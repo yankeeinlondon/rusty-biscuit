@@ -8,7 +8,7 @@ use crate::error::Result;
 use crate::events::Provider;
 
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, ResourceFormat, capabilities_for};
-use super::compatibility::parse_markdown_document;
+use super::compatibility::{has_claude_specific_properties, parse_markdown_document};
 use super::filter::ResourceFilter;
 use super::paths::{ProviderSkillPaths, ResourceScope};
 use super::symlink::{LinkResult, create_skill_link};
@@ -122,6 +122,8 @@ pub struct AgentFixSummary {
     pub skipped: usize,
     /// Agents where format is incompatible with target provider.
     pub format_incompatible: usize,
+    /// Agents skipped because they have Claude-specific frontmatter (not shareable).
+    pub not_shareable: usize,
 }
 
 /// Fix missing agent links for non-Claude providers.
@@ -139,8 +141,13 @@ pub fn fix_missing_agents(paths: &ProviderSkillPaths) -> Result<AgentFixSummary>
         ResourceScope::Repo,
     );
 
-    let user_agents = scan_agent_dir(user_dir.as_ref());
-    let repo_agents = scan_agent_dir(repo_dir.as_ref());
+    let all_user_agents = scan_agent_dir(user_dir.as_ref());
+    let all_repo_agents = scan_agent_dir(repo_dir.as_ref());
+
+    // Filter out agents with Claude-specific frontmatter — these are not shareable
+    let (user_agents, user_skipped) = filter_unshareable(all_user_agents);
+    let (repo_agents, repo_skipped) = filter_unshareable(all_repo_agents);
+    summary.not_shareable = user_skipped + repo_skipped;
 
     for provider in ALL_PROVIDERS {
         if provider == Provider::Claude {
@@ -548,6 +555,20 @@ fn check_invalid(exceptions: &mut Vec<AgentException>, name: &str, agent_file: &
             target_format: None,
         });
     }
+}
+
+/// Partition resources into shareable (no Claude-specific properties) and count of skipped.
+fn filter_unshareable(items: Vec<(String, PathBuf)>) -> (Vec<(String, PathBuf)>, usize) {
+    let mut shareable = Vec::new();
+    let mut skipped = 0;
+    for entry in items {
+        if has_claude_specific_properties(&entry.1) {
+            skipped += 1;
+        } else {
+            shareable.push(entry);
+        }
+    }
+    (shareable, skipped)
 }
 
 /// Flag agents that specify a `model` property.

@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::events::Provider;
 
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
-use super::compatibility::parse_markdown_document;
+use super::compatibility::{has_claude_specific_properties, parse_markdown_document};
 use super::filter::ResourceFilter;
 use super::paths::{ProviderSkillPaths, ResourceScope};
 use super::symlink::{LinkResult, create_skill_link};
@@ -117,6 +117,8 @@ pub struct SkillFixSummary {
     pub skipped: usize,
     /// SKILL.md files that had a missing `name` property auto-inserted.
     pub names_inserted: usize,
+    /// Skills skipped because they have Claude-specific frontmatter (not shareable).
+    pub not_shareable: usize,
 }
 
 /// Fix missing skill links for non-Claude providers.
@@ -138,8 +140,13 @@ pub fn fix_missing_skills(paths: &ProviderSkillPaths) -> Result<SkillFixSummary>
         ResourceScope::Repo,
     );
 
-    let user_skills = scan_skill_dir(user_dir.as_ref());
-    let repo_skills = scan_skill_dir(repo_dir.as_ref());
+    let all_user_skills = scan_skill_dir(user_dir.as_ref());
+    let all_repo_skills = scan_skill_dir(repo_dir.as_ref());
+
+    // Filter out skills with Claude-specific frontmatter — these are not shareable
+    let (user_skills, user_skipped) = filter_unshareable_skills(all_user_skills);
+    let (repo_skills, repo_skipped) = filter_unshareable_skills(all_repo_skills);
+    summary.not_shareable = user_skipped + repo_skipped;
 
     // Fix missing `name` property in canonical Claude skills
     for (name, path) in user_skills.iter().chain(repo_skills.iter()) {
@@ -210,6 +217,25 @@ fn fix_scope_skills(
         }
     }
     Ok(())
+}
+
+/// Partition skills into shareable (no Claude-specific properties) and count of skipped.
+///
+/// Skills are directories; the check targets `SKILL.md` inside each directory.
+fn filter_unshareable_skills(
+    skills: Vec<(String, PathBuf)>,
+) -> (Vec<(String, PathBuf)>, usize) {
+    let mut shareable = Vec::new();
+    let mut skipped = 0;
+    for entry in skills {
+        let skill_md = entry.1.join("SKILL.md");
+        if skill_md.exists() && has_claude_specific_properties(&skill_md) {
+            skipped += 1;
+        } else {
+            shareable.push(entry);
+        }
+    }
+    (shareable, skipped)
 }
 
 /// Discover all skills from Claude's user and repo skill directories,
