@@ -1472,3 +1472,402 @@ exit 9
     assert!(updated.contains("Old body"));
     assert!(!updated.contains("Should not be applied"));
 }
+
+#[cfg(unix)]
+#[test]
+fn codex_prompt_file_redirects_after_precheck_failure() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let prompt_path = workspace.path().join("prompt.md");
+    let redirected_path = workspace.path().join("redirected.md");
+    let run_count_path = workspace.path().join("runs.txt");
+    let prompt_log_path = workspace.path().join("prompt-log.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(
+        &prompt_path,
+        format!(
+            concat!(
+                "---\n",
+                "pre_checks:\n",
+                "  file_exists: ./missing.txt\n",
+                "handle_file_exists:\n",
+                "  redirect:\n",
+                "    file: {}\n",
+                "---\n",
+                "Initial prompt body.\n",
+            ),
+            redirected_path.display()
+        ),
+    )
+    .unwrap();
+    fs::write(&redirected_path, "Redirected prompt body.\n").unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+COUNT=0
+if [ -f "$CLAUDINE_RUN_COUNT_FILE" ]; then
+  COUNT=$(/bin/cat "$CLAUDINE_RUN_COUNT_FILE")
+fi
+COUNT=$((COUNT + 1))
+printf '%s' "$COUNT" > "$CLAUDINE_RUN_COUNT_FILE"
+PROMPT=$(/bin/cat)
+printf '%s' "$PROMPT" > "$CLAUDINE_PROMPT_LOG"
+printf '%s\n' 'redirected success'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_RUN_COUNT_FILE", &run_count_path)
+        .env("CLAUDINE_PROMPT_LOG", &prompt_log_path)
+        .args([
+            "codex",
+            "--prompt-file",
+            prompt_path.to_str().unwrap(),
+            "--output",
+            "text",
+        ])
+        .assert()
+        .success()
+        .stdout("redirected success\n");
+
+    assert_eq!(fs::read_to_string(&run_count_path).unwrap(), "1");
+    assert_eq!(
+        fs::read_to_string(&prompt_log_path).unwrap(),
+        "Redirected prompt body."
+    );
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr.contains("redirected"));
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_prompt_file_retry_applies_prompt_suffix_and_set_overlay() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let prompt_path = workspace.path().join("prompt.md");
+    let run_count_path = workspace.path().join("runs.txt");
+    let attempt_log_path = workspace.path().join("attempt-log.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(
+        &prompt_path,
+        concat!(
+            "---\n",
+            "mode: first\n",
+            "post_checks:\n",
+            "  response_includes: FIXED\n",
+            "handle_response_includes:\n",
+            "  retry:\n",
+            "    prompt: Add the word FIXED.\n",
+            "    retries: 2\n",
+            "    set:\n",
+            "      mode: second\n",
+            "---\n",
+            "Base prompt body.\n",
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+COUNT=0
+if [ -f "$CLAUDINE_RUN_COUNT_FILE" ]; then
+  COUNT=$(/bin/cat "$CLAUDINE_RUN_COUNT_FILE")
+fi
+COUNT=$((COUNT + 1))
+printf '%s' "$COUNT" > "$CLAUDINE_RUN_COUNT_FILE"
+PROMPT=$(/bin/cat)
+{
+  printf 'ATTEMPT=%s\n' "$COUNT"
+  printf 'MODE=%s\n' "$MODE"
+  printf 'PROMPT=%s\n' "$PROMPT"
+  printf '%s\n' '--'
+} >> "$CLAUDINE_ATTEMPT_LOG"
+if [ "$COUNT" -eq 1 ]; then
+  printf '%s\n' 'missing keyword'
+else
+  printf '%s\n' 'Now FIXED'
+fi
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_RUN_COUNT_FILE", &run_count_path)
+        .env("CLAUDINE_ATTEMPT_LOG", &attempt_log_path)
+        .args([
+            "codex",
+            "--prompt-file",
+            prompt_path.to_str().unwrap(),
+            "--output",
+            "text",
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(fs::read_to_string(&run_count_path).unwrap(), "2");
+    let attempt_log = fs::read_to_string(&attempt_log_path).unwrap();
+    assert!(attempt_log.contains("ATTEMPT=1\nMODE=first"));
+    assert!(attempt_log.contains("ATTEMPT=2\nMODE=second"));
+    assert!(attempt_log.contains("PROMPT=Base prompt body."));
+    assert!(attempt_log.contains("Add the word FIXED."));
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("missing keyword"));
+    assert!(stdout.contains("Now FIXED"));
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr.contains("retry"));
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_prompt_file_resume_uses_provider_resume_args() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let prompt_path = workspace.path().join("prompt.md");
+    let run_count_path = workspace.path().join("runs.txt");
+    let invocation_log_path = workspace.path().join("invocations.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(
+        &prompt_path,
+        concat!(
+            "---\n",
+            "post_checks:\n",
+            "  response_includes: continued\n",
+            "handle_response_includes:\n",
+            "  resume:\n",
+            "    prompt: Continue and include continued.\n",
+            "    retries: 2\n",
+            "---\n",
+            "Initial prompt body.\n",
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+COUNT=0
+if [ -f "$CLAUDINE_RUN_COUNT_FILE" ]; then
+  COUNT=$(/bin/cat "$CLAUDINE_RUN_COUNT_FILE")
+fi
+COUNT=$((COUNT + 1))
+printf '%s' "$COUNT" > "$CLAUDINE_RUN_COUNT_FILE"
+INPUT=$(/bin/cat)
+{
+  printf 'INVOCATION=%s\n' "$COUNT"
+  for arg in "$@"; do
+    printf 'ARG=%s\n' "$arg"
+  done
+  printf 'STDIN=%s\n' "$INPUT"
+  printf '%s\n' '--'
+} >> "$CLAUDINE_INVOCATION_LOG"
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"resume-session","model":"claude-sonnet-4"}'
+if [ "$1" = "-r" ]; then
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"continued answer"}],"role":"assistant"}}'
+else
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"initial answer"}],"role":"assistant"}}'
+fi
+printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","num_turns":1,"duration_ms":40,"usage":{"input_tokens":3,"output_tokens":4},"total_cost_usd":0.0}'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_RUN_COUNT_FILE", &run_count_path)
+        .env("CLAUDINE_INVOCATION_LOG", &invocation_log_path)
+        .args(["claude", "--prompt-file", prompt_path.to_str().unwrap()])
+        .assert()
+        .success();
+
+    assert_eq!(fs::read_to_string(&run_count_path).unwrap(), "2");
+    let invocation_log = fs::read_to_string(&invocation_log_path).unwrap();
+    assert!(invocation_log.contains("INVOCATION=1"));
+    assert!(invocation_log.contains("STDIN=Initial prompt body."));
+    assert!(invocation_log.contains("INVOCATION=2\nARG=-r\nARG=resume-session\nARG=--print"));
+    assert!(invocation_log.contains("STDIN=Continue and include continued."));
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("initial answer"));
+    assert!(stdout.contains("continued answer"));
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_compose_response_validation_uses_captured_legacy_output() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let doc_path = workspace.path().join("compose.md");
+    let prompt_log_path = workspace.path().join("compose-prompt.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(
+        &doc_path,
+        concat!(
+            "---\n",
+            "post_checks:\n",
+            "  response_includes: legacy needle\n",
+            "---\n",
+            "Compose prompt body.\n",
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+PROMPT=$(/bin/cat)
+printf '%s' "$PROMPT" > "$CLAUDINE_PROMPT_LOG"
+printf '%s\n' 'legacy needle from raw stdout'
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_PROMPT_LOG", &prompt_log_path)
+        .args([
+            "codex",
+            "--compose",
+            doc_path.to_str().unwrap(),
+            "--output",
+            "text",
+        ])
+        .assert()
+        .success()
+        .stdout("legacy needle from raw stdout\n");
+
+    assert!(
+        fs::read_to_string(&prompt_log_path)
+            .unwrap()
+            .contains("Compose prompt body.")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_frontmatter_prompt_retries_inline_recovery() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let doc_path = workspace.path().join("note.md");
+    let run_count_path = workspace.path().join("runs.txt");
+    let prompt_log_path = workspace.path().join("prompt-log.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(
+        &doc_path,
+        concat!(
+            "---\n",
+            "prompt: |-\n",
+            "  Replace the body.\n",
+            "post_checks:\n",
+            "  response_includes: DONE\n",
+            "handle_response_includes:\n",
+            "  retry:\n",
+            "    prompt: Make sure the response says DONE.\n",
+            "    retries: 2\n",
+            "---\n",
+            "Old body\n",
+        ),
+    )
+    .unwrap();
+
+    let doc_path_str = doc_path.to_str().unwrap().replace('\'', "'\\''");
+    write_executable(
+        &path_dir.join("codex"),
+        &format!(
+            r#"#!/bin/sh
+COUNT=0
+if [ -f "$CLAUDINE_RUN_COUNT_FILE" ]; then
+  COUNT=$(/bin/cat "$CLAUDINE_RUN_COUNT_FILE")
+fi
+COUNT=$((COUNT + 1))
+printf '%s' "$COUNT" > "$CLAUDINE_RUN_COUNT_FILE"
+PROMPT=$(/bin/cat)
+{{
+  printf 'ATTEMPT=%s\n' "$COUNT"
+  printf 'PROMPT=%s\n' "$PROMPT"
+  printf '%s\n' '--'
+}} >> "$CLAUDINE_PROMPT_LOG"
+DOC='{doc_path_str}'
+if [ "$COUNT" -eq 1 ]; then
+  printf '%s\n' '---' > "$DOC"
+  printf '%s\n' 'prompt: |-' >> "$DOC"
+  printf '%s\n' '  Replace the body.' >> "$DOC"
+  printf '%s\n' 'post_checks:' >> "$DOC"
+  printf '%s\n' '  response_includes: DONE' >> "$DOC"
+  printf '%s\n' 'handle_response_includes:' >> "$DOC"
+  printf '%s\n' '  retry:' >> "$DOC"
+  printf '%s\n' '    prompt: Make sure the response says DONE.' >> "$DOC"
+  printf '%s\n' '    retries: 2' >> "$DOC"
+  printf '%s\n' '---' >> "$DOC"
+  printf '%s' 'First attempt body' >> "$DOC"
+  printf '%s\n' 'not yet'
+else
+  printf '%s\n' '---' > "$DOC"
+  printf '%s\n' 'prompt: |-' >> "$DOC"
+  printf '%s\n' '  Replace the body.' >> "$DOC"
+  printf '%s\n' 'post_checks:' >> "$DOC"
+  printf '%s\n' '  response_includes: DONE' >> "$DOC"
+  printf '%s\n' 'handle_response_includes:' >> "$DOC"
+  printf '%s\n' '  retry:' >> "$DOC"
+  printf '%s\n' '    prompt: Make sure the response says DONE.' >> "$DOC"
+  printf '%s\n' '    retries: 2' >> "$DOC"
+  printf '%s\n' '---' >> "$DOC"
+  printf '%s' 'DONE body' >> "$DOC"
+  printf '%s\n' 'DONE'
+fi
+"#
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_RUN_COUNT_FILE", &run_count_path)
+        .env("CLAUDINE_PROMPT_LOG", &prompt_log_path)
+        .args([
+            "codex",
+            "--frontmatter-prompt",
+            doc_path.to_str().unwrap(),
+            "--output",
+            "text",
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(fs::read_to_string(&run_count_path).unwrap(), "2");
+    let prompt_log = fs::read_to_string(&prompt_log_path).unwrap();
+    assert!(prompt_log.contains("ATTEMPT=2"));
+    assert!(prompt_log.contains("Make sure the response says DONE."));
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("not yet"));
+    assert!(stdout.contains("DONE"));
+
+    let updated = fs::read_to_string(&doc_path).unwrap();
+    assert!(updated.contains("DONE body"));
+    assert!(updated.contains("last_updated:"));
+}
