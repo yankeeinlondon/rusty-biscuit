@@ -10,13 +10,13 @@ While the main workhorse in the Markdown pipeline is _transclusion_ we offer a n
 
 - **Text Replacement**
 
-    We describe the text replacement process in the design document [Text Replacement](@darkmatter/docs/text-replacement.md), however, the short version is that we treat the `replace` property in frontmatter as a special property and if it's defined as a dictionary then we use it to replace all the _keys_ with the associated _value_ throughout the document (like a document find-and-replace operation).
+    We describe the text replacement process in the design document [Text Replacement](@darkmatter/docs/inline/text-replacement.md), however, the short version is that we treat the `replace` property in frontmatter as a special property and if it's defined as a dictionary then we use it to replace all the _keys_ with the associated _value_ throughout the document (like a document find-and-replace operation).
 
 - **Frontmatter Interpolation**
 
     Any property defined either _in_ the documents frontmatter or _passed into_ the document's frontmatter during the the pipelining process can be used to replace "handlebars" based template syntax on the page.
 
-    In addition we provide built-in context which is made available in frontmatter via the `ctx` and `env` properties. For more details refer to the design document: [Frontmatter Interpolation](@darkmatter/docs/interpolation.md).
+    In addition we provide built-in context which is made available in frontmatter via the `ctx` and `env` properties. For more details refer to the design document: [Frontmatter Interpolation](@darkmatter/docs/inline/interpolation.md).
 
 - **Cleaning**
 

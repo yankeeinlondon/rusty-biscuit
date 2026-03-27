@@ -306,7 +306,7 @@ fn build_node(
 
             if directive.kind == DirectiveKind::File {
                 // Try to resolve and recurse into the child
-                if let Some(child_path) = resolve_local_target(&directive.raw_target, source) {
+                if let Some(child_path) = resolve_local_target(&directive.raw_target, source, &options.compose.magic_paths) {
                     let child_source = ComposeSource::File(child_path.clone());
                     let child_id = source_to_id(&child_source);
 
@@ -451,21 +451,21 @@ fn build_node(
             } else {
                 // Target didn't resolve — still emit reference record and
                 // a context-only insertion for the caption.
-                if extract_references {
-                    if let Some(raw_target) = directive.targets.first() {
-                        local_references.records.push(ReferenceRecord {
-                            id: ref_id.clone(),
-                            kind: ReferenceKind::Transclusion,
-                            target: classify_target(raw_target),
-                            origin: ReferenceOrigin {
-                                source: source.clone(),
-                                line: directive.line,
-                                span: directive.span.clone(),
-                                syntax: ReferenceSyntax::DirectiveTocLinking,
-                            },
-                            attributes: serde_json::Map::new(),
-                        });
-                    }
+                if extract_references
+                    && let Some(raw_target) = directive.targets.first()
+                {
+                    local_references.records.push(ReferenceRecord {
+                        id: ref_id.clone(),
+                        kind: ReferenceKind::Transclusion,
+                        target: classify_target(raw_target),
+                        origin: ReferenceOrigin {
+                            source: source.clone(),
+                            line: directive.line,
+                            span: directive.span.clone(),
+                            syntax: ReferenceSyntax::DirectiveTocLinking,
+                        },
+                        attributes: serde_json::Map::new(),
+                    });
                 }
 
                 child_insertions.push(ReferenceInsertion {
@@ -521,8 +521,9 @@ fn build_node(
                 });
             }
 
-            if !is_literal {
-            if let Some(child_path) = resolve_local_target(prologue, source) {
+            if !is_literal
+                && let Some(child_path) = resolve_local_target(prologue, source, &options.compose.magic_paths)
+            {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
@@ -555,7 +556,6 @@ fn build_node(
                     runtime.transclusion.exit();
                 }
             }
-            } // if !is_literal
         }
 
         for (idx, epilogue) in fm_refs.epilogue.iter().enumerate() {
@@ -593,8 +593,9 @@ fn build_node(
                 });
             }
 
-            if !is_literal {
-            if let Some(child_path) = resolve_local_target(epilogue, source) {
+            if !is_literal
+                && let Some(child_path) = resolve_local_target(epilogue, source, &options.compose.magic_paths)
+            {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
@@ -630,7 +631,6 @@ fn build_node(
                     runtime.transclusion.exit();
                 }
             }
-            } // if !is_literal
         }
     }
 
@@ -752,17 +752,24 @@ fn is_literal_content(value: &str) -> bool {
 ///
 /// Uses `biscuit_file::FileReference` for full resolution including
 /// repo-root `@` paths (rec #6), with fallback to simple path join.
-fn resolve_local_target(raw_target: &str, source: &ComposeSource) -> Option<std::path::PathBuf> {
+fn resolve_local_target(
+    raw_target: &str,
+    source: &ComposeSource,
+    magic_paths: &[(std::path::PathBuf, biscuit_file::PathPosition)],
+) -> Option<std::path::PathBuf> {
     match source {
         ComposeSource::File(base_path) => {
             let base_dir = base_path.parent();
 
             // Try biscuit_file::FileReference for full resolution (supports @repo-root, etc.)
             // Canonicalize so node IDs match source_to_id().
-            if let Ok(file_ref) = biscuit_file::FileReference::new(raw_target)
-                && let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir)
-            {
-                return Some(resolved.canonicalize().unwrap_or(resolved));
+            if let Ok(mut file_ref) = biscuit_file::FileReference::new(raw_target) {
+                for (path, position) in magic_paths {
+                    file_ref = file_ref.add_magic_path(path, *position);
+                }
+                if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
+                    return Some(resolved.canonicalize().unwrap_or(resolved));
+                }
             }
 
             // Fallback to simple path join; canonicalize to match source_to_id().

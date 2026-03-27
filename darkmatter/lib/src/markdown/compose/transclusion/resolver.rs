@@ -98,7 +98,10 @@ pub(crate) fn resolve_path(
             raw_target
         };
 
-        let file_ref = FileReference::new(ref_input)?;
+        let mut file_ref = FileReference::new(ref_input)?;
+        for (path, position) in &options.magic_paths {
+            file_ref = file_ref.add_magic_path(path, *position);
+        }
         let resolved = file_ref.resolve()?;
 
         return resolved.ok_or_else(|| {
@@ -369,6 +372,44 @@ mod tests {
             "See [other](./other.md) for details"
         ));
         assert!(!is_file_like_reference("Line one\nLine two"));
+    }
+
+    #[test]
+    fn resolves_magic_path_prepended() {
+        let dir = tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+
+        // Create a custom magic-path directory with a target file
+        let magic_dir = root.join("custom-root");
+        std::fs::create_dir_all(&magic_dir).unwrap();
+        let target_path = magic_dir.join("special.md");
+        std::fs::write(&target_path, "# Special").unwrap();
+
+        // Create source file
+        let source_path = root.join("root.md");
+        std::fs::write(&source_path, "# root").unwrap();
+
+        // Initialize a git repo so FileReference works
+        git2::Repository::init(&root).unwrap();
+
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+
+        let mut opts = default_options();
+        opts.magic_paths
+            .push((magic_dir.clone(), biscuit_file::PathPosition::Start));
+
+        let resolved = resolve_path(
+            "@/special.md",
+            &opts,
+            &ComposeSource::File(source_path),
+            1,
+        );
+
+        std::env::set_current_dir(&original_dir).unwrap();
+
+        let resolved = resolved.unwrap();
+        assert_eq!(resolved, std::fs::canonicalize(&target_path).unwrap());
     }
 
     #[test]

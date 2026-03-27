@@ -296,6 +296,13 @@ pub struct ComposeOptions {
     /// Default: true.
     pub resolve_repo_root: bool,
 
+    /// Custom search roots for `@`-prefixed (magic) file references.
+    ///
+    /// Each entry is a `(path, position)` pair where `position` controls
+    /// whether the path is searched before (`Start`) or after (`End`) the
+    /// default roots (git repo root, HOME).
+    pub magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
+
     // ── Shell expansion ────────────────────────────────────────────
     /// Maximum execution time for a single `::shell` command.
     /// Default: 10 seconds.
@@ -378,6 +385,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("code_fallback_language", &self.code_fallback_language)
             .field("ignore_invalid_references", &self.ignore_invalid_references)
             .field("resolve_repo_root", &self.resolve_repo_root)
+            .field("magic_paths", &self.magic_paths)
             .field("shell_timeout", &self.shell_timeout)
             .field("shell_policy_root", &self.shell_policy_root)
             .field("shell_working_directory", &self.shell_working_directory)
@@ -422,6 +430,7 @@ impl ComposeOptions {
             code_fallback_language: "txt".to_string(),
             ignore_invalid_references: None,
             resolve_repo_root: true,
+            magic_paths: Vec::new(),
             shell_timeout: std::time::Duration::from_secs(10),
             shell_policy_root: None,
             shell_working_directory: None,
@@ -622,6 +631,31 @@ impl ComposeOptions {
         self
     }
 
+    /// Adds a custom search root for `@`-prefixed file references.
+    ///
+    /// Paths added with `PathPosition::Start` are searched before the
+    /// git repository root; paths with `PathPosition::End` are searched
+    /// after HOME.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::compose::{ComposeOptions, PathPosition};
+    ///
+    /// let options = ComposeOptions::new()
+    ///     .with_magic_path("/project/.claudine", PathPosition::Start)
+    ///     .with_magic_path("/home/user/.claudine", PathPosition::Start);
+    /// ```
+    #[must_use]
+    pub fn with_magic_path(
+        mut self,
+        path: impl Into<PathBuf>,
+        position: biscuit_file::PathPosition,
+    ) -> Self {
+        self.magic_paths.push((path.into(), position));
+        self
+    }
+
     /// Sets the fallback language for code transclusion.
     #[must_use]
     pub fn with_code_fallback_language(mut self, language: impl Into<String>) -> Self {
@@ -643,6 +677,7 @@ impl ComposeOptions {
             code_fallback_language: self.code_fallback_language.clone(),
             ignore_invalid: self.ignore_invalid_references,
             resolve_repo_root: self.resolve_repo_root,
+            magic_paths: self.magic_paths.clone(),
         }
     }
 
@@ -739,6 +774,9 @@ pub(crate) struct TransclusionOptions {
 
     /// Whether repo-root (`@`) resolution is enabled.
     pub resolve_repo_root: bool,
+
+    /// Custom search roots for `@`-prefixed (magic) file references.
+    pub magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
 }
 
 impl Default for TransclusionOptions {
@@ -752,6 +790,7 @@ impl Default for TransclusionOptions {
             code_fallback_language: "txt".to_string(),
             ignore_invalid: None,
             resolve_repo_root: true,
+            magic_paths: Vec::new(),
         }
     }
 }
@@ -1365,5 +1404,45 @@ mod tests {
         > {
             Ok(super::super::shell_expansion::ShellApprovalDecision::Deny)
         }
+    }
+
+    #[test]
+    fn with_magic_path_accumulates_entries() {
+        use biscuit_file::PathPosition;
+
+        let options = ComposeOptions::new()
+            .with_magic_path("/project/.claudine", PathPosition::Start)
+            .with_magic_path("/home/user/.claudine", PathPosition::Start)
+            .with_magic_path("/fallback", PathPosition::End);
+
+        assert_eq!(options.magic_paths.len(), 3);
+        assert_eq!(options.magic_paths[0].0, PathBuf::from("/project/.claudine"));
+        assert_eq!(options.magic_paths[0].1, PathPosition::Start);
+        assert_eq!(options.magic_paths[1].0, PathBuf::from("/home/user/.claudine"));
+        assert_eq!(options.magic_paths[1].1, PathPosition::Start);
+        assert_eq!(options.magic_paths[2].0, PathBuf::from("/fallback"));
+        assert_eq!(options.magic_paths[2].1, PathPosition::End);
+    }
+
+    #[test]
+    fn magic_paths_appear_in_transclusion_options() {
+        use biscuit_file::PathPosition;
+
+        let options = ComposeOptions::new()
+            .with_magic_path("/custom/root", PathPosition::Start);
+
+        let transclusion = options.transclusion_options();
+        assert_eq!(transclusion.magic_paths.len(), 1);
+        assert_eq!(transclusion.magic_paths[0].0, PathBuf::from("/custom/root"));
+        assert_eq!(transclusion.magic_paths[0].1, PathPosition::Start);
+    }
+
+    #[test]
+    fn magic_paths_default_empty() {
+        let options = ComposeOptions::new();
+        assert!(options.magic_paths.is_empty());
+
+        let transclusion = options.transclusion_options();
+        assert!(transclusion.magic_paths.is_empty());
     }
 }

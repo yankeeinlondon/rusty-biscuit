@@ -48,6 +48,10 @@ md compose doc.md --show
 - `--frontmatter` / `--fm`: include frontmatter in the output (default: body only).
 - `--output <markdown|text|html|json|ast|auto>`: output format (default: `markdown`).
 - `--show`: open output via temp artifact.
+- `--allow-missing-hyperlinks`: allow broken hyperlink targets; emit composed content to stdout and report issues on stderr with exit code 0.
+- `--allow-missing-image-refs`: allow broken image reference targets; same behavior as above for images.
+- `--allow-missing-transclusions`: allow missing transclusion targets; the directive is removed from the output and issues are reported on stderr with exit code 0.
+- `--allow-any-missing-reference`: combines all `--allow-missing-*` flags.
 
 ### Output Behavior
 
@@ -96,6 +100,31 @@ md compose doc.md --state '{feature: "auth", stage: "build"}'
 
 ### Validation and Errors
 
+- **Reference validation** runs automatically before composition when input is a file path. If any references (hyperlinks, images, transclusions, CSS imports, etc.) point to missing targets, compose reports grouped errors and exits with code 2.
+
+  ```
+  Invalid Hyperlink(s)
+  - the preparation.md reference to @darkmatter/docs/text-replacement.md is not valid
+  - the preparation.md reference to @darkmatter/docs/interpolation.md is not valid
+
+  19 references scanned, 17 valid, 2 issues
+  ```
+
+  Issues are grouped by category (hyperlinks, images, transclusions, etc.) with the source document shown as a clickable link and broken targets in red.
+
+- **Allow flags** relax validation for specific categories. When all errors belong to allowed categories, compose proceeds normally: content goes to stdout, issues are reported on stderr, and the exit code is 0. If any errors remain in non-allowed categories, compose still blocks with exit code 2.
+
+  ```bash
+  # Compose despite broken links — content to stdout, warnings to stderr
+  md compose doc.md --allow-missing-hyperlinks
+
+  # Compose despite any broken reference
+  md compose doc.md --allow-any-missing-reference
+
+  # Pipe composed output while still seeing warnings
+  md compose doc.md --allow-missing-hyperlinks > output.md
+  ```
+
 - Invalid JSON/JSON5 in `--state` returns an error.
 - Non-object JSON (array/string/number/etc.) in `--state` returns an error.
 - Transform failures return non-zero exit with error details.
@@ -109,4 +138,4 @@ md compose doc.md --state '{feature: "auth", stage: "build"}'
 
 ## Issues
 
-- CLI currently discards the detailed transform report that library callers can capture.
+- The compose transform report (warnings from the library compose pipeline) is still discarded in CLI output; only reference validation issues are surfaced.

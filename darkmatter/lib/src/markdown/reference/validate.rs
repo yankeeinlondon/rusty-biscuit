@@ -12,7 +12,7 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeSource;
 use super::errors::ReferenceError;
 use super::types::{
-    ReferenceGraphOptions, ReferenceOrigin, ReferenceRecord, ReferenceTarget,
+    ReferenceGraphOptions, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceTarget,
 };
 
 /// Options for reference validation.
@@ -82,6 +82,10 @@ pub struct ReferenceIssue {
     pub message: String,
     /// Severity level.
     pub severity: ReferenceSeverity,
+    /// Semantic kind of the reference (hyperlink, image, transclusion, etc.).
+    pub kind: ReferenceKind,
+    /// The raw reference target string for display (e.g., `"./foo.md"`, `"https://example.com"`).
+    pub reference_display: String,
     /// ID of the reference that triggered this issue.
     pub reference_id: String,
     /// Where the reference was found.
@@ -167,7 +171,7 @@ pub(crate) fn validate(
             ReferenceTarget::LocalPath { raw } => {
                 // Check for fragment in local path (e.g., "./other.md#section")
                 let (path_part, fragment) = split_path_fragment(raw);
-                validate_local_path(&path_part, ref_source, record, &mut report);
+                validate_local_path(&path_part, ref_source, record, &mut report, &options.graph.compose.magic_paths);
 
                 // Validate fragment if enabled and path exists
                 if options.validate_fragments
@@ -189,6 +193,8 @@ pub(crate) fn validate(
                         code: ReferenceIssueCode::InvalidUrl,
                         message: format!("Invalid URL: {e}"),
                         severity: ReferenceSeverity::Error,
+                        kind: record.kind,
+                        reference_display: raw.clone(),
                         reference_id: record.id.clone(),
                         origin: record.origin.clone(),
                     });
@@ -212,6 +218,8 @@ pub(crate) fn validate(
                                 code: ReferenceIssueCode::MissingFragmentTarget,
                                 message: format!("Fragment target not found: {raw}"),
                                 severity: ReferenceSeverity::Error,
+                                kind: record.kind,
+                                reference_display: raw.clone(),
                                 reference_id: record.id.clone(),
                                 origin: record.origin.clone(),
                             });
@@ -231,11 +239,13 @@ pub(crate) fn validate(
             ReferenceTarget::DataUri { .. } => {
                 report.references_valid += 1;
             }
-            ReferenceTarget::OtherScheme { scheme, .. } => {
+            ReferenceTarget::OtherScheme { scheme, raw } => {
                 report.issues.push(ReferenceIssue {
                     code: ReferenceIssueCode::UnsupportedScheme,
                     message: format!("Unsupported scheme: {scheme}"),
                     severity: ReferenceSeverity::Info,
+                    kind: record.kind,
+                    reference_display: raw.clone(),
                     reference_id: record.id.clone(),
                     origin: record.origin.clone(),
                 });
@@ -261,12 +271,18 @@ pub(crate) fn validate(
                 match result {
                     RemoteResult::Ok => {}
                     RemoteResult::Error(msg) => {
+                        let raw = match &record.target {
+                            ReferenceTarget::RemoteUrl { raw } => raw.clone(),
+                            _ => String::new(),
+                        };
                         // Undo the valid count added above
                         report.references_valid = report.references_valid.saturating_sub(1);
                         report.issues.push(ReferenceIssue {
                             code: ReferenceIssueCode::RemoteUnreachable,
                             message: msg,
                             severity: ReferenceSeverity::Error,
+                            kind: record.kind,
+                            reference_display: raw,
                             reference_id: record.id.clone(),
                             origin: record.origin.clone(),
                         });
@@ -288,27 +304,34 @@ fn validate_local_path(
     source: &ComposeSource,
     record: &ReferenceRecord,
     report: &mut ReferenceValidationReport,
+    magic_paths: &[(std::path::PathBuf, biscuit_file::PathPosition)],
 ) {
     match source {
         ComposeSource::File(base_path) => {
             let base_dir = base_path.parent();
 
             // Try biscuit_file::FileReference first for @repo-root support
-            if let Ok(file_ref) = biscuit_file::FileReference::new(raw)
-                && let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir)
-            {
-                if resolved.exists() {
-                    report.references_valid += 1;
-                } else {
-                    report.issues.push(ReferenceIssue {
-                        code: ReferenceIssueCode::MissingLocalTarget,
-                        message: format!("Missing local target: {raw}"),
-                        severity: ReferenceSeverity::Error,
-                        reference_id: record.id.clone(),
-                        origin: record.origin.clone(),
-                    });
+            if let Ok(file_ref) = biscuit_file::FileReference::new(raw) {
+                let mut file_ref = file_ref;
+                for (path, position) in magic_paths {
+                    file_ref = file_ref.add_magic_path(path, *position);
                 }
-                return;
+                if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
+                    if resolved.exists() {
+                        report.references_valid += 1;
+                    } else {
+                        report.issues.push(ReferenceIssue {
+                            code: ReferenceIssueCode::MissingLocalTarget,
+                            message: format!("Missing local target: {raw}"),
+                            severity: ReferenceSeverity::Error,
+                            kind: record.kind,
+                            reference_display: raw.to_string(),
+                            reference_id: record.id.clone(),
+                            origin: record.origin.clone(),
+                        });
+                    }
+                    return;
+                }
             }
 
             // Fallback to simple path join
@@ -321,6 +344,8 @@ fn validate_local_path(
                         code: ReferenceIssueCode::MissingLocalTarget,
                         message: format!("Missing local target: {raw}"),
                         severity: ReferenceSeverity::Error,
+                        kind: record.kind,
+                        reference_display: raw.to_string(),
                         reference_id: record.id.clone(),
                         origin: record.origin.clone(),
                     });
@@ -334,6 +359,8 @@ fn validate_local_path(
                 code: ReferenceIssueCode::MissingSourceContext,
                 message: format!("Cannot validate local path without source context: {raw}"),
                 severity: ReferenceSeverity::Warning,
+                kind: record.kind,
+                reference_display: raw.to_string(),
                 reference_id: record.id.clone(),
                 origin: record.origin.clone(),
             });
@@ -432,6 +459,10 @@ fn validate_cross_doc_fragment(
 
     // Resolve via FileReference for @repo-root support, fallback to simple join
     let target_path = if let Ok(file_ref) = biscuit_file::FileReference::new(path) {
+        let mut file_ref = file_ref;
+        for (mp, position) in &graph_options.compose.magic_paths {
+            file_ref = file_ref.add_magic_path(mp, *position);
+        }
         file_ref.resolve_relative(base_dir).ok().flatten()
     } else {
         None
@@ -464,6 +495,8 @@ fn validate_cross_doc_fragment(
                 code: ReferenceIssueCode::MissingFragmentTarget,
                 message: format!("Fragment '#{fragment}' not found in {path}"),
                 severity: ReferenceSeverity::Error,
+                kind: record.kind,
+                reference_display: format!("{path}#{fragment}"),
                 reference_id: record.id.clone(),
                 origin: record.origin.clone(),
             });

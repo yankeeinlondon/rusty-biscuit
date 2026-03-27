@@ -208,7 +208,7 @@ fn filter_docs(
         && !filter.plan
         && !filter.src
         && !filter.has_prompt
-        && filter.filter.is_none()
+        && filter.filter.is_empty()
     {
         return docs.to_vec();
     }
@@ -229,8 +229,8 @@ fn filter_docs(
             if filter.has_prompt && doc.prompt.is_none() {
                 return false;
             }
-            if let Some(ref substring) = filter.filter
-                && !path_lower.contains(&substring.to_lowercase())
+            if !filter.filter.is_empty()
+                && !filter.filter.iter().any(|s| path_lower.contains(&s.to_lowercase()))
             {
                 return false;
             }
@@ -378,12 +378,12 @@ pub fn render_text(
                     out.push('\n');
                 }
                 Some(RepoAction::Packages { filter }) => {
-                    let rendered = render_repo_packages(result, filter.as_deref());
+                    let rendered = render_repo_packages(result, filter);
                     out.push_str(&rendered);
                     out.push('\n');
                 }
                 Some(RepoAction::DirtyPackages { filter }) => {
-                    let rendered = render_dirty_packages(result, filter.as_deref());
+                    let rendered = render_dirty_packages(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
@@ -391,7 +391,7 @@ pub fn render_text(
                     out.push('\n');
                 }
                 Some(RepoAction::DirtyPackageAreas { filter }) => {
-                    let rendered = render_dirty_package_areas(result, filter.as_deref());
+                    let rendered = render_dirty_package_areas(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
@@ -399,7 +399,7 @@ pub fn render_text(
                     out.push('\n');
                 }
                 Some(RepoAction::StagedPackages { filter }) => {
-                    let rendered = render_staged_packages(result, filter.as_deref());
+                    let rendered = render_staged_packages(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
@@ -407,7 +407,7 @@ pub fn render_text(
                     out.push('\n');
                 }
                 Some(RepoAction::StagedPackageAreas { filter }) => {
-                    let rendered = render_staged_package_areas(result, filter.as_deref());
+                    let rendered = render_staged_package_areas(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
@@ -415,7 +415,7 @@ pub fn render_text(
                     out.push('\n');
                 }
                 Some(RepoAction::UnstagedPackages { filter }) => {
-                    let rendered = render_unstaged_packages(result, filter.as_deref());
+                    let rendered = render_unstaged_packages(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
@@ -423,7 +423,7 @@ pub fn render_text(
                     out.push('\n');
                 }
                 Some(RepoAction::UnstagedPackageAreas { filter }) => {
-                    let rendered = render_unstaged_package_areas(result, filter.as_deref());
+                    let rendered = render_unstaged_package_areas(result, filter);
                     if rendered.is_empty() {
                         std::process::exit(1);
                     }
@@ -435,9 +435,9 @@ pub fn render_text(
                         && let Some(ref repo) = filesystem.repo
                     {
                         if *ui {
-                            out.push_str(&render_repo_deps_visual(repo, filter.as_deref()));
+                            out.push_str(&render_repo_deps_visual(repo, filter));
                         } else {
-                            out.push_str(&render_repo_deps_text(repo, filter.as_deref()));
+                            out.push_str(&render_repo_deps_text(repo, filter));
                         }
                     }
                 }
@@ -488,7 +488,7 @@ pub fn render_text(
                             repo,
                             verbose,
                             repo_root,
-                            filter.as_deref(),
+                            filter,
                             latest_versions_requested,
                         ));
                     }
@@ -501,7 +501,7 @@ pub fn render_text(
                             repo,
                             verbose,
                             repo_root,
-                            None,
+                            &[],
                             latest_versions_requested,
                         ));
                     }
@@ -837,7 +837,7 @@ mod tests {
         fn positional_filter_matches_substring() {
             let docs = sample_docs();
             let filter = DocsFilter {
-                filter: Some("homelab".to_string()),
+                filter: vec!["homelab".to_string()],
                 ..Default::default()
             };
             let result = filter_docs(&docs, &filter);
@@ -853,7 +853,7 @@ mod tests {
         fn positional_filter_is_case_insensitive() {
             let docs = sample_docs();
             let filter = DocsFilter {
-                filter: Some("HOMELAB".to_string()),
+                filter: vec!["HOMELAB".to_string()],
                 ..Default::default()
             };
             let result = filter_docs(&docs, &filter);
@@ -865,7 +865,7 @@ mod tests {
             let docs = sample_docs();
             let filter = DocsFilter {
                 has_prompt: true,
-                filter: Some("homelab".to_string()),
+                filter: vec!["homelab".to_string()],
                 ..Default::default()
             };
             let result = filter_docs(&docs, &filter);
