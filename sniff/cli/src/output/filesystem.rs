@@ -66,14 +66,16 @@ impl RepoFilter {
 /// Apply an optional filter to a package list, returning matching packages.
 pub(crate) fn filter_packages<'a>(
     packages: &'a [Package],
-    repo_filter: Option<&str>,
+    filters: &[String],
 ) -> Vec<&'a Package> {
-    match repo_filter {
-        Some(f) => {
-            let filter = RepoFilter::parse(f);
-            packages.iter().filter(|p| filter.matches(p)).collect()
-        }
-        None => packages.iter().collect(),
+    if filters.is_empty() {
+        packages.iter().collect()
+    } else {
+        let parsed: Vec<RepoFilter> = filters.iter().map(|f| RepoFilter::parse(f)).collect();
+        packages
+            .iter()
+            .filter(|p| parsed.iter().any(|f| f.matches(p)))
+            .collect()
     }
 }
 
@@ -1297,7 +1299,7 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
 /// Render package names as a comma-separated plain text list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_repo_packages(result: &sniff::SniffResult, repo_filter: Option<&str>) -> String {
+pub fn render_repo_packages(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
@@ -1378,15 +1380,15 @@ fn dirty_package_names(result: &sniff::SniffResult) -> Vec<String> {
 /// Render package names with uncommitted changes as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_dirty_packages(result: &sniff::SniffResult, repo_filter: Option<&str>) -> String {
+pub fn render_dirty_packages(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
         Some(repo) if repo.is_monorepo => {
             let names = dirty_package_names(result);
-            let names: Vec<&str> = if let Some(filter_str) = repo_filter {
+            let names: Vec<&str> = if !repo_filter.is_empty() {
                 if let Some(ref packages) = repo.packages {
-                    let filtered = filter_packages(packages, Some(filter_str));
+                    let filtered = filter_packages(packages, repo_filter);
                     let filtered_names: std::collections::HashSet<&str> =
                         filtered.iter().map(|p| p.name.as_str()).collect();
                     names
@@ -1413,7 +1415,7 @@ pub fn render_dirty_packages(result: &sniff::SniffResult, repo_filter: Option<&s
 /// Returns an error message if the repo is not a monorepo.
 pub fn render_dirty_package_areas(
     result: &sniff::SniffResult,
-    repo_filter: Option<&str>,
+    repo_filter: &[String],
 ) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
@@ -1499,15 +1501,15 @@ fn staged_package_names(result: &sniff::SniffResult) -> Vec<String> {
 /// Render package names with staged files as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_staged_packages(result: &sniff::SniffResult, repo_filter: Option<&str>) -> String {
+pub fn render_staged_packages(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
         Some(repo) if repo.is_monorepo => {
             let names = staged_package_names(result);
-            let names: Vec<&str> = if let Some(filter_str) = repo_filter {
+            let names: Vec<&str> = if !repo_filter.is_empty() {
                 if let Some(ref packages) = repo.packages {
-                    let filtered = filter_packages(packages, Some(filter_str));
+                    let filtered = filter_packages(packages, repo_filter);
                     let filtered_names: std::collections::HashSet<&str> =
                         filtered.iter().map(|p| p.name.as_str()).collect();
                     names
@@ -1534,7 +1536,7 @@ pub fn render_staged_packages(result: &sniff::SniffResult, repo_filter: Option<&
 /// Returns an error message if the repo is not a monorepo.
 pub fn render_staged_package_areas(
     result: &sniff::SniffResult,
-    repo_filter: Option<&str>,
+    repo_filter: &[String],
 ) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
@@ -1623,15 +1625,15 @@ fn unstaged_package_names(result: &sniff::SniffResult) -> Vec<String> {
 /// Render package names with unstaged changes as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_unstaged_packages(result: &sniff::SniffResult, repo_filter: Option<&str>) -> String {
+pub fn render_unstaged_packages(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
         Some(repo) if repo.is_monorepo => {
             let names = unstaged_package_names(result);
-            let names: Vec<&str> = if let Some(filter_str) = repo_filter {
+            let names: Vec<&str> = if !repo_filter.is_empty() {
                 if let Some(ref packages) = repo.packages {
-                    let filtered = filter_packages(packages, Some(filter_str));
+                    let filtered = filter_packages(packages, repo_filter);
                     let filtered_names: std::collections::HashSet<&str> =
                         filtered.iter().map(|p| p.name.as_str()).collect();
                     names
@@ -1658,7 +1660,7 @@ pub fn render_unstaged_packages(result: &sniff::SniffResult, repo_filter: Option
 /// Returns an error message if the repo is not a monorepo.
 pub fn render_unstaged_package_areas(
     result: &sniff::SniffResult,
-    repo_filter: Option<&str>,
+    repo_filter: &[String],
 ) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
@@ -1941,7 +1943,7 @@ pub fn render_repo_section(
     repo: &sniff::filesystem::repo::RepoInfo,
     verbose: u8,
     _repo_root: Option<&Path>,
-    repo_filter: Option<&str>,
+    repo_filter: &[String],
     latest_versions_requested: bool,
 ) -> String {
     let mut out = String::new();
@@ -1981,7 +1983,7 @@ pub fn render_repo_section(
         let filtered = filter_packages(packages, repo_filter);
         let showing_count = filtered.len();
 
-        let title_suffix = if repo_filter.is_some() && showing_count != total_count {
+        let title_suffix = if !repo_filter.is_empty() && showing_count != total_count {
             format!(
                 " <dim>({} / showing {} of {} packages)</dim>",
                 tool_name, showing_count, total_count,
@@ -2769,7 +2771,7 @@ fn build_deps_mermaid(packages: &[sniff::filesystem::repo::Package]) -> Option<S
 /// terminal cannot display images or mmdc is not available.
 pub fn render_repo_deps_visual(
     repo: &sniff::filesystem::repo::RepoInfo,
-    repo_filter: Option<&str>,
+    repo_filter: &[String],
 ) -> String {
     if !repo.is_monorepo {
         return String::from("deps requires a monorepo (no workspace packages found)");
@@ -2806,7 +2808,7 @@ pub fn render_repo_deps_visual(
 /// are omitted unless an explicit filter is set.
 pub fn render_repo_deps_text(
     repo: &sniff::filesystem::repo::RepoInfo,
-    repo_filter: Option<&str>,
+    repo_filter: &[String],
 ) -> String {
     let mut out = String::new();
 
@@ -2822,7 +2824,7 @@ pub fn render_repo_deps_text(
     };
 
     let filtered = filter_packages(packages, repo_filter);
-    let has_explicit_filter = repo_filter.is_some();
+    let has_explicit_filter = !repo_filter.is_empty();
 
     // Collect only packages that participate in dependency relationships
     // (unless an explicit filter is set, in which case show all matched)
@@ -3066,7 +3068,7 @@ mod tests {
                 make_package("alpha", "area-a", &[]),
                 make_package("beta", "area-b", &[]),
             ];
-            let result = filter_packages(&packages, None);
+            let result = filter_packages(&packages, &[]);
             assert_eq!(result.len(), 2);
         }
 
@@ -3077,7 +3079,7 @@ mod tests {
                 make_package("sniff-cli", "sniff", &[]),
                 make_package("biscuit-file", "biscuit-file", &[]),
             ];
-            let result = filter_packages(&packages, Some("biscuit"));
+            let result = filter_packages(&packages, &["biscuit".to_string()]);
             assert_eq!(result.len(), 2);
             assert!(result.iter().all(|p| p.name.contains("biscuit")));
         }
@@ -3089,9 +3091,24 @@ mod tests {
                 make_package("sniff-lib", "sniff", &[]),
                 make_package("biscuit-hash", "biscuit-hash", &[]),
             ];
-            let result = filter_packages(&packages, Some("@sniff"));
+            let result = filter_packages(&packages, &["@sniff".to_string()]);
             assert_eq!(result.len(), 2);
             assert!(result.iter().all(|p| p.package_area == "sniff"));
+        }
+
+        #[test]
+        fn multiple_filters_with_or_logic() {
+            let packages = vec![
+                make_package("biscuit-hash", "biscuit-hash", &[]),
+                make_package("sniff-cli", "sniff", &[]),
+                make_package("darkmatter-lib", "darkmatter", &[]),
+                make_package("playa-cli", "playa", &[]),
+            ];
+            let result = filter_packages(&packages, &["biscuit".to_string(), "darkmatter".to_string()]);
+            assert_eq!(result.len(), 2);
+            let names: Vec<&str> = result.iter().map(|p| p.name.as_str()).collect();
+            assert!(names.contains(&"biscuit-hash"));
+            assert!(names.contains(&"darkmatter-lib"));
         }
     }
 
