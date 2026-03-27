@@ -7614,6 +7614,7 @@ dependencies = [
  "serde_json",
  "sniff",
  "strum 0.28.0",
+ "tempfile",
  "tokio",
 ]
 
