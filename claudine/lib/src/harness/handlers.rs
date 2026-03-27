@@ -4,17 +4,27 @@
 //! the precedence order: subject-specific YAML handler > generic YAML handler
 //! > programmatic `handle` > unhandled.
 
+use std::path::{Path, PathBuf};
+
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
-    ApprovedRuntimeCommand, AttemptOutcome, FailureEvent, HandlerAction, HandlerTable,
-    ProcessTermination, ValidationFailure,
+    ApprovedRuntimeCommand, AttemptOutcome, FailureCheck, FailureEvent, FailurePhase,
+    HandlerAction, HandlerTable, ProcessTermination, ValidationFailure,
 };
 
 /// Context describing a failure event for handler resolution.
 #[derive(Debug, Clone)]
 pub struct FailureContext {
+    /// Provider name for the failed attempt.
+    pub provider: String,
+    /// Absolute source document path, if available.
+    pub source_file: Option<PathBuf>,
     /// The normalized failure event.
     pub event: FailureEvent,
+    /// Which phase reported the failure.
+    pub failure_phase: FailurePhase,
+    /// Validation-specific details, when applicable.
+    pub check: Option<FailureCheck>,
     /// Subject key for subject-specific matching (e.g. a file path).
     pub subject_key: Option<String>,
     /// Human-readable failure message.
@@ -89,6 +99,8 @@ pub fn classify_failure(outcome: &AttemptOutcome) -> Option<FailureEvent> {
 /// Build a `FailureContext` from validation failures.
 pub fn build_validation_failure_context(
     failures: &[ValidationFailure],
+    provider: &str,
+    source_file: &Path,
     attempt: u32,
     session_id: Option<String>,
     outcome: Option<AttemptOutcome>,
@@ -96,7 +108,14 @@ pub fn build_validation_failure_context(
     failures
         .iter()
         .map(|f| FailureContext {
+            provider: provider.to_string(),
+            source_file: Some(source_file.to_path_buf()),
             event: FailureEvent::Validation(f.event.clone()),
+            failure_phase: f.phase,
+            check: Some(FailureCheck {
+                name: f.event.clone(),
+                subject_key: f.subject_key.clone(),
+            }),
             subject_key: f.subject_key.clone(),
             message: f.message.clone(),
             attempt,
@@ -121,14 +140,34 @@ fn execute_programmatic_handler(
     use std::io::Write;
     use std::process::{Command, Stdio};
 
+    let termination = failure
+        .outcome
+        .as_ref()
+        .map(|outcome| outcome.termination.to_string());
+    let response = failure
+        .outcome
+        .as_ref()
+        .filter(|outcome| !outcome.final_response.is_empty())
+        .map(|outcome| serde_json::json!({ "text": outcome.final_response }));
+    let check = failure.check.as_ref().map(|check| {
+        serde_json::json!({
+            "name": check.name.to_string(),
+            "subject_key": check.subject_key,
+        })
+    });
+
     // Build JSON payload
     let payload = serde_json::json!({
-        "source_file": null,
+        "provider": failure.provider,
+        "source_file": failure.source_file.as_ref().map(|path| path.display().to_string()),
         "attempt": failure.attempt,
         "session_id": failure.session_id,
+        "termination": termination,
         "failure_event": failure.event.to_string(),
+        "failure_phase": failure.failure_phase.to_string(),
         "message": failure.message,
-        "subject_key": failure.subject_key,
+        "check": check,
+        "response": response,
     });
 
     let exe = which::which(&command.executable).map_err(|_| HarnessError::HandlerFailed {
@@ -141,11 +180,25 @@ fn execute_programmatic_handler(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .env("CLAUDINE_PROVIDER", &failure.provider)
         .env("CLAUDINE_ATTEMPT", failure.attempt.to_string())
         .env("CLAUDINE_FAILURE_EVENT", failure.event.to_string())
+        .env("CLAUDINE_FAILURE_PHASE", failure.failure_phase.to_string())
         .env(
             "CLAUDINE_SESSION_ID",
             failure.session_id.as_deref().unwrap_or(""),
+        )
+        .env(
+            "CLAUDINE_TERMINATION",
+            termination.as_deref().unwrap_or(""),
+        )
+        .env(
+            "CLAUDINE_SOURCE_FILE",
+            failure
+                .source_file
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
         )
         .spawn()
         .map_err(|e| HarnessError::HandlerFailed {
@@ -369,6 +422,8 @@ pub fn validate_resume(
 
 /// Build a `FailureContext` from an agent failure or timeout.
 pub fn build_agent_failure_context(
+    provider: &str,
+    source_file: &Path,
     event: FailureEvent,
     message: String,
     attempt: u32,
@@ -376,7 +431,11 @@ pub fn build_agent_failure_context(
     outcome: Option<AttemptOutcome>,
 ) -> FailureContext {
     FailureContext {
+        provider: provider.to_string(),
+        source_file: Some(source_file.to_path_buf()),
         event,
+        failure_phase: FailurePhase::Agent,
+        check: None,
         subject_key: None,
         message,
         attempt,
@@ -388,10 +447,27 @@ pub fn build_agent_failure_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::model::{HandlerRule, ProcessTermination, ValidationEvent};
+    use crate::harness::model::{
+        HandlerRule, ProcessTermination, ValidationEvent,
+    };
 
     fn make_handler_table(exact: Vec<HandlerRule>, generic: Vec<HandlerRule>) -> HandlerTable {
         HandlerTable { exact, generic }
+    }
+
+    fn test_failure_context(event: FailureEvent, subject_key: Option<String>, message: &str) -> FailureContext {
+        FailureContext {
+            provider: "codex".to_string(),
+            source_file: Some(PathBuf::from("/repo/prompts/test.md")),
+            event,
+            failure_phase: FailurePhase::PostCheck,
+            check: None,
+            subject_key,
+            message: message.to_string(),
+            attempt: 1,
+            session_id: None,
+            outcome: None,
+        }
     }
 
     #[test]
@@ -411,14 +487,11 @@ mod tests {
             vec![],
         );
 
-        let failure = FailureContext {
-            event: FailureEvent::Validation(ValidationEvent::FileExists),
-            subject_key: Some("/repo/docs/output.md".to_string()),
-            message: "file not found".to_string(),
-            attempt: 1,
-            session_id: None,
-            outcome: None,
-        };
+        let failure = test_failure_context(
+            FailureEvent::Validation(ValidationEvent::FileExists),
+            Some("/repo/docs/output.md".to_string()),
+            "file not found",
+        );
 
         let result = resolve_handler(&failure, &table, None).unwrap();
         assert!(result.is_some());
@@ -442,14 +515,7 @@ mod tests {
             }],
         );
 
-        let failure = FailureContext {
-            event: FailureEvent::Timeout,
-            subject_key: None,
-            message: "timed out".to_string(),
-            attempt: 1,
-            session_id: None,
-            outcome: None,
-        };
+        let failure = test_failure_context(FailureEvent::Timeout, None, "timed out");
 
         let result = resolve_handler(&failure, &table, None).unwrap();
         assert!(result.is_some());
@@ -459,14 +525,7 @@ mod tests {
     #[test]
     fn no_handler_returns_none() {
         let table = make_handler_table(vec![], vec![]);
-        let failure = FailureContext {
-            event: FailureEvent::AgentFailure,
-            subject_key: None,
-            message: "agent failed".to_string(),
-            attempt: 1,
-            session_id: None,
-            outcome: None,
-        };
+        let failure = test_failure_context(FailureEvent::AgentFailure, None, "agent failed");
 
         let result = resolve_handler(&failure, &table, None).unwrap();
         assert!(result.is_none());
@@ -499,14 +558,11 @@ mod tests {
             }],
         );
 
-        let failure = FailureContext {
-            event: FailureEvent::Validation(ValidationEvent::FileExists),
-            subject_key: Some("/specific.md".to_string()),
-            message: "file not found".to_string(),
-            attempt: 1,
-            session_id: None,
-            outcome: None,
-        };
+        let failure = test_failure_context(
+            FailureEvent::Validation(ValidationEvent::FileExists),
+            Some("/specific.md".to_string()),
+            "file not found",
+        );
 
         let result = resolve_handler(&failure, &table, None).unwrap();
         let action = result.unwrap();
