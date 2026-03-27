@@ -80,6 +80,10 @@ pub(crate) struct PromptFileDryRunInfo {
     pub env_names: Vec<String>,
     /// The composed prompt body, for display in the output section.
     pub body: String,
+    /// The composed frontmatter as a JSON value (for harness property detection).
+    /// Uses the composed result directly rather than re-reading from disk, so
+    /// harness keys introduced by composition are not lost.
+    pub frontmatter: serde_json::Value,
 }
 
 // ---------------------------------------------------------------------------

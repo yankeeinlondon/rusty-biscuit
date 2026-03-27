@@ -643,6 +643,7 @@ fn run_provider_wrapper_inner(provider: Provider, mut args: WrapperArgs, verbose
             delivery_method: delivery_method.to_string(),
             env_names: composed.env_names.clone(),
             body: composed.body.clone(),
+            frontmatter: composed.frontmatter.clone(),
         });
     }
 
@@ -780,9 +781,9 @@ fn run_provider_wrapper_inner(provider: Provider, mut args: WrapperArgs, verbose
     let composed_frontmatter: Option<serde_json::Value> = if let Some(ref pf_info) =
         prompt_file_dry_run
     {
-        // --prompt-file: re-read the resolved file's frontmatter
-        let md = darkmatter::markdown::Markdown::try_from(pf_info.resolved_path.as_path()).ok();
-        md.map(|m| fm_to_value(m.frontmatter().as_map()))
+        // --prompt-file: use composed frontmatter directly (preserves keys
+        // introduced by composition that might not be on disk).
+        Some(pf_info.frontmatter.clone())
     } else if let Some((ref source, _, _, _)) = inline_composition_source {
         // --frontmatter-prompt: frontmatter from source.markdown
         Some(fm_to_value(source.markdown.frontmatter().as_map()))
@@ -1178,7 +1179,7 @@ fn run_provider_wrapper_inner(provider: Provider, mut args: WrapperArgs, verbose
             // Inline composition: the agent is responsible for writing to the file.
             // Capture structured assistant text so we can render it with terminal-aware
             // wrapping before running validation checks and emitting the metadata line.
-            let (agent_exit, deferred_summary) = if use_structured {
+            let (agent_exit, agent_termination, deferred_summary) = if use_structured {
                 let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
                 let parser_config = claudine::stream::ParserConfig {
                     model: args.model.clone(),
@@ -1204,6 +1205,7 @@ fn run_provider_wrapper_inner(provider: Provider, mut args: WrapperArgs, verbose
                     stdin_seed.as_deref(),
                     parser,
                 )?;
+                let termination = stream_result.termination;
                 let mut summary = stream_result.data;
                 // Codex never emits text via feed_line; its accumulated text is
                 // fallback-only, so it doesn't count as "streamed to stdout".
@@ -1238,7 +1240,7 @@ fn run_provider_wrapper_inner(provider: Provider, mut args: WrapperArgs, verbose
 
                 let exit = summary.exit_code;
                 let details = summary_details.lock().unwrap().clone();
-                (exit, Some((summary, details, had_streamed_assistant)))
+                (exit, termination, Some((summary, details, had_streamed_assistant)))
             } else {
                 // Legacy path: forward I/O to terminal
                 let result = exec::run_child(
@@ -1253,37 +1255,8 @@ fn run_provider_wrapper_inner(provider: Provider, mut args: WrapperArgs, verbose
                         stdin_seed: stdin_seed.as_deref(),
                     },
                 )?;
-                (result.data, None)
+                (result.data, result.termination, None)
             };
-
-            // Harness post-checks: if the harness is active, run post-checks
-            // using the captured snapshot and attempt outcome. If post-checks fail,
-            // exit with an error code.
-            if let Some((ref plan, ref snapshot)) = harness_state {
-                // Build an AttemptOutcome from the stream summary if available
-                let outcome = if let Some((ref summary, _, _)) = deferred_summary {
-                    claudine::harness::build_attempt_outcome(
-                        1,
-                        summary,
-                        claudine::harness::ProcessTermination::Completed, // TODO: use actual termination from Phase 3
-                    )
-                } else {
-                    // Legacy path: no structured summary available
-                    claudine::harness::AttemptOutcome {
-                        attempt: 1,
-                        session_id: None,
-                        final_response: String::new(),
-                        exit_code: agent_exit,
-                        termination: claudine::harness::ProcessTermination::Completed,
-                        stderr_text: None,
-                    }
-                };
-
-                if let Err(e) = claudine::harness::evaluate_post_checks(plan, snapshot, &outcome, &term)
-                {
-                    return Err(eyre!("{e}"));
-                }
-            }
 
             // Post-execution validation: always check the file, even on agent error.
             // The agent may have successfully updated the file before an API error occurred.
@@ -1466,6 +1439,84 @@ fn run_provider_wrapper_inner(provider: Provider, mut args: WrapperArgs, verbose
                 }
             }
 
+            // Harness post-checks: run after file reconciliation (frontmatter
+            // restoration, last_updated rewrite) so validations observe the final
+            // persisted state, not transient agent-written state.
+            if let Some((ref plan, ref snapshot)) = harness_state {
+                let outcome = if let Some((ref summary, _, _)) = deferred_summary {
+                    claudine::harness::build_attempt_outcome(
+                        1,
+                        summary,
+                        agent_termination,
+                    )
+                } else {
+                    claudine::harness::AttemptOutcome {
+                        attempt: 1,
+                        session_id: None,
+                        final_response: String::new(),
+                        exit_code: agent_exit,
+                        termination: agent_termination,
+                        stderr_text: None,
+                    }
+                };
+
+                // Check for agent failure / timeout
+                if let Some(failure_event) = claudine::harness::classify_failure(&outcome) {
+                    let message = format!("agent failed with exit code {agent_exit}");
+                    let ctx = claudine::harness::build_agent_failure_context(
+                        failure_event,
+                        message.clone(),
+                        1,
+                        outcome.session_id.clone(),
+                        Some(outcome.clone()),
+                    );
+                    match claudine::harness::resolve_handler(
+                        &ctx,
+                        &plan.handlers,
+                        plan.programmatic_handler.as_ref(),
+                    ) {
+                        Ok(Some(_action)) => {
+                            // For the inline path, retry requires re-running the entire
+                            // inline composition flow which is not loopable in this context.
+                            // Log the handler message but still fail.
+                            log::warn("handler resolved for inline (--frontmatter-prompt) failure, \
+                                       but retry is not supported for inline composition");
+                        }
+                        Ok(None) | Err(_) => {}
+                    }
+                    return Err(eyre!("{message}"));
+                }
+
+                // Run post-checks with handler resolution
+                match claudine::harness::evaluate_post_checks(plan, snapshot, &outcome, &term) {
+                    Ok(()) => {}
+                    Err(claudine::harness::HarnessError::PostCheckFailed { ref failures }) => {
+                        let contexts = claudine::harness::build_validation_failure_context(
+                            failures, 1, outcome.session_id.clone(), Some(outcome.clone()),
+                        );
+                        // Try to resolve handlers; for inline path, we can't retry
+                        // but we can at least report the handler info
+                        for failure_ctx in &contexts {
+                            if let Ok(Some(_action)) = claudine::harness::resolve_handler(
+                                failure_ctx,
+                                &plan.handlers,
+                                plan.programmatic_handler.as_ref(),
+                            ) {
+                                log::warn("handler resolved for inline (--frontmatter-prompt) \
+                                           post-check failure, but retry is not supported \
+                                           for inline composition");
+                                break;
+                            }
+                        }
+                        return Err(eyre!("post-check validation failed ({} {})",
+                            failures.len(),
+                            if failures.len() == 1 { "failure" } else { "failures" }
+                        ));
+                    }
+                    Err(e) => return Err(eyre!("{e}")),
+                }
+            }
+
             // Emit the metadata summary line last, after validation checks.
             // Blank line before metadata to visually separate from checks.
             if let Some((summary, details, _)) = deferred_summary {
@@ -1483,94 +1534,217 @@ fn run_provider_wrapper_inner(provider: Provider, mut args: WrapperArgs, verbose
             }
 
             Ok(final_exit)
-        } else if use_structured {
-            let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-            // Normal execution with structured stream parsing
-            let parser_config = claudine::stream::ParserConfig {
-                model: args.model.clone(),
-            };
-            let parser = claudine::stream::create_parser(
-                provider,
-                LiveStreamSink::new(
-                    provider,
-                    env_context.clone(),
-                    stream_verbosity,
-                    summary_details.clone(),
-                ),
-                parser_config,
-            );
-            let stream_result = exec::run_child_stream(
-                binary_path.as_path(),
-                &child_args,
-                &env_plan.env,
-                child_cwd,
-                args.timeout,
-                stderr_noise,
-                profile.suppress_structured_stderr_on_success(),
-                stdin_seed.as_deref(),
-                parser,
-            )?;
-            let mut summary = stream_result.data;
-            if let Some(codex_output) = structured_codex_output.as_ref() {
-                codex_output.apply_to_summary(&mut summary);
-            }
-            // Codex never emits assistant text live (feed_line always returns None);
-            // the authoritative text comes from --output-last-message. Write it now.
-            if provider == Provider::Codex && !summary.assistant_text.is_empty() {
-                let text = &summary.assistant_text;
-                if std::io::stdout().is_terminal() {
-                    let rendered = crate::output::render_assistant_markdown(text, &term);
-                    std::io::stdout().write_all(rendered.as_bytes())?;
-                    if !rendered.ends_with('\n') {
-                        std::io::stdout().write_all(b"\n")?;
-                    }
-                } else {
-                    std::io::stdout().write_all(text.as_bytes())?;
-                    if !text.ends_with('\n') {
-                        std::io::stdout().write_all(b"\n")?;
-                    }
-                }
-                std::io::stdout().flush()?;
-            }
-
-            // Emit stderr summaries and write synthetic event
-            emit_stream_summary(
-                &summary,
-                profile,
-                &env_context,
-                stream_verbosity,
-                verbose_requested,
-                &summary_details.lock().unwrap().clone(),
-            );
-
-            // Harness post-checks for compose/prompt-file paths
-            if let Some((ref plan, ref snapshot)) = harness_state {
-                let outcome = claudine::harness::build_attempt_outcome(
-                    1,
-                    &summary,
-                    claudine::harness::ProcessTermination::Completed,
-                );
-                if let Err(e) = claudine::harness::evaluate_post_checks(plan, snapshot, &outcome, &term) {
-                    return Err(eyre!("{e}"));
-                }
-            }
-
-            Ok(summary.exit_code)
         } else {
-            // Normal execution: forward I/O to terminal (legacy path)
-            let result = exec::run_child(
-                binary_path.as_path(),
-                &child_args,
-                &env_plan.env,
-                child_cwd,
-                args.timeout,
-                exec::ChildIoOptions {
-                    stdout_noise_prefixes: stdout_noise,
-                    stderr_noise_prefixes: stderr_noise,
-                    stdin_seed: stdin_seed.as_deref(),
-                },
-            )?;
-            Ok(result.data)
+            // Non-inline execution: prompt-file, compose, or plain prompt.
+            // Wrapped in a harness loop that supports retry/resume/deviate
+            // handlers when post-checks or agent execution fail.
+            let mut harness_attempt = 1u32;
+            const DEFAULT_MAX_RETRIES: u32 = 3;
+
+            'harness: loop {
+                // On retry (attempt > 1), re-run pre-checks and re-capture snapshot
+                if harness_attempt > 1 {
+                    if let Some((ref plan, ref mut snapshot)) = harness_state {
+                        if let Err(e) = claudine::harness::evaluate_pre_checks(plan, &term) {
+                            return Err(eyre!("{e}"));
+                        }
+                        *snapshot = claudine::harness::capture_pre_run_snapshot(plan)
+                            .map_err(|e| eyre!("harness snapshot: {e}"))?;
+                    }
+                }
+
+                // Execute the provider
+                let (exit_code, termination, session_id, final_response) = if use_structured {
+                    let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+                    let parser_config = claudine::stream::ParserConfig {
+                        model: args.model.clone(),
+                    };
+                    let parser = claudine::stream::create_parser(
+                        provider,
+                        LiveStreamSink::new(
+                            provider,
+                            env_context.clone(),
+                            stream_verbosity,
+                            summary_details.clone(),
+                        ),
+                        parser_config,
+                    );
+                    let stream_result = exec::run_child_stream(
+                        binary_path.as_path(),
+                        &child_args,
+                        &env_plan.env,
+                        child_cwd,
+                        args.timeout,
+                        stderr_noise,
+                        profile.suppress_structured_stderr_on_success(),
+                        stdin_seed.as_deref(),
+                        parser,
+                    )?;
+                    let stream_termination = stream_result.termination;
+                    let mut summary = stream_result.data;
+                    if let Some(codex_output) = structured_codex_output.as_ref() {
+                        codex_output.apply_to_summary(&mut summary);
+                    }
+                    if provider == Provider::Codex && !summary.assistant_text.is_empty() {
+                        let text = &summary.assistant_text;
+                        if std::io::stdout().is_terminal() {
+                            let rendered = crate::output::render_assistant_markdown(text, &term);
+                            std::io::stdout().write_all(rendered.as_bytes())?;
+                            if !rendered.ends_with('\n') {
+                                std::io::stdout().write_all(b"\n")?;
+                            }
+                        } else {
+                            std::io::stdout().write_all(text.as_bytes())?;
+                            if !text.ends_with('\n') {
+                                std::io::stdout().write_all(b"\n")?;
+                            }
+                        }
+                        std::io::stdout().flush()?;
+                    }
+
+                    emit_stream_summary(
+                        &summary,
+                        profile,
+                        &env_context,
+                        stream_verbosity,
+                        verbose_requested,
+                        &summary_details.lock().unwrap().clone(),
+                    );
+
+                    let ec = summary.exit_code;
+                    let sid = summary.session_id.clone();
+                    let resp = summary.assistant_text.clone();
+                    (ec, stream_termination, sid, resp)
+                } else {
+                    // Legacy path: forward I/O to terminal
+                    let result = exec::run_child(
+                        binary_path.as_path(),
+                        &child_args,
+                        &env_plan.env,
+                        child_cwd,
+                        args.timeout,
+                        exec::ChildIoOptions {
+                            stdout_noise_prefixes: stdout_noise,
+                            stderr_noise_prefixes: stderr_noise,
+                            stdin_seed: stdin_seed.as_deref(),
+                        },
+                    )?;
+                    (result.data, result.termination, None, String::new())
+                };
+
+                // If no harness is active, just return the exit code
+                let Some((ref plan, ref snapshot)) = harness_state else {
+                    break Ok(exit_code);
+                };
+
+                // Build attempt outcome
+                let outcome = claudine::harness::AttemptOutcome {
+                    attempt: harness_attempt,
+                    session_id: session_id.clone(),
+                    final_response,
+                    exit_code,
+                    termination,
+                    stderr_text: None,
+                };
+
+                // Step 1: Check for agent failure / timeout before running post-checks
+                if let Some(failure_event) = claudine::harness::classify_failure(&outcome) {
+                    let message = match failure_event {
+                        claudine::harness::FailureEvent::Timeout => {
+                            format!("provider timed out (attempt {harness_attempt})")
+                        }
+                        claudine::harness::FailureEvent::AgentFailure => {
+                            format!("agent exited with error code {} (attempt {harness_attempt})", exit_code)
+                        }
+                        _ => format!("failure on attempt {harness_attempt}"),
+                    };
+                    let ctx = claudine::harness::build_agent_failure_context(
+                        failure_event,
+                        message.clone(),
+                        harness_attempt,
+                        session_id.clone(),
+                        Some(outcome.clone()),
+                    );
+
+                    match claudine::harness::resolve_handler(
+                        &ctx,
+                        &plan.handlers,
+                        plan.programmatic_handler.as_ref(),
+                    ) {
+                        Ok(Some(action)) => {
+                            if let Some(next) = apply_handler_action(
+                                &action,
+                                harness_attempt,
+                                DEFAULT_MAX_RETRIES,
+                                &ctx.message,
+                                profile,
+                                session_id.as_deref(),
+                                plan.source_path.as_path(),
+                                &ctx,
+                                &term,
+                            )? {
+                                harness_attempt = next;
+                                continue 'harness;
+                            }
+                            break Err(eyre!("{message}"));
+                        }
+                        Ok(None) => break Err(eyre!("{message}")),
+                        Err(e) => break Err(eyre!("{e}")),
+                    }
+                }
+
+                // Step 2: Run post-checks
+                match claudine::harness::evaluate_post_checks(plan, snapshot, &outcome, &term) {
+                    Ok(()) => break Ok(exit_code),
+                    Err(claudine::harness::HarnessError::PostCheckFailed { ref failures }) => {
+                        // Try to resolve a handler for the first failure
+                        let contexts = claudine::harness::build_validation_failure_context(
+                            failures,
+                            harness_attempt,
+                            session_id.clone(),
+                            Some(outcome.clone()),
+                        );
+
+                        let mut handled = false;
+                        for failure_ctx in &contexts {
+                            match claudine::harness::resolve_handler(
+                                failure_ctx,
+                                &plan.handlers,
+                                plan.programmatic_handler.as_ref(),
+                            ) {
+                                Ok(Some(action)) => {
+                                    if let Some(next) = apply_handler_action(
+                                        &action,
+                                        harness_attempt,
+                                        DEFAULT_MAX_RETRIES,
+                                        &failure_ctx.message,
+                                        profile,
+                                        session_id.as_deref(),
+                                        plan.source_path.as_path(),
+                                        failure_ctx,
+                                        &term,
+                                    )? {
+                                        harness_attempt = next;
+                                        handled = true;
+                                        break;
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(e) => break 'harness Err(eyre!("{e}")),
+                            }
+                        }
+                        if handled {
+                            continue 'harness;
+                        }
+                        // No handler found for any failure
+                        break Err(eyre!("post-check validation failed ({} {})",
+                            failures.len(),
+                            if failures.len() == 1 { "failure" } else { "failures" }
+                        ));
+                    }
+                    Err(e) => break Err(eyre!("{e}")),
+                }
+            } // end 'harness loop
         };
 
     // MCP injector cleanup: remove temp files written during injection
@@ -1581,6 +1755,138 @@ fn run_provider_wrapper_inner(provider: Provider, mut args: WrapperArgs, verbose
     }
 
     exit_code
+}
+
+/// Apply a resolved handler action and return the next attempt number if the
+/// loop should continue, or `None` if the action cannot be applied (e.g.,
+/// retry ceiling reached, resume unsupported).
+///
+/// Returns `Ok(Some(next_attempt))` to continue the harness loop, or
+/// `Ok(None)` to stop (caller should report the original failure).
+#[allow(clippy::too_many_arguments)]
+fn apply_handler_action(
+    action: &claudine::harness::HandlerAction,
+    current_attempt: u32,
+    default_max_retries: u32,
+    failure_message: &str,
+    profile: &dyn WrapperProfile,
+    session_id: Option<&str>,
+    source_path: &std::path::Path,
+    failure_ctx: &claudine::harness::FailureContext,
+    term: &Terminal,
+) -> Result<Option<u32>> {
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::prelude::Renderable;
+
+    match action {
+        claudine::harness::HandlerAction::Retry {
+            prompt_suffix: _,
+            set: _,
+            msg,
+            say: _,
+            retries,
+        } => {
+            let max = retries.unwrap_or(default_max_retries);
+            if current_attempt >= max {
+                log::warn(&format!(
+                    "retry ceiling reached ({current_attempt}/{max}): {failure_message}"
+                ));
+                return Ok(None);
+            }
+            if let Some(msg_text) = msg {
+                let rendered = Prose::new(msg_text).render(term);
+                eprintln!("{rendered}");
+            } else {
+                log::message(&format!(
+                    "retrying (attempt {}/{max})...",
+                    current_attempt + 1
+                ));
+            }
+            Ok(Some(current_attempt + 1))
+        }
+        claudine::harness::HandlerAction::Resume {
+            prompt: _,
+            set: _,
+            msg,
+            say: _,
+            retries,
+        } => {
+            let max = retries.unwrap_or(default_max_retries);
+            if current_attempt >= max {
+                log::warn(&format!(
+                    "resume retry ceiling reached ({current_attempt}/{max}): {failure_message}"
+                ));
+                return Ok(None);
+            }
+            // Validate resume support
+            if let Err(e) = claudine::harness::validate_resume(
+                &profile.provider().to_string(),
+                profile.supports_resume(),
+                session_id,
+            ) {
+                log::warn(&format!("cannot resume: {e}"));
+                return Ok(None);
+            }
+            if let Some(msg_text) = msg {
+                let rendered = Prose::new(msg_text).render(term);
+                eprintln!("{rendered}");
+            } else {
+                log::message(&format!(
+                    "resuming session (attempt {}/{max})...",
+                    current_attempt + 1
+                ));
+            }
+            Ok(Some(current_attempt + 1))
+        }
+        claudine::harness::HandlerAction::Deviate {
+            command,
+            set: _,
+            msg,
+            say: _,
+        } => {
+            if let Some(msg_text) = msg {
+                let rendered = Prose::new(msg_text).render(term);
+                eprintln!("{rendered}");
+            } else {
+                log::message(&format!(
+                    "running deviate command: {}",
+                    command.raw
+                ));
+            }
+            match claudine::harness::execute_deviate_command(
+                command,
+                failure_ctx,
+                Some(source_path),
+            ) {
+                Ok(deviate_exit) => {
+                    if deviate_exit != 0 {
+                        log::warn(&format!(
+                            "deviate command '{}' exited with code {deviate_exit}",
+                            command.raw
+                        ));
+                    }
+                    // After deviate, retry the main provider
+                    Ok(Some(current_attempt + 1))
+                }
+                Err(e) => Err(eyre!("deviate failed: {e}")),
+            }
+        }
+        claudine::harness::HandlerAction::Redirect {
+            file,
+            set: _,
+            msg,
+            say: _,
+            resume: _,
+        } => {
+            if let Some(msg_text) = msg {
+                let rendered = Prose::new(msg_text).render(term);
+                eprintln!("{rendered}");
+            }
+            Err(eyre!(
+                "redirect handler to '{file}' is not yet supported in the execution loop"
+            ))
+        }
+    }
 }
 
 fn resolve_binary_path(
