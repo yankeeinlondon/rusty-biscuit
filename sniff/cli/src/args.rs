@@ -12,7 +12,7 @@ pub const DEFAULT_COMMIT_COUNT: usize = 10;
 #[allow(dead_code)]
 pub enum RepoAction {
     Structure {
-        filter: Option<String>,
+        filter: Vec<String>,
         latest_versions: bool,
     },
     GitStatus {
@@ -36,31 +36,31 @@ pub enum RepoAction {
         remote: String,
     },
     Deps {
-        filter: Option<String>,
+        filter: Vec<String>,
         ui: bool,
     },
     Packages {
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     Package,
     PackageArea,
     DirtyPackages {
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     DirtyPackageAreas {
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     StagedPackages {
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     StagedPackageAreas {
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     UnstagedPackages {
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     UnstagedPackageAreas {
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     PackageRoot,
     PackageAreaRoot,
@@ -251,7 +251,7 @@ pub enum Commands {
         #[arg(long)]
         latest_versions: bool,
         /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Option<String>,
+        filter: Vec<String>,
 
         #[command(subcommand)]
         repo_subcommand: Option<RepoSubcommand>,
@@ -286,7 +286,7 @@ pub enum Commands {
         has_prompt: bool,
 
         /// Filter documents by substring match on filepath/filename
-        filter: Option<String>,
+        filter: Vec<String>,
     },
 
     /// Show all installed programs detection
@@ -373,7 +373,7 @@ pub enum RepoSubcommand {
     /// Show repository structure (default when no subcommand given)
     Structure {
         /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     /// Show git status with commit history
     #[command(name = "git-status")]
@@ -427,12 +427,12 @@ pub enum RepoSubcommand {
         #[arg(long)]
         ui: bool,
         /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     /// Output only package names as a comma-separated list
     Packages {
         /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     /// Output the package name for the current directory
     Package,
@@ -441,36 +441,36 @@ pub enum RepoSubcommand {
     /// Output only package names that have uncommitted changes
     DirtyPackages {
         /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     /// Output only package area names that have uncommitted changes
     DirtyPackageAreas {
         /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     /// Output only package names that have staged files
     #[command(name = "staged-packages")]
     StagedPackages {
         /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     /// Output only package area names that have staged files
     #[command(name = "staged-package-areas")]
     StagedPackageAreas {
         /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     /// Output only package names that have unstaged changes
     #[command(name = "unstaged-packages")]
     UnstagedPackages {
         /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     /// Output only package area names that have unstaged changes
     #[command(name = "unstaged-package-areas")]
     UnstagedPackageAreas {
         /// Filter packages by name (or @area); prefix with ! to exclude
-        filter: Option<String>,
+        filter: Vec<String>,
     },
     /// Output the root directory of the current package
     PackageRoot,
@@ -685,7 +685,7 @@ impl Commands {
                     latest_versions: *latest_versions,
                 },
                 Some(RepoSubcommand::Structure { filter: sub_filter }) => RepoAction::Structure {
-                    filter: sub_filter.clone().or_else(|| filter.clone()),
+                    filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
                     latest_versions: *latest_versions,
                 },
                 Some(RepoSubcommand::GitStatus {
@@ -714,42 +714,42 @@ impl Commands {
                     ui,
                     filter: sub_filter,
                 }) => RepoAction::Deps {
-                    filter: sub_filter.clone().or_else(|| filter.clone()),
+                    filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
                     ui: *ui,
                 },
                 Some(RepoSubcommand::Packages { filter: sub_filter }) => RepoAction::Packages {
-                    filter: sub_filter.clone().or_else(|| filter.clone()),
+                    filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
                 },
                 Some(RepoSubcommand::Package) => RepoAction::Package,
                 Some(RepoSubcommand::PackageArea) => RepoAction::PackageArea,
                 Some(RepoSubcommand::DirtyPackages { filter: sub_filter }) => {
                     RepoAction::DirtyPackages {
-                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
                     }
                 }
                 Some(RepoSubcommand::DirtyPackageAreas { filter: sub_filter }) => {
                     RepoAction::DirtyPackageAreas {
-                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
                     }
                 }
                 Some(RepoSubcommand::StagedPackages { filter: sub_filter }) => {
                     RepoAction::StagedPackages {
-                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
                     }
                 }
                 Some(RepoSubcommand::StagedPackageAreas { filter: sub_filter }) => {
                     RepoAction::StagedPackageAreas {
-                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
                     }
                 }
                 Some(RepoSubcommand::UnstagedPackages { filter: sub_filter }) => {
                     RepoAction::UnstagedPackages {
-                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
                     }
                 }
                 Some(RepoSubcommand::UnstagedPackageAreas { filter: sub_filter }) => {
                     RepoAction::UnstagedPackageAreas {
-                        filter: sub_filter.clone().or_else(|| filter.clone()),
+                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
                     }
                 }
                 Some(RepoSubcommand::PackageRoot) => RepoAction::PackageRoot,
@@ -779,7 +779,7 @@ pub struct DocsFilter {
     /// Show only documents with a prompt in frontmatter.
     pub has_prompt: bool,
     /// Substring filter on filepath/filename (case-insensitive).
-    pub filter: Option<String>,
+    pub filter: Vec<String>,
 }
 
 /// Filter options for the files subcommand.
@@ -890,7 +890,7 @@ Output modes:
 pub const REPO_AFTER_HELP: &str = "\
 Structure:
   sniff repo                          Show repository/monorepo structure
-  sniff repo biscuit                  Filter to packages matching \"biscuit\"
+  sniff repo biscuit darkmatter       Filter to packages matching \"biscuit\" or \"darkmatter\"
   sniff repo structure @sniff         Filter to packages in \"sniff\" area
 
 Git:
@@ -1021,7 +1021,7 @@ mod tests {
             {
                 assert!(readme);
                 assert!(has_prompt);
-                assert_eq!(filter.as_deref(), Some("research"));
+                assert_eq!(filter, vec!["research".to_string()]);
             } else {
                 panic!("Expected Docs command");
             }
@@ -1049,7 +1049,7 @@ mod tests {
             }) = cli.command
             {
                 assert!(latest_versions);
-                assert_eq!(filter.as_deref(), Some("@sniff"));
+                assert_eq!(filter, vec!["@sniff".to_string()]);
             } else {
                 panic!("Expected Repo command");
             }
@@ -1232,7 +1232,7 @@ mod tests {
             assert_eq!(
                 Commands::Repo {
                     latest_versions: false,
-                    filter: None,
+                    filter: vec![],
                     repo_subcommand: None,
                 }
                 .to_output_filter(),
@@ -1310,7 +1310,7 @@ mod tests {
         fn repo_accessors_work() {
             let cmd = Commands::Repo {
                 latest_versions: true,
-                filter: Some("biscuit".to_string()),
+                filter: vec!["biscuit".to_string()],
                 repo_subcommand: None,
             };
 
@@ -1321,7 +1321,7 @@ mod tests {
                 latest_versions,
             }) = cmd.to_repo_action()
             {
-                assert_eq!(filter.as_deref(), Some("biscuit"));
+                assert_eq!(filter, vec!["biscuit".to_string()]);
                 assert!(latest_versions);
             } else {
                 panic!("Expected Structure action");
@@ -1330,14 +1330,14 @@ mod tests {
             // Subcommand filter takes precedence
             let cmd = Commands::Repo {
                 latest_versions: false,
-                filter: Some("top-level".to_string()),
+                filter: vec!["top-level".to_string()],
                 repo_subcommand: Some(RepoSubcommand::Deps {
                     ui: true,
-                    filter: Some("sub-level".to_string()),
+                    filter: vec!["sub-level".to_string()],
                 }),
             };
             if let Some(RepoAction::Deps { filter, ui }) = cmd.to_repo_action() {
-                assert_eq!(filter.as_deref(), Some("sub-level"));
+                assert_eq!(filter, vec!["sub-level".to_string()]);
                 assert!(ui);
             } else {
                 panic!("Expected Deps action");
@@ -1346,14 +1346,14 @@ mod tests {
             // Falls back to top-level filter when subcommand has none
             let cmd = Commands::Repo {
                 latest_versions: false,
-                filter: Some("top-level".to_string()),
+                filter: vec!["top-level".to_string()],
                 repo_subcommand: Some(RepoSubcommand::Deps {
                     ui: false,
-                    filter: None,
+                    filter: vec![],
                 }),
             };
             if let Some(RepoAction::Deps { filter, .. }) = cmd.to_repo_action() {
-                assert_eq!(filter.as_deref(), Some("top-level"));
+                assert_eq!(filter, vec!["top-level".to_string()]);
             } else {
                 panic!("Expected Deps action");
             }
@@ -1366,12 +1366,12 @@ mod tests {
                 plan: false,
                 src: true,
                 has_prompt: false,
-                filter: Some("homelab".to_string()),
+                filter: vec!["homelab".to_string()],
             };
             let filter = docs.docs_filter();
             assert!(filter.readme);
             assert!(filter.src);
-            assert_eq!(filter.filter.as_deref(), Some("homelab"));
+            assert_eq!(filter.filter, vec!["homelab".to_string()]);
         }
 
         #[test]
@@ -1442,13 +1442,15 @@ mod tests {
         #[test]
         fn repo_structure_parses() {
             let cli = parse_args(&["repo", "structure"]).unwrap();
-            assert!(matches!(
-                cli.command,
-                Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::Structure { filter: None }),
-                    ..
-                })
-            ));
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Structure { filter }),
+                ..
+            }) = cli.command
+            {
+                assert!(filter.is_empty());
+            } else {
+                panic!("Expected repo structure");
+            }
         }
 
         #[test]
@@ -1459,9 +1461,23 @@ mod tests {
                 ..
             }) = cli.command
             {
-                assert_eq!(filter.as_deref(), Some("biscuit"));
+                assert_eq!(filter, vec!["biscuit".to_string()]);
             } else {
                 panic!("Expected repo structure with filter");
+            }
+        }
+
+        #[test]
+        fn repo_structure_with_multiple_filters_parses() {
+            let cli = parse_args(&["repo", "structure", "biscuit", "sniff"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Structure { filter }),
+                ..
+            }) = cli.command
+            {
+                assert_eq!(filter, vec!["biscuit".to_string(), "sniff".to_string()]);
+            } else {
+                panic!("Expected repo structure with multiple filters");
             }
         }
 
@@ -1588,7 +1604,7 @@ mod tests {
         fn to_repo_action_structure_default() {
             let cmd = Commands::Repo {
                 latest_versions: true,
-                filter: Some("biscuit".to_string()),
+                filter: vec!["biscuit".to_string()],
                 repo_subcommand: None,
             };
             match cmd.to_repo_action() {
@@ -1596,7 +1612,7 @@ mod tests {
                     filter,
                     latest_versions,
                 }) => {
-                    assert_eq!(filter.as_deref(), Some("biscuit"));
+                    assert_eq!(filter, vec!["biscuit".to_string()]);
                     assert!(latest_versions);
                 }
                 _ => panic!("Expected Structure action"),
@@ -1607,7 +1623,7 @@ mod tests {
         fn to_repo_action_git_status() {
             let cmd = Commands::Repo {
                 latest_versions: false,
-                filter: None,
+                filter: vec![],
                 repo_subcommand: Some(RepoSubcommand::GitStatus {
                     history: 25,
                     refresh_remotes: true,
