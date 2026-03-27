@@ -127,19 +127,6 @@ fn render_reference_groups(
     render_reference_groups_inner(groups, lines, indent, is_nerd_font, is_tty, width, true);
 }
 
-/// Render reference groups without the trailing │ separator.
-/// Used for child content under followed edges where no file head follows.
-fn render_reference_groups_no_trailing(
-    groups: &[FileTreeReferenceGroup],
-    lines: &mut Vec<String>,
-    indent: &str,
-    is_nerd_font: bool,
-    is_tty: bool,
-    width: usize,
-) {
-    render_reference_groups_inner(groups, lines, indent, is_nerd_font, is_tty, width, false);
-}
-
 fn render_reference_groups_inner(
     groups: &[FileTreeReferenceGroup],
     lines: &mut Vec<String>,
@@ -368,25 +355,23 @@ fn render_single_edge(
                 edge.display_target,
             )
         }
-    } else {
-        if is_fm {
-            let label = match edge.kind {
-                FileTreeTransclusionKind::Prologue => "prologue",
-                _ => "epilogue",
-            };
-            if is_literal_fm {
-                format!("{prefix}[{label}] {}{suffix}", edge.caption)
-            } else {
-                format!("{prefix}[{label}] references {}{suffix}", edge.display_target)
-            }
+    } else if is_fm {
+        let label = match edge.kind {
+            FileTreeTransclusionKind::Prologue => "prologue",
+            _ => "epilogue",
+        };
+        if is_literal_fm {
+            format!("{prefix}[{label}] {}{suffix}", edge.caption)
         } else {
-            let caption = if edge.caption.is_empty() {
-                String::new()
-            } else {
-                format!(" {}", edge.caption)
-            };
-            format!("{prefix}{icon}{}{caption}{suffix}", edge.display_target)
+            format!("{prefix}[{label}] references {}{suffix}", edge.display_target)
         }
+    } else {
+        let caption = if edge.caption.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", edge.caption)
+        };
+        format!("{prefix}{icon}{}{caption}{suffix}", edge.display_target)
     };
 
     lines.push(truncate_line(&line, width));
@@ -405,13 +390,13 @@ fn style_transclusion_caption(caption: &str) -> String {
     const DIM_ITALIC: &str = "\x1b[2;3m";
     const RESET: &str = "\x1b[0m";
 
-    if let Some(start) = caption.find('\'') {
-        if let Some(end) = caption[start + 1..].find('\'') {
-            let before = &caption[..start];
-            let section = &caption[start..start + 1 + end + 1];
-            let after = &caption[start + 1 + end + 1..];
-            return format!(" {DIM_ITALIC}{before}{RESET}{section}{DIM_ITALIC}{after}{RESET}");
-        }
+    if let Some(start) = caption.find('\'')
+        && let Some(end) = caption[start + 1..].find('\'')
+    {
+        let before = &caption[..start];
+        let section = &caption[start..start + 1 + end + 1];
+        let after = &caption[start + 1 + end + 1..];
+        return format!(" {DIM_ITALIC}{before}{RESET}{section}{DIM_ITALIC}{after}{RESET}");
     }
 
     format!(" {DIM_ITALIC}{caption}{RESET}")

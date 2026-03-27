@@ -56,6 +56,7 @@ pub use shell_expansion::ShellExpansionError;
 pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
+pub use biscuit_file::PathPosition;
 pub use types::{
     ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePhase,
     ComposeReport, ComposeSource, ComposeWarning,

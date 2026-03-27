@@ -29,16 +29,23 @@ use crate::markdown::types::MarkdownResult;
 ///
 /// Mirrors the resolution logic in [`graph::resolve_local_target`] so that
 /// `transclusions().resolved_target` agrees with graph/validation resolution.
-fn resolve_transclusion_target(raw_target: &str, source: &ComposeSource) -> Option<String> {
+fn resolve_transclusion_target(
+    raw_target: &str,
+    source: &ComposeSource,
+    magic_paths: &[(std::path::PathBuf, biscuit_file::PathPosition)],
+) -> Option<String> {
     match source {
         ComposeSource::File(base_path) => {
             let base_dir = base_path.parent();
 
             // Try biscuit_file::FileReference for full resolution (@repo-root, etc.)
-            if let Ok(file_ref) = biscuit_file::FileReference::new(raw_target)
-                && let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir)
-            {
-                return Some(resolved.to_string_lossy().to_string());
+            if let Ok(mut file_ref) = biscuit_file::FileReference::new(raw_target) {
+                for (path, position) in magic_paths {
+                    file_ref = file_ref.add_magic_path(path, *position);
+                }
+                if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
+                    return Some(resolved.to_string_lossy().to_string());
+                }
             }
 
             // Fallback to simple path join
@@ -101,7 +108,7 @@ impl Markdown {
             // Fill resolved_target using FileReference semantics (rec #4)
             let resolved_target = match &kind {
                 TransclusionRefKind::File | TransclusionRefKind::Code => {
-                    resolve_transclusion_target(&directive.raw_target, &source)
+                    resolve_transclusion_target(&directive.raw_target, &source, &[])
                 }
                 TransclusionRefKind::Url => {
                     // URL targets are already absolute
@@ -149,7 +156,7 @@ impl Markdown {
         // Frontmatter prologue/epilogue
         if let Ok(fm_refs) = parse_frontmatter_refs(self.frontmatter().as_map()) {
             for prologue in &fm_refs.prologue {
-                let resolved_target = resolve_transclusion_target(prologue, &source);
+                let resolved_target = resolve_transclusion_target(prologue, &source, &[]);
                 refs.push(TransclusionRef {
                     kind: TransclusionRefKind::Prologue,
                     raw_target: prologue.clone(),
@@ -165,7 +172,7 @@ impl Markdown {
             }
 
             for epilogue in &fm_refs.epilogue {
-                let resolved_target = resolve_transclusion_target(epilogue, &source);
+                let resolved_target = resolve_transclusion_target(epilogue, &source, &[]);
                 refs.push(TransclusionRef {
                     kind: TransclusionRefKind::Epilogue,
                     raw_target: epilogue.clone(),

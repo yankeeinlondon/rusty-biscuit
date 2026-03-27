@@ -1817,11 +1817,11 @@ fn resolve_base_branch(repo: &Repository) -> (String, Option<git2::Oid>) {
     let effective_repo = base_repo.as_ref().unwrap_or(repo);
 
     // Try the base repo's current HEAD branch
-    if let Ok(head) = effective_repo.head() {
-        if let Some(name) = head.shorthand() {
-            let oid = head.peel_to_commit().ok().map(|c| c.id());
-            return (name.to_string(), oid);
-        }
+    if let Ok(head) = effective_repo.head()
+        && let Some(name) = head.shorthand()
+    {
+        let oid = head.peel_to_commit().ok().map(|c| c.id());
+        return (name.to_string(), oid);
     }
 
     // Fallback: try "main", then "master"

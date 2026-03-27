@@ -145,6 +145,16 @@ pub(crate) fn options_hash(options: &ComposeOptions) -> u64 {
         options.ignore_invalid_references
     ));
     parts.push(format!("resolve_repo_root={}", options.resolve_repo_root));
+
+    if !options.magic_paths.is_empty() {
+        let paths: Vec<String> = options
+            .magic_paths
+            .iter()
+            .map(|(p, pos)| format!("{}:{:?}", p.display(), pos))
+            .collect();
+        parts.push(format!("magic_paths={}", paths.join(",")));
+    }
+
     parts.push(format!("list_spacing={:?}", options.list_spacing));
     parts.push(format!("indent_size={}", options.indent_size));
     parts.push(format!(
@@ -454,5 +464,24 @@ mod tests {
         let k1 = operation_entry_key("code", 123, 100);
         let k2 = operation_entry_key("code", 123, 200);
         assert_ne!(k1, k2);
+    }
+
+    #[test]
+    fn options_hash_sensitive_to_magic_paths() {
+        let base = ComposeOptions::new();
+        let with_magic = ComposeOptions::new()
+            .with_magic_path("/custom/root", biscuit_file::PathPosition::Start);
+
+        assert_ne!(options_hash(&base), options_hash(&with_magic));
+    }
+
+    #[test]
+    fn options_hash_sensitive_to_magic_path_position() {
+        let start = ComposeOptions::new()
+            .with_magic_path("/path", biscuit_file::PathPosition::Start);
+        let end = ComposeOptions::new()
+            .with_magic_path("/path", biscuit_file::PathPosition::End);
+
+        assert_ne!(options_hash(&start), options_hash(&end));
     }
 }
