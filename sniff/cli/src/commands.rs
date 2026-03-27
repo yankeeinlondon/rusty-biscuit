@@ -170,11 +170,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             if cli.json {
                 let json_val = serde_json::json!({
                     "scope": change_scope,
-                    "documents": matched_docs.iter().map(|d| serde_json::json!({
-                        "relative": d.relative,
-                        "title": d.title,
-                        "blast_radius": d.blast_radius,
-                    })).collect::<Vec<_>>(),
+                    "documents": matched_docs.iter().map(|d| &d.relative).collect::<Vec<_>>(),
                 });
                 println!("{}", serde_json::to_string_pretty(&json_val)?);
             } else {

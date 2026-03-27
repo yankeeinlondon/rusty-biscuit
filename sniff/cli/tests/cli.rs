@@ -1358,10 +1358,10 @@ fn test_repo_staged_files_json_uses_new_shape() {
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let json: Value = serde_json::from_str(&stdout).expect("Should be valid JSON");
-    // New shape has "scope", "kind", "paths" fields
-    assert!(json.get("scope").is_some(), "JSON should have 'scope' field");
-    assert!(json.get("kind").is_some(), "JSON should have 'kind' field");
-    assert!(json.get("paths").is_some(), "JSON should have 'paths' field");
+    assert_eq!(json["scope"], "staged", "scope should be lowercase");
+    assert_eq!(json["kind"], "all_files", "kind should be snake_case");
+    let paths = json["paths"].as_array().expect("paths should be an array");
+    assert!(paths.iter().any(|p| p.as_str().unwrap().contains("main.rs")));
 }
 
 #[test]
@@ -1531,8 +1531,10 @@ fn test_blast_radius_json_output() {
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let json: Value = serde_json::from_str(&stdout).expect("Should be valid JSON");
-    assert!(json.get("scope").is_some());
-    assert!(json.get("documents").is_some());
+    assert_eq!(json["scope"], "dirty", "scope should be lowercase");
+    let docs = json["documents"].as_array().expect("documents should be an array");
+    assert_eq!(docs.len(), 1);
+    assert_eq!(docs[0].as_str().unwrap(), "docs/guide.md", "documents should be path strings");
 }
 
 #[test]
@@ -1569,6 +1571,26 @@ fn test_docs_stdout_stderr_split() {
     assert!(stdout.contains("readme.md"), "Doc list should be on stdout");
     // Footer should be on stderr
     assert!(stderr.contains("--verbose"), "Footer should be on stderr");
+}
+
+#[test]
+fn test_docs_blast_radius_filter() {
+    let (_dir, path) = create_test_repo();
+    // Doc WITH blast_radius
+    let doc_with = "---\ntitle: API Guide\nblast_radius:\n  - src/main.rs\n---\n# API Guide\n";
+    test_commit_file(&path, "docs/api.md", doc_with);
+    // Doc WITHOUT blast_radius
+    let doc_without = "---\ntitle: Readme\n---\n# Readme\n";
+    test_commit_file(&path, "docs/readme.md", doc_without);
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "docs", "--blast-radius", "--plain"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("api.md"), "Should include doc with blast_radius");
+    assert!(!stdout.contains("readme.md"), "Should exclude doc without blast_radius");
 }
 
 #[test]

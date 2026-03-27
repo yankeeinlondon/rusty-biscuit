@@ -69,6 +69,7 @@ pub fn is_source_code_path(path: &Path) -> bool {
 
 /// Which set of changes to inspect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ChangeScope {
     /// Staged + Modified + Both + Untracked (deduplicated).
     Dirty,
@@ -82,6 +83,7 @@ pub enum ChangeScope {
 
 /// Whether to return all files or only source code files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ChangedPathKind {
     AllFiles,
     SourceCode,
@@ -712,6 +714,186 @@ mod tests {
             .unwrap();
 
             assert!(result.paths.contains(&PathBuf::from("src/old.rs")));
+        }
+    }
+
+    /// Helper: set up the temp repo as a Cargo workspace with given members.
+    ///
+    /// Each member path like `"sniff/lib"` gets package name `"sniff-lib"` (slashes → dashes).
+    fn make_workspace(repo_path: &Path, members: &[&str]) {
+        let member_list: Vec<String> = members.iter().map(|m| format!("    \"{m}\"")).collect();
+        let cargo_toml = format!(
+            "[workspace]\nmembers = [\n{}\n]\n",
+            member_list.join(",\n")
+        );
+        commit_file(repo_path, "Cargo.toml", &cargo_toml);
+
+        // Create a Cargo.toml for each member package
+        for member in members {
+            let name = member.replace('/', "-");
+            let pkg_toml = format!(
+                "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
+            );
+            commit_file(repo_path, &format!("{member}/Cargo.toml"), &pkg_toml);
+            commit_file(
+                repo_path,
+                &format!("{member}/src/lib.rs"),
+                "// placeholder",
+            );
+        }
+    }
+
+    mod package_scoping {
+        use super::*;
+
+        #[test]
+        fn exact_package_match_filters_paths() {
+            let (_dir, path) = create_temp_repo();
+            // sniff/lib → package name "sniff-lib", homelab/lib → "homelab-lib"
+            make_workspace(&path, &["sniff/lib", "homelab/lib"]);
+
+            // Dirty files in both packages
+            std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
+            std::fs::write(path.join("homelab/lib/src/lib.rs"), "// dirty").unwrap();
+
+            let result = collect_changed_paths(
+                &path,
+                &ChangedPathQuery {
+                    scope: ChangeScope::Dirty,
+                    kind: ChangedPathKind::AllFiles,
+                    package: Some("sniff-lib".to_string()),
+                    package_area: None,
+                    filters: Vec::new(),
+                },
+            )
+            .unwrap();
+
+            assert!(
+                result.paths.iter().all(|p| p.starts_with("sniff/")),
+                "All paths should be in sniff/: {:?}",
+                result.paths
+            );
+            assert!(
+                !result.paths.iter().any(|p| p.starts_with("homelab/")),
+                "Should not include homelab/ paths"
+            );
+        }
+
+        #[test]
+        fn exact_package_area_match() {
+            let (_dir, path) = create_temp_repo();
+            make_workspace(&path, &["sniff/lib", "sniff/cli", "homelab/lib"]);
+
+            std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
+            std::fs::write(path.join("sniff/cli/src/lib.rs"), "// dirty").unwrap();
+            std::fs::write(path.join("homelab/lib/src/lib.rs"), "// dirty").unwrap();
+
+            let result = collect_changed_paths(
+                &path,
+                &ChangedPathQuery {
+                    scope: ChangeScope::Dirty,
+                    kind: ChangedPathKind::AllFiles,
+                    package: None,
+                    package_area: Some("sniff".to_string()),
+                    filters: Vec::new(),
+                },
+            )
+            .unwrap();
+
+            assert!(
+                result.paths.iter().all(|p| p.starts_with("sniff/")),
+                "All paths should be in sniff/: {:?}",
+                result.paths
+            );
+            assert!(result.paths.len() >= 2, "Should match both sniff/lib and sniff/cli");
+        }
+
+        #[test]
+        fn nested_package_area_prefix_match() {
+            let (_dir, path) = create_temp_repo();
+            make_workspace(
+                &path,
+                &["apps/web", "apps/api", "apps/api/workers", "libs/core"],
+            );
+
+            std::fs::write(path.join("apps/web/src/lib.rs"), "// dirty").unwrap();
+            std::fs::write(path.join("apps/api/src/lib.rs"), "// dirty").unwrap();
+            std::fs::write(path.join("apps/api/workers/src/lib.rs"), "// dirty").unwrap();
+            std::fs::write(path.join("libs/core/src/lib.rs"), "// dirty").unwrap();
+
+            let result = collect_changed_paths(
+                &path,
+                &ChangedPathQuery {
+                    scope: ChangeScope::Dirty,
+                    kind: ChangedPathKind::AllFiles,
+                    package: None,
+                    package_area: Some("apps".to_string()),
+                    filters: Vec::new(),
+                },
+            )
+            .unwrap();
+
+            assert!(
+                result.paths.iter().all(|p| p.starts_with("apps/")),
+                "All paths should be in apps/: {:?}",
+                result.paths
+            );
+            assert!(
+                !result.paths.iter().any(|p| p.starts_with("libs/")),
+                "Should not include libs/ paths"
+            );
+        }
+
+        #[test]
+        fn unknown_package_returns_error() {
+            let (_dir, path) = create_temp_repo();
+            make_workspace(&path, &["sniff/lib", "sniff/cli"]);
+
+            std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
+
+            let result = collect_changed_paths(
+                &path,
+                &ChangedPathQuery {
+                    scope: ChangeScope::Dirty,
+                    kind: ChangedPathKind::AllFiles,
+                    package: Some("nonexistent".to_string()),
+                    package_area: None,
+                    filters: Vec::new(),
+                },
+            );
+
+            assert!(result.is_err());
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("nonexistent") && err.contains("not found"),
+                "Error should mention the package name: {err}"
+            );
+        }
+
+        #[test]
+        fn unknown_package_area_returns_error() {
+            let (_dir, path) = create_temp_repo();
+            make_workspace(&path, &["sniff/lib", "sniff/cli"]);
+
+            std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
+
+            let result = collect_changed_paths(
+                &path,
+                &ChangedPathQuery {
+                    scope: ChangeScope::Dirty,
+                    kind: ChangedPathKind::AllFiles,
+                    package: None,
+                    package_area: Some("bogus".to_string()),
+                    filters: Vec::new(),
+                },
+            );
+
+            assert!(result.is_err());
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("bogus") && err.contains("not found"),
+                "Error should mention the area name: {err}"
+            );
         }
     }
 

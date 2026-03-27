@@ -922,6 +922,52 @@ mod tests {
             assert_eq!(result.len(), 1);
             assert_eq!(result[0].relative, "darkmatter/lib/src/README.md");
         }
+
+        #[test]
+        fn blast_radius_flag_filters_to_blast_radius_docs() {
+            let mut doc_with_br = make_doc("sniff/docs/cli/repo.md");
+            doc_with_br.has_blast_radius = true;
+            doc_with_br.blast_radius = Some(vec![PathBuf::from("sniff/cli/src/args.rs")]);
+
+            let doc_without_br = make_doc("sniff/README.md");
+
+            let mut doc_empty_br = make_doc("sniff/docs/overview.md");
+            doc_empty_br.has_blast_radius = true;
+            doc_empty_br.blast_radius = Some(Vec::new());
+
+            let docs = vec![doc_with_br, doc_without_br, doc_empty_br];
+            let filter = DocsFilter {
+                blast_radius: true,
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            // Should return both docs that have blast_radius key, even the empty one
+            assert_eq!(result.len(), 2);
+            assert!(result.iter().all(|d| d.has_blast_radius));
+            assert!(result.iter().any(|d| d.relative == "sniff/docs/cli/repo.md"));
+            assert!(result.iter().any(|d| d.relative == "sniff/docs/overview.md"));
+        }
+
+        #[test]
+        fn blast_radius_flag_with_filter_intersects() {
+            let mut doc_br_homelab = make_doc("homelab/docs/api.md");
+            doc_br_homelab.has_blast_radius = true;
+
+            let mut doc_br_sniff = make_doc("sniff/docs/cli/repo.md");
+            doc_br_sniff.has_blast_radius = true;
+
+            let doc_no_br = make_doc("homelab/README.md");
+
+            let docs = vec![doc_br_homelab, doc_br_sniff, doc_no_br];
+            let filter = DocsFilter {
+                blast_radius: true,
+                filter: vec!["homelab".to_string()],
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].relative, "homelab/docs/api.md");
+        }
     }
 
     #[test]
