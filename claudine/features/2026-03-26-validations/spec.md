@@ -18,9 +18,9 @@ When we are running non-interactive prompts we will add some conventions to allo
     - The file exists in the filesystem
     - AND the file is a valid YAML file
     - the validation may optionally specify a broad shape ('scalar', 'array', 'object') that the root of the data structure must have
-- `has_write_permission(file)`
+- `has_write_permission(file_ref)`
     - Checks the agent config to see if the user has **write** access to the given file
-- `toml_file_exists(file)`
+- `toml_file_exists(file_ref)`
     - The file exists in the filesystem
     - AND the file is a valid TOML file
 - `shell_command(cmd_and_params, show_stdout = true, show_stderr = true)`
@@ -53,8 +53,11 @@ When we are running non-interactive prompts we will add some conventions to allo
     - test the length (characters) of the response in the Agent's final (non-thinking) response to STDOUT
     - fails if the response is greater than `length`
 - `response_includes(find)`
-    - test whether the Agent's final (non-thinking) response to STDOUT
+    - test whether the Agent's final (non-thinking) response to STDOUT contains the given substring
+    - fails if the substring is not found
 - `response_missing(find)`
+    - test whether the Agent's final (non-thinking) response to STDOUT does NOT contain the given substring
+    - fails if the substring is found
 
 
 > **Note:** all validations will have an optional `msg` property which a caller can override but has a sensible message structure as a default. This `msg` is used to report to the non-interactive prompt:
@@ -108,7 +111,7 @@ Validations are used to test certain things about the **state** _before_ and _af
 post_checks:
     file_changed: "@this-file-must-change.md"
     response_missing: "failed"
-    response_length: 150
+    response_length_at_least: 150
 ---
 # My Markdown Page
 ```
@@ -149,7 +152,7 @@ An Agent can fail all by itself and a validation or timeout can also put us into
             }
             ```
 
-            > **Note:** programmatic handlers aren't allowed to use the `deviate` handler type because Claudine has no way to screen the shell commands and run it through it's permissions system
+            > **Note:** programmatic handlers aren't allowed to use the `deviate` handler type. YAML-configured `deviate` commands are statically known at parse time and can be pre-screened against the shell command whitelist before execution begins. Programmatic handlers return commands at runtime, so Claudine cannot guarantee they've been screened before invocation.
 
 - `handle_{EVENT}`
     - you can _handle_ any validation operation using just YAML configuration
