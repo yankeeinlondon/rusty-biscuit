@@ -250,9 +250,7 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
     }
 
     fn handle_item_completed(&mut self, obj: &Value) -> Option<StreamChunk> {
-        let Some(item) = obj.get("item") else {
-            return None;
-        };
+        let item = obj.get("item")?;
         let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
         if item_type == "agent_message" {
