@@ -98,6 +98,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
 
+        // Handle blast-radius mode separately (doesn't use SniffResult)
+        if let Commands::BlastRadius { .. } = cmd {
+            // Handled in Phase 4 (wiring) — placeholder for now
+            eprintln!("Not yet implemented");
+            return Ok(());
+        }
+
         // Handle services mode separately (doesn't use SniffResult)
         if let Some(state_arg) = cmd.state() {
             let services_info = detect_services();
@@ -179,11 +186,11 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
-            crate::args::RepoAction::StagedFiles { package: _ }
+            crate::args::RepoAction::StagedFiles(_)
             | crate::args::RepoAction::UnstagedFiles { package: _ }
             | crate::args::RepoAction::UntrackedFiles { package: _ } => {
                 let status_filter = match action {
-                    crate::args::RepoAction::StagedFiles { .. } => {
+                    crate::args::RepoAction::StagedFiles(_) => {
                         sniff::filesystem::git::FileStatus::Staged
                     }
                     crate::args::RepoAction::UnstagedFiles { .. } => {
@@ -232,6 +239,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     std::process::exit(1);
                 }
+                return Ok(());
+            }
+            crate::args::RepoAction::DirtySourceCode(_)
+            | crate::args::RepoAction::StagedSourceCode(_)
+            | crate::args::RepoAction::UnstagedSourceCode(_)
+            | crate::args::RepoAction::DirtyFiles(_) => {
+                // Handled in Phase 4 (wiring) — placeholder for now
+                eprintln!("Not yet implemented");
                 return Ok(());
             }
             _ => {
@@ -308,8 +323,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::Services
-        | OutputFilter::Just => {
-            unreachable!("Programs, Services, and Just mode should be handled before this point")
+        | OutputFilter::Just
+        | OutputFilter::BlastRadius => {
+            unreachable!("Programs, Services, Just, and BlastRadius mode should be handled before this point")
         }
     }
 

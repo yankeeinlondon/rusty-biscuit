@@ -32,6 +32,7 @@ Commands:
     sniff language        Show language detection
     sniff files           Show file associations
     sniff docs            Show markdown documents
+    sniff blast-radius    Find docs affected by changed source files
 
   Programs:
     sniff programs        Show all installed programs

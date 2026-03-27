@@ -1832,31 +1832,11 @@ pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: O
     std::process::exit(1);
 }
 
-/// Source code file extensions considered for change detection.
-const SOURCE_CODE_EXTENSIONS: &[&str] = &[
-    // Rust
-    "rs", // TypeScript / JavaScript
-    "ts", "tsx", "js", "jsx", "mjs", "mts", "cjs", "cts", // Web
-    "vue", "svelte", "html", "htm", "css", "scss", "sass", "less", // Python
-    "py", "pyi", // Go
-    "go",  // C / C++
-    "c", "h", "cpp", "hpp", "cc", "cxx", // Java / Kotlin
-    "java", "kt", "kts", // Shell
-    "sh", "bash", "zsh",   // Ruby
-    "rb",    // Swift
-    "swift", // SQL
-    "sql",
-];
-
 /// Returns true if a file path has a source code extension.
+///
+/// Delegates to the shared library helper.
 fn is_source_code_file(path: &str) -> bool {
-    let ext = match path.rsplit('.').next() {
-        Some(e) if e != path => e,
-        _ => return false,
-    };
-    SOURCE_CODE_EXTENSIONS
-        .iter()
-        .any(|&s| s.eq_ignore_ascii_case(ext))
+    sniff::filesystem::blast_radius::is_source_code_path(Path::new(path))
 }
 
 /// Exit 0 if the current package area has source code file changes, exit 1 otherwise.
@@ -2651,7 +2631,7 @@ pub(crate) fn render_docs_section(docs: &[MarkdownMeta], verbose: u8) -> String 
     let items: Vec<String> = docs
         .iter()
         .map(|doc| {
-            let file_link = format_doc_filepath(&doc.relative, &doc.filepath.display().to_string());
+            let file_link = format_styled_filepath(&doc.relative, &doc.filepath.display().to_string());
 
             if verbose > 0 {
                 let date_str = doc.last_updated.format("%Y-%m-%d").to_string();
@@ -2685,16 +2665,82 @@ pub(crate) fn render_docs_section(docs: &[MarkdownMeta], verbose: u8) -> String 
     out
 }
 
-/// Format a document filepath with dim directory and bold filename,
+/// Format a filepath with dim directory and bold filename,
 /// wrapped in an OSC8 hyperlink.
-fn format_doc_filepath(relative: &str, absolute: &str) -> String {
+fn format_styled_filepath(relative: &str, absolute: &str) -> String {
     match relative.rsplit_once('/') {
         Some((dir, file)) => {
             format!("<a href=\"{absolute}\"><blue><dim>{dir}/</dim><b>{file}</b></blue></a>")
         }
         None => {
-            // No directory prefix, just the filename
             format!("<a href=\"{absolute}\"><blue><b>{relative}</b></blue></a>")
+        }
+    }
+}
+
+/// Format a filepath showing only the basename, with an OSC8 hyperlink.
+fn format_basename_filepath(relative: &str, absolute: &str) -> String {
+    let basename = relative.rsplit_once('/').map_or(relative, |(_, f)| f);
+    format!("<a href=\"{absolute}\"><blue>{basename}</blue></a>")
+}
+
+// ---------------------------------------------------------------------------
+// Shared path-list renderer
+// ---------------------------------------------------------------------------
+
+/// Output format for path lists.
+pub enum PathListFormat {
+    /// One path per line (default).
+    Lines,
+    /// Bullet list with `- ` prefix.
+    BulletList,
+    /// Comma-separated on a single line.
+    Csv,
+}
+
+/// Render a list of repo-relative paths in the chosen format.
+///
+/// Paths are displayed with OSC8 hyperlinks (absolute target), dim directory
+/// segments, and bold basenames. With `no_path`, only the basename is shown.
+pub fn render_path_list(
+    repo_root: &Path,
+    paths: &[PathBuf],
+    format: PathListFormat,
+    no_path: bool,
+) -> String {
+    let terminal = Terminal::default();
+
+    let format_one = |p: &PathBuf| -> String {
+        let relative = p.display().to_string();
+        let absolute = repo_root.join(p).display().to_string();
+        let markup = if no_path {
+            format_basename_filepath(&relative, &absolute)
+        } else {
+            format_styled_filepath(&relative, &absolute)
+        };
+        Prose::new(&markup).render(&terminal)
+    };
+
+    match format {
+        PathListFormat::Lines => {
+            let mut out = String::new();
+            for p in paths {
+                writeln!(out, "{}", format_one(p)).unwrap();
+            }
+            out
+        }
+        PathListFormat::BulletList => {
+            let items: Vec<String> = paths.iter().map(format_one).collect();
+            let list = UnorderedList::new(items);
+            let mut out = String::new();
+            writeln!(out, "{}", list.render(&terminal)).unwrap();
+            out
+        }
+        PathListFormat::Csv => {
+            let items: Vec<String> = paths.iter().map(format_one).collect();
+            let mut out = items.join(", ");
+            out.push('\n');
+            out
         }
     }
 }

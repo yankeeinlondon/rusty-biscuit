@@ -20,7 +20,16 @@ use sniff::SniffResult;
 
 use crate::args::{DocsFilter, FilesFilter, RepoAction};
 
-pub use filesystem::{render_git_file_list, render_git_section, render_hash_section};
+/// Split-stream output for commands that write to both stdout and stderr.
+pub struct TextOutput {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+pub use filesystem::{
+    render_git_file_list, render_git_section, render_hash_section, PathListFormat,
+    render_docs_output, render_path_list,
+};
 pub use just::{filter_justfiles_for_json, render_just_text};
 pub use programs::{print_programs_json, render_programs_markdown};
 pub use remote::{print_remote_json, render_remote_text};
@@ -30,7 +39,7 @@ pub use topics::render_topics_table;
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
     print_current_package_area_dirty, print_package_area_has_source_code_changes,
-    render_dirty_package_areas, render_dirty_packages, render_docs_section, render_files_section,
+    render_dirty_package_areas, render_dirty_packages, render_files_section,
     render_filesystem_section, render_language_section, render_repo_deps_text,
     render_repo_deps_visual, render_repo_package, render_repo_package_area,
     render_repo_package_area_root, render_repo_package_root, render_repo_packages,
@@ -102,6 +111,8 @@ pub enum OutputFilter {
     Services,
     /// Show justfiles and their recipes
     Just,
+    /// Show documents whose blast_radius intersects with changed files
+    BlastRadius,
 }
 
 // ============================================================================
@@ -208,6 +219,7 @@ fn filter_docs(
         && !filter.plan
         && !filter.src
         && !filter.has_prompt
+        && !filter.blast_radius
         && filter.filter.is_empty()
     {
         return docs.to_vec();
@@ -227,6 +239,9 @@ fn filter_docs(
                 return false;
             }
             if filter.has_prompt && doc.prompt.is_none() {
+                return false;
+            }
+            if filter.blast_radius && !doc.has_blast_radius {
                 return false;
             }
             if !filter.filter.is_empty()
@@ -544,9 +559,10 @@ pub fn render_text(
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::Services
-        | OutputFilter::Just => {
+        | OutputFilter::Just
+        | OutputFilter::BlastRadius => {
             unreachable!(
-                "Programs, Services, Just, and Remote filters should be handled separately"
+                "Programs, Services, Just, BlastRadius, and Remote filters should be handled separately"
             )
         }
     }
@@ -694,8 +710,9 @@ fn apply_filter_to_json(
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::Services
-        | OutputFilter::Just => {
-            unreachable!("Programs, Services, and Just filters should be handled separately")
+        | OutputFilter::Just
+        | OutputFilter::BlastRadius => {
+            unreachable!("Programs, Services, Just, and BlastRadius filters should be handled separately")
         }
     }
 }
@@ -727,10 +744,15 @@ mod tests {
                 relative: relative.to_string(),
                 package: None,
                 title: String::new(),
+                title_source: sniff::filesystem::TitleSource::None,
                 model: None,
                 prompt: None,
                 last_updated: Utc::now(),
+                updated_source: sniff::filesystem::UpdatedSource::FileMetadata,
                 content_hash: String::new(),
+                has_blast_radius: false,
+                blast_radius: None,
+                frontmatter_keys: Vec::new(),
             }
         }
 
