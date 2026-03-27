@@ -6,7 +6,6 @@ pub mod handle;
 pub mod help;
 pub mod hooks;
 pub mod init;
-pub mod link;
 pub mod logs;
 pub mod mcp;
 pub mod providers;

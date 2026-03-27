@@ -37,7 +37,6 @@ async fn main() -> Result<()> {
         Some(Commands::Handle(args)) => commands::handle::run(args).await,
         Some(Commands::Completions(args)) => commands::completions::run(args),
         Some(Commands::Init(args)) => commands::init::run(args).await,
-        Some(Commands::Link(args)) => commands::link::run(args),
         Some(Commands::Sync(args)) => commands::sync::run(args).await,
         Some(Commands::Hooks(args)) => commands::hooks::run(args, cli.verbose > 0),
         Some(Commands::Actions(args)) => commands::actions::run(args, cli.verbose > 0),

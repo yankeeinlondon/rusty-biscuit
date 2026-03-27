@@ -41,7 +41,6 @@ fn groups() -> Vec<CommandGroup> {
                 cmd("agents", "List available agent definitions and their scopes"),
                 cmd("mcp", "Manage MCP (Model Context Protocol) servers"),
                 cmd("hooks", "Show registered hooks for all detected agents"),
-                cmd("link", "Link skills and commands across providers"),
             ],
         },
         CommandGroup {

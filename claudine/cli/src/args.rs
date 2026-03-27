@@ -26,8 +26,6 @@ pub(crate) enum Commands {
     Completions(commands::completions::CompletionsArgs),
     /// Interactive setup wizard.
     Init(commands::init::InitArgs),
-    /// Link skills and commands across providers.
-    Link(commands::link::LinkArgs),
     /// Re-sync hook registrations with detected agents.
     Sync(commands::sync::SyncArgs),
     /// Show registered hooks for all detected agents.

@@ -9,7 +9,6 @@ Usage: claudine [OPTIONS] [COMMAND]
 Commands:
   completions     Generate shell completions
   init            Interactive setup wizard
-  link            Link skills and commands across providers
   sync            Re-sync hook registrations with detected agents
   hooks           Show registered hooks for all detected agents
   actions         Show which actions are configured and for which events
