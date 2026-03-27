@@ -7,7 +7,43 @@ We will discuss two kinds of composition:
 - direct composition
 - inline composition
 
-Both forms share a lot of the key principles and features but the _inline_ style allows a _all-in-one_ file approach to composition which is particularly valuable to certain use cases.
+Both forms share a lot of the key principles and features but the _inline_ style allows a _all-in-one_ file approach to composition which is particularly valuable to certain use cases. Before we go into the differences, let's start with the similarities.
+
+## Composition Basics
+
+A **majority** of the composition features we'll be leveraging in Claudine are by leveraging **Darkmatter**'s [composition features](../../../darkmatter/docs/topics/what-is-composition.md) the remaining of features which Claudine layer's on top are just some conventions, validations, along with the richer output of non-interactive sessions with Claudine.
+
+> **Note:** the composition features can be used with both interactive and non-interactive sessions but we suspect you'll find that you can go further by leveraging the power of non-interactive sessions.
+
+The way you'll use composition with the Claudine CLI includes two base syntaxes:
+
+1. `claudine compose <file-ref> ...`
+2. `claudine <agent> --compose <file-ref> ...`
+    - examples: `claudine claude --compose ...`, `claudine codex --compose ...`, `claudine opencode --compose ...`
+
+In the first syntax you are _deferring_ an explicit choice of which Agentic CLI you will use versus the second where the Agent is declared as part of the command.
+
+### Simple Example
+
+
+```sh
+claudine codex --compose @commit.md
+```
+
+- Claudine then resolves the location of the `@commit.md` file using the file resolution functionality provided by [`biscuit-file`](../../../biscuit-file/README.md); this functionality includes treating the leading `@` character as a "magic path". Magic paths will attempt to resolve the "commit.md" file in multiple locations (in this order):
+    - the base of the current repo root
+    - if it is not resolvable there, it will try to resolve from the base of the 
+- will use the `prompt` property of the **some-file.md**'s frontmatter
+    - if there is not a `prompt` file then we will return an error
+    - `<red><b>ERROR:</b></red> the file <blue>some-file.md</blue> does not have a <b>prompt</b> property in it's frontmatter!`
+- pass this prompt through Darkmatter's **compose** pipeline
+- then execute a non-interactive prompt -- using claudine -- to perform the work: 
+    - get content: `claudine {agent} -n "{prompt}" --silent`
+    - save to the Markdown files body
+    - update the `last_updated` frontmatter (YYYY-MM-DD)
+
+## Inline Composition
+
 
 The _inline_ style of composition is a powerful way to keep Markdown documents in your repo up-to-date. It allows a caller to reference a markdown file and have the `prompt` property of it's frontmatter be used as a non-interactive prompt to build the content for the body of the of document.
 
