@@ -20,7 +20,16 @@ use sniff::SniffResult;
 
 use crate::args::{DocsFilter, FilesFilter, RepoAction};
 
-pub use filesystem::{render_git_file_list, render_git_section, render_hash_section};
+/// Split-stream output for commands that write to both stdout and stderr.
+pub struct TextOutput {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+pub use filesystem::{
+    render_git_file_list, render_git_section, render_hash_section, PathListFormat,
+    render_docs_output, render_path_list,
+};
 pub use just::{filter_justfiles_for_json, render_just_text};
 pub use programs::{print_programs_json, render_programs_markdown};
 pub use remote::{print_remote_json, render_remote_text};
@@ -30,7 +39,7 @@ pub use topics::render_topics_table;
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
     print_current_package_area_dirty, print_package_area_has_source_code_changes,
-    render_dirty_package_areas, render_dirty_packages, render_docs_section, render_files_section,
+    render_dirty_package_areas, render_dirty_packages, render_files_section,
     render_filesystem_section, render_language_section, render_repo_deps_text,
     render_repo_deps_visual, render_repo_package, render_repo_package_area,
     render_repo_package_area_root, render_repo_package_root, render_repo_packages,
@@ -102,6 +111,8 @@ pub enum OutputFilter {
     Services,
     /// Show justfiles and their recipes
     Just,
+    /// Show documents whose blast_radius intersects with changed files
+    BlastRadius,
 }
 
 // ============================================================================
@@ -200,7 +211,7 @@ pub(crate) fn format_uptime(seconds: u64) -> String {
 ///
 /// When multiple flags are combined, results are intersected (AND logic).
 /// When no flags are set, all documents are returned.
-fn filter_docs(
+pub fn filter_docs(
     docs: &[sniff::filesystem::docs::MarkdownMeta],
     filter: &DocsFilter,
 ) -> Vec<sniff::filesystem::docs::MarkdownMeta> {
@@ -208,6 +219,7 @@ fn filter_docs(
         && !filter.plan
         && !filter.src
         && !filter.has_prompt
+        && !filter.blast_radius
         && filter.filter.is_empty()
     {
         return docs.to_vec();
@@ -227,6 +239,9 @@ fn filter_docs(
                 return false;
             }
             if filter.has_prompt && doc.prompt.is_none() {
+                return false;
+            }
+            if filter.blast_radius && !doc.has_blast_radius {
                 return false;
             }
             if !filter.filter.is_empty()
@@ -251,6 +266,15 @@ pub fn emit_text(text: &str, plain: bool) {
         print!("{}", biscuit_terminal::prelude::strip_escape_codes(text));
     } else {
         print!("{text}");
+    }
+}
+
+/// Emit rendered text to stderr, optionally stripping ANSI escape codes.
+pub fn emit_stderr(text: &str, plain: bool) {
+    if plain {
+        eprint!("{}", biscuit_terminal::prelude::strip_escape_codes(text));
+    } else {
+        eprint!("{text}");
     }
 }
 
@@ -527,11 +551,15 @@ pub fn render_text(
             }
         }
         OutputFilter::Docs => {
+            // Docs is handled as an early return in commands.rs with split-stream output.
+            // This branch is kept for the All filter case.
             if let Some(ref filesystem) = result.filesystem
                 && let Some(ref docs) = filesystem.docs
             {
                 let filtered = filter_docs(docs, docs_filter);
-                out.push_str(&render_docs_section(&filtered, verbose));
+                let text_output = filesystem::render_docs_output(&filtered, verbose);
+                out.push_str(&text_output.stderr);
+                out.push_str(&text_output.stdout);
             }
         }
         OutputFilter::Programs
@@ -544,9 +572,10 @@ pub fn render_text(
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::Services
-        | OutputFilter::Just => {
+        | OutputFilter::Just
+        | OutputFilter::BlastRadius => {
             unreachable!(
-                "Programs, Services, Just, and Remote filters should be handled separately"
+                "Programs, Services, Just, BlastRadius, and Remote filters should be handled separately"
             )
         }
     }
@@ -694,8 +723,9 @@ fn apply_filter_to_json(
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
         | OutputFilter::Services
-        | OutputFilter::Just => {
-            unreachable!("Programs, Services, and Just filters should be handled separately")
+        | OutputFilter::Just
+        | OutputFilter::BlastRadius => {
+            unreachable!("Programs, Services, Just, and BlastRadius filters should be handled separately")
         }
     }
 }
@@ -727,10 +757,15 @@ mod tests {
                 relative: relative.to_string(),
                 package: None,
                 title: String::new(),
+                title_source: sniff::filesystem::TitleSource::None,
                 model: None,
                 prompt: None,
                 last_updated: Utc::now(),
+                updated_source: sniff::filesystem::UpdatedSource::FileMetadata,
                 content_hash: String::new(),
+                has_blast_radius: false,
+                blast_radius: None,
+                frontmatter_keys: Vec::new(),
             }
         }
 
@@ -886,6 +921,52 @@ mod tests {
             // Only darkmatter/lib/src/README.md matches both --readme and --src
             assert_eq!(result.len(), 1);
             assert_eq!(result[0].relative, "darkmatter/lib/src/README.md");
+        }
+
+        #[test]
+        fn blast_radius_flag_filters_to_blast_radius_docs() {
+            let mut doc_with_br = make_doc("sniff/docs/cli/repo.md");
+            doc_with_br.has_blast_radius = true;
+            doc_with_br.blast_radius = Some(vec![PathBuf::from("sniff/cli/src/args.rs")]);
+
+            let doc_without_br = make_doc("sniff/README.md");
+
+            let mut doc_empty_br = make_doc("sniff/docs/overview.md");
+            doc_empty_br.has_blast_radius = true;
+            doc_empty_br.blast_radius = Some(Vec::new());
+
+            let docs = vec![doc_with_br, doc_without_br, doc_empty_br];
+            let filter = DocsFilter {
+                blast_radius: true,
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            // Should return both docs that have blast_radius key, even the empty one
+            assert_eq!(result.len(), 2);
+            assert!(result.iter().all(|d| d.has_blast_radius));
+            assert!(result.iter().any(|d| d.relative == "sniff/docs/cli/repo.md"));
+            assert!(result.iter().any(|d| d.relative == "sniff/docs/overview.md"));
+        }
+
+        #[test]
+        fn blast_radius_flag_with_filter_intersects() {
+            let mut doc_br_homelab = make_doc("homelab/docs/api.md");
+            doc_br_homelab.has_blast_radius = true;
+
+            let mut doc_br_sniff = make_doc("sniff/docs/cli/repo.md");
+            doc_br_sniff.has_blast_radius = true;
+
+            let doc_no_br = make_doc("homelab/README.md");
+
+            let docs = vec![doc_br_homelab, doc_br_sniff, doc_no_br];
+            let filter = DocsFilter {
+                blast_radius: true,
+                filter: vec!["homelab".to_string()],
+                ..Default::default()
+            };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].relative, "homelab/docs/api.md");
         }
     }
 

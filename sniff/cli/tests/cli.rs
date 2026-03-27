@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use serde_json::Value;
@@ -1227,4 +1229,400 @@ fn test_repo_help_shows_examples() {
         .stdout(predicate::str::contains("sniff repo git-status"))
         .stdout(predicate::str::contains("sniff repo hash"))
         .stdout(predicate::str::contains("sniff repo staged-files"));
+}
+
+// ============================================================================
+// Blast-radius CLI integration tests (temp-repo based)
+// ============================================================================
+
+/// Create a temp git repo with an initial commit.
+fn create_test_repo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test").unwrap();
+
+    let sig = repo.signature().unwrap();
+    let tree_id = repo.index().unwrap().write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+        .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+/// Commit a file to the test repo.
+fn test_commit_file(repo_path: &Path, relative: &str, content: &str) {
+    let full = repo_path.join(relative);
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&full, content).unwrap();
+
+    let repo = git2::Repository::open(repo_path).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new(relative)).unwrap();
+    index.write().unwrap();
+
+    let sig = repo.signature().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "add file", &tree, &[&head])
+        .unwrap();
+}
+
+/// Stage a file in the test repo (no commit).
+fn test_stage_file(repo_path: &Path, relative: &str, content: &str) {
+    let full = repo_path.join(relative);
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&full, content).unwrap();
+
+    let repo = git2::Repository::open(repo_path).unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new(relative)).unwrap();
+    index.write().unwrap();
+}
+
+#[test]
+fn test_repo_dirty_source_code_returns_source_files() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    // Create a dirty source file
+    std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/main.rs"));
+}
+
+#[test]
+fn test_repo_staged_source_code_returns_staged_only() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/a.rs", "a");
+    test_commit_file(&path, "src/b.rs", "b");
+
+    // Stage a change to a.rs only
+    test_stage_file(&path, "src/a.rs", "a modified");
+    // Modify b.rs without staging
+    std::fs::write(path.join("src/b.rs"), "b modified").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "staged-source-code", "--plain"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("a.rs"), "Should contain staged file a.rs");
+    assert!(!stdout.contains("b.rs"), "Should not contain unstaged file b.rs");
+}
+
+#[test]
+fn test_repo_staged_files_uses_new_path() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file(&path, "docs/guide.md", "# Guide");
+
+    // Stage changes to both
+    test_stage_file(&path, "src/main.rs", "fn main() { updated }");
+    test_stage_file(&path, "docs/guide.md", "# Updated Guide");
+
+    // staged-files should now go through the new path (all files, not just source)
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "staged-files", "--plain"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("main.rs"), "Should contain source file");
+    assert!(stdout.contains("guide.md"), "Should contain markdown file");
+}
+
+#[test]
+fn test_repo_staged_files_json_uses_new_shape() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_stage_file(&path, "src/main.rs", "fn main() { updated }");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "staged-files", "--json"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Should be valid JSON");
+    assert_eq!(json["scope"], "staged", "scope should be lowercase");
+    assert_eq!(json["kind"], "all_files", "kind should be snake_case");
+    let paths = json["paths"].as_array().expect("paths should be an array");
+    assert!(paths.iter().any(|p| p.as_str().unwrap().contains("main.rs")));
+}
+
+#[test]
+fn test_repo_dirty_files_returns_all_file_types() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file(&path, "config.json", "{}");
+
+    // Dirty both files
+    std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
+    std::fs::write(path.join("config.json"), "{\"key\": true}").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "dirty-files", "--plain"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("main.rs"));
+    assert!(stdout.contains("config.json"));
+}
+
+#[test]
+fn test_repo_file_list_no_results_exits_1() {
+    let (_dir, path) = create_test_repo();
+    // Commit a file, no dirty files
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn test_repo_file_list_no_error_exits_0() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code", "--no-error"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_file_list_on_error_to_stderr() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code", "--on-error", "No dirty source code found", "--plain"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("No dirty source code found"));
+}
+
+#[test]
+fn test_repo_file_list_on_error_plus_no_error_to_stdout() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code", "--no-error", "--on-error", "clean!", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("clean!"));
+}
+
+#[test]
+fn test_blast_radius_dirty_matches_documents() {
+    let (_dir, path) = create_test_repo();
+    // Commit source and doc
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    let doc = "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
+    test_commit_file(&path, "docs/guide.md", doc);
+
+    // Dirty the source file
+    std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("docs/guide.md"));
+}
+
+#[test]
+fn test_blast_radius_staged_matches_documents() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    let doc = "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
+    test_commit_file(&path, "docs/guide.md", doc);
+
+    // Stage a modification
+    test_stage_file(&path, "src/main.rs", "fn main() { staged }");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "blast-radius", "staged", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("docs/guide.md"));
+}
+
+#[test]
+fn test_blast_radius_last_commit_matches_documents() {
+    let (_dir, path) = create_test_repo();
+    let doc = "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
+    test_commit_file(&path, "docs/guide.md", doc);
+    // Commit the source file last (it will be in HEAD)
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "blast-radius", "last-commit", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("docs/guide.md"));
+}
+
+#[test]
+fn test_blast_radius_no_matches_exits_1() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    // No dirty files -> no blast radius matches
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn test_blast_radius_no_error_exits_0() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty", "--no-error"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_blast_radius_on_error_to_stderr() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty", "--on-error", "No docs affected", "--plain"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("No docs affected"));
+}
+
+#[test]
+fn test_blast_radius_json_output() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    let doc = "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
+    test_commit_file(&path, "docs/guide.md", doc);
+    std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty", "--json"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Should be valid JSON");
+    assert_eq!(json["scope"], "dirty", "scope should be lowercase");
+    let docs = json["documents"].as_array().expect("documents should be an array");
+    assert_eq!(docs.len(), 1);
+    assert_eq!(docs[0].as_str().unwrap(), "docs/guide.md", "documents should be path strings");
+}
+
+#[test]
+fn test_blast_radius_list_format() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    let doc = "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
+    test_commit_file(&path, "docs/guide.md", doc);
+    std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty", "--list", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("docs/guide.md"));
+}
+
+#[test]
+fn test_docs_stdout_stderr_split() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "docs/readme.md", "---\ntitle: Readme\n---\n# Readme\n");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "docs", "--plain"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+
+    // Header should be on stderr
+    assert!(stderr.contains("Docs"), "Header should be on stderr");
+    // Document list should be on stdout
+    assert!(stdout.contains("readme.md"), "Doc list should be on stdout");
+    // Footer should be on stderr
+    assert!(stderr.contains("--verbose"), "Footer should be on stderr");
+}
+
+#[test]
+fn test_docs_blast_radius_filter() {
+    let (_dir, path) = create_test_repo();
+    // Doc WITH blast_radius
+    let doc_with = "---\ntitle: API Guide\nblast_radius:\n  - src/main.rs\n---\n# API Guide\n";
+    test_commit_file(&path, "docs/api.md", doc_with);
+    // Doc WITHOUT blast_radius
+    let doc_without = "---\ntitle: Readme\n---\n# Readme\n";
+    test_commit_file(&path, "docs/readme.md", doc_without);
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "docs", "--blast-radius", "--plain"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("api.md"), "Should include doc with blast_radius");
+    assert!(!stdout.contains("readme.md"), "Should exclude doc without blast_radius");
+}
+
+#[test]
+fn test_repo_dirty_source_code_with_list_flag() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code", "--list", "--plain"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("main.rs"));
+}
+
+#[test]
+fn test_repo_unstaged_source_code_returns_modified_only() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/a.rs", "a");
+    test_commit_file(&path, "src/b.rs", "b");
+
+    // Stage a.rs
+    test_stage_file(&path, "src/a.rs", "a staged");
+    // Modify b.rs without staging
+    std::fs::write(path.join("src/b.rs"), "b modified").unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "unstaged-source-code", "--plain"])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("b.rs"), "Should contain unstaged file b.rs");
+    assert!(!stdout.contains("a.rs"), "Should not contain staged file a.rs");
 }

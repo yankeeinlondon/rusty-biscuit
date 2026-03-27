@@ -23,9 +23,7 @@ pub enum RepoAction {
     Hash {
         sha: String,
     },
-    StagedFiles {
-        package: Option<String>,
-    },
+    StagedFiles(FileListArgs),
     UnstagedFiles {
         package: Option<String>,
     },
@@ -67,6 +65,94 @@ pub enum RepoAction {
     RepoRoot,
     IsCurrentPackageAreaDirty,
     PackageAreaHasSourceCodeChanges,
+    DirtySourceCode(FileListArgs),
+    StagedSourceCode(FileListArgs),
+    UnstagedSourceCode(FileListArgs),
+    DirtyFiles(FileListArgs),
+}
+
+// ---------------------------------------------------------------------------
+// Shared file-list arguments
+// ---------------------------------------------------------------------------
+
+/// Completion candidates for `--package` flags.
+fn repo_package_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
+    use clap_complete::engine::CompletionCandidate;
+    let Ok(Some(info)) = sniff::filesystem::repo::detect_repo(&std::env::current_dir().unwrap_or_default()) else {
+        return Vec::new();
+    };
+    info.packages
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| CompletionCandidate::new(p.name))
+        .collect()
+}
+
+/// Completion candidates for `--package-area` flags.
+fn repo_package_area_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
+    use clap_complete::engine::CompletionCandidate;
+    use std::collections::BTreeSet;
+    let Ok(Some(info)) = sniff::filesystem::repo::detect_repo(&std::env::current_dir().unwrap_or_default()) else {
+        return Vec::new();
+    };
+    let areas: BTreeSet<String> = info
+        .packages
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| p.package_area)
+        .collect();
+    areas
+        .into_iter()
+        .map(CompletionCandidate::new)
+        .collect()
+}
+
+/// Shared arguments for commands that list file paths.
+#[derive(clap::Args, Debug, Clone)]
+pub struct FileListArgs {
+    /// Scope to a specific package
+    #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+    pub package: Option<String>,
+
+    /// Scope to a specific package area
+    #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+    pub package_area: Option<String>,
+
+    /// Output as bullet list (one item per line with `- ` prefix)
+    #[arg(long, conflicts_with = "csv")]
+    pub list: bool,
+
+    /// Output as comma-separated values on a single line
+    #[arg(long, conflicts_with = "list")]
+    pub csv: bool,
+
+    /// Show only basename (hide directory path)
+    #[arg(long)]
+    pub no_path: bool,
+
+    /// Exit 0 with no output when no results found (default is exit 1)
+    #[arg(long)]
+    pub no_error: bool,
+
+    /// Message to display when no results found
+    #[arg(long, value_name = "MESSAGE")]
+    pub on_error: Option<String>,
+
+    /// Filter paths by substring match (OR logic)
+    pub filter: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Blast-radius scope argument
+// ---------------------------------------------------------------------------
+
+/// Which change scope to inspect for blast-radius analysis.
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+pub enum BlastRadiusScopeArg {
+    #[default]
+    Dirty,
+    Staged,
+    LastCommit,
 }
 
 /// Detect system and repository information
@@ -285,6 +371,10 @@ pub enum Commands {
         #[arg(long)]
         has_prompt: bool,
 
+        /// Show only documents that have a blast_radius frontmatter key
+        #[arg(long)]
+        blast_radius: bool,
+
         /// Filter documents by substring match on filepath/filename
         filter: Vec<String>,
     },
@@ -350,6 +440,41 @@ pub enum Commands {
         state: ServiceStateArg,
     },
 
+    /// Find documents whose blast_radius intersects with changed source files
+    BlastRadius {
+        /// Which changes to inspect (default: dirty)
+        #[arg(value_enum, default_value_t = BlastRadiusScopeArg::Dirty)]
+        scope: BlastRadiusScopeArg,
+
+        /// Scope changed files to a specific package
+        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+
+        /// Scope changed files to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
+
+        /// Output as bullet list
+        #[arg(long, conflicts_with = "csv")]
+        list: bool,
+
+        /// Output as comma-separated values
+        #[arg(long, conflicts_with = "list")]
+        csv: bool,
+
+        /// Show only basename (hide directory path)
+        #[arg(long)]
+        no_path: bool,
+
+        /// Exit 0 with no output when no results found
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
+
     /// Detect justfiles and their recipes
     Just {
         /// Filter justfiles by path substring (OR logic: matches any filter)
@@ -396,11 +521,7 @@ pub enum RepoSubcommand {
     },
     /// List staged files (in index, ready to commit)
     #[command(name = "staged-files")]
-    StagedFiles {
-        /// Scope to a specific package or package area
-        #[arg(short, long, value_name = "PKG")]
-        package: Option<String>,
-    },
+    StagedFiles(FileListArgs),
     /// List unstaged files (modified in working tree)
     #[command(name = "unstaged-files")]
     UnstagedFiles {
@@ -415,6 +536,18 @@ pub enum RepoSubcommand {
         #[arg(short, long, value_name = "PKG")]
         package: Option<String>,
     },
+    /// List dirty source code files (staged + modified + untracked source files)
+    #[command(name = "dirty-source-code")]
+    DirtySourceCode(FileListArgs),
+    /// List staged source code files
+    #[command(name = "staged-source-code")]
+    StagedSourceCode(FileListArgs),
+    /// List unstaged source code files
+    #[command(name = "unstaged-source-code")]
+    UnstagedSourceCode(FileListArgs),
+    /// List all dirty files (staged + modified + untracked)
+    #[command(name = "dirty-files")]
+    DirtyFiles(FileListArgs),
     /// Inspect a remote repository (URL, name, or owner/repo shorthand)
     Remote {
         /// Git remote URL, remote name, or owner/repo shorthand
@@ -512,6 +645,7 @@ impl Commands {
             Commands::Audio { .. } => OutputFilter::HeadlessAudio,
             Commands::Agents { .. } => OutputFilter::AiClients,
             Commands::Services { .. } => OutputFilter::Services,
+            Commands::BlastRadius { .. } => OutputFilter::BlastRadius,
             Commands::Just { .. } => OutputFilter::Just,
         }
     }
@@ -650,12 +784,14 @@ impl Commands {
                 plan,
                 src,
                 has_prompt,
+                blast_radius,
                 filter,
             } => DocsFilter {
                 readme: *readme,
                 plan: *plan,
                 src: *src,
                 has_prompt: *has_prompt,
+                blast_radius: *blast_radius,
                 filter: filter.clone(),
             },
             _ => DocsFilter::default(),
@@ -698,9 +834,7 @@ impl Commands {
                     package: package.clone(),
                 },
                 Some(RepoSubcommand::Hash { sha }) => RepoAction::Hash { sha: sha.clone() },
-                Some(RepoSubcommand::StagedFiles { package }) => RepoAction::StagedFiles {
-                    package: package.clone(),
-                },
+                Some(RepoSubcommand::StagedFiles(args)) => RepoAction::StagedFiles(args.clone()),
                 Some(RepoSubcommand::UnstagedFiles { package }) => RepoAction::UnstagedFiles {
                     package: package.clone(),
                 },
@@ -761,6 +895,18 @@ impl Commands {
                 Some(RepoSubcommand::PackageAreaHasSourceCodeChanges) => {
                     RepoAction::PackageAreaHasSourceCodeChanges
                 }
+                Some(RepoSubcommand::DirtySourceCode(args)) => {
+                    RepoAction::DirtySourceCode(args.clone())
+                }
+                Some(RepoSubcommand::StagedSourceCode(args)) => {
+                    RepoAction::StagedSourceCode(args.clone())
+                }
+                Some(RepoSubcommand::UnstagedSourceCode(args)) => {
+                    RepoAction::UnstagedSourceCode(args.clone())
+                }
+                Some(RepoSubcommand::DirtyFiles(args)) => {
+                    RepoAction::DirtyFiles(args.clone())
+                }
             }),
             _ => None,
         }
@@ -778,6 +924,8 @@ pub struct DocsFilter {
     pub src: bool,
     /// Show only documents with a prompt in frontmatter.
     pub has_prompt: bool,
+    /// Show only documents that have a blast_radius frontmatter key.
+    pub blast_radius: bool,
     /// Substring filter on filepath/filename (case-insensitive).
     pub filter: Vec<String>,
 }
@@ -863,6 +1011,7 @@ Commands:
     sniff language        Show language detection
     sniff files           Show file associations
     sniff docs            Show markdown documents
+    sniff blast-radius    Find docs affected by changed source files
 
   Programs:
     sniff programs        Show all installed programs
@@ -900,6 +1049,9 @@ Git:
   sniff repo staged-files             List staged files
   sniff repo unstaged-files           List unstaged files
   sniff repo untracked-files          List untracked files
+  sniff repo dirty-source-code        List dirty source code files
+  sniff repo staged-source-code       List staged source code files
+  sniff repo dirty-files              List all dirty files
   sniff repo remote origin            Inspect the 'origin' remote
 
 Packages:
@@ -1366,11 +1518,13 @@ mod tests {
                 plan: false,
                 src: true,
                 has_prompt: false,
+                blast_radius: false,
                 filter: vec!["homelab".to_string()],
             };
             let filter = docs.docs_filter();
             assert!(filter.readme);
             assert!(filter.src);
+            assert!(!filter.blast_radius);
             assert_eq!(filter.filter, vec!["homelab".to_string()]);
         }
 
@@ -1552,7 +1706,7 @@ mod tests {
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::StagedFiles { package: None }),
+                    repo_subcommand: Some(RepoSubcommand::StagedFiles(_)),
                     ..
                 })
             ));
@@ -1641,6 +1795,157 @@ mod tests {
                     assert_eq!(package.as_deref(), Some("homelab"));
                 }
                 _ => panic!("Expected GitStatus action"),
+            }
+        }
+    }
+
+    mod blast_radius_commands {
+        use super::*;
+
+        #[test]
+        fn blast_radius_default_scope() {
+            let cli = parse_args(&["blast-radius"]).unwrap();
+            if let Some(Commands::BlastRadius { scope, .. }) = cli.command {
+                assert!(matches!(scope, BlastRadiusScopeArg::Dirty));
+            } else {
+                panic!("Expected BlastRadius command");
+            }
+        }
+
+        #[test]
+        fn blast_radius_staged_scope() {
+            let cli = parse_args(&["blast-radius", "staged"]).unwrap();
+            if let Some(Commands::BlastRadius { scope, .. }) = cli.command {
+                assert!(matches!(scope, BlastRadiusScopeArg::Staged));
+            } else {
+                panic!("Expected BlastRadius staged");
+            }
+        }
+
+        #[test]
+        fn blast_radius_last_commit_scope() {
+            let cli = parse_args(&["blast-radius", "last-commit"]).unwrap();
+            if let Some(Commands::BlastRadius { scope, .. }) = cli.command {
+                assert!(matches!(scope, BlastRadiusScopeArg::LastCommit));
+            } else {
+                panic!("Expected BlastRadius last-commit");
+            }
+        }
+
+        #[test]
+        fn blast_radius_with_package() {
+            let cli = parse_args(&["blast-radius", "--package", "sniff"]).unwrap();
+            if let Some(Commands::BlastRadius { package, .. }) = cli.command {
+                assert_eq!(package.as_deref(), Some("sniff"));
+            } else {
+                panic!("Expected BlastRadius with package");
+            }
+        }
+
+        #[test]
+        fn blast_radius_list_csv_conflict() {
+            let result = parse_args(&["blast-radius", "--list", "--csv"]);
+            assert!(result.is_err(), "--list and --csv should conflict");
+        }
+
+        #[test]
+        fn docs_blast_radius_flag_parses() {
+            let cli = parse_args(&["docs", "--blast-radius"]).unwrap();
+            if let Some(Commands::Docs { blast_radius, .. }) = cli.command {
+                assert!(blast_radius);
+            } else {
+                panic!("Expected Docs with blast_radius flag");
+            }
+        }
+
+        #[test]
+        fn repo_dirty_source_code_parses() {
+            let cli = parse_args(&["repo", "dirty-source-code"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::DirtySourceCode(_)),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_staged_source_code_parses() {
+            let cli = parse_args(&["repo", "staged-source-code"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::StagedSourceCode(_)),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_unstaged_source_code_parses() {
+            let cli = parse_args(&["repo", "unstaged-source-code"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::UnstagedSourceCode(_)),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_dirty_files_parses() {
+            let cli = parse_args(&["repo", "dirty-files"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::DirtyFiles(_)),
+                    ..
+                })
+            ));
+        }
+
+        #[test]
+        fn staged_files_list_csv_conflict() {
+            let result = parse_args(&["repo", "staged-files", "--list", "--csv"]);
+            assert!(result.is_err(), "--list and --csv should conflict");
+        }
+
+        #[test]
+        fn staged_files_list_flag_parses() {
+            let cli = parse_args(&["repo", "staged-files", "--list"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::StagedFiles(args)),
+                ..
+            }) = cli.command
+            {
+                assert!(args.list);
+                assert!(!args.csv);
+            } else {
+                panic!("Expected StagedFiles with --list");
+            }
+        }
+
+        #[test]
+        fn no_error_and_on_error_coexist() {
+            let cli = parse_args(&[
+                "repo",
+                "dirty-source-code",
+                "--no-error",
+                "--on-error",
+                "No changes found",
+            ])
+            .unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::DirtySourceCode(args)),
+                ..
+            }) = cli.command
+            {
+                assert!(args.no_error);
+                assert_eq!(args.on_error.as_deref(), Some("No changes found"));
+            } else {
+                panic!("Expected DirtySourceCode with no_error + on_error");
             }
         }
     }

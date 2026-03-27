@@ -12,9 +12,11 @@ use biscuit_terminal::terminal::Terminal;
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileAction, FileStatus, RefKind};
 use sniff::filesystem::repo::{DependencyEntry, Package, RepoInfo};
-use sniff::filesystem::{FileAssociationBreakdown, FileAssociationStats, FrameworkStats};
+use sniff::filesystem::{
+    FileAssociationBreakdown, FileAssociationStats, FrameworkStats, TitleSource, UpdatedSource,
+};
 
-use super::{format_number, relative_path};
+use super::{format_number, relative_path, TextOutput};
 use crate::args::FilesFilter;
 
 /// Parsed repo filter with support for negation (`!`) and area matching (`@`).
@@ -666,7 +668,7 @@ pub fn render_git_section(
         }
 
         // Worktree lines: varies based on whether we're inside that worktree
-        for (_key, info) in &git.worktrees {
+        for info in git.worktrees.values() {
             let branch = &info.branch;
             let status = if info.merged && info.ahead == 0 {
                 format!("merged into <b>{}</b>", &info.base_branch)
@@ -1832,31 +1834,11 @@ pub fn print_current_package_area_dirty(result: &sniff::SniffResult, base_dir: O
     std::process::exit(1);
 }
 
-/// Source code file extensions considered for change detection.
-const SOURCE_CODE_EXTENSIONS: &[&str] = &[
-    // Rust
-    "rs", // TypeScript / JavaScript
-    "ts", "tsx", "js", "jsx", "mjs", "mts", "cjs", "cts", // Web
-    "vue", "svelte", "html", "htm", "css", "scss", "sass", "less", // Python
-    "py", "pyi", // Go
-    "go",  // C / C++
-    "c", "h", "cpp", "hpp", "cc", "cxx", // Java / Kotlin
-    "java", "kt", "kts", // Shell
-    "sh", "bash", "zsh",   // Ruby
-    "rb",    // Swift
-    "swift", // SQL
-    "sql",
-];
-
 /// Returns true if a file path has a source code extension.
+///
+/// Delegates to the shared library helper.
 fn is_source_code_file(path: &str) -> bool {
-    let ext = match path.rsplit('.').next() {
-        Some(e) if e != path => e,
-        _ => return false,
-    };
-    SOURCE_CODE_EXTENSIONS
-        .iter()
-        .any(|&s| s.eq_ignore_ascii_case(ext))
+    sniff::filesystem::blast_radius::is_source_code_path(Path::new(path))
 }
 
 /// Exit 0 if the current package area has source code file changes, exit 1 otherwise.
@@ -2631,12 +2613,16 @@ pub fn render_filesystem_section(
     out
 }
 
-/// Render markdown documents section.
-pub(crate) fn render_docs_section(docs: &[MarkdownMeta], verbose: u8) -> String {
-    let mut out = String::new();
+/// Render markdown documents with split stdout/stderr output.
+///
+/// - **stderr**: header line + footer (when not verbose)
+/// - **stdout**: document list
+pub fn render_docs_output(docs: &[MarkdownMeta], verbose: u8) -> TextOutput {
     let terminal = Terminal::default();
     let prompt_count = docs.iter().filter(|d| d.prompt.is_some()).count();
 
+    // --- stderr: header ---
+    let mut stderr = String::new();
     let header = if prompt_count > 0 {
         format!(
             "<b>Docs</b> <dim>({} documents, {} with prompts)</dim>",
@@ -2646,55 +2632,166 @@ pub(crate) fn render_docs_section(docs: &[MarkdownMeta], verbose: u8) -> String 
     } else {
         format!("<b>Docs</b> <dim>({} documents)</dim>", docs.len())
     };
-    writeln!(out, "\n{}\n", Prose::new(&header).render(&terminal)).unwrap();
+    writeln!(stderr, "\n{}\n", Prose::new(&header).render(&terminal)).unwrap();
 
-    let items: Vec<String> = docs
+    // --- stdout: document list ---
+    let mut stdout = String::new();
+
+    let items: Vec<RenderableContent> = docs
         .iter()
-        .map(|doc| {
-            let file_link = format_doc_filepath(&doc.relative, &doc.filepath.display().to_string());
+        .flat_map(|doc| {
+            let file_link =
+                format_styled_filepath(&doc.relative, &doc.filepath.display().to_string());
+            let main = Prose::new(&file_link).render(&terminal);
+            let mut result = vec![RenderableContent::String(main)];
 
             if verbose > 0 {
-                let date_str = doc.last_updated.format("%Y-%m-%d").to_string();
-                let mut meta_parts = Vec::new();
+                let mut details: Vec<String> = Vec::new();
+
+                // title
+                let title_source_label = match doc.title_source {
+                    TitleSource::FrontmatterTitle => "title property",
+                    TitleSource::H1Heading => "H1 heading",
+                    TitleSource::H2Heading => "H2 heading",
+                    TitleSource::H3Heading => "H3 heading",
+                    TitleSource::None => "none",
+                };
                 if !doc.title.is_empty() {
-                    meta_parts.push(format!("title: <dim>{}</dim>", doc.title));
+                    let title_line = format!(
+                        "<b>title:</b> {} <dim><i>(from {})</i></dim>",
+                        doc.title, title_source_label
+                    );
+                    details.push(Prose::new(&title_line).render(&terminal));
+                } else {
+                    let title_line = format!(
+                        "<b>title:</b> <yellow>none</yellow> <dim><i>(from {})</i></dim>",
+                        title_source_label
+                    );
+                    details.push(Prose::new(&title_line).render(&terminal));
                 }
-                meta_parts.push(format!("updated: <dim>{date_str}</dim>"));
-                format!("{file_link} ({meta})", meta = meta_parts.join(", "))
-            } else {
-                file_link
+
+                // updated
+                let date_str = doc.last_updated.format("%Y-%m-%d").to_string();
+                let updated_source_label = match doc.updated_source {
+                    UpdatedSource::UpdatedProperty => "updated property",
+                    UpdatedSource::FileMetadata => "file metadata",
+                };
+                let updated_line = format!(
+                    "<b>updated:</b> {} <dim><i>(from {})</i></dim>",
+                    date_str, updated_source_label
+                );
+                details.push(Prose::new(&updated_line).render(&terminal));
+
+                // frontmatter properties
+                if !doc.frontmatter_keys.is_empty() {
+                    let props = doc.frontmatter_keys.join(", ");
+                    let props_line = format!("<b>frontmatter properties:</b> <i>{props}</i>");
+                    details.push(Prose::new(&props_line).render(&terminal));
+                }
+
+                let detail_list = UnorderedList::new(details).with_bullet("  ");
+                result.push(RenderableContent::Component(Rc::new(detail_list)));
             }
+
+            result
         })
-        .map(|item| Prose::new(&item).render(&terminal))
         .collect();
 
-    let list = UnorderedList::new(items);
-    writeln!(out, "{}", list.render(&terminal)).unwrap();
+    let list = UnorderedList::from(items);
+    writeln!(stdout, "{}", list.render(&terminal)).unwrap();
 
+    // --- stderr: footer ---
     if verbose == 0 {
         writeln!(
-            out,
+            stderr,
             "{}",
             Prose::new(
-                "<dim>Use <blue>--verbose</blue> / <blue>-v</blue> to include title and last updated</dim>"
+                "<dim>Use <blue>--verbose</blue> / <blue>-v</blue> to include metadata for documents</dim>"
             )
             .render(&terminal)
-        ).unwrap();
+        )
+        .unwrap();
     }
 
-    out
+    TextOutput { stdout, stderr }
 }
 
-/// Format a document filepath with dim directory and bold filename,
+/// Format a filepath with dim directory and bold filename,
 /// wrapped in an OSC8 hyperlink.
-fn format_doc_filepath(relative: &str, absolute: &str) -> String {
+fn format_styled_filepath(relative: &str, absolute: &str) -> String {
     match relative.rsplit_once('/') {
         Some((dir, file)) => {
             format!("<a href=\"{absolute}\"><blue><dim>{dir}/</dim><b>{file}</b></blue></a>")
         }
         None => {
-            // No directory prefix, just the filename
             format!("<a href=\"{absolute}\"><blue><b>{relative}</b></blue></a>")
+        }
+    }
+}
+
+/// Format a filepath showing only the basename, with an OSC8 hyperlink.
+fn format_basename_filepath(relative: &str, absolute: &str) -> String {
+    let basename = relative.rsplit_once('/').map_or(relative, |(_, f)| f);
+    format!("<a href=\"{absolute}\"><blue>{basename}</blue></a>")
+}
+
+// ---------------------------------------------------------------------------
+// Shared path-list renderer
+// ---------------------------------------------------------------------------
+
+/// Output format for path lists.
+pub enum PathListFormat {
+    /// One path per line (default).
+    Lines,
+    /// Bullet list with `- ` prefix.
+    BulletList,
+    /// Comma-separated on a single line.
+    Csv,
+}
+
+/// Render a list of repo-relative paths in the chosen format.
+///
+/// Paths are displayed with OSC8 hyperlinks (absolute target), dim directory
+/// segments, and bold basenames. With `no_path`, only the basename is shown.
+pub fn render_path_list(
+    repo_root: &Path,
+    paths: &[PathBuf],
+    format: PathListFormat,
+    no_path: bool,
+) -> String {
+    let terminal = Terminal::default();
+
+    let format_one = |p: &PathBuf| -> String {
+        let relative = p.display().to_string();
+        let absolute = repo_root.join(p).display().to_string();
+        let markup = if no_path {
+            format_basename_filepath(&relative, &absolute)
+        } else {
+            format_styled_filepath(&relative, &absolute)
+        };
+        Prose::new(&markup).render(&terminal)
+    };
+
+    match format {
+        PathListFormat::Lines => {
+            let mut out = String::new();
+            for p in paths {
+                writeln!(out, "{}", format_one(p)).unwrap();
+            }
+            out
+        }
+        PathListFormat::BulletList => {
+            let items: Vec<String> = paths.iter().map(format_one).collect();
+            let list = UnorderedList::new(items);
+            let mut out = String::new();
+            writeln!(out, "{}", list.render(&terminal)).unwrap();
+            out
+        }
+        PathListFormat::Csv => {
+            let items: Vec<String> = paths.iter().map(format_one).collect();
+            let mut out = items.join(", ");
+            out.push('\n');
+            out
         }
     }
 }
@@ -3109,6 +3206,148 @@ mod tests {
             let names: Vec<&str> = result.iter().map(|p| p.name.as_str()).collect();
             assert!(names.contains(&"biscuit-hash"));
             assert!(names.contains(&"darkmatter-lib"));
+        }
+    }
+
+    mod path_list_rendering {
+        use super::*;
+
+        #[test]
+        fn lines_format_one_path_per_line() {
+            let repo_root = PathBuf::from("/repo");
+            let paths = vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")];
+            let output = render_path_list(&repo_root, &paths, PathListFormat::Lines, false);
+            let lines: Vec<&str> = output.trim().lines().collect();
+            assert_eq!(lines.len(), 2);
+        }
+
+        #[test]
+        fn bullet_list_format_has_bullet_prefix() {
+            let repo_root = PathBuf::from("/repo");
+            let paths = vec![PathBuf::from("src/main.rs")];
+            let output = render_path_list(&repo_root, &paths, PathListFormat::BulletList, false);
+            // UnorderedList uses bullet characters
+            assert!(!output.is_empty());
+        }
+
+        #[test]
+        fn csv_format_comma_separated() {
+            let repo_root = PathBuf::from("/repo");
+            let paths = vec![PathBuf::from("src/a.rs"), PathBuf::from("src/b.rs")];
+            let output = render_path_list(&repo_root, &paths, PathListFormat::Csv, false);
+            assert!(output.contains(", "));
+        }
+
+        #[test]
+        fn no_path_shows_basename_only() {
+            let repo_root = PathBuf::from("/repo");
+            let paths = vec![PathBuf::from("deeply/nested/file.rs")];
+            let output = render_path_list(&repo_root, &paths, PathListFormat::Lines, true);
+            // With no_path, should not contain the directory segments in display text
+            // (though they may be in the OSC8 link target)
+            assert!(output.contains("file.rs"));
+        }
+
+        #[test]
+        fn empty_paths_produces_empty_output() {
+            let repo_root = PathBuf::from("/repo");
+            let paths: Vec<PathBuf> = vec![];
+            let output = render_path_list(&repo_root, &paths, PathListFormat::Lines, false);
+            assert!(output.is_empty());
+        }
+    }
+
+    mod docs_output_rendering {
+        use super::*;
+        use chrono::Utc;
+
+        fn make_doc(relative: &str, title: &str, title_source: TitleSource) -> MarkdownMeta {
+            MarkdownMeta {
+                filepath: PathBuf::from(format!("/repo/{relative}")),
+                relative: relative.to_string(),
+                package: None,
+                title: title.to_string(),
+                title_source,
+                model: None,
+                prompt: None,
+                last_updated: Utc::now(),
+                updated_source: UpdatedSource::FileMetadata,
+                content_hash: "abc123".to_string(),
+                has_blast_radius: false,
+                blast_radius: None,
+                frontmatter_keys: vec!["title".to_string()],
+            }
+        }
+
+        #[test]
+        fn non_verbose_output_has_header_on_stderr() {
+            let docs = vec![make_doc("docs/readme.md", "Readme", TitleSource::FrontmatterTitle)];
+            let output = render_docs_output(&docs, 0);
+            assert!(output.stderr.contains("Docs"));
+            assert!(output.stderr.contains("1 document"));
+        }
+
+        #[test]
+        fn non_verbose_output_has_footer_on_stderr() {
+            let docs = vec![make_doc("docs/readme.md", "Readme", TitleSource::FrontmatterTitle)];
+            let output = render_docs_output(&docs, 0);
+            assert!(output.stderr.contains("--verbose"));
+            assert!(output.stderr.contains("metadata for documents"));
+        }
+
+        #[test]
+        fn non_verbose_document_list_on_stdout() {
+            let docs = vec![make_doc("docs/readme.md", "Readme", TitleSource::FrontmatterTitle)];
+            let output = render_docs_output(&docs, 0);
+            assert!(output.stdout.contains("readme.md"));
+        }
+
+        #[test]
+        fn verbose_output_includes_title_with_provenance() {
+            let docs = vec![make_doc("docs/guide.md", "Guide", TitleSource::FrontmatterTitle)];
+            let output = render_docs_output(&docs, 1);
+            assert!(output.stdout.contains("title:"));
+            assert!(output.stdout.contains("title property"));
+        }
+
+        #[test]
+        fn verbose_h1_title_provenance() {
+            let docs = vec![make_doc("docs/guide.md", "Guide", TitleSource::H1Heading)];
+            let output = render_docs_output(&docs, 1);
+            assert!(output.stdout.contains("H1 heading"));
+        }
+
+        #[test]
+        fn verbose_none_title_has_provenance() {
+            let docs = vec![make_doc("docs/empty.md", "", TitleSource::None)];
+            let output = render_docs_output(&docs, 1);
+            // Should show "none" provenance, not drop it
+            assert!(output.stdout.contains("none"));
+        }
+
+        #[test]
+        fn verbose_includes_updated_with_provenance() {
+            let docs = vec![make_doc("docs/guide.md", "Guide", TitleSource::FrontmatterTitle)];
+            let output = render_docs_output(&docs, 1);
+            assert!(output.stdout.contains("updated:"));
+            assert!(output.stdout.contains("file metadata"));
+        }
+
+        #[test]
+        fn verbose_includes_frontmatter_properties() {
+            let mut doc = make_doc("docs/guide.md", "Guide", TitleSource::FrontmatterTitle);
+            doc.frontmatter_keys = vec!["blast_radius".to_string(), "title".to_string()];
+            let output = render_docs_output(&[doc], 1);
+            assert!(output.stdout.contains("frontmatter properties:"));
+            assert!(output.stdout.contains("blast_radius"));
+        }
+
+        #[test]
+        fn prompt_count_shown_in_header() {
+            let mut doc = make_doc("docs/guide.md", "Guide", TitleSource::FrontmatterTitle);
+            doc.prompt = Some("Generate a summary".to_string());
+            let output = render_docs_output(&[doc], 0);
+            assert!(output.stderr.contains("with prompts"));
         }
     }
 

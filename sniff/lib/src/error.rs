@@ -18,6 +18,18 @@ pub enum SniffError {
     #[error("Not a git repository: {0}")]
     NotARepository(PathBuf),
 
+    /// The repository is not a monorepo (required for package scoping).
+    #[error("Not a monorepo: {0}")]
+    NotAMonorepo(PathBuf),
+
+    /// The specified package name was not found in the monorepo.
+    #[error("package '{name}' not found. Valid packages: {valid}")]
+    UnknownPackage { name: String, valid: String },
+
+    /// The specified package area was not found in the monorepo.
+    #[error("package area '{area}' not found. Valid areas: {valid}")]
+    UnknownPackageArea { area: String, valid: String },
+
     /// Error gathering system information.
     ///
     /// The `domain` field indicates which system area failed

@@ -9,6 +9,23 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// How the document title was resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TitleSource {
+    FrontmatterTitle,
+    H1Heading,
+    H2Heading,
+    H3Heading,
+    None,
+}
+
+/// How the last-updated timestamp was resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UpdatedSource {
+    UpdatedProperty,
+    FileMetadata,
+}
+
 /// Metadata for a markdown document in a git repository.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarkdownMeta {
@@ -23,6 +40,8 @@ pub struct MarkdownMeta {
     /// Document title extracted from frontmatter "title" field,
     /// first H1, first H2, first H3, or empty string (in that priority).
     pub title: String,
+    /// How the title was resolved.
+    pub title_source: TitleSource,
     /// The frontmatter "model" property if defined.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -31,8 +50,19 @@ pub struct MarkdownMeta {
     pub prompt: Option<String>,
     /// Last updated timestamp resolved from frontmatter or file mtime.
     pub last_updated: DateTime<Utc>,
+    /// How the last-updated timestamp was resolved.
+    pub updated_source: UpdatedSource,
     /// xxHash (XXH64) of the document body (content after frontmatter).
     pub content_hash: String,
+    /// Whether the frontmatter contains a `blast_radius` key (even if empty).
+    #[serde(default)]
+    pub has_blast_radius: bool,
+    /// Repo-relative paths from the `blast_radius` frontmatter list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blast_radius: Option<Vec<PathBuf>>,
+    /// Sorted set of frontmatter keys present in this document.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub frontmatter_keys: Vec<String>,
 }
 
 /// Discovers and analyzes markdown documents in a git repository.
@@ -142,21 +172,32 @@ fn parse_markdown_meta(
 
     let relative_path = Path::new(&relative);
     let package = determine_package(relative_path, packages);
-    let title = extract_title(&frontmatter, body);
+    let (title, title_source) = extract_title(&frontmatter, body);
     let model = get_string_field(&frontmatter, "model");
     let prompt = get_string_field(&frontmatter, "prompt");
-    let last_updated = resolve_last_updated(&frontmatter, path);
+    let (last_updated, updated_source) = resolve_last_updated(&frontmatter, path);
     let content_hash = format!("{:x}", xx_hash(body));
+
+    let has_blast_radius = frontmatter.contains_key("blast_radius");
+    let blast_radius = parse_blast_radius(&frontmatter, repo_root);
+
+    let mut frontmatter_keys: Vec<String> = frontmatter.keys().cloned().collect();
+    frontmatter_keys.sort();
 
     Some(MarkdownMeta {
         filepath: path.to_path_buf(),
         relative,
         package,
         title,
+        title_source,
         model,
         prompt,
         last_updated,
+        updated_source,
         content_hash,
+        has_blast_radius,
+        blast_radius,
+        frontmatter_keys,
     })
 }
 
@@ -220,18 +261,74 @@ fn get_string_field(
     })
 }
 
+/// Parse the `blast_radius` frontmatter field as a list of repo-relative paths.
+///
+/// Paths are normalized to repo-relative form:
+/// - `./` prefixes are stripped
+/// - absolute paths matching `repo_root` are made relative
+/// - `.` segments are resolved
+///
+/// Non-string entries are silently ignored. Returns `None` if the key is missing.
+fn parse_blast_radius(
+    frontmatter: &HashMap<String, serde_yaml_ng::Value>,
+    repo_root: &Path,
+) -> Option<Vec<PathBuf>> {
+    let value = frontmatter.get("blast_radius")?;
+    match value {
+        serde_yaml_ng::Value::Sequence(seq) => {
+            let paths: Vec<PathBuf> = seq
+                .iter()
+                .filter_map(|v| {
+                    if let serde_yaml_ng::Value::String(s) = v {
+                        Some(normalize_blast_radius_path(s, repo_root))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            Some(paths)
+        }
+        _ => Some(Vec::new()),
+    }
+}
+
+/// Normalize a blast-radius path entry to a clean repo-relative path.
+fn normalize_blast_radius_path(raw: &str, repo_root: &Path) -> PathBuf {
+    let p = Path::new(raw);
+
+    // Try stripping repo root from absolute paths
+    if p.is_absolute()
+        && let Ok(relative) = p.strip_prefix(repo_root)
+    {
+        return normalize_relative_components(relative);
+    }
+
+    normalize_relative_components(p)
+}
+
+/// Remove `.` and `./` components from a relative path, and strip leading `./`.
+fn normalize_relative_components(p: &Path) -> PathBuf {
+    use std::path::Component;
+    p.components()
+        .filter(|c| !matches!(c, Component::CurDir))
+        .collect()
+}
+
 /// Extract the document title using priority:
 /// 1. Frontmatter "title" field
 /// 2. First H1 heading (`# ...`)
 /// 3. First H2 heading (`## ...`)
 /// 4. First H3 heading (`### ...`)
 /// 5. Empty string
-fn extract_title(frontmatter: &HashMap<String, serde_yaml_ng::Value>, body: &str) -> String {
+fn extract_title(
+    frontmatter: &HashMap<String, serde_yaml_ng::Value>,
+    body: &str,
+) -> (String, TitleSource) {
     // 1. Frontmatter title
     if let Some(serde_yaml_ng::Value::String(title)) = frontmatter.get("title")
         && !title.is_empty()
     {
-        return title.clone();
+        return (title.clone(), TitleSource::FrontmatterTitle);
     }
 
     // 2-4. Search for headings in priority order
@@ -243,7 +340,7 @@ fn extract_title(frontmatter: &HashMap<String, serde_yaml_ng::Value>, body: &str
         if let Some(h1) = trimmed.strip_prefix("# ")
             && !h1.starts_with('#')
         {
-            return h1.trim().to_string();
+            return (h1.trim().to_string(), TitleSource::H1Heading);
         }
         if first_h2.is_none()
             && let Some(h2) = trimmed.strip_prefix("## ")
@@ -260,13 +357,13 @@ fn extract_title(frontmatter: &HashMap<String, serde_yaml_ng::Value>, body: &str
     }
 
     if let Some(h2) = first_h2 {
-        return h2.to_string();
+        return (h2.to_string(), TitleSource::H2Heading);
     }
     if let Some(h3) = first_h3 {
-        return h3.to_string();
+        return (h3.to_string(), TitleSource::H3Heading);
     }
 
-    String::new()
+    (String::new(), TitleSource::None)
 }
 
 /// Resolve last updated timestamp from frontmatter or file metadata.
@@ -278,19 +375,19 @@ fn extract_title(frontmatter: &HashMap<String, serde_yaml_ng::Value>, body: &str
 fn resolve_last_updated(
     frontmatter: &HashMap<String, serde_yaml_ng::Value>,
     path: &Path,
-) -> DateTime<Utc> {
+) -> (DateTime<Utc>, UpdatedSource) {
     // Try frontmatter fields in priority order
     for key in &[
         "last_updated",
         "updated_at",
     ] {
         if let Some(dt) = frontmatter.get(*key).and_then(parse_datetime_value) {
-            return dt;
+            return (dt, UpdatedSource::UpdatedProperty);
         }
     }
 
     // Fall back to file modification time
-    file_mtime(path)
+    (file_mtime(path), UpdatedSource::FileMetadata)
 }
 
 /// Try to parse a YAML value as a DateTime<Utc>.
@@ -408,38 +505,50 @@ mod tests {
         fn prefers_frontmatter_title() {
             let mut fm = HashMap::new();
             fm.insert("title".to_string(), serde_yaml_ng::Value::String("FM Title".to_string()));
-            assert_eq!(extract_title(&fm, "# Heading Title"), "FM Title");
+            let (title, source) = extract_title(&fm, "# Heading Title");
+            assert_eq!(title, "FM Title");
+            assert_eq!(source, TitleSource::FrontmatterTitle);
         }
 
         #[test]
         fn falls_back_to_h1() {
             let fm = HashMap::new();
-            assert_eq!(extract_title(&fm, "Some text\n# Main Title\n## Sub"), "Main Title");
+            let (title, source) = extract_title(&fm, "Some text\n# Main Title\n## Sub");
+            assert_eq!(title, "Main Title");
+            assert_eq!(source, TitleSource::H1Heading);
         }
 
         #[test]
         fn falls_back_to_h2_when_no_h1() {
             let fm = HashMap::new();
-            assert_eq!(extract_title(&fm, "Some text\n## Section Title\n### Sub"), "Section Title");
+            let (title, source) = extract_title(&fm, "Some text\n## Section Title\n### Sub");
+            assert_eq!(title, "Section Title");
+            assert_eq!(source, TitleSource::H2Heading);
         }
 
         #[test]
         fn falls_back_to_h3_when_no_h1_or_h2() {
             let fm = HashMap::new();
-            assert_eq!(extract_title(&fm, "Some text\n### Subsection"), "Subsection");
+            let (title, source) = extract_title(&fm, "Some text\n### Subsection");
+            assert_eq!(title, "Subsection");
+            assert_eq!(source, TitleSource::H3Heading);
         }
 
         #[test]
         fn returns_empty_string_when_no_title() {
             let fm = HashMap::new();
-            assert_eq!(extract_title(&fm, "Just some plain text."), "");
+            let (title, source) = extract_title(&fm, "Just some plain text.");
+            assert_eq!(title, "");
+            assert_eq!(source, TitleSource::None);
         }
 
         #[test]
         fn h2_not_confused_with_h1() {
             let fm = HashMap::new();
             // "## Title" should not match as H1
-            assert_eq!(extract_title(&fm, "## Only H2\n### And H3"), "Only H2");
+            let (title, source) = extract_title(&fm, "## Only H2\n### And H3");
+            assert_eq!(title, "Only H2");
+            assert_eq!(source, TitleSource::H2Heading);
         }
     }
 
@@ -546,6 +655,132 @@ mod tests {
             let hash1 = xx_hash("hello world");
             let hash2 = xx_hash("goodbye world");
             assert_ne!(hash1, hash2);
+        }
+    }
+
+    mod blast_radius_parsing {
+        use super::*;
+
+        fn dummy_root() -> PathBuf {
+            PathBuf::from("/repo")
+        }
+
+        #[test]
+        fn parses_valid_blast_radius_list() {
+            let content = "---\nblast_radius:\n  - src/main.rs\n  - src/lib.rs\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            assert!(fm.contains_key("blast_radius"));
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
+            assert_eq!(paths, vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")]);
+        }
+
+        #[test]
+        fn parses_empty_blast_radius_list() {
+            let content = "---\nblast_radius: []\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            assert!(fm.contains_key("blast_radius"));
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
+            assert!(paths.is_empty());
+        }
+
+        #[test]
+        fn missing_blast_radius_returns_none() {
+            let content = "---\ntitle: Hello\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            assert!(!fm.contains_key("blast_radius"));
+            assert!(parse_blast_radius(&fm, &dummy_root()).is_none());
+        }
+
+        #[test]
+        fn non_string_entries_silently_dropped() {
+            let content = "---\nblast_radius:\n  - src/main.rs\n  - 42\n  - true\n  - src/lib.rs\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
+            assert_eq!(paths, vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")]);
+        }
+
+        #[test]
+        fn has_blast_radius_true_when_key_present() {
+            let content = "---\nblast_radius: []\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            assert!(fm.contains_key("blast_radius"));
+        }
+
+        #[test]
+        fn normalizes_dot_slash_prefix() {
+            let content = "---\nblast_radius:\n  - ./src/main.rs\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
+            assert_eq!(paths, vec![PathBuf::from("src/main.rs")]);
+        }
+
+        #[test]
+        fn normalizes_absolute_path_matching_repo_root() {
+            let content = "---\nblast_radius:\n  - /repo/src/main.rs\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
+            assert_eq!(paths, vec![PathBuf::from("src/main.rs")]);
+        }
+
+        #[test]
+        fn preserves_absolute_path_not_matching_repo_root() {
+            let content = "---\nblast_radius:\n  - /other/src/main.rs\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
+            assert_eq!(paths, vec![PathBuf::from("/other/src/main.rs")]);
+        }
+    }
+
+    mod frontmatter_keys_extraction {
+        use super::*;
+
+        #[test]
+        fn extracts_sorted_keys() {
+            let content = "---\ntitle: Hello\nmodel: gpt-4\nprompt: Do stuff\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            let mut keys: Vec<String> = fm.keys().cloned().collect();
+            keys.sort();
+            assert_eq!(keys, vec!["model", "prompt", "title"]);
+        }
+
+        #[test]
+        fn empty_frontmatter_has_no_keys() {
+            let content = "---\n---\n# Body";
+            let (fm, _body) = extract_frontmatter(content);
+            assert!(fm.is_empty());
+        }
+    }
+
+    mod updated_source_tracking {
+        use super::*;
+
+        #[test]
+        fn updated_property_source_from_last_updated() {
+            let mut fm = HashMap::new();
+            fm.insert(
+                "last_updated".to_string(),
+                serde_yaml_ng::Value::String("2025-06-15".to_string()),
+            );
+            let (_dt, source) = resolve_last_updated(&fm, Path::new("nonexistent.md"));
+            assert_eq!(source, UpdatedSource::UpdatedProperty);
+        }
+
+        #[test]
+        fn updated_property_source_from_updated_at() {
+            let mut fm = HashMap::new();
+            fm.insert(
+                "updated_at".to_string(),
+                serde_yaml_ng::Value::String("2025-06-15".to_string()),
+            );
+            let (_dt, source) = resolve_last_updated(&fm, Path::new("nonexistent.md"));
+            assert_eq!(source, UpdatedSource::UpdatedProperty);
+        }
+
+        #[test]
+        fn file_metadata_source_when_no_frontmatter_date() {
+            let fm = HashMap::new();
+            let (_dt, source) = resolve_last_updated(&fm, Path::new("."));
+            assert_eq!(source, UpdatedSource::FileMetadata);
         }
     }
 
