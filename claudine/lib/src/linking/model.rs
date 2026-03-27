@@ -15,17 +15,6 @@ pub enum ResourceScope {
     User,
 }
 
-/// Status class for a resource reference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ReferenceStatus {
-    /// Resource state is healthy and actionable without intervention.
-    Ok,
-    /// Resource state is unhealthy but automatically fixable.
-    IsFixable,
-    /// Resource state requires explicit user attention.
-    NeedsUserAttention,
-}
-
 /// Canonical definition of a resource instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceDefinition {
@@ -58,12 +47,8 @@ pub enum IncompleteCause {
     MissingProperties(Vec<String>),
     /// Target provider has no configured resource format.
     NoTargetFormat,
-    /// No conversion path exists between the canonical format and the target format.
-    NoConversionPath,
     /// Existing symlink points to a different target than the canonical source.
     WrongSymlinkTarget,
-    /// Target location is a symlink where a derived (non-symlink) artifact is expected.
-    UnexpectedSymlink,
 }
 
 impl fmt::Display for IncompleteCause {
@@ -81,14 +66,8 @@ impl fmt::Display for IncompleteCause {
             IncompleteCause::NoTargetFormat => {
                 write!(f, "no target format configured")
             }
-            IncompleteCause::NoConversionPath => {
-                write!(f, "no conversion path between formats")
-            }
             IncompleteCause::WrongSymlinkTarget => {
                 write!(f, "symlink points to wrong target")
-            }
-            IncompleteCause::UnexpectedSymlink => {
-                write!(f, "unexpected symlink where derived artifact expected")
             }
         }
     }
@@ -109,12 +88,6 @@ pub enum ResourceReference {
     LinkMissing(Provider, ResourceScope),
     /// Symlink blocked by incomplete canonical properties.
     IncompleteLink(Provider, ResourceScope, IncompleteCause),
-    /// Derived representation exists and matches canonical source hashes.
-    DerivedLink(Provider, ResourceScope),
-    /// Derived representation exists but is stale.
-    DerivedStale(Provider, ResourceScope),
-    /// Derived representation should exist but is missing.
-    DerivedMissing(Provider, ResourceScope),
 }
 
 impl ResourceReference {
@@ -126,70 +99,10 @@ impl ResourceReference {
             | ResourceReference::Isolated(definition) => definition.provider,
             ResourceReference::Link(provider, _)
             | ResourceReference::LinkMissing(provider, _)
-            | ResourceReference::IncompleteLink(provider, _, _)
-            | ResourceReference::DerivedLink(provider, _)
-            | ResourceReference::DerivedStale(provider, _)
-            | ResourceReference::DerivedMissing(provider, _) => *provider,
+            | ResourceReference::IncompleteLink(provider, _, _) => *provider,
         }
     }
 
-    /// Status classification mapped from reference variant semantics.
-    pub fn status(&self) -> ReferenceStatus {
-        match self {
-            ResourceReference::Source(_)
-            | ResourceReference::Isolated(_)
-            | ResourceReference::Link(_, _)
-            | ResourceReference::DerivedLink(_, _) => ReferenceStatus::Ok,
-            ResourceReference::DerivedStale(_, _)
-            | ResourceReference::DerivedMissing(_, _)
-            | ResourceReference::LinkMissing(_, _) => ReferenceStatus::IsFixable,
-            ResourceReference::PartialSource(_, _) | ResourceReference::IncompleteLink(_, _, _) => {
-                ReferenceStatus::NeedsUserAttention
-            }
-        }
-    }
-}
-
-/// Cross-provider resource kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ResourceType {
-    /// Skill definitions.
-    Skill,
-    /// Slash command definitions.
-    SlashCommand,
-    /// Agent/subagent definitions.
-    AgentDefinition,
-    /// Shared scripts directory resources.
-    SharedScripts,
-}
-
-/// Unified resource representation used by detector/analyzer layers.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Resource {
-    /// Resource name.
-    pub name: String,
-    /// Resource kind.
-    pub kind: ResourceType,
-    /// Scope classification.
-    pub scope: ResourceScope,
-    /// Resource provider.
-    pub provider: Provider,
-    /// Definition state.
-    pub definition: ResourceReference,
-}
-
-/// Converter function signature used by bespoke conversion entries.
-pub type BespokeConverter = fn(String) -> String;
-
-/// Supported conversion strategy classes.
-#[derive(Clone, Copy)]
-pub enum ResourceFormatConversion {
-    /// YAML conversion.
-    Yaml,
-    /// TOML conversion.
-    Toml,
-    /// Provider/resource bespoke conversion pair.
-    Bespoke((BespokeConverter, BespokeConverter)),
 }
 
 /// Validation errors for provider ordering configuration.
@@ -247,9 +160,6 @@ mod tests {
                 ResourceScope::Repo,
                 IncompleteCause::NoCanonicalDefinition,
             ),
-            ResourceReference::DerivedLink(Provider::QwenCode, ResourceScope::Repo),
-            ResourceReference::DerivedStale(Provider::RooCode, ResourceScope::Repo),
-            ResourceReference::DerivedMissing(Provider::Goose, ResourceScope::Repo),
         ];
 
         let providers: Vec<Provider> = refs.iter().map(ResourceReference::provider).collect();
@@ -262,59 +172,8 @@ mod tests {
                 Provider::Codex,
                 Provider::Gemini,
                 Provider::OpenCode,
-                Provider::QwenCode,
-                Provider::RooCode,
-                Provider::Goose,
             ]
         );
-    }
-
-    #[test]
-    fn status_mapping_covers_all_resource_reference_variants() {
-        let definition = sample_definition(Provider::Claude);
-        let cases = vec![
-            (
-                ResourceReference::Source(definition.clone()),
-                ReferenceStatus::Ok,
-            ),
-            (
-                ResourceReference::PartialSource(definition.clone(), vec!["name".to_string()]),
-                ReferenceStatus::NeedsUserAttention,
-            ),
-            (ResourceReference::Isolated(definition), ReferenceStatus::Ok),
-            (
-                ResourceReference::Link(Provider::Codex, ResourceScope::Repo),
-                ReferenceStatus::Ok,
-            ),
-            (
-                ResourceReference::LinkMissing(Provider::Codex, ResourceScope::Repo),
-                ReferenceStatus::IsFixable,
-            ),
-            (
-                ResourceReference::IncompleteLink(
-                    Provider::Codex,
-                    ResourceScope::Repo,
-                    IncompleteCause::CustomNotSupported,
-                ),
-                ReferenceStatus::NeedsUserAttention,
-            ),
-            (
-                ResourceReference::DerivedLink(Provider::Codex, ResourceScope::Repo),
-                ReferenceStatus::Ok,
-            ),
-            (
-                ResourceReference::DerivedStale(Provider::Codex, ResourceScope::Repo),
-                ReferenceStatus::IsFixable,
-            ),
-            (
-                ResourceReference::DerivedMissing(Provider::Codex, ResourceScope::Repo),
-                ReferenceStatus::IsFixable,
-            ),
-        ];
-
-        for (reference, expected) in cases {
-            assert_eq!(reference.status(), expected);
-        }
     }
 
     #[test]
@@ -337,16 +196,8 @@ mod tests {
             "no target format configured"
         );
         assert_eq!(
-            IncompleteCause::NoConversionPath.to_string(),
-            "no conversion path between formats"
-        );
-        assert_eq!(
             IncompleteCause::WrongSymlinkTarget.to_string(),
             "symlink points to wrong target"
-        );
-        assert_eq!(
-            IncompleteCause::UnexpectedSymlink.to_string(),
-            "unexpected symlink where derived artifact expected"
         );
     }
 
