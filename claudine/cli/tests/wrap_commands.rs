@@ -1807,7 +1807,17 @@ esac
 
     let payload = fs::read_to_string(&handler_payload_path).unwrap();
     assert!(payload.contains("\"failure_event\":\"response_includes\""));
+    assert!(payload.contains("\"provider\":\"codex\""));
+    assert!(payload.contains(&format!(
+        "\"source_file\":\"{}\"",
+        prompt_path.display()
+    )));
     assert!(payload.contains("\"attempt\":1"));
+    assert!(payload.contains("\"termination\":\"completed\""));
+    assert!(payload.contains("\"failure_phase\":\"post_check\""));
+    assert!(payload.contains("\"check\":"));
+    assert!(payload.contains("\"name\":\"response_includes\""));
+    assert!(payload.contains("\"response\":{\"text\":\"still broken\"}"));
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     assert!(stdout.contains("still broken"));
@@ -1815,6 +1825,114 @@ esac
 
     let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(stderr.contains("Retrying via programmatic handler"));
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_prompt_file_programmatic_handle_can_redirect() {
+    let workspace = tempdir().unwrap();
+    let repo_dir = workspace.path().join("repo");
+    let prompts_dir = repo_dir.join("prompts");
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let prompt_path = prompts_dir.join("prompt.md");
+    let redirected_path = prompts_dir.join("redirected.md");
+    let handler_path = repo_dir.join("redirect-handler");
+    let run_count_path = workspace.path().join("runs.txt");
+    let prompt_log_path = workspace.path().join("prompt-log.txt");
+
+    fs::create_dir_all(repo_dir.join(".git")).unwrap();
+    fs::create_dir_all(&prompts_dir).unwrap();
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(
+        repo_dir.join(".darkmatter-shell-whitelist"),
+        format!("exact {}\n", handler_path.display()),
+    )
+    .unwrap();
+    fs::write(
+        &prompt_path,
+        format!(
+            concat!(
+                "---\n",
+                "post_checks:\n",
+                "  response_includes: FIXED\n",
+                "handle:\n",
+                "  command:\n",
+                "    - {}\n",
+                "---\n",
+                "Primary prompt body.\n",
+            ),
+            handler_path.display()
+        ),
+    )
+    .unwrap();
+    fs::write(&redirected_path, "Redirected prompt body.\n").unwrap();
+
+    let handler_script = format!(
+        "#!/bin/sh\nprintf '%s\\n' '{}'\n",
+        serde_json::json!({
+            "action": "redirect",
+            "file": redirected_path.display().to_string(),
+            "msg": "Redirecting via programmatic handler",
+        })
+    );
+    write_executable(&handler_path, &handler_script);
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+COUNT=0
+if [ -f "$CLAUDINE_RUN_COUNT_FILE" ]; then
+  COUNT=$(/bin/cat "$CLAUDINE_RUN_COUNT_FILE")
+fi
+COUNT=$((COUNT + 1))
+printf '%s' "$COUNT" > "$CLAUDINE_RUN_COUNT_FILE"
+PROMPT=$(/bin/cat)
+{
+  printf 'ATTEMPT=%s\n' "$COUNT"
+  printf 'PROMPT=%s\n' "$PROMPT"
+  printf '%s\n' '--'
+} >> "$CLAUDINE_PROMPT_LOG"
+case "$PROMPT" in
+  *"Redirected prompt body."*)
+    printf '%s\n' 'Now FIXED'
+    ;;
+  *)
+    printf '%s\n' 'still broken'
+    ;;
+esac
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_RUN_COUNT_FILE", &run_count_path)
+        .env("CLAUDINE_PROMPT_LOG", &prompt_log_path)
+        .args([
+            "codex",
+            "--prompt-file",
+            prompt_path.to_str().unwrap(),
+            "--output",
+            "text",
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(fs::read_to_string(&run_count_path).unwrap(), "2");
+    let prompt_log = fs::read_to_string(&prompt_log_path).unwrap();
+    assert!(prompt_log.contains("ATTEMPT=1\nPROMPT=Primary prompt body."));
+    assert!(prompt_log.contains("ATTEMPT=2\nPROMPT=Redirected prompt body."));
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("still broken"));
+    assert!(stdout.contains("Now FIXED"));
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr.contains("Redirecting via programmatic handler"));
 }
 
 #[cfg(unix)]

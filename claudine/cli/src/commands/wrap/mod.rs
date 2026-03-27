@@ -169,6 +169,126 @@ fn build_harness_shell_options(
     claudine::harness::ShellApprovalOptions {
         policy_root: harness_policy_root(source_path, repo_root),
         approval_handler: None,
+        ..Default::default()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct WrapperHarnessPermissionProbe {
+    provider: Provider,
+    child_args: Vec<String>,
+    repo_root: Option<PathBuf>,
+}
+
+impl WrapperHarnessPermissionProbe {
+    fn new(provider: Provider, child_args: Vec<String>, repo_root: Option<&Path>) -> Self {
+        Self {
+            provider,
+            child_args,
+            repo_root: repo_root.map(Path::to_path_buf),
+        }
+    }
+
+    fn sandbox_value(&self) -> Option<&str> {
+        self.child_args
+            .iter()
+            .position(|arg| arg == "--sandbox")
+            .and_then(|index| self.child_args.get(index + 1))
+            .map(String::as_str)
+    }
+
+    fn workspace_root<'a>(&'a self, source_path: &'a Path) -> Option<&'a Path> {
+        self.repo_root
+            .as_deref()
+            .or_else(|| source_path.parent().filter(|path| !path.as_os_str().is_empty()))
+    }
+}
+
+impl claudine::harness::HarnessPermissionProbe for WrapperHarnessPermissionProbe {
+    fn can_write(
+        &self,
+        path: &Path,
+        source_path: &Path,
+    ) -> claudine::harness::PermissionAssessment {
+        use claudine::harness::PermissionAssessment;
+
+        if self.provider != Provider::Codex {
+            return PermissionAssessment::Allowed;
+        }
+
+        if self
+            .child_args
+            .iter()
+            .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox" || arg == "--yolo")
+        {
+            return PermissionAssessment::Allowed;
+        }
+
+        match self.sandbox_value() {
+            Some("danger-full-access") => PermissionAssessment::Allowed,
+            Some("read-only") => PermissionAssessment::Denied {
+                reason: "Codex is running in read-only sandbox mode".to_string(),
+            },
+            Some("workspace-write") => {
+                let Some(root) = self.workspace_root(source_path) else {
+                    return PermissionAssessment::Unknown {
+                        reason: "workspace-write mode is active, but no workspace root could be determined".to_string(),
+                    };
+                };
+                if path.starts_with(root) {
+                    PermissionAssessment::Allowed
+                } else {
+                    PermissionAssessment::Denied {
+                        reason: format!(
+                            "Codex workspace-write sandbox only allows writes under {}",
+                            root.display()
+                        ),
+                    }
+                }
+            }
+            Some(mode) => PermissionAssessment::Unknown {
+                reason: format!("unrecognized Codex sandbox mode '{mode}'"),
+            },
+            None => PermissionAssessment::Allowed,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct CachedHarnessLoopContext {
+    source_path: PathBuf,
+    repo_root: Option<PathBuf>,
+    shell_options: claudine::harness::ShellApprovalOptions,
+}
+
+impl CachedHarnessLoopContext {
+    fn new(source_path: &Path, repo_root: Option<&Path>) -> Self {
+        Self {
+            source_path: source_path.to_path_buf(),
+            repo_root: repo_root.map(Path::to_path_buf),
+            shell_options: build_harness_shell_options(source_path, repo_root),
+        }
+    }
+
+    fn refresh(&mut self, source_path: &Path, repo_root: Option<&Path>) {
+        let repo_root = repo_root.map(Path::to_path_buf);
+        if self.source_path != source_path || self.repo_root != repo_root {
+            self.source_path = source_path.to_path_buf();
+            self.repo_root = repo_root;
+            self.shell_options =
+                build_harness_shell_options(&self.source_path, self.repo_root.as_deref());
+        }
+    }
+
+    fn resolve_context(&self) -> claudine::harness::HarnessResolutionContext<'_> {
+        claudine::harness::HarnessResolutionContext {
+            source_path: &self.source_path,
+            repo_root: self.repo_root.as_deref(),
+        }
+    }
+
+    fn shell_options(&self) -> &claudine::harness::ShellApprovalOptions {
+        &self.shell_options
     }
 }
 
@@ -1603,6 +1723,11 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         // restoration, last_updated rewrite) so validations observe the final
         // persisted state, not transient agent-written state.
         if let Some((ref plan, ref snapshot)) = harness_state {
+            let permission_probe = WrapperHarnessPermissionProbe::new(
+                provider,
+                child_args.clone(),
+                env_plan.repo_root.as_deref(),
+            );
             let outcome = if let Some((ref summary, _, _)) = deferred_summary {
                 claudine::harness::build_attempt_outcome(1, summary, agent_termination)
             } else {
@@ -1620,6 +1745,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             if let Some(failure_event) = claudine::harness::classify_failure(&outcome) {
                 let message = format!("agent failed with exit code {agent_exit}");
                 let ctx = claudine::harness::build_agent_failure_context(
+                    provider.as_slug(),
+                    plan.source_path.as_path(),
                     failure_event,
                     message.clone(),
                     1,
@@ -1646,11 +1773,19 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             }
 
             // Run post-checks with handler resolution
-            match claudine::harness::evaluate_post_checks(plan, snapshot, &outcome, &term) {
+            match claudine::harness::evaluate_post_checks(
+                plan,
+                snapshot,
+                &outcome,
+                Some(&permission_probe),
+                &term,
+            ) {
                 Ok(()) => {}
                 Err(claudine::harness::HarnessError::PostCheckFailed { ref failures }) => {
                     let contexts = claudine::harness::build_validation_failure_context(
                         failures,
+                        provider.as_slug(),
+                        plan.source_path.as_path(),
                         1,
                         outcome.session_id.clone(),
                         Some(outcome.clone()),
@@ -1708,12 +1843,19 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         // handlers when post-checks or agent execution fail.
         let mut harness_attempt = 1u32;
         const DEFAULT_MAX_RETRIES: u32 = 3;
+        let permission_probe = WrapperHarnessPermissionProbe::new(
+            provider,
+            child_args.clone(),
+            env_plan.repo_root.as_deref(),
+        );
 
         'harness: loop {
             // On retry (attempt > 1), re-run pre-checks and re-capture snapshot
             if harness_attempt > 1 {
                 if let Some((ref plan, ref mut snapshot)) = harness_state {
-                    if let Err(e) = claudine::harness::evaluate_pre_checks(plan, &term) {
+                    if let Err(e) =
+                        claudine::harness::evaluate_pre_checks(plan, Some(&permission_probe), &term)
+                    {
                         return Err(eyre!("{e}"));
                     }
                     *snapshot = claudine::harness::capture_pre_run_snapshot(plan)
@@ -1830,6 +1972,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     _ => format!("failure on attempt {harness_attempt}"),
                 };
                 let ctx = claudine::harness::build_agent_failure_context(
+                    provider.as_slug(),
+                    plan.source_path.as_path(),
                     failure_event,
                     message.clone(),
                     harness_attempt,
@@ -1865,12 +2009,20 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             }
 
             // Step 2: Run post-checks
-            match claudine::harness::evaluate_post_checks(plan, snapshot, &outcome, &term) {
+            match claudine::harness::evaluate_post_checks(
+                plan,
+                snapshot,
+                &outcome,
+                Some(&permission_probe),
+                &term,
+            ) {
                 Ok(()) => break Ok(exit_code),
                 Err(claudine::harness::HarnessError::PostCheckFailed { ref failures }) => {
                     // Try to resolve a handler for the first failure
                     let contexts = claudine::harness::build_validation_failure_context(
                         failures,
+                        provider.as_slug(),
+                        plan.source_path.as_path(),
                         harness_attempt,
                         session_id.clone(),
                         Some(outcome.clone()),
@@ -2696,27 +2848,32 @@ fn run_harness_loop(
     term: &Terminal,
 ) -> Result<i32> {
     const DEFAULT_MAX_RETRIES: u32 = 3;
-    let shell_options = build_harness_shell_options(&prompt_state.source_path, repo_root);
+    let permission_probe =
+        WrapperHarnessPermissionProbe::new(provider, base_args.to_vec(), repo_root);
+    let mut harness_context = CachedHarnessLoopContext::new(&prompt_state.source_path, repo_root);
     let mut attempt = 1u32;
 
     loop {
+        harness_context.refresh(&prompt_state.source_path, repo_root);
         let materialized = materialize_harness_prompt(prompt_state, repo_root)?;
-        let resolve_ctx = claudine::harness::HarnessResolutionContext {
-            source_path: &prompt_state.source_path,
-            repo_root,
-        };
+        let resolve_ctx = harness_context.resolve_context();
         let plan = claudine::harness::parse_harness_plan_with_shell(
             &materialized.frontmatter,
             &prompt_state.source_path,
             &resolve_ctx,
-            Some(&shell_options),
+            Some(harness_context.shell_options()),
         )?;
 
-        match claudine::harness::evaluate_pre_checks(&plan, term) {
+        match claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe), term) {
             Ok(()) => {}
             Err(claudine::harness::HarnessError::PreCheckFailed { ref failures }) => {
                 let contexts = claudine::harness::build_validation_failure_context(
-                    failures, attempt, None, None,
+                    failures,
+                    provider.as_slug(),
+                    plan.source_path.as_path(),
+                    attempt,
+                    None,
+                    None,
                 );
                 let mut next_plan = None;
                 for failure_ctx in &contexts {
@@ -2818,6 +2975,8 @@ fn run_harness_loop(
                 _ => format!("failure on attempt {attempt}"),
             };
             let ctx = claudine::harness::build_agent_failure_context(
+                provider.as_slug(),
+                plan.source_path.as_path(),
                 failure_event,
                 message.clone(),
                 attempt,
@@ -2853,11 +3012,19 @@ fn run_harness_loop(
             }
         }
 
-        match claudine::harness::evaluate_post_checks(&plan, &snapshot, &outcome, term) {
+        match claudine::harness::evaluate_post_checks(
+            &plan,
+            &snapshot,
+            &outcome,
+            Some(&permission_probe),
+            term,
+        ) {
             Ok(()) => return Ok(outcome.exit_code),
             Err(claudine::harness::HarnessError::PostCheckFailed { ref failures }) => {
                 let contexts = claudine::harness::build_validation_failure_context(
                     failures,
+                    provider.as_slug(),
+                    plan.source_path.as_path(),
                     attempt,
                     outcome.session_id.clone(),
                     Some(outcome.clone()),
