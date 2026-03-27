@@ -17,6 +17,7 @@ pub struct ProtectService {
 ```
 
 **Responsibilities:**
+
 - Evaluate event contexts against policy rules
 - Return normalized protection outcomes
 - Emit structured audit records
@@ -86,14 +87,17 @@ Filesystem paths that require confirmation when accessed (configurable via `prot
 The service automatically classifies commands by risk level:
 
 **Critical Risk** (triggers stop):
+
 - `rm -rf` - Destructive recursive delete
 - `drop database` - Database destruction
 
 **High Risk:**
+
 - `chmod` - Permission changes
 - `curl` - Network requests
 
 **Medium Risk:**
+
 - `write` - File writes
 - `delete` - File deletions
 
@@ -102,11 +106,13 @@ The service automatically classifies commands by risk level:
 Detects elevated runtime posture and automatically escalates policy:
 
 #### Root Detection
+
 - Detects `uid=0` or `is_root` flag in event metadata
 - When running as root without sandbox: denies destructive operations
 
 #### Network Write Detection
 Triggers "ask" confirmation for these patterns:
+
 - `curl -x` (proxy)
 - `curl -d` (POST data)
 - `wget --post`
@@ -116,6 +122,7 @@ Triggers "ask" confirmation for these patterns:
 
 #### Broad Filesystem Write Detection
 Triggers "ask" confirmation for:
+
 - `rm -rf /` - Root deletion
 - `chmod -r` - Recursive permission changes
 - `chown -r` - Recursive ownership changes
@@ -124,16 +131,19 @@ Triggers "ask" confirmation for:
 ### 3. MCP Response Protection
 
 #### Server Trust Policy
+
 - `allowlist` - Approved MCP servers (all others require ask)
 - `denylist` - Blocked MCP servers
 
 #### Response Content Controls
+
 - **If modifiable**: Redact secrets and strip instruction-like payloads
 - **If stoppable**: Block high-confidence malicious payloads
 - **Otherwise**: Mark advisory and attach audit finding
 
 #### Instruction Payload Blocking
 Detects prompt injection patterns in MCP responses:
+
 - `ignore previous instructions`
 - `system prompt`
 - `developer instructions`
@@ -155,6 +165,7 @@ Detects prompt injection patterns in MCP responses:
 ### 6. Secret Detection
 
 The `secret_patterns` configuration identifies sensitive data for redaction:
+
 - API keys
 - Passwords
 - Tokens
@@ -178,6 +189,7 @@ Protect evaluation returns one of:
 ### Outcome Precedence
 
 When multiple outcomes apply, the highest-priority outcome wins:
+
 1. StopSession (6)
 2. StopCurrent (5)
 3. AskThenAllowOrStop (4)
@@ -220,6 +232,7 @@ pub struct ProviderProtectCapabilities {
 ### Degradation Behavior
 
 When provider capabilities cannot fulfill the desired outcome:
+
 - `StopCurrent` → `AdvisoryOnly` (if no stop_current capability)
 - `StopSession` → `AdvisoryOnly` (if no stop_session capability)
 - `AskThenAllowOrStop` → `AdvisoryOnly` (if no ask_user capability)
