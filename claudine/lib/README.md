@@ -4,7 +4,7 @@ Core library for the Claudine cross-agent event handling, skill linking, and MCP
 
 ## Architecture
 
-The library is organized into thirteen top-level modules plus the shared error type:
+The library is organized into fourteen top-level modules plus the shared error type:
 
 ```
 claudine/lib/src/
@@ -16,6 +16,7 @@ claudine/lib/src/
 ├── config/       → Agent detection and hook registration
 ├── dispatch/     → Event processing pipeline
 ├── events/       → Normalized event model and types
+├── harness/      → Typed pre/post validations, timeouts, handlers, and shell policy
 ├── linking/      → Cross-provider skill and command synchronization
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
@@ -243,6 +244,20 @@ Library-first reporting over Claudine's JSONL event logs:
 - `queries` — typed daily summary, sessions, tools, errors, repos, and trends queries
 - `metrics` — derived metrics such as autonomy ratio, research-vs-action ratio, recovery rate, and context pressure
 - `types` — stable result models used by both terminal rendering and `--json` output
+
+### Harness (`harness`)
+
+Typed pre/post validations, timeouts, handler resolution, and shell policy for composed prompt pipelines:
+
+- `model` — core data types: `HarnessPlan`, `ValidationRule`, `ValidationKind` (19 validation types), `HandlerAction` (retry/resume/redirect/deviate), `HandlerTable`, `ProcessTermination`, `AttemptOutcome`
+- `error` — `HarnessError` enum covering parse, runtime, handler, shell, and path resolution failures
+- `parse` — frontmatter-to-plan parser with phase constraint enforcement; accepts list and map forms for checks
+- `validate` — pre/post-check execution engine with BLAKE3 file fingerprinting, git status integration, and template-based message rendering
+- `handlers` — handler resolution (subject-specific > generic > programmatic), failure classification, programmatic handler execution with JSON stdin/stdout protocol, and deviate command execution
+- `shell` — shell policy adapter reusing Darkmatter's tokenizer, blacklist/whitelist, and approval handler infrastructure
+- `resolve` — source-relative path resolution (`@repo/path`, `./local`, `/absolute`)
+- `timeout` — human-friendly duration parser (`30s`, `5m`, `2h`)
+- `runtime` — `build_attempt_outcome()` for mapping stream summaries to harness outcomes
 
 ## Action Execution
 
