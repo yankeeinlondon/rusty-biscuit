@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use chrono::Local;
@@ -63,6 +64,18 @@ fn today_log_path(home: &Path) -> std::path::PathBuf {
     home.join(".claudine")
         .join("logs")
         .join(format!("{}.jsonl", Local::now().format("%Y-%m-%d")))
+}
+
+fn wait_for_file_contains(path: &Path, needle: &str) -> bool {
+    for _ in 0..50 {
+        if let Ok(contents) = fs::read_to_string(path)
+            && contents.contains(needle)
+        {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
 }
 
 #[test]
@@ -1549,6 +1562,65 @@ printf '%s\n' 'redirected success'
 
 #[cfg(unix)]
 #[test]
+fn prompt_file_shell_precheck_uses_prompt_repo_whitelist() {
+    let workspace = tempdir().unwrap();
+    let runner_dir = workspace.path().join("runner");
+    let repo_dir = workspace.path().join("repo");
+    let prompts_dir = repo_dir.join("prompts");
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let prompt_path = prompts_dir.join("prompt.md");
+
+    fs::create_dir_all(&runner_dir).unwrap();
+    fs::create_dir_all(repo_dir.join(".git")).unwrap();
+    fs::create_dir_all(&prompts_dir).unwrap();
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(
+        repo_dir.join(".darkmatter-shell-whitelist"),
+        "exact /bin/echo allowed\n",
+    )
+    .unwrap();
+    fs::write(
+        &prompt_path,
+        concat!(
+            "---\n",
+            "pre_checks:\n",
+            "  shell_command: /bin/echo allowed\n",
+            "---\n",
+            "Shell policy prompt body.\n",
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+/bin/cat >/dev/null
+printf '%s\n' 'shell policy ok'
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .current_dir(&runner_dir)
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args([
+            "codex",
+            "--prompt-file",
+            prompt_path.to_str().unwrap(),
+            "--output",
+            "text",
+        ])
+        .assert()
+        .success()
+        .stdout("shell policy ok\n");
+}
+
+#[cfg(unix)]
+#[test]
 fn codex_prompt_file_retry_applies_prompt_suffix_and_set_overlay() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
@@ -1634,6 +1706,119 @@ fi
 
 #[cfg(unix)]
 #[test]
+fn codex_prompt_file_programmatic_handle_retries_with_prompt_suffix() {
+    let workspace = tempdir().unwrap();
+    let repo_dir = workspace.path().join("repo");
+    let prompts_dir = repo_dir.join("prompts");
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let prompt_path = prompts_dir.join("prompt.md");
+    let handler_path = repo_dir.join("repair-handler");
+    let run_count_path = workspace.path().join("runs.txt");
+    let prompt_log_path = workspace.path().join("prompt-log.txt");
+    let handler_payload_path = workspace.path().join("handler-payload.json");
+
+    fs::create_dir_all(repo_dir.join(".git")).unwrap();
+    fs::create_dir_all(&prompts_dir).unwrap();
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(
+        repo_dir.join(".darkmatter-shell-whitelist"),
+        format!("exact {}\n", handler_path.display()),
+    )
+    .unwrap();
+    fs::write(
+        &prompt_path,
+        format!(
+            concat!(
+                "---\n",
+                "post_checks:\n",
+                "  response_includes: FIXED\n",
+                "handle:\n",
+                "  command:\n",
+                "    - {}\n",
+                "---\n",
+                "Base prompt body.\n",
+            ),
+            handler_path.display()
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &handler_path,
+        r#"#!/bin/sh
+PAYLOAD=$(/bin/cat)
+printf '%s' "$PAYLOAD" > "$CLAUDINE_HANDLER_PAYLOAD"
+printf '%s\n' '{"action":"retry","prompt_suffix":"Add FIXED.","msg":"Retrying via programmatic handler","retries":2}'
+"#,
+    );
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+COUNT=0
+if [ -f "$CLAUDINE_RUN_COUNT_FILE" ]; then
+  COUNT=$(/bin/cat "$CLAUDINE_RUN_COUNT_FILE")
+fi
+COUNT=$((COUNT + 1))
+printf '%s' "$COUNT" > "$CLAUDINE_RUN_COUNT_FILE"
+PROMPT=$(/bin/cat)
+{
+  printf 'ATTEMPT=%s\n' "$COUNT"
+  printf 'PROMPT=%s\n' "$PROMPT"
+  printf '%s\n' '--'
+} >> "$CLAUDINE_PROMPT_LOG"
+case "$PROMPT" in
+  *"Add FIXED."*)
+    printf '%s\n' 'Now FIXED'
+    ;;
+  *)
+    printf '%s\n' 'still broken'
+    ;;
+esac
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_RUN_COUNT_FILE", &run_count_path)
+        .env("CLAUDINE_PROMPT_LOG", &prompt_log_path)
+        .env("CLAUDINE_HANDLER_PAYLOAD", &handler_payload_path)
+        .args([
+            "codex",
+            "--prompt-file",
+            prompt_path.to_str().unwrap(),
+            "--output",
+            "text",
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(fs::read_to_string(&run_count_path).unwrap(), "2");
+    let prompt_log = fs::read_to_string(&prompt_log_path).unwrap();
+    assert!(prompt_log.contains("ATTEMPT=1"));
+    assert!(prompt_log.contains("PROMPT=Base prompt body."));
+    assert!(prompt_log.contains("ATTEMPT=2"));
+    assert!(prompt_log.contains("Add FIXED."));
+
+    let payload = fs::read_to_string(&handler_payload_path).unwrap();
+    assert!(payload.contains("\"failure_event\":\"response_includes\""));
+    assert!(payload.contains("\"attempt\":1"));
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("still broken"));
+    assert!(stdout.contains("Now FIXED"));
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr.contains("Retrying via programmatic handler"));
+}
+
+#[cfg(unix)]
+#[test]
 fn claude_prompt_file_resume_uses_provider_resume_args() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
@@ -1707,6 +1892,134 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     assert!(stdout.contains("initial answer"));
     assert!(stdout.contains("continued answer"));
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_prompt_file_redirect_resume_fails_when_provider_cannot_resume() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let prompt_path = workspace.path().join("prompt.md");
+    let redirected_path = workspace.path().join("redirected.md");
+
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(
+        &prompt_path,
+        format!(
+            concat!(
+                "---\n",
+                "post_checks:\n",
+                "  response_includes: FIXED\n",
+                "handle_response_includes:\n",
+                "  redirect:\n",
+                "    file: {}\n",
+                "    resume: true\n",
+                "---\n",
+                "Initial prompt body.\n",
+            ),
+            redirected_path.display()
+        ),
+    )
+    .unwrap();
+    fs::write(&redirected_path, "Redirect target body.\n").unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+/bin/cat >/dev/null
+printf '%s\n' 'still broken'
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .args([
+            "codex",
+            "--prompt-file",
+            prompt_path.to_str().unwrap(),
+            "--output",
+            "text",
+        ])
+        .assert()
+        .code(1)
+        .stderr(contains("no session ID available"));
+}
+
+#[cfg(all(unix, target_os = "macos"))]
+#[test]
+fn codex_prompt_file_retry_speaks_handler_say_message() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    let prompt_path = workspace.path().join("prompt.md");
+    let speech_log_path = workspace.path().join("speech-log.txt");
+
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    fs::write(
+        &prompt_path,
+        concat!(
+            "---\n",
+            "post_checks:\n",
+            "  response_includes: FIXED\n",
+            "handle_response_includes:\n",
+            "  retry:\n",
+            "    prompt: Add FIXED.\n",
+            "    say: Handler retry speech\n",
+            "    retries: 2\n",
+            "---\n",
+            "Base prompt body.\n",
+        ),
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("say"),
+        r#"#!/bin/sh
+/bin/cat > "$CLAUDINE_SAY_LOG"
+"#,
+    );
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+PROMPT=$(/bin/cat)
+case "$PROMPT" in
+  *"Add FIXED."*)
+    printf '%s\n' 'Now FIXED'
+    ;;
+  *)
+    printf '%s\n' 'still broken'
+    ;;
+esac
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_SAY_LOG", &speech_log_path)
+        .args([
+            "codex",
+            "--prompt-file",
+            prompt_path.to_str().unwrap(),
+            "--output",
+            "text",
+        ])
+        .assert()
+        .success();
+
+    assert!(
+        wait_for_file_contains(&speech_log_path, "Handler retry speech"),
+        "expected biscuit-speaks/macOS say path to record handler speech"
+    );
 }
 
 #[cfg(unix)]

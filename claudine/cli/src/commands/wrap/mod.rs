@@ -127,6 +127,51 @@ struct NextAttemptPlan {
     clear_prompt_tail: bool,
 }
 
+fn harness_policy_root(source_path: &Path, repo_root: Option<&Path>) -> Option<PathBuf> {
+    let source_dir = source_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())?;
+
+    if let Some(source_repo_root) = find_git_root(source_dir) {
+        return Some(source_repo_root);
+    }
+
+    if let Some(repo_root) = repo_root
+        && source_path.starts_with(repo_root)
+    {
+        return Some(repo_root.to_path_buf());
+    }
+
+    Some(source_dir.to_path_buf())
+}
+
+fn find_git_root(start: &Path) -> Option<PathBuf> {
+    let mut current = start;
+
+    loop {
+        if current.join(".git").exists() {
+            return Some(current.to_path_buf());
+        }
+
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => break,
+        }
+    }
+
+    None
+}
+
+fn build_harness_shell_options(
+    source_path: &Path,
+    repo_root: Option<&Path>,
+) -> claudine::harness::ShellApprovalOptions {
+    claudine::harness::ShellApprovalOptions {
+        policy_root: harness_policy_root(source_path, repo_root),
+        approval_handler: None,
+    }
+}
+
 struct LiveStreamSink {
     provider: Provider,
     env: EnvironmentContext,
@@ -867,7 +912,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 source_path: &source_path,
                 repo_root: env_plan.repo_root.as_deref(),
             };
-            let shell_options = claudine::harness::ShellApprovalOptions::default();
+            let shell_options =
+                build_harness_shell_options(&source_path, env_plan.repo_root.as_deref());
 
             match claudine::harness::parse_harness_plan_with_shell(
                 fm,
@@ -2485,7 +2531,10 @@ fn build_next_attempt_plan(
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::prelude::Renderable;
 
-    let render_msg = |msg: &Option<String>| {
+    let dispatch_handler_feedback = |msg: &Option<String>, say: &Option<String>| {
+        if let Some(text) = say.as_deref() {
+            claudine::harness::speak_when_able(text);
+        }
         if let Some(msg_text) = msg {
             let rendered = Prose::new(msg_text).render(term);
             eprintln!("{rendered}");
@@ -2497,7 +2546,7 @@ fn build_next_attempt_plan(
             prompt_suffix,
             set,
             msg,
-            say: _,
+            say,
             retries,
         } => {
             let max = retries.unwrap_or(default_max_retries);
@@ -2507,7 +2556,7 @@ fn build_next_attempt_plan(
                 ));
                 return Ok(None);
             }
-            render_msg(msg);
+            dispatch_handler_feedback(msg, say);
             let prompt_append = prompt_suffix.clone().or_else(|| {
                 Some(format!(
                     "The previous attempt failed: {failure_message}. Please correct the issue and try again."
@@ -2527,7 +2576,7 @@ fn build_next_attempt_plan(
             prompt,
             set,
             msg,
-            say: _,
+            say,
             retries,
         } => {
             let max = retries.unwrap_or(default_max_retries);
@@ -2542,7 +2591,7 @@ fn build_next_attempt_plan(
                 profile.supports_resume(),
                 session_id,
             )?;
-            render_msg(msg);
+            dispatch_handler_feedback(msg, say);
             Ok(Some(NextAttemptPlan {
                 next_attempt: current_attempt + 1,
                 prompt_append: None,
@@ -2557,16 +2606,23 @@ fn build_next_attempt_plan(
             file,
             set,
             msg,
-            say: _,
+            say,
             resume,
         } => {
-            render_msg(msg);
+            if *resume {
+                claudine::harness::validate_resume(
+                    &profile.provider().to_string(),
+                    profile.supports_resume(),
+                    session_id,
+                )?;
+            }
+            dispatch_handler_feedback(msg, say);
             let resolve_ctx = claudine::harness::HarnessResolutionContext {
                 source_path,
                 repo_root,
             };
             let redirect_source = claudine::harness::resolve_harness_path(file, &resolve_ctx)?;
-            let resume_session_id = if *resume && profile.supports_resume() {
+            let resume_session_id = if *resume {
                 session_id.map(|id| id.to_string())
             } else {
                 None
@@ -2585,9 +2641,9 @@ fn build_next_attempt_plan(
             command,
             set,
             msg,
-            say: _,
+            say,
         } => {
-            render_msg(msg);
+            dispatch_handler_feedback(msg, say);
             match claudine::harness::execute_deviate_command(
                 command,
                 failure_ctx,
@@ -2640,7 +2696,7 @@ fn run_harness_loop(
     term: &Terminal,
 ) -> Result<i32> {
     const DEFAULT_MAX_RETRIES: u32 = 3;
-    let shell_options = claudine::harness::ShellApprovalOptions::default();
+    let shell_options = build_harness_shell_options(&prompt_state.source_path, repo_root);
     let mut attempt = 1u32;
 
     loop {
@@ -2878,12 +2934,22 @@ fn apply_handler_action(
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::prelude::Renderable;
 
+    let dispatch_handler_feedback = |msg: &Option<String>, say: &Option<String>| {
+        if let Some(text) = say.as_deref() {
+            claudine::harness::speak_when_able(text);
+        }
+        if let Some(msg_text) = msg {
+            let rendered = Prose::new(msg_text).render(term);
+            eprintln!("{rendered}");
+        }
+    };
+
     match action {
         claudine::harness::HandlerAction::Retry {
             prompt_suffix: _,
             set: _,
             msg,
-            say: _,
+            say,
             retries,
         } => {
             let max = retries.unwrap_or(default_max_retries);
@@ -2893,9 +2959,8 @@ fn apply_handler_action(
                 ));
                 return Ok(None);
             }
-            if let Some(msg_text) = msg {
-                let rendered = Prose::new(msg_text).render(term);
-                eprintln!("{rendered}");
+            if msg.is_some() || say.is_some() {
+                dispatch_handler_feedback(msg, say);
             } else {
                 log::message(&format!(
                     "retrying (attempt {}/{max})...",
@@ -2908,7 +2973,7 @@ fn apply_handler_action(
             prompt: _,
             set: _,
             msg,
-            say: _,
+            say,
             retries,
         } => {
             let max = retries.unwrap_or(default_max_retries);
@@ -2927,9 +2992,8 @@ fn apply_handler_action(
                 log::warn(&format!("cannot resume: {e}"));
                 return Ok(None);
             }
-            if let Some(msg_text) = msg {
-                let rendered = Prose::new(msg_text).render(term);
-                eprintln!("{rendered}");
+            if msg.is_some() || say.is_some() {
+                dispatch_handler_feedback(msg, say);
             } else {
                 log::message(&format!(
                     "resuming session (attempt {}/{max})...",
@@ -2942,11 +3006,10 @@ fn apply_handler_action(
             command,
             set: _,
             msg,
-            say: _,
+            say,
         } => {
-            if let Some(msg_text) = msg {
-                let rendered = Prose::new(msg_text).render(term);
-                eprintln!("{rendered}");
+            if msg.is_some() || say.is_some() {
+                dispatch_handler_feedback(msg, say);
             } else {
                 log::message(&format!("running deviate command: {}", command.raw));
             }
@@ -2972,13 +3035,10 @@ fn apply_handler_action(
             file,
             set: _,
             msg,
-            say: _,
+            say,
             resume: _,
         } => {
-            if let Some(msg_text) = msg {
-                let rendered = Prose::new(msg_text).render(term);
-                eprintln!("{rendered}");
-            }
+            dispatch_handler_feedback(msg, say);
             Err(eyre!(
                 "redirect handler to '{file}' is not yet supported in the execution loop"
             ))
