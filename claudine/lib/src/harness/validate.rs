@@ -307,10 +307,78 @@ fn check_value_shape(
 }
 
 fn check_write_permission(file: &Path) -> CheckResult {
-    // OS writability check
-    match std::fs::OpenOptions::new().write(true).open(file) {
-        Ok(_) => Ok(()),
-        Err(e) => Err(format!("no write permission for {}: {e}", file.display())),
+    match std::fs::metadata(file) {
+        Ok(metadata) => {
+            if metadata.is_dir() {
+                return Err(format!(
+                    "{} is a directory; expected a writable file path",
+                    file.display()
+                ));
+            }
+
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(file)
+                .map(|_| ())
+                .map_err(|e| {
+                    format!(
+                        "cannot write existing file {}: {e} (filesystem write check failed; provider runtime policy may also deny writes)",
+                        file.display()
+                    )
+                })
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            check_parent_allows_file_creation(file)
+        }
+        Err(e) => Err(format!(
+            "cannot inspect {} for write access: {e}",
+            file.display()
+        )),
+    }
+}
+
+fn check_parent_allows_file_creation(file: &Path) -> CheckResult {
+    let parent = file
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
+    if !parent.exists() {
+        return Err(format!(
+            "cannot create {}: parent directory {} does not exist",
+            file.display(),
+            parent.display()
+        ));
+    }
+
+    if !parent.is_dir() {
+        return Err(format!(
+            "cannot create {}: parent path {} is not a directory",
+            file.display(),
+            parent.display()
+        ));
+    }
+
+    let probe_path = parent.join(format!(
+        ".claudine-write-probe-{}-{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
+
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe_path)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe_path);
+            Ok(())
+        }
+        Err(e) => Err(format!(
+            "cannot create {} in {}: {e} (filesystem write check failed; provider runtime policy may also deny writes)",
+            file.display(),
+            parent.display()
+        )),
     }
 }
 
@@ -786,6 +854,50 @@ mod tests {
             None,
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn has_write_permission_passes_for_creatable_missing_file() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("new-file.txt");
+
+        let result = evaluate_single(
+            &make_rule(
+                0,
+                ValidationEvent::HasWritePermission,
+                ValidationKind::HasWritePermission { file: file.clone() },
+            ),
+            None,
+            None,
+            None,
+        );
+
+        assert!(result.is_ok(), "expected creatable path to pass: {result:?}");
+        assert!(
+            !file.exists(),
+            "write-permission probe should not leave the target file behind"
+        );
+    }
+
+    #[test]
+    fn has_write_permission_fails_when_parent_directory_is_missing() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("missing").join("new-file.txt");
+
+        let result = evaluate_single(
+            &make_rule(
+                0,
+                ValidationEvent::HasWritePermission,
+                ValidationKind::HasWritePermission { file: file.clone() },
+            ),
+            None,
+            None,
+            None,
+        );
+
+        let error = result.unwrap_err();
+        assert!(error.contains("parent directory"));
+        assert!(error.contains("does not exist"));
     }
 
     #[test]
