@@ -12,4 +12,4 @@ pub use model::{
     FrameworkKind, FrameworkStats, LanguageSummary, ProgrammingLanguage, ProgrammingLanguageStats,
     ProgrammingLanguageType,
 };
-pub use registry::is_command_runner_filename;
+pub use registry::{is_command_runner_filename, lookup_exact_filename, lookup_extension};
