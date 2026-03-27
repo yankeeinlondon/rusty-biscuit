@@ -15,16 +15,14 @@ use crate::harness::model::{
     StructuredShape, ValidationEvent, ValidationKind, ValidationPhase, ValidationRule,
     ValidationRuleId,
 };
-use crate::harness::resolve::{resolve_harness_path, HarnessResolutionContext};
+use crate::harness::resolve::{HarnessResolutionContext, resolve_harness_path};
+use crate::harness::shell::{
+    ShellApprovalOptions, validate_and_approve_command, validate_and_approve_command_parts,
+};
 use crate::harness::timeout::parse_timeout;
 
 /// Harness-relevant frontmatter keys.
-const HARNESS_KEYS: &[&str] = &[
-    "pre_checks",
-    "post_checks",
-    "timeout",
-    "handle",
-];
+const HARNESS_KEYS: &[&str] = &["pre_checks", "post_checks", "timeout", "handle"];
 
 /// Check whether composed frontmatter contains any harness-relevant keys.
 ///
@@ -54,13 +52,24 @@ pub fn parse_harness_plan(
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
 ) -> Result<HarnessPlan, HarnessError> {
-    let obj = frontmatter.as_object().ok_or_else(|| {
-        HarnessError::InvalidFrontmatter {
+    parse_harness_plan_with_shell(frontmatter, source_path, ctx, None)
+}
+
+/// Parse composed frontmatter into a [`HarnessPlan`], optionally enforcing
+/// shell approval for runtime commands at parse time.
+pub fn parse_harness_plan_with_shell(
+    frontmatter: &Value,
+    source_path: &Path,
+    ctx: &HarnessResolutionContext<'_>,
+    shell_options: Option<&ShellApprovalOptions>,
+) -> Result<HarnessPlan, HarnessError> {
+    let obj = frontmatter
+        .as_object()
+        .ok_or_else(|| HarnessError::InvalidFrontmatter {
             source_path: source_path.to_path_buf(),
             property: "(root)".to_string(),
             detail: "frontmatter must be an object".to_string(),
-        }
-    })?;
+        })?;
 
     let mut next_id: u32 = 0;
     let mut alloc_id = || {
@@ -71,14 +80,14 @@ pub fn parse_harness_plan(
 
     // Parse pre_checks
     let pre_checks = if let Some(v) = obj.get("pre_checks") {
-        parse_checks(v, true, source_path, ctx, &mut alloc_id)?
+        parse_checks(v, true, source_path, ctx, shell_options, &mut alloc_id)?
     } else {
         Vec::new()
     };
 
     // Parse post_checks
     let post_checks = if let Some(v) = obj.get("post_checks") {
-        parse_checks(v, false, source_path, ctx, &mut alloc_id)?
+        parse_checks(v, false, source_path, ctx, shell_options, &mut alloc_id)?
     } else {
         Vec::new()
     };
@@ -96,7 +105,7 @@ pub fn parse_harness_plan(
     };
 
     // Parse handlers
-    let (handlers, programmatic_handler) = parse_handlers(obj, source_path, ctx)?;
+    let (handlers, programmatic_handler) = parse_handlers(obj, source_path, ctx, shell_options)?;
 
     Ok(HarnessPlan {
         source_path: source_path.to_path_buf(),
@@ -114,6 +123,7 @@ fn parse_checks(
     is_pre: bool,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
+    shell_options: Option<&ShellApprovalOptions>,
     alloc_id: &mut impl FnMut() -> ValidationRuleId,
 ) -> Result<Vec<ValidationRule>, HarnessError> {
     let property = if is_pre { "pre_checks" } else { "post_checks" };
@@ -123,16 +133,22 @@ fn parse_checks(
             // List form: each element is a single-key object
             let mut rules = Vec::with_capacity(arr.len());
             for item in arr {
-                let obj = item.as_object().ok_or_else(|| {
-                    HarnessError::InvalidFrontmatter {
+                let obj = item
+                    .as_object()
+                    .ok_or_else(|| HarnessError::InvalidFrontmatter {
                         source_path: source_path.to_path_buf(),
                         property: property.to_string(),
                         detail: "each item in the list must be an object".to_string(),
-                    }
-                })?;
+                    })?;
                 for (name, val) in obj {
                     let rule = parse_single_validation(
-                        name, val, is_pre, source_path, ctx, alloc_id,
+                        name,
+                        val,
+                        is_pre,
+                        source_path,
+                        ctx,
+                        shell_options,
+                        alloc_id,
                     )?;
                     rules.push(rule);
                 }
@@ -143,8 +159,15 @@ fn parse_checks(
             // Map form: shorthand
             let mut rules = Vec::with_capacity(obj.len());
             for (name, val) in obj {
-                let rule =
-                    parse_single_validation(name, val, is_pre, source_path, ctx, alloc_id)?;
+                let rule = parse_single_validation(
+                    name,
+                    val,
+                    is_pre,
+                    source_path,
+                    ctx,
+                    shell_options,
+                    alloc_id,
+                )?;
                 rules.push(rule);
             }
             Ok(rules)
@@ -166,24 +189,78 @@ struct ValidationMeta {
 /// Look up validation metadata by name string.
 fn validation_meta(name: &str) -> Option<ValidationMeta> {
     let meta = match name {
-        "file_exists" => ValidationMeta { event: ValidationEvent::FileExists, phase: ValidationPhase::Both },
-        "dir_exists" => ValidationMeta { event: ValidationEvent::DirExists, phase: ValidationPhase::Both },
-        "json_file_exists" => ValidationMeta { event: ValidationEvent::JsonFileExists, phase: ValidationPhase::Both },
-        "yaml_file_exists" => ValidationMeta { event: ValidationEvent::YamlFileExists, phase: ValidationPhase::Both },
-        "toml_file_exists" => ValidationMeta { event: ValidationEvent::TomlFileExists, phase: ValidationPhase::Both },
-        "has_write_permission" => ValidationMeta { event: ValidationEvent::HasWritePermission, phase: ValidationPhase::Both },
-        "shell_command" => ValidationMeta { event: ValidationEvent::ShellCommand, phase: ValidationPhase::Both },
-        "no_dirty_source_code" => ValidationMeta { event: ValidationEvent::NoDirtySourceCode, phase: ValidationPhase::Both },
-        "has_dirty_source_code" => ValidationMeta { event: ValidationEvent::HasDirtySourceCode, phase: ValidationPhase::Both },
-        "file_changed" => ValidationMeta { event: ValidationEvent::FileChanged, phase: ValidationPhase::PostOnly },
-        "file_unchanged" => ValidationMeta { event: ValidationEvent::FileUnchanged, phase: ValidationPhase::PostOnly },
-        "frontmatter_prop_changed" => ValidationMeta { event: ValidationEvent::FrontmatterPropChanged, phase: ValidationPhase::PostOnly },
-        "frontmatter_prop_unchanged" => ValidationMeta { event: ValidationEvent::FrontmatterPropUnchanged, phase: ValidationPhase::PostOnly },
-        "frontmatter_prop_equals" => ValidationMeta { event: ValidationEvent::FrontmatterPropEquals, phase: ValidationPhase::PostOnly },
-        "response_length_at_least" => ValidationMeta { event: ValidationEvent::ResponseLengthAtLeast, phase: ValidationPhase::PostOnly },
-        "response_length_at_most" => ValidationMeta { event: ValidationEvent::ResponseLengthAtMost, phase: ValidationPhase::PostOnly },
-        "response_includes" => ValidationMeta { event: ValidationEvent::ResponseIncludes, phase: ValidationPhase::PostOnly },
-        "response_missing" => ValidationMeta { event: ValidationEvent::ResponseMissing, phase: ValidationPhase::PostOnly },
+        "file_exists" => ValidationMeta {
+            event: ValidationEvent::FileExists,
+            phase: ValidationPhase::Both,
+        },
+        "dir_exists" => ValidationMeta {
+            event: ValidationEvent::DirExists,
+            phase: ValidationPhase::Both,
+        },
+        "json_file_exists" => ValidationMeta {
+            event: ValidationEvent::JsonFileExists,
+            phase: ValidationPhase::Both,
+        },
+        "yaml_file_exists" => ValidationMeta {
+            event: ValidationEvent::YamlFileExists,
+            phase: ValidationPhase::Both,
+        },
+        "toml_file_exists" => ValidationMeta {
+            event: ValidationEvent::TomlFileExists,
+            phase: ValidationPhase::Both,
+        },
+        "has_write_permission" => ValidationMeta {
+            event: ValidationEvent::HasWritePermission,
+            phase: ValidationPhase::Both,
+        },
+        "shell_command" => ValidationMeta {
+            event: ValidationEvent::ShellCommand,
+            phase: ValidationPhase::Both,
+        },
+        "no_dirty_source_code" => ValidationMeta {
+            event: ValidationEvent::NoDirtySourceCode,
+            phase: ValidationPhase::Both,
+        },
+        "has_dirty_source_code" => ValidationMeta {
+            event: ValidationEvent::HasDirtySourceCode,
+            phase: ValidationPhase::Both,
+        },
+        "file_changed" => ValidationMeta {
+            event: ValidationEvent::FileChanged,
+            phase: ValidationPhase::PostOnly,
+        },
+        "file_unchanged" => ValidationMeta {
+            event: ValidationEvent::FileUnchanged,
+            phase: ValidationPhase::PostOnly,
+        },
+        "frontmatter_prop_changed" => ValidationMeta {
+            event: ValidationEvent::FrontmatterPropChanged,
+            phase: ValidationPhase::PostOnly,
+        },
+        "frontmatter_prop_unchanged" => ValidationMeta {
+            event: ValidationEvent::FrontmatterPropUnchanged,
+            phase: ValidationPhase::PostOnly,
+        },
+        "frontmatter_prop_equals" => ValidationMeta {
+            event: ValidationEvent::FrontmatterPropEquals,
+            phase: ValidationPhase::PostOnly,
+        },
+        "response_length_at_least" => ValidationMeta {
+            event: ValidationEvent::ResponseLengthAtLeast,
+            phase: ValidationPhase::PostOnly,
+        },
+        "response_length_at_most" => ValidationMeta {
+            event: ValidationEvent::ResponseLengthAtMost,
+            phase: ValidationPhase::PostOnly,
+        },
+        "response_includes" => ValidationMeta {
+            event: ValidationEvent::ResponseIncludes,
+            phase: ValidationPhase::PostOnly,
+        },
+        "response_missing" => ValidationMeta {
+            event: ValidationEvent::ResponseMissing,
+            phase: ValidationPhase::PostOnly,
+        },
         _ => return None,
     };
     Some(meta)
@@ -196,6 +273,7 @@ fn parse_single_validation(
     is_pre: bool,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
+    shell_options: Option<&ShellApprovalOptions>,
     alloc_id: &mut impl FnMut() -> ValidationRuleId,
 ) -> Result<ValidationRule, HarnessError> {
     let meta = validation_meta(name).ok_or_else(|| HarnessError::UnknownValidation {
@@ -218,7 +296,7 @@ fn parse_single_validation(
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    let (kind, subject_key) = parse_validation_kind(name, value, source_path, ctx)?;
+    let (kind, subject_key) = parse_validation_kind(name, value, source_path, ctx, shell_options)?;
 
     Ok(ValidationRule {
         id: alloc_id(),
@@ -238,6 +316,7 @@ fn parse_validation_kind(
     value: &Value,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
+    shell_options: Option<&ShellApprovalOptions>,
 ) -> Result<(ValidationKind, Option<String>), HarnessError> {
     match name {
         "file_exists" => {
@@ -267,7 +346,10 @@ fn parse_validation_kind(
             let path = resolve_harness_path(&file_ref, ctx)?;
             let shape = extract_shape(value, source_path)?;
             Ok((
-                ValidationKind::JsonFileExists { file: path.clone(), shape },
+                ValidationKind::JsonFileExists {
+                    file: path.clone(),
+                    shape,
+                },
                 Some(path.display().to_string()),
             ))
         }
@@ -276,7 +358,10 @@ fn parse_validation_kind(
             let path = resolve_harness_path(&file_ref, ctx)?;
             let shape = extract_shape(value, source_path)?;
             Ok((
-                ValidationKind::YamlFileExists { file: path.clone(), shape },
+                ValidationKind::YamlFileExists {
+                    file: path.clone(),
+                    shape,
+                },
                 Some(path.display().to_string()),
             ))
         }
@@ -297,18 +382,22 @@ fn parse_validation_kind(
             ))
         }
         "shell_command" => {
-            let raw = extract_scalar_string(value).ok_or_else(|| {
-                HarnessError::InvalidFrontmatter {
+            let raw = extract_string_field(value, "cmd")
+                .or_else(|| extract_scalar_string(value))
+                .ok_or_else(|| HarnessError::InvalidFrontmatter {
                     source_path: source_path.to_path_buf(),
                     property: name.to_string(),
-                    detail: "requires a command string".to_string(),
-                }
-            })?;
+                    detail: "requires a command string or an object with a `cmd` field".to_string(),
+                })?;
             let show_stdout = extract_bool_field(value, "show_stdout").unwrap_or(true);
             let show_stderr = extract_bool_field(value, "show_stderr").unwrap_or(true);
-            let command = tokenize_to_approved_command(&raw, source_path)?;
+            let command = parse_runtime_command(&raw, source_path, shell_options)?;
             Ok((
-                ValidationKind::ShellCommand { command, show_stdout, show_stderr },
+                ValidationKind::ShellCommand {
+                    command,
+                    show_stdout,
+                    show_stderr,
+                },
                 Some(raw),
             ))
         }
@@ -345,39 +434,37 @@ fn parse_validation_kind(
             ))
         }
         "frontmatter_prop_changed" => {
-            let prop = extract_scalar_string(value).ok_or_else(|| {
-                HarnessError::InvalidFrontmatter {
+            let prop =
+                extract_scalar_string(value).ok_or_else(|| HarnessError::InvalidFrontmatter {
                     source_path: source_path.to_path_buf(),
                     property: name.to_string(),
                     detail: "requires a property name string".to_string(),
-                }
-            })?;
+                })?;
             Ok((
                 ValidationKind::FrontmatterPropChanged { prop: prop.clone() },
                 Some(prop),
             ))
         }
         "frontmatter_prop_unchanged" => {
-            let prop = extract_scalar_string(value).ok_or_else(|| {
-                HarnessError::InvalidFrontmatter {
+            let prop =
+                extract_scalar_string(value).ok_or_else(|| HarnessError::InvalidFrontmatter {
                     source_path: source_path.to_path_buf(),
                     property: name.to_string(),
                     detail: "requires a property name string".to_string(),
-                }
-            })?;
+                })?;
             Ok((
                 ValidationKind::FrontmatterPropUnchanged { prop: prop.clone() },
                 Some(prop),
             ))
         }
         "frontmatter_prop_equals" => {
-            let obj = value.as_object().ok_or_else(|| {
-                HarnessError::InvalidFrontmatter {
+            let obj = value
+                .as_object()
+                .ok_or_else(|| HarnessError::InvalidFrontmatter {
                     source_path: source_path.to_path_buf(),
                     property: name.to_string(),
                     detail: "requires a mapping of property names to expected values".to_string(),
-                }
-            })?;
+                })?;
             let mut expected = IndexMap::new();
             for (k, v) in obj {
                 if k == "msg" {
@@ -396,28 +483,30 @@ fn parse_validation_kind(
             Ok((ValidationKind::ResponseLengthAtMost { length }, None))
         }
         "response_includes" => {
-            let needle = extract_scalar_string(value).ok_or_else(|| {
-                HarnessError::InvalidFrontmatter {
+            let needle =
+                extract_scalar_string(value).ok_or_else(|| HarnessError::InvalidFrontmatter {
                     source_path: source_path.to_path_buf(),
                     property: name.to_string(),
                     detail: "requires a search string".to_string(),
-                }
-            })?;
+                })?;
             Ok((
-                ValidationKind::ResponseIncludes { needle: needle.clone() },
+                ValidationKind::ResponseIncludes {
+                    needle: needle.clone(),
+                },
                 Some(needle),
             ))
         }
         "response_missing" => {
-            let needle = extract_scalar_string(value).ok_or_else(|| {
-                HarnessError::InvalidFrontmatter {
+            let needle =
+                extract_scalar_string(value).ok_or_else(|| HarnessError::InvalidFrontmatter {
                     source_path: source_path.to_path_buf(),
                     property: name.to_string(),
                     detail: "requires a search string".to_string(),
-                }
-            })?;
+                })?;
             Ok((
-                ValidationKind::ResponseMissing { needle: needle.clone() },
+                ValidationKind::ResponseMissing {
+                    needle: needle.clone(),
+                },
                 Some(needle),
             ))
         }
@@ -434,6 +523,7 @@ fn parse_handlers(
     obj: &serde_json::Map<String, Value>,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
+    shell_options: Option<&ShellApprovalOptions>,
 ) -> Result<(HandlerTable, Option<ApprovedRuntimeCommand>), HarnessError> {
     let mut table = HandlerTable::default();
     let mut programmatic = None;
@@ -441,13 +531,24 @@ fn parse_handlers(
     for (key, value) in obj {
         if key == "handle" {
             // Programmatic handler: store raw command, defer approval to Phase 7
-            programmatic = Some(parse_programmatic_handler(value, source_path)?);
+            programmatic = Some(parse_programmatic_handler(
+                value,
+                source_path,
+                shell_options,
+            )?);
             continue;
         }
 
         if let Some(event_name) = key.strip_prefix("handle_") {
             let failure_event = parse_failure_event(event_name, source_path)?;
-            parse_handler_entry(value, failure_event, source_path, ctx, &mut table)?;
+            parse_handler_entry(
+                value,
+                failure_event,
+                source_path,
+                ctx,
+                shell_options,
+                &mut table,
+            )?;
         }
     }
 
@@ -458,6 +559,7 @@ fn parse_handlers(
 fn parse_programmatic_handler(
     value: &Value,
     source_path: &Path,
+    shell_options: Option<&ShellApprovalOptions>,
 ) -> Result<ApprovedRuntimeCommand, HarnessError> {
     // Accept: { command: ["executable", "arg1", ...] } or { command: "executable arg1 ..." }
     let cmd_value = if let Some(obj) = value.as_object() {
@@ -483,13 +585,9 @@ fn parse_programmatic_handler(
                         .unwrap_or_else(|| v.to_string())
                 })
                 .collect();
-            Ok(ApprovedRuntimeCommand {
-                raw: parts.join(" "),
-                executable: parts[0].clone(),
-                args: parts[1..].to_vec(),
-            })
+            parse_runtime_command_parts(&parts, shell_options)
         }
-        Value::String(s) => tokenize_to_approved_command(s, source_path),
+        Value::String(s) => parse_runtime_command(s, source_path, shell_options),
         _ => Err(HarnessError::InvalidFrontmatter {
             source_path: source_path.to_path_buf(),
             property: "handle".to_string(),
@@ -499,10 +597,7 @@ fn parse_programmatic_handler(
 }
 
 /// Map a `handle_*` suffix to a [`FailureEvent`].
-fn parse_failure_event(
-    name: &str,
-    source_path: &Path,
-) -> Result<FailureEvent, HarnessError> {
+fn parse_failure_event(name: &str, source_path: &Path) -> Result<FailureEvent, HarnessError> {
     match name {
         "agent_failure" => Ok(FailureEvent::AgentFailure),
         "timeout" => Ok(FailureEvent::Timeout),
@@ -549,23 +644,27 @@ fn parse_handler_entry(
     event: FailureEvent,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
+    shell_options: Option<&ShellApprovalOptions>,
     table: &mut HandlerTable,
 ) -> Result<(), HarnessError> {
-    let obj = value.as_object().ok_or_else(|| HarnessError::InvalidFrontmatter {
-        source_path: source_path.to_path_buf(),
-        property: format!("handle_{event}"),
-        detail: "must be an object".to_string(),
-    })?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| HarnessError::InvalidFrontmatter {
+            source_path: source_path.to_path_buf(),
+            property: format!("handle_{event}"),
+            detail: "must be an object".to_string(),
+        })?;
 
     // Detect whether this is a direct handler or subject-keyed mapping.
     // A direct handler has action keys like "retry", "resume", "redirect", "deviate".
-    let is_direct = obj.keys().any(|k| {
-        matches!(k.as_str(), "retry" | "resume" | "redirect" | "deviate")
-    });
+    let is_direct = obj
+        .keys()
+        .any(|k| matches!(k.as_str(), "retry" | "resume" | "redirect" | "deviate"));
 
     if is_direct {
         // Generic handler
-        let action = parse_handler_action(obj, source_path, &format!("handle_{event}"))?;
+        let action =
+            parse_handler_action(obj, source_path, &format!("handle_{event}"), shell_options)?;
         table.generic.push(HandlerRule {
             event,
             subject_key: None,
@@ -574,17 +673,19 @@ fn parse_handler_entry(
     } else {
         // Subject-specific handlers
         for (subject_key, subject_value) in obj {
-            let subject_obj = subject_value.as_object().ok_or_else(|| {
-                HarnessError::InvalidFrontmatter {
-                    source_path: source_path.to_path_buf(),
-                    property: format!("handle_{event}.{subject_key}"),
-                    detail: "must be an object containing a handler action".to_string(),
-                }
-            })?;
+            let subject_obj =
+                subject_value
+                    .as_object()
+                    .ok_or_else(|| HarnessError::InvalidFrontmatter {
+                        source_path: source_path.to_path_buf(),
+                        property: format!("handle_{event}.{subject_key}"),
+                        detail: "must be an object containing a handler action".to_string(),
+                    })?;
             let action = parse_handler_action(
                 subject_obj,
                 source_path,
                 &format!("handle_{event}.{subject_key}"),
+                shell_options,
             )?;
             // Normalize subject key through the same path resolver used for
             // validation subjects so that handler matching works correctly
@@ -639,15 +740,22 @@ fn parse_handler_action(
     obj: &serde_json::Map<String, Value>,
     source_path: &Path,
     property: &str,
+    shell_options: Option<&ShellApprovalOptions>,
 ) -> Result<HandlerAction, HarnessError> {
     if let Some(v) = obj.get("retry") {
         let inner = v.as_object().cloned().unwrap_or_default();
         return Ok(HandlerAction::Retry {
-            prompt_suffix: inner.get("prompt").and_then(|v| v.as_str()).map(String::from),
+            prompt_suffix: inner
+                .get("prompt")
+                .and_then(|v| v.as_str())
+                .map(String::from),
             set: parse_set_overlay(&inner),
             msg: inner.get("msg").and_then(|v| v.as_str()).map(String::from),
             say: inner.get("say").and_then(|v| v.as_str()).map(String::from),
-            retries: inner.get("retries").and_then(|v| v.as_u64()).map(|n| n as u32),
+            retries: inner
+                .get("retries")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32),
         });
     }
 
@@ -667,7 +775,10 @@ fn parse_handler_action(
             set: parse_set_overlay(&inner),
             msg: inner.get("msg").and_then(|v| v.as_str()).map(String::from),
             say: inner.get("say").and_then(|v| v.as_str()).map(String::from),
-            retries: inner.get("retries").and_then(|v| v.as_u64()).map(|n| n as u32),
+            retries: inner
+                .get("retries")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32),
         });
     }
 
@@ -687,7 +798,10 @@ fn parse_handler_action(
             set: parse_set_overlay(&inner),
             msg: inner.get("msg").and_then(|v| v.as_str()).map(String::from),
             say: inner.get("say").and_then(|v| v.as_str()).map(String::from),
-            resume: inner.get("resume").and_then(|v| v.as_bool()).unwrap_or(false),
+            resume: inner
+                .get("resume")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
         });
     }
 
@@ -702,7 +816,7 @@ fn parse_handler_action(
                 handler: "deviate".to_string(),
                 field: "cmd".to_string(),
             })?;
-        let command = tokenize_to_approved_command(&cmd_str, source_path)?;
+        let command = parse_runtime_command(&cmd_str, source_path, shell_options)?;
         return Ok(HandlerAction::Deviate {
             command,
             set: parse_set_overlay(&inner),
@@ -720,11 +834,9 @@ fn parse_handler_action(
 
 /// Parse an optional `set` overlay from a handler object.
 fn parse_set_overlay(obj: &serde_json::Map<String, Value>) -> Option<IndexMap<String, Value>> {
-    obj.get("set").and_then(|v| v.as_object()).map(|m| {
-        m.iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
-    })
+    obj.get("set")
+        .and_then(|v| v.as_object())
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -739,11 +851,13 @@ fn tokenize_to_approved_command(
     raw: &str,
     source_path: &Path,
 ) -> Result<ApprovedRuntimeCommand, HarnessError> {
-    let tokens = darkmatter::markdown::compose::shell_expansion::tokenize::tokenize(raw)
-        .map_err(|_e| HarnessError::InvalidFrontmatter {
-            source_path: source_path.to_path_buf(),
-            property: "shell_command".to_string(),
-            detail: format!("invalid command string: \"{raw}\""),
+    let tokens =
+        darkmatter::markdown::compose::shell_expansion::tokenize::tokenize(raw).map_err(|_e| {
+            HarnessError::InvalidFrontmatter {
+                source_path: source_path.to_path_buf(),
+                property: "shell_command".to_string(),
+                detail: format!("invalid command string: \"{raw}\""),
+            }
         })?;
 
     if tokens.is_empty() {
@@ -759,6 +873,31 @@ fn tokenize_to_approved_command(
         executable: tokens[0].clone(),
         args: tokens[1..].to_vec(),
     })
+}
+
+fn parse_runtime_command(
+    raw: &str,
+    source_path: &Path,
+    shell_options: Option<&ShellApprovalOptions>,
+) -> Result<ApprovedRuntimeCommand, HarnessError> {
+    match shell_options {
+        Some(options) => validate_and_approve_command(raw, options),
+        None => tokenize_to_approved_command(raw, source_path),
+    }
+}
+
+fn parse_runtime_command_parts(
+    parts: &[String],
+    shell_options: Option<&ShellApprovalOptions>,
+) -> Result<ApprovedRuntimeCommand, HarnessError> {
+    match shell_options {
+        Some(options) => validate_and_approve_command_parts(parts, options),
+        None => Ok(ApprovedRuntimeCommand {
+            raw: parts.join(" "),
+            executable: parts[0].clone(),
+            args: parts[1..].to_vec(),
+        }),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -802,7 +941,10 @@ fn extract_string_field(value: &Value, field: &str) -> Option<String> {
 
 /// Extract a boolean field from an object value.
 fn extract_bool_field(value: &Value, field: &str) -> Option<bool> {
-    value.as_object().and_then(|o| o.get(field)).and_then(|v| v.as_bool())
+    value
+        .as_object()
+        .and_then(|o| o.get(field))
+        .and_then(|v| v.as_bool())
 }
 
 /// Extract an optional `shape` field and parse it.
@@ -823,28 +965,27 @@ fn extract_shape(
 }
 
 /// Extract a `usize` from a scalar value.
-fn extract_usize(
-    value: &Value,
-    name: &str,
-    source_path: &Path,
-) -> Result<usize, HarnessError> {
+fn extract_usize(value: &Value, name: &str, source_path: &Path) -> Result<usize, HarnessError> {
     match value {
-        Value::Number(n) => n.as_u64().map(|v| v as usize).ok_or_else(|| {
-            HarnessError::InvalidFrontmatter {
-                source_path: source_path.to_path_buf(),
-                property: name.to_string(),
-                detail: "requires a positive integer".to_string(),
-            }
-        }),
+        Value::Number(n) => {
+            n.as_u64()
+                .map(|v| v as usize)
+                .ok_or_else(|| HarnessError::InvalidFrontmatter {
+                    source_path: source_path.to_path_buf(),
+                    property: name.to_string(),
+                    detail: "requires a positive integer".to_string(),
+                })
+        }
         Value::Object(obj) => {
             // Expanded form: look for a primary field
-            let length_val = obj.get("length").or_else(|| obj.get("value")).ok_or_else(|| {
-                HarnessError::InvalidFrontmatter {
+            let length_val = obj
+                .get("length")
+                .or_else(|| obj.get("value"))
+                .ok_or_else(|| HarnessError::InvalidFrontmatter {
                     source_path: source_path.to_path_buf(),
                     property: name.to_string(),
                     detail: "requires a number or an object with a `length` field".to_string(),
-                }
-            })?;
+                })?;
             length_val.as_u64().map(|v| v as usize).ok_or_else(|| {
                 HarnessError::InvalidFrontmatter {
                     source_path: source_path.to_path_buf(),
@@ -924,8 +1065,14 @@ mod tests {
         });
         let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
         assert_eq!(plan.pre_checks.len(), 2);
-        assert!(matches!(plan.pre_checks[0].kind, ValidationKind::FileExists { .. }));
-        assert!(matches!(plan.pre_checks[1].kind, ValidationKind::DirExists { .. }));
+        assert!(matches!(
+            plan.pre_checks[0].kind,
+            ValidationKind::FileExists { .. }
+        ));
+        assert!(matches!(
+            plan.pre_checks[1].kind,
+            ValidationKind::DirExists { .. }
+        ));
     }
 
     #[test]
@@ -954,7 +1101,10 @@ mod tests {
         assert_eq!(plan.pre_checks.len(), 1);
         assert!(matches!(
             plan.pre_checks[0].kind,
-            ValidationKind::JsonFileExists { shape: Some(StructuredShape::Object), .. }
+            ValidationKind::JsonFileExists {
+                shape: Some(StructuredShape::Object),
+                ..
+            }
         ));
         assert_eq!(
             plan.pre_checks[0].message_template.as_deref(),
@@ -1031,7 +1181,10 @@ mod tests {
         let plan = parse_harness_plan(&fm, source(), &test_ctx()).unwrap();
         assert_eq!(plan.handlers.generic.len(), 1);
         assert_eq!(plan.handlers.generic[0].event, FailureEvent::Timeout);
-        assert!(matches!(plan.handlers.generic[0].action, HandlerAction::Resume { .. }));
+        assert!(matches!(
+            plan.handlers.generic[0].action,
+            HandlerAction::Resume { .. }
+        ));
     }
 
     #[test]

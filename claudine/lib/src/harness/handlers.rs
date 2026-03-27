@@ -229,7 +229,10 @@ fn parse_programmatic_response(
                 .get("say")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string()),
-            retries: value.get("retries").and_then(|v| v.as_u64()).map(|n| n as u32),
+            retries: value
+                .get("retries")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32),
         })),
         "resume" => {
             let prompt = value
@@ -250,17 +253,19 @@ fn parse_programmatic_response(
                     .get("say")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
-                retries: value.get("retries").and_then(|v| v.as_u64()).map(|n| n as u32),
+                retries: value
+                    .get("retries")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as u32),
             }))
         }
         "redirect" => {
-            let file = value
-                .get("file")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| HarnessError::HandlerFailed {
+            let file = value.get("file").and_then(|v| v.as_str()).ok_or_else(|| {
+                HarnessError::HandlerFailed {
                     action: "handle".to_string(),
                     detail: "redirect action requires a 'file' field".to_string(),
-                })?;
+                }
+            })?;
             Ok(Some(HandlerAction::Redirect {
                 file: file.to_string(),
                 set: parse_set_from_value(value),
@@ -289,11 +294,10 @@ fn parse_programmatic_response(
 fn parse_set_from_value(
     value: &serde_json::Value,
 ) -> Option<indexmap::IndexMap<String, serde_json::Value>> {
-    value.get("set").and_then(|v| v.as_object()).map(|obj| {
-        obj.iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
-    })
+    value
+        .get("set")
+        .and_then(|v| v.as_object())
+        .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
 }
 
 /// Execute a `deviate` handler command with attempt context environment variables.
@@ -322,7 +326,9 @@ pub fn execute_deviate_command(
         )
         .env(
             "CLAUDINE_SOURCE_FILE",
-            source_file.map(|p| p.display().to_string()).unwrap_or_default(),
+            source_file
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
         )
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
@@ -384,10 +390,7 @@ mod tests {
     use super::*;
     use crate::harness::model::{HandlerRule, ProcessTermination, ValidationEvent};
 
-    fn make_handler_table(
-        exact: Vec<HandlerRule>,
-        generic: Vec<HandlerRule>,
-    ) -> HandlerTable {
+    fn make_handler_table(exact: Vec<HandlerRule>, generic: Vec<HandlerRule>) -> HandlerTable {
         HandlerTable { exact, generic }
     }
 
@@ -554,10 +557,7 @@ mod tests {
             termination: ProcessTermination::TimedOut,
             stderr_text: None,
         };
-        assert_eq!(
-            classify_failure(&outcome),
-            Some(FailureEvent::Timeout)
-        );
+        assert_eq!(classify_failure(&outcome), Some(FailureEvent::Timeout));
     }
 
     #[test]
@@ -570,10 +570,7 @@ mod tests {
             termination: ProcessTermination::Completed,
             stderr_text: None,
         };
-        assert_eq!(
-            classify_failure(&outcome),
-            Some(FailureEvent::AgentFailure)
-        );
+        assert_eq!(classify_failure(&outcome), Some(FailureEvent::AgentFailure));
     }
 
     #[test]

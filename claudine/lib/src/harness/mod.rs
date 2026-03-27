@@ -16,13 +16,16 @@ pub mod validate;
 
 pub use error::HarnessError;
 pub use handlers::{
-    build_agent_failure_context, build_validation_failure_context, classify_failure,
-    execute_deviate_command, resolve_handler, validate_resume, FailureContext,
+    FailureContext, build_agent_failure_context, build_validation_failure_context,
+    classify_failure, execute_deviate_command, resolve_handler, validate_resume,
 };
-pub use shell::{ShellApprovalOptions, execute_approved_command, validate_and_approve_command};
 pub use model::*;
-pub use parse::{has_harness_properties, parse_harness_plan};
-pub use resolve::{resolve_harness_path, HarnessResolutionContext};
+pub use parse::{has_harness_properties, parse_harness_plan, parse_harness_plan_with_shell};
+pub use resolve::{HarnessResolutionContext, resolve_harness_path};
 pub use runtime::build_attempt_outcome;
+pub use shell::{
+    ShellApprovalOptions, execute_approved_command, validate_and_approve_command,
+    validate_and_approve_command_parts,
+};
 pub use timeout::parse_timeout;
 pub use validate::{capture_pre_run_snapshot, evaluate_post_checks, evaluate_pre_checks};

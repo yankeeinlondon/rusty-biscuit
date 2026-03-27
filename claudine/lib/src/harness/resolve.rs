@@ -44,23 +44,25 @@ pub fn resolve_harness_path(
 
     // 2. @-prefixed: repo-root-relative
     if let Some(rest) = trimmed.strip_prefix('@') {
-        let repo_root = ctx.repo_root.ok_or_else(|| HarnessError::RepoRootRequired {
-            path: raw.to_string(),
-        })?;
+        let repo_root = ctx
+            .repo_root
+            .ok_or_else(|| HarnessError::RepoRootRequired {
+                path: raw.to_string(),
+            })?;
         return Ok(repo_root.join(rest));
     }
 
     // 3. Relative to source document's directory
-    let source_dir = ctx
-        .source_path
-        .parent()
-        .ok_or_else(|| HarnessError::PathResolutionFailed {
-            raw: raw.to_string(),
-            detail: format!(
-                "source path \"{}\" has no parent directory",
-                ctx.source_path.display()
-            ),
-        })?;
+    let source_dir =
+        ctx.source_path
+            .parent()
+            .ok_or_else(|| HarnessError::PathResolutionFailed {
+                raw: raw.to_string(),
+                detail: format!(
+                    "source path \"{}\" has no parent directory",
+                    ctx.source_path.display()
+                ),
+            })?;
 
     Ok(source_dir.join(trimmed))
 }

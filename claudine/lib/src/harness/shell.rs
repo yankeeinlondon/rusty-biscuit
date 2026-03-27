@@ -6,13 +6,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use darkmatter::markdown::compose::shell_expansion::{
-    ShellApprovalHandler, ShellExpansionOptions,
-    check_builtin_blacklist, check_user_blacklist, check_whitelist, normalize_command,
-    resolve_policy_paths,
-};
-use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
 use darkmatter::markdown::compose::ComposeSource;
+use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
+use darkmatter::markdown::compose::shell_expansion::{
+    ShellApprovalHandler, ShellExpansionOptions, check_builtin_blacklist, check_user_blacklist,
+    check_whitelist, normalize_command, resolve_policy_paths,
+};
 
 use crate::harness::error::HarnessError;
 use crate::harness::model::ApprovedRuntimeCommand;
@@ -54,14 +53,32 @@ pub fn validate_and_approve_command(
         });
     }
 
-    let executable = &tokens[0];
-    let args: Vec<String> = tokens[1..].to_vec();
+    validate_and_approve_command_parts(&tokens, options)
+}
+
+/// Validate an already-tokenized command against shell policies.
+///
+/// This is used for structured command inputs such as JSON arrays or expanded
+/// objects where the caller has already separated the executable from its args.
+pub fn validate_and_approve_command_parts(
+    parts: &[String],
+    options: &ShellApprovalOptions,
+) -> Result<ApprovedRuntimeCommand, HarnessError> {
+    if parts.is_empty() {
+        return Err(HarnessError::ShellCommandDenied {
+            command: String::new(),
+        });
+    }
+
+    let raw = parts.join(" ");
+    let executable = &parts[0];
+    let args: Vec<String> = parts[1..].to_vec();
     let normalized = normalize_command(executable, &args);
 
     // Check built-in blacklist
     if let Some(reason) = check_builtin_blacklist(executable, &args) {
         return Err(HarnessError::ShellCommandBlacklisted {
-            command: raw.to_string(),
+            command: raw.clone(),
             reason,
         });
     }
@@ -80,28 +97,30 @@ pub fn validate_and_approve_command(
 
     let policy_paths = resolve_policy_paths(&shell_opts, &source).map_err(|_| {
         HarnessError::ShellCommandDenied {
-            command: raw.to_string(),
+            command: raw.clone(),
         }
     })?;
 
     // Load and check user blacklist
-    let blacklist =
-        darkmatter::markdown::compose::shell_expansion::store::load_ruleset(&policy_paths.blacklist)
-            .unwrap_or_default();
+    let blacklist = darkmatter::markdown::compose::shell_expansion::store::load_ruleset(
+        &policy_paths.blacklist,
+    )
+    .unwrap_or_default();
     if check_user_blacklist(&blacklist, executable, &args, &normalized) {
         return Err(HarnessError::ShellCommandBlacklisted {
-            command: raw.to_string(),
+            command: raw.clone(),
             reason: "command matches user blacklist".to_string(),
         });
     }
 
     // Check whitelist — if whitelisted, approve immediately
-    let whitelist =
-        darkmatter::markdown::compose::shell_expansion::store::load_ruleset(&policy_paths.whitelist)
-            .unwrap_or_default();
+    let whitelist = darkmatter::markdown::compose::shell_expansion::store::load_ruleset(
+        &policy_paths.whitelist,
+    )
+    .unwrap_or_default();
     if check_whitelist(&whitelist, executable, &normalized) {
         return Ok(ApprovedRuntimeCommand {
-            raw: raw.to_string(),
+            raw,
             executable: executable.to_string(),
             args,
         });
@@ -112,7 +131,7 @@ pub fn validate_and_approve_command(
         let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
             source: source.clone(),
             line: 0,
-            raw_command: raw.to_string(),
+            raw_command: raw.clone(),
             executable: executable.to_string(),
             args: args.clone(),
             normalized_exact: normalized.clone(),
@@ -140,7 +159,7 @@ pub fn validate_and_approve_command(
                     ShellApprovalDecision::AllowOnce => {}
                     ShellApprovalDecision::Deny => {
                         return Err(HarnessError::ShellCommandDenied {
-                            command: raw.to_string(),
+                            command: raw.clone(),
                         });
                     }
                     ShellApprovalDecision::BlacklistPersist => {
@@ -149,7 +168,7 @@ pub fn validate_and_approve_command(
                             &normalized,
                         );
                         return Err(HarnessError::ShellCommandBlacklisted {
-                            command: raw.to_string(),
+                            command: raw.clone(),
                             reason: "user blacklisted this command".to_string(),
                         });
                     }
@@ -157,19 +176,17 @@ pub fn validate_and_approve_command(
             }
             Err(_) => {
                 return Err(HarnessError::ShellCommandDenied {
-                    command: raw.to_string(),
+                    command: raw.clone(),
                 });
             }
         }
     } else {
         // No approval handler and not whitelisted: deny
-        return Err(HarnessError::ShellCommandDenied {
-            command: raw.to_string(),
-        });
+        return Err(HarnessError::ShellCommandDenied { command: raw });
     }
 
     Ok(ApprovedRuntimeCommand {
-        raw: raw.to_string(),
+        raw,
         executable: executable.to_string(),
         args,
     })

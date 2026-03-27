@@ -104,30 +104,70 @@ pub struct ValidationRule {
 /// All supported validation operations with their typed parameters.
 #[derive(Debug, Clone)]
 pub enum ValidationKind {
-    FileExists { file: PathBuf },
-    DirExists { dir: PathBuf },
-    JsonFileExists { file: PathBuf, shape: Option<StructuredShape> },
-    YamlFileExists { file: PathBuf, shape: Option<StructuredShape> },
-    TomlFileExists { file: PathBuf },
-    HasWritePermission { file: PathBuf },
-    ShellCommand { command: ApprovedRuntimeCommand, show_stdout: bool, show_stderr: bool },
-    NoDirtySourceCode { root: PathBuf },
-    HasDirtySourceCode { root: PathBuf },
+    FileExists {
+        file: PathBuf,
+    },
+    DirExists {
+        dir: PathBuf,
+    },
+    JsonFileExists {
+        file: PathBuf,
+        shape: Option<StructuredShape>,
+    },
+    YamlFileExists {
+        file: PathBuf,
+        shape: Option<StructuredShape>,
+    },
+    TomlFileExists {
+        file: PathBuf,
+    },
+    HasWritePermission {
+        file: PathBuf,
+    },
+    ShellCommand {
+        command: ApprovedRuntimeCommand,
+        show_stdout: bool,
+        show_stderr: bool,
+    },
+    NoDirtySourceCode {
+        root: PathBuf,
+    },
+    HasDirtySourceCode {
+        root: PathBuf,
+    },
 
     // Post-only: file comparison
-    FileChanged { file: PathBuf },
-    FileUnchanged { file: PathBuf },
+    FileChanged {
+        file: PathBuf,
+    },
+    FileUnchanged {
+        file: PathBuf,
+    },
 
     // Post-only: frontmatter comparison
-    FrontmatterPropChanged { prop: String },
-    FrontmatterPropUnchanged { prop: String },
-    FrontmatterPropEquals { expected: IndexMap<String, serde_json::Value> },
+    FrontmatterPropChanged {
+        prop: String,
+    },
+    FrontmatterPropUnchanged {
+        prop: String,
+    },
+    FrontmatterPropEquals {
+        expected: IndexMap<String, serde_json::Value>,
+    },
 
     // Post-only: response checks
-    ResponseLengthAtLeast { length: usize },
-    ResponseLengthAtMost { length: usize },
-    ResponseIncludes { needle: String },
-    ResponseMissing { needle: String },
+    ResponseLengthAtLeast {
+        length: usize,
+    },
+    ResponseLengthAtMost {
+        length: usize,
+    },
+    ResponseIncludes {
+        needle: String,
+    },
+    ResponseMissing {
+        needle: String,
+    },
 }
 
 /// Broad shape constraint for structured file validations.
@@ -147,7 +187,9 @@ impl std::str::FromStr for StructuredShape {
             "scalar" => Ok(Self::Scalar),
             "array" => Ok(Self::Array),
             "object" => Ok(Self::Object),
-            _ => Err(format!("invalid shape \"{s}\"; expected \"scalar\", \"array\", or \"object\"")),
+            _ => Err(format!(
+                "invalid shape \"{s}\"; expected \"scalar\", \"array\", or \"object\""
+            )),
         }
     }
 }

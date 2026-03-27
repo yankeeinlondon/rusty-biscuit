@@ -23,10 +23,7 @@ use crate::harness::model::{
 /// Runs every rule and collects all failures (does not short-circuit).
 /// Returns `Ok(())` if all pass, or `HarnessError::PreCheckFailed` with
 /// all failures.
-pub fn evaluate_pre_checks(
-    plan: &HarnessPlan,
-    term: &Terminal,
-) -> Result<(), HarnessError> {
+pub fn evaluate_pre_checks(plan: &HarnessPlan, term: &Terminal) -> Result<(), HarnessError> {
     let failures = run_checks(&plan.pre_checks, None, None, None, term);
     if failures.is_empty() {
         Ok(())
@@ -39,9 +36,7 @@ pub fn evaluate_pre_checks(
 ///
 /// Only captures state for files and frontmatter properties that are
 /// actually referenced, keeping the snapshot small and deterministic.
-pub fn capture_pre_run_snapshot(
-    plan: &HarnessPlan,
-) -> Result<PreRunSnapshot, HarnessError> {
+pub fn capture_pre_run_snapshot(plan: &HarnessPlan) -> Result<PreRunSnapshot, HarnessError> {
     let mut snapshot = PreRunSnapshot::default();
 
     for rule in &plan.post_checks {
@@ -61,9 +56,7 @@ pub fn capture_pre_run_snapshot(
                         let md: darkmatter::markdown::Markdown = text.into();
                         // Capture the specific property values
                         if let Ok(Some(val)) = md.fm_get::<serde_json::Value>(prop) {
-                            snapshot
-                                .tracked_frontmatter
-                                .insert(prop.clone(), val);
+                            snapshot.tracked_frontmatter.insert(prop.clone(), val);
                         }
                         snapshot.source_markdown = Some(md);
                     }
@@ -71,9 +64,7 @@ pub fn capture_pre_run_snapshot(
                     // Source already loaded, just grab this property
                     if let Some(ref md) = snapshot.source_markdown {
                         if let Ok(Some(val)) = md.fm_get::<serde_json::Value>(prop) {
-                            snapshot
-                                .tracked_frontmatter
-                                .insert(prop.clone(), val);
+                            snapshot.tracked_frontmatter.insert(prop.clone(), val);
                         }
                     }
                 }
@@ -178,37 +169,23 @@ fn evaluate_single(
                 Err(format!("directory does not exist: {}", dir.display()))
             }
         }
-        ValidationKind::JsonFileExists { file, shape } => {
-            check_json_file(file, shape.as_ref())
-        }
-        ValidationKind::YamlFileExists { file, shape } => {
-            check_yaml_file(file, shape.as_ref())
-        }
-        ValidationKind::TomlFileExists { file } => {
-            check_toml_file(file)
-        }
-        ValidationKind::HasWritePermission { file } => {
-            check_write_permission(file)
-        }
-        ValidationKind::ShellCommand { command, show_stdout, show_stderr } => {
-            check_shell_command(command, *show_stdout, *show_stderr)
-        }
+        ValidationKind::JsonFileExists { file, shape } => check_json_file(file, shape.as_ref()),
+        ValidationKind::YamlFileExists { file, shape } => check_yaml_file(file, shape.as_ref()),
+        ValidationKind::TomlFileExists { file } => check_toml_file(file),
+        ValidationKind::HasWritePermission { file } => check_write_permission(file),
+        ValidationKind::ShellCommand {
+            command,
+            show_stdout,
+            show_stderr,
+        } => check_shell_command(command, *show_stdout, *show_stderr),
 
         // --- Git checks ---
-        ValidationKind::NoDirtySourceCode { root } => {
-            check_dirty_source_code(root, false)
-        }
-        ValidationKind::HasDirtySourceCode { root } => {
-            check_dirty_source_code(root, true)
-        }
+        ValidationKind::NoDirtySourceCode { root } => check_dirty_source_code(root, false),
+        ValidationKind::HasDirtySourceCode { root } => check_dirty_source_code(root, true),
 
         // --- Post-only: file comparison ---
-        ValidationKind::FileChanged { file } => {
-            check_file_changed(file, snapshot, true)
-        }
-        ValidationKind::FileUnchanged { file } => {
-            check_file_changed(file, snapshot, false)
-        }
+        ValidationKind::FileChanged { file } => check_file_changed(file, snapshot, true),
+        ValidationKind::FileUnchanged { file } => check_file_changed(file, snapshot, false),
 
         // --- Post-only: frontmatter comparison ---
         ValidationKind::FrontmatterPropChanged { prop } => {
@@ -223,7 +200,9 @@ fn evaluate_single(
 
         // --- Post-only: response checks ---
         ValidationKind::ResponseLengthAtLeast { length } => {
-            let resp = outcome.map(|o| o.final_response.chars().count()).unwrap_or(0);
+            let resp = outcome
+                .map(|o| o.final_response.chars().count())
+                .unwrap_or(0);
             if resp >= *length {
                 Ok(())
             } else {
@@ -233,13 +212,13 @@ fn evaluate_single(
             }
         }
         ValidationKind::ResponseLengthAtMost { length } => {
-            let resp = outcome.map(|o| o.final_response.chars().count()).unwrap_or(0);
+            let resp = outcome
+                .map(|o| o.final_response.chars().count())
+                .unwrap_or(0);
             if resp <= *length {
                 Ok(())
             } else {
-                Err(format!(
-                    "response length {resp} exceeds maximum {length}"
-                ))
+                Err(format!("response length {resp} exceeds maximum {length}"))
             }
         }
         ValidationKind::ResponseIncludes { needle } => {
@@ -269,8 +248,8 @@ fn check_json_file(file: &Path, shape: Option<&StructuredShape>) -> CheckResult 
     if !file.exists() || file.is_dir() {
         return Err(format!("file does not exist: {}", file.display()));
     }
-    let content = fs::read_to_string(file)
-        .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
+    let content =
+        fs::read_to_string(file).map_err(|e| format!("cannot read {}: {e}", file.display()))?;
     let value: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("{} is not valid JSON: {e}", file.display()))?;
     if let Some(expected_shape) = shape {
@@ -283,12 +262,13 @@ fn check_yaml_file(file: &Path, shape: Option<&StructuredShape>) -> CheckResult 
     if !file.exists() || file.is_dir() {
         return Err(format!("file does not exist: {}", file.display()));
     }
-    let content = fs::read_to_string(file)
-        .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
+    let content =
+        fs::read_to_string(file).map_err(|e| format!("cannot read {}: {e}", file.display()))?;
     let yaml = biscuit_file::Yaml::from_str(&content)
         .map_err(|e| format!("{} is not valid YAML: {e}", file.display()))?;
     if let Some(expected_shape) = shape {
-        let json_value = yaml.as_json()
+        let json_value = yaml
+            .as_json()
             .map_err(|e| format!("{} YAML-to-JSON conversion failed: {e}", file.display()))?;
         check_value_shape(&json_value, expected_shape, file)?;
     }
@@ -299,8 +279,8 @@ fn check_toml_file(file: &Path) -> CheckResult {
     if !file.exists() || file.is_dir() {
         return Err(format!("file does not exist: {}", file.display()));
     }
-    let content = fs::read_to_string(file)
-        .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
+    let content =
+        fs::read_to_string(file).map_err(|e| format!("cannot read {}: {e}", file.display()))?;
     let _: toml::Value = toml::from_str(&content)
         .map_err(|e| format!("{} is not valid TOML: {e}", file.display()))?;
     Ok(())
@@ -330,10 +310,7 @@ fn check_write_permission(file: &Path) -> CheckResult {
     // OS writability check
     match std::fs::OpenOptions::new().write(true).open(file) {
         Ok(_) => Ok(()),
-        Err(e) => Err(format!(
-            "no write permission for {}: {e}",
-            file.display()
-        )),
+        Err(e) => Err(format!("no write permission for {}: {e}", file.display())),
     }
 }
 
@@ -344,9 +321,8 @@ fn check_shell_command(
 ) -> CheckResult {
     let timeout = std::time::Duration::from_secs(60);
     let (exit_code, stdout, stderr) =
-        crate::harness::shell::execute_approved_command(command, None, timeout).map_err(|e| {
-            format!("shell command '{}' failed: {e}", command.raw)
-        })?;
+        crate::harness::shell::execute_approved_command(command, None, timeout)
+            .map_err(|e| format!("shell command '{}' failed: {e}", command.raw))?;
 
     if show_stdout && !stdout.trim().is_empty() {
         eprintln!("{stdout}");
@@ -368,18 +344,12 @@ fn check_shell_command(
 /// Known source code extensions for dirty-source-code checks.
 const SOURCE_EXTENSIONS: &[&str] = &[
     // Rust
-    "rs",
-    // JS/TS
-    "js", "jsx", "ts", "tsx", "mjs", "cjs",
-    // Python
-    "py",
-    // Go
-    "go",
-    // JVM
-    "java", "kt",
-    // Web
-    "css", "scss", "html",
-    // Shell
+    "rs", // JS/TS
+    "js", "jsx", "ts", "tsx", "mjs", "cjs", // Python
+    "py", // Go
+    "go", // JVM
+    "java", "kt", // Web
+    "css", "scss", "html", // Shell
     "sh", "bash", "zsh",
 ];
 
@@ -388,9 +358,8 @@ const SOURCE_FILENAMES: &[&str] = &["justfile", "Cargo.toml", "package.json"];
 
 fn check_dirty_source_code(root: &Path, expect_dirty: bool) -> CheckResult {
     // Find repo root by walking up from the specified root
-    let repo_root = find_git_repo_root(root).ok_or_else(|| {
-        format!("no git repository found at or above {}", root.display())
-    })?;
+    let repo_root = find_git_repo_root(root)
+        .ok_or_else(|| format!("no git repository found at or above {}", root.display()))?;
 
     let output = Command::new("git")
         .args(["status", "--porcelain", "--"])
@@ -489,7 +458,10 @@ fn check_file_changed(
 ) -> CheckResult {
     let snapshot = snapshot.ok_or("internal error: no pre-run snapshot for file comparison")?;
     let pre = snapshot.tracked_files.get(file).ok_or_else(|| {
-        format!("internal error: file {} not tracked in snapshot", file.display())
+        format!(
+            "internal error: file {} not tracked in snapshot",
+            file.display()
+        )
     })?;
     let post = fingerprint_file(file);
 
@@ -513,18 +485,15 @@ fn check_frontmatter_prop_changed(
     post_run_markdown: Option<&darkmatter::markdown::Markdown>,
     expect_changed: bool,
 ) -> CheckResult {
-    let snapshot = snapshot.ok_or("internal error: no pre-run snapshot for frontmatter comparison")?;
+    let snapshot =
+        snapshot.ok_or("internal error: no pre-run snapshot for frontmatter comparison")?;
     let pre_value = snapshot.tracked_frontmatter.get(prop);
 
     // Read the current on-disk post-state from the post-run markdown.
-    let post_md = post_run_markdown.ok_or(
-        "internal error: post-run markdown not available for frontmatter comparison",
-    )?;
+    let post_md = post_run_markdown
+        .ok_or("internal error: post-run markdown not available for frontmatter comparison")?;
 
-    let post_value = post_md
-        .fm_get::<serde_json::Value>(prop)
-        .ok()
-        .flatten();
+    let post_value = post_md.fm_get::<serde_json::Value>(prop).ok().flatten();
 
     let changed = pre_value != post_value.as_ref();
     if expect_changed {
@@ -546,9 +515,8 @@ fn check_frontmatter_prop_equals(
     expected: &indexmap::IndexMap<String, serde_json::Value>,
     post_run_markdown: Option<&darkmatter::markdown::Markdown>,
 ) -> CheckResult {
-    let post_md = post_run_markdown.ok_or(
-        "internal error: post-run markdown not available for frontmatter equals check",
-    )?;
+    let post_md = post_run_markdown
+        .ok_or("internal error: post-run markdown not available for frontmatter equals check")?;
 
     let mut mismatches = Vec::new();
     for (key, expected_val) in expected {
@@ -559,7 +527,9 @@ fn check_frontmatter_prop_equals(
                 mismatches.push(format!("{key}: expected {expected_val}, got {actual_val}"));
             }
             None => {
-                mismatches.push(format!("{key}: expected {expected_val}, but property is missing"));
+                mismatches.push(format!(
+                    "{key}: expected {expected_val}, but property is missing"
+                ));
             }
         }
     }
@@ -586,16 +556,30 @@ fn default_message(kind: &ValidationKind, vars: &HashMap<&str, String>) -> Strin
         ValidationKind::HasWritePermission { .. } => "{{status}} write permission for {{file}}",
         ValidationKind::ShellCommand { .. } => "{{status}} shell command: {{command}}",
         ValidationKind::NoDirtySourceCode { .. } => "{{status}} no dirty source code in {{dir}}",
-        ValidationKind::HasDirtySourceCode { .. } => "{{status}} dirty source code found in {{dir}}",
+        ValidationKind::HasDirtySourceCode { .. } => {
+            "{{status}} dirty source code found in {{dir}}"
+        }
         ValidationKind::FileChanged { .. } => "{{status}} the file {{file}} was modified",
         ValidationKind::FileUnchanged { .. } => "{{status}} the file {{file}} was not modified",
-        ValidationKind::FrontmatterPropChanged { .. } => "{{status}} frontmatter property \"{{prop}}\" was modified",
-        ValidationKind::FrontmatterPropUnchanged { .. } => "{{status}} frontmatter property \"{{prop}}\" was not modified",
-        ValidationKind::FrontmatterPropEquals { .. } => "{{status}} frontmatter properties match expected values",
-        ValidationKind::ResponseLengthAtLeast { .. } => "{{status}} response is at least {{length}} characters (actual: {{response_length}})",
-        ValidationKind::ResponseLengthAtMost { .. } => "{{status}} response is at most {{length}} characters (actual: {{response_length}})",
+        ValidationKind::FrontmatterPropChanged { .. } => {
+            "{{status}} frontmatter property \"{{prop}}\" was modified"
+        }
+        ValidationKind::FrontmatterPropUnchanged { .. } => {
+            "{{status}} frontmatter property \"{{prop}}\" was not modified"
+        }
+        ValidationKind::FrontmatterPropEquals { .. } => {
+            "{{status}} frontmatter properties match expected values"
+        }
+        ValidationKind::ResponseLengthAtLeast { .. } => {
+            "{{status}} response is at least {{length}} characters (actual: {{response_length}})"
+        }
+        ValidationKind::ResponseLengthAtMost { .. } => {
+            "{{status}} response is at most {{length}} characters (actual: {{response_length}})"
+        }
         ValidationKind::ResponseIncludes { .. } => "{{status}} response includes \"{{expected}}\"",
-        ValidationKind::ResponseMissing { .. } => "{{status}} response does not include \"{{expected}}\"",
+        ValidationKind::ResponseMissing { .. } => {
+            "{{status}} response does not include \"{{expected}}\""
+        }
     };
     render_template(template, vars)
 }
@@ -716,7 +700,11 @@ mod tests {
         fs::write(&file, "hello").unwrap();
 
         let result = evaluate_single(
-            &make_rule(0, ValidationEvent::FileExists, ValidationKind::FileExists { file }),
+            &make_rule(
+                0,
+                ValidationEvent::FileExists,
+                ValidationKind::FileExists { file },
+            ),
             None,
             None,
             None,
@@ -1122,8 +1110,7 @@ mod tests {
                 file: std::path::PathBuf::from("/test.txt"),
             },
         );
-        let (passed, rendered) =
-            render_check_result(&rule, &Err("not found".to_string()), &term);
+        let (passed, rendered) = render_check_result(&rule, &Err("not found".to_string()), &term);
         assert!(!passed);
         // The rendered output should contain the cross mark character
         assert!(rendered.contains('\u{2a2f}'));

@@ -115,10 +115,7 @@ mod tests {
 
     #[test]
     fn parse_minutes_short() {
-        assert_eq!(
-            parse_timeout("5m", p()).unwrap(),
-            Duration::from_secs(300)
-        );
+        assert_eq!(parse_timeout("5m", p()).unwrap(), Duration::from_secs(300));
     }
 
     #[test]
@@ -131,10 +128,7 @@ mod tests {
 
     #[test]
     fn parse_hours_short() {
-        assert_eq!(
-            parse_timeout("2h", p()).unwrap(),
-            Duration::from_secs(7200)
-        );
+        assert_eq!(parse_timeout("2h", p()).unwrap(), Duration::from_secs(7200));
     }
 
     #[test]
@@ -148,19 +142,13 @@ mod tests {
     #[test]
     fn reject_zero() {
         let err = parse_timeout("0s", p()).unwrap_err();
-        assert!(
-            err.to_string().contains("greater than zero"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("greater than zero"), "got: {err}");
     }
 
     #[test]
     fn reject_non_numeric() {
         let err = parse_timeout("abc", p()).unwrap_err();
-        assert!(
-            err.to_string().contains("no numeric value"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("no numeric value"), "got: {err}");
     }
 
     #[test]

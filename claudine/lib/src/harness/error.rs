@@ -18,17 +18,11 @@ pub enum HarnessError {
 
     /// A validation name was not recognized.
     #[error("{source_path}: \"{name}\" is not a recognized validation")]
-    UnknownValidation {
-        source_path: PathBuf,
-        name: String,
-    },
+    UnknownValidation { source_path: PathBuf, name: String },
 
     /// A post-only validation was placed in `pre_checks`.
     #[error("{source_path}: \"{name}\" is a post-only validation and cannot appear in pre_checks")]
-    PostOnlyInPreChecks {
-        source_path: PathBuf,
-        name: String,
-    },
+    PostOnlyInPreChecks { source_path: PathBuf, name: String },
 
     /// A timeout string could not be parsed.
     #[error("{source_path}: invalid timeout \"{raw}\": {detail}")]
@@ -39,11 +33,10 @@ pub enum HarnessError {
     },
 
     /// A `shape` value is not one of the recognized shapes.
-    #[error("{source_path}: invalid shape \"{raw}\"; expected \"scalar\", \"array\", or \"object\"")]
-    InvalidShape {
-        source_path: PathBuf,
-        raw: String,
-    },
+    #[error(
+        "{source_path}: invalid shape \"{raw}\"; expected \"scalar\", \"array\", or \"object\""
+    )]
+    InvalidShape { source_path: PathBuf, raw: String },
 
     /// A handler is missing a required field.
     #[error("{source_path}: handler `{handler}` is missing required field `{field}`")]
