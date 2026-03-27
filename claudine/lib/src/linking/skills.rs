@@ -222,9 +222,7 @@ fn fix_scope_skills(
 /// Partition skills into shareable (no Claude-specific properties) and count of skipped.
 ///
 /// Skills are directories; the check targets `SKILL.md` inside each directory.
-fn filter_unshareable_skills(
-    skills: Vec<(String, PathBuf)>,
-) -> (Vec<(String, PathBuf)>, usize) {
+fn filter_unshareable_skills(skills: Vec<(String, PathBuf)>) -> (Vec<(String, PathBuf)>, usize) {
     let mut shareable = Vec::new();
     let mut skipped = 0;
     for entry in skills {

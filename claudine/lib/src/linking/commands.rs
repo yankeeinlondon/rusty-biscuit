@@ -244,9 +244,7 @@ fn fix_scope_commands(
 }
 
 /// Partition commands into shareable (no Claude-specific properties) and count of skipped.
-fn filter_unshareable_commands(
-    commands: Vec<ScannedCommand>,
-) -> (Vec<ScannedCommand>, usize) {
+fn filter_unshareable_commands(commands: Vec<ScannedCommand>) -> (Vec<ScannedCommand>, usize) {
     let mut shareable = Vec::new();
     let mut skipped = 0;
     for cmd in commands {

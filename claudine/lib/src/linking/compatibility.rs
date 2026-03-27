@@ -989,7 +989,11 @@ mod tests {
     fn claude_specific_detects_tools() {
         let tmp = TempDir::new().unwrap();
         let file = tmp.path().join("test.md");
-        std::fs::write(&file, "---\ndescription: Test\ntools: Bash, Read\n---\nBody\n").unwrap();
+        std::fs::write(
+            &file,
+            "---\ndescription: Test\ntools: Bash, Read\n---\nBody\n",
+        )
+        .unwrap();
         let props = claude_specific_properties(&file);
         assert_eq!(props, vec!["tools"]);
     }
