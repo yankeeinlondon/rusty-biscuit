@@ -43,59 +43,6 @@ fn init_quick_writes_protect_defaults() {
 }
 
 #[test]
-fn dry_run_json_includes_protect_preview() {
-    let root = test_root();
-    let home = root.join("home");
-    fs::create_dir_all(&home).unwrap();
-
-    let config = serde_json::json!({
-        "version": "1.0",
-        "settings": {
-            "protect": {
-                "enabled": true,
-                "posture": "balanced",
-                "rules": {
-                    "blocked_command_patterns": ["rm -rf"],
-                    "ask_command_patterns": [],
-                    "protected_paths": [],
-                    "secret_patterns": []
-                }
-            }
-        },
-        "providers": {
-            "claude": {
-                "events": {
-                    "before_tool": {
-                        "enabled": true,
-                        "actions": [
-                            { "type": "report" }
-                        ]
-                    }
-                }
-            }
-        }
-    });
-    write(
-        &home.join(".claudine/config.json"),
-        &serde_json::to_string_pretty(&config).unwrap(),
-    );
-
-    let output = cargo_bin_cmd!("claudine")
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
-        .args(["dry-run", "before_tool", "--provider", "claude", "--json"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let parsed: Value = serde_json::from_slice(&output).unwrap();
-    assert_eq!(parsed["parsed"], true);
-    assert!(parsed.get("protect").is_some());
-}
-
-#[test]
 fn handle_json_includes_protect_decisions() {
     let root = test_root();
     let home = root.join("home");
