@@ -1,0 +1,178 @@
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::Renderable;
+use color_eyre::eyre::Result;
+
+use crate::log;
+
+struct CommandEntry {
+    name: &'static str,
+    description: &'static str,
+    future: bool,
+}
+
+struct CommandGroup {
+    name: &'static str,
+    commands: Vec<CommandEntry>,
+}
+
+fn cmd(name: &'static str, description: &'static str) -> CommandEntry {
+    CommandEntry {
+        name,
+        description,
+        future: false,
+    }
+}
+
+fn future_cmd(name: &'static str, description: &'static str) -> CommandEntry {
+    CommandEntry {
+        name,
+        description,
+        future: true,
+    }
+}
+
+fn groups() -> Vec<CommandGroup> {
+    vec![
+        CommandGroup {
+            name: "Shared Resources",
+            commands: vec![
+                cmd("skills", "List available skills and their scopes"),
+                cmd("commands", "List available slash commands and their scopes"),
+                cmd("agents", "List available agent definitions and their scopes"),
+                cmd("mcp", "Manage MCP (Model Context Protocol) servers"),
+                cmd("hooks", "Show registered hooks for all detected agents"),
+                cmd("link", "Link skills and commands across providers"),
+            ],
+        },
+        CommandGroup {
+            name: "Wrapped Execution",
+            commands: vec![
+                cmd(
+                    "claude",
+                    "Wrap Claude Code with Claudine preflight/env handling",
+                ),
+                cmd(
+                    "codex",
+                    "Wrap Codex CLI with Claudine preflight/env handling",
+                ),
+                cmd(
+                    "gemini",
+                    "Wrap Gemini CLI with Claudine preflight/env handling",
+                ),
+                cmd(
+                    "goose",
+                    "Wrap Goose with Claudine preflight/env handling",
+                ),
+                cmd(
+                    "kimi",
+                    "Wrap Kimi Code with Claudine preflight/env handling",
+                ),
+                cmd(
+                    "opencode",
+                    "Wrap OpenCode with Claudine preflight/env handling",
+                ),
+                cmd(
+                    "qwen",
+                    "Wrap Qwen Code with Claudine preflight/env handling",
+                ),
+            ],
+        },
+        CommandGroup {
+            name: "Composition",
+            commands: vec![
+                cmd("compose", "Compose a Markdown document through an agentic CLI"),
+                cmd(
+                    "compose-inline",
+                    "Inline composition: frontmatter prompt, replace body",
+                ),
+                future_cmd("sequence", "Sequence multiple compositions"),
+            ],
+        },
+        CommandGroup {
+            name: "Administration",
+            commands: vec![
+                cmd("init", "Interactive setup wizard"),
+                cmd("sync", "Re-sync hook registrations with detected agents"),
+                cmd("uninstall", "Remove Claudine hooks from all agents"),
+                cmd("actions", "Show configured actions and events"),
+                cmd("providers", "Show provider capability matrix"),
+                cmd("logs", "Query and sync Claudine JSONL logs"),
+                cmd("completions", "Generate shell completions"),
+            ],
+        },
+    ]
+}
+
+const NAME_COL_WIDTH: usize = 18;
+
+fn render_group(group: &CommandGroup, term: &biscuit_terminal::terminal::Terminal) -> String {
+    let mut out = String::new();
+
+    // Bold group heading via Prose
+    out.push_str(&Prose::new(format!("<bold>{}:</bold>", group.name)).render(term));
+    out.push('\n');
+
+    for entry in &group.commands {
+        let padded_name = format!("{:<width$}", entry.name, width = NAME_COL_WIDTH);
+        let line = if entry.future {
+            Prose::new(format!(
+                "<dim>  {}{}  (future)</dim>",
+                padded_name, entry.description
+            ))
+        } else {
+            Prose::new(format!(
+                "  <green>{}</green><dim>{}</dim>",
+                padded_name, entry.description
+            ))
+        };
+        out.push_str(&line.render(term));
+        out.push('\n');
+    }
+
+    out
+}
+
+/// Render the grouped help display.
+pub fn run() -> Result<()> {
+    let term = log::terminal();
+    let mut output = String::new();
+
+    // Title
+    output.push_str(
+        &Prose::new("<bold>Claudine</bold> — cross-agent hook/event system for agentic CLIs")
+            .render(&term),
+    );
+    output.push_str("\n\n");
+
+    // Usage
+    output.push_str(
+        &Prose::new("<dim>Usage:</dim> <bold>claudine</bold> [OPTIONS] <COMMAND>").render(&term),
+    );
+    output.push('\n');
+
+    // Command groups
+    for group in &groups() {
+        output.push('\n');
+        output.push_str(&render_group(group, &term));
+    }
+
+    // Options
+    output.push('\n');
+    output.push_str(&Prose::new("<bold>Options:</bold>").render(&term));
+    output.push('\n');
+    for (name, desc) in [
+        ("-v, --verbose", "Increase verbosity (-v for verbose, -vv for debug)"),
+        ("--plain", "Strip ANSI escape codes from all output"),
+        ("-h, --help", "Print help"),
+        ("-V, --version", "Print version"),
+    ] {
+        let padded = format!("{:<width$}", name, width = NAME_COL_WIDTH);
+        let line = Prose::new(format!("  <green>{}</green><dim>{}</dim>", padded, desc));
+        output.push_str(&line.render(&term));
+        output.push('\n');
+    }
+
+    log::output(&output);
+
+    Ok(())
+}
