@@ -34,3 +34,6 @@ This feature will focus no cleanup of the Claudine CLI:
         - sync
         - uninstall
 - Use the `Renderable` components from `biscuit-terminal` library to polish the look and feel of the help system
+- review the shell completions for every subcommand and try to identify ways to improve them
+    - one common pattern which tends to add value is finding a parameter which can be enumerated into a set of valid/suggested values.
+
