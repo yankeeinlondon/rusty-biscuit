@@ -40,7 +40,13 @@ fn groups() -> Vec<CommandGroup> {
                 cmd("commands", "List available slash commands and their scopes"),
                 cmd("agents", "List available agent definitions and their scopes"),
                 cmd("mcp", "Manage MCP (Model Context Protocol) servers"),
+            ],
+        },
+        CommandGroup {
+            name: "Hook Events and Actions",
+            commands: vec![
                 cmd("hooks", "Show registered hooks for all detected agents"),
+                cmd("actions", "Show configured actions and events"),
             ],
         },
         CommandGroup {
@@ -93,7 +99,6 @@ fn groups() -> Vec<CommandGroup> {
                 cmd("init", "Interactive setup wizard"),
                 cmd("sync", "Re-sync hook registrations with detected agents"),
                 cmd("uninstall", "Remove Claudine hooks from all agents"),
-                cmd("actions", "Show configured actions and events"),
                 cmd("providers", "Show provider capability matrix"),
                 cmd("logs", "Query and sync Claudine JSONL logs"),
                 cmd("completions", "Generate shell completions"),
@@ -138,8 +143,11 @@ pub fn run() -> Result<()> {
 
     // Title
     output.push_str(
-        &Prose::new("<bold>Claudine</bold> — cross-agent hook/event system for agentic CLIs")
-            .render(&term),
+        &Prose::new(format!(
+            "<b><yellow>Claudine</yellow></b>\n<dim><i>{}</i></dim>",
+            env!("CARGO_PKG_DESCRIPTION")
+        ))
+        .render(&term),
     );
     output.push_str("\n\n");
 

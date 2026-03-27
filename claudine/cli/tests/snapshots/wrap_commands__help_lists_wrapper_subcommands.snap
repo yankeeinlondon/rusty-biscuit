@@ -2,7 +2,7 @@
 source: claudine/cli/tests/wrap_commands.rs
 expression: strip_ansi(&stdout)
 ---
-Claudine — cross-agent hook/event system for agentic CLIs
+cross-agent abstraction and meta-agent harness
 
 Usage: claudine [OPTIONS] [COMMAND]
 
