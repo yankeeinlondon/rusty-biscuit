@@ -25,15 +25,28 @@ In the first syntax you are _deferring_ an explicit choice of which Agentic CLI 
 
 ### Simple Example
 
-
 ```sh
 claudine codex --compose @commit.md
 ```
 
 - Claudine then resolves the location of the `@commit.md` file using the file resolution functionality provided by [`biscuit-file`](../../../biscuit-file/README.md); this functionality includes treating the leading `@` character as a "magic path". Magic paths will attempt to resolve the "commit.md" file in multiple locations (in this order):
     - the base of the current repo root
-    - if it is not resolvable there, it will try to resolve from the base of the 
-- will use the `prompt` property of the **some-file.md**'s frontmatter
+    - if a monorepo:
+        - the base of the current package area
+        - if in a specific package then the root of that package
+    - the user's home directory
+- With the file resolved we now use Darkmatter's "compose pipeline on the file
+- The resolved Markdown content is then used as a prompt to the Agentic CLI provider
+- By default these prompts are non-interactive but you can switch to interactive by using the `--interactive` / `-i` switch
+- In the non-interactive mode, we will:
+    - pickup the Session ID from the Agent
+    - stream the Agent's response to STDOUT but through a filter so that Markdown output (which most Agents report with) will be converted to Terminal enhanced Markdown and look a lot more presentable while streaming
+    - the final output will be copied to the user's clipboard on completion
+
+
+## Inline Composition
+
+- will use the `prompt` property of the **commit.md**'s frontmatter
     - if there is not a `prompt` file then we will return an error
     - `<red><b>ERROR:</b></red> the file <blue>some-file.md</blue> does not have a <b>prompt</b> property in it's frontmatter!`
 - pass this prompt through Darkmatter's **compose** pipeline
@@ -41,8 +54,6 @@ claudine codex --compose @commit.md
     - get content: `claudine {agent} -n "{prompt}" --silent`
     - save to the Markdown files body
     - update the `last_updated` frontmatter (YYYY-MM-DD)
-
-## Inline Composition
 
 
 The _inline_ style of composition is a powerful way to keep Markdown documents in your repo up-to-date. It allows a caller to reference a markdown file and have the `prompt` property of it's frontmatter be used as a non-interactive prompt to build the content for the body of the of document.
