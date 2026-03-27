@@ -2,6 +2,7 @@ use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+pub mod blast_radius;
 pub mod docs;
 pub mod file_types;
 pub mod formatting;
@@ -10,7 +11,7 @@ pub mod just;
 pub mod languages;
 pub mod repo;
 
-pub use docs::{MarkdownMeta, RepoDocuments, detect_docs};
+pub use docs::{MarkdownMeta, RepoDocuments, TitleSource, UpdatedSource, detect_docs};
 pub use file_types::{
     FileAssociation, FileAssociationBreakdown, FileAssociationStats, FileClassification,
     FileInventory, FrameworkKind, FrameworkStats, ProgrammingLanguage, ProgrammingLanguageStats,

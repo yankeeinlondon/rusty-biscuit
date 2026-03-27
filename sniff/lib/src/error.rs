@@ -18,6 +18,10 @@ pub enum SniffError {
     #[error("Not a git repository: {0}")]
     NotARepository(PathBuf),
 
+    /// The repository is not a monorepo (required for package scoping).
+    #[error("Not a monorepo: {0}")]
+    NotAMonorepo(PathBuf),
+
     /// Error gathering system information.
     ///
     /// The `domain` field indicates which system area failed
