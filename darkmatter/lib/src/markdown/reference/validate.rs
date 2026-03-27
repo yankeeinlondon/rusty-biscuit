@@ -171,7 +171,7 @@ pub(crate) fn validate(
             ReferenceTarget::LocalPath { raw } => {
                 // Check for fragment in local path (e.g., "./other.md#section")
                 let (path_part, fragment) = split_path_fragment(raw);
-                validate_local_path(&path_part, ref_source, record, &mut report);
+                validate_local_path(&path_part, ref_source, record, &mut report, &options.graph.compose.magic_paths);
 
                 // Validate fragment if enabled and path exists
                 if options.validate_fragments
@@ -304,29 +304,34 @@ fn validate_local_path(
     source: &ComposeSource,
     record: &ReferenceRecord,
     report: &mut ReferenceValidationReport,
+    magic_paths: &[(std::path::PathBuf, biscuit_file::PathPosition)],
 ) {
     match source {
         ComposeSource::File(base_path) => {
             let base_dir = base_path.parent();
 
             // Try biscuit_file::FileReference first for @repo-root support
-            if let Ok(file_ref) = biscuit_file::FileReference::new(raw)
-                && let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir)
-            {
-                if resolved.exists() {
-                    report.references_valid += 1;
-                } else {
-                    report.issues.push(ReferenceIssue {
-                        code: ReferenceIssueCode::MissingLocalTarget,
-                        message: format!("Missing local target: {raw}"),
-                        severity: ReferenceSeverity::Error,
-                        kind: record.kind,
-                        reference_display: raw.to_string(),
-                        reference_id: record.id.clone(),
-                        origin: record.origin.clone(),
-                    });
+            if let Ok(file_ref) = biscuit_file::FileReference::new(raw) {
+                let mut file_ref = file_ref;
+                for (path, position) in magic_paths {
+                    file_ref = file_ref.add_magic_path(path, *position);
                 }
-                return;
+                if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
+                    if resolved.exists() {
+                        report.references_valid += 1;
+                    } else {
+                        report.issues.push(ReferenceIssue {
+                            code: ReferenceIssueCode::MissingLocalTarget,
+                            message: format!("Missing local target: {raw}"),
+                            severity: ReferenceSeverity::Error,
+                            kind: record.kind,
+                            reference_display: raw.to_string(),
+                            reference_id: record.id.clone(),
+                            origin: record.origin.clone(),
+                        });
+                    }
+                    return;
+                }
             }
 
             // Fallback to simple path join
@@ -454,6 +459,10 @@ fn validate_cross_doc_fragment(
 
     // Resolve via FileReference for @repo-root support, fallback to simple join
     let target_path = if let Ok(file_ref) = biscuit_file::FileReference::new(path) {
+        let mut file_ref = file_ref;
+        for (mp, position) in &graph_options.compose.magic_paths {
+            file_ref = file_ref.add_magic_path(mp, *position);
+        }
         file_ref.resolve_relative(base_dir).ok().flatten()
     } else {
         None
