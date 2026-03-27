@@ -11,6 +11,7 @@ pub mod parse;
 pub mod resolve;
 pub mod runtime;
 pub mod shell;
+pub mod speech;
 pub mod timeout;
 pub mod validate;
 
@@ -27,5 +28,6 @@ pub use shell::{
     ShellApprovalOptions, execute_approved_command, validate_and_approve_command,
     validate_and_approve_command_parts,
 };
+pub use speech::speak_when_able;
 pub use timeout::parse_timeout;
 pub use validate::{capture_pre_run_snapshot, evaluate_post_checks, evaluate_pre_checks};
