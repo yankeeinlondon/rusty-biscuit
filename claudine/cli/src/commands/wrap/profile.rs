@@ -255,7 +255,7 @@ pub(crate) trait WrapperProfile: Send + Sync {
     ///
     /// Returns `Ok(args)` with the full argv for a resume invocation, or
     /// `Err` if the provider does not support session resume.
-    fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
+    fn build_resume_args(&self, _session_id: &str) -> Result<Vec<String>> {
         bail!(
             "provider {} does not support session resume",
             self.provider()

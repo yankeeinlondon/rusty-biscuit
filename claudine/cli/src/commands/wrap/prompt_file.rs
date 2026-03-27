@@ -302,9 +302,8 @@ pub(crate) fn compose_prompt_file(resolved: &ResolvedPromptFile) -> Result<Compo
 
     let env_overrides = frontmatter_to_env(fm_map)?;
     let env_names: Vec<String> = env_overrides.iter().map(|(k, _)| k.clone()).collect();
-    let frontmatter = serde_json::Value::Object(
-        fm_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-    );
+    let frontmatter =
+        serde_json::Value::Object(fm_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
 
     Ok(ComposedPrompt {
         resolved_path: resolved.resolved_path.clone(),

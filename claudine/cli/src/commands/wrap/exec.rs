@@ -209,8 +209,7 @@ impl StreamThinkingRenderer {
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable;
         let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim><i>{safe}</i></dim>"))
-            .render(&crate::log::terminal())
+        Prose::new(format!("<dim><i>{safe}</i></dim>")).render(&crate::log::terminal())
     }
 }
 
@@ -451,7 +450,7 @@ fn wait_with_timeout(
                 return Ok((
                     exit_code_from_status(status),
                     claudine::harness::ProcessTermination::Completed,
-                ))
+                ));
             }
             None => {
                 if Instant::now() >= deadline {
@@ -468,7 +467,7 @@ fn wait_with_timeout(
                                 return Ok((
                                     exit_code_from_status(status),
                                     claudine::harness::ProcessTermination::TimedOut,
-                                ))
+                                ));
                             }
                             None => {
                                 if Instant::now() >= kill_deadline {
@@ -508,7 +507,7 @@ fn wait_with_timeout(
                 return Ok((
                     exit_code_from_status(status),
                     claudine::harness::ProcessTermination::Completed,
-                ))
+                ));
             }
             None => {
                 if Instant::now() >= deadline {
