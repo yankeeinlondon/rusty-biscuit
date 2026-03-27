@@ -2,35 +2,45 @@
 source: claudine/cli/tests/wrap_commands.rs
 expression: strip_ansi(&stdout)
 ---
+Claudine
 cross-agent abstraction and meta-agent harness
 
-Usage: claudine [OPTIONS] [COMMAND]
+Usage: claudine <command> [options]
 
-Commands:
-  completions     Generate shell completions
-  init            Interactive setup wizard
-  sync            Re-sync hook registrations with detected agents
-  hooks           Show registered hooks for all detected agents
-  actions         Show which actions are configured and for which events
-  skills          List available skills and their scopes
-  agents          List available agent definitions and their scopes
-  commands        List available slash commands and their scopes
-  providers       Show provider capability matrix (skill/slash/agent/hooks)
-  logs            Query and sync Claudine JSONL logs through the reporting index
-  uninstall       Remove Claudine hooks from all agents
-  mcp             Manage MCP (Model Context Protocol) servers
-  claude          Wrap Claude Code with Claudine preflight/env handling
-  codex           Wrap Codex CLI with Claudine preflight/env handling
-  gemini          Wrap Gemini CLI with Claudine preflight/env handling
-  kimi            Wrap Kimi Code with Claudine preflight/env handling
-  qwen            Wrap Qwen Code with Claudine preflight/env handling
-  opencode        Wrap OpenCode with Claudine preflight/env handling
-  goose           Wrap Goose with Claudine preflight/env handling
-  compose         Compose a Markdown document through an agentic CLI
-  compose-inline  Inline composition: use frontmatter prompt, replace body with output
+Shared Resources:
+  skills            List available skills and their scopes
+  commands          List available slash commands and their scopes
+  agents            List available agent definitions and their scopes
+  mcp               Manage MCP (Model Context Protocol) servers
+
+Hook Events and Actions:
+  hooks             Show registered hooks for all detected agents
+  actions           Show configured actions and events
+
+Wrapped Execution:
+  claude            Wrap Claude Code with Claudine preflight/env handling
+  codex             Wrap Codex CLI with Claudine preflight/env handling
+  gemini            Wrap Gemini CLI with Claudine preflight/env handling
+  goose             Wrap Goose with Claudine preflight/env handling
+  kimi              Wrap Kimi Code with Claudine preflight/env handling
+  opencode          Wrap OpenCode with Claudine preflight/env handling
+  qwen              Wrap Qwen Code with Claudine preflight/env handling
+
+Composition:
+  compose           Compose a Markdown document through an agentic CLI
+  compose-inline    Inline composition: frontmatter prompt, replace body
+  sequence          Sequence multiple compositions  (future)
+
+Administration:
+  init              Interactive setup wizard
+  sync              Re-sync hook registrations with detected agents
+  uninstall         Remove Claudine hooks from all agents
+  providers         Show provider capability matrix
+  logs              Query and sync Claudine JSONL logs
+  completions       Generate shell completions
 
 Options:
-  -v, --verbose...  Increase verbosity (-v for verbose, -vv for debug)
-      --plain       Strip ANSI escape codes from all output
+  -v, --verbose     Increase verbosity (-v for verbose, -vv for debug)
+  --plain           Strip ANSI escape codes from all output
   -h, --help        Print help
   -V, --version     Print version

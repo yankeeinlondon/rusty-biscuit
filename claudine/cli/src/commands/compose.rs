@@ -1,28 +1,25 @@
-//! Top-level `compose` command for agent-selected composition.
+//! Top-level composition commands.
 //!
 //! - `claudine compose <file>` — chained composition (no file mutation)
-//! - `claudine compose inline <file>` — inline composition (replaces body)
+//! - `claudine inline-compose <file>` — inline composition (replaces body)
+//!
+//! Both commands are thin request builders that delegate to
+//! [`execute_composition_request`] for wrapper-grade execution.
 
 use std::collections::BTreeSet;
-use std::io::IsTerminal;
 
-use clap::{Args, Subcommand};
-use claudine::composition::{
-    self, CompositionMode, CompositionRequest, PreparedPrompt, ResolvedCompositionSource,
-    SelectedProvider, SelectionReason,
-};
+use clap::Args;
+use claudine::composition::{self, CompositionExecutionRequest, CompositionMode};
 use claudine::events::Provider;
 use color_eyre::eyre::{Result, eyre};
-use inquire::Select;
-use sniff::programs::InstalledAiClients;
 
-use super::wrap::{env, exec, profile};
+use super::wrap::composition::execute_composition_request;
 use crate::log;
 
 /// Compose a Markdown document through an agentic CLI.
 #[derive(Debug, Clone, Args)]
 pub struct ComposeArgs {
-    /// Force interactive provider selection.
+    /// Run the provider session in interactive mode.
     #[arg(short = 'i', long)]
     pub interactive: bool,
 
@@ -30,39 +27,47 @@ pub struct ComposeArgs {
     #[arg(long = "exclude", value_name = "PROVIDER")]
     pub exclude: Vec<String>,
 
-    /// Timeout in seconds for the provider session.
-    #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
-    pub timeout: Option<u64>,
-
     /// Suppress all output except the composition result.
     #[arg(long)]
     pub silent: bool,
 
-    /// File reference to compose (chained mode).
-    #[arg(value_name = "FILE")]
-    pub file: Option<String>,
+    /// Use Claude as the provider.
+    #[arg(long, group = "provider_select")]
+    pub claude: bool,
 
-    #[command(subcommand)]
-    pub subcommand: Option<ComposeSubcommand>,
-}
+    /// Use Codex as the provider.
+    #[arg(long, group = "provider_select")]
+    pub codex: bool,
 
-#[derive(Debug, Clone, Subcommand)]
-pub enum ComposeSubcommand {
-    /// Inline composition: use frontmatter `prompt`, replace body with output.
-    Inline(InlineArgs),
-}
+    /// Use Gemini as the provider.
+    #[arg(long, group = "provider_select")]
+    pub gemini: bool,
 
-#[derive(Debug, Clone, Args)]
-pub struct InlineArgs {
+    /// Use OpenCode as the provider.
+    #[arg(long, group = "provider_select")]
+    pub opencode: bool,
+
+    /// Use Qwen Code as the provider.
+    #[arg(long, group = "provider_select")]
+    pub qwen: bool,
+
+    /// Use Goose as the provider.
+    #[arg(long, group = "provider_select")]
+    pub goose: bool,
+
+    /// Use Kimi Code as the provider.
+    #[arg(long, group = "provider_select")]
+    pub kimi: bool,
+
     /// File reference to compose.
     #[arg(value_name = "FILE")]
     pub file: String,
 }
 
-/// Arguments for the top-level `compose-inline` command.
+/// Inline composition: use frontmatter `prompt`, replace body with output.
 #[derive(Debug, Clone, Args)]
-pub struct ComposeInlineArgs {
-    /// Force interactive provider selection.
+pub struct InlineComposeArgs {
+    /// Run the provider session in interactive mode.
     #[arg(short = 'i', long)]
     pub interactive: bool,
 
@@ -70,32 +75,41 @@ pub struct ComposeInlineArgs {
     #[arg(long = "exclude", value_name = "PROVIDER")]
     pub exclude: Vec<String>,
 
-    /// Timeout in seconds for the provider session.
-    #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
-    pub timeout: Option<u64>,
-
     /// Suppress all output except the composition result.
     #[arg(long)]
     pub silent: bool,
 
+    /// Use Claude as the provider.
+    #[arg(long, group = "provider_select")]
+    pub claude: bool,
+
+    /// Use Codex as the provider.
+    #[arg(long, group = "provider_select")]
+    pub codex: bool,
+
+    /// Use Gemini as the provider.
+    #[arg(long, group = "provider_select")]
+    pub gemini: bool,
+
+    /// Use OpenCode as the provider.
+    #[arg(long, group = "provider_select")]
+    pub opencode: bool,
+
+    /// Use Qwen Code as the provider.
+    #[arg(long, group = "provider_select")]
+    pub qwen: bool,
+
+    /// Use Goose as the provider.
+    #[arg(long, group = "provider_select")]
+    pub goose: bool,
+
+    /// Use Kimi Code as the provider.
+    #[arg(long, group = "provider_select")]
+    pub kimi: bool,
+
     /// File reference to compose.
     #[arg(value_name = "FILE")]
     pub file: String,
-}
-
-/// Entry point for `claudine compose-inline`.
-pub fn run_compose_inline(args: ComposeInlineArgs, verbose: u8) -> Result<()> {
-    let compose_args = ComposeArgs {
-        interactive: args.interactive,
-        exclude: args.exclude,
-        timeout: args.timeout,
-        silent: args.silent,
-        file: None,
-        subcommand: Some(ComposeSubcommand::Inline(InlineArgs {
-            file: args.file,
-        })),
-    };
-    run_compose(compose_args, verbose)
 }
 
 /// Entry point for `claudine compose`.
@@ -110,335 +124,135 @@ pub fn run_compose(args: ComposeArgs, verbose: u8) -> Result<()> {
     std::process::exit(code);
 }
 
-fn run_compose_inner(args: ComposeArgs, _verbose: u8) -> Result<i32> {
-    // Determine mode and file reference
-    let (mode, file_ref) = match &args.subcommand {
-        Some(ComposeSubcommand::Inline(inline_args)) => (
-            CompositionMode::InlineFrontmatterPrompt,
-            inline_args.file.clone(),
-        ),
-        None => {
-            let file = args
-                .file
-                .as_ref()
-                .ok_or_else(|| eyre!("file argument is required"))?;
-            (CompositionMode::ChainedDocument, file.clone())
+/// Entry point for `claudine inline-compose`.
+pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
+    let code = match run_inline_compose_inner(args, verbose) {
+        Ok(code) => code,
+        Err(error) => {
+            log::error(&error.to_string());
+            1
         }
     };
+    std::process::exit(code);
+}
 
-    // Parse excluded providers
-    let excluded: BTreeSet<Provider> = args
-        .exclude
+fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
+    let excluded = parse_excluded(&args.exclude, args.silent);
+    let explicit_provider = resolve_explicit_provider(
+        args.claude,
+        args.codex,
+        args.gemini,
+        args.opencode,
+        args.qwen,
+        args.goose,
+        args.kimi,
+    );
+
+    let source =
+        composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
+
+    let prepared =
+        composition::prepare_direct(&source).map_err(|e| eyre!("{e}"))?;
+
+    let request = CompositionExecutionRequest {
+        mode: CompositionMode::ChainedDocument,
+        file_ref: args.file,
+        prepared,
+        explicit_provider,
+        excluded,
+        session_interactive: args.interactive,
+        silent: args.silent,
+    };
+
+    execute_composition_request(request, verbose)
+}
+
+fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32> {
+    let excluded = parse_excluded(&args.exclude, args.silent);
+    let explicit_provider = resolve_explicit_provider(
+        args.claude,
+        args.codex,
+        args.gemini,
+        args.opencode,
+        args.qwen,
+        args.goose,
+        args.kimi,
+    );
+
+    let source =
+        composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
+
+    // Validate file read/write permissions before proceeding.
+    composition::validate_file_permissions(&source.resolved_path).map_err(|e| eyre!("{e}"))?;
+
+    let repo_root = find_git_root();
+    let prepared =
+        composition::prepare_inline(&source, repo_root.as_deref())
+            .map_err(|e| eyre!("{e}"))?;
+
+    let request = CompositionExecutionRequest {
+        mode: CompositionMode::InlineFrontmatterPrompt,
+        file_ref: args.file,
+        prepared,
+        explicit_provider,
+        excluded,
+        session_interactive: args.interactive,
+        silent: args.silent,
+    };
+
+    execute_composition_request(request, verbose)
+}
+
+fn parse_excluded(exclude: &[String], silent: bool) -> BTreeSet<Provider> {
+    exclude
         .iter()
         .filter_map(|name| {
             Provider::fuzzy_match_cli_name(name).or_else(|| {
-                if !args.silent {
-                    eprintln!("warning: unknown provider '{}', ignoring --exclude", name);
+                if !silent {
+                    eprintln!("warning: unknown provider '{name}', ignoring --exclude");
                 }
                 None
             })
         })
-        .collect();
-
-    // Resolve source document
-    let source = composition::resolve_composition_source(&file_ref).map_err(|e| eyre!("{e}"))?;
-
-    // Prepare prompt
-    let prepared = match mode {
-        CompositionMode::InlineFrontmatterPrompt => {
-            composition::prepare_inline_prompt(&source, None).map_err(|e| eyre!("{e}"))?
-        }
-        CompositionMode::ChainedDocument => {
-            composition::prepare_chained_prompt(&source).map_err(|e| eyre!("{e}"))?
-        }
-    };
-
-    // Build composition request
-    let request = CompositionRequest {
-        mode,
-        file_ref: file_ref.clone(),
-        explicit_provider: None,
-        excluded,
-        force_interactive_selection: args.interactive,
-    };
-
-    // Detect installed providers
-    let clients = InstalledAiClients::new();
-    let installed: Vec<Provider> = [
-        Provider::Claude,
-        Provider::Codex,
-        Provider::Gemini,
-        Provider::Goose,
-        Provider::KimiCode,
-        Provider::OpenCode,
-        Provider::QwenCode,
-    ]
-    .into_iter()
-    .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
-    .collect();
-
-    // Load provider preferences
-    let preference = load_provider_preferences();
-
-    // Select provider (may require interactive selection)
-    let selected = match composition::select_provider(&request, &prepared, &installed, &preference)
-    {
-        Ok(selected) => selected,
-        Err(claudine::composition::CompositionError::InteractiveSelectionRequired) => {
-            interactive_select(&installed, &request.excluded)?
-        }
-        Err(claudine::composition::CompositionError::AgentHintAmbiguous {
-            hint: _,
-            matches: _,
-            providers,
-        }) => {
-            if is_tty() {
-                interactive_select_from(&providers)?
-            } else {
-                return Err(eyre!(
-                    "agent hint is ambiguous and no TTY available for interactive selection"
-                ));
-            }
-        }
-        Err(e) => return Err(eyre!("{e}")),
-    };
-
-    if !args.silent {
-        eprintln!(
-            "  Using {} ({})",
-            selected.provider,
-            reason_label(selected.reason)
-        );
-    }
-
-    // Execute with provider retry for preference fallback
-    execute_composition(
-        &source,
-        &prepared,
-        selected,
-        &installed,
-        &preference,
-        &request,
-        &clients,
-        &args,
-    )
+        .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn execute_composition(
-    source: &ResolvedCompositionSource,
-    prepared: &PreparedPrompt,
-    selected: SelectedProvider,
-    installed: &[Provider],
-    preference: &[Provider],
-    request: &CompositionRequest,
-    clients: &InstalledAiClients,
-    args: &ComposeArgs,
-) -> Result<i32> {
-    let mut providers_to_try = vec![selected.provider];
-
-    // For preference fallback, add remaining ranked providers
-    if selected.reason == SelectionReason::PreferenceFallback {
-        let ranked = claudine::linking::ranked_provider_preferences(installed, preference);
-        for p in ranked {
-            if p != selected.provider
-                && !request.excluded.contains(&p)
-                && !providers_to_try.contains(&p)
-            {
-                providers_to_try.push(p);
-            }
-        }
-    }
-
-    for (i, provider) in providers_to_try.iter().enumerate() {
-        let result = run_provider_composition(source, prepared, *provider, clients, args);
-
-        match result {
-            Ok(code) => return Ok(code),
-            Err(e) => {
-                if i + 1 < providers_to_try.len()
-                    && selected.reason == SelectionReason::PreferenceFallback
-                {
-                    if !args.silent {
-                        eprintln!(
-                            "  {} failed ({}), trying {}...",
-                            provider,
-                            e,
-                            providers_to_try[i + 1]
-                        );
-                    }
-                    continue;
-                }
-                return Err(e);
-            }
-        }
-    }
-
-    Err(eyre!("all providers failed"))
-}
-
-fn run_provider_composition(
-    source: &ResolvedCompositionSource,
-    prepared: &PreparedPrompt,
-    provider: Provider,
-    clients: &InstalledAiClients,
-    args: &ComposeArgs,
-) -> Result<i32> {
-    let wrapper_profile = profile::profile_for_provider(provider)
-        .ok_or_else(|| eyre!("{} cannot be wrapped", provider))?;
-
-    let binary_path = clients
-        .path(provider.sniff_ai_cli())
-        .ok_or_else(|| eyre!("{} is not installed", provider))?;
-
-    let cwd = std::env::current_dir()?;
-
-    // Build minimal child args and env
-    let mut child_args = Vec::new();
-    let mut stdin_seed: Option<String> = None;
-
-    // Deliver the prompt BEFORE applying non-interactive mode, because
-    // some providers (Gemini) validate that a prompt is present in args
-    // during apply_non_interactive.
-    wrapper_profile.apply_prompt_body(&mut child_args, &mut stdin_seed, &prepared.prompt, true)?;
-
-    wrapper_profile.apply_non_interactive(&mut child_args)?;
-    wrapper_profile.apply_non_interactive_defaults(&mut child_args);
-
-    // Inject structured output flags for reliable capture
-    wrapper_profile.prepare_captured_output(&mut child_args);
-
-    // Build env
-    let env_plan = env::build_child_env(
-        wrapper_profile,
-        provider,
-        &[],   // no include overrides
-        false, // no yolo
-        false, // non-interactive
-        &[],   // no raw agent params
-        &cwd,
-        &[],   // no env overrides
-        false, // no repo mode
-        false, // no mcp shadow home
-    )?;
-
-    let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
-
-    let stdout_noise = wrapper_profile.stdout_noise_prefixes();
-    let stderr_noise = wrapper_profile.stderr_noise_prefixes();
-
-    let result = exec::run_child_capture(
-        &binary_path,
-        &child_args,
-        &env_plan.env,
-        child_cwd,
-        args.timeout,
-        exec::ChildIoOptions {
-            stdout_noise_prefixes: stdout_noise,
-            stderr_noise_prefixes: stderr_noise,
-            stdin_seed: stdin_seed.as_deref(),
-        },
-    )?;
-    let captured = result.data;
-
-    let parsed_stdout = wrapper_profile.parse_captured_output(&captured.stdout);
-
-    match prepared.mode {
-        CompositionMode::ChainedDocument => {
-            if captured.exit_code == 0 {
-                print!("{}", crate::log::maybe_strip(&parsed_stdout));
-            } else if !captured.stderr.is_empty() {
-                eprintln!("{}", crate::log::maybe_strip(&captured.stderr));
-            }
-            Ok(captured.exit_code)
-        }
-        CompositionMode::InlineFrontmatterPrompt => {
-            if captured.exit_code == 0 {
-                let mut updated_md = source.markdown.clone();
-                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                updated_md
-                    .fm_insert("last_updated", &today)
-                    .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
-                *updated_md.content_mut() = parsed_stdout;
-
-                let doc_string = updated_md.as_string();
-                claudine::config::atomic::atomic_write(
-                    &source.resolved_path,
-                    doc_string.as_bytes(),
-                )
-                .map_err(|e| eyre!("failed to write: {e}"))?;
-
-                if !args.silent {
-                    use biscuit_terminal::components::prose::Prose;
-                    use biscuit_terminal::components::renderable::Renderable;
-                    let msg = Prose::new(format!(
-                        "<green>\u{2713}</green> Updated {}",
-                        source.resolved_path.display()
-                    ))
-                    .render(&crate::log::optimistic_terminal(None));
-                    eprintln!("  {msg}");
-                }
-            } else if !captured.stderr.is_empty() {
-                eprintln!("{}", crate::log::maybe_strip(&captured.stderr));
-            }
-            Ok(captured.exit_code)
-        }
+fn resolve_explicit_provider(
+    claude: bool,
+    codex: bool,
+    gemini: bool,
+    opencode: bool,
+    qwen: bool,
+    goose: bool,
+    kimi: bool,
+) -> Option<Provider> {
+    if claude {
+        Some(Provider::Claude)
+    } else if codex {
+        Some(Provider::Codex)
+    } else if gemini {
+        Some(Provider::Gemini)
+    } else if opencode {
+        Some(Provider::OpenCode)
+    } else if qwen {
+        Some(Provider::QwenCode)
+    } else if goose {
+        Some(Provider::Goose)
+    } else if kimi {
+        Some(Provider::KimiCode)
+    } else {
+        None
     }
 }
 
-fn interactive_select(
-    installed: &[Provider],
-    excluded: &BTreeSet<Provider>,
-) -> Result<SelectedProvider> {
-    if !is_tty() {
-        return Err(eyre!(
-            "interactive provider selection required but no TTY available; \
-             set AGENT env var or add an `agent` frontmatter property"
-        ));
-    }
-
-    let candidates: Vec<Provider> = composition::build_candidate_set(installed, excluded);
-    if candidates.is_empty() {
-        return Err(eyre!("no runnable providers available"));
-    }
-
-    interactive_select_from(&candidates)
-}
-
-fn interactive_select_from(candidates: &[Provider]) -> Result<SelectedProvider> {
-    let options: Vec<String> = candidates.iter().map(|p| p.to_string()).collect();
-    let selection = Select::new("Choose a provider:", options)
-        .prompt()
-        .map_err(|e| eyre!("selection cancelled: {e}"))?;
-
-    let provider = candidates
-        .iter()
-        .find(|p| p.to_string() == selection)
-        .copied()
-        .ok_or_else(|| eyre!("invalid selection"))?;
-
-    Ok(SelectedProvider {
-        provider,
-        reason: SelectionReason::InteractiveChoice,
-    })
-}
-
-fn is_tty() -> bool {
-    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
-}
-
-fn load_provider_preferences() -> Vec<Provider> {
-    // TODO: Load from claudine settings once settings infrastructure exists.
-    // For now, return a sensible default ordering.
-    vec![Provider::Claude, Provider::Codex, Provider::Gemini]
-}
-
-fn reason_label(reason: SelectionReason) -> &'static str {
-    match reason {
-        SelectionReason::ExplicitProvider => "explicit",
-        SelectionReason::EnvironmentOverride => "AGENT env",
-        SelectionReason::FrontmatterHint => "frontmatter hint",
-        SelectionReason::InteractiveChoice => "interactive choice",
-        SelectionReason::PreferenceFallback => "preference",
+/// Lightweight git root detection for guardrails loading.
+fn find_git_root() -> Option<std::path::PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let mut dir = cwd.as_path();
+    loop {
+        if dir.join(".git").exists() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
     }
 }

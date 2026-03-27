@@ -1,4 +1,3 @@
-use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
@@ -6,7 +5,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::badges::{
-    COMPOSE, INLINE_COMPOSE, INTERACTIVE, NON_INTERACTIVE, PROMPT_FILE, REPO_FLAG, VERBOSE, YOLO,
+    COMPOSE, INLINE_COMPOSE, INTERACTIVE, NON_INTERACTIVE, REPO_FLAG, VERBOSE, YOLO,
 };
 use claudine::events::Provider;
 use std::path::Path;
@@ -14,17 +13,15 @@ use std::path::Path;
 use crate::commands::wrap::McpRuntimeInfo;
 use crate::commands::wrap::env::EnvPlan;
 use crate::commands::wrap::profile::WrapperProfile;
-use crate::commands::wrap::prompt_file::PromptFileDryRunInfo;
 use crate::log;
 
 /// Context for compose/inline-compose mode display in the header.
+#[allow(dead_code)]
 pub(crate) enum ComposeDisplay {
-    /// Chained composition (`--compose`).
+    /// Chained composition (`claudine compose`).
     Compose,
-    /// Inline frontmatter-prompt composition (`--frontmatter-prompt`).
+    /// Inline composition (`claudine inline-compose`).
     InlineCompose,
-    /// Prompt sourced from a file (`--prompt-file`).
-    PromptFile,
 }
 
 /// Print the one-line header: `Claudine ▸ Provider [badges] prompt`
@@ -69,7 +66,6 @@ pub(crate) fn log_wrapper_header(
     match compose_display {
         Some(ComposeDisplay::Compose) => header_parts.push(COMPOSE.to_string()),
         Some(ComposeDisplay::InlineCompose) => header_parts.push(INLINE_COMPOSE.to_string()),
-        Some(ComposeDisplay::PromptFile) => header_parts.push(PROMPT_FILE.to_string()),
         None => {}
     }
 
@@ -165,7 +161,6 @@ pub(crate) fn log_dry_run(
     repo_requested: bool,
     env_plan: &EnvPlan,
     mcp_runtime: Option<&McpRuntimeInfo>,
-    prompt_file_info: Option<&PromptFileDryRunInfo>,
     child_cwd: &Path,
     term: &Terminal,
 ) {
@@ -228,34 +223,6 @@ pub(crate) fn log_dry_run(
     if let Some(mcp_runtime) = mcp_runtime {
         log_mcp_runtime(term, mcp_runtime);
     }
-
-    if let Some(pf) = prompt_file_info {
-        log_prompt_file_dry_run(term, pf);
-    }
-}
-
-fn log_prompt_file_dry_run(term: &Terminal, info: &PromptFileDryRunInfo) {
-    log::message(&Prose::new("<bold>Prompt File:</bold>").render(term));
-
-    let mut items: Vec<RenderableContent> = Vec::new();
-    items.push(RenderableContent::from(Prose::new(format!(
-        "<green>path</green><dim>={} (from {})</dim>",
-        info.resolved_path.display(),
-        info.original
-    ))));
-    items.push(RenderableContent::from(Prose::new(format!(
-        "<green>delivery</green><dim>={}</dim>",
-        info.delivery_method
-    ))));
-    if !info.env_names.is_empty() {
-        items.push(RenderableContent::from(Prose::new(format!(
-            "<green>env_vars</green><dim>={}</dim>",
-            info.env_names.join(", ")
-        ))));
-    }
-
-    let rendered = UnorderedList::from(items).with_bullet("• ").render(term);
-    log::message(&rendered);
 }
 
 pub(crate) fn summarize_value(key: &str, value: &str) -> String {
@@ -564,30 +531,6 @@ pub(crate) fn format_session_start(
         "<dim>- <i>{name}</i> session ID </dim>{short_id}<dim>{model_part}</dim>"
     ))
     .render(&crate::log::terminal())
-}
-
-/// Render the user prompt as a truncated blockquote for frontmatter-prompt display.
-///
-/// When `verbose` is true, the full prompt is shown without truncation.
-pub(crate) fn render_prompt_blockquote(prompt: &str, term: &Terminal, verbose: bool) {
-    let lines: Vec<&str> = prompt.lines().collect();
-    let (display_text, truncated) = if !verbose && lines.len() > 10 {
-        let first_10 = lines[..10].join("\n");
-        (first_10, true)
-    } else {
-        (prompt.to_string(), false)
-    };
-
-    log::message(&Prose::new("<bold>Prompt:</bold>").render(term));
-    let mut bq_text = display_text;
-    if truncated {
-        bq_text.push_str(&format!(
-            "\n{}",
-            Prose::new("<dim><i>remaining prompt shortened for brevity</i></dim>").render(term)
-        ));
-    }
-    let rendered = BlockQuote::from(bq_text.as_str()).render(term);
-    log::message(&rendered);
 }
 
 /// Render assistant terminal text through `Prose` so wrapping and styling are terminal-aware.

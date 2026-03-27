@@ -75,8 +75,8 @@ async fn main() -> Result<()> {
             commands::wrap::run_provider_wrapper(Provider::Goose, args, cli.verbose)
         }
         Commands::Compose(args) => commands::compose::run_compose(args, cli.verbose),
-        Commands::ComposeInline(args) => {
-            commands::compose::run_compose_inline(args, cli.verbose)
+        Commands::InlineCompose(args) => {
+            commands::compose::run_inline_compose(args, cli.verbose)
         }
     }
 }

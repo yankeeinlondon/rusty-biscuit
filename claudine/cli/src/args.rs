@@ -69,6 +69,6 @@ pub(crate) enum Commands {
     /// Compose a Markdown document through an agentic CLI.
     Compose(commands::compose::ComposeArgs),
     /// Inline composition: use frontmatter prompt, replace body with output.
-    #[command(name = "compose-inline")]
-    ComposeInline(commands::compose::ComposeInlineArgs),
+    #[command(name = "inline-compose")]
+    InlineCompose(commands::compose::InlineComposeArgs),
 }
