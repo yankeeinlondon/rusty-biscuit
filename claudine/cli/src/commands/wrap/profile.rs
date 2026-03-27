@@ -249,6 +249,26 @@ pub(crate) trait WrapperProfile: Send + Sync {
         None
     }
 
+    // -- Resume support -------------------------------------------------------
+
+    /// Build CLI args for resuming a previous session.
+    ///
+    /// Returns `Ok(args)` with the full argv for a resume invocation, or
+    /// `Err` if the provider does not support session resume.
+    fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
+        bail!(
+            "provider {} does not support session resume",
+            self.provider()
+        )
+    }
+
+    /// Whether this provider supports resuming sessions.
+    fn supports_resume(&self) -> bool {
+        false
+    }
+
+    // -- Structured stream support -------------------------------------------
+
     /// Apply internal structured stream flags to child args.
     ///
     /// Called only when `supports_structured_stream()` returns true and
@@ -379,6 +399,19 @@ impl WrapperProfile for ClaudeWrapper {
         }
         *stdin_seed = Some(prompt.to_string());
         Ok(())
+    }
+
+    fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
+        Ok(vec![
+            "claude".to_string(),
+            "-r".to_string(),
+            session_id.to_string(),
+            "--print".to_string(),
+        ])
+    }
+
+    fn supports_resume(&self) -> bool {
+        true
     }
 
     fn supports_structured_stream(&self) -> bool {
@@ -517,6 +550,19 @@ impl WrapperProfile for CodexWrapper {
 
     fn allowed_env_keys(&self) -> &'static [&'static str] {
         &["OPENAI_API_KEY", "CODEX_API_KEY"]
+    }
+
+    fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
+        Ok(vec![
+            "codex".to_string(),
+            "exec".to_string(),
+            "resume".to_string(),
+            session_id.to_string(),
+        ])
+    }
+
+    fn supports_resume(&self) -> bool {
+        true
     }
 
     fn supports_structured_stream(&self) -> bool {
@@ -778,6 +824,19 @@ impl WrapperProfile for KimiWrapper {
         Ok(())
     }
 
+    fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
+        Ok(vec![
+            "kimi".to_string(),
+            "--resume".to_string(),
+            session_id.to_string(),
+            "--print".to_string(),
+        ])
+    }
+
+    fn supports_resume(&self) -> bool {
+        true
+    }
+
     fn supports_structured_stream(&self) -> bool {
         true
     }
@@ -884,6 +943,18 @@ impl WrapperProfile for QwenWrapper {
         args.push("--prompt".to_string());
         args.push(prompt.to_string());
         Ok(())
+    }
+
+    fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
+        Ok(vec![
+            "qwen".to_string(),
+            "--resume".to_string(),
+            session_id.to_string(),
+        ])
+    }
+
+    fn supports_resume(&self) -> bool {
+        true
     }
 
     fn supports_structured_stream(&self) -> bool {

@@ -633,14 +633,28 @@ pub(crate) fn render_assistant_markdown_with_options(
     }
 }
 
-/// Format a frontmatter-prompt validation check line (success).
-pub(crate) fn fm_check_ok(message: &str, term: &Terminal) -> String {
+/// Format a validation check line (success).
+pub(crate) fn check_ok(message: &str, term: &Terminal) -> String {
     Prose::new(format!("<green-500>\u{2713}</green-500> {message}")).render(term)
 }
 
-/// Format a frontmatter-prompt validation check line (failure).
-pub(crate) fn fm_check_fail(message: &str, term: &Terminal) -> String {
+/// Format a validation check line (failure).
+pub(crate) fn check_fail(message: &str, term: &Terminal) -> String {
     Prose::new(format!("<red-500>\u{2a2f}</red-500> {message}")).render(term)
+}
+
+/// Format a frontmatter-prompt validation check line (success).
+///
+/// Thin wrapper kept for backwards compatibility.
+pub(crate) fn fm_check_ok(message: &str, term: &Terminal) -> String {
+    check_ok(message, term)
+}
+
+/// Format a frontmatter-prompt validation check line (failure).
+///
+/// Thin wrapper kept for backwards compatibility.
+pub(crate) fn fm_check_fail(message: &str, term: &Terminal) -> String {
+    check_fail(message, term)
 }
 
 pub(crate) fn capitalize_provider(provider: Provider) -> String {

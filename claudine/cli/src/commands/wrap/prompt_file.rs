@@ -67,6 +67,8 @@ pub(crate) struct ComposedPrompt {
     pub body: String,
     pub env_overrides: Vec<(String, String)>,
     pub env_names: Vec<String>,
+    /// The composed frontmatter as a JSON value (for harness property detection).
+    pub frontmatter: serde_json::Value,
 }
 
 /// Metadata for prompt-file display (used in both dry-run and normal output).
@@ -296,12 +298,16 @@ pub(crate) fn compose_prompt_file(resolved: &ResolvedPromptFile) -> Result<Compo
 
     let env_overrides = frontmatter_to_env(fm_map)?;
     let env_names: Vec<String> = env_overrides.iter().map(|(k, _)| k.clone()).collect();
+    let frontmatter = serde_json::Value::Object(
+        fm_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+    );
 
     Ok(ComposedPrompt {
         resolved_path: resolved.resolved_path.clone(),
         body,
         env_overrides,
         env_names,
+        frontmatter,
     })
 }
 

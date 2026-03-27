@@ -288,7 +288,7 @@ fn run_provider_composition(
     let stdout_noise = wrapper_profile.stdout_noise_prefixes();
     let stderr_noise = wrapper_profile.stderr_noise_prefixes();
 
-    let captured = exec::run_child_capture(
+    let result = exec::run_child_capture(
         &binary_path,
         &child_args,
         &env_plan.env,
@@ -300,6 +300,7 @@ fn run_provider_composition(
             stdin_seed: stdin_seed.as_deref(),
         },
     )?;
+    let captured = result.data;
 
     let parsed_stdout = wrapper_profile.parse_captured_output(&captured.stdout);
 

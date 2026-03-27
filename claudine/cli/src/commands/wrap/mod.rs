@@ -437,7 +437,7 @@ pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs, verbose: u8) 
     std::process::exit(code);
 }
 
-fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8) -> Result<i32> {
+fn run_provider_wrapper_inner(provider: Provider, mut args: WrapperArgs, verbose: u8) -> Result<i32> {
     let profile = profile::profile_for_provider(provider).ok_or_else(|| {
         eyre!(
             "'{}' cannot be wrapped (it is a VS Code extension)",
@@ -760,6 +760,97 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     // INTERACTIVE env var that was set before the pipelines ran.
     if effective_non_interactive && !non_interactive_requested {
         env_plan.env.insert("INTERACTIVE".into(), "false".into());
+    }
+
+    // -- Harness detection and pre-checks ------------------------------------
+    // Check whether the composed frontmatter contains harness properties
+    // (pre_checks, post_checks, timeout, handle, handle_*). If so, parse a
+    // HarnessPlan and run pre-checks before provider launch.
+    let mut harness_state: Option<(
+        claudine::harness::HarnessPlan,
+        claudine::harness::PreRunSnapshot,
+    )> = None;
+
+    // Extract composed frontmatter from whichever pipeline was used.
+    // Converts IndexMap-based FrontmatterMap to serde_json::Value::Object.
+    let fm_to_value = |fm: &indexmap::IndexMap<String, serde_json::Value>| -> serde_json::Value {
+        serde_json::Value::Object(fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+    };
+
+    let composed_frontmatter: Option<serde_json::Value> = if let Some(ref pf_info) =
+        prompt_file_dry_run
+    {
+        // --prompt-file: re-read the resolved file's frontmatter
+        let md = darkmatter::markdown::Markdown::try_from(pf_info.resolved_path.as_path()).ok();
+        md.map(|m| fm_to_value(m.frontmatter().as_map()))
+    } else if let Some((ref source, _, _, _)) = inline_composition_source {
+        // --frontmatter-prompt: frontmatter from source.markdown
+        Some(fm_to_value(source.markdown.frontmatter().as_map()))
+    } else if chained_composition {
+        // --compose: re-read frontmatter from the compose input
+        args.compose.as_ref().and_then(|input| {
+            claudine::composition::resolve_composition_source(input)
+                .ok()
+                .map(|s| fm_to_value(s.markdown.frontmatter().as_map()))
+        })
+    } else {
+        None
+    };
+
+    if let Some(ref fm) = composed_frontmatter {
+        if claudine::harness::has_harness_properties(fm) {
+            // Determine source path and repo root for resolution context
+            let source_path = prompt_file_dry_run
+                .as_ref()
+                .map(|pf| pf.resolved_path.clone())
+                .or_else(|| {
+                    inline_composition_source
+                        .as_ref()
+                        .map(|(s, _, _, _)| s.resolved_path.clone())
+                })
+                .unwrap_or_else(|| {
+                    // For --compose, use the compose input path
+                    args.compose
+                        .as_ref()
+                        .and_then(|input| {
+                            claudine::composition::resolve_composition_source(input)
+                                .ok()
+                                .map(|s| s.resolved_path)
+                        })
+                        .unwrap_or_else(|| std::path::PathBuf::from("unknown"))
+                });
+
+            let resolve_ctx = claudine::harness::HarnessResolutionContext {
+                source_path: &source_path,
+                repo_root: env_plan.repo_root.as_deref(),
+            };
+
+            match claudine::harness::parse_harness_plan(fm, &source_path, &resolve_ctx) {
+                Ok(plan) => {
+                    // Apply harness timeout if no CLI --timeout was specified
+                    if args.timeout.is_none() {
+                        if let Some(t) = plan.timeout {
+                            args.timeout = Some(t.as_secs());
+                        }
+                    }
+
+                    // Run pre-checks
+                    if let Err(e) = claudine::harness::evaluate_pre_checks(&plan, &term) {
+                        return Err(eyre!("{e}"));
+                    }
+
+                    // Capture pre-run snapshot for post-check comparison
+                    let snapshot = claudine::harness::capture_pre_run_snapshot(&plan)
+                        .map_err(|e| eyre!("harness snapshot: {e}"))?;
+
+                    harness_state = Some((plan, snapshot));
+                }
+                Err(e) => {
+                    // Parse error: render and exit before provider launch
+                    return Err(eyre!("{e}"));
+                }
+            }
+        }
     }
 
     let mut mcp_runtime = None;
@@ -1102,7 +1193,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     ),
                     parser_config,
                 );
-                let mut summary = exec::run_child_stream(
+                let stream_result = exec::run_child_stream(
                     binary_path.as_path(),
                     &child_args,
                     &env_plan.env,
@@ -1113,6 +1204,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     stdin_seed.as_deref(),
                     parser,
                 )?;
+                let mut summary = stream_result.data;
                 // Codex never emits text via feed_line; its accumulated text is
                 // fallback-only, so it doesn't count as "streamed to stdout".
                 let had_streamed_assistant =
@@ -1149,7 +1241,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 (exit, Some((summary, details, had_streamed_assistant)))
             } else {
                 // Legacy path: forward I/O to terminal
-                let exit = exec::run_child(
+                let result = exec::run_child(
                     binary_path.as_path(),
                     &child_args,
                     &env_plan.env,
@@ -1161,8 +1253,37 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                         stdin_seed: stdin_seed.as_deref(),
                     },
                 )?;
-                (exit, None)
+                (result.data, None)
             };
+
+            // Harness post-checks: if the harness is active, run post-checks
+            // using the captured snapshot and attempt outcome. If post-checks fail,
+            // exit with an error code.
+            if let Some((ref plan, ref snapshot)) = harness_state {
+                // Build an AttemptOutcome from the stream summary if available
+                let outcome = if let Some((ref summary, _, _)) = deferred_summary {
+                    claudine::harness::build_attempt_outcome(
+                        1,
+                        summary,
+                        claudine::harness::ProcessTermination::Completed, // TODO: use actual termination from Phase 3
+                    )
+                } else {
+                    // Legacy path: no structured summary available
+                    claudine::harness::AttemptOutcome {
+                        attempt: 1,
+                        session_id: None,
+                        final_response: String::new(),
+                        exit_code: agent_exit,
+                        termination: claudine::harness::ProcessTermination::Completed,
+                        stderr_text: None,
+                    }
+                };
+
+                if let Err(e) = claudine::harness::evaluate_post_checks(plan, snapshot, &outcome, &term)
+                {
+                    return Err(eyre!("{e}"));
+                }
+            }
 
             // Post-execution validation: always check the file, even on agent error.
             // The agent may have successfully updated the file before an API error occurred.
@@ -1378,7 +1499,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 ),
                 parser_config,
             );
-            let mut summary = exec::run_child_stream(
+            let stream_result = exec::run_child_stream(
                 binary_path.as_path(),
                 &child_args,
                 &env_plan.env,
@@ -1389,6 +1510,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 stdin_seed.as_deref(),
                 parser,
             )?;
+            let mut summary = stream_result.data;
             if let Some(codex_output) = structured_codex_output.as_ref() {
                 codex_output.apply_to_summary(&mut summary);
             }
@@ -1421,10 +1543,22 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 &summary_details.lock().unwrap().clone(),
             );
 
+            // Harness post-checks for compose/prompt-file paths
+            if let Some((ref plan, ref snapshot)) = harness_state {
+                let outcome = claudine::harness::build_attempt_outcome(
+                    1,
+                    &summary,
+                    claudine::harness::ProcessTermination::Completed,
+                );
+                if let Err(e) = claudine::harness::evaluate_post_checks(plan, snapshot, &outcome, &term) {
+                    return Err(eyre!("{e}"));
+                }
+            }
+
             Ok(summary.exit_code)
         } else {
             // Normal execution: forward I/O to terminal (legacy path)
-            exec::run_child(
+            let result = exec::run_child(
                 binary_path.as_path(),
                 &child_args,
                 &env_plan.env,
@@ -1435,7 +1569,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     stderr_noise_prefixes: stderr_noise,
                     stdin_seed: stdin_seed.as_deref(),
                 },
-            )
+            )?;
+            Ok(result.data)
         };
 
     // MCP injector cleanup: remove temp files written during injection

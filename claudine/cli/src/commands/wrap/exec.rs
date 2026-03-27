@@ -17,6 +17,12 @@ pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdin_seed: Option<&'a str>,
 }
 
+/// Result of a child process execution, enriched with termination info.
+pub(crate) struct ProcessResult<T> {
+    pub(crate) data: T,
+    pub(crate) termination: claudine::harness::ProcessTermination,
+}
+
 /// Renders streamed assistant text as Markdown, flushing at block boundaries.
 ///
 /// Accumulates incoming text and detects Markdown block boundaries (blank lines,
@@ -241,7 +247,7 @@ pub(crate) fn run_child(
     cwd: &Path,
     timeout: Option<u64>,
     io: ChildIoOptions<'_>,
-) -> Result<i32> {
+) -> Result<ProcessResult<i32>> {
     // Debug assertion: critical variables must be present.
     debug_assert!(
         env.contains_key(&OsString::from("PATH")),
@@ -347,7 +353,7 @@ pub(crate) fn run_child(
         None
     };
 
-    let exit_code = if let Some(seconds) = timeout {
+    let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
         wait_with_signal_handling(&mut child)?
@@ -360,12 +366,19 @@ pub(crate) fn run_child(
         let _ = handle.join();
     }
 
-    Ok(exit_code)
+    Ok(ProcessResult {
+        data: exit_code,
+        termination,
+    })
 }
 
 /// Wait for the child, forwarding SIGINT/SIGTERM on repeated Ctrl-C.
+///
+/// Returns `(exit_code, termination_kind)`.
 #[cfg(unix)]
-fn wait_with_signal_handling(child: &mut Child) -> Result<i32> {
+fn wait_with_signal_handling(
+    child: &mut Child,
+) -> Result<(i32, claudine::harness::ProcessTermination)> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -398,18 +411,35 @@ fn wait_with_signal_handling(child: &mut Child) -> Result<i32> {
     }?;
 
     let status = child.wait()?;
-    Ok(exit_code_from_status(status))
+    let code = exit_code_from_status(status);
+    let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
+    let termination = if was_interrupted {
+        claudine::harness::ProcessTermination::Interrupted
+    } else {
+        claudine::harness::ProcessTermination::Completed
+    };
+    Ok((code, termination))
 }
 
 #[cfg(not(unix))]
-fn wait_with_signal_handling(child: &mut Child) -> Result<i32> {
+fn wait_with_signal_handling(
+    child: &mut Child,
+) -> Result<(i32, claudine::harness::ProcessTermination)> {
     let status = child.wait()?;
-    Ok(exit_code_from_status(status))
+    Ok((
+        exit_code_from_status(status),
+        claudine::harness::ProcessTermination::Completed,
+    ))
 }
 
 /// Wait for the child with a timeout, sending SIGTERM then SIGKILL.
+///
+/// Returns `(exit_code, termination_kind)`.
 #[cfg(unix)]
-fn wait_with_timeout(child: &mut Child, seconds: u64) -> Result<i32> {
+fn wait_with_timeout(
+    child: &mut Child,
+    seconds: u64,
+) -> Result<(i32, claudine::harness::ProcessTermination)> {
     use std::time::{Duration, Instant};
 
     let deadline = Instant::now() + Duration::from_secs(seconds);
@@ -417,7 +447,12 @@ fn wait_with_timeout(child: &mut Child, seconds: u64) -> Result<i32> {
 
     loop {
         match child.try_wait()? {
-            Some(status) => return Ok(exit_code_from_status(status)),
+            Some(status) => {
+                return Ok((
+                    exit_code_from_status(status),
+                    claudine::harness::ProcessTermination::Completed,
+                ))
+            }
             None => {
                 if Instant::now() >= deadline {
                     // Send SIGTERM
@@ -429,7 +464,12 @@ fn wait_with_timeout(child: &mut Child, seconds: u64) -> Result<i32> {
                     let kill_deadline = Instant::now() + grace_period;
                     loop {
                         match child.try_wait()? {
-                            Some(status) => return Ok(exit_code_from_status(status)),
+                            Some(status) => {
+                                return Ok((
+                                    exit_code_from_status(status),
+                                    claudine::harness::ProcessTermination::TimedOut,
+                                ))
+                            }
                             None => {
                                 if Instant::now() >= kill_deadline {
                                     // Send SIGKILL
@@ -437,7 +477,10 @@ fn wait_with_timeout(child: &mut Child, seconds: u64) -> Result<i32> {
                                         libc::kill(child.id() as i32, libc::SIGKILL);
                                     }
                                     let status = child.wait()?;
-                                    return Ok(exit_code_from_status(status));
+                                    return Ok((
+                                        exit_code_from_status(status),
+                                        claudine::harness::ProcessTermination::TimedOut,
+                                    ));
                                 }
                                 std::thread::sleep(Duration::from_millis(100));
                             }
@@ -451,19 +494,30 @@ fn wait_with_timeout(child: &mut Child, seconds: u64) -> Result<i32> {
 }
 
 #[cfg(not(unix))]
-fn wait_with_timeout(child: &mut Child, seconds: u64) -> Result<i32> {
+fn wait_with_timeout(
+    child: &mut Child,
+    seconds: u64,
+) -> Result<(i32, claudine::harness::ProcessTermination)> {
     use std::time::{Duration, Instant};
 
     let deadline = Instant::now() + Duration::from_secs(seconds);
 
     loop {
         match child.try_wait()? {
-            Some(status) => return Ok(exit_code_from_status(status)),
+            Some(status) => {
+                return Ok((
+                    exit_code_from_status(status),
+                    claudine::harness::ProcessTermination::Completed,
+                ))
+            }
             None => {
                 if Instant::now() >= deadline {
                     child.kill()?;
                     let status = child.wait()?;
-                    return Ok(exit_code_from_status(status));
+                    return Ok((
+                        exit_code_from_status(status),
+                        claudine::harness::ProcessTermination::TimedOut,
+                    ));
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
@@ -490,7 +544,7 @@ pub(crate) fn run_child_capture(
     cwd: &Path,
     timeout: Option<u64>,
     io: ChildIoOptions<'_>,
-) -> Result<CapturedChildOutput> {
+) -> Result<ProcessResult<CapturedChildOutput>> {
     debug_assert!(
         env.contains_key(&OsString::from("PATH")),
         "child env is missing PATH"
@@ -571,7 +625,7 @@ pub(crate) fn run_child_capture(
         captured
     });
 
-    let exit_code = if let Some(seconds) = timeout {
+    let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
         wait_with_signal_handling(&mut child)?
@@ -580,10 +634,13 @@ pub(crate) fn run_child_capture(
     let stdout = stdout_handle.join().unwrap_or_default();
     let stderr = stderr_handle.join().unwrap_or_default();
 
-    Ok(CapturedChildOutput {
-        exit_code,
-        stdout,
-        stderr,
+    Ok(ProcessResult {
+        data: CapturedChildOutput {
+            exit_code,
+            stdout,
+            stderr,
+        },
+        termination,
     })
 }
 
@@ -605,7 +662,7 @@ pub(crate) fn run_child_stream(
     suppress_stderr_on_success: bool,
     stdin_seed: Option<&str>,
     parser: Box<dyn StreamParser>,
-) -> Result<StreamExecutionSummary> {
+) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
 
@@ -724,7 +781,7 @@ pub(crate) fn run_child_stream(
         captured
     });
 
-    let exit_code = if let Some(seconds) = timeout {
+    let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
         wait_with_signal_handling(&mut child)?
@@ -745,7 +802,10 @@ pub(crate) fn run_child_stream(
         summary.duration_ms = Some(started_at.elapsed().as_millis() as u64);
     }
 
-    Ok(summary)
+    Ok(ProcessResult {
+        data: summary,
+        termination,
+    })
 }
 
 /// Spawn a provider child process with structured stream parsing, capturing output.
@@ -762,7 +822,7 @@ pub(crate) fn run_child_stream_capture(
     stderr_noise_prefixes: &[&str],
     stdin_seed: Option<&str>,
     parser: Box<dyn StreamParser>,
-) -> Result<StreamExecutionSummary> {
+) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
 
@@ -829,7 +889,7 @@ pub(crate) fn run_child_stream_capture(
         captured
     });
 
-    let exit_code = if let Some(seconds) = timeout {
+    let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
         wait_with_signal_handling(&mut child)?
@@ -852,7 +912,10 @@ pub(crate) fn run_child_stream_capture(
         summary.stderr_text = Some(stderr_text);
     }
 
-    Ok(summary)
+    Ok(ProcessResult {
+        data: summary,
+        termination,
+    })
 }
 
 /// Minimal fallback parser used when the real parser thread panics.
@@ -926,7 +989,7 @@ printf '%s\n' '{"type":"result","duration_ms":25}'
 "#;
         let args = vec!["-c".to_string(), script.to_string()];
 
-        let summary = run_child_stream_capture(
+        let result = run_child_stream_capture(
             Path::new("/bin/sh"),
             &args,
             &env,
@@ -937,6 +1000,7 @@ printf '%s\n' '{"type":"result","duration_ms":25}'
             parser,
         )
         .unwrap();
+        let summary = result.data;
 
         assert_eq!(summary.exit_code, 0);
         assert_eq!(summary.assistant_text, "hello");
@@ -970,7 +1034,7 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
 "#;
         let args = vec!["-c".to_string(), script.to_string()];
 
-        let summary = run_child_stream(
+        let result = run_child_stream(
             Path::new("/bin/sh"),
             &args,
             &env,
@@ -982,6 +1046,7 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
             parser,
         )
         .unwrap();
+        let summary = result.data;
 
         assert_eq!(summary.exit_code, 0);
         assert_eq!(summary.assistant_text, "hello");
