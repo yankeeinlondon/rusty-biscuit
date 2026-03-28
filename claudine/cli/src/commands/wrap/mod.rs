@@ -1560,7 +1560,7 @@ fn execute_harness_attempt(
     launch: &AttemptLaunch,
     prompt_mode: HarnessPromptMode,
     prompt_state: &HarnessPromptState,
-    materialized: &MaterializedHarnessPrompt,
+    _materialized: &MaterializedHarnessPrompt,
     use_structured: bool,
     structured_codex_output: Option<&StructuredCodexOutput>,
     stdout_noise: &[&str],
@@ -1573,7 +1573,7 @@ fn execute_harness_attempt(
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
 ) -> Result<claudine::harness::AttemptOutcome> {
-    let (mut exit_code, termination, session_id, final_response, stderr_text) = if use_structured {
+    let (exit_code, termination, session_id, final_response, stderr_text) = if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig::default();
         let parser = claudine::stream::create_parser(
@@ -1684,17 +1684,16 @@ fn execute_harness_attempt(
     };
 
     if prompt_mode == HarnessPromptMode::Inline {
-        exit_code = finalize_inline_harness_attempt(
+        report_inline_agent_status(
             provider,
             &prompt_state.source_path,
-            materialized,
             &final_response,
             exit_code,
             termination,
             child_cwd,
             show_checks,
             term,
-        )?;
+        );
     }
 
     Ok(claudine::harness::AttemptOutcome {
@@ -1708,17 +1707,16 @@ fn execute_harness_attempt(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn finalize_inline_harness_attempt(
+fn report_inline_agent_status(
     provider: Provider,
     source_path: &Path,
-    materialized: &MaterializedHarnessPrompt,
     final_response: &str,
     agent_exit: i32,
     termination: claudine::harness::ProcessTermination,
     child_cwd: &Path,
     show_checks: bool,
     term: &Terminal,
-) -> Result<i32> {
+) {
     let provider_name = crate::output::capitalize_provider(provider);
     let display_path = source_path
         .strip_prefix(child_cwd)
@@ -1749,54 +1747,69 @@ fn finalize_inline_harness_attempt(
         }
     }
 
-    if was_interrupted {
-        if show_checks {
-            if final_response.trim().is_empty() {
-                log::message(&crate::output::fm_check_fail(
-                    &format!(
-                        "<b>User interrupted the agent with CTRL+C; the body of \
-                         <blue-500>{display_path}</blue-500> is empty so it appears no work was accomplished.</b>"
-                    ),
-                    term,
-                ));
-            } else {
-                log::message(&crate::output::fm_check_fail(
-                    &format!(
-                        "<b>User interrupted the agent with CTRL+C; the body of \
-                         <blue-500>{display_path}</blue-500> has been at least partially filled:</b>"
-                    ),
-                    term,
-                ));
-                eprintln!();
-                for line in final_response.lines() {
-                    eprintln!("  {line}");
-                }
+    if was_interrupted && show_checks {
+        if final_response.trim().is_empty() {
+            log::message(&crate::output::fm_check_fail(
+                &format!(
+                    "<b>User interrupted the agent with CTRL+C; the body of \
+                     <blue-500>{display_path}</blue-500> is empty so it appears no work was accomplished.</b>"
+                ),
+                term,
+            ));
+        } else {
+            log::message(&crate::output::fm_check_fail(
+                &format!(
+                    "<b>User interrupted the agent with CTRL+C; the body of \
+                     <blue-500>{display_path}</blue-500> has been at least partially filled:</b>"
+                ),
+                term,
+            ));
+            eprintln!();
+            for line in final_response.lines() {
+                eprintln!("  {line}");
             }
         }
-        return Ok(1);
     }
+}
 
-    let Some(closure_plan) = materialized.inline_closure_plan.as_ref() else {
-        return Ok(agent_exit);
-    };
-    if agent_exit != 0 {
-        return Ok(agent_exit);
-    }
+/// Attempt inline closure validation and application.
+///
+/// Returns `Ok(())` on success (file rewritten), or a list of
+/// `ValidationFailure`s that should be routed through the harness handler
+/// system for potential retry/resume/redirect recovery.
+fn try_inline_closure(
+    closure_plan: &claudine::composition::InlineClosurePlan,
+    final_response: &str,
+    source_path: &Path,
+    child_cwd: &Path,
+    show_checks: bool,
+    term: &Terminal,
+) -> Result<(), Vec<claudine::harness::ValidationFailure>> {
+    use claudine::harness::{ValidationEvent, ValidationFailure, ValidationRuleId, FailurePhase};
+
+    let display_path = source_path
+        .strip_prefix(child_cwd)
+        .unwrap_or(source_path)
+        .display();
 
     let replacement_body = match claudine::composition::closure::extract_replacement_body(
         final_response,
     ) {
         Ok(body) => body,
         Err(error) => {
+            let message = format!(
+                "the referenced file -- {display_path} -- did not receive a valid replacement body: {error}"
+            );
             if show_checks {
-                log::message(&crate::output::fm_check_fail(
-                    &format!(
-                        "the referenced file -- {display_path} -- did not receive a valid replacement body: {error}"
-                    ),
-                    term,
-                ));
+                log::message(&crate::output::fm_check_fail(&message, term));
             }
-            return Ok(1);
+            return Err(vec![ValidationFailure {
+                rule_id: ValidationRuleId(9000),
+                event: ValidationEvent::InlineResponseEmpty,
+                phase: FailurePhase::PostCheck,
+                subject_key: Some(source_path.display().to_string()),
+                message,
+            }]);
         }
     };
 
@@ -1818,16 +1831,28 @@ fn finalize_inline_harness_attempt(
                     term,
                 ));
             }
-            Ok(agent_exit)
+            Ok(())
         }
         Err(error) => {
+            let is_unchanged = error
+                .to_string()
+                .contains("unchanged");
+            let event = if is_unchanged {
+                ValidationEvent::InlineBodyUnchanged
+            } else {
+                ValidationEvent::InlineResponseEmpty
+            };
+            let message = format!("failed to rewrite {display_path}: {error}");
             if show_checks {
-                log::message(&crate::output::fm_check_fail(
-                    &format!("failed to rewrite {display_path}: {error}"),
-                    term,
-                ));
+                log::message(&crate::output::fm_check_fail(&message, term));
             }
-            Ok(1)
+            Err(vec![ValidationFailure {
+                rule_id: ValidationRuleId(9001),
+                event,
+                phase: FailurePhase::PostCheck,
+                subject_key: Some(source_path.display().to_string()),
+                message,
+            }])
         }
     }
 }
@@ -2211,7 +2236,79 @@ pub(crate) fn run_harness_loop(
             Some(&permission_probe),
             term,
         ) {
-            Ok(()) => return Ok(outcome.exit_code),
+            Ok(()) => {
+                // Post-checks passed. For inline mode, run built-in closure
+                // validation through the handler system so retry/resume/redirect
+                // can recover from empty or unchanged responses.
+                if let Some(closure_plan) = materialized.inline_closure_plan.as_ref() {
+                    if outcome.exit_code == 0 {
+                        if let Err(failures) = try_inline_closure(
+                            closure_plan,
+                            &outcome.final_response,
+                            &prompt_state.source_path,
+                            child_cwd,
+                            show_checks,
+                            term,
+                        ) {
+                            let contexts =
+                                claudine::harness::build_validation_failure_context(
+                                    &failures,
+                                    provider.as_slug(),
+                                    plan.source_path.as_path(),
+                                    attempt,
+                                    outcome.session_id.clone(),
+                                    Some(outcome.clone()),
+                                );
+
+                            let mut next_plan = None;
+                            for failure_ctx in &contexts {
+                                match claudine::harness::resolve_handler(
+                                    failure_ctx,
+                                    &plan.handlers,
+                                    plan.programmatic_handler.as_ref(),
+                                ) {
+                                    Ok(Some(action)) => {
+                                        next_plan = build_next_attempt_plan(
+                                            &action,
+                                            attempt,
+                                            DEFAULT_MAX_RETRIES,
+                                            &failure_ctx.message,
+                                            profile,
+                                            outcome.session_id.as_deref(),
+                                            &prompt_state.source_path,
+                                            repo_root,
+                                            failure_ctx,
+                                            term,
+                                        )?;
+                                        if next_plan.is_some() {
+                                            break;
+                                        }
+                                    }
+                                    Ok(None) => {}
+                                    Err(e) => return Err(eyre!("{e}")),
+                                }
+                            }
+
+                            if let Some(plan) = next_plan {
+                                attempt = plan.next_attempt;
+                                apply_next_attempt_plan(prompt_state, &plan);
+                                continue;
+                            }
+
+                            return Err(eyre!(
+                                "inline closure validation failed ({} {})",
+                                failures.len(),
+                                if failures.len() == 1 {
+                                    "failure"
+                                } else {
+                                    "failures"
+                                }
+                            ));
+                        }
+                    }
+                }
+                return Ok(outcome.exit_code);
+            }
             Err(claudine::harness::HarnessError::PostCheckFailed { ref failures }) => {
                 let contexts = claudine::harness::build_validation_failure_context(
                     failures,
@@ -2316,6 +2413,38 @@ pub(crate) fn emit_stream_summary(
     verbose: bool,
     details: &StructuredSummaryDetails,
 ) {
+    emit_stream_summary_inner(summary, profile, env_context, verbosity, verbose, details, None);
+}
+
+pub(crate) fn emit_stream_summary_with_context(
+    summary: &claudine::stream::summary::StreamExecutionSummary,
+    profile: &dyn WrapperProfile,
+    env_context: &EnvironmentContext,
+    verbosity: Verbosity,
+    verbose: bool,
+    details: &StructuredSummaryDetails,
+    context_extra: &HashMap<String, serde_json::Value>,
+) {
+    emit_stream_summary_inner(
+        summary,
+        profile,
+        env_context,
+        verbosity,
+        verbose,
+        details,
+        Some(context_extra),
+    );
+}
+
+fn emit_stream_summary_inner(
+    summary: &claudine::stream::summary::StreamExecutionSummary,
+    profile: &dyn WrapperProfile,
+    env_context: &EnvironmentContext,
+    verbosity: Verbosity,
+    verbose: bool,
+    details: &StructuredSummaryDetails,
+    context_extra: Option<&HashMap<String, serde_json::Value>>,
+) {
     let primary_markup = if verbosity == Verbosity::Silent {
         None
     } else {
@@ -2352,8 +2481,12 @@ pub(crate) fn emit_stream_summary(
 
     // Write synthetic summary event to JSONL (best-effort)
     if let Some(protocol) = profile.stream_protocol() {
-        let meta =
-            claudine::stream::reporting::summary_to_event_meta(summary, protocol, env_context);
+        let meta = claudine::stream::reporting::summary_to_event_meta_with_context(
+            summary,
+            protocol,
+            env_context,
+            context_extra,
+        );
         if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
             tracing::warn!("Failed to write stream summary event: {e}");
         }
@@ -2362,6 +2495,7 @@ pub(crate) fn emit_stream_summary(
 
 /// Like `emit_stream_summary` but without the automatic separator logic.
 /// Used when the caller manages spacing (e.g. inline composition validation output).
+#[allow(dead_code)]
 pub(crate) fn emit_stream_summary_no_separator(
     summary: &claudine::stream::summary::StreamExecutionSummary,
     profile: &dyn WrapperProfile,
@@ -2369,6 +2503,26 @@ pub(crate) fn emit_stream_summary_no_separator(
     verbosity: Verbosity,
     verbose: bool,
     details: &StructuredSummaryDetails,
+) {
+    emit_stream_summary_no_separator_with_context(
+        summary,
+        profile,
+        env_context,
+        verbosity,
+        verbose,
+        details,
+        None,
+    );
+}
+
+pub(crate) fn emit_stream_summary_no_separator_with_context(
+    summary: &claudine::stream::summary::StreamExecutionSummary,
+    profile: &dyn WrapperProfile,
+    env_context: &EnvironmentContext,
+    verbosity: Verbosity,
+    verbose: bool,
+    details: &StructuredSummaryDetails,
+    context_extra: Option<&HashMap<String, serde_json::Value>>,
 ) {
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::Renderable;
@@ -2391,8 +2545,12 @@ pub(crate) fn emit_stream_summary_no_separator(
 
     // Write synthetic summary event to JSONL (best-effort)
     if let Some(protocol) = profile.stream_protocol() {
-        let meta =
-            claudine::stream::reporting::summary_to_event_meta(summary, protocol, env_context);
+        let meta = claudine::stream::reporting::summary_to_event_meta_with_context(
+            summary,
+            protocol,
+            env_context,
+            context_extra,
+        );
         if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
             tracing::warn!("Failed to write stream summary event: {e}");
         }
