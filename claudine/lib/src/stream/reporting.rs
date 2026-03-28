@@ -22,7 +22,25 @@ pub fn summary_to_event_meta(
     protocol: StreamProtocol,
     env: &EnvironmentContext,
 ) -> EventMeta {
+    summary_to_event_meta_with_context(summary, protocol, env, None)
+}
+
+/// Convert a `StreamExecutionSummary` into an `EventMeta` with optional
+/// composition context merged into `extra`.
+pub fn summary_to_event_meta_with_context(
+    summary: &StreamExecutionSummary,
+    protocol: StreamProtocol,
+    env: &EnvironmentContext,
+    context_extra: Option<&HashMap<String, Value>>,
+) -> EventMeta {
     let mut extra = HashMap::new();
+
+    // Merge caller-provided context (e.g. composition metadata).
+    if let Some(ctx) = context_extra {
+        for (key, value) in ctx {
+            extra.insert(key.clone(), value.clone());
+        }
+    }
 
     // Synthetic markers
     extra.insert("synthetic".into(), Value::Bool(true));
@@ -310,5 +328,65 @@ mod tests {
 
         let meta = summary_to_event_meta(&summary, StreamProtocol::Jsonl, &env);
         assert_eq!(meta.extra["stream_protocol"], Value::String("jsonl".into()));
+    }
+
+    #[test]
+    fn summary_with_context_merges_composition_metadata() {
+        let summary = make_test_summary();
+        let env = make_test_env();
+        let mut context = HashMap::new();
+        context.insert(
+            "composition_file_ref".into(),
+            Value::String("notes/weekly.md".into()),
+        );
+        context.insert(
+            "composition_mode".into(),
+            Value::String("inline".into()),
+        );
+        context.insert(
+            "composition_source_path".into(),
+            Value::String("/tmp/notes/weekly.md".into()),
+        );
+
+        let meta = summary_to_event_meta_with_context(
+            &summary,
+            StreamProtocol::StreamJson,
+            &env,
+            Some(&context),
+        );
+
+        assert_eq!(meta.event, AgenticEvent::SessionEnd);
+        assert_eq!(
+            meta.extra["composition_file_ref"],
+            Value::String("notes/weekly.md".into())
+        );
+        assert_eq!(
+            meta.extra["composition_mode"],
+            Value::String("inline".into())
+        );
+        assert_eq!(
+            meta.extra["composition_source_path"],
+            Value::String("/tmp/notes/weekly.md".into())
+        );
+        // Standard fields still present
+        assert_eq!(meta.extra["synthetic"], Value::Bool(true));
+        assert_eq!(meta.extra["exit_code"], Value::Number(0.into()));
+    }
+
+    #[test]
+    fn summary_with_no_context_matches_original() {
+        let summary = make_test_summary();
+        let env = make_test_env();
+
+        let meta_plain = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &env);
+        let meta_none = summary_to_event_meta_with_context(
+            &summary,
+            StreamProtocol::StreamJson,
+            &env,
+            None,
+        );
+
+        assert_eq!(meta_plain.extra.len(), meta_none.extra.len());
+        assert!(!meta_none.extra.contains_key("composition_file_ref"));
     }
 }
