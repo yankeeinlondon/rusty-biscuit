@@ -73,7 +73,7 @@ Both commands use a deterministic precedence chain:
 
 `-i` / `--interactive` controls the **provider session mode**, not provider selection. The composed prompt is still prepared first, then passed as the initial message for an interactive session.
 
-> **Note:** `inline-compose -i` is not supported because the provider cannot reliably capture the final assistant message for file rewrite.
+> **Note:** `inline-compose -i` is provider-gated. Claudine allows it only when the selected provider can recover the final assistant message for the inline rewrite path.
 
 ### The `--exclude` Flag
 
