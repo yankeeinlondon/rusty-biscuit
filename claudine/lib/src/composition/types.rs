@@ -111,6 +111,12 @@ pub struct CompositionExecutionRequest {
     pub explicit_provider: Option<Provider>,
     /// Providers to exclude from automatic selection.
     pub excluded: BTreeSet<Provider>,
+    /// Enable Claudine-managed MCP session composition.
+    pub mcp: bool,
+    /// Explicit MCP server IDs or aliases to activate.
+    pub mcp_use: Vec<String>,
+    /// Treat unresolved or ambiguous MCP tags as hard errors.
+    pub strict: bool,
     /// Whether the provider session should be interactive (`-i`).
     pub session_interactive: bool,
     /// Suppress all preflight output.

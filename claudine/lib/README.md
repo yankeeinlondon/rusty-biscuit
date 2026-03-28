@@ -221,8 +221,8 @@ Provider-native structured stream parsing for wrapped non-interactive sessions. 
 
 Markdown frontmatter-based composition pipelines for delivering prompts to provider sessions:
 
-- **Inline composition** (`--frontmatter-prompt`): reads frontmatter `prompt` field as input, replaces document body with provider output
-- **Chained composition** (`--compose`): composes full document as prompt without file mutation
+- **Inline composition** (`claudine inline-compose <file>`): reads frontmatter `prompt` as input, then rewrites the document body from the provider's returned content while preserving source frontmatter
+- **Chained composition** (`claudine compose <file>`): composes the full document as a prompt without mutating the source file
 
 ### Badges (`badges`)
 

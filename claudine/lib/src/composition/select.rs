@@ -36,18 +36,23 @@ pub fn select_provider(
     favorite: Option<Provider>,
 ) -> Result<SelectedProvider, CompositionError> {
     let candidates = build_candidate_set(installed, excluded);
-    if candidates.is_empty() {
+    let runnable_installed = build_candidate_set(installed, &BTreeSet::new());
+    if runnable_installed.is_empty() {
         return Err(CompositionError::NoRunnableProviders);
     }
 
     // 1. Explicit provider
     if let Some(provider) = explicit_provider {
-        if candidates.contains(&provider) {
+        if runnable_installed.contains(&provider) {
             return Ok(SelectedProvider {
                 provider,
                 reason: SelectionReason::ExplicitProvider,
             });
         }
+        return Err(CompositionError::NoRunnableProviders);
+    }
+
+    if candidates.is_empty() {
         return Err(CompositionError::NoRunnableProviders);
     }
 
@@ -61,7 +66,9 @@ pub fn select_provider(
 
     // 3. Effective frontmatter agent hint
     if let Some(ref hint) = prepared.effective_agent_hint {
-        return resolve_agent_hint(hint, &candidates, false);
+        if let Some(selected) = resolve_agent_hint(hint, &candidates)? {
+            return Ok(selected);
+        }
     }
 
     // 4. Config favorite
@@ -81,8 +88,7 @@ pub fn select_provider(
 fn resolve_agent_hint(
     hint: &serde_json::Value,
     candidates: &[Provider],
-    _force_interactive: bool,
-) -> Result<SelectedProvider, CompositionError> {
+) -> Result<Option<SelectedProvider>, CompositionError> {
     match hint {
         serde_json::Value::String(s) => {
             let lower = s.to_lowercase();
@@ -91,17 +97,20 @@ fn resolve_agent_hint(
             }
 
             let matches = Provider::fuzzy_match_all(s);
+            if matches.is_empty() {
+                return Err(CompositionError::AgentHintInvalid(s.clone()));
+            }
             let candidate_matches: Vec<Provider> = matches
                 .into_iter()
                 .filter(|p| candidates.contains(p))
                 .collect();
 
             match candidate_matches.len() {
-                0 => Err(CompositionError::AgentHintInvalid(s.clone())),
-                1 => Ok(SelectedProvider {
+                0 => Ok(None),
+                1 => Ok(Some(SelectedProvider {
                     provider: candidate_matches[0],
                     reason: SelectionReason::FrontmatterHint,
-                }),
+                })),
                 _ => Err(CompositionError::AgentHintAmbiguous {
                     hint: s.clone(),
                     matches: candidate_matches
@@ -187,6 +196,25 @@ mod tests {
     }
 
     #[test]
+    fn explicit_provider_ignores_exclusion() {
+        let prepared = make_prepared_composition(None);
+        let installed = vec![Provider::Claude, Provider::Codex];
+        let excluded: BTreeSet<Provider> = [Provider::Claude].into_iter().collect();
+
+        let result = select_provider(
+            Some(Provider::Claude),
+            &prepared,
+            &installed,
+            &excluded,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(result.provider, Provider::Claude);
+        assert_eq!(result.reason, SelectionReason::ExplicitProvider);
+    }
+
+    #[test]
     fn single_installed_selected() {
         let prepared = make_prepared_composition(None);
         let installed = vec![Provider::Claude];
@@ -255,6 +283,25 @@ mod tests {
             err,
             CompositionError::InteractiveSelectionRequired
         ));
+    }
+
+    #[test]
+    fn installed_but_excluded_hint_falls_through_to_favorite() {
+        let prepared = make_prepared_composition(Some(json!("codex")));
+        let installed = vec![Provider::Claude, Provider::Codex, Provider::Gemini];
+        let excluded: BTreeSet<Provider> = [Provider::Codex].into_iter().collect();
+
+        let result = select_provider(
+            None,
+            &prepared,
+            &installed,
+            &excluded,
+            Some(Provider::Claude),
+        )
+        .unwrap();
+
+        assert_eq!(result.provider, Provider::Claude);
+        assert_eq!(result.reason, SelectionReason::ConfigFavorite);
     }
 
     #[test]

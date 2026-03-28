@@ -52,6 +52,13 @@ pub fn apply_inline_closure(
         ));
     }
 
+    let replacement_markdown: darkmatter::markdown::Markdown = replacement_body.to_string().into();
+    if replacement_markdown.hash_body(false) == plan.original_body_hash {
+        return Err(CompositionError::InvalidInlineResponse(
+            "replacement body is unchanged".into(),
+        ));
+    }
+
     let doc_string = rewrite_inline_document(&plan.original_document_text, replacement_body, today)
         .map_err(CompositionError::InvalidInlineResponse)?;
 
@@ -258,6 +265,29 @@ mod tests {
     fn extract_body_rejects_frontmatter_only() {
         let output = "---\ntitle: oops\n---\n";
         assert!(extract_replacement_body(output).is_err());
+    }
+
+    #[test]
+    fn apply_inline_closure_rejects_unchanged_body() {
+        let original = "---\nprompt: write\n---\nOriginal body\n";
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_frontmatter_hash: original_markdown.hash_frontmatter(false),
+            original_body_hash: original_markdown.hash_body(false),
+            managed_fields: default_managed_fields(),
+        };
+
+        let err = apply_inline_closure(
+            &plan,
+            "Original body",
+            Path::new("/tmp/nonexistent"),
+            "2026-03-27",
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, CompositionError::InvalidInlineResponse(_)));
+        assert!(err.to_string().contains("unchanged"));
     }
 
     #[test]
