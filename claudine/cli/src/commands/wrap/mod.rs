@@ -1039,6 +1039,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             None,
             effective_operation.as_deref(),
             prompt_display.as_deref(),
+            None, // no compose source hint for direct wrapper
             &env_plan,
             &term,
         );

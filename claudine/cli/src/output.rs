@@ -4,9 +4,8 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
-use claudine::badges::{
-    COMPOSE, INLINE_COMPOSE, INTERACTIVE, NON_INTERACTIVE, REPO_FLAG, VERBOSE, YOLO,
-};
+use biscuit_terminal::components::block_quote::BlockQuote;
+use claudine::badges::{COMPOSE, INLINE_COMPOSE, INTERACTIVE, REPO_FLAG, VERBOSE, YOLO};
 use claudine::events::Provider;
 use std::path::Path;
 
@@ -30,12 +29,13 @@ pub(crate) fn log_wrapper_header(
     profile: &dyn WrapperProfile,
     yolo_requested: bool,
     non_interactive: bool,
-    interactive_override: bool,
+    _interactive_override: bool,
     verbose_requested: bool,
     repo_requested: bool,
     compose_display: Option<&ComposeDisplay>,
     operation: Option<&str>,
     prompt_display: Option<&str>,
+    compose_source_hint: Option<&str>,
     env_plan: &EnvPlan,
     term: &Terminal,
 ) {
@@ -51,11 +51,10 @@ pub(crate) fn log_wrapper_header(
         header_parts.push(YOLO.to_string());
     }
 
-    // Show Non-Interactive badge when session is non-interactive
-    // Show Interactive badge only when user explicitly forced it (prompt + -i)
-    if non_interactive {
-        header_parts.push(NON_INTERACTIVE.to_string());
-    } else if interactive_override {
+    // Non-interactive is the norm when a prompt is given — no badge needed.
+    // Show Interactive badge when session is interactive (explicit -i override
+    // or no prompt at all).
+    if !non_interactive {
         header_parts.push(INTERACTIVE.to_string());
     }
 
@@ -74,7 +73,12 @@ pub(crate) fn log_wrapper_header(
     }
 
     if let Some(op) = operation {
-        header_parts.push(Prose::new(format!("<green><bold>OP:</bold> {op}</green>")).render(term));
+        header_parts.push(
+            Prose::new(format!(
+                "<bg-green-900><green-100><bold> Op(<dim><i>{op}</i></dim>) </bold></green-100></bg-green-900>"
+            ))
+            .render(term),
+        );
     }
 
     if let Some(package_name) = package_name_display(env_plan) {
@@ -86,9 +90,17 @@ pub(crate) fn log_wrapper_header(
         );
     }
 
-    // Show only the user's prompt text (no provider-specific switches).
-    // The prompt may contain `<` characters so we escape them for Prose.
-    if let Some(prompt) = prompt_display {
+    // For compose-based prompts, show the source file instead of the prompt text.
+    // For static string prompts, show truncated prompt text as before.
+    if let Some(filename) = compose_source_hint {
+        let prose_safe = filename.replace('<', "\\<");
+        header_parts.push(
+            Prose::new(format!(
+                "<dim><i>prompt sourced from <blue>{prose_safe}</blue></i></dim>"
+            ))
+            .render(term),
+        );
+    } else if let Some(prompt) = prompt_display {
         let flattened = prompt.replace('\n', "\\n").replace('\r', "\\r");
         let escaped = shell_escape(&flattened);
         let prefix = header_parts.join(" ");
@@ -102,6 +114,34 @@ pub(crate) fn log_wrapper_header(
     }
 
     log::message(&format!("\n{}\n", header_parts.join(" ")));
+}
+
+/// Render the composed prompt as a BlockQuote after environment details.
+///
+/// In verbose mode the entire prompt is shown. Otherwise the first 10 lines
+/// are rendered with a truncation notice.
+pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
+    log::message(&Prose::new("<bold>Prompt:</bold>").render(term));
+
+    if verbose {
+        let block = BlockQuote::from(prompt);
+        log::message(&block.render(term));
+    } else {
+        let lines: Vec<&str> = prompt.lines().collect();
+        let truncated: String = lines.iter().take(10).copied().collect::<Vec<_>>().join("\n");
+        let block = BlockQuote::from(truncated.as_str());
+        log::message(&block.render(term));
+
+        if lines.len() > 10 {
+            log::message("");
+            log::message(
+                &Prose::new(
+                    "<dim><i>remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</i></dim>",
+                )
+                .render(term),
+            );
+        }
+    }
 }
 
 /// Print environment variable details (removed, included, added).

@@ -474,16 +474,14 @@ pub(crate) fn execute_composition_request(
         Some(crate::output::ComposeDisplay::Compose)
     };
 
-    // Truncate prompt for display (first ~80 chars, flattened)
-    let prompt_display = {
-        let raw = &request.prepared.prompt;
-        let flat = raw.replace('\n', "\\n").replace('\r', "\\r");
-        if flat.len() > 120 {
-            Some(format!("{}...", &flat[..120]))
-        } else {
-            Some(flat)
-        }
-    };
+    // For compose-based prompts, show source file on exec line instead of
+    // the resolved prompt text.
+    let compose_source_hint = request
+        .prepared
+        .resolved_path
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| request.file_ref.clone());
 
     let interactive_override = request.session_interactive && !effective_prompt.is_empty();
 
@@ -497,10 +495,26 @@ pub(crate) fn execute_composition_request(
             request.repo,
             compose_display.as_ref(),
             request.operation.as_deref(),
-            prompt_display.as_deref(),
+            None, // no inline prompt text for compose
+            Some(&compose_source_hint),
             &env_plan,
             &term,
         );
+
+        if !quiet {
+            crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
+
+            // Blank line then composed prompt block
+            log::message("");
+            crate::output::log_compose_prompt(
+                &request.prepared.prompt,
+                verbose_requested,
+                &term,
+            );
+
+            // Blank line to separate preamble from execution output
+            log::message("");
+        }
     }
 
     // -- Execution --------------------------------------------------------
