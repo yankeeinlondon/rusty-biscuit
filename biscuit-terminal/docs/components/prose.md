@@ -47,6 +47,18 @@ println!("{}", prose.display(&term));
 
 **Special**: `<a href="url">text</a>` for hyperlinks, `<rgb #hex>text</rgb>` for arbitrary colors, `{{reset}}` to clear all styles
 
+### Prose in Other Components
+
+`Todo` and `Status` both offer a `from_prose` constructor that renders the description through Prose at render time, so markup is resolved with full terminal context:
+
+```rust
+use biscuit_terminal::prelude::*;
+
+let todo = Todo::from_prose("review <red>critical</red> PR");
+let status = Status::from_prose("this is a <b>test</b>")
+    .state(StatusState::Success);
+```
+
 ### Key API
 
 | Method | Description |
