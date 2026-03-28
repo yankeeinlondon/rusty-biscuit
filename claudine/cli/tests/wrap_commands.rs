@@ -1711,6 +1711,52 @@ fn inline_compose_preserves_frontmatter() {
 
 #[cfg(unix)]
 #[test]
+fn inline_compose_file_changed_post_check_sees_closure_artifact() {
+    // Verifies that file-state post_checks like `file_changed` evaluate
+    // AFTER inline closure has rewritten the document, not before.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // Initialize a git repo so @-prefixed path resolution works.
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(workspace.path())
+        .output()
+        .unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    // The `file_changed` post-check points at the target document itself.
+    // Before the fix, closure ran after post-checks, so the file was still
+    // unchanged when the check ran, causing a spurious failure.
+    fs::write(
+        &md_file,
+        "---\nprompt: Rewrite the body\npost_checks:\n  file_changed: \"@test.md\"\n---\nOriginal body\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\nprintf 'Brand new replacement body\\n'\nexit 0\n",
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .current_dir(workspace.path())
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let final_content = fs::read_to_string(&md_file).unwrap();
+    assert!(
+        final_content.contains("Brand new replacement body"),
+        "closure should have rewritten the document; file: {final_content}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn inline_compose_no_overwrite_on_failure() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
@@ -2011,6 +2057,39 @@ fn old_compose_inline_command_is_unknown() {
         .args(["compose-inline", "file.md"])
         .assert()
         .code(2); // clap returns 2 for unrecognized subcommands
+}
+
+#[test]
+fn retired_compose_flag_rejected_in_wrapper() {
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["claude", "--compose", "file.md"])
+        .assert()
+        .failure()
+        .stderr(contains("--compose has been retired"))
+        .stderr(contains("claudine compose"));
+}
+
+#[test]
+fn retired_frontmatter_prompt_flag_rejected_in_wrapper() {
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["claude", "--frontmatter-prompt", "file.md"])
+        .assert()
+        .failure()
+        .stderr(contains("--frontmatter-prompt has been retired"))
+        .stderr(contains("claudine inline-compose"));
+}
+
+#[test]
+fn retired_prompt_file_flag_rejected_in_wrapper() {
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["claude", "--prompt-file", "file.md"])
+        .assert()
+        .failure()
+        .stderr(contains("--prompt-file has been retired"))
+        .stderr(contains("claudine inline-compose"));
 }
 
 #[cfg(unix)]

@@ -554,6 +554,36 @@ fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|arg| arg == flag)
 }
 
+/// Reject retired composition flags that should no longer be forwarded to
+/// wrapped providers. Users should migrate to `claudine compose` or
+/// `claudine inline-compose`.
+fn reject_retired_composition_flags(args: &[String]) -> Result<()> {
+    const RETIRED: &[(&str, &str)] = &[
+        (
+            "--compose",
+            "claudine compose --<provider> <file>",
+        ),
+        (
+            "--frontmatter-prompt",
+            "claudine inline-compose --<provider> <file>",
+        ),
+        (
+            "--prompt-file",
+            "claudine inline-compose --<provider> <file>",
+        ),
+    ];
+
+    for (flag, replacement) in RETIRED {
+        if args.iter().any(|a| a == flag || a.starts_with(&format!("{flag}="))) {
+            return Err(eyre!(
+                "{flag} has been retired; use `{replacement}` instead"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn has_explicit_native_output_request(provider: Provider, args: &[String]) -> bool {
     match provider {
         Provider::Codex => has_flag(args, "--json"),
@@ -709,6 +739,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     }
 
     profile.reject_direct_yolo(&child_args)?;
+    reject_retired_composition_flags(&child_args)?;
 
     if yolo_requested && let Some(warn) = profile.apply_yolo(&mut child_args, &mut env_overrides)? {
         deferred_warnings.push(warn);
@@ -2229,6 +2260,80 @@ pub(crate) fn run_harness_loop(
             }
         }
 
+        // For inline mode, apply closure BEFORE post-checks so that
+        // file-state checks (file_changed, frontmatter comparisons, etc.)
+        // observe the final rewritten document rather than the pre-closure
+        // source file.
+        if let Some(closure_plan) = materialized.inline_closure_plan.as_ref() {
+            if outcome.exit_code == 0 {
+                if let Err(failures) = try_inline_closure(
+                    closure_plan,
+                    &outcome.final_response,
+                    &prompt_state.source_path,
+                    child_cwd,
+                    show_checks,
+                    term,
+                ) {
+                    let contexts =
+                        claudine::harness::build_validation_failure_context(
+                            &failures,
+                            provider.as_slug(),
+                            plan.source_path.as_path(),
+                            attempt,
+                            outcome.session_id.clone(),
+                            Some(outcome.clone()),
+                        );
+
+                    let mut next_plan = None;
+                    for failure_ctx in &contexts {
+                        match claudine::harness::resolve_handler(
+                            failure_ctx,
+                            &plan.handlers,
+                            plan.programmatic_handler.as_ref(),
+                        ) {
+                            Ok(Some(action)) => {
+                                next_plan = build_next_attempt_plan(
+                                    &action,
+                                    attempt,
+                                    DEFAULT_MAX_RETRIES,
+                                    &failure_ctx.message,
+                                    profile,
+                                    outcome.session_id.as_deref(),
+                                    &prompt_state.source_path,
+                                    repo_root,
+                                    failure_ctx,
+                                    term,
+                                )?;
+                                if next_plan.is_some() {
+                                    break;
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(e) => return Err(eyre!("{e}")),
+                        }
+                    }
+
+                    if let Some(plan) = next_plan {
+                        attempt = plan.next_attempt;
+                        apply_next_attempt_plan(prompt_state, &plan);
+                        continue;
+                    }
+
+                    return Err(eyre!(
+                        "inline closure validation failed ({} {})",
+                        failures.len(),
+                        if failures.len() == 1 {
+                            "failure"
+                        } else {
+                            "failures"
+                        }
+                    ));
+                }
+            }
+        }
+
+        // Evaluate post-checks. In inline mode this now runs against the
+        // post-closure document so file-state checks see the final artifact.
         match claudine::harness::evaluate_post_checks(
             &plan,
             &snapshot,
@@ -2237,76 +2342,6 @@ pub(crate) fn run_harness_loop(
             term,
         ) {
             Ok(()) => {
-                // Post-checks passed. For inline mode, run built-in closure
-                // validation through the handler system so retry/resume/redirect
-                // can recover from empty or unchanged responses.
-                if let Some(closure_plan) = materialized.inline_closure_plan.as_ref() {
-                    if outcome.exit_code == 0 {
-                        if let Err(failures) = try_inline_closure(
-                            closure_plan,
-                            &outcome.final_response,
-                            &prompt_state.source_path,
-                            child_cwd,
-                            show_checks,
-                            term,
-                        ) {
-                            let contexts =
-                                claudine::harness::build_validation_failure_context(
-                                    &failures,
-                                    provider.as_slug(),
-                                    plan.source_path.as_path(),
-                                    attempt,
-                                    outcome.session_id.clone(),
-                                    Some(outcome.clone()),
-                                );
-
-                            let mut next_plan = None;
-                            for failure_ctx in &contexts {
-                                match claudine::harness::resolve_handler(
-                                    failure_ctx,
-                                    &plan.handlers,
-                                    plan.programmatic_handler.as_ref(),
-                                ) {
-                                    Ok(Some(action)) => {
-                                        next_plan = build_next_attempt_plan(
-                                            &action,
-                                            attempt,
-                                            DEFAULT_MAX_RETRIES,
-                                            &failure_ctx.message,
-                                            profile,
-                                            outcome.session_id.as_deref(),
-                                            &prompt_state.source_path,
-                                            repo_root,
-                                            failure_ctx,
-                                            term,
-                                        )?;
-                                        if next_plan.is_some() {
-                                            break;
-                                        }
-                                    }
-                                    Ok(None) => {}
-                                    Err(e) => return Err(eyre!("{e}")),
-                                }
-                            }
-
-                            if let Some(plan) = next_plan {
-                                attempt = plan.next_attempt;
-                                apply_next_attempt_plan(prompt_state, &plan);
-                                continue;
-                            }
-
-                            return Err(eyre!(
-                                "inline closure validation failed ({} {})",
-                                failures.len(),
-                                if failures.len() == 1 {
-                                    "failure"
-                                } else {
-                                    "failures"
-                                }
-                            ));
-                        }
-                    }
-                }
                 return Ok(outcome.exit_code);
             }
             Err(claudine::harness::HarnessError::PostCheckFailed { ref failures }) => {
