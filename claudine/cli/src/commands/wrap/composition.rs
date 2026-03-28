@@ -135,11 +135,12 @@ pub(crate) fn execute_composition_request(
     let needs_mcp_shadow_home = (request.mcp || !request.mcp_use.is_empty())
         && matches!(provider, Provider::Codex | Provider::Gemini);
     let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
+    let mut yolo_enabled = request.yolo;
     let mut env_plan = env::build_child_env(
         profile,
         provider,
         &[],                         // no include overrides
-        false,                       // no yolo
+        yolo_enabled,                // yolo
         request.session_interactive, // interactive
         &raw_agent_params,
         &cwd,
@@ -148,7 +149,7 @@ pub(crate) fn execute_composition_request(
         needs_mcp_shadow_home,
     )?;
 
-    // -- Model, operation, env overrides ------------------------------------
+    // -- Operation env override -----------------------------------------------
 
     if let Some(ref op) = request.operation {
         env_plan
@@ -272,6 +273,23 @@ pub(crate) fn execute_composition_request(
         effective_non_interactive,
     )?;
 
+    // -- Yolo ----------------------------------------------------------------
+
+    if request.yolo {
+        let mut env_overrides = Vec::new();
+        if let Some(warn) = profile.apply_yolo(&mut child_args, &mut env_overrides)? {
+            if !silent && !quiet {
+                log::warn(&warn);
+            }
+        }
+        for (key, value) in env_overrides {
+            env_plan.env.insert(key.into(), value.into());
+        }
+        if !profile.has_supported_yolo() {
+            yolo_enabled = false;
+        }
+    }
+
     if effective_non_interactive {
         profile.apply_non_interactive(&mut child_args)?;
         // Only apply default model if --model was not explicitly provided.
@@ -378,9 +396,39 @@ pub(crate) fn execute_composition_request(
 
     let env_context = claudine::events::detect_environment_fast(&cwd);
 
+    let compose_display = if is_inline {
+        Some(crate::output::ComposeDisplay::InlineCompose)
+    } else {
+        Some(crate::output::ComposeDisplay::Compose)
+    };
+
+    // Truncate prompt for display (first ~80 chars, flattened)
+    let prompt_display = {
+        let raw = &request.prepared.prompt;
+        let flat = raw.replace('\n', "\\n").replace('\r', "\\r");
+        if flat.len() > 120 {
+            Some(format!("{}...", &flat[..120]))
+        } else {
+            Some(flat)
+        }
+    };
+
+    let interactive_override = request.session_interactive && !effective_prompt.is_empty();
+
     if !silent {
-        eprintln!("  Using {} ({})", provider, reason_label(selected.reason));
-        eprintln!();
+        crate::output::log_wrapper_header(
+            profile,
+            yolo_enabled,
+            effective_non_interactive,
+            interactive_override,
+            verbose_requested,
+            false, // no repo mode in composition
+            compose_display.as_ref(),
+            request.operation.as_deref(),
+            prompt_display.as_deref(),
+            &env_plan,
+            &term,
+        );
     }
 
     // -- Execution --------------------------------------------------------
@@ -1081,14 +1129,3 @@ fn emit_legacy_composition_session_event(
     }
 }
 
-// -- Display helpers ------------------------------------------------------
-
-pub(crate) fn reason_label(reason: SelectionReason) -> &'static str {
-    match reason {
-        SelectionReason::ExplicitProvider => "explicit",
-        SelectionReason::SingleInstalled => "only installed",
-        SelectionReason::FrontmatterHint => "frontmatter hint",
-        SelectionReason::ConfigFavorite => "config favorite",
-        SelectionReason::InteractiveChoice => "interactive choice",
-    }
-}

@@ -1446,8 +1446,8 @@ exit 99
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     let plain = strip_ansi(&stderr);
     assert!(
-        plain.contains("explicit"),
-        "should indicate explicit provider selection but stderr was: {plain}"
+        plain.contains("Codex") && plain.contains("Compose"),
+        "should show Codex provider in the Claudine header but stderr was: {plain}"
     );
 }
 
@@ -2151,8 +2151,8 @@ exit 99
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     let plain = strip_ansi(&stderr);
     assert!(
-        plain.contains("config favorite"),
-        "repo config favorite should be reported; stderr was: {plain}"
+        plain.contains("Goose"),
+        "repo config favorite should select Goose; stderr was: {plain}"
     );
     assert!(
         args_file.exists(),
