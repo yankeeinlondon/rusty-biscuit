@@ -48,6 +48,8 @@ pub enum ValidationEvent {
     ResponseLengthAtMost,
     ResponseIncludes,
     ResponseMissing,
+    InlineResponseEmpty,
+    InlineBodyUnchanged,
 }
 
 impl std::fmt::Display for ValidationEvent {
@@ -71,6 +73,8 @@ impl std::fmt::Display for ValidationEvent {
             Self::ResponseLengthAtMost => "response_length_at_most",
             Self::ResponseIncludes => "response_includes",
             Self::ResponseMissing => "response_missing",
+            Self::InlineResponseEmpty => "inline_response_empty",
+            Self::InlineBodyUnchanged => "inline_body_unchanged",
         };
         write!(f, "{s}")
     }

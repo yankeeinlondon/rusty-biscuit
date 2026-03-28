@@ -261,6 +261,17 @@ fn validation_meta(name: &str) -> Option<ValidationMeta> {
             event: ValidationEvent::ResponseMissing,
             phase: ValidationPhase::PostOnly,
         },
+        // Built-in inline closure events. These are never declared as
+        // pre/post checks — they are produced by the closure path and
+        // only need validation_meta entries so `handle_*` keys resolve.
+        "inline_response_empty" => ValidationMeta {
+            event: ValidationEvent::InlineResponseEmpty,
+            phase: ValidationPhase::PostOnly,
+        },
+        "inline_body_unchanged" => ValidationMeta {
+            event: ValidationEvent::InlineBodyUnchanged,
+            phase: ValidationPhase::PostOnly,
+        },
         _ => return None,
     };
     Some(meta)
@@ -623,6 +634,8 @@ fn parse_failure_event(name: &str, source_path: &Path) -> Result<FailureEvent, H
                     "response_length_at_most" => ValidationEvent::ResponseLengthAtMost,
                     "response_includes" => ValidationEvent::ResponseIncludes,
                     "response_missing" => ValidationEvent::ResponseMissing,
+                    "inline_response_empty" => ValidationEvent::InlineResponseEmpty,
+                    "inline_body_unchanged" => ValidationEvent::InlineBodyUnchanged,
                     _ => unreachable!(),
                 };
                 Ok(FailureEvent::Validation(event))
