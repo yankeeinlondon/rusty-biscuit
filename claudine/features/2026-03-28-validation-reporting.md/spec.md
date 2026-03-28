@@ -12,5 +12,9 @@ When a non-interactive session starts up we will:
 1. validate that the referenced file exists
     - success: `the file reference <blue-500>{ref}</blue-500> to the <blue-500><a href={absolute_path}>{filepath}</a></blue-500> file on this host`
     - failure: `the file reference <blue-500>{ref}</blue-500> found no match on host computer!`
-2. look for all validation properties (_in `pre_checks` and `post_checks`_)
+2. Shell Command Audit
+      -  
+3. look for all validation properties (_in `pre_checks` and `post_checks`_) and report:
+   - if `pre_checks` populated:
+       - report with StatusState::Info `validation <i>pre checks</i> found:` 
 
