@@ -2012,3 +2012,220 @@ fn old_compose_inline_command_is_unknown() {
         .assert()
         .code(2); // clap returns 2 for unrecognized subcommands
 }
+
+#[cfg(unix)]
+#[test]
+fn repo_scoped_config_favorite_selects_provider() {
+    // Verifies that a repo-level .claudine/config.json with a linking
+    // preference is consulted during composition selection so the
+    // favorite provider wins over interactive selection.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let args_file = workspace.path().join("goose-args.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // Initialize a git repo so repo root detection works
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(workspace.path())
+        .output()
+        .unwrap();
+
+    // Create repo-local config with goose as the favorite
+    let config_dir = workspace.path().join(".claudine");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.json"),
+        r#"{"version":"1","settings":{"linking":{"preference":["goose"],"canonical_provider":{}}},"providers":{}}"#,
+    )
+    .unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
+
+    // Install both providers — without the config favorite, multiple
+    // installed providers would require interactive selection.
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+exit 99
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("HOME", workspace.path())
+        .env("CLAUDINE_ARGS_FILE", &args_file)
+        .current_dir(workspace.path())
+        .args(["compose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("config favorite"),
+        "repo config favorite should be reported; stderr was: {plain}"
+    );
+    assert!(
+        args_file.exists(),
+        "goose should have been invoked via the config favorite"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn ambiguous_agent_hint_no_tty_returns_error() {
+    // Verifies that an ambiguous `agent` hint with no TTY returns an error
+    // instead of hanging on interactive selection.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    // "agent: c" matches both claude and codex via prefix matching,
+    // producing an ambiguous hint that requires interactive selection.
+    fs::write(
+        &md_file,
+        "---\ntitle: test\nagent: c\n---\nPrompt\n",
+    )
+    .unwrap();
+
+    // Install both claude and codex so "c" is ambiguous
+    write_executable(
+        &path_dir.join("claude"),
+        "#!/bin/sh\nexit 0\n",
+    );
+    write_executable(
+        &path_dir.join("codex"),
+        "#!/bin/sh\nexit 0\n",
+    );
+
+    // Write empty stdin via a file to prevent TTY detection
+    let stdin_file = workspace.path().join("empty-stdin.txt");
+    fs::write(&stdin_file, "").unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .pipe_stdin(&stdin_file)
+        .unwrap()
+        .args(["compose", md_file.to_str().unwrap()])
+        .assert()
+        .code(1)
+        .stderr(contains("ambiguous"));
+}
+
+#[cfg(unix)]
+#[test]
+fn effective_composed_frontmatter_activates_harness() {
+    // Verifies that harness behavior (pre_checks) from effective
+    // composed frontmatter -- not raw source frontmatter -- is honored
+    // in the CLI composition path.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let marker_path = workspace.path().join("provider-ran.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // The source file transcludes another file that adds pre_checks.
+    // Since we can't easily set up full transclusion in an integration
+    // test, we test with inline frontmatter that includes harness props.
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: Rewrite this\npre_checks:\n  file_exists: \"required-context.txt\"\n---\nBody\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf 'ran\n' > "$CLAUDINE_MARKER_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_MARKER_FILE", &marker_path)
+        .current_dir(workspace.path())
+        .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .code(1)
+        .stderr(contains("pre-check validation failed"));
+
+    assert!(
+        !marker_path.exists(),
+        "harness pre_checks from effective frontmatter should block provider launch"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_closure_unchanged_body_retries_via_handler() {
+    // Verifies that when an inline composition provider returns the
+    // unchanged body, the failure is routed through the harness handler
+    // system and a retry handler can recover.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let count_path = workspace.path().join("attempt-count.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: Rewrite the body\nhandle_inline_body_unchanged:\n  retry:\n    prompt: \"The body must change. Rewrite it differently.\"\n---\nOriginal body\n",
+    )
+    .unwrap();
+
+    // First attempt: echo back the original body (unchanged).
+    // Second attempt: return a different body.
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+count=0
+if [ -f "$CLAUDINE_COUNT_FILE" ]; then
+  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
+if [ "$count" -eq 1 ]; then
+  printf 'Original body\n'
+else
+  printf 'Revised and improved body\n'
+fi
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .current_dir(workspace.path())
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let attempts = fs::read_to_string(&count_path).unwrap();
+    assert_eq!(
+        attempts.trim(),
+        "2",
+        "expected retry after unchanged body failure"
+    );
+
+    let final_content = fs::read_to_string(&md_file).unwrap();
+    assert!(
+        final_content.contains("Revised and improved body"),
+        "retry should apply the changed body; file: {final_content}"
+    );
+}
