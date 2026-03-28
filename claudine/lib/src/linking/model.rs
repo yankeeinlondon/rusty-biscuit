@@ -102,7 +102,6 @@ impl ResourceReference {
             | ResourceReference::IncompleteLink(provider, _, _) => *provider,
         }
     }
-
 }
 
 /// Validation errors for provider ordering configuration.
