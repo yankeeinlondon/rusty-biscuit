@@ -2089,7 +2089,7 @@ fn retired_prompt_file_flag_rejected_in_wrapper() {
         .assert()
         .failure()
         .stderr(contains("--prompt-file has been retired"))
-        .stderr(contains("claudine inline-compose"));
+        .stderr(contains("claudine compose"));
 }
 
 #[cfg(unix)]
@@ -2307,4 +2307,101 @@ exit 0
         final_content.contains("Revised and improved body"),
         "retry should apply the changed body; file: {final_content}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_readonly_file_fails_without_harness() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("readonly.md");
+    fs::write(&md_file, "---\nprompt: Generate\n---\nBody\n").unwrap();
+
+    // Make the file read-only
+    let mut perms = fs::metadata(&md_file).unwrap().permissions();
+    perms.set_mode(0o444);
+    fs::set_permissions(&md_file, perms).unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\necho 'should not run'\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .code(1);
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    assert!(
+        stderr.contains("insufficient file permissions")
+            || stderr.contains("Permission denied")
+            || stderr.contains("permission"),
+        "should report a permission error for read-only files; stderr: {stderr}"
+    );
+
+    // Restore permissions for cleanup
+    let mut perms = fs::metadata(&md_file).unwrap().permissions();
+    perms.set_mode(0o644);
+    fs::set_permissions(&md_file, perms).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_harness_writability_pre_check_fires() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let marker_path = workspace.path().join("provider-ran.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("locked.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: Generate\npre_checks:\n  file_exists: \"locked.md\"\n---\nBody\n",
+    )
+    .unwrap();
+
+    // Make the file read-only so the system writability check fails
+    let mut perms = fs::metadata(&md_file).unwrap().permissions();
+    perms.set_mode(0o444);
+    fs::set_permissions(&md_file, perms).unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\ntouch \"{}\"\n",
+            marker_path.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .current_dir(workspace.path())
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .code(1);
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    assert!(
+        stderr.contains("pre-check validation failed"),
+        "harness should report a pre-check failure for the writability check; stderr: {stderr}"
+    );
+    assert!(
+        !marker_path.exists(),
+        "provider should not have been launched when the writability pre-check fails"
+    );
+
+    // Restore permissions for cleanup
+    let mut perms = fs::metadata(&md_file).unwrap().permissions();
+    perms.set_mode(0o644);
+    fs::set_permissions(&md_file, perms).unwrap();
 }
