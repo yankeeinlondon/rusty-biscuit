@@ -16,33 +16,9 @@ use color_eyre::eyre::{Result, eyre};
 use super::wrap::composition::execute_composition_request;
 use crate::log;
 
-/// Compose a Markdown document through an agentic CLI.
+/// Shared provider-override flags for composition commands.
 #[derive(Debug, Clone, Args)]
-pub struct ComposeArgs {
-    /// Run the provider session in interactive mode.
-    #[arg(short = 'i', long)]
-    pub interactive: bool,
-
-    /// Exclude providers from automatic selection (repeatable).
-    #[arg(long = "exclude", value_name = "PROVIDER")]
-    pub exclude: Vec<String>,
-
-    /// Suppress all output except the composition result.
-    #[arg(long)]
-    pub silent: bool,
-
-    /// Enable Claudine-managed MCP session composition.
-    #[arg(long)]
-    pub mcp: bool,
-
-    /// Activate specific MCP servers by ID or alias (comma-separated).
-    #[arg(long = "use", value_name = "ID", value_delimiter = ',')]
-    pub mcp_use: Vec<String>,
-
-    /// Treat unresolved or ambiguous MCP tags as hard errors.
-    #[arg(long)]
-    pub strict: bool,
-
+pub struct ProviderOverrideArgs {
     /// Use Claude as the provider.
     #[arg(long, group = "provider_select")]
     pub claude: bool,
@@ -70,6 +46,59 @@ pub struct ComposeArgs {
     /// Use Kimi Code as the provider.
     #[arg(long, group = "provider_select")]
     pub kimi: bool,
+}
+
+impl ProviderOverrideArgs {
+    fn resolve(&self) -> Option<Provider> {
+        if self.claude {
+            Some(Provider::Claude)
+        } else if self.codex {
+            Some(Provider::Codex)
+        } else if self.gemini {
+            Some(Provider::Gemini)
+        } else if self.opencode {
+            Some(Provider::OpenCode)
+        } else if self.qwen {
+            Some(Provider::QwenCode)
+        } else if self.goose {
+            Some(Provider::Goose)
+        } else if self.kimi {
+            Some(Provider::KimiCode)
+        } else {
+            None
+        }
+    }
+}
+
+/// Compose a Markdown document through an agentic CLI.
+#[derive(Debug, Clone, Args)]
+pub struct ComposeArgs {
+    /// Run the provider session in interactive mode.
+    #[arg(short = 'i', long)]
+    pub interactive: bool,
+
+    /// Exclude providers from automatic selection (repeatable).
+    #[arg(long = "exclude", value_name = "PROVIDER")]
+    pub exclude: Vec<String>,
+
+    /// Suppress all output except the composition result.
+    #[arg(long)]
+    pub silent: bool,
+
+    /// Enable Claudine-managed MCP session composition.
+    #[arg(long)]
+    pub mcp: bool,
+
+    /// Activate specific MCP servers by ID or alias (comma-separated).
+    #[arg(long = "use", value_name = "ID", value_delimiter = ',')]
+    pub mcp_use: Vec<String>,
+
+    /// Treat unresolved or ambiguous MCP tags as hard errors.
+    #[arg(long)]
+    pub strict: bool,
+
+    #[command(flatten)]
+    pub provider: ProviderOverrideArgs,
 
     /// File reference to compose.
     #[arg(value_name = "FILE")]
@@ -103,33 +132,8 @@ pub struct InlineComposeArgs {
     #[arg(long)]
     pub strict: bool,
 
-    /// Use Claude as the provider.
-    #[arg(long, group = "provider_select")]
-    pub claude: bool,
-
-    /// Use Codex as the provider.
-    #[arg(long, group = "provider_select")]
-    pub codex: bool,
-
-    /// Use Gemini as the provider.
-    #[arg(long, group = "provider_select")]
-    pub gemini: bool,
-
-    /// Use OpenCode as the provider.
-    #[arg(long, group = "provider_select")]
-    pub opencode: bool,
-
-    /// Use Qwen Code as the provider.
-    #[arg(long, group = "provider_select")]
-    pub qwen: bool,
-
-    /// Use Goose as the provider.
-    #[arg(long, group = "provider_select")]
-    pub goose: bool,
-
-    /// Use Kimi Code as the provider.
-    #[arg(long, group = "provider_select")]
-    pub kimi: bool,
+    #[command(flatten)]
+    pub provider: ProviderOverrideArgs,
 
     /// File reference to compose.
     #[arg(value_name = "FILE")]
@@ -162,15 +166,7 @@ pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
 
 fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
     let excluded = parse_excluded(&args.exclude, args.silent);
-    let explicit_provider = resolve_explicit_provider(
-        args.claude,
-        args.codex,
-        args.gemini,
-        args.opencode,
-        args.qwen,
-        args.goose,
-        args.kimi,
-    );
+    let explicit_provider = args.provider.resolve();
 
     let source = composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
 
@@ -194,15 +190,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
 
 fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32> {
     let excluded = parse_excluded(&args.exclude, args.silent);
-    let explicit_provider = resolve_explicit_provider(
-        args.claude,
-        args.codex,
-        args.gemini,
-        args.opencode,
-        args.qwen,
-        args.goose,
-        args.kimi,
-    );
+    let explicit_provider = args.provider.resolve();
 
     let source = composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
 
@@ -241,34 +229,6 @@ fn parse_excluded(exclude: &[String], silent: bool) -> BTreeSet<Provider> {
             })
         })
         .collect()
-}
-
-fn resolve_explicit_provider(
-    claude: bool,
-    codex: bool,
-    gemini: bool,
-    opencode: bool,
-    qwen: bool,
-    goose: bool,
-    kimi: bool,
-) -> Option<Provider> {
-    if claude {
-        Some(Provider::Claude)
-    } else if codex {
-        Some(Provider::Codex)
-    } else if gemini {
-        Some(Provider::Gemini)
-    } else if opencode {
-        Some(Provider::OpenCode)
-    } else if qwen {
-        Some(Provider::QwenCode)
-    } else if goose {
-        Some(Provider::Goose)
-    } else if kimi {
-        Some(Provider::KimiCode)
-    } else {
-        None
-    }
 }
 
 /// Lightweight git root detection for guardrails loading.
