@@ -9,7 +9,7 @@ use sniff::filesystem::repo::{Package, detect_repo};
 use super::profile::WrapperProfile;
 use super::repo_home;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[allow(dead_code)]
 pub(crate) struct EnvPlan {
     pub(crate) env: HashMap<OsString, OsString>,
