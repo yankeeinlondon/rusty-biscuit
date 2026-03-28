@@ -27,8 +27,8 @@ pub struct TextOutput {
 }
 
 pub use filesystem::{
-    render_git_file_list, render_git_section, render_hash_section, PathListFormat,
-    render_docs_output, render_path_list,
+    PathListFormat, render_docs_output, render_git_file_list, render_git_section,
+    render_hash_section, render_path_list,
 };
 pub use just::{filter_justfiles_for_json, render_just_text};
 pub use programs::{print_programs_json, render_programs_markdown};
@@ -245,7 +245,10 @@ pub fn filter_docs(
                 return false;
             }
             if !filter.filter.is_empty()
-                && !filter.filter.iter().any(|s| path_lower.contains(&s.to_lowercase()))
+                && !filter
+                    .filter
+                    .iter()
+                    .any(|s| path_lower.contains(&s.to_lowercase()))
             {
                 return false;
             }
@@ -725,7 +728,9 @@ fn apply_filter_to_json(
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
-            unreachable!("Programs, Services, Just, and BlastRadius filters should be handled separately")
+            unreachable!(
+                "Programs, Services, Just, and BlastRadius filters should be handled separately"
+            )
         }
     }
 }
@@ -944,8 +949,16 @@ mod tests {
             // Should return both docs that have blast_radius key, even the empty one
             assert_eq!(result.len(), 2);
             assert!(result.iter().all(|d| d.has_blast_radius));
-            assert!(result.iter().any(|d| d.relative == "sniff/docs/cli/repo.md"));
-            assert!(result.iter().any(|d| d.relative == "sniff/docs/overview.md"));
+            assert!(
+                result
+                    .iter()
+                    .any(|d| d.relative == "sniff/docs/cli/repo.md")
+            );
+            assert!(
+                result
+                    .iter()
+                    .any(|d| d.relative == "sniff/docs/overview.md")
+            );
         }
 
         #[test]

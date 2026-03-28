@@ -7,11 +7,11 @@ use std::path::{Path, PathBuf};
 use git2::Repository;
 use serde::{Deserialize, Serialize};
 
+use crate::filesystem::FileAssociation;
 use crate::filesystem::docs::{MarkdownMeta, detect_docs};
 use crate::filesystem::file_types::{lookup_exact_filename, lookup_extension};
 use crate::filesystem::git::get_commit_files;
 use crate::filesystem::repo::detect_repo;
-use crate::filesystem::FileAssociation;
 use crate::{Result, SniffError};
 
 // ---------------------------------------------------------------------------
@@ -113,7 +113,10 @@ pub struct ChangedPathResult {
 /// Returns `SniffError::NotARepository` if `base_dir` is not inside a git repo.
 /// Returns an error if `package` or `package_area` is specified but the repo
 /// is not a monorepo.
-pub fn collect_changed_paths(base_dir: &Path, query: &ChangedPathQuery) -> Result<ChangedPathResult> {
+pub fn collect_changed_paths(
+    base_dir: &Path,
+    query: &ChangedPathQuery,
+) -> Result<ChangedPathResult> {
     let repo = Repository::discover(base_dir)
         .map_err(|_| SniffError::NotARepository(base_dir.to_path_buf()))?;
     let repo_root = repo
@@ -137,8 +140,8 @@ pub fn collect_changed_paths(base_dir: &Path, query: &ChangedPathQuery) -> Resul
 
     // Filter by package or package_area if specified
     if query.package.is_some() || query.package_area.is_some() {
-        let repo_info = detect_repo(&repo_root)?
-            .ok_or_else(|| SniffError::NotAMonorepo(repo_root.clone()))?;
+        let repo_info =
+            detect_repo(&repo_root)?.ok_or_else(|| SniffError::NotAMonorepo(repo_root.clone()))?;
 
         if !repo_info.is_monorepo {
             return Err(SniffError::NotAMonorepo(repo_root.clone()));
@@ -154,25 +157,18 @@ pub fn collect_changed_paths(base_dir: &Path, query: &ChangedPathQuery) -> Resul
                         // Prefix semantics: --package-area foo matches foo, foo/bar, etc.
                         let pkg_area = pkg.package_area.to_ascii_lowercase();
                         let target = area.to_ascii_lowercase();
-                        pkg_area == target
-                            || pkg_area.starts_with(&format!("{target}/"))
+                        pkg_area == target || pkg_area.starts_with(&format!("{target}/"))
                     } else {
                         false
                     }
                 })
-                .map(|pkg| {
-                    pkg.path
-                        .strip_prefix(&repo_root)
-                        .unwrap_or(&pkg.path)
-                        .to_path_buf()
-                })
+                .map(|pkg| pkg.path.strip_prefix(&repo_root).unwrap_or(&pkg.path).to_path_buf())
                 .collect();
 
             // Validate that the package/area name matched at least one package
             if matching_roots.is_empty() {
                 if let Some(ref name) = query.package {
-                    let mut names: Vec<&str> =
-                        packages.iter().map(|p| p.name.as_str()).collect();
+                    let mut names: Vec<&str> = packages.iter().map(|p| p.name.as_str()).collect();
                     names.sort();
                     names.dedup();
                     return Err(SniffError::UnknownPackage {
@@ -209,7 +205,10 @@ pub fn collect_changed_paths(base_dir: &Path, query: &ChangedPathQuery) -> Resul
     paths.sort();
     paths.dedup();
 
-    Ok(ChangedPathResult { repo_root, paths })
+    Ok(ChangedPathResult {
+        repo_root,
+        paths,
+    })
 }
 
 /// Collect paths from working tree status (Dirty/Staged/Unstaged).
@@ -251,17 +250,11 @@ fn collect_working_tree_paths(repo: &Repository, scope: ChangeScope) -> Result<V
 
 /// Collect paths from the HEAD commit.
 fn collect_last_commit_paths(repo: &Repository) -> Vec<PathBuf> {
-    let head_sha = repo
-        .head()
-        .ok()
-        .and_then(|h| h.peel_to_commit().ok())
-        .map(|c| c.id().to_string());
+    let head_sha =
+        repo.head().ok().and_then(|h| h.peel_to_commit().ok()).map(|c| c.id().to_string());
 
     match head_sha {
-        Some(sha) => get_commit_files(repo, &sha)
-            .into_iter()
-            .map(|(path, _kind)| path)
-            .collect(),
+        Some(sha) => get_commit_files(repo, &sha).into_iter().map(|(path, _kind)| path).collect(),
         None => Vec::new(),
     }
 }
@@ -441,11 +434,7 @@ mod tests {
             .unwrap();
 
             for path in &result.paths {
-                assert!(
-                    is_source_code_path(path),
-                    "Expected source code path: {:?}",
-                    path
-                );
+                assert!(is_source_code_path(path), "Expected source code path: {:?}", path);
             }
         }
 
@@ -518,8 +507,7 @@ mod tests {
         let sig = repo.signature().unwrap();
         let tree_id = repo.index().unwrap().write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[]).unwrap();
 
         let path = dir.path().to_path_buf();
         (dir, path)
@@ -542,8 +530,7 @@ mod tests {
         let tree_id = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "add file", &tree, &[&head])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "add file", &tree, &[&head]).unwrap();
     }
 
     /// Helper: write a file and stage it (but don't commit).
@@ -722,24 +709,16 @@ mod tests {
     /// Each member path like `"sniff/lib"` gets package name `"sniff-lib"` (slashes → dashes).
     fn make_workspace(repo_path: &Path, members: &[&str]) {
         let member_list: Vec<String> = members.iter().map(|m| format!("    \"{m}\"")).collect();
-        let cargo_toml = format!(
-            "[workspace]\nmembers = [\n{}\n]\n",
-            member_list.join(",\n")
-        );
+        let cargo_toml = format!("[workspace]\nmembers = [\n{}\n]\n", member_list.join(",\n"));
         commit_file(repo_path, "Cargo.toml", &cargo_toml);
 
         // Create a Cargo.toml for each member package
         for member in members {
             let name = member.replace('/', "-");
-            let pkg_toml = format!(
-                "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
-            );
+            let pkg_toml =
+                format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n");
             commit_file(repo_path, &format!("{member}/Cargo.toml"), &pkg_toml);
-            commit_file(
-                repo_path,
-                &format!("{member}/src/lib.rs"),
-                "// placeholder",
-            );
+            commit_file(repo_path, &format!("{member}/src/lib.rs"), "// placeholder");
         }
     }
 
@@ -750,7 +729,13 @@ mod tests {
         fn exact_package_match_filters_paths() {
             let (_dir, path) = create_temp_repo();
             // sniff/lib → package name "sniff-lib", homelab/lib → "homelab-lib"
-            make_workspace(&path, &["sniff/lib", "homelab/lib"]);
+            make_workspace(
+                &path,
+                &[
+                    "sniff/lib",
+                    "homelab/lib",
+                ],
+            );
 
             // Dirty files in both packages
             std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
@@ -782,7 +767,14 @@ mod tests {
         #[test]
         fn exact_package_area_match() {
             let (_dir, path) = create_temp_repo();
-            make_workspace(&path, &["sniff/lib", "sniff/cli", "homelab/lib"]);
+            make_workspace(
+                &path,
+                &[
+                    "sniff/lib",
+                    "sniff/cli",
+                    "homelab/lib",
+                ],
+            );
 
             std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
             std::fs::write(path.join("sniff/cli/src/lib.rs"), "// dirty").unwrap();
@@ -813,7 +805,12 @@ mod tests {
             let (_dir, path) = create_temp_repo();
             make_workspace(
                 &path,
-                &["apps/web", "apps/api", "apps/api/workers", "libs/core"],
+                &[
+                    "apps/web",
+                    "apps/api",
+                    "apps/api/workers",
+                    "libs/core",
+                ],
             );
 
             std::fs::write(path.join("apps/web/src/lib.rs"), "// dirty").unwrap();
@@ -847,7 +844,13 @@ mod tests {
         #[test]
         fn unknown_package_returns_error() {
             let (_dir, path) = create_temp_repo();
-            make_workspace(&path, &["sniff/lib", "sniff/cli"]);
+            make_workspace(
+                &path,
+                &[
+                    "sniff/lib",
+                    "sniff/cli",
+                ],
+            );
 
             std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
 
@@ -873,7 +876,13 @@ mod tests {
         #[test]
         fn unknown_package_area_returns_error() {
             let (_dir, path) = create_temp_repo();
-            make_workspace(&path, &["sniff/lib", "sniff/cli"]);
+            make_workspace(
+                &path,
+                &[
+                    "sniff/lib",
+                    "sniff/cli",
+                ],
+            );
 
             std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
 
@@ -911,7 +920,8 @@ mod tests {
             let doc_content = "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
             commit_file(&path, "docs/guide.md", doc_content);
 
-            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            let matched =
+                find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
             assert_eq!(matched.len(), 1);
             assert_eq!(matched[0].relative, "docs/guide.md");
         }
@@ -924,11 +934,11 @@ mod tests {
             std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
             // Doc references a DIFFERENT file
-            let doc_content =
-                "---\ntitle: Other\nblast_radius:\n  - src/other.rs\n---\n# Other\n";
+            let doc_content = "---\ntitle: Other\nblast_radius:\n  - src/other.rs\n---\n# Other\n";
             commit_file(&path, "docs/other.md", doc_content);
 
-            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            let matched =
+                find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
             assert!(matched.is_empty());
         }
 
@@ -941,7 +951,8 @@ mod tests {
             let doc_content = "---\ntitle: Empty\nblast_radius: []\n---\n# Empty\n";
             commit_file(&path, "docs/empty.md", doc_content);
 
-            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            let matched =
+                find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
             assert!(matched.is_empty());
         }
 
@@ -954,7 +965,8 @@ mod tests {
             let doc_content = "---\ntitle: No BR\n---\n# No BR\n";
             commit_file(&path, "docs/nobr.md", doc_content);
 
-            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            let matched =
+                find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
             assert!(matched.is_empty());
         }
 
@@ -962,12 +974,12 @@ mod tests {
         fn no_changed_files_returns_empty() {
             let (_dir, path) = create_temp_repo();
             // Everything is committed, nothing dirty
-            let doc_content =
-                "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
+            let doc_content = "---\ntitle: Guide\nblast_radius:\n  - src/main.rs\n---\n# Guide\n";
             commit_file(&path, "docs/guide.md", doc_content);
             commit_file(&path, "src/main.rs", "fn main() {}");
 
-            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            let matched =
+                find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
             assert!(matched.is_empty());
         }
 
@@ -1001,11 +1013,11 @@ mod tests {
             std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
             // Doc uses ./src/main.rs (should be normalized to src/main.rs)
-            let doc_content =
-                "---\ntitle: Guide\nblast_radius:\n  - ./src/main.rs\n---\n# Guide\n";
+            let doc_content = "---\ntitle: Guide\nblast_radius:\n  - ./src/main.rs\n---\n# Guide\n";
             commit_file(&path, "docs/guide.md", doc_content);
 
-            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            let matched =
+                find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
             assert_eq!(matched.len(), 1);
         }
 
@@ -1015,14 +1027,13 @@ mod tests {
             commit_file(&path, "src/main.rs", "fn main() {}");
             std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
-            let doc_a =
-                "---\ntitle: Z Doc\nblast_radius:\n  - src/main.rs\n---\n# Z Doc\n";
-            let doc_b =
-                "---\ntitle: A Doc\nblast_radius:\n  - src/main.rs\n---\n# A Doc\n";
+            let doc_a = "---\ntitle: Z Doc\nblast_radius:\n  - src/main.rs\n---\n# Z Doc\n";
+            let doc_b = "---\ntitle: A Doc\nblast_radius:\n  - src/main.rs\n---\n# A Doc\n";
             commit_file(&path, "docs/z_doc.md", doc_a);
             commit_file(&path, "docs/a_doc.md", doc_b);
 
-            let matched = find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
+            let matched =
+                find_blast_radius_documents(&path, ChangeScope::Dirty, None, None).unwrap();
             assert_eq!(matched.len(), 2);
             assert!(matched[0].relative < matched[1].relative);
         }

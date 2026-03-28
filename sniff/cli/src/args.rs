@@ -78,7 +78,9 @@ pub enum RepoAction {
 /// Completion candidates for `--package` flags.
 fn repo_package_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
     use clap_complete::engine::CompletionCandidate;
-    let Ok(Some(info)) = sniff::filesystem::repo::detect_repo(&std::env::current_dir().unwrap_or_default()) else {
+    let Ok(Some(info)) =
+        sniff::filesystem::repo::detect_repo(&std::env::current_dir().unwrap_or_default())
+    else {
         return Vec::new();
     };
     info.packages
@@ -92,7 +94,9 @@ fn repo_package_candidates() -> Vec<clap_complete::engine::CompletionCandidate> 
 fn repo_package_area_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
     use clap_complete::engine::CompletionCandidate;
     use std::collections::BTreeSet;
-    let Ok(Some(info)) = sniff::filesystem::repo::detect_repo(&std::env::current_dir().unwrap_or_default()) else {
+    let Ok(Some(info)) =
+        sniff::filesystem::repo::detect_repo(&std::env::current_dir().unwrap_or_default())
+    else {
         return Vec::new();
     };
     let areas: BTreeSet<String> = info
@@ -101,10 +105,7 @@ fn repo_package_area_candidates() -> Vec<clap_complete::engine::CompletionCandid
         .into_iter()
         .map(|p| p.package_area)
         .collect();
-    areas
-        .into_iter()
-        .map(CompletionCandidate::new)
-        .collect()
+    areas.into_iter().map(CompletionCandidate::new).collect()
 }
 
 /// Shared arguments for commands that list file paths.
@@ -821,7 +822,11 @@ impl Commands {
                     latest_versions: *latest_versions,
                 },
                 Some(RepoSubcommand::Structure { filter: sub_filter }) => RepoAction::Structure {
-                    filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
+                    filter: if sub_filter.is_empty() {
+                        filter.clone()
+                    } else {
+                        sub_filter.clone()
+                    },
                     latest_versions: *latest_versions,
                 },
                 Some(RepoSubcommand::GitStatus {
@@ -848,42 +853,74 @@ impl Commands {
                     ui,
                     filter: sub_filter,
                 }) => RepoAction::Deps {
-                    filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
+                    filter: if sub_filter.is_empty() {
+                        filter.clone()
+                    } else {
+                        sub_filter.clone()
+                    },
                     ui: *ui,
                 },
                 Some(RepoSubcommand::Packages { filter: sub_filter }) => RepoAction::Packages {
-                    filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
+                    filter: if sub_filter.is_empty() {
+                        filter.clone()
+                    } else {
+                        sub_filter.clone()
+                    },
                 },
                 Some(RepoSubcommand::Package) => RepoAction::Package,
                 Some(RepoSubcommand::PackageArea) => RepoAction::PackageArea,
                 Some(RepoSubcommand::DirtyPackages { filter: sub_filter }) => {
                     RepoAction::DirtyPackages {
-                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
+                        filter: if sub_filter.is_empty() {
+                            filter.clone()
+                        } else {
+                            sub_filter.clone()
+                        },
                     }
                 }
                 Some(RepoSubcommand::DirtyPackageAreas { filter: sub_filter }) => {
                     RepoAction::DirtyPackageAreas {
-                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
+                        filter: if sub_filter.is_empty() {
+                            filter.clone()
+                        } else {
+                            sub_filter.clone()
+                        },
                     }
                 }
                 Some(RepoSubcommand::StagedPackages { filter: sub_filter }) => {
                     RepoAction::StagedPackages {
-                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
+                        filter: if sub_filter.is_empty() {
+                            filter.clone()
+                        } else {
+                            sub_filter.clone()
+                        },
                     }
                 }
                 Some(RepoSubcommand::StagedPackageAreas { filter: sub_filter }) => {
                     RepoAction::StagedPackageAreas {
-                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
+                        filter: if sub_filter.is_empty() {
+                            filter.clone()
+                        } else {
+                            sub_filter.clone()
+                        },
                     }
                 }
                 Some(RepoSubcommand::UnstagedPackages { filter: sub_filter }) => {
                     RepoAction::UnstagedPackages {
-                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
+                        filter: if sub_filter.is_empty() {
+                            filter.clone()
+                        } else {
+                            sub_filter.clone()
+                        },
                     }
                 }
                 Some(RepoSubcommand::UnstagedPackageAreas { filter: sub_filter }) => {
                     RepoAction::UnstagedPackageAreas {
-                        filter: if sub_filter.is_empty() { filter.clone() } else { sub_filter.clone() },
+                        filter: if sub_filter.is_empty() {
+                            filter.clone()
+                        } else {
+                            sub_filter.clone()
+                        },
                     }
                 }
                 Some(RepoSubcommand::PackageRoot) => RepoAction::PackageRoot,
@@ -904,9 +941,7 @@ impl Commands {
                 Some(RepoSubcommand::UnstagedSourceCode(args)) => {
                     RepoAction::UnstagedSourceCode(args.clone())
                 }
-                Some(RepoSubcommand::DirtyFiles(args)) => {
-                    RepoAction::DirtyFiles(args.clone())
-                }
+                Some(RepoSubcommand::DirtyFiles(args)) => RepoAction::DirtyFiles(args.clone()),
             }),
             _ => None,
         }
@@ -1581,8 +1616,7 @@ mod tests {
                 })
             ));
 
-            let git =
-                parse_args(&["repo", "git-status", "--refresh-remotes"]).unwrap();
+            let git = parse_args(&["repo", "git-status", "--refresh-remotes"]).unwrap();
             assert!(git.command.as_ref().is_some_and(Commands::refresh_remotes));
 
             let repo = parse_args(&["repo", "--latest-versions"]).unwrap();

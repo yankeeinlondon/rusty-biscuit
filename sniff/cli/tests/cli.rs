@@ -1297,7 +1297,13 @@ fn test_repo_dirty_source_code_returns_source_files() {
     std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-source-code",
+            "--plain",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("src/main.rs"));
@@ -1315,13 +1321,22 @@ fn test_repo_staged_source_code_returns_staged_only() {
     std::fs::write(path.join("src/b.rs"), "b modified").unwrap();
 
     let assert = cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "staged-source-code", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "staged-source-code",
+            "--plain",
+        ])
         .assert()
         .success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     assert!(stdout.contains("a.rs"), "Should contain staged file a.rs");
-    assert!(!stdout.contains("b.rs"), "Should not contain unstaged file b.rs");
+    assert!(
+        !stdout.contains("b.rs"),
+        "Should not contain unstaged file b.rs"
+    );
 }
 
 #[test]
@@ -1336,7 +1351,13 @@ fn test_repo_staged_files_uses_new_path() {
 
     // staged-files should now go through the new path (all files, not just source)
     let assert = cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "staged-files", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "staged-files",
+            "--plain",
+        ])
         .assert()
         .success();
 
@@ -1352,7 +1373,13 @@ fn test_repo_staged_files_json_uses_new_shape() {
     test_stage_file(&path, "src/main.rs", "fn main() { updated }");
 
     let assert = cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "staged-files", "--json"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "staged-files",
+            "--json",
+        ])
         .assert()
         .success();
 
@@ -1361,7 +1388,11 @@ fn test_repo_staged_files_json_uses_new_shape() {
     assert_eq!(json["scope"], "staged", "scope should be lowercase");
     assert_eq!(json["kind"], "all_files", "kind should be snake_case");
     let paths = json["paths"].as_array().expect("paths should be an array");
-    assert!(paths.iter().any(|p| p.as_str().unwrap().contains("main.rs")));
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.as_str().unwrap().contains("main.rs"))
+    );
 }
 
 #[test]
@@ -1375,7 +1406,13 @@ fn test_repo_dirty_files_returns_all_file_types() {
     std::fs::write(path.join("config.json"), "{\"key\": true}").unwrap();
 
     let assert = cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "dirty-files", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-files",
+            "--plain",
+        ])
         .assert()
         .success();
 
@@ -1391,7 +1428,12 @@ fn test_repo_file_list_no_results_exits_1() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-source-code",
+        ])
         .assert()
         .code(1);
 }
@@ -1402,7 +1444,13 @@ fn test_repo_file_list_no_error_exits_0() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code", "--no-error"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-source-code",
+            "--no-error",
+        ])
         .assert()
         .success();
 }
@@ -1413,7 +1461,15 @@ fn test_repo_file_list_on_error_to_stderr() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code", "--on-error", "No dirty source code found", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-source-code",
+            "--on-error",
+            "No dirty source code found",
+            "--plain",
+        ])
         .assert()
         .code(1)
         .stderr(predicate::str::contains("No dirty source code found"));
@@ -1425,7 +1481,16 @@ fn test_repo_file_list_on_error_plus_no_error_to_stdout() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code", "--no-error", "--on-error", "clean!", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-source-code",
+            "--no-error",
+            "--on-error",
+            "clean!",
+            "--plain",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("clean!"));
@@ -1443,7 +1508,13 @@ fn test_blast_radius_dirty_matches_documents() {
     std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "blast-radius",
+            "dirty",
+            "--plain",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("docs/guide.md"));
@@ -1460,7 +1531,13 @@ fn test_blast_radius_staged_matches_documents() {
     test_stage_file(&path, "src/main.rs", "fn main() { staged }");
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "blast-radius", "staged", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "blast-radius",
+            "staged",
+            "--plain",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("docs/guide.md"));
@@ -1475,7 +1552,13 @@ fn test_blast_radius_last_commit_matches_documents() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "blast-radius", "last-commit", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "blast-radius",
+            "last-commit",
+            "--plain",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("docs/guide.md"));
@@ -1499,7 +1582,13 @@ fn test_blast_radius_no_error_exits_0() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty", "--no-error"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "blast-radius",
+            "dirty",
+            "--no-error",
+        ])
         .assert()
         .success();
 }
@@ -1510,7 +1599,15 @@ fn test_blast_radius_on_error_to_stderr() {
     test_commit_file(&path, "src/main.rs", "fn main() {}");
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty", "--on-error", "No docs affected", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "blast-radius",
+            "dirty",
+            "--on-error",
+            "No docs affected",
+            "--plain",
+        ])
         .assert()
         .code(1)
         .stderr(predicate::str::contains("No docs affected"));
@@ -1525,16 +1622,28 @@ fn test_blast_radius_json_output() {
     std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
     let assert = cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty", "--json"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "blast-radius",
+            "dirty",
+            "--json",
+        ])
         .assert()
         .success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let json: Value = serde_json::from_str(&stdout).expect("Should be valid JSON");
     assert_eq!(json["scope"], "dirty", "scope should be lowercase");
-    let docs = json["documents"].as_array().expect("documents should be an array");
+    let docs = json["documents"]
+        .as_array()
+        .expect("documents should be an array");
     assert_eq!(docs.len(), 1);
-    assert_eq!(docs[0].as_str().unwrap(), "docs/guide.md", "documents should be path strings");
+    assert_eq!(
+        docs[0].as_str().unwrap(),
+        "docs/guide.md",
+        "documents should be path strings"
+    );
 }
 
 #[test]
@@ -1546,7 +1655,14 @@ fn test_blast_radius_list_format() {
     std::fs::write(path.join("src/main.rs"), "fn main() { changed }").unwrap();
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "blast-radius", "dirty", "--list", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "blast-radius",
+            "dirty",
+            "--list",
+            "--plain",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("docs/guide.md"));
@@ -1555,7 +1671,11 @@ fn test_blast_radius_list_format() {
 #[test]
 fn test_docs_stdout_stderr_split() {
     let (_dir, path) = create_test_repo();
-    test_commit_file(&path, "docs/readme.md", "---\ntitle: Readme\n---\n# Readme\n");
+    test_commit_file(
+        &path,
+        "docs/readme.md",
+        "---\ntitle: Readme\n---\n# Readme\n",
+    );
 
     let assert = cargo_bin_cmd!("sniff")
         .args(["--base", path.to_str().unwrap(), "docs", "--plain"])
@@ -1584,13 +1704,25 @@ fn test_docs_blast_radius_filter() {
     test_commit_file(&path, "docs/readme.md", doc_without);
 
     let assert = cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "docs", "--blast-radius", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "docs",
+            "--blast-radius",
+            "--plain",
+        ])
         .assert()
         .success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(stdout.contains("api.md"), "Should include doc with blast_radius");
-    assert!(!stdout.contains("readme.md"), "Should exclude doc without blast_radius");
+    assert!(
+        stdout.contains("api.md"),
+        "Should include doc with blast_radius"
+    );
+    assert!(
+        !stdout.contains("readme.md"),
+        "Should exclude doc without blast_radius"
+    );
 }
 
 #[test]
@@ -1600,7 +1732,14 @@ fn test_repo_dirty_source_code_with_list_flag() {
     std::fs::write(path.join("src/main.rs"), "fn main() { dirty }").unwrap();
 
     cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "dirty-source-code", "--list", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "dirty-source-code",
+            "--list",
+            "--plain",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("main.rs"));
@@ -1618,11 +1757,20 @@ fn test_repo_unstaged_source_code_returns_modified_only() {
     std::fs::write(path.join("src/b.rs"), "b modified").unwrap();
 
     let assert = cargo_bin_cmd!("sniff")
-        .args(["--base", path.to_str().unwrap(), "repo", "unstaged-source-code", "--plain"])
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "unstaged-source-code",
+            "--plain",
+        ])
         .assert()
         .success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     assert!(stdout.contains("b.rs"), "Should contain unstaged file b.rs");
-    assert!(!stdout.contains("a.rs"), "Should not contain staged file a.rs");
+    assert!(
+        !stdout.contains("a.rs"),
+        "Should not contain staged file a.rs"
+    );
 }

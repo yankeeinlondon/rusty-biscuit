@@ -24,11 +24,17 @@ pub enum SniffError {
 
     /// The specified package name was not found in the monorepo.
     #[error("package '{name}' not found. Valid packages: {valid}")]
-    UnknownPackage { name: String, valid: String },
+    UnknownPackage {
+        name: String,
+        valid: String,
+    },
 
     /// The specified package area was not found in the monorepo.
     #[error("package area '{area}' not found. Valid areas: {valid}")]
-    UnknownPackageArea { area: String, valid: String },
+    UnknownPackageArea {
+        area: String,
+        valid: String,
+    },
 
     /// Error gathering system information.
     ///

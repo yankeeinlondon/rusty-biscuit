@@ -1,7 +1,7 @@
 use clap::{CommandFactory, Parser};
 use clap_complete::{CompleteEnv, Shell};
 use sniff::filesystem::blast_radius::{
-    ChangedPathKind, ChangedPathQuery, ChangeScope, collect_changed_paths,
+    ChangeScope, ChangedPathKind, ChangedPathQuery, collect_changed_paths,
     find_blast_radius_documents,
 };
 use sniff::package::{enrich_dependency, is_major_update, is_owner_repo_shorthand};
@@ -354,7 +354,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => unreachable!(),
                 };
                 return handle_file_list_command(
-                    args, scope, kind, cli.json, cli.plain, base_dir.as_deref(),
+                    args,
+                    scope,
+                    kind,
+                    cli.json,
+                    cli.plain,
+                    base_dir.as_deref(),
                 );
             }
             _ => {
@@ -433,7 +438,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::Services
         | OutputFilter::Just
         | OutputFilter::BlastRadius => {
-            unreachable!("Programs, Services, Just, and BlastRadius mode should be handled before this point")
+            unreachable!(
+                "Programs, Services, Just, and BlastRadius mode should be handled before this point"
+            )
         }
     }
 
@@ -946,7 +953,8 @@ fn handle_file_list_command(
         println!("{}", serde_json::to_string_pretty(&json_val)?);
     } else {
         let format = path_list_format(args);
-        let rendered = output::render_path_list(&result.repo_root, &result.paths, format, args.no_path);
+        let rendered =
+            output::render_path_list(&result.repo_root, &result.paths, format, args.no_path);
         output::emit_text(&rendered, plain);
     }
 

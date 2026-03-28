@@ -16,7 +16,7 @@ use sniff::filesystem::{
     FileAssociationBreakdown, FileAssociationStats, FrameworkStats, TitleSource, UpdatedSource,
 };
 
-use super::{format_number, relative_path, TextOutput};
+use super::{TextOutput, format_number, relative_path};
 use crate::args::FilesFilter;
 
 /// Parsed repo filter with support for negation (`!`) and area matching (`@`).
@@ -66,10 +66,7 @@ impl RepoFilter {
 }
 
 /// Apply an optional filter to a package list, returning matching packages.
-pub(crate) fn filter_packages<'a>(
-    packages: &'a [Package],
-    filters: &[String],
-) -> Vec<&'a Package> {
+pub(crate) fn filter_packages<'a>(packages: &'a [Package], filters: &[String]) -> Vec<&'a Package> {
     if filters.is_empty() {
         packages.iter().collect()
     } else {
@@ -464,11 +461,7 @@ pub fn render_hash_section(
 /// - **Meta**: Remote tracking status, branches, git config
 ///
 /// Format a file path with the directory dimmed and filename bold, plus optional action.
-fn format_file_line(
-    path: &std::path::Path,
-    verbose: u8,
-    action: &FileAction,
-) -> String {
+fn format_file_line(path: &std::path::Path, verbose: u8, action: &FileAction) -> String {
     let path_str = path.display().to_string();
     let (dir, name) = split_path(&path_str);
     let action_suffix = if verbose > 0 {
@@ -685,7 +678,11 @@ pub fn render_git_section(
                 format!(
                     " <dim><i>merge</i></dim> · <red-500>{}</red-500> <dim><i>uncommitted {}</i></dim>",
                     info.changed_files,
-                    if info.changed_files == 1 { "file" } else { "files" }
+                    if info.changed_files == 1 {
+                        "file"
+                    } else {
+                        "files"
+                    }
                 )
             } else {
                 String::new()
@@ -693,8 +690,7 @@ pub fn render_git_section(
 
             // Check if we're inside this particular worktree
             let is_current = git.in_worktree
-                && git.repo_root.canonicalize().ok()
-                    == info.filepath.canonicalize().ok();
+                && git.repo_root.canonicalize().ok() == info.filepath.canonicalize().ok();
 
             if is_current {
                 wt_list.add(Prose::new(format!(
@@ -1415,10 +1411,7 @@ pub fn render_dirty_packages(result: &sniff::SniffResult, repo_filter: &[String]
 /// Render package area names with uncommitted changes as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_dirty_package_areas(
-    result: &sniff::SniffResult,
-    repo_filter: &[String],
-) -> String {
+pub fn render_dirty_package_areas(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
@@ -1536,10 +1529,7 @@ pub fn render_staged_packages(result: &sniff::SniffResult, repo_filter: &[String
 /// Render package area names with staged files as a comma-separated list.
 ///
 /// Returns an error message if the repo is not a monorepo.
-pub fn render_staged_package_areas(
-    result: &sniff::SniffResult,
-    repo_filter: &[String],
-) -> String {
+pub fn render_staged_package_areas(result: &sniff::SniffResult, repo_filter: &[String]) -> String {
     let repo = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref());
 
     match repo {
@@ -3201,7 +3191,10 @@ mod tests {
                 make_package("darkmatter-lib", "darkmatter", &[]),
                 make_package("playa-cli", "playa", &[]),
             ];
-            let result = filter_packages(&packages, &["biscuit".to_string(), "darkmatter".to_string()]);
+            let result = filter_packages(
+                &packages,
+                &["biscuit".to_string(), "darkmatter".to_string()],
+            );
             assert_eq!(result.len(), 2);
             let names: Vec<&str> = result.iter().map(|p| p.name.as_str()).collect();
             assert!(names.contains(&"biscuit-hash"));
@@ -3281,7 +3274,11 @@ mod tests {
 
         #[test]
         fn non_verbose_output_has_header_on_stderr() {
-            let docs = vec![make_doc("docs/readme.md", "Readme", TitleSource::FrontmatterTitle)];
+            let docs = vec![make_doc(
+                "docs/readme.md",
+                "Readme",
+                TitleSource::FrontmatterTitle,
+            )];
             let output = render_docs_output(&docs, 0);
             assert!(output.stderr.contains("Docs"));
             assert!(output.stderr.contains("1 document"));
@@ -3289,7 +3286,11 @@ mod tests {
 
         #[test]
         fn non_verbose_output_has_footer_on_stderr() {
-            let docs = vec![make_doc("docs/readme.md", "Readme", TitleSource::FrontmatterTitle)];
+            let docs = vec![make_doc(
+                "docs/readme.md",
+                "Readme",
+                TitleSource::FrontmatterTitle,
+            )];
             let output = render_docs_output(&docs, 0);
             assert!(output.stderr.contains("--verbose"));
             assert!(output.stderr.contains("metadata for documents"));
@@ -3297,14 +3298,22 @@ mod tests {
 
         #[test]
         fn non_verbose_document_list_on_stdout() {
-            let docs = vec![make_doc("docs/readme.md", "Readme", TitleSource::FrontmatterTitle)];
+            let docs = vec![make_doc(
+                "docs/readme.md",
+                "Readme",
+                TitleSource::FrontmatterTitle,
+            )];
             let output = render_docs_output(&docs, 0);
             assert!(output.stdout.contains("readme.md"));
         }
 
         #[test]
         fn verbose_output_includes_title_with_provenance() {
-            let docs = vec![make_doc("docs/guide.md", "Guide", TitleSource::FrontmatterTitle)];
+            let docs = vec![make_doc(
+                "docs/guide.md",
+                "Guide",
+                TitleSource::FrontmatterTitle,
+            )];
             let output = render_docs_output(&docs, 1);
             assert!(output.stdout.contains("title:"));
             assert!(output.stdout.contains("title property"));
@@ -3327,7 +3336,11 @@ mod tests {
 
         #[test]
         fn verbose_includes_updated_with_provenance() {
-            let docs = vec![make_doc("docs/guide.md", "Guide", TitleSource::FrontmatterTitle)];
+            let docs = vec![make_doc(
+                "docs/guide.md",
+                "Guide",
+                TitleSource::FrontmatterTitle,
+            )];
             let output = render_docs_output(&docs, 1);
             assert!(output.stdout.contains("updated:"));
             assert!(output.stdout.contains("file metadata"));

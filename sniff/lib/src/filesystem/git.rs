@@ -1759,7 +1759,9 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
         // Check if worktree branch is fully merged into base (ancestor of base HEAD)
         let merged = base_oid
             .zip(head_commit.as_ref())
-            .map(|(base, wt_commit)| repo.graph_descendant_of(base, wt_commit.id()).unwrap_or(false))
+            .map(|(base, wt_commit)| {
+                repo.graph_descendant_of(base, wt_commit.id()).unwrap_or(false)
+            })
             .unwrap_or(false);
 
         // Check for merge conflicts by performing an in-memory merge
@@ -1808,9 +1810,7 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
 fn resolve_base_branch(repo: &Repository) -> (String, Option<git2::Oid>) {
     // If we're in a worktree, open the base repo to get its HEAD branch
     let base_repo = if repo.is_worktree() {
-        repo.commondir()
-            .parent()
-            .and_then(|p| Repository::open(p).ok())
+        repo.commondir().parent().and_then(|p| Repository::open(p).ok())
     } else {
         None
     };
@@ -1825,7 +1825,9 @@ fn resolve_base_branch(repo: &Repository) -> (String, Option<git2::Oid>) {
     }
 
     // Fallback: try "main", then "master"
-    for candidate in &["main", "master"] {
+    for candidate in &[
+        "main", "master",
+    ] {
         let refname = format!("refs/heads/{candidate}");
         if let Ok(reference) = repo.find_reference(&refname) {
             let oid = reference.peel_to_commit().ok().map(|c| c.id());

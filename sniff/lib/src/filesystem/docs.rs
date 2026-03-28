@@ -309,9 +309,7 @@ fn normalize_blast_radius_path(raw: &str, repo_root: &Path) -> PathBuf {
 /// Remove `.` and `./` components from a relative path, and strip leading `./`.
 fn normalize_relative_components(p: &Path) -> PathBuf {
     use std::path::Component;
-    p.components()
-        .filter(|c| !matches!(c, Component::CurDir))
-        .collect()
+    p.components().filter(|c| !matches!(c, Component::CurDir)).collect()
 }
 
 /// Extract the document title using priority:
@@ -671,7 +669,13 @@ mod tests {
             let (fm, _body) = extract_frontmatter(content);
             assert!(fm.contains_key("blast_radius"));
             let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
-            assert_eq!(paths, vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")]);
+            assert_eq!(
+                paths,
+                vec![
+                    PathBuf::from("src/main.rs"),
+                    PathBuf::from("src/lib.rs")
+                ]
+            );
         }
 
         #[test]
@@ -696,7 +700,13 @@ mod tests {
             let content = "---\nblast_radius:\n  - src/main.rs\n  - 42\n  - true\n  - src/lib.rs\n---\n# Body";
             let (fm, _body) = extract_frontmatter(content);
             let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
-            assert_eq!(paths, vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")]);
+            assert_eq!(
+                paths,
+                vec![
+                    PathBuf::from("src/main.rs"),
+                    PathBuf::from("src/lib.rs")
+                ]
+            );
         }
 
         #[test]
@@ -740,7 +750,12 @@ mod tests {
             let (fm, _body) = extract_frontmatter(content);
             let mut keys: Vec<String> = fm.keys().cloned().collect();
             keys.sort();
-            assert_eq!(keys, vec!["model", "prompt", "title"]);
+            assert_eq!(
+                keys,
+                vec![
+                    "model", "prompt", "title"
+                ]
+            );
         }
 
         #[test]
