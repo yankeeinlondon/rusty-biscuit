@@ -28,7 +28,7 @@ use super::exec;
 use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, LiveStreamSink, StructuredCodexOutput,
-    StructuredSummaryDetails, build_harness_shell_options,
+    StructuredSummaryDetails, WrapperHarnessPermissionProbe, build_harness_shell_options,
     emit_stream_summary_no_separator_with_context, emit_stream_summary_with_context,
     materialized_harness_prompt_from_prepared, resolve_binary_path, run_harness_loop,
     strip_prompt_from_args, structured_verbosity, wrap_terminal,
@@ -37,6 +37,7 @@ use crate::log;
 
 fn composition_dispatch_context(
     request: &CompositionExecutionRequest,
+    selection_reason: &SelectionReason,
 ) -> HashMap<String, serde_json::Value> {
     let mut context = HashMap::new();
     context.insert(
@@ -53,6 +54,10 @@ fn composition_dispatch_context(
     context.insert(
         "composition_source_path".into(),
         serde_json::Value::String(request.prepared.resolved_path.display().to_string()),
+    );
+    context.insert(
+        "provider_selection_reason".into(),
+        serde_json::Value::String(format!("{selection_reason:?}")),
     );
     context
 }
@@ -280,10 +285,10 @@ pub(crate) fn execute_composition_request(
 
     if request.yolo {
         let mut env_overrides = Vec::new();
-        if let Some(warn) = profile.apply_yolo(&mut child_args, &mut env_overrides)? {
-            if !silent && !quiet {
-                log::warn(&warn);
-            }
+        if let Some(warn) = profile.apply_yolo(&mut child_args, &mut env_overrides)?
+            && !silent && !quiet
+        {
+            log::warn(&warn);
         }
         for (key, value) in env_overrides {
             env_plan.env.insert(key.into(), value.into());
@@ -304,10 +309,10 @@ pub(crate) fn execute_composition_request(
     // Universal --model flag
     if let Some(ref model) = request.model {
         let mut env_overrides = Vec::new();
-        if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model) {
-            if !silent && !quiet {
-                log::warn(&warn);
-            }
+        if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
+            && !silent && !quiet
+        {
+            log::warn(&warn);
         }
         for (key, value) in env_overrides {
             env_plan.env.insert(key.into(), value.into());
@@ -324,30 +329,29 @@ pub(crate) fn execute_composition_request(
     if let Some(ref output_str) = request.output {
         use super::profile::OutputFormat;
         let format: OutputFormat = output_str.parse().map_err(|e: String| eyre!(e))?;
-        if let Some(warn) = profile.apply_output_format(&mut child_args, format) {
-            if !silent && !quiet {
-                log::warn(&warn);
-            }
+        if let Some(warn) = profile.apply_output_format(&mut child_args, format)
+            && !silent && !quiet
+        {
+            log::warn(&warn);
         }
     }
 
     // Universal --system-prompt flag
     if let Some(ref prompt) = request.system_prompt {
         let resolved = super::resolve_system_prompt(prompt)?;
-        if let Some(warn) = profile.apply_system_prompt(&mut child_args, &resolved) {
-            if !silent && !quiet {
-                log::warn(&warn);
-            }
+        if let Some(warn) = profile.apply_system_prompt(&mut child_args, &resolved)
+            && !silent && !quiet
+        {
+            log::warn(&warn);
         }
     }
 
     // Universal --sandbox flag
-    if request.sandbox {
-        if let Some(warn) = profile.apply_sandbox(&mut child_args) {
-            if !silent && !quiet {
-                log::warn(&warn);
-            }
-        }
+    if request.sandbox
+        && let Some(warn) = profile.apply_sandbox(&mut child_args)
+        && !silent && !quiet
+    {
+        log::warn(&warn);
     }
 
     // Timeout validation
@@ -415,10 +419,21 @@ pub(crate) fn execute_composition_request(
         // Plan is validated; the harness loop will re-parse if needed.
         drop(plan);
     } else if is_inline {
-        // Non-harness inline: validate writability directly since there
-        // is no handler system to recover from permission failures.
-        claudine::composition::validate_file_permissions(&request.prepared.resolved_path)
-            .map_err(|e| eyre!("{e}"))?;
+        // Non-harness inline: validate writability using the same OS +
+        // provider-policy check that the harness path uses. Without harness
+        // frontmatter there is no handler system to recover, so a failure
+        // here is fatal.
+        let permission_probe = WrapperHarnessPermissionProbe::new(
+            provider,
+            child_args.clone(),
+            effective_repo_root,
+        );
+        claudine::harness::check_write_permission(
+            &request.prepared.resolved_path,
+            &request.prepared.resolved_path,
+            Some(&permission_probe),
+        )
+        .map_err(|reason| eyre!("{reason}"))?;
     }
 
     // -- Structured streaming decision ------------------------------------
@@ -490,7 +505,7 @@ pub(crate) fn execute_composition_request(
 
     // -- Execution --------------------------------------------------------
 
-    let dispatch_context = composition_dispatch_context(&request);
+    let dispatch_context = composition_dispatch_context(&request, &selected.reason);
 
     if harness_enabled {
         let harness_mode = if is_inline {

@@ -737,4 +737,54 @@ mod tests {
 
         (kept, removed.into_iter().collect())
     }
+
+    #[test]
+    fn repo_root_hint_overrides_cwd_detection() {
+        let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let hint_dir = tempfile::tempdir().unwrap();
+
+        let plan = build_child_env(
+            profile,
+            claudine::events::Provider::Claude,
+            &[],
+            false,
+            false,
+            &[],
+            cwd.path(),
+            &[],
+            false,
+            false,
+            Some(hint_dir.path()),
+        )
+        .unwrap();
+
+        // repo_root should be the hint, not whatever CWD detection found.
+        assert_eq!(plan.repo_root.as_deref(), Some(hint_dir.path()));
+    }
+
+    #[test]
+    fn repo_root_hint_none_falls_back_to_cwd_detection() {
+        let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+
+        let plan = build_child_env(
+            profile,
+            claudine::events::Provider::Claude,
+            &[],
+            false,
+            false,
+            &[],
+            cwd.path(),
+            &[],
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+
+        // With None hint and a non-git tempdir, repo_root should be None
+        // (CWD detection finds no git repo in a tempdir).
+        assert_eq!(plan.repo_root, None);
+    }
 }
