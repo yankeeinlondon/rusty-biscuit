@@ -9,6 +9,7 @@
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::terminal::Terminal;
@@ -27,10 +28,10 @@ use super::exec;
 use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, LiveStreamSink, StructuredCodexOutput,
-    StructuredSummaryDetails, build_harness_shell_options, emit_stream_summary,
-    emit_stream_summary_no_separator, materialized_harness_prompt_from_prepared,
-    resolve_binary_path, run_harness_loop, strip_prompt_from_args, structured_verbosity,
-    wrap_terminal,
+    StructuredSummaryDetails, build_harness_shell_options,
+    emit_stream_summary_no_separator_with_context, emit_stream_summary_with_context,
+    materialized_harness_prompt_from_prepared, resolve_binary_path, run_harness_loop,
+    strip_prompt_from_args, structured_verbosity, wrap_terminal,
 };
 use crate::log;
 
@@ -88,7 +89,7 @@ pub(crate) fn execute_composition_request(
     .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
     .collect();
 
-    let favorite = load_config_favorite();
+    let favorite = load_config_favorite(&cwd);
 
     let selected = match select_provider(
         request.explicit_provider,
@@ -588,13 +589,23 @@ fn execute_inline_without_harness(
         if stream_verbosity != Verbosity::Silent {
             eprintln!();
         }
-        emit_stream_summary_no_separator(
+        emit_stream_summary_no_separator_with_context(
             &summary,
             profile,
             env_context,
             stream_verbosity,
             verbose_requested,
             &details,
+            Some(dispatch_context),
+        );
+    } else {
+        // Legacy (non-structured) inline path: emit synthetic session-end
+        // event so composition metadata is consistently logged.
+        emit_legacy_composition_session_event(
+            provider,
+            final_exit,
+            env_context,
+            dispatch_context,
         );
     }
 
@@ -868,13 +879,14 @@ fn execute_direct_without_harness(
             std::io::stdout().flush()?;
         }
 
-        emit_stream_summary(
+        emit_stream_summary_with_context(
             &summary,
             profile,
             env_context,
             stream_verbosity,
             verbose_requested,
             &summary_details.lock().unwrap().clone(),
+            dispatch_context,
         );
 
         Ok(summary.exit_code)
@@ -891,6 +903,16 @@ fn execute_direct_without_harness(
                 stdin_seed,
             },
         )?;
+
+        // Emit a synthetic session-end event for non-structured composition
+        // runs so that composition metadata is consistently logged.
+        emit_legacy_composition_session_event(
+            provider,
+            result.data,
+            env_context,
+            dispatch_context,
+        );
+
         Ok(result.data)
     }
 }
@@ -941,9 +963,70 @@ fn is_tty() -> bool {
 
 // -- Config loading -------------------------------------------------------
 
-fn load_config_favorite() -> Option<Provider> {
-    let config = claudine::dispatch::loader::load_config(None, None).ok()?;
+fn load_config_favorite(cwd: &Path) -> Option<Provider> {
+    let repo_root = sniff::filesystem::git::detect_git(cwd, false, 1)
+        .ok()
+        .flatten()
+        .map(|info| info.repo_root);
+    let config =
+        claudine::dispatch::loader::load_config(None, repo_root.as_deref()).ok()?;
     config.settings.linking?.preference.first().copied()
+}
+
+// -- Legacy composition session event --------------------------------------
+
+/// Emit a synthetic `SessionEnd` event for non-structured composition runs.
+///
+/// Structured runs emit this via `emit_stream_summary_with_context`, but
+/// legacy (non-structured) paths return raw process results without any
+/// event emission. This ensures composition metadata is consistently logged
+/// across all execution paths for future resume/reporting UX.
+fn emit_legacy_composition_session_event(
+    provider: Provider,
+    exit_code: i32,
+    env_context: &claudine::events::EnvironmentContext,
+    dispatch_context: &HashMap<String, serde_json::Value>,
+) {
+    use claudine::events::{AgenticEvent, EventMeta};
+
+    let mut extra = HashMap::new();
+    extra.insert(
+        "synthetic".into(),
+        serde_json::Value::Bool(true),
+    );
+    extra.insert(
+        "synthetic_kind".into(),
+        serde_json::Value::String("composition_legacy_summary".into()),
+    );
+    extra.insert(
+        "exit_code".into(),
+        serde_json::Value::Number(exit_code.into()),
+    );
+    for (key, value) in dispatch_context {
+        extra.insert(key.clone(), value.clone());
+    }
+
+    let meta = EventMeta {
+        provider,
+        event: AgenticEvent::SessionEnd,
+        timestamp: chrono::Utc::now(),
+        session_id: None,
+        cwd: None,
+        tool_name: None,
+        tool_input: None,
+        tool_response: None,
+        error: None,
+        prompt: None,
+        agent_type: None,
+        notification_type: None,
+        notification_message: None,
+        extra,
+        env: env_context.clone(),
+    };
+
+    if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
+        tracing::warn!("Failed to write legacy composition session event: {e}");
+    }
 }
 
 // -- Display helpers ------------------------------------------------------
