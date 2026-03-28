@@ -6,6 +6,7 @@
 //! - Agent/provider selection with precedence rules
 //! - Composition-specific error types
 
+pub mod closure;
 mod error;
 mod guardrails;
 mod prepare;
