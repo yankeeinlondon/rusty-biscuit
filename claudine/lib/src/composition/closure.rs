@@ -5,7 +5,6 @@
 //! so that both the harness loop and the non-harness path share one
 //! deterministic rewrite pipeline.
 
-use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::composition::error::CompositionError;
@@ -96,11 +95,6 @@ pub fn rewrite_inline_document(
     Ok(markdown.as_string())
 }
 
-/// Return the set of frontmatter field names that Claudine manages
-/// automatically during inline closure.
-pub fn default_managed_fields() -> BTreeSet<String> {
-    BTreeSet::from(["last_updated".into()])
-}
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -273,9 +267,7 @@ mod tests {
         let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
         let plan = InlineClosurePlan {
             original_document_text: original.to_string(),
-            original_frontmatter_hash: original_markdown.hash_frontmatter(false),
             original_body_hash: original_markdown.hash_body(false),
-            managed_fields: default_managed_fields(),
         };
 
         let err = apply_inline_closure(
@@ -363,21 +355,10 @@ mod tests {
     fn apply_closure_rejects_empty_body() {
         let plan = InlineClosurePlan {
             original_document_text: "---\nprompt: test\n---\nOld\n".into(),
-            original_frontmatter_hash: 0,
             original_body_hash: 0,
-            managed_fields: default_managed_fields(),
         };
         let err = apply_inline_closure(&plan, "  ", Path::new("/tmp/nonexistent"), "2026-03-27");
         assert!(err.is_err());
-    }
-
-    // -- default_managed_fields ---------------------------------------------
-
-    #[test]
-    fn managed_fields_contains_last_updated() {
-        let fields = default_managed_fields();
-        assert!(fields.contains("last_updated"));
-        assert_eq!(fields.len(), 1);
     }
 
     // -- strip_leading_frontmatter ------------------------------------------
