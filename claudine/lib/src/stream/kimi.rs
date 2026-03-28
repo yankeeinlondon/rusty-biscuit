@@ -59,7 +59,15 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             .map(String::from);
         self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
 
-        let meta = EventMeta::default();
+        let mut meta = EventMeta::default();
+        if let Some(session_id) = &self.session_id {
+            meta.extra
+                .insert("session_id".into(), Value::String(session_id.clone()));
+        }
+        if let Some(model) = &self.model {
+            meta.extra
+                .insert("model".into(), Value::String(model.clone()));
+        }
         self.sink.on_session_start(&meta);
     }
 
