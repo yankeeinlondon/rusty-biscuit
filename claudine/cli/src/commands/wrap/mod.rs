@@ -375,18 +375,20 @@ impl LiveStreamSink {
         }
     }
 
-    fn emit_start_summary(&mut self) {
-        if self.start_emitted || self.verbosity != Verbosity::Normal {
+    /// Emit the agent's session ID to stderr unconditionally (unless
+    /// already emitted). This is operational tracking info that must
+    /// always be visible regardless of --quiet or --silent.
+    fn emit_agent_session_id(&mut self) {
+        if self.start_emitted {
             return;
         }
-
         if let Some(ref session_id) = self.session_id {
             let line = crate::output::format_session_start(
                 self.provider,
                 session_id,
                 self.model.as_deref(),
             );
-            eprintln!("{line}\n"); // blank line after session ID separates from execution output
+            eprintln!("{line}\n");
             self.start_emitted = true;
         }
     }
@@ -459,7 +461,7 @@ impl LiveStreamSink {
             details.record_tool_name(tool_name);
         }
         if event == AgenticEvent::SessionStart {
-            self.emit_start_summary();
+            self.emit_agent_session_id();
         }
         if event == AgenticEvent::TurnError
             && let Some(message) = dispatch_meta.error.as_deref()

@@ -1125,7 +1125,8 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .success()
         .stdout("Hello\n");
     let quiet_stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-    assert!(!quiet_stderr.contains("session ID gem-1"));
+    // Agent session ID is always emitted regardless of --quiet/--silent
+    assert!(quiet_stderr.contains("session ID gem-1"));
     assert!(!quiet_stderr.contains("Malformed JSON"));
     assert!(quiet_stderr.contains("Loop detected"));
     assert!(quiet_stderr.contains("\n\n✓ 1.5s"));
@@ -1143,7 +1144,8 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
         .success()
         .stdout("Hello\n");
     let silent_stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-    assert!(!silent_stderr.contains("session ID gem-1"));
+    // Agent session ID is always emitted regardless of --quiet/--silent
+    assert!(silent_stderr.contains("session ID gem-1"));
     assert!(!silent_stderr.contains("Malformed JSON"));
     assert!(!silent_stderr.contains("Loop detected"));
     assert!(!silent_stderr.contains("✓ 1.5s"));
