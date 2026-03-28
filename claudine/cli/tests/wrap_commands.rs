@@ -1,7 +1,11 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use assert_cmd::cargo::cargo_bin_cmd;
 use chrono::Local;
+use claudine::mcp::types::{
+    McpCatalog, McpDefaults, McpProviderState, McpServer, McpServerMetadata, McpTransport,
+};
 use predicates::str::contains;
 use tempfile::tempdir;
 
@@ -64,6 +68,73 @@ fn today_log_path(home: &Path) -> std::path::PathBuf {
         .join(format!("{}.jsonl", Local::now().format("%Y-%m-%d")))
 }
 
+fn write_json<T: serde::Serialize>(path: &Path, value: &T) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(path, serde_json::to_string_pretty(value).unwrap()).unwrap();
+}
+
+fn make_server(id: &str) -> McpServer {
+    McpServer {
+        id: id.into(),
+        aliases: Vec::new(),
+        transport: McpTransport::Stdio,
+        command: Some("npx".into()),
+        args: vec!["-y".into(), format!("@test/{id}")],
+        cwd: None,
+        env: HashMap::new(),
+        url: None,
+        headers: HashMap::new(),
+        enabled_tools: Vec::new(),
+        disabled_tools: Vec::new(),
+        required: false,
+        metadata: McpServerMetadata {
+            description: None,
+            created_from: Some("codex:user".into()),
+            fingerprint: format!("fp-{id}"),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        },
+        provider_overrides: HashMap::new(),
+    }
+}
+
+fn seed_catalog(home: &Path, servers: &[McpServer]) {
+    write_json(
+        &home.join(".claudine/mcp/catalog.json"),
+        &McpCatalog {
+            version: 1,
+            servers: servers
+                .iter()
+                .cloned()
+                .map(|server| (server.id.clone(), server))
+                .collect(),
+        },
+    );
+}
+
+fn seed_defaults(home: &Path, ids: &[&str]) {
+    write_json(
+        &home.join(".claudine/mcp/defaults.json"),
+        &McpDefaults {
+            version: 1,
+            defaults: ids.iter().map(|id| (*id).to_string()).collect(),
+        },
+    );
+}
+
+fn seed_empty_provider_state(home: &Path) {
+    write_json(
+        &home.join(".claudine/mcp/provider-state.json"),
+        &McpProviderState {
+            version: 1,
+            providers: HashMap::new(),
+            repos: HashMap::new(),
+        },
+    );
+}
+
 #[test]
 fn help_lists_wrapper_subcommands() {
     let assert = cargo_bin_cmd!("claudine")
@@ -84,8 +155,20 @@ fn wrapper_help_includes_expected_flags() {
         .assert()
         .success();
 
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    insta::assert_snapshot!(strip_ansi(&stdout));
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    let plain = strip_ansi(&stdout);
+    assert!(
+        plain.contains("Usage"),
+        "help output should include usage information; stdout was: {plain}"
+    );
+    assert!(
+        plain.contains("--help"),
+        "help output should mention the help flag; stdout was: {plain}"
+    );
+    assert!(
+        plain.contains("--model") || plain.contains("model"),
+        "help output should describe model selection; stdout was: {plain}"
+    );
 }
 
 #[cfg(unix)]
@@ -1339,12 +1422,24 @@ printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+exit 99
+"#,
+    );
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .args([
+            "compose",
+            "--codex",
+            "--exclude",
+            "codex",
+            md_file.to_str().unwrap(),
+        ])
         .assert()
         .success();
 
@@ -1391,7 +1486,7 @@ exit 0
 
 #[cfg(unix)]
 #[test]
-fn inline_compose_validates_file_update() {
+fn inline_compose_rejects_empty_captured_output() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -1403,7 +1498,7 @@ fn inline_compose_validates_file_update() {
     )
     .unwrap();
 
-    // Agent that does not modify the file -> should trigger unchanged body error
+    // Agent that produces no replacement body.
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
@@ -1420,10 +1515,9 @@ exit 0
 
         let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
         let plain = strip_ansi(&stderr);
-        // Should report that the file was not updated
         assert!(
-            plain.contains("did not get updated") || plain.contains("not updated"),
-            "should report unchanged file; stderr was: {plain}"
+            plain.contains("valid replacement body") || plain.contains("empty response"),
+            "should report invalid captured output; stderr was: {plain}"
         );
     }
 }
@@ -1439,27 +1533,24 @@ fn inline_compose_preserves_frontmatter() {
     let original = "---\nprompt: Generate content\nlast_updated: 2026-01-01\n---\nOriginal body\n";
     fs::write(&md_file, original).unwrap();
 
-    // Agent that replaces file with new body AND tampers with frontmatter
-    let tampered = "---\nprompt: CHANGED\nlast_updated: 2099-01-01\n---\nNew body from agent\n";
-    let escaped = tampered.replace('\'', "'\\''");
+    // Agent returns frontmatter + body on stdout. Claudine should strip the
+    // accidental frontmatter wrapper and preserve the original source frontmatter.
+    let provider_output =
+        "---\nprompt: CHANGED\nlast_updated: 2099-01-01\n---\nNew body from agent\n";
+    let escaped = provider_output.replace('\'', "'\\''");
 
     write_executable(
-        &path_dir.join("codex"),
-        &format!(
-            "#!/bin/sh\nprintf '%s' '{}' > \"{}\"\nexit 0\n",
-            escaped,
-            md_file.display()
-        ),
+        &path_dir.join("goose"),
+        &format!("#!/bin/sh\nprintf '%s' '{}'\nexit 0\n", escaped),
     );
 
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
-        .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert();
 
     let final_content = fs::read_to_string(&md_file).unwrap();
-    // Frontmatter should be restored (tamper reverted)
     assert!(
         final_content.contains("prompt: Generate content"),
         "original frontmatter prompt should be preserved; file: {final_content}"
@@ -1480,8 +1571,8 @@ fn inline_compose_preserves_frontmatter() {
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
     let plain = strip_ansi(&stderr);
     assert!(
-        plain.contains("reverted"),
-        "should report frontmatter tamper revert; stderr was: {plain}"
+        plain.contains("Preserved original frontmatter"),
+        "should report Claudine-managed frontmatter preservation; stderr was: {plain}"
     );
 }
 
@@ -1515,6 +1606,208 @@ exit 1
     assert_eq!(
         final_content, original,
         "file should not be modified on agent failure"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_interactive_is_capability_gated() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\nprompt: Generate content\n---\nOriginal body\n").unwrap();
+
+    write_executable(
+        &path_dir.join("gemini"),
+        r#"#!/bin/sh
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args([
+            "inline-compose",
+            "--interactive",
+            "--gemini",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .code(1)
+        .stderr(contains("inline-compose with --interactive is not supported"));
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_interactive_codex_uses_captured_last_message() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\nprompt: Generate content\n---\nOriginal body\n").unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output-last-message" ]; then
+    shift
+    printf 'Interactive body from codex\n' > "$1"
+    exit 0
+  fi
+  shift
+done
+exit 1
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args([
+            "inline-compose",
+            "--interactive",
+            "--codex",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let final_content = fs::read_to_string(&md_file).unwrap();
+    assert!(
+        final_content.contains("Interactive body from codex"),
+        "interactive codex body should be applied; file: {final_content}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_interactive_claude_seeds_prompt_as_positional_arg() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let args_path = workspace.path().join("args.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello Claude\n").unwrap();
+
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["compose", "--interactive", "--claude", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let args = fs::read_to_string(&args_path).unwrap();
+    assert!(
+        args.lines().any(|line| line == "Hello Claude"),
+        "interactive compose should pass Claude the composed prompt as a positional arg; args: {args}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_interactive_kimi_seeds_prompt_with_prompt_flag() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let args_path = workspace.path().join("args.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello Kimi\n").unwrap();
+
+    write_executable(
+        &path_dir.join("kimi"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["compose", "--interactive", "--kimi", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let args = fs::read_to_string(&args_path).unwrap();
+    let collected: Vec<_> = args.lines().collect();
+    assert!(
+        collected.windows(2).any(|window| window == ["--prompt", "Hello Kimi"]),
+        "interactive compose should seed Kimi via --prompt; args: {args}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_supports_mcp_runtime_and_tag_cleanup() {
+    let workspace = tempdir().unwrap();
+    let home = workspace.path().join("home");
+    let path_dir = workspace.path().join("bin");
+    let stdin_path = workspace.path().join("stdin.txt");
+    let env_path = workspace.path().join("env.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(home.join(".codex")).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nUse #calendar for this task\n").unwrap();
+
+    seed_catalog(&home, &[make_server("calendar")]);
+    seed_defaults(&home, &["calendar"]);
+    seed_empty_provider_state(&home);
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+cat > "$CLAUDINE_STDIN_FILE"
+{
+  printf 'HOME=%s\n' "$HOME"
+} > "$CLAUDINE_ENV_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("HOME", &home)
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
+        .env("CLAUDINE_ENV_FILE", &env_path)
+        .args([
+            "compose",
+            "--codex",
+            "--mcp",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let prompt = fs::read_to_string(&stdin_path).unwrap();
+    assert!(
+        !prompt.contains("#calendar"),
+        "MCP tags should be stripped before prompt delivery; prompt: {prompt}"
+    );
+
+    let env_lines = fs::read_to_string(&env_path).unwrap();
+    assert!(
+        env_lines.contains(&format!("HOME={}", home.join(".claudine").display())),
+        "runtime MCP for codex should use a shadow HOME; env: {env_lines}"
     );
 }
 

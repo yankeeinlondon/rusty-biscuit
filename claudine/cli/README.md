@@ -122,9 +122,6 @@ Shared wrapper flags:
 | `--use <ID[,ID...]>` | Add specific MCP catalog IDs or aliases and enable MCP composition |
 | `--sandbox` | Enable provider-specific sandboxing |
 | `--repo` | Use only repo-scoped skills, commands, and agents via a shadow HOME |
-| `-p, --prompt-file <FILE>` | Source initial prompt from a Markdown file (composed with Darkmatter) |
-| `--frontmatter-prompt <FILE>` | Inline composition: use frontmatter prompt as input |
-| `--compose <FILE>` | Chained composition: compose full document and use as prompt |
 | `--dry-run` | Show what would be executed without launching the child |
 | `-q, --quiet` | Show only the header line; suppress env details |
 | `--silent` | Suppress all Claudine preflight output |
