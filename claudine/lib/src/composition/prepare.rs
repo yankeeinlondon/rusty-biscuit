@@ -1,6 +1,5 @@
 //! Prompt preparation for composition workflows.
 
-use std::collections::BTreeSet;
 use std::path::Path;
 
 use darkmatter::markdown::Markdown;
@@ -96,14 +95,19 @@ pub fn prepare_inline(
             original_document_text: source.original_text.clone(),
             original_frontmatter_hash,
             original_body_hash,
-            managed_fields: BTreeSet::from(["last_updated".into()]),
+            managed_fields: super::closure::default_managed_fields(),
         }),
     })
 }
 
 /// Convert a `Frontmatter` to a `serde_json::Value::Object`.
 fn frontmatter_to_value(fm: &darkmatter::markdown::Frontmatter) -> serde_json::Value {
-    serde_json::Value::Object(fm.as_map().iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+    serde_json::Value::Object(
+        fm.as_map()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    )
 }
 
 fn json_type_name(value: &serde_json::Value) -> &'static str {
@@ -184,9 +188,11 @@ mod tests {
         let prepared = prepare_inline(&source, None).unwrap();
         assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
         assert!(prepared.prompt.contains("List three colors"));
-        assert!(prepared
-            .prompt
-            .contains("Return the replacement Markdown body content only"));
+        assert!(
+            prepared
+                .prompt
+                .contains("Return the replacement Markdown body content only")
+        );
 
         // Effective frontmatter should contain composed keys
         assert!(prepared.effective_frontmatter.is_object());

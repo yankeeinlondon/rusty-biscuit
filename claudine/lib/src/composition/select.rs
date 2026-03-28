@@ -148,9 +148,7 @@ mod tests {
     use serde_json::json;
     use std::path::PathBuf;
 
-    fn make_prepared_composition(
-        agent_hint: Option<serde_json::Value>,
-    ) -> PreparedComposition {
+    fn make_prepared_composition(agent_hint: Option<serde_json::Value>) -> PreparedComposition {
         use super::super::types::CompositionClosurePlan;
         PreparedComposition {
             mode: CompositionMode::ChainedDocument,
@@ -219,14 +217,7 @@ mod tests {
         let prepared = make_prepared_composition(None);
         let installed = vec![Provider::Claude];
 
-        let result = select_provider(
-            None,
-            &prepared,
-            &installed,
-            &BTreeSet::new(),
-            None,
-        )
-        .unwrap();
+        let result = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap();
         assert_eq!(result.provider, Provider::Claude);
         assert_eq!(result.reason, SelectionReason::SingleInstalled);
     }
@@ -236,14 +227,7 @@ mod tests {
         let prepared = make_prepared_composition(Some(json!("codex")));
         let installed = vec![Provider::Claude, Provider::Codex];
 
-        let result = select_provider(
-            None,
-            &prepared,
-            &installed,
-            &BTreeSet::new(),
-            None,
-        )
-        .unwrap();
+        let result = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap();
         assert_eq!(result.provider, Provider::Codex);
         assert_eq!(result.reason, SelectionReason::FrontmatterHint);
     }
@@ -309,14 +293,7 @@ mod tests {
         let prepared = make_prepared_composition(None);
         let installed = vec![Provider::Claude, Provider::Codex];
 
-        let err = select_provider(
-            None,
-            &prepared,
-            &installed,
-            &BTreeSet::new(),
-            None,
-        )
-        .unwrap_err();
+        let err = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap_err();
         assert!(matches!(
             err,
             CompositionError::InteractiveSelectionRequired
@@ -329,14 +306,7 @@ mod tests {
         let prepared = make_prepared_composition(Some(json!("c")));
         let installed = vec![Provider::Claude, Provider::Codex];
 
-        let err = select_provider(
-            None,
-            &prepared,
-            &installed,
-            &BTreeSet::new(),
-            None,
-        )
-        .unwrap_err();
+        let err = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap_err();
         assert!(matches!(err, CompositionError::AgentHintAmbiguous { .. }));
     }
 
@@ -346,14 +316,7 @@ mod tests {
         let installed = vec![Provider::Claude, Provider::Codex];
         let excluded: BTreeSet<Provider> = [Provider::Claude].into_iter().collect();
 
-        let result = select_provider(
-            None,
-            &prepared,
-            &installed,
-            &excluded,
-            None,
-        )
-        .unwrap();
+        let result = select_provider(None, &prepared, &installed, &excluded, None).unwrap();
         assert_eq!(result.provider, Provider::Codex);
         assert_eq!(result.reason, SelectionReason::SingleInstalled);
     }

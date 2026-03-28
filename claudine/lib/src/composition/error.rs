@@ -59,7 +59,9 @@ pub enum CompositionError {
 
     /// Inline composition with `-i` is not supported for this provider
     /// because it cannot capture the final assistant message.
-    #[error("inline-compose with --interactive is not supported for {0}; the provider cannot capture the final assistant message")]
+    #[error(
+        "inline-compose with --interactive is not supported for {0}; the provider cannot capture the final assistant message"
+    )]
     InlineInteractiveUnsupported(String),
 
     /// The provider returned an invalid response for inline composition.
