@@ -150,10 +150,15 @@ The following interfaces have been removed and replaced by the two canonical com
 |---------|-------------|
 | `claudine <agent> --compose <file>` | `claudine compose --<agent> <file>` |
 | `claudine <agent> --frontmatter-prompt <file>` | `claudine inline-compose --<agent> <file>` |
-| `claudine <agent> --prompt-file <file>` | `claudine compose --<agent> <file>` |
 | `claudine compose inline <file>` | `claudine inline-compose <file>` |
 | `claudine compose-inline <file>` | `claudine inline-compose <file>` |
 | `AGENT` environment variable | `--claude`, `--codex`, etc. flags or `agent` frontmatter |
+
+**Removed without replacement:**
+
+| Removed | Reason |
+|---------|--------|
+| `claudine <agent> --prompt-file <file>` | Sent file content verbatim as a prompt. `claudine compose` performs full Markdown composition (frontmatter, template substitution, `::shell` directives) so it is not a drop-in replacement. Callers that need raw prompt delivery should use the provider CLI directly. |
 
 ## Architecture
 
