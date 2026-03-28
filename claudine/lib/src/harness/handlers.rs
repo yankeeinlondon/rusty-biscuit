@@ -188,10 +188,7 @@ fn execute_programmatic_handler(
             "CLAUDINE_SESSION_ID",
             failure.session_id.as_deref().unwrap_or(""),
         )
-        .env(
-            "CLAUDINE_TERMINATION",
-            termination.as_deref().unwrap_or(""),
-        )
+        .env("CLAUDINE_TERMINATION", termination.as_deref().unwrap_or(""))
         .env(
             "CLAUDINE_SOURCE_FILE",
             failure
@@ -447,15 +444,17 @@ pub fn build_agent_failure_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::harness::model::{
-        HandlerRule, ProcessTermination, ValidationEvent,
-    };
+    use crate::harness::model::{HandlerRule, ProcessTermination, ValidationEvent};
 
     fn make_handler_table(exact: Vec<HandlerRule>, generic: Vec<HandlerRule>) -> HandlerTable {
         HandlerTable { exact, generic }
     }
 
-    fn test_failure_context(event: FailureEvent, subject_key: Option<String>, message: &str) -> FailureContext {
+    fn test_failure_context(
+        event: FailureEvent,
+        subject_key: Option<String>,
+        message: &str,
+    ) -> FailureContext {
         FailureContext {
             provider: "codex".to_string(),
             source_file: Some(PathBuf::from("/repo/prompts/test.md")),

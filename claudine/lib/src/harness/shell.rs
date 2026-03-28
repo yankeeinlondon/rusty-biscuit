@@ -349,8 +349,8 @@ mod tests {
     use darkmatter::markdown::compose::shell_expansion::{
         ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
     };
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct CountingApprovalHandler {
         approvals: AtomicUsize,

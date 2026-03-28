@@ -175,7 +175,10 @@ type CheckResult = Result<(), String>;
 
 enum PostRunMarkdownState {
     Loaded(darkmatter::markdown::Markdown),
-    ReadFailed { path: std::path::PathBuf, error: String },
+    ReadFailed {
+        path: std::path::PathBuf,
+        error: String,
+    },
 }
 
 /// Evaluate a single validation rule.
@@ -478,8 +481,8 @@ const SOURCE_EXTENSIONS: &[&str] = &[
     // Rust
     "rs", // JS/TS
     "js", "jsx", "ts", "tsx", "mjs", "cjs", // Python
-    "py", // Go
-    "go", // JVM
+    "py",  // Go
+    "go",  // JVM
     "java", "kt", // Web
     "css", "scss", "html", // Shell
     "sh", "bash", "zsh",
@@ -622,10 +625,7 @@ fn check_frontmatter_prop_changed(
     let pre_value = snapshot.tracked_frontmatter.get(prop);
 
     // Read the current on-disk post-state from the post-run markdown.
-    let post_md = get_post_run_markdown(
-        post_run_markdown,
-        "frontmatter comparison",
-    )?;
+    let post_md = get_post_run_markdown(post_run_markdown, "frontmatter comparison")?;
 
     let post_value = post_md.fm_get::<serde_json::Value>(prop).ok().flatten();
 
@@ -981,7 +981,10 @@ mod tests {
             None,
         );
 
-        assert!(result.is_ok(), "expected creatable path to pass: {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected creatable path to pass: {result:?}"
+        );
         assert!(
             !file.exists(),
             "write-permission probe should not leave the target file behind"
