@@ -1,6 +1,6 @@
 # Validation and Handler Reporting
 
-When we run Claudine in a non-interactive compose/inline-compose sessions, we are allowed to add both **validations** and **handlers**. In this feature we will introduce some key enhancements to reporting on this as well as a few improvements to ensure a non-interactive session is able to "fail fast" if we detect that it WILL fail.
+When we run Claudine in a non-interactive `compose`/`inline-compose` sessions, we are allowed to add both **validations** and **handlers**. In this feature we will introduce some key enhancements to reporting on this as well as a few improvements to ensure a non-interactive session is able to "fail fast" if we detect that it WILL fail.
 
 
 ## Reporting Validations
