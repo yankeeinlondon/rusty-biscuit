@@ -68,10 +68,6 @@ pub enum CompositionError {
     #[error("invalid inline composition response: {0}")]
     InvalidInlineResponse(String),
 
-    /// The provider child process could not be launched.
-    #[error("failed to launch provider: {0}")]
-    ProviderLaunchFailed(String),
-
     /// Atomic file write failed during inline composition.
     #[error("atomic write failed: {0}")]
     AtomicWriteFailed(String),

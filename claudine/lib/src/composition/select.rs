@@ -65,10 +65,10 @@ pub fn select_provider(
     }
 
     // 3. Effective frontmatter agent hint
-    if let Some(ref hint) = prepared.effective_agent_hint {
-        if let Some(selected) = resolve_agent_hint(hint, &candidates)? {
-            return Ok(selected);
-        }
+    if let Some(ref hint) = prepared.effective_agent_hint
+        && let Some(selected) = resolve_agent_hint(hint, &candidates)?
+    {
+        return Ok(selected);
     }
 
     // 4. Config favorite
@@ -320,5 +320,37 @@ mod tests {
         let result = select_provider(None, &prepared, &installed, &excluded, None).unwrap();
         assert_eq!(result.provider, Provider::Codex);
         assert_eq!(result.reason, SelectionReason::SingleInstalled);
+    }
+
+    #[test]
+    fn hint_matches_known_but_uninstalled_provider_falls_through_to_favorite() {
+        // Hint is "gemini" which is a known provider, but Gemini is not installed.
+        let prepared = make_prepared_composition(Some(json!("gemini")));
+        let installed = vec![Provider::Claude, Provider::Codex];
+
+        // Falls through hint (no candidate match) → config favorite
+        let result = select_provider(
+            None,
+            &prepared,
+            &installed,
+            &BTreeSet::new(),
+            Some(Provider::Claude),
+        )
+        .unwrap();
+        assert_eq!(result.provider, Provider::Claude);
+        assert_eq!(result.reason, SelectionReason::ConfigFavorite);
+    }
+
+    #[test]
+    fn hint_matches_known_but_uninstalled_provider_no_favorite_requires_interactive() {
+        // Hint is "gemini" (known but not installed), no favorite configured.
+        let prepared = make_prepared_composition(Some(json!("gemini")));
+        let installed = vec![Provider::Claude, Provider::Codex];
+
+        let err = select_provider(None, &prepared, &installed, &BTreeSet::new(), None).unwrap_err();
+        assert!(matches!(
+            err,
+            CompositionError::InteractiveSelectionRequired
+        ));
     }
 }
