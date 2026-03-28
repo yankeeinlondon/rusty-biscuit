@@ -41,6 +41,7 @@ pub(crate) fn build_child_env(
     env_overrides: &[(String, String)],
     repo: bool,
     force_shadow_home: bool,
+    repo_root_hint: Option<&Path>,
 ) -> Result<EnvPlan> {
     let include_set = validate_include_names(include)?;
     let auto_include: HashSet<String> = profile
@@ -94,12 +95,18 @@ pub(crate) fn build_child_env(
 
     let mut shadow_home_path = None;
 
-    let needs_shadow_home = force_shadow_home || repo_home::needs_shadow_home(provider, cwd, repo);
+    // When a repo_root_hint is provided (composition mode), use it for
+    // shadow-HOME and repo_root instead of re-deriving from the caller's CWD.
+    // This ensures cross-repo composition picks up the source repo's context.
+    let effective_root_for_home = repo_root_hint.unwrap_or(cwd);
+
+    let needs_shadow_home =
+        force_shadow_home || repo_home::needs_shadow_home(provider, effective_root_for_home, repo);
 
     // Use a shadow HOME when repo-only isolation is requested, or when Codex
     // needs repo-local prompt overlay because custom prompts are user-scoped.
     if needs_shadow_home {
-        match repo_home::build_repo_home_env(provider, cwd, repo) {
+        match repo_home::build_repo_home_env(provider, effective_root_for_home, repo) {
             Ok((shadow_env, shadow_path)) => {
                 for (key, value) in shadow_env {
                     env.insert(key, value);
@@ -114,11 +121,17 @@ pub(crate) fn build_child_env(
         }
     }
 
+    // Package context (PACKAGE_AREA, PACKAGE) is always derived from the
+    // caller's CWD so the agent knows which package the user was working in.
+    // The repo_root, however, uses the hint when available so the child
+    // process starts in the correct repository.
     let mut package_context = None;
-    let mut repo_root = None;
+    let mut repo_root = repo_root_hint.map(Path::to_path_buf);
     match resolve_monorepo_package_context(cwd) {
         Ok(repo_ctx) => {
-            repo_root = repo_ctx.repo_root;
+            if repo_root.is_none() {
+                repo_root = repo_ctx.repo_root;
+            }
             if let Some(package_ctx) = repo_ctx.package_context {
                 set_added_env(
                     &mut env,
@@ -689,6 +702,7 @@ mod tests {
             &[],
             false,
             false,
+            None,
         )
         .unwrap();
 

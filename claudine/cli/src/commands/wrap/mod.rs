@@ -820,6 +820,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         &env_overrides,
         repo_requested,
         needs_mcp_shadow_home,
+        None,
     )?;
     let stdin_seed: Option<String> = None;
 

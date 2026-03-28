@@ -148,6 +148,7 @@ pub(crate) fn execute_composition_request(
         &[],
         needs_repo_shadow_home,
         needs_mcp_shadow_home || needs_repo_shadow_home,
+        source_repo_root,
     )?;
 
     // -- Operation env override -----------------------------------------------
@@ -236,8 +237,9 @@ pub(crate) fn execute_composition_request(
         if let Some(injector) = injector_for_provider(provider) {
             if !session.servers.is_empty() {
                 if needs_mcp_shadow_home && env_plan.shadow_home_path.is_none() {
+                    let effective_root = source_repo_root.unwrap_or(&cwd);
                     let (shadow_env, shadow_path) =
-                        super::repo_home::build_repo_home_env(provider, &cwd, false)?;
+                        super::repo_home::build_repo_home_env(provider, effective_root, false)?;
                     for (key, value) in shadow_env {
                         env_plan.env.insert(key, value);
                     }
@@ -445,7 +447,11 @@ pub(crate) fn execute_composition_request(
 
     // -- Preflight output -------------------------------------------------
 
-    let env_context = claudine::events::detect_environment_fast(&cwd);
+    // Detect the environment from the source repo root when available so
+    // that git/repo metadata reflects the composition source, not the
+    // caller's CWD (which may be in a different repo entirely).
+    let env_detect_root = effective_repo_root.unwrap_or(&cwd);
+    let env_context = claudine::events::detect_environment_fast(env_detect_root);
 
     let compose_display = if is_inline {
         Some(crate::output::ComposeDisplay::InlineCompose)
