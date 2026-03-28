@@ -81,8 +81,20 @@ pub struct ComposeArgs {
     #[arg(long = "exclude", value_name = "PROVIDER")]
     pub exclude: Vec<String>,
 
+    /// Override the model used by the provider.
+    #[arg(short = 'm', long = "model", value_name = "MODEL")]
+    pub model: Option<String>,
+
+    /// Set the OPERATION env var for the composed session.
+    #[arg(long = "operation", visible_alias = "op", value_name = "OP")]
+    pub operation: Option<String>,
+
+    /// Show only the header line; suppress env details and info messages.
+    #[arg(short = 'q', long)]
+    pub quiet: bool,
+
     /// Suppress all output except the composition result.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "quiet")]
     pub silent: bool,
 
     /// Enable Claudine-managed MCP session composition.
@@ -116,8 +128,20 @@ pub struct InlineComposeArgs {
     #[arg(long = "exclude", value_name = "PROVIDER")]
     pub exclude: Vec<String>,
 
+    /// Override the model used by the provider.
+    #[arg(short = 'm', long = "model", value_name = "MODEL")]
+    pub model: Option<String>,
+
+    /// Set the OPERATION env var for the composed session.
+    #[arg(long = "operation", visible_alias = "op", value_name = "OP")]
+    pub operation: Option<String>,
+
+    /// Show only the header line; suppress env details and info messages.
+    #[arg(short = 'q', long)]
+    pub quiet: bool,
+
     /// Suppress all output except the composition result.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "quiet")]
     pub silent: bool,
 
     /// Enable Claudine-managed MCP session composition.
@@ -165,7 +189,7 @@ pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
 }
 
 fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
-    let excluded = parse_excluded(&args.exclude, args.silent);
+    let excluded = parse_excluded(&args.exclude, args.silent || args.quiet);
     let explicit_provider = args.provider.resolve();
 
     let source = composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
@@ -178,10 +202,13 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         prepared,
         explicit_provider,
         excluded,
+        model: args.model,
+        operation: args.operation,
         mcp: args.mcp,
         mcp_use: args.mcp_use,
         strict: args.strict,
         session_interactive: args.interactive,
+        quiet: args.quiet,
         silent: args.silent,
     };
 
@@ -189,17 +216,12 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
 }
 
 fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32> {
-    let excluded = parse_excluded(&args.exclude, args.silent);
+    let excluded = parse_excluded(&args.exclude, args.silent || args.quiet);
     let explicit_provider = args.provider.resolve();
 
     let source = composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
 
-    // Validate file read/write permissions before proceeding.
-    composition::validate_file_permissions(&source.resolved_path).map_err(|e| eyre!("{e}"))?;
-
-    let repo_root = find_git_root();
-    let prepared =
-        composition::prepare_inline(&source, repo_root.as_deref()).map_err(|e| eyre!("{e}"))?;
+    let prepared = composition::prepare_inline(&source).map_err(|e| eyre!("{e}"))?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,
@@ -207,10 +229,13 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         prepared,
         explicit_provider,
         excluded,
+        model: args.model,
+        operation: args.operation,
         mcp: args.mcp,
         mcp_use: args.mcp_use,
         strict: args.strict,
         session_interactive: args.interactive,
+        quiet: args.quiet,
         silent: args.silent,
     };
 
@@ -231,14 +256,3 @@ fn parse_excluded(exclude: &[String], silent: bool) -> BTreeSet<Provider> {
         .collect()
 }
 
-/// Lightweight git root detection for guardrails loading.
-fn find_git_root() -> Option<std::path::PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    let mut dir = cwd.as_path();
-    loop {
-        if dir.join(".git").exists() {
-            return Some(dir.to_path_buf());
-        }
-        dir = dir.parent()?;
-    }
-}

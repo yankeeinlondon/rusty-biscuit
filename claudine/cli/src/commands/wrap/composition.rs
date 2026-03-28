@@ -70,6 +70,7 @@ pub(crate) fn execute_composition_request(
     let term = wrap_terminal();
     let cwd = std::env::current_dir()?;
     let verbose_requested = verbose > 0;
+    let quiet = request.quiet;
     let silent = request.silent;
     let show_checks = !silent;
 
@@ -89,7 +90,8 @@ pub(crate) fn execute_composition_request(
     .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
     .collect();
 
-    let favorite = load_config_favorite(&cwd);
+    let source_repo_root = request.prepared.source_repo_root.as_deref();
+    let favorite = load_config_favorite(source_repo_root.unwrap_or(&cwd));
 
     let selected = match select_provider(
         request.explicit_provider,
@@ -146,6 +148,14 @@ pub(crate) fn execute_composition_request(
         needs_mcp_shadow_home,
     )?;
 
+    // -- Model, operation, env overrides ------------------------------------
+
+    if let Some(ref op) = request.operation {
+        env_plan
+            .env
+            .insert("OPERATION".into(), op.clone().into());
+    }
+
     let mut effective_prompt = request.prepared.prompt.clone();
     let mut mcp_extra_args = Vec::new();
     if request.mcp || !request.mcp_use.is_empty() {
@@ -153,7 +163,7 @@ pub(crate) fn execute_composition_request(
         use claudine::mcp::inject::injector_for_provider;
         use claudine::mcp::session::{compute_session_set, lex_tags};
 
-        let repo_root_ref = env_plan.repo_root.as_deref();
+        let repo_root_ref = source_repo_root.or(env_plan.repo_root.as_deref());
         let _ = super::bootstrap_mcp_state(repo_root_ref)?;
         let catalog =
             McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
@@ -264,11 +274,35 @@ pub(crate) fn execute_composition_request(
 
     if effective_non_interactive {
         profile.apply_non_interactive(&mut child_args)?;
-        profile.apply_non_interactive_defaults(&mut child_args);
+        // Only apply default model if --model was not explicitly provided.
+        if request.model.is_none() {
+            profile.apply_non_interactive_defaults(&mut child_args);
+        }
     }
+
+    // Universal --model flag
+    if let Some(ref model) = request.model {
+        let mut env_overrides = Vec::new();
+        if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model) {
+            if !silent && !quiet {
+                log::warn(&warn);
+            }
+        }
+        for (key, value) in env_overrides {
+            env_plan.env.insert(key.into(), value.into());
+        }
+        // OpenCode needs MODEL env var when --model is passed via passthrough
+        if provider == Provider::OpenCode && effective_non_interactive {
+            env_plan
+                .env
+                .insert("MODEL".into(), model.clone().into());
+        }
+    }
+
     child_args.extend(mcp_extra_args);
 
-    let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
+    let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
+    let child_cwd = effective_repo_root.unwrap_or(&cwd);
 
     profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
 
@@ -282,20 +316,38 @@ pub(crate) fn execute_composition_request(
     if harness_enabled {
         let resolve_ctx = claudine::harness::HarnessResolutionContext {
             source_path: &request.prepared.resolved_path,
-            repo_root: env_plan.repo_root.as_deref(),
+            repo_root: effective_repo_root,
         };
         let shell_options = build_harness_shell_options(
             &request.prepared.resolved_path,
-            env_plan.repo_root.as_deref(),
+            effective_repo_root,
         );
         // Validate that the harness plan can be parsed before proceeding.
-        claudine::harness::parse_harness_plan_with_shell(
+        let mut plan = claudine::harness::parse_harness_plan_with_shell(
             &request.prepared.effective_frontmatter,
             &request.prepared.resolved_path,
             &resolve_ctx,
             Some(&shell_options),
         )
         .map_err(|e| eyre!("{e}"))?;
+
+        // For inline composition, prepend a system-owned writability check
+        // so that handler recovery paths can respond to permission failures
+        // instead of hard-failing before the handler system exists.
+        if is_inline {
+            plan.pre_checks.insert(
+                0,
+                claudine::harness::inline_writability_pre_check(&request.prepared.resolved_path),
+            );
+        }
+
+        // Plan is validated; the harness loop will re-parse if needed.
+        drop(plan);
+    } else if is_inline {
+        // Non-harness inline: validate writability directly since there
+        // is no handler system to recover from permission failures.
+        claudine::composition::validate_file_permissions(&request.prepared.resolved_path)
+            .map_err(|e| eyre!("{e}"))?;
     }
 
     // -- Structured streaming decision ------------------------------------
@@ -308,7 +360,7 @@ pub(crate) fn execute_composition_request(
     let stderr_noise = profile.stderr_noise_prefixes();
 
     let use_structured = profile.supports_structured_stream() && effective_non_interactive;
-    let stream_verbosity = structured_verbosity(silent, false);
+    let stream_verbosity = structured_verbosity(silent, quiet);
 
     if use_structured {
         profile.apply_structured_stream(&mut child_args);
@@ -368,7 +420,7 @@ pub(crate) fn execute_composition_request(
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,
-            env_plan.repo_root.as_deref(),
+            effective_repo_root,
             use_structured,
             structured_codex_output.as_ref(),
             stdout_noise,

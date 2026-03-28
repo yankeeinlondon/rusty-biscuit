@@ -65,6 +65,12 @@ pub struct PreparedComposition {
     pub mode: CompositionMode,
     /// Resolved absolute path to the source file.
     pub resolved_path: PathBuf,
+    /// Git repo root derived from the source document's location.
+    ///
+    /// Used for favorite-provider lookup, guardrails, MCP defaults,
+    /// and harness path resolution. `None` when the source document
+    /// is not inside a git repository.
+    pub source_repo_root: Option<PathBuf>,
     /// The composed prompt text.
     pub prompt: String,
     /// Full frontmatter after Darkmatter composition.
@@ -89,12 +95,8 @@ pub enum CompositionClosurePlan {
 pub struct InlineClosurePlan {
     /// The original on-disk document text (frontmatter + body).
     pub original_document_text: String,
-    /// Hash of the original frontmatter (for tamper detection).
-    pub original_frontmatter_hash: u64,
     /// Hash of the original body (for unchanged-body detection).
     pub original_body_hash: u64,
-    /// Frontmatter fields managed by Claudine (auto-updated on write).
-    pub managed_fields: BTreeSet<String>,
 }
 
 /// A fully-specified request to execute a composition through the
@@ -111,6 +113,10 @@ pub struct CompositionExecutionRequest {
     pub explicit_provider: Option<Provider>,
     /// Providers to exclude from automatic selection.
     pub excluded: BTreeSet<Provider>,
+    /// Override the model used by the provider.
+    pub model: Option<String>,
+    /// OPERATION env var value for the composed session.
+    pub operation: Option<String>,
     /// Enable Claudine-managed MCP session composition.
     pub mcp: bool,
     /// Explicit MCP server IDs or aliases to activate.
@@ -119,6 +125,8 @@ pub struct CompositionExecutionRequest {
     pub strict: bool,
     /// Whether the provider session should be interactive (`-i`).
     pub session_interactive: bool,
+    /// Show only header; suppress env details and info.
+    pub quiet: bool,
     /// Suppress all preflight output.
     pub silent: bool,
 }

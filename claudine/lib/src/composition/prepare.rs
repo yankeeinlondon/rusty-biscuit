@@ -1,9 +1,25 @@
 //! Prompt preparation for composition workflows.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
+
+/// Walk up from a file path to find the nearest `.git` directory.
+fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
+    let start = if path.is_file() {
+        path.parent()?
+    } else {
+        path
+    };
+    let mut dir = start;
+    loop {
+        if dir.join(".git").exists() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
+}
 
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
@@ -29,9 +45,12 @@ pub fn prepare_direct(
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let effective_agent_hint = composed.frontmatter().as_map().get("agent").cloned();
 
+    let source_repo_root = find_git_root_from_path(&source.resolved_path);
+
     Ok(PreparedComposition {
         mode: CompositionMode::ChainedDocument,
         resolved_path: source.resolved_path.clone(),
+        source_repo_root,
         prompt: composed.content().to_string(),
         effective_frontmatter,
         effective_agent_hint,
@@ -43,10 +62,9 @@ pub fn prepare_direct(
 ///
 /// Extracts the `prompt` frontmatter property, builds a temporary
 /// document, composes through Darkmatter, and captures closure state
-/// (hashes, managed fields) for deterministic post-execution rewrite.
+/// for deterministic post-execution rewrite.
 pub fn prepare_inline(
     source: &ResolvedCompositionSource,
-    repo_root: Option<&Path>,
 ) -> Result<PreparedComposition, CompositionError> {
     let fm = source.markdown.frontmatter();
 
@@ -76,26 +94,26 @@ pub fn prepare_inline(
 
     let mut prompt = composed.content().to_string();
 
+    let source_repo_root = find_git_root_from_path(&source.resolved_path);
+
     // Append guardrails with the new inline contract
-    let guardrails = load_or_create_guardrails(repo_root);
+    let guardrails = load_or_create_guardrails(source_repo_root.as_deref());
     prompt.push_str("\n\n");
     prompt.push_str(&guardrails);
 
-    // Capture pre-execution hashes for closure
-    let original_frontmatter_hash = source.markdown.hash_frontmatter(false);
+    // Capture pre-execution hash for closure
     let original_body_hash = source.markdown.hash_body(false);
 
     Ok(PreparedComposition {
         mode: CompositionMode::InlineFrontmatterPrompt,
         resolved_path: source.resolved_path.clone(),
+        source_repo_root,
         prompt,
         effective_frontmatter,
         effective_agent_hint,
         closure: CompositionClosurePlan::Inline(InlineClosurePlan {
             original_document_text: source.original_text.clone(),
-            original_frontmatter_hash,
             original_body_hash,
-            managed_fields: super::closure::default_managed_fields(),
         }),
     })
 }
@@ -185,7 +203,7 @@ mod tests {
             "Old content",
         );
 
-        let prepared = prepare_inline(&source, None).unwrap();
+        let prepared = prepare_inline(&source).unwrap();
         assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
         assert!(prepared.prompt.contains("List three colors"));
         assert!(
@@ -200,13 +218,12 @@ mod tests {
         assert!(fm_obj.contains_key("prompt"));
         assert_eq!(prepared.effective_agent_hint, Some(json!("claude")));
 
-        // Closure should be Inline with captured hashes
+        // Closure should be Inline with captured hash
         match &prepared.closure {
             CompositionClosurePlan::Inline(plan) => {
                 assert!(!plan.original_document_text.is_empty());
-                assert!(plan.managed_fields.contains("last_updated"));
-                // Hashes should be non-zero for non-empty content
-                assert_ne!(plan.original_frontmatter_hash, 0);
+                // Body hash should be non-zero for non-empty content
+                assert_ne!(plan.original_body_hash, 0);
             }
             CompositionClosurePlan::Direct => panic!("expected Inline closure plan"),
         }
@@ -217,7 +234,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("title", json!("Test"))], "Content");
 
-        let err = prepare_inline(&source, None).unwrap_err();
+        let err = prepare_inline(&source).unwrap_err();
         assert!(matches!(err, CompositionError::PromptPropertyMissing));
     }
 
@@ -226,7 +243,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("prompt", json!(42))], "Content");
 
-        let err = prepare_inline(&source, None).unwrap_err();
+        let err = prepare_inline(&source).unwrap_err();
         assert!(matches!(err, CompositionError::PromptPropertyWrongType(_)));
     }
 }

@@ -153,6 +153,7 @@ mod tests {
         PreparedComposition {
             mode: CompositionMode::ChainedDocument,
             resolved_path: PathBuf::from("/tmp/test.md"),
+            source_repo_root: None,
             prompt: "test prompt".to_string(),
             effective_frontmatter: json!({}),
             effective_agent_hint: agent_hint,
