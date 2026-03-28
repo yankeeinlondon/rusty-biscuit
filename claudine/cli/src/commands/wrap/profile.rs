@@ -274,6 +274,12 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Called only when `supports_structured_stream()` returns true and
     /// the user did not explicitly request an output format.
     fn apply_structured_stream(&self, _args: &mut Vec<String>) {}
+
+    /// Whether Claudine can recover a final assistant body after an
+    /// interactive session ends for inline composition closure.
+    fn supports_interactive_inline_closure(&self) -> bool {
+        false
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -386,18 +392,16 @@ impl WrapperProfile for ClaudeWrapper {
 
     fn apply_prompt_body(
         &self,
-        _args: &mut Vec<String>,
+        args: &mut Vec<String>,
         stdin_seed: &mut Option<String>,
         prompt: &str,
         non_interactive: bool,
     ) -> Result<()> {
-        if !non_interactive {
-            bail!(
-                "prompt-file delivery for Claude requires --non-interactive \
-                 because the prompt is seeded via stdin"
-            );
+        if non_interactive {
+            *stdin_seed = Some(prompt.to_string());
+        } else {
+            args.push(prompt.to_string());
         }
-        *stdin_seed = Some(prompt.to_string());
         Ok(())
     }
 
@@ -580,6 +584,10 @@ impl WrapperProfile for CodexWrapper {
             args.push("--json".to_string());
         }
     }
+
+    fn supports_interactive_inline_closure(&self) -> bool {
+        true
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -737,9 +745,13 @@ impl WrapperProfile for GeminiWrapper {
         args: &mut Vec<String>,
         _stdin_seed: &mut Option<String>,
         prompt: &str,
-        _non_interactive: bool,
+        non_interactive: bool,
     ) -> Result<()> {
-        args.push("--prompt".to_string());
+        args.push(if non_interactive {
+            "--prompt".to_string()
+        } else {
+            "--prompt-interactive".to_string()
+        });
         args.push(prompt.to_string());
         Ok(())
     }
@@ -809,18 +821,17 @@ impl WrapperProfile for KimiWrapper {
 
     fn apply_prompt_body(
         &self,
-        _args: &mut Vec<String>,
+        args: &mut Vec<String>,
         stdin_seed: &mut Option<String>,
         prompt: &str,
         non_interactive: bool,
     ) -> Result<()> {
-        if !non_interactive {
-            bail!(
-                "prompt-file delivery for Kimi requires --non-interactive \
-                 because the prompt is seeded via stdin"
-            );
+        if non_interactive {
+            *stdin_seed = Some(prompt.to_string());
+        } else {
+            args.push("--prompt".to_string());
+            args.push(prompt.to_string());
         }
-        *stdin_seed = Some(prompt.to_string());
         Ok(())
     }
 
@@ -938,9 +949,13 @@ impl WrapperProfile for QwenWrapper {
         args: &mut Vec<String>,
         _stdin_seed: &mut Option<String>,
         prompt: &str,
-        _non_interactive: bool,
+        non_interactive: bool,
     ) -> Result<()> {
-        args.push("--prompt".to_string());
+        args.push(if non_interactive {
+            "--prompt".to_string()
+        } else {
+            "--prompt-interactive".to_string()
+        });
         args.push(prompt.to_string());
         Ok(())
     }

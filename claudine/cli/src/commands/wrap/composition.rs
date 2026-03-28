@@ -93,28 +93,149 @@ pub(crate) fn execute_composition_request(
     let provider = selected.provider;
     let is_inline = matches!(request.prepared.closure, CompositionClosurePlan::Inline(_));
 
-    // -- Inline + interactive check ---------------------------------------
-
-    if request.session_interactive && is_inline {
-        return Err(
-            CompositionError::InlineInteractiveUnsupported(provider.to_string()).into(),
-        );
-    }
-
     // -- Profile, binary, arguments, environment --------------------------
 
     let profile = profile::profile_for_provider(provider)
         .ok_or_else(|| eyre!("'{}' cannot be wrapped", provider))?;
     let binary_path = resolve_binary_path(profile, &clients)?;
 
+    // -- Inline + interactive check ---------------------------------------
+
+    if request.session_interactive && is_inline && !profile.supports_interactive_inline_closure() {
+        return Err(
+            CompositionError::InlineInteractiveUnsupported(provider.to_string()).into(),
+        );
+    }
+
     let effective_non_interactive = !request.session_interactive;
+    let needs_mcp_shadow_home = (request.mcp || !request.mcp_use.is_empty())
+        && matches!(provider, Provider::Codex | Provider::Gemini);
+    let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
+    let mut env_plan = env::build_child_env(
+        profile,
+        provider,
+        &[],                         // no include overrides
+        false,                       // no yolo
+        request.session_interactive, // interactive
+        &raw_agent_params,
+        &cwd,
+        &[],   // no env overrides
+        false, // no repo mode
+        needs_mcp_shadow_home,
+    )?;
+
+    let mut effective_prompt = request.prepared.prompt.clone();
+    let mut mcp_extra_args = Vec::new();
+    if request.mcp || !request.mcp_use.is_empty() {
+        use claudine::mcp::catalog::McpCatalogStore;
+        use claudine::mcp::inject::injector_for_provider;
+        use claudine::mcp::session::{compute_session_set, lex_tags};
+
+        let repo_root_ref = env_plan.repo_root.as_deref();
+        let _ = super::bootstrap_mcp_state(repo_root_ref)?;
+        let catalog =
+            McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
+        let (cleaned_prompt, prompt_tags) = lex_tags(&effective_prompt);
+        let prompt_is_interactive =
+            request.session_interactive && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+        let session = compute_session_set(
+            &catalog,
+            repo_root_ref,
+            &request.mcp_use,
+            &prompt_tags,
+            |tag, _tier, candidates| {
+                if request.strict || effective_non_interactive || !prompt_is_interactive {
+                    return None;
+                }
+                Select::new(
+                    &format!("`#{tag}` matched multiple MCP servers. Choose one:"),
+                    candidates.to_vec(),
+                )
+                .prompt()
+                .ok()
+            },
+        )
+        .map_err(|e| eyre!("MCP session error: {e}"))?;
+
+        if !session.missing_tags.is_empty() {
+            if request.strict {
+                return Err(eyre!(
+                    "unresolved MCP tag(s): {}",
+                    session
+                        .missing_tags
+                        .iter()
+                        .map(|tag| format!("#{tag}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            if !silent {
+                for tag in &session.missing_tags {
+                    log::warn(&format!("tag `#{tag}` was not found in the MCP catalog"));
+                }
+            }
+        }
+        if !session.ambiguous_tags.is_empty() {
+            if request.strict || effective_non_interactive {
+                let message = session
+                    .ambiguous_tags
+                    .iter()
+                    .map(|tag| format!("#{} -> {}", tag.tag, tag.candidates.join(", ")))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(eyre!("ambiguous MCP tag(s): {message}"));
+            }
+            if !silent {
+                for tag in &session.ambiguous_tags {
+                    log::warn(&format!(
+                        "tag `#{}` is ambiguous ({}); dropped from session",
+                        tag.tag,
+                        tag.candidates.join(", ")
+                    ));
+                }
+            }
+        }
+
+        effective_prompt = session.cleaned_prompt.unwrap_or(cleaned_prompt);
+
+        if let Some(injector) = injector_for_provider(provider) {
+            if !session.servers.is_empty() {
+                if needs_mcp_shadow_home && env_plan.shadow_home_path.is_none() {
+                    let (shadow_env, shadow_path) =
+                        super::repo_home::build_repo_home_env(provider, &cwd, false)?;
+                    for (key, value) in shadow_env {
+                        env_plan.env.insert(key, value);
+                    }
+                    env_plan.shadow_home_path = shadow_path;
+                }
+                let shadow = env_plan.shadow_home_path.as_deref();
+                let mut string_env = std::collections::HashMap::new();
+                let result = injector
+                    .inject(&session.servers, &mut string_env, shadow)
+                    .map_err(|e| eyre!("MCP injection failed: {e}"))?;
+
+                for (key, value) in string_env {
+                    env_plan.env.insert(key.into(), value.into());
+                }
+                mcp_extra_args.extend(result.extra_args);
+            }
+        } else {
+            return Err(eyre!(
+                "provider {} does not support runtime MCP injection.\n\
+                 Use `claudine mcp export {} --apply` to write servers to its native config instead.",
+                provider,
+                provider.as_slug()
+            ));
+        }
+    }
+
     let mut child_args = Vec::new();
     let mut stdin_seed: Option<String> = None;
 
     profile.apply_prompt_body(
         &mut child_args,
         &mut stdin_seed,
-        &request.prepared.prompt,
+        &effective_prompt,
         effective_non_interactive,
     )?;
 
@@ -122,19 +243,7 @@ pub(crate) fn execute_composition_request(
         profile.apply_non_interactive(&mut child_args)?;
         profile.apply_non_interactive_defaults(&mut child_args);
     }
-
-    let env_plan = env::build_child_env(
-        profile,
-        provider,
-        &[],                         // no include overrides
-        false,                       // no yolo
-        request.session_interactive, // interactive
-        &[],                         // no raw agent params
-        &cwd,
-        &[],                         // no env overrides
-        false,                       // no repo mode
-        false,                       // no mcp shadow home
-    )?;
+    child_args.extend(mcp_extra_args);
 
     let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
 
@@ -182,7 +291,9 @@ pub(crate) fn execute_composition_request(
         profile.apply_structured_stream(&mut child_args);
     }
 
-    let structured_codex_output = if use_structured && provider == Provider::Codex {
+    let structured_codex_output = if provider == Provider::Codex
+        && (use_structured || (request.session_interactive && is_inline))
+    {
         Some(StructuredCodexOutput::prepare(&mut child_args))
     } else {
         None
@@ -260,6 +371,7 @@ pub(crate) fn execute_composition_request(
             &env_plan.env,
             child_cwd,
             stdin_seed.as_deref(),
+            request.session_interactive,
             closure_plan,
             &request.prepared.resolved_path,
             use_structured,
@@ -303,6 +415,7 @@ fn execute_inline_without_harness(
     child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
     child_cwd: &std::path::Path,
     stdin_seed: Option<&str>,
+    session_interactive: bool,
     closure_plan: &InlineClosurePlan,
     resolved_path: &std::path::Path,
     use_structured: bool,
@@ -316,7 +429,7 @@ fn execute_inline_without_harness(
     term: &Terminal,
 ) -> Result<i32> {
     // Run the provider and capture output.
-    let (agent_exit, _agent_termination, deferred_summary) = if use_structured {
+    let (agent_exit, _agent_termination, final_response, deferred_summary) = if use_structured {
         run_structured_inline(
             provider,
             profile,
@@ -333,13 +446,18 @@ fn execute_inline_without_harness(
         )?
     } else {
         run_legacy_inline(
+            provider,
+            profile,
             binary_path,
             child_args,
             child_env,
             child_cwd,
             stdin_seed,
+            session_interactive,
+            structured_codex_output,
             stdout_noise,
             stderr_noise,
+            term,
         )?
     };
 
@@ -382,91 +500,58 @@ fn execute_inline_without_harness(
 
     // Interrupted: report partial state and bail
     if was_interrupted {
-        report_interruption(resolved_path, &display_path, term);
+        report_interruption(&display_path, final_response.trim(), term);
         return Ok(1);
     }
 
-    // Read the file from disk to see what the agent did
-    match std::fs::read_to_string(resolved_path) {
-        Ok(disk_text) => {
-            let on_disk: darkmatter::markdown::Markdown = disk_text.clone().into();
-            let disk_body_hash = on_disk.hash_body(false);
-            let body_updated = disk_body_hash != closure_plan.original_body_hash;
-
-            if body_updated {
-                if show_checks {
-                    log::message(&crate::output::fm_check_ok(
-                        "Agent updated the target document's body",
-                        term,
-                    ));
-                }
-
-                if agent_exit != 0 && show_checks {
-                    log::warn(
-                        "agent reported an error but the target file was updated; \
-                         treating as success",
-                    );
-                }
-                final_exit = 0;
-
-                // Check for frontmatter tamper; rewrite preserving original if tampered
-                let disk_fm_hash = on_disk.hash_frontmatter(false);
-                let fm_tampered = disk_fm_hash != closure_plan.original_frontmatter_hash;
-
-                let frontmatter_source = if fm_tampered {
+    if agent_exit == 0 {
+        let replacement_body =
+            match claudine::composition::closure::extract_replacement_body(&final_response) {
+                Ok(body) => body,
+                Err(error) => {
                     if show_checks {
                         log::message(&crate::output::fm_check_fail(
-                            "Agent ignored instruction to leave frontmatter untouched \
-                             (<i>we have reverted their changes</i>)",
+                            &format!(
+                                "the referenced file -- {display_path} -- did not receive a valid replacement body: {error}"
+                            ),
                             term,
                         ));
                     }
-                    &closure_plan.original_document_text
-                } else {
+                    final_exit = 1;
+                    String::new()
+                }
+            };
+
+        if final_exit == 0 {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            match claudine::composition::closure::apply_inline_closure(
+                closure_plan,
+                &replacement_body,
+                resolved_path,
+                &today,
+            ) {
+                Ok(()) => {
                     if show_checks {
                         log::message(&crate::output::fm_check_ok(
-                            "Agent left frontmatter untouched (<i>as instructed</i>)",
+                            "Applied the captured replacement body to the target document",
+                            term,
+                        ));
+                        log::message(&crate::output::fm_check_ok(
+                            "Preserved original frontmatter and updated <bold>last_updated</bold>",
                             term,
                         ));
                     }
-                    &disk_text
-                };
-
-                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                let doc_string = claudine::composition::closure::rewrite_inline_document(
-                    frontmatter_source,
-                    on_disk.content(),
-                    &today,
-                )
-                .map_err(|e| eyre!("failed to reconstruct document: {e}"))?;
-
-                claudine::config::atomic::atomic_write(resolved_path, doc_string.as_bytes())
-                    .map_err(|e| eyre!("failed to write: {e}"))?;
-
-                if show_checks {
-                    log::message(&crate::output::fm_check_ok(
-                        "Updated <bold>last_updated</bold> property to today's date",
-                        term,
-                    ));
                 }
-            } else if agent_exit == 0 {
-                if show_checks {
-                    log::message(&crate::output::fm_check_fail(
-                        &format!(
-                            "the referenced file -- {display_path} -- did not get \
-                             updated even though the Agent reported a successful outcome!"
-                        ),
-                        term,
-                    ));
+                Err(error) => {
+                    if show_checks {
+                        log::message(&crate::output::fm_check_fail(
+                            &format!("failed to rewrite {display_path}: {error}"),
+                            term,
+                        ));
+                    }
+                    final_exit = 1;
                 }
-                final_exit = 1;
             }
-        }
-        Err(e) => {
-            log::error(&format!(
-                "failed to read {display_path} after agent completion: {e}"
-            ));
-            final_exit = 1;
         }
     }
 
@@ -491,6 +576,7 @@ fn execute_inline_without_harness(
 type InlineRunResult = (
     i32,
     claudine::harness::ProcessTermination,
+    String,
     Option<(
         claudine::stream::summary::StreamExecutionSummary,
         StructuredSummaryDetails,
@@ -570,49 +656,95 @@ fn run_structured_inline(
     Ok((
         exit,
         termination,
+        summary.assistant_text.clone(),
         Some((summary, details, had_streamed_assistant)),
     ))
 }
 
 #[allow(clippy::too_many_arguments)]
 fn run_legacy_inline(
+    provider: Provider,
+    profile: &dyn WrapperProfile,
     binary_path: &std::path::Path,
     child_args: &[String],
     child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
     child_cwd: &std::path::Path,
     stdin_seed: Option<&str>,
+    session_interactive: bool,
+    structured_codex_output: Option<&StructuredCodexOutput>,
     stdout_noise: &[&str],
     stderr_noise: &[&str],
+    term: &Terminal,
 ) -> Result<InlineRunResult> {
-    let result = exec::run_child(
-        binary_path,
-        child_args,
-        child_env,
-        child_cwd,
-        None,
-        exec::ChildIoOptions {
-            stdout_noise_prefixes: stdout_noise,
-            stderr_noise_prefixes: stderr_noise,
-            stdin_seed,
-        },
-    )?;
-    Ok((result.data, result.termination, None))
+    if session_interactive {
+        let result = exec::run_child(
+            binary_path,
+            child_args,
+            child_env,
+            child_cwd,
+            None,
+            exec::ChildIoOptions {
+                stdout_noise_prefixes: stdout_noise,
+                stderr_noise_prefixes: stderr_noise,
+                stdin_seed,
+            },
+        )?;
+        let final_response = if provider == Provider::Codex {
+            if let Some(output) = structured_codex_output {
+                let text = std::fs::read_to_string(&output.last_message_path).unwrap_or_default();
+                let _ = std::fs::remove_file(&output.last_message_path);
+                text
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        Ok((result.data, result.termination, final_response, None))
+    } else {
+        let mut capture_args = child_args.to_vec();
+        profile.prepare_captured_output(&mut capture_args);
+        let capture = exec::run_child_capture(
+            binary_path,
+            &capture_args,
+            child_env,
+            child_cwd,
+            None,
+            exec::ChildIoOptions {
+                stdout_noise_prefixes: stdout_noise,
+                stderr_noise_prefixes: stderr_noise,
+                stdin_seed,
+            },
+        )?;
+        let response = profile.parse_captured_output(&capture.data.stdout);
+        if !response.trim().is_empty() {
+            if std::io::stdout().is_terminal() {
+                let rendered = crate::output::render_assistant_markdown(&response, term);
+                std::io::stdout().write_all(rendered.as_bytes())?;
+                if !rendered.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            } else {
+                std::io::stdout().write_all(response.as_bytes())?;
+                if !response.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            }
+            std::io::stdout().flush()?;
+        }
+        if !capture.data.stderr.trim().is_empty() {
+            eprintln!("{}", capture.data.stderr);
+        }
+        Ok((capture.data.exit_code, capture.termination, response, None))
+    }
 }
 
 fn report_interruption(
-    resolved_path: &std::path::Path,
     display_path: &std::path::Display<'_>,
+    captured_body: &str,
     term: &Terminal,
 ) {
-    let body_on_disk = std::fs::read_to_string(resolved_path)
-        .ok()
-        .map(|text| {
-            let md: darkmatter::markdown::Markdown = text.into();
-            md.content().trim().to_string()
-        })
-        .unwrap_or_default();
-
-    if body_on_disk.is_empty() {
+    if captured_body.is_empty() {
         log::message(&crate::output::fm_check_fail(
             &format!(
                 "<b>User interrupted the agent with CTRL+C; the body of \
@@ -631,7 +763,7 @@ fn report_interruption(
             term,
         ));
         eprintln!();
-        for line in body_on_disk.lines() {
+        for line in captured_body.lines() {
             eprintln!("  {line}");
         }
     }

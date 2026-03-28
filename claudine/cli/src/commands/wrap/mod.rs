@@ -103,9 +103,7 @@ pub(crate) struct MaterializedHarnessPrompt {
     pub(crate) frontmatter: serde_json::Value,
     pub(crate) prompt: String,
     pub(crate) env_overrides: Vec<(String, String)>,
-    pub(crate) inline_source_text: Option<String>,
-    pub(crate) inline_pre_frontmatter_hash: Option<u64>,
-    pub(crate) inline_pre_body_hash: Option<u64>,
+    pub(crate) inline_closure_plan: Option<claudine::composition::InlineClosurePlan>,
 }
 
 #[derive(Debug, Clone)]
@@ -1233,14 +1231,13 @@ fn materialize_harness_prompt(
 ) -> Result<MaterializedHarnessPrompt> {
     let source_text = fs::read_to_string(&state.source_path)
         .map_err(|e| eyre!("failed to read '{}': {e}", state.source_path.display()))?;
-    let source_markdown: darkmatter::markdown::Markdown = source_text.clone().into();
-    let mut effective_markdown = source_markdown.clone();
+    let mut effective_markdown: darkmatter::markdown::Markdown = source_text.clone().into();
     merge_frontmatter_overlay(
         effective_markdown.frontmatter_mut().as_map_mut(),
         &state.overlay,
     );
 
-    let (mut prompt, frontmatter, env_overrides, inline_source_text, pre_fm_hash, pre_body_hash) =
+    let (mut prompt, frontmatter, env_overrides, inline_closure_plan) =
         match state.mode {
             HarnessPromptMode::Compose => {
                 let options = darkmatter::markdown::compose::ComposeOptions::new()
@@ -1264,8 +1261,6 @@ fn materialize_harness_prompt(
                     ),
                     env_overrides,
                     None,
-                    None,
-                    None,
                 )
             }
             HarnessPromptMode::Inline => {
@@ -1281,18 +1276,12 @@ fn materialize_harness_prompt(
                     .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
                 (
                     prepared.prompt,
-                    serde_json::Value::Object(
-                        effective_markdown
-                            .frontmatter()
-                            .as_map()
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect(),
-                    ),
+                    prepared.effective_frontmatter,
                     Vec::new(),
-                    Some(source_text),
-                    Some(source_markdown.hash_frontmatter(false)),
-                    Some(source_markdown.hash_body(false)),
+                    match prepared.closure {
+                        claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan),
+                        claudine::composition::CompositionClosurePlan::Direct => None,
+                    },
                 )
             }
         };
@@ -1310,9 +1299,7 @@ fn materialize_harness_prompt(
         frontmatter,
         prompt,
         env_overrides,
-        inline_source_text,
-        inline_pre_frontmatter_hash: pre_fm_hash,
-        inline_pre_body_hash: pre_body_hash,
+        inline_closure_plan,
     })
 }
 
@@ -1496,6 +1483,7 @@ fn execute_harness_attempt(
             provider,
             &prompt_state.source_path,
             materialized,
+            &final_response,
             exit_code,
             termination,
             child_cwd,
@@ -1519,6 +1507,7 @@ fn finalize_inline_harness_attempt(
     provider: Provider,
     source_path: &Path,
     materialized: &MaterializedHarnessPrompt,
+    final_response: &str,
     agent_exit: i32,
     termination: claudine::harness::ProcessTermination,
     child_cwd: &Path,
@@ -1556,16 +1545,8 @@ fn finalize_inline_harness_attempt(
     }
 
     if was_interrupted {
-        let body_on_disk = fs::read_to_string(source_path)
-            .ok()
-            .map(|text| {
-                let md: darkmatter::markdown::Markdown = text.into();
-                md.content().trim().to_string()
-            })
-            .unwrap_or_default();
-
         if show_checks {
-            if body_on_disk.is_empty() {
+            if final_response.trim().is_empty() {
                 log::message(&crate::output::fm_check_fail(
                     &format!(
                         "<b>User interrupted the agent with CTRL+C; the body of \
@@ -1582,7 +1563,7 @@ fn finalize_inline_harness_attempt(
                     term,
                 ));
                 eprintln!();
-                for line in body_on_disk.lines() {
+                for line in final_response.lines() {
                     eprintln!("  {line}");
                 }
             }
@@ -1590,86 +1571,57 @@ fn finalize_inline_harness_attempt(
         return Ok(1);
     }
 
-    let Some(pre_body_hash) = materialized.inline_pre_body_hash else {
+    let Some(closure_plan) = materialized.inline_closure_plan.as_ref() else {
         return Ok(agent_exit);
     };
-    let Some(pre_fm_hash) = materialized.inline_pre_frontmatter_hash else {
+    if agent_exit != 0 {
         return Ok(agent_exit);
-    };
-    let Some(source_text_before) = materialized.inline_source_text.as_deref() else {
-        return Ok(agent_exit);
+    }
+
+    let replacement_body = match claudine::composition::closure::extract_replacement_body(final_response) {
+        Ok(body) => body,
+        Err(error) => {
+            if show_checks {
+                log::message(&crate::output::fm_check_fail(
+                    &format!(
+                        "the referenced file -- {display_path} -- did not receive a valid replacement body: {error}"
+                    ),
+                    term,
+                ));
+            }
+            return Ok(1);
+        }
     };
 
-    match fs::read_to_string(source_path) {
-        Ok(disk_text) => {
-            let on_disk: darkmatter::markdown::Markdown = disk_text.clone().into();
-            let body_updated = on_disk.hash_body(false) != pre_body_hash;
-            if body_updated {
-                if show_checks {
-                    log::message(&crate::output::fm_check_ok(
-                        "Agent updated the target document's body",
-                        term,
-                    ));
-                }
-                let disk_fm_hash = on_disk.hash_frontmatter(false);
-                let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                let rewritten = if disk_fm_hash != pre_fm_hash {
-                    if show_checks {
-                        log::message(&crate::output::fm_check_fail(
-                            "Agent ignored instruction to leave frontmatter untouched \
-                             (<i>we have reverted their changes</i>)",
-                            term,
-                        ));
-                    }
-                    claudine::composition::closure::rewrite_inline_document(
-                        source_text_before,
-                        on_disk.content(),
-                        &today,
-                    ).map_err(|e| eyre!("{e}"))?
-                } else {
-                    if show_checks {
-                        log::message(&crate::output::fm_check_ok(
-                            "Agent left frontmatter untouched (<i>as instructed</i>)",
-                            term,
-                        ));
-                    }
-                    claudine::composition::closure::rewrite_inline_document(&disk_text, on_disk.content(), &today)
-                        .map_err(|e| eyre!("{e}"))?
-                };
-                claudine::config::atomic::atomic_write(source_path, rewritten.as_bytes())
-                    .map_err(|e| eyre!("failed to rewrite inline target: {e}"))?;
-                if agent_exit != 0
-                    && show_checks
-                    && termination == claudine::harness::ProcessTermination::Completed
-                {
-                    log::warn(
-                        "agent reported an error but the target file was updated; treating as success",
-                    );
-                }
-                Ok(
-                    if termination == claudine::harness::ProcessTermination::Completed {
-                        0
-                    } else {
-                        agent_exit
-                    },
-                )
-            } else {
-                if show_checks && agent_exit == 0 {
-                    log::message(&crate::output::fm_check_fail(
-                        &format!(
-                            "the referenced file -- {display_path} -- did not get updated even \
-                             though the Agent reported a successful outcome!"
-                        ),
-                        term,
-                    ));
-                }
-                Ok(if agent_exit == 0 { 1 } else { agent_exit })
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    match claudine::composition::closure::apply_inline_closure(
+        closure_plan,
+        &replacement_body,
+        source_path,
+        &today,
+    ) {
+        Ok(()) => {
+            if show_checks {
+                log::message(&crate::output::fm_check_ok(
+                    "Applied the captured replacement body to the target document",
+                    term,
+                ));
+                log::message(&crate::output::fm_check_ok(
+                    "Preserved original frontmatter and updated <bold>last_updated</bold>",
+                    term,
+                ));
             }
+            Ok(agent_exit)
         }
-        Err(e) => Err(eyre!(
-            "failed to read {} after agent completion: {e}",
-            source_path.display()
-        )),
+        Err(error) => {
+            if show_checks {
+                log::message(&crate::output::fm_check_fail(
+                    &format!("failed to rewrite {display_path}: {error}"),
+                    term,
+                ));
+            }
+            Ok(1)
+        }
     }
 }
 
