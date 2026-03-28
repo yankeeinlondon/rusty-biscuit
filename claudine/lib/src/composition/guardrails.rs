@@ -1,15 +1,15 @@
-//! Guardrail loading for `--frontmatter-prompt` workflows.
+//! Guardrail loading for inline composition workflows.
 //!
 //! Guardrails are instructions appended to every inline prompt to prevent the
 //! agent from rewriting frontmatter or otherwise defeating the composition
 //! pipeline.  Users can customise the guardrails by placing a
-//! `.claudine/frontmatter-prompt.md` file in the repository root.
+//! `.claudine/inline-compose.md` file in the repository root.
 
 use std::fs;
 use std::path::Path;
 
 /// Relative path (from repo root) to the user-customisable guardrails file.
-const GUARDRAILS_RELATIVE_PATH: &str = ".claudine/frontmatter-prompt.md";
+const GUARDRAILS_RELATIVE_PATH: &str = ".claudine/inline-compose.md";
 
 /// Default guardrail instructions shipped with Claudine.
 const DEFAULT_GUARDRAILS: &str = "\
@@ -20,7 +20,7 @@ const DEFAULT_GUARDRAILS: &str = "\
 > - Do not edit the source file directly
 ";
 
-/// Load guardrails from `.claudine/frontmatter-prompt.md` (creating it if
+/// Load guardrails from `.claudine/inline-compose.md` (creating it if
 /// absent), or fall back to the built-in default when no repo root is known.
 ///
 /// ## Returns

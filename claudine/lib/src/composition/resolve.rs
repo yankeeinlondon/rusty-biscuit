@@ -50,7 +50,7 @@ pub fn resolve_composition_source(
 /// Validate that the resolved file is readable and writable.
 ///
 /// This is a cross-provider pre-flight check: regardless of which agent
-/// is used, the frontmatter-prompt workflow requires the agent to read
+/// is used, the inline composition workflow requires the agent to read
 /// the file (to understand context) and write back (to update the body).
 pub fn validate_file_permissions(path: &Path) -> Result<(), CompositionError> {
     // Try opening for write — the most reliable cross-platform method,
