@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::components::prose::Prose;
 use crate::components::renderable::Renderable;
 use crate::discovery::detection::ColorDepth;
 use crate::terminal::Terminal;
@@ -151,6 +152,8 @@ pub struct Todo {
     created: DateTime<Utc>,
     last_updated: DateTime<Utc>,
     #[serde(skip)]
+    use_prose: bool,
+    #[serde(skip)]
     layout: Layout,
 }
 
@@ -181,6 +184,7 @@ impl Default for Todo {
             description: "".to_string(),
             created: Utc::now(),
             last_updated: Utc::now(),
+            use_prose: false,
             layout: Layout::default(),
         }
     }
@@ -209,6 +213,18 @@ impl Todo {
         }
     }
 
+    /// Create a new TODO item with a prose-formatted description.
+    ///
+    /// The description is rendered through [`Prose`] at render time,
+    /// enabling markup like `<b>bold</b>` and `<red>color</red>`.
+    pub fn from_prose<T: Into<String>>(desc: T) -> Todo {
+        Todo {
+            description: desc.into(),
+            use_prose: true,
+            ..Todo::default()
+        }
+    }
+
     /// Reports the Todo item to the terminal. Using a nerd font representation
     /// if the terminal has detected that the font is a nerd font. Otherwise it
     /// uses basic characters which should be in all font variants.
@@ -219,6 +235,12 @@ impl Todo {
         let todo_icon = TODO_CHAR_LOOKUP
             .get(&self.state)
             .unwrap_or(&TODO_CHAR_LOOKUP[&TodoState::Open]);
+
+        let desc = if self.use_prose {
+            Prose::new(&self.description).render(term)
+        } else {
+            self.description.clone()
+        };
 
         // Check if terminal supports colors
         let has_color = term.color_depth != ColorDepth::None;
@@ -239,28 +261,28 @@ impl Todo {
         match self.state {
             TodoState::Cancelled => match term.is_nerd_font {
                 Some(true) if has_color => {
-                    FontWeight::Dim.wrap(format!("{} {}", todo_icon.nerd, self.description))
+                    FontWeight::Dim.wrap(format!("{} {}", todo_icon.nerd, desc))
                 }
                 Some(true) => {
                     // Nerd font but no color - just use the icon without dim styling
-                    format!("{} {}", todo_icon.nerd, self.description)
+                    format!("{} {}", todo_icon.nerd, desc)
                 }
                 _ if has_color => FontWeight::Dim.wrap(format!(
                     "{} {}",
                     fallback_icon,
-                    Style::Strikethrough.term_wrap(&self.description, term)
+                    Style::Strikethrough.term_wrap(&desc, term)
                 )),
                 _ => {
                     // No color - plain text with no styling
-                    format!("{} {}", fallback_icon, self.description)
+                    format!("{} {}", fallback_icon, desc)
                 }
             },
             _ => match term.is_nerd_font {
                 Some(true) => {
-                    format!("{} {}", todo_icon.nerd, self.description)
+                    format!("{} {}", todo_icon.nerd, desc)
                 }
                 _ => {
-                    format!("{} {}", fallback_icon, self.description)
+                    format!("{} {}", fallback_icon, desc)
                 }
             },
         }
