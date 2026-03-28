@@ -11,6 +11,7 @@ pub mod progress;
 pub mod prose;
 pub mod renderable;
 pub mod section;
+pub mod status;
 pub mod table;
 pub mod terminal_image;
 pub mod text_block;
