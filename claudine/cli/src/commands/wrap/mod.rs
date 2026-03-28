@@ -599,6 +599,10 @@ fn has_explicit_native_output_request(provider: Provider, args: &[String]) -> bo
 /// Shared wrapper args for provider subcommands.
 #[derive(Debug, Clone, Args)]
 pub struct WrapperArgs {
+    /// Print help for this wrapper command.
+    #[arg(short, long)]
+    pub help: bool,
+
     /// Enable provider-specific YOLO/auto-approval mode.
     #[arg(short = 'y', long)]
     pub yolo: bool,
@@ -675,6 +679,11 @@ pub struct WrapperArgs {
 
 /// Run a wrapped provider command.
 pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs, verbose: u8) -> Result<()> {
+    if args.help {
+        print_wrapper_help(provider);
+        return Ok(());
+    }
+
     let code = match run_provider_wrapper_inner(provider, args, verbose) {
         Ok(code) => code,
         Err(error) => {
@@ -2876,6 +2885,37 @@ fn extract_prompt_from_child_args(
                 .map(ToOwned::to_owned),
         })
         .or_else(|| extract_user_prompt(child_args))
+}
+
+fn print_wrapper_help(provider: Provider) {
+    let slug = provider.as_slug();
+    println!(
+        "Wrap {provider} with Claudine preflight/env handling\n\
+         \n\
+         Usage: claudine {slug} [OPTIONS] [ARGS]...\n\
+         \n\
+         Arguments:\n\
+         \x20 [ARGS]...  Arguments forwarded to the wrapped provider CLI\n\
+         \n\
+         Options:\n\
+         \x20 -y, --yolo               Enable provider-specific YOLO/auto-approval mode\n\
+         \x20     --include <ENV_NAME>  Preserve this env var even when it matches sensitive-name filters\n\
+         \x20 -i, --interactive         Force interactive mode even when a prompt string is provided\n\
+         \x20 -m, --model <MODEL>       Override the model used by the provider\n\
+         \x20 -o, --output <FORMAT>     Set the output format (json, text, stream)\n\
+         \x20 -s, --system-prompt <PROMPT|FILE>  Set or append a system prompt\n\
+         \x20 -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)\n\
+         \x20     --dry-run             Show what would be executed without launching the child\n\
+         \x20 -q, --quiet              Show only the header line; suppress env details and info\n\
+         \x20     --silent              Suppress all Claudine preflight output\n\
+         \x20     --operation <OP>      Set the OPERATION env var for the wrapped session\n\
+         \x20     --sandbox             Enable provider-specific sandboxing\n\
+         \x20     --repo                Use only repo-scoped skills, commands, and agents\n\
+         \x20     --mcp                 Enable Claudine-managed MCP session composition\n\
+         \x20     --use <ID>            Activate specific MCP servers by ID or alias\n\
+         \x20     --strict              Treat unresolved or ambiguous MCP tags as hard errors\n\
+         \x20 -h, --help               Print help"
+    );
 }
 
 /// Returns true if a prompt string is present — either as a remaining
