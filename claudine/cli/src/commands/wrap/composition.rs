@@ -28,9 +28,8 @@ use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, LiveStreamSink, StructuredCodexOutput,
     StructuredSummaryDetails, build_harness_shell_options, emit_stream_summary,
-    emit_stream_summary_no_separator, rewrite_markdown_preserving_frontmatter,
-    resolve_binary_path, run_harness_loop, strip_prompt_from_args, structured_verbosity,
-    wrap_terminal,
+    emit_stream_summary_no_separator, resolve_binary_path, run_harness_loop,
+    strip_prompt_from_args, structured_verbosity, wrap_terminal,
 };
 use crate::log;
 
@@ -434,7 +433,7 @@ fn execute_inline_without_harness(
                 };
 
                 let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                let doc_string = rewrite_markdown_preserving_frontmatter(
+                let doc_string = claudine::composition::closure::rewrite_inline_document(
                     frontmatter_source,
                     on_disk.content(),
                     &today,

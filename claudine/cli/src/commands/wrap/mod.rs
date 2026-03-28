@@ -1621,11 +1621,11 @@ fn finalize_inline_harness_attempt(
                             term,
                         ));
                     }
-                    rewrite_markdown_preserving_frontmatter(
+                    claudine::composition::closure::rewrite_inline_document(
                         source_text_before,
                         on_disk.content(),
                         &today,
-                    )?
+                    ).map_err(|e| eyre!("{e}"))?
                 } else {
                     if show_checks {
                         log::message(&crate::output::fm_check_ok(
@@ -1633,7 +1633,8 @@ fn finalize_inline_harness_attempt(
                             term,
                         ));
                     }
-                    rewrite_markdown_preserving_frontmatter(&disk_text, on_disk.content(), &today)?
+                    claudine::composition::closure::rewrite_inline_document(&disk_text, on_disk.content(), &today)
+                        .map_err(|e| eyre!("{e}"))?
                 };
                 claudine::config::atomic::atomic_write(source_path, rewritten.as_bytes())
                     .map_err(|e| eyre!("failed to rewrite inline target: {e}"))?;
@@ -2322,134 +2323,6 @@ fn format_verbose_summary_details_prose(
     Some(format!("<dim>{}</dim>", parts.join(" \u{00b7} ")))
 }
 
-pub(crate) fn rewrite_markdown_preserving_frontmatter(
-    frontmatter_source: &str,
-    body: &str,
-    today: &str,
-) -> Result<String> {
-    if let Some(parts) = split_frontmatter_parts(frontmatter_source) {
-        let newline = detect_newline(frontmatter_source);
-        let yaml = upsert_last_updated_in_frontmatter(parts.yaml, today, newline);
-        let mut document = String::with_capacity(
-            parts.opening.len() + yaml.len() + parts.closing.len() + body.len(),
-        );
-        document.push_str(parts.opening);
-        document.push_str(&yaml);
-        document.push_str(parts.closing);
-        document.push_str(body);
-        return Ok(document);
-    }
-
-    let mut markdown: darkmatter::markdown::Markdown = frontmatter_source.to_string().into();
-    markdown
-        .fm_insert("last_updated", today)
-        .map_err(|e| eyre!("failed to update last_updated: {e}"))?;
-    *markdown.content_mut() = body.to_string();
-    Ok(markdown.as_string())
-}
-
-struct FrontmatterParts<'a> {
-    opening: &'a str,
-    yaml: &'a str,
-    closing: &'a str,
-}
-
-fn split_frontmatter_parts(text: &str) -> Option<FrontmatterParts<'_>> {
-    let mut lines = text.split_inclusive('\n');
-    let opening = lines.next()?;
-    if trim_line_ending(opening) != "---" {
-        return None;
-    }
-
-    let yaml_start = opening.len();
-    let mut offset = yaml_start;
-    for line in lines {
-        let next_offset = offset + line.len();
-        if trim_line_ending(line) == "---" {
-            return Some(FrontmatterParts {
-                opening: &text[..yaml_start],
-                yaml: &text[yaml_start..offset],
-                closing: &text[offset..next_offset],
-            });
-        }
-        offset = next_offset;
-    }
-
-    None
-}
-
-fn upsert_last_updated_in_frontmatter(yaml: &str, today: &str, newline: &str) -> String {
-    let mut updated = String::with_capacity(yaml.len() + today.len() + 32);
-    let mut found = false;
-    let mut had_trailing_newline = yaml.is_empty();
-
-    for line in yaml.split_inclusive('\n') {
-        let line_ending = if line.ends_with("\r\n") {
-            "\r\n"
-        } else if line.ends_with('\n') {
-            "\n"
-        } else {
-            ""
-        };
-        let content = trim_line_ending(line);
-
-        if let Some(rewritten) = rewrite_last_updated_line(content, today) {
-            updated.push_str(&rewritten);
-            updated.push_str(line_ending);
-            found = true;
-        } else {
-            updated.push_str(line);
-        }
-
-        had_trailing_newline = !line_ending.is_empty();
-    }
-
-    if !found {
-        if !updated.is_empty() && !had_trailing_newline {
-            updated.push_str(newline);
-        }
-        updated.push_str("last_updated: ");
-        updated.push_str(today);
-        updated.push_str(newline);
-    }
-
-    updated
-}
-
-fn rewrite_last_updated_line(line: &str, today: &str) -> Option<String> {
-    let trimmed = line.trim_start();
-    let rest = trimmed.strip_prefix("last_updated:")?;
-    let indent = &line[..line.len() - trimmed.len()];
-    if !indent.is_empty() {
-        return None;
-    }
-    let quote = rest
-        .trim_start()
-        .chars()
-        .next()
-        .filter(|quote| matches!(quote, '"' | '\''));
-
-    let mut rewritten = String::from(indent);
-    rewritten.push_str("last_updated: ");
-    match quote {
-        Some(quote) => {
-            rewritten.push(quote);
-            rewritten.push_str(today);
-            rewritten.push(quote);
-        }
-        None => rewritten.push_str(today),
-    }
-    Some(rewritten)
-}
-
-fn detect_newline(text: &str) -> &str {
-    if text.contains("\r\n") { "\r\n" } else { "\n" }
-}
-
-fn trim_line_ending(line: &str) -> &str {
-    line.trim_end_matches(['\r', '\n'])
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PromptLocation {
     Value(usize),
@@ -2975,47 +2848,6 @@ mod tests {
 
         assert_eq!(metas[5].event, AgenticEvent::TurnComplete);
         assert_eq!(metas[5].session_id.as_deref(), Some("thread-1"));
-    }
-
-    #[test]
-    fn rewrite_markdown_preserves_block_scalar_frontmatter_layout() {
-        let original = concat!(
-            "---\n",
-            "prompt: |-\n",
-            "  First line\n",
-            "  Second line\n",
-            "last_updated: 2026-03-18\n",
-            "---\n",
-            "Old body\n",
-        );
-
-        let rewritten =
-            rewrite_markdown_preserving_frontmatter(original, "Fresh body\n", "2026-03-19")
-                .unwrap();
-
-        assert!(rewritten.contains("prompt: |-"));
-        assert!(rewritten.contains("  First line\n  Second line\n"));
-        assert!(rewritten.contains("last_updated: 2026-03-19"));
-        assert!(rewritten.ends_with("---\nFresh body\n"));
-    }
-
-    #[test]
-    fn rewrite_markdown_adds_last_updated_without_reserializing_frontmatter() {
-        let original = concat!(
-            "---\n",
-            "prompt: |-\n",
-            "  Keep this formatting\n",
-            "---\n",
-            "Body\n",
-        );
-
-        let rewritten =
-            rewrite_markdown_preserving_frontmatter(original, "Updated body\n", "2026-03-19")
-                .unwrap();
-
-        assert!(rewritten.contains("prompt: |-"));
-        assert!(rewritten.contains("  Keep this formatting\n"));
-        assert!(rewritten.contains("last_updated: 2026-03-19\n---\nUpdated body\n"));
     }
 
     fn make_catalog_with_servers(names: &[&str]) -> Vec<McpServer> {

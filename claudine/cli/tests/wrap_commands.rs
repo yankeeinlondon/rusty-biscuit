@@ -1254,3 +1254,314 @@ printf '%s\n' '{"type":"result","duration_ms":4600,"total_cost_usd":0.02,"usage"
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     assert!(stderr_plain.contains("no tool calls"));
 }
+
+// ===========================================================================
+// Composition tests
+// ===========================================================================
+
+#[test]
+fn compose_requires_file_argument() {
+    // When no file is provided, clap shows usage which includes the expected flags
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose"])
+        .assert()
+        .code(2);
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(plain.contains("FILE"), "usage should show FILE argument");
+}
+
+#[test]
+fn inline_compose_requires_file_argument() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["inline-compose"])
+        .assert()
+        .code(2);
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(plain.contains("FILE"), "usage should show FILE argument");
+}
+
+#[test]
+fn compose_rejects_nonexistent_file() {
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", "/nonexistent/path/to/file.md"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn compose_rejects_non_markdown_file() {
+    let workspace = tempdir().unwrap();
+    let txt_file = workspace.path().join("file.txt");
+    fs::write(&txt_file, "hello").unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", txt_file.to_str().unwrap()])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn inline_compose_rejects_missing_prompt_property() {
+    let workspace = tempdir().unwrap();
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: No prompt\n---\nBody\n").unwrap();
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["inline-compose", md_file.to_str().unwrap()])
+        .assert()
+        .code(1);
+}
+
+#[cfg(unix)]
+#[test]
+fn explicit_provider_flag_bypasses_chooser() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let args_path = workspace.path().join("args.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("explicit"),
+        "should indicate explicit provider selection but stderr was: {plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_uses_wrapper_grade_execution() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello compose\n").unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf 'AGENT=%s\n' "$AGENT" >&2
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    // Wrapper-grade execution injects AGENT env
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    assert!(
+        stderr.contains("AGENT=codex"),
+        "compose should inject AGENT env via wrapper pipeline; stderr was: {stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_validates_file_update() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: Generate content\n---\nOriginal body\n",
+    )
+    .unwrap();
+
+    // Agent that does not modify the file -> should trigger unchanged body error
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+exit 0
+"#,
+    );
+
+    {
+        let assert = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("PATH", &path_dir)
+            .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
+            .assert();
+
+        let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+        let plain = strip_ansi(&stderr);
+        // Should report that the file was not updated
+        assert!(
+            plain.contains("did not get updated") || plain.contains("not updated"),
+            "should report unchanged file; stderr was: {plain}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_preserves_frontmatter() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    let original = "---\nprompt: Generate content\nlast_updated: 2026-01-01\n---\nOriginal body\n";
+    fs::write(&md_file, original).unwrap();
+
+    // Agent that replaces file with new body AND tampers with frontmatter
+    let tampered = "---\nprompt: CHANGED\nlast_updated: 2099-01-01\n---\nNew body from agent\n";
+    let escaped = tampered.replace('\'', "'\\''");
+
+    write_executable(
+        &path_dir.join("codex"),
+        &format!(
+            "#!/bin/sh\nprintf '%s' '{}' > \"{}\"\nexit 0\n",
+            escaped,
+            md_file.display()
+        ),
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
+        .assert();
+
+    let final_content = fs::read_to_string(&md_file).unwrap();
+    // Frontmatter should be restored (tamper reverted)
+    assert!(
+        final_content.contains("prompt: Generate content"),
+        "original frontmatter prompt should be preserved; file: {final_content}"
+    );
+
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    assert!(
+        final_content.contains(&format!("last_updated: {today}")),
+        "last_updated should be today; file: {final_content}"
+    );
+
+    // Body should be updated
+    assert!(
+        final_content.contains("New body from agent"),
+        "body should be from agent; file: {final_content}"
+    );
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("reverted"),
+        "should report frontmatter tamper revert; stderr was: {plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_no_overwrite_on_failure() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    let original = "---\nprompt: Generate content\n---\nOriginal body\n";
+    fs::write(&md_file, original).unwrap();
+
+    // Agent that exits with error and does not modify the file
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+exit 1
+"#,
+    );
+
+    let _assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
+        .assert();
+
+    // File should not have been modified
+    let final_content = fs::read_to_string(&md_file).unwrap();
+    assert_eq!(
+        final_content, original,
+        "file should not be modified on agent failure"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn no_cross_provider_retry_after_launch() {
+    // Verifies that after a provider is launched and fails, Claudine
+    // does NOT automatically retry with another provider. The exit code
+    // from the single provider invocation is returned directly.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
+
+    // Provider that exits with error code 42
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+exit 42
+"#,
+    );
+
+    // Also install a "claude" that succeeds -- if retry happened, we'd see code 0
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+exit 0
+"#,
+    );
+
+    // Explicitly select codex. It exits 42. No fallback to claude.
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .code(42);
+}
+
+#[test]
+fn old_compose_inline_command_is_unknown() {
+    // Verify that the old `compose-inline` command no longer exists
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose-inline", "file.md"])
+        .assert()
+        .code(2); // clap returns 2 for unrecognized subcommands
+}

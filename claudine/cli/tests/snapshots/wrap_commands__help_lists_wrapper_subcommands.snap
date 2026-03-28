@@ -27,9 +27,8 @@ Wrapped Execution:
   qwen              Wrap Qwen Code with Claudine preflight/env handling
 
 Composition:
-  compose           Compose a Markdown document through an agentic CLI
-  compose-inline    Inline composition: frontmatter prompt, replace body
-  sequence          Sequence multiple compositions  (future)
+  compose           Compose a Markdown document and send as prompt
+  inline-compose    Inline composition: generate and replace body
 
 Administration:
   init              Interactive setup wizard

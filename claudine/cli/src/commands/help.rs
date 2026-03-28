@@ -23,14 +23,6 @@ fn cmd(name: &'static str, description: &'static str) -> CommandEntry {
     }
 }
 
-fn future_cmd(name: &'static str, description: &'static str) -> CommandEntry {
-    CommandEntry {
-        name,
-        description,
-        future: true,
-    }
-}
-
 fn groups() -> Vec<CommandGroup> {
     vec![
         CommandGroup {
@@ -85,12 +77,11 @@ fn groups() -> Vec<CommandGroup> {
         CommandGroup {
             name: "Composition",
             commands: vec![
-                cmd("compose", "Compose a Markdown document through an agentic CLI"),
+                cmd("compose", "Compose a Markdown document and send as prompt"),
                 cmd(
-                    "compose-inline",
-                    "Inline composition: frontmatter prompt, replace body",
+                    "inline-compose",
+                    "Inline composition: generate and replace body",
                 ),
-                future_cmd("sequence", "Sequence multiple compositions"),
             ],
         },
         CommandGroup {
