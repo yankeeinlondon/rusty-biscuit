@@ -31,6 +31,18 @@ pub struct ComposeArgs {
     #[arg(long)]
     pub silent: bool,
 
+    /// Enable Claudine-managed MCP session composition.
+    #[arg(long)]
+    pub mcp: bool,
+
+    /// Activate specific MCP servers by ID or alias (comma-separated).
+    #[arg(long = "use", value_name = "ID", value_delimiter = ',')]
+    pub mcp_use: Vec<String>,
+
+    /// Treat unresolved or ambiguous MCP tags as hard errors.
+    #[arg(long)]
+    pub strict: bool,
+
     /// Use Claude as the provider.
     #[arg(long, group = "provider_select")]
     pub claude: bool,
@@ -78,6 +90,18 @@ pub struct InlineComposeArgs {
     /// Suppress all output except the composition result.
     #[arg(long)]
     pub silent: bool,
+
+    /// Enable Claudine-managed MCP session composition.
+    #[arg(long)]
+    pub mcp: bool,
+
+    /// Activate specific MCP servers by ID or alias (comma-separated).
+    #[arg(long = "use", value_name = "ID", value_delimiter = ',')]
+    pub mcp_use: Vec<String>,
+
+    /// Treat unresolved or ambiguous MCP tags as hard errors.
+    #[arg(long)]
+    pub strict: bool,
 
     /// Use Claude as the provider.
     #[arg(long, group = "provider_select")]
@@ -160,6 +184,9 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         prepared,
         explicit_provider,
         excluded,
+        mcp: args.mcp,
+        mcp_use: args.mcp_use,
+        strict: args.strict,
         session_interactive: args.interactive,
         silent: args.silent,
     };
@@ -196,6 +223,9 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         prepared,
         explicit_provider,
         excluded,
+        mcp: args.mcp,
+        mcp_use: args.mcp_use,
+        strict: args.strict,
         session_interactive: args.interactive,
         silent: args.silent,
     };
