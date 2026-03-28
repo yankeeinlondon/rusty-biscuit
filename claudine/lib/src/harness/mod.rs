@@ -33,4 +33,6 @@ pub use shell::{
 };
 pub use speech::speak_when_able;
 pub use timeout::parse_timeout;
-pub use validate::{capture_pre_run_snapshot, evaluate_post_checks, evaluate_pre_checks};
+pub use validate::{
+    capture_pre_run_snapshot, check_write_permission, evaluate_post_checks, evaluate_pre_checks,
+};

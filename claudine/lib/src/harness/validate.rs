@@ -345,7 +345,13 @@ fn check_value_shape(
     }
 }
 
-fn check_write_permission(
+/// Check that `file` is writable both at the filesystem level and under the
+/// provider's runtime write policy (when a probe is supplied).
+///
+/// This is the same check used by the harness `has_write_permission`
+/// validation. Exposed publicly so that non-harness inline composition can
+/// enforce the same invariant.
+pub fn check_write_permission(
     file: &Path,
     source_path: &Path,
     permission_probe: Option<&dyn HarnessPermissionProbe>,
@@ -1392,5 +1398,48 @@ mod tests {
         assert!(!passed);
         // The rendered output should contain the cross mark character
         assert!(rendered.contains('\u{2a2f}'));
+    }
+
+    // -- Public check_write_permission tests (non-harness inline path) ----
+
+    #[test]
+    fn check_write_permission_public_passes_writable_file_no_probe() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("writable.md");
+        fs::write(&file, "# hello").unwrap();
+
+        let result = check_write_permission(&file, &file, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_write_permission_public_denies_when_probe_rejects() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("writable.md");
+        fs::write(&file, "# hello").unwrap();
+        let source = dir.path().join("source.md");
+
+        let probe = StaticPermissionProbe {
+            assessment: PermissionAssessment::Denied {
+                reason: "read-only sandbox".to_string(),
+            },
+        };
+
+        let result = check_write_permission(&file, &source, Some(&probe));
+        let error = result.unwrap_err();
+        assert!(error.contains("provider runtime policy denies writes"));
+        assert!(error.contains("read-only sandbox"));
+    }
+
+    #[test]
+    fn check_write_permission_public_denies_missing_parent() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("no-such-parent").join("target.md");
+        let source = dir.path().join("source.md");
+
+        let result = check_write_permission(&file, &source, None);
+        let error = result.unwrap_err();
+        assert!(error.contains("parent directory"));
+        assert!(error.contains("does not exist"));
     }
 }
