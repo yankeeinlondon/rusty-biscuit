@@ -117,6 +117,27 @@ pub fn parse_harness_plan_with_shell(
     })
 }
 
+/// Create a system-owned `has_write_permission` pre-check rule for the
+/// source document itself.
+///
+/// Inline composition requires write access to the source file. When a
+/// harness is active, this rule participates in the normal pre-check
+/// pipeline so that handler recovery paths (redirect, deviate, etc.)
+/// can respond to permission failures instead of hard-failing before
+/// the handler system exists.
+pub fn inline_writability_pre_check(source_path: &Path) -> ValidationRule {
+    ValidationRule {
+        id: ValidationRuleId(u32::MAX),
+        event: ValidationEvent::HasWritePermission,
+        phase: ValidationPhase::PreOnly,
+        kind: ValidationKind::HasWritePermission {
+            file: source_path.to_path_buf(),
+        },
+        message_template: None,
+        subject_key: Some(source_path.display().to_string()),
+    }
+}
+
 /// Parse a `pre_checks` or `post_checks` value in list or map form.
 fn parse_checks(
     value: &Value,

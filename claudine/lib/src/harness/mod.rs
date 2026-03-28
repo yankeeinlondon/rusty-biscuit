@@ -21,7 +21,10 @@ pub use handlers::{
     classify_failure, execute_deviate_command, resolve_handler, validate_resume,
 };
 pub use model::*;
-pub use parse::{has_harness_properties, parse_harness_plan, parse_harness_plan_with_shell};
+pub use parse::{
+    has_harness_properties, inline_writability_pre_check, parse_harness_plan,
+    parse_harness_plan_with_shell,
+};
 pub use resolve::{HarnessResolutionContext, resolve_harness_path};
 pub use runtime::build_attempt_outcome;
 pub use shell::{

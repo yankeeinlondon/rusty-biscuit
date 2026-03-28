@@ -569,7 +569,7 @@ fn reject_retired_composition_flags(args: &[String]) -> Result<()> {
         ),
         (
             "--prompt-file",
-            "claudine inline-compose --<provider> <file>",
+            "claudine compose --<provider> <file>",
         ),
     ];
 
@@ -1444,7 +1444,7 @@ fn find_wrapper_harness_source(
 
 fn materialize_harness_prompt(
     state: &HarnessPromptState,
-    repo_root: Option<&Path>,
+    _repo_root: Option<&Path>,
 ) -> Result<MaterializedHarnessPrompt> {
     let source_text = fs::read_to_string(&state.source_path)
         .map_err(|e| eyre!("failed to read '{}': {e}", state.source_path.display()))?;
@@ -1506,7 +1506,7 @@ fn materialize_harness_prompt(
                 original_text: source_text.clone(),
                 markdown: effective_markdown.clone(),
             };
-            let prepared = claudine::composition::prepare_inline(&source, repo_root)
+            let prepared = claudine::composition::prepare_inline(&source)
                 .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
             (
                 prepared.prompt,
@@ -2104,12 +2104,22 @@ pub(crate) fn run_harness_loop(
             materialize_harness_prompt(prompt_state, repo_root)?
         };
         let resolve_ctx = harness_context.resolve_context();
-        let plan = claudine::harness::parse_harness_plan_with_shell(
+        let mut plan = claudine::harness::parse_harness_plan_with_shell(
             &materialized.frontmatter,
             &prompt_state.source_path,
             &resolve_ctx,
             Some(harness_context.shell_options()),
         )?;
+
+        // For inline composition, prepend a system-owned writability
+        // pre-check so handler recovery paths can respond to permission
+        // failures.
+        if matches!(prompt_state.mode, HarnessPromptMode::Inline) {
+            plan.pre_checks.insert(
+                0,
+                claudine::harness::inline_writability_pre_check(&prompt_state.source_path),
+            );
+        }
 
         match claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe), term) {
             Ok(()) => {}
