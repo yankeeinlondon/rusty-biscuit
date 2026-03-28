@@ -149,8 +149,8 @@ The following interfaces have been removed and replaced by the two canonical com
 | Removed | Replacement |
 |---------|-------------|
 | `claudine <agent> --compose <file>` | `claudine compose --<agent> <file>` |
-| `claudine <agent> --frontmatter-prompt <file>` | `claudine inline-compose --<agent> <file>` |
-| `claudine <agent> --prompt-file <file>` | `claudine inline-compose --<agent> <file>` |
+| `claudine <agent> --frontmatter-prompt <file>` | `claudine compose --<agent> <file>` or `claudine inline-compose --<agent> <file>` |
+| `claudine <agent> --prompt-file <file>` | `claudine compose --<agent> <file>` (prompt loading is now part of composition) |
 | `claudine compose inline <file>` | `claudine inline-compose <file>` |
 | `claudine compose-inline <file>` | `claudine inline-compose <file>` |
 | `AGENT` environment variable | `--claude`, `--codex`, etc. flags or `agent` frontmatter |

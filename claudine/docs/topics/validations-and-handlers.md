@@ -30,11 +30,12 @@ Without validations, those concerns end up either undocumented or duplicated in 
 
 ## Where The Harness Is Active Today
 
-The harness is intentionally scoped to Markdown-backed workflows:
+The harness is intentionally scoped to the two canonical composition commands:
 
-1. `claudine <provider> --prompt-file <file>`
-2. `claudine <provider> --frontmatter-prompt <file>`
-3. `claudine <provider> --compose <file>`
+1. `claudine compose --<provider> <file>` — chained prompt pipelines
+2. `claudine inline-compose --<provider> <file>` — deterministic document rewrite
+
+It also activates when a wrapper passthrough prompt resolves to a Markdown file with harness frontmatter properties (e.g., `claudine claude prompt.md` where `prompt.md` contains `pre_checks` or `post_checks`).
 
 This is a deliberate boundary. These flows already have a resolved source file, composed frontmatter, and a clear place to store validations and handler rules. Raw positional prompts do not.
 
@@ -300,7 +301,7 @@ That limitation is intentional. Declarative `deviate` commands are statically kn
 
 ## Inline Documents Are Supported Too
 
-`--frontmatter-prompt` deserves special mention because it is the most stateful mode.
+`claudine inline-compose` deserves special mention because it is the most stateful mode.
 
 In inline mode, Claudine is not only validating the provider's response. It is also reconciling the target document itself:
 

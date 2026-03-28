@@ -21,7 +21,7 @@ and preserve blank-line separators between sections.
 │    - Info: potentially dangerous ENV variables removed…  │
 │    ⚠ Warning: …                                         │
 │                                                         │
-│ 4. Validation checkpoints  (frontmatter-prompt only)    │
+│ 4. Validation checkpoints  (composition commands only)  │
 │    ✓ validated that agent has read and write permissions │
 │    ✓ resolved the file reference to path/to/file.md     │
 │    Prompt:                                              │
