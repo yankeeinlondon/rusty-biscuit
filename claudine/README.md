@@ -83,107 +83,20 @@ The immediate benefits of wrapped execution are:
     - We'll cover this in the next section
 
 
-### Compositional Flow Features
+### Composition
 
-One of the newer and cooler features provided by Claudine is what Claudine' calls _compositional flow_ features. There are more than one variant of these but they all have the following characteristics:
+Claudine's composition features let you use Markdown as a dynamic template for agentic CLI sessions, leveraging [Darkmatter](../darkmatter/README.md)'s composition pipeline (transclusion, interpolation, conditionals, shell commands).
 
-- allow you to write and leverage Markdown as a "dynamic template"
-- the dynamic nature of these documents is derived from both the 
-    - _parameterization_ and _flow control_ provided by Claudine
-    - the compositional features of the [**Darkmatter**](../darkmatter/README.md) library
-- these features provide meta-agentic processes which orchestrate/operate outside of the Agent platform(s) themselves
-- these process favor non-interactive sessions over interactive but allow for both
-    - if you do want to run in an interactive session use the `--interactive` / `-i` flag
-- all variants support file reference resolution of relative path, absolute paths, repo-relative paths, monorepo-package-relative, and magic paths (represented by the leading `@` character many Agents provide).
+Two canonical commands:
 
-#### The `compose` Variant
+- **`claudine compose <file-ref>`** — compose a Markdown file and send it as a prompt (no file mutation)
+- **`claudine inline-compose <file-ref>`** — use the frontmatter `prompt` property to generate and replace the document body
 
-The `compose` variant allows you to reference a Markdown file as a prompt for your Agent.
+Both commands share a wrapper-grade execution pipeline with full support for environment setup, harness detection, structured streaming, and handler-driven recovery.
 
-- it is available in two syntaxes:
-    - `claudine <agent> --compose <file-ref>`, and
-    - `claudine compose <file-ref>`
-- both syntaxes provide the same functionality but the `claudine <agent>` syntax explicitly states the agent provider we will use whereas the `claudine compose` syntax will lead to a lazy evaluation of the agent to use
-    - `claudine compose` may be more appropriate for open source projects where you have a diverse set of contributors each using a different Agent or set of Agent providers.
-- when you run -- _as an example_ -- `claudine claude --compose "@foobar.md"`; Claudine will:
-    - use both "repo", "package", and "user" scoped paths to resolve the `foobar.md` file
-    - once resolved (still in a purely deterministic mode), it will _compose_ this Markdown file with Darkmatter's compose pipeline
-    - once composed this prompt will be passed to the `claude` agent harness for execution of a non-interactive session (using `-i` CLI switch would have used an interactive session)
-    - once the non-interactive session has completed the appropriate exit code is returned based on a successful or unsuccessful outcome
+Provider selection uses explicit flags (`--claude`, `--codex`, etc.), frontmatter hints, config favorites, or interactive chooser. Use `-i` for interactive sessions, `--exclude` to filter providers.
 
-Why use a compose prompt?
-
-- we all know a "better prompt" provides a "better answer"
-- but how can we allocate the time to build better prompts?
-    - there is no _one answer_ to this question, but
-    - where you can gain reuse on a prompt you can justify spending more time on it
-        - In some cases that means more time up front because you can see the value in it immediately
-        - but probably more importantly if there's a prompt you can keep on tweaking and iterating on each time you use it so that it improves over time
-- so far you may be thinking ... thanks Claudine, you've just described a Slash Command
-- The analogy is not _wrong_ but it misses the extra capabilities you get with a compose prompt:
-    - being able to inject content conditionally, inject shell command output (with a security model), leverage the composition of a graph of sub-documents via transclusion, interpolate state derived from ENV variables, Claudine provided context, or Frontmatter properties on the page (or inherited during transclusion)
-    - all of this dynamic behavior is provided in a purely deterministic environment which guarantees a known prompt strategy will be used, in a lightning quick manner, without a single token being used to build your prompt on the fly and all the while doing it in a way which is Agent neutral
-    - non-interactive sessions also benefit from:
-        - the session will be streamed (so caller gets real-time feedback)
-        - the stream will be visually enhanced for the terminal (`**bold**` is actually **bold** text, Markdown tables look like tables, etc.)
-        - metadata is injected into the STDERR stream (session id, model, tokens, cost basis, etc.) for context but not in conflict with STDOUT
-
-For more details on the **compose** variant, read the [Compose Prompting](./docs/topics/compose.md) document.
-
-#### The Inline Composition Variant
-
-While the `compose` variant used the frontmatter and body of Markdown file to create a high quality _prompt_ on the fly and then pass that into an Agent. With the _inline composition_ variant we will leverage the frontmatter of a document to create or update the body of the same document.
-
-The inline composition variant is available in two syntaxes:
-
-- `claudine <agent> --inline-composition <file-ref>`
-    - the `--inline-composition` CLI switch also comes with following aliases:
-        - `--inline-compose`
-        - `--frontmatter-property`
-        - `--fp`
-    - use whichever cognitively makes the most sense to you
-- `claudine inline-compose <file-ref>`; lazily resolves which agent to use
-
-In order to pull off inline composition in a compact CLI surface we will rely on some conventions:
-
-- the `prompt` property is where we expect to find the "prompt" that we'll use to generate content for the body of the document
-    - whatever text is found in this property will be run through Darkmatter's compose pipeline first
-    - this allows the same dynamic behaviors discussed in the compose variant
-- the `policy` property is reserved for content policy declarations (_coming soon_)
-    - this policy describes when the content will become "stale" and need to be _re_-generated
-- the `blast_radius` property is an optional property which can be added to technical documents
-    - this property is structured as a list of source files
-    - these files -- when present -- will be analyzed for changes and will trigger a targeted re-generation of content when source files have been updated after the document was last updated
-    - when first setting up a document you plan to use for inline-composition you can simply set it to `[]` and then the blast_radius will be determined by a parallel agentic process.
-    - if you prefer to manually stipulate the blast radius you can do that too
-    - Note: a blast_radius definition _can_ in effect becomes a specialized "policy" for updates and can be used _in addition_ to other policies should that be desirable.
-- the `last_executed` property _will_ be updated each time the file is evaluated
-- the `last_updated` property _will_ be updated each time the file's body is updated
-- the `_prompt_hash` and `_blast_radius_hash` are used to track changes in the prompt and blast radius (you should not set these but Claudine will when this file is processed)
-- the `_transcluded_docs` property will be added by Claudine if the base document uses [_transclusion_](../darkmatter/docs/topics/transclusion.md) and will be a list of underlying documents this document is dependent on.
-
-> **Note:** the only required property is `prompt` and you should feel free to use the YAML `|-` directive to produce larger prompts where having multi-line spacing is useful to legibility.
-
-When you run an inline composition the following steps are executed:
-
-- **File Resolution** - _attempts to resolve the file reference into a real file path, returns immediately with error if file is not found_
-- **Prompt Existence** - _validates that the resolved file has a `prompt` frontmatter property and returns immediately with an error if it doesn't_
-- **Permissions Check** - _if the current session doesn't have read and write permissions to the file then we return immediately with an error_
-- **Composition Error** - _when we run the prompt through Darkmatter's composition pipeline, the pipeline can succeed, fail, or require permissions approval; Claudine will interactively ask for permission when that is required but if any failure occurs we will immediately return with an appropriate error_
-- **Freshness Check** - _when a document's body is empty or any of the content policies indicate that the document is stale we will continue processing but if the document looks like it's content is already fresh then we will simply indicate that diagnosis to the caller and exit with a success code_
-- **Agentic Harness** - _we will now hand off to the Agentic CLI to update the Markdown bodies content_
-    - Note: _the user's prompt will have a small addendum added to it to provide the Agent context that it is to update THIS document and that the inline composition frontmatter properties are NOT to be touched_
-- **Agent Failure** - _if we detect that the Agent believes it has failed then we will immediately stop and return an error message_
-- **Task Failure** - _if the agent believes it has succeeded but the document's body has not changed or is empty then we will report this as an error_
-- **Frontmatter Check** - _the Agent will have been told not to update the Frontmatter but if they do anyway, we'll report this as a warning but convert the frontmatter back to it's original/intended state_
-
-This form of composition provide a self-contained way of keeping a document up-to-date and is often used for research and avoiding documentation drift.
-
-
-#### The `sequence` Variant
-
-The `sequence` variant is the most powerful of the compositional variants as it allows for a multi-step state machine to be setup for long running tasks along with stage gates (aka, validations) used to check that the pipeline is ready to move to the next state.
-
+For full details, see [Composition](./docs/topics/composition.md).
 
 
 ## Getting Started
