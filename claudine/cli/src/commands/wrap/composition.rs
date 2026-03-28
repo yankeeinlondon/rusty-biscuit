@@ -134,19 +134,20 @@ pub(crate) fn execute_composition_request(
     let effective_non_interactive = !request.session_interactive;
     let needs_mcp_shadow_home = (request.mcp || !request.mcp_use.is_empty())
         && matches!(provider, Provider::Codex | Provider::Gemini);
+    let needs_repo_shadow_home = request.repo;
     let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
     let mut yolo_enabled = request.yolo;
     let mut env_plan = env::build_child_env(
         profile,
         provider,
-        &[],                         // no include overrides
-        yolo_enabled,                // yolo
-        request.session_interactive, // interactive
+        &request.include,
+        yolo_enabled,
+        request.session_interactive,
         &raw_agent_params,
         &cwd,
-        &[],   // no env overrides
-        false, // no repo mode
-        needs_mcp_shadow_home,
+        &[],
+        needs_repo_shadow_home,
+        needs_mcp_shadow_home || needs_repo_shadow_home,
     )?;
 
     // -- Operation env override -----------------------------------------------
@@ -317,12 +318,62 @@ pub(crate) fn execute_composition_request(
         }
     }
 
+    // Universal --output flag
+    if let Some(ref output_str) = request.output {
+        use super::profile::OutputFormat;
+        let format: OutputFormat = output_str.parse().map_err(|e: String| eyre!(e))?;
+        if let Some(warn) = profile.apply_output_format(&mut child_args, format) {
+            if !silent && !quiet {
+                log::warn(&warn);
+            }
+        }
+    }
+
+    // Universal --system-prompt flag
+    if let Some(ref prompt) = request.system_prompt {
+        let resolved = super::resolve_system_prompt(prompt)?;
+        if let Some(warn) = profile.apply_system_prompt(&mut child_args, &resolved) {
+            if !silent && !quiet {
+                log::warn(&warn);
+            }
+        }
+    }
+
+    // Universal --sandbox flag
+    if request.sandbox {
+        if let Some(warn) = profile.apply_sandbox(&mut child_args) {
+            if !silent && !quiet {
+                log::warn(&warn);
+            }
+        }
+    }
+
+    // Timeout validation
+    if request.timeout.is_some() && request.session_interactive {
+        return Err(eyre!("--timeout cannot be used with --interactive mode"));
+    }
+
     child_args.extend(mcp_extra_args);
 
     let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
     let child_cwd = effective_repo_root.unwrap_or(&cwd);
 
     profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
+
+    // --dry-run: print what would be executed and exit
+    if request.dry_run {
+        crate::output::log_dry_run(
+            profile,
+            &binary_path,
+            &child_args,
+            request.repo,
+            &env_plan,
+            None,
+            child_cwd,
+            &term,
+        );
+        return Ok(0);
+    }
 
     // -- Harness detection from effective frontmatter ---------------------
     // THE key architectural fix: harness properties are read from the
@@ -422,7 +473,7 @@ pub(crate) fn execute_composition_request(
             effective_non_interactive,
             interactive_override,
             verbose_requested,
-            false, // no repo mode in composition
+            request.repo,
             compose_display.as_ref(),
             request.operation.as_deref(),
             prompt_display.as_deref(),
@@ -464,7 +515,7 @@ pub(crate) fn execute_composition_request(
             binary_path.as_path(),
             child_cwd,
             effective_non_interactive,
-            None,
+            request.timeout,
             &harness_base_args,
             &env_plan.env,
             &mut prompt_state,

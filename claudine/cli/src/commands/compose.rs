@@ -73,6 +73,10 @@ impl ProviderOverrideArgs {
 /// Compose a Markdown document through an agentic CLI.
 #[derive(Debug, Clone, Args)]
 pub struct ComposeArgs {
+    /// Enable provider-specific YOLO/auto-approval mode.
+    #[arg(short = 'y', long)]
+    pub yolo: bool,
+
     /// Run the provider session in interactive mode.
     #[arg(short = 'i', long)]
     pub interactive: bool,
@@ -81,13 +85,41 @@ pub struct ComposeArgs {
     #[arg(long = "exclude", value_name = "PROVIDER")]
     pub exclude: Vec<String>,
 
+    /// Preserve this env var even when it matches sensitive-name filters.
+    #[arg(long = "include", value_name = "ENV_NAME")]
+    pub include: Vec<String>,
+
     /// Override the model used by the provider.
     #[arg(short = 'm', long = "model", value_name = "MODEL")]
     pub model: Option<String>,
 
+    /// Set the output format (json, text, stream).
+    #[arg(short = 'o', long = "output", value_name = "FORMAT")]
+    pub output: Option<String>,
+
+    /// Set or append a system prompt (string or file path).
+    #[arg(short = 's', long = "system-prompt", value_name = "PROMPT|FILE")]
+    pub system_prompt: Option<String>,
+
+    /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
+    #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
+    pub timeout: Option<u64>,
+
     /// Set the OPERATION env var for the composed session.
     #[arg(long = "operation", visible_alias = "op", value_name = "OP")]
     pub operation: Option<String>,
+
+    /// Enable provider-specific sandboxing.
+    #[arg(long)]
+    pub sandbox: bool,
+
+    /// Use only repo-scoped skills, commands, and agents via a shadow HOME.
+    #[arg(long)]
+    pub repo: bool,
+
+    /// Show what would be executed without launching the child.
+    #[arg(long)]
+    pub dry_run: bool,
 
     /// Show only the header line; suppress env details and info messages.
     #[arg(short = 'q', long)]
@@ -120,6 +152,10 @@ pub struct ComposeArgs {
 /// Inline composition: use frontmatter `prompt`, replace body with output.
 #[derive(Debug, Clone, Args)]
 pub struct InlineComposeArgs {
+    /// Enable provider-specific YOLO/auto-approval mode.
+    #[arg(short = 'y', long)]
+    pub yolo: bool,
+
     /// Run the provider session in interactive mode.
     #[arg(short = 'i', long)]
     pub interactive: bool,
@@ -128,13 +164,41 @@ pub struct InlineComposeArgs {
     #[arg(long = "exclude", value_name = "PROVIDER")]
     pub exclude: Vec<String>,
 
+    /// Preserve this env var even when it matches sensitive-name filters.
+    #[arg(long = "include", value_name = "ENV_NAME")]
+    pub include: Vec<String>,
+
     /// Override the model used by the provider.
     #[arg(short = 'm', long = "model", value_name = "MODEL")]
     pub model: Option<String>,
 
+    /// Set the output format (json, text, stream).
+    #[arg(short = 'o', long = "output", value_name = "FORMAT")]
+    pub output: Option<String>,
+
+    /// Set or append a system prompt (string or file path).
+    #[arg(short = 's', long = "system-prompt", value_name = "PROMPT|FILE")]
+    pub system_prompt: Option<String>,
+
+    /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
+    #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
+    pub timeout: Option<u64>,
+
     /// Set the OPERATION env var for the composed session.
     #[arg(long = "operation", visible_alias = "op", value_name = "OP")]
     pub operation: Option<String>,
+
+    /// Enable provider-specific sandboxing.
+    #[arg(long)]
+    pub sandbox: bool,
+
+    /// Use only repo-scoped skills, commands, and agents via a shadow HOME.
+    #[arg(long)]
+    pub repo: bool,
+
+    /// Show what would be executed without launching the child.
+    #[arg(long)]
+    pub dry_run: bool,
 
     /// Show only the header line; suppress env details and info messages.
     #[arg(short = 'q', long)]
@@ -202,8 +266,16 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         prepared,
         explicit_provider,
         excluded,
+        yolo: args.yolo,
+        include: args.include,
         model: args.model,
+        output: args.output,
+        system_prompt: args.system_prompt,
+        timeout: args.timeout,
         operation: args.operation,
+        sandbox: args.sandbox,
+        repo: args.repo,
+        dry_run: args.dry_run,
         mcp: args.mcp,
         mcp_use: args.mcp_use,
         strict: args.strict,
@@ -229,8 +301,16 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         prepared,
         explicit_provider,
         excluded,
+        yolo: args.yolo,
+        include: args.include,
         model: args.model,
+        output: args.output,
+        system_prompt: args.system_prompt,
+        timeout: args.timeout,
         operation: args.operation,
+        sandbox: args.sandbox,
+        repo: args.repo,
+        dry_run: args.dry_run,
         mcp: args.mcp,
         mcp_use: args.mcp_use,
         strict: args.strict,

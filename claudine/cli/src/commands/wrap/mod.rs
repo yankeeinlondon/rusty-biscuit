@@ -2964,7 +2964,7 @@ fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWr
 
 /// Resolve the `--system-prompt` value: if it looks like a file path and exists,
 /// read its contents; otherwise treat it as a literal prompt string.
-fn resolve_system_prompt(prompt_or_file: &str) -> Result<String> {
+pub(crate) fn resolve_system_prompt(prompt_or_file: &str) -> Result<String> {
     let path = std::path::Path::new(prompt_or_file);
     if path.exists() && path.is_file() {
         Ok(std::fs::read_to_string(path)?)

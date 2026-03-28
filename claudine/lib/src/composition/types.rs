@@ -113,10 +113,26 @@ pub struct CompositionExecutionRequest {
     pub explicit_provider: Option<Provider>,
     /// Providers to exclude from automatic selection.
     pub excluded: BTreeSet<Provider>,
+    /// Enable provider-specific YOLO/auto-approval mode.
+    pub yolo: bool,
+    /// Preserve these env vars even when they match sensitive-name filters.
+    pub include: Vec<String>,
     /// Override the model used by the provider.
     pub model: Option<String>,
+    /// Set the output format (json, text, stream).
+    pub output: Option<String>,
+    /// Set or append a system prompt (string or file path).
+    pub system_prompt: Option<String>,
+    /// Timeout in seconds for non-interactive mode.
+    pub timeout: Option<u64>,
     /// OPERATION env var value for the composed session.
     pub operation: Option<String>,
+    /// Enable provider-specific sandboxing.
+    pub sandbox: bool,
+    /// Use only repo-scoped resources via a shadow HOME.
+    pub repo: bool,
+    /// Show what would be executed without launching the child.
+    pub dry_run: bool,
     /// Enable Claudine-managed MCP session composition.
     pub mcp: bool,
     /// Explicit MCP server IDs or aliases to activate.
