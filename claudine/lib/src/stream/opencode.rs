@@ -90,12 +90,26 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
     }
 
     fn handle_step_start(&mut self, obj: &Value) {
-        // Capture session ID from first step_start
-        if self.session_id.is_none() {
+        // Capture session ID from first step_start and emit session_start.
+        // OpenCode doesn't send a dedicated init/session_start event; the
+        // session ID arrives in the first step_start payload instead.
+        let first_step = self.session_id.is_none();
+        if first_step {
             self.session_id = obj
                 .get("sessionID")
                 .and_then(|v| v.as_str())
                 .map(String::from);
+
+            let mut meta = EventMeta::default();
+            if let Some(session_id) = &self.session_id {
+                meta.extra
+                    .insert("session_id".into(), Value::String(session_id.clone()));
+            }
+            if let Some(model) = &self.model {
+                meta.extra
+                    .insert("model".into(), Value::String(model.clone()));
+            }
+            self.sink.on_session_start(&meta);
         }
 
         self.num_turns += 1;
