@@ -30,7 +30,10 @@ fn groups() -> Vec<CommandGroup> {
             commands: vec![
                 cmd("skills", "List available skills and their scopes"),
                 cmd("commands", "List available slash commands and their scopes"),
-                cmd("agents", "List available agent definitions and their scopes"),
+                cmd(
+                    "agents",
+                    "List available agent definitions and their scopes",
+                ),
                 cmd("mcp", "Manage MCP (Model Context Protocol) servers"),
             ],
         },
@@ -56,10 +59,7 @@ fn groups() -> Vec<CommandGroup> {
                     "gemini",
                     "Wrap Gemini CLI with Claudine preflight/env handling",
                 ),
-                cmd(
-                    "goose",
-                    "Wrap Goose with Claudine preflight/env handling",
-                ),
+                cmd("goose", "Wrap Goose with Claudine preflight/env handling"),
                 cmd(
                     "kimi",
                     "Wrap Kimi Code with Claudine preflight/env handling",
@@ -160,7 +160,10 @@ pub fn run() -> Result<()> {
     output.push_str(&Prose::new("<bold>Options:</bold>").render(&term));
     output.push('\n');
     for (name, desc) in [
-        ("-v, --verbose", "Increase verbosity (-v for verbose, -vv for debug)"),
+        (
+            "-v, --verbose",
+            "Increase verbosity (-v for verbose, -vv for debug)",
+        ),
         ("--plain", "Strip ANSI escape codes from all output"),
         ("-h, --help", "Print help"),
         ("-V, --version", "Print version"),

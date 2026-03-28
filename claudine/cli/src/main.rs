@@ -46,9 +46,7 @@ async fn main() -> Result<()> {
         Commands::Actions(args) => commands::actions::run(args, cli.verbose > 0),
         Commands::Skills(args) => commands::skills::run(args, cli.verbose > 0).await,
         Commands::Agents(args) => commands::agents::run(args, cli.verbose > 0).await,
-        Commands::SlashCommands(args) => {
-            commands::slash_commands::run(args, cli.verbose > 0).await
-        }
+        Commands::SlashCommands(args) => commands::slash_commands::run(args, cli.verbose > 0).await,
         Commands::Providers => commands::providers::run(),
         Commands::Logs(args) => commands::logs::run(args).await,
         Commands::Uninstall(args) => commands::uninstall::run(args),
@@ -75,9 +73,7 @@ async fn main() -> Result<()> {
             commands::wrap::run_provider_wrapper(Provider::Goose, args, cli.verbose)
         }
         Commands::Compose(args) => commands::compose::run_compose(args, cli.verbose),
-        Commands::InlineCompose(args) => {
-            commands::compose::run_inline_compose(args, cli.verbose)
-        }
+        Commands::InlineCompose(args) => commands::compose::run_inline_compose(args, cli.verbose),
     }
 }
 

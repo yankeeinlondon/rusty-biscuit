@@ -172,11 +172,9 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         args.kimi,
     );
 
-    let source =
-        composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
+    let source = composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
 
-    let prepared =
-        composition::prepare_direct(&source).map_err(|e| eyre!("{e}"))?;
+    let prepared = composition::prepare_direct(&source).map_err(|e| eyre!("{e}"))?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::ChainedDocument,
@@ -206,16 +204,14 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         args.kimi,
     );
 
-    let source =
-        composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
+    let source = composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
 
     // Validate file read/write permissions before proceeding.
     composition::validate_file_permissions(&source.resolved_path).map_err(|e| eyre!("{e}"))?;
 
     let repo_root = find_git_root();
     let prepared =
-        composition::prepare_inline(&source, repo_root.as_deref())
-            .map_err(|e| eyre!("{e}"))?;
+        composition::prepare_inline(&source, repo_root.as_deref()).map_err(|e| eyre!("{e}"))?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,

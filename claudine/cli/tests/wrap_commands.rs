@@ -1,12 +1,12 @@
-use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 use assert_cmd::cargo::cargo_bin_cmd;
 use chrono::Local;
 use claudine::mcp::types::{
     McpCatalog, McpDefaults, McpProviderState, McpServer, McpServerMetadata, McpTransport,
 };
 use predicates::str::contains;
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use tempfile::tempdir;
 
 fn write_executable(path: &Path, content: &str) {
@@ -1486,6 +1486,83 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn wrapper_restores_repo_harness_for_plain_prompts() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let marker_path = workspace.path().join("provider-ran.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    fs::write(
+        workspace.path().join("CLAUDE.md"),
+        "---\npre_checks:\n  file_exists: \"missing.txt\"\n---\nRepo harness\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("claude"),
+        r#"#!/bin/sh
+printf 'ran\n' > "$CLAUDINE_MARKER_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_MARKER_FILE", &marker_path)
+        .current_dir(workspace.path())
+        .args(["claude", "--", "summarize the repo"])
+        .assert()
+        .code(1)
+        .stderr(contains("pre-check validation failed"));
+
+    assert!(
+        !marker_path.exists(),
+        "plain wrapper harness should block launch before the provider runs"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_harness_pre_check_blocks_provider_launch() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let marker_path = workspace.path().join("provider-ran.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("compose.md");
+    fs::write(
+        &md_file,
+        "---\npre_checks:\n  file_exists: \"missing.txt\"\n---\nFinish the brief.\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf 'ran\n' > "$CLAUDINE_MARKER_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_MARKER_FILE", &marker_path)
+        .current_dir(workspace.path())
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .code(1)
+        .stderr(contains("pre-check validation failed"));
+
+    assert!(
+        !marker_path.exists(),
+        "compose harness should block launch before the provider runs"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn inline_compose_rejects_empty_captured_output() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
@@ -1520,6 +1597,62 @@ exit 0
             "should report invalid captured output; stderr was: {plain}"
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_harness_retries_after_post_check_failure() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let count_path = workspace.path().join("attempt-count.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: Rewrite the body\npost_checks:\n  response_includes: \"Updated brief\"\nhandle_response_includes:\n  retry:\n    prompt: \"Your final response must explicitly say 'Updated brief'.\"\n---\nOriginal body\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+count=0
+if [ -f "$CLAUDINE_COUNT_FILE" ]; then
+  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
+if [ "$count" -eq 1 ]; then
+  printf 'Replacement body without the required phrase\n'
+else
+  printf 'Updated brief\n\nFinal replacement body\n'
+fi
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .current_dir(workspace.path())
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let attempts = fs::read_to_string(&count_path).unwrap();
+    assert_eq!(attempts.trim(), "2", "expected exactly one retry");
+
+    let final_content = fs::read_to_string(&md_file).unwrap();
+    assert!(
+        final_content.contains("Updated brief"),
+        "inline retry should apply the successful replacement body; file: {final_content}"
+    );
+    assert!(
+        final_content.contains("Final replacement body"),
+        "inline retry should preserve the successful second attempt body; file: {final_content}"
+    );
 }
 
 #[cfg(unix)]
@@ -1617,7 +1750,11 @@ fn inline_compose_interactive_is_capability_gated() {
     fs::create_dir_all(&path_dir).unwrap();
 
     let md_file = workspace.path().join("test.md");
-    fs::write(&md_file, "---\nprompt: Generate content\n---\nOriginal body\n").unwrap();
+    fs::write(
+        &md_file,
+        "---\nprompt: Generate content\n---\nOriginal body\n",
+    )
+    .unwrap();
 
     write_executable(
         &path_dir.join("gemini"),
@@ -1637,7 +1774,9 @@ exit 0
         ])
         .assert()
         .code(1)
-        .stderr(contains("inline-compose with --interactive is not supported"));
+        .stderr(contains(
+            "inline-compose with --interactive is not supported",
+        ));
 }
 
 #[cfg(unix)]
@@ -1648,7 +1787,11 @@ fn inline_compose_interactive_codex_uses_captured_last_message() {
     fs::create_dir_all(&path_dir).unwrap();
 
     let md_file = workspace.path().join("test.md");
-    fs::write(&md_file, "---\nprompt: Generate content\n---\nOriginal body\n").unwrap();
+    fs::write(
+        &md_file,
+        "---\nprompt: Generate content\n---\nOriginal body\n",
+    )
+    .unwrap();
 
     write_executable(
         &path_dir.join("codex"),
@@ -1707,7 +1850,12 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .args(["compose", "--interactive", "--claude", md_file.to_str().unwrap()])
+        .args([
+            "compose",
+            "--interactive",
+            "--claude",
+            md_file.to_str().unwrap(),
+        ])
         .assert()
         .success();
 
@@ -1741,14 +1889,21 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .args(["compose", "--interactive", "--kimi", md_file.to_str().unwrap()])
+        .args([
+            "compose",
+            "--interactive",
+            "--kimi",
+            md_file.to_str().unwrap(),
+        ])
         .assert()
         .success();
 
     let args = fs::read_to_string(&args_path).unwrap();
     let collected: Vec<_> = args.lines().collect();
     assert!(
-        collected.windows(2).any(|window| window == ["--prompt", "Hello Kimi"]),
+        collected
+            .windows(2)
+            .any(|window| window == ["--prompt", "Hello Kimi"]),
         "interactive compose should seed Kimi via --prompt; args: {args}"
     );
 }
@@ -1766,7 +1921,11 @@ fn compose_supports_mcp_runtime_and_tag_cleanup() {
     fs::create_dir_all(home.join(".codex")).unwrap();
 
     let md_file = workspace.path().join("test.md");
-    fs::write(&md_file, "---\ntitle: test\n---\nUse #calendar for this task\n").unwrap();
+    fs::write(
+        &md_file,
+        "---\ntitle: test\n---\nUse #calendar for this task\n",
+    )
+    .unwrap();
 
     seed_catalog(&home, &[make_server("calendar")]);
     seed_defaults(&home, &["calendar"]);
@@ -1789,12 +1948,7 @@ exit 0
         .env("PATH", &path_dir)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
-        .args([
-            "compose",
-            "--codex",
-            "--mcp",
-            md_file.to_str().unwrap(),
-        ])
+        .args(["compose", "--codex", "--mcp", md_file.to_str().unwrap()])
         .assert()
         .success();
 

@@ -55,7 +55,10 @@ impl StructuredCodexOutput {
         }
     }
 
-    pub(crate) fn apply_to_summary(&self, summary: &mut claudine::stream::summary::StreamExecutionSummary) {
+    pub(crate) fn apply_to_summary(
+        &self,
+        summary: &mut claudine::stream::summary::StreamExecutionSummary,
+    ) {
         if let Ok(text) = fs::read_to_string(&self.last_message_path)
             && !text.trim().is_empty()
         {
@@ -84,6 +87,7 @@ pub(crate) mod composition;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HarnessPromptMode {
+    Passthrough,
     Inline,
     Compose,
 }
@@ -92,6 +96,7 @@ pub(crate) enum HarnessPromptMode {
 pub(crate) struct HarnessPromptState {
     pub(crate) mode: HarnessPromptMode,
     pub(crate) source_path: PathBuf,
+    pub(crate) base_prompt: Option<String>,
     pub(crate) overlay: indexmap::IndexMap<String, serde_json::Value>,
     pub(crate) prompt_tail: Vec<String>,
     pub(crate) next_prompt_override: Option<String>,
@@ -196,9 +201,11 @@ impl WrapperHarnessPermissionProbe {
     }
 
     fn workspace_root<'a>(&'a self, source_path: &'a Path) -> Option<&'a Path> {
-        self.repo_root
-            .as_deref()
-            .or_else(|| source_path.parent().filter(|path| !path.as_os_str().is_empty()))
+        self.repo_root.as_deref().or_else(|| {
+            source_path
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+        })
     }
 }
 
@@ -298,6 +305,7 @@ pub(crate) struct LiveStreamSink {
     model: Option<String>,
     start_emitted: bool,
     summary_details: Arc<Mutex<StructuredSummaryDetails>>,
+    context_extra: HashMap<String, serde_json::Value>,
     dispatch: StreamDispatchFn,
 }
 
@@ -326,6 +334,14 @@ impl LiveStreamSink {
         )
     }
 
+    pub(crate) fn with_context_extra(
+        mut self,
+        context_extra: HashMap<String, serde_json::Value>,
+    ) -> Self {
+        self.context_extra = context_extra;
+        self
+    }
+
     fn with_dispatcher<F>(
         provider: Provider,
         env: EnvironmentContext,
@@ -344,6 +360,7 @@ impl LiveStreamSink {
             model: None,
             start_emitted: false,
             summary_details,
+            context_extra: HashMap::new(),
             dispatch: Box::new(dispatch),
         }
     }
@@ -395,6 +412,9 @@ impl LiveStreamSink {
             extra
                 .entry("model".into())
                 .or_insert_with(|| serde_json::Value::String(model.clone()));
+        }
+        for (key, value) in &self.context_extra {
+            extra.entry(key.clone()).or_insert_with(|| value.clone());
         }
 
         DispatchEventMeta {
@@ -958,6 +978,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     }
 
     let prompt_display = extract_user_prompt(&args.passthrough);
+    let dispatch_context = HashMap::new();
 
     // Interactive override: user explicitly forced -i with a prompt present
     let interactive_override = interactive_requested && has_prompt;
@@ -1034,10 +1055,88 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         None
     };
 
+    let wrapper_harness = if effective_non_interactive {
+        let base_prompt =
+            extract_prompt_from_child_args(provider, &child_args, stdin_seed.as_deref());
+        let harness_source = base_prompt.as_ref().and_then(|_| {
+            find_wrapper_harness_source(provider, env_plan.repo_root.as_deref(), &cwd)
+        });
+
+        if let (Some(base_prompt), Some(source_path)) = (base_prompt, harness_source) {
+            let seed = materialize_passthrough_harness_seed(&source_path, base_prompt.clone())?;
+            let harness_enabled = claudine::harness::has_harness_properties(&seed.frontmatter);
+            if harness_enabled {
+                let resolve_ctx = claudine::harness::HarnessResolutionContext {
+                    source_path: &source_path,
+                    repo_root: env_plan.repo_root.as_deref(),
+                };
+                let shell_options =
+                    build_harness_shell_options(&source_path, env_plan.repo_root.as_deref());
+                claudine::harness::parse_harness_plan_with_shell(
+                    &seed.frontmatter,
+                    &source_path,
+                    &resolve_ctx,
+                    Some(&shell_options),
+                )
+                .map_err(|e| eyre!("{e}"))?;
+
+                Some((source_path, base_prompt, seed))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Execute the provider. Composition and harness execution are handled by
     // `claudine compose` / `claudine inline-compose` through the wrapper-grade
     // composition executor; the wrapper path handles plain prompt passthrough.
-    let exit_code = if use_structured {
+    let exit_code = if let Some((source_path, base_prompt, initial_materialized)) = wrapper_harness
+    {
+        let mut prompt_state = HarnessPromptState {
+            mode: HarnessPromptMode::Passthrough,
+            source_path,
+            base_prompt: Some(base_prompt),
+            overlay: indexmap::IndexMap::new(),
+            prompt_tail: Vec::new(),
+            next_prompt_override: None,
+            next_resume_session_id: None,
+        };
+
+        let mut harness_base_args = child_args.clone();
+        strip_prompt_from_args(provider, &mut harness_base_args);
+        if !use_structured {
+            profile.prepare_captured_output(&mut harness_base_args);
+        }
+
+        run_harness_loop(
+            provider,
+            profile,
+            binary_path.as_path(),
+            child_cwd,
+            effective_non_interactive,
+            args.timeout,
+            &harness_base_args,
+            &env_plan.env,
+            &mut prompt_state,
+            env_plan.repo_root.as_deref(),
+            use_structured,
+            structured_codex_output.as_ref(),
+            stdout_noise,
+            stderr_noise,
+            profile.suppress_structured_stderr_on_success(),
+            !silent_requested,
+            stream_verbosity,
+            verbose_requested,
+            &env_context,
+            &dispatch_context,
+            Some(initial_materialized),
+            &term,
+        )?
+    } else if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig {
             model: args.model.clone(),
@@ -1049,7 +1148,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 env_context.clone(),
                 stream_verbosity,
                 summary_details.clone(),
-            ),
+            )
+            .with_context_extra(dispatch_context.clone()),
             parser_config,
         );
         let stream_result = exec::run_child_stream(
@@ -1225,6 +1325,92 @@ fn append_resume_passthrough_args(resume_args: &mut Vec<String>, base_args: &[St
     }
 }
 
+fn frontmatter_map_to_value(frontmatter: &darkmatter::markdown::Frontmatter) -> serde_json::Value {
+    serde_json::Value::Object(
+        frontmatter
+            .as_map()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    )
+}
+
+pub(crate) fn materialized_harness_prompt_from_prepared(
+    prepared: &claudine::composition::PreparedComposition,
+) -> MaterializedHarnessPrompt {
+    let inline_closure_plan = match &prepared.closure {
+        claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan.clone()),
+        claudine::composition::CompositionClosurePlan::Direct => None,
+    };
+
+    MaterializedHarnessPrompt {
+        frontmatter: prepared.effective_frontmatter.clone(),
+        prompt: prepared.prompt.clone(),
+        env_overrides: Vec::new(),
+        inline_closure_plan,
+    }
+}
+
+fn materialize_passthrough_harness_seed(
+    source_path: &Path,
+    prompt: String,
+) -> Result<MaterializedHarnessPrompt> {
+    let source_text = fs::read_to_string(source_path)
+        .map_err(|e| eyre!("failed to read '{}': {e}", source_path.display()))?;
+    let source_markdown: darkmatter::markdown::Markdown = source_text.into();
+    let options =
+        darkmatter::markdown::compose::ComposeOptions::new().with_source_file(source_path);
+    let (composed, _report) = source_markdown.compose_with(options).map_err(|e| {
+        eyre!(
+            "Darkmatter compose failed for '{}': {e}",
+            source_path.display()
+        )
+    })?;
+
+    Ok(MaterializedHarnessPrompt {
+        frontmatter: frontmatter_map_to_value(composed.frontmatter()),
+        prompt,
+        env_overrides: Vec::new(),
+        inline_closure_plan: None,
+    })
+}
+
+fn provider_agent_id(provider: Provider) -> Option<claudine::agents::AgentId> {
+    match provider {
+        Provider::Claude => Some(claudine::agents::AgentId::ClaudeCode),
+        Provider::Codex => Some(claudine::agents::AgentId::Codex),
+        Provider::Gemini => Some(claudine::agents::AgentId::GeminiCli),
+        Provider::Goose => Some(claudine::agents::AgentId::Goose),
+        Provider::KimiCode => Some(claudine::agents::AgentId::KimiCode),
+        Provider::OpenCode => Some(claudine::agents::AgentId::OpenCode),
+        Provider::QwenCode => Some(claudine::agents::AgentId::QwenCli),
+        Provider::RooCode => Some(claudine::agents::AgentId::RooCode),
+        _ => None,
+    }
+}
+
+fn find_wrapper_harness_source(
+    provider: Provider,
+    repo_root: Option<&Path>,
+    cwd: &Path,
+) -> Option<PathBuf> {
+    let agent = claudine::agents::agent_for(provider_agent_id(provider)?);
+    let search_root = repo_root.unwrap_or(cwd);
+
+    agent
+        .capabilities()
+        .runtime
+        .system_prompt
+        .memory_files
+        .iter()
+        .filter(|path| !path.starts_with('~'))
+        .map(PathBuf::from)
+        .find_map(|relative| {
+            let candidate = search_root.join(relative);
+            candidate.is_file().then_some(candidate)
+        })
+}
+
 fn materialize_harness_prompt(
     state: &HarnessPromptState,
     repo_root: Option<&Path>,
@@ -1237,54 +1423,71 @@ fn materialize_harness_prompt(
         &state.overlay,
     );
 
-    let (mut prompt, frontmatter, env_overrides, inline_closure_plan) =
-        match state.mode {
-            HarnessPromptMode::Compose => {
-                let options = darkmatter::markdown::compose::ComposeOptions::new()
-                    .with_source_file(&state.source_path);
-                let (composed, _report) =
-                    effective_markdown.compose_with(options).map_err(|e| {
-                        eyre!(
-                            "Darkmatter compose failed for '{}': {e}",
-                            state.source_path.display()
-                        )
-                    })?;
-                let body = composed.content().to_string();
-                let fm_map = composed.frontmatter().as_map();
-
-                let env_overrides = Vec::new();
-
-                (
-                    body,
-                    serde_json::Value::Object(
-                        fm_map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-                    ),
-                    env_overrides,
-                    None,
+    let (mut prompt, frontmatter, env_overrides, inline_closure_plan) = match state.mode {
+        HarnessPromptMode::Passthrough => {
+            let options = darkmatter::markdown::compose::ComposeOptions::new()
+                .with_source_file(&state.source_path);
+            let (composed, _report) = effective_markdown.compose_with(options).map_err(|e| {
+                eyre!(
+                    "Darkmatter compose failed for '{}': {e}",
+                    state.source_path.display()
                 )
-            }
-            HarnessPromptMode::Inline => {
-                claudine::composition::validate_file_permissions(&state.source_path)
-                    .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
-                let source = claudine::composition::ResolvedCompositionSource {
-                    original_ref: state.source_path.display().to_string(),
-                    resolved_path: state.source_path.clone(),
-                    original_text: source_text.clone(),
-                    markdown: effective_markdown.clone(),
-                };
-                let prepared = claudine::composition::prepare_inline(&source, repo_root)
-                    .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
-                (
-                    prepared.prompt,
-                    prepared.effective_frontmatter,
-                    Vec::new(),
-                    match prepared.closure {
-                        claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan),
-                        claudine::composition::CompositionClosurePlan::Direct => None,
-                    },
+            })?;
+            let prompt = state.base_prompt.clone().ok_or_else(|| {
+                eyre!(
+                    "missing passthrough prompt seed for '{}'",
+                    state.source_path.display()
                 )
-            }
-        };
+            })?;
+            (
+                prompt,
+                frontmatter_map_to_value(composed.frontmatter()),
+                Vec::new(),
+                None,
+            )
+        }
+        HarnessPromptMode::Compose => {
+            let options = darkmatter::markdown::compose::ComposeOptions::new()
+                .with_source_file(&state.source_path);
+            let (composed, _report) = effective_markdown.compose_with(options).map_err(|e| {
+                eyre!(
+                    "Darkmatter compose failed for '{}': {e}",
+                    state.source_path.display()
+                )
+            })?;
+            let body = composed.content().to_string();
+
+            let env_overrides = Vec::new();
+
+            (
+                body,
+                frontmatter_map_to_value(composed.frontmatter()),
+                env_overrides,
+                None,
+            )
+        }
+        HarnessPromptMode::Inline => {
+            claudine::composition::validate_file_permissions(&state.source_path)
+                .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+            let source = claudine::composition::ResolvedCompositionSource {
+                original_ref: state.source_path.display().to_string(),
+                resolved_path: state.source_path.clone(),
+                original_text: source_text.clone(),
+                markdown: effective_markdown.clone(),
+            };
+            let prepared = claudine::composition::prepare_inline(&source, repo_root)
+                .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+            (
+                prepared.prompt,
+                prepared.effective_frontmatter,
+                Vec::new(),
+                match prepared.closure {
+                    claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan),
+                    claudine::composition::CompositionClosurePlan::Direct => None,
+                },
+            )
+        }
+    };
 
     if let Some(ref override_prompt) = state.next_prompt_override {
         prompt = override_prompt.clone();
@@ -1367,6 +1570,7 @@ fn execute_harness_attempt(
     stream_verbosity: Verbosity,
     verbose_requested: bool,
     env_context: &EnvironmentContext,
+    dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
 ) -> Result<claudine::harness::AttemptOutcome> {
     let (mut exit_code, termination, session_id, final_response, stderr_text) = if use_structured {
@@ -1379,7 +1583,8 @@ fn execute_harness_attempt(
                 env_context.clone(),
                 stream_verbosity,
                 summary_details.clone(),
-            ),
+            )
+            .with_context_extra(dispatch_context.clone()),
             parser_config,
         );
         let stream_result = exec::run_child_stream(
@@ -1578,7 +1783,9 @@ fn finalize_inline_harness_attempt(
         return Ok(agent_exit);
     }
 
-    let replacement_body = match claudine::composition::closure::extract_replacement_body(final_response) {
+    let replacement_body = match claudine::composition::closure::extract_replacement_body(
+        final_response,
+    ) {
         Ok(body) => body,
         Err(error) => {
             if show_checks {
@@ -1822,6 +2029,8 @@ pub(crate) fn run_harness_loop(
     stream_verbosity: Verbosity,
     verbose_requested: bool,
     env_context: &EnvironmentContext,
+    dispatch_context: &HashMap<String, serde_json::Value>,
+    initial_materialized: Option<MaterializedHarnessPrompt>,
     term: &Terminal,
 ) -> Result<i32> {
     const DEFAULT_MAX_RETRIES: u32 = 3;
@@ -1829,10 +2038,15 @@ pub(crate) fn run_harness_loop(
         WrapperHarnessPermissionProbe::new(provider, base_args.to_vec(), repo_root);
     let mut harness_context = CachedHarnessLoopContext::new(&prompt_state.source_path, repo_root);
     let mut attempt = 1u32;
+    let mut initial_materialized = initial_materialized;
 
     loop {
         harness_context.refresh(&prompt_state.source_path, repo_root);
-        let materialized = materialize_harness_prompt(prompt_state, repo_root)?;
+        let materialized = if let Some(seed) = initial_materialized.take() {
+            seed
+        } else {
+            materialize_harness_prompt(prompt_state, repo_root)?
+        };
         let resolve_ctx = harness_context.resolve_context();
         let plan = claudine::harness::parse_harness_plan_with_shell(
             &materialized.frontmatter,
@@ -1931,6 +2145,7 @@ pub(crate) fn run_harness_loop(
             stream_verbosity,
             verbose_requested,
             env_context,
+            dispatch_context,
             term,
         )?;
 
@@ -2440,6 +2655,26 @@ fn extract_user_prompt(passthrough: &[String]) -> Option<String> {
         .cloned()
 }
 
+fn extract_prompt_from_child_args(
+    provider: Provider,
+    child_args: &[String],
+    stdin_seed: Option<&str>,
+) -> Option<String> {
+    if let Some(seed) = stdin_seed {
+        return Some(seed.to_string());
+    }
+
+    find_prompt_location(provider, child_args)
+        .and_then(|location| match location {
+            PromptLocation::Value(index) => child_args.get(index).cloned(),
+            PromptLocation::Inline { index, prefix } => child_args
+                .get(index)
+                .and_then(|value| value.strip_prefix(prefix))
+                .map(ToOwned::to_owned),
+        })
+        .or_else(|| extract_user_prompt(child_args))
+}
+
 /// Returns true if a prompt string is present — either as a remaining
 /// non-switch arg in `child_args` or via stdin.
 fn has_prompt_source(child_args: &[String], stdin_seed: Option<&str>) -> bool {
@@ -2800,6 +3035,44 @@ mod tests {
 
         assert_eq!(metas[5].event, AgenticEvent::TurnComplete);
         assert_eq!(metas[5].session_id.as_deref(), Some("thread-1"));
+    }
+
+    #[test]
+    fn live_stream_sink_merges_context_extra_into_dispatch_meta() {
+        let recorded: Arc<Mutex<Vec<DispatchEventMeta>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_events = recorded.clone();
+        let mut context = HashMap::new();
+        context.insert(
+            "composition_file_ref".into(),
+            serde_json::Value::String("docs/brief.md".into()),
+        );
+        context.insert(
+            "composition_mode".into(),
+            serde_json::Value::String("inline".into()),
+        );
+
+        let mut sink = LiveStreamSink::with_dispatcher(
+            Provider::Codex,
+            EnvironmentContext::default(),
+            Verbosity::Silent,
+            Arc::new(Mutex::new(StructuredSummaryDetails::default())),
+            move |_event, meta| {
+                sink_events.lock().unwrap().push(meta);
+            },
+        )
+        .with_context_extra(context);
+
+        sink.on_turn_start(&StreamEventMeta::default());
+
+        let metas = recorded.lock().unwrap().clone();
+        assert_eq!(
+            metas[0].extra["composition_file_ref"],
+            serde_json::Value::String("docs/brief.md".into())
+        );
+        assert_eq!(
+            metas[0].extra["composition_mode"],
+            serde_json::Value::String("inline".into())
+        );
     }
 
     fn make_catalog_with_servers(names: &[&str]) -> Vec<McpServer> {

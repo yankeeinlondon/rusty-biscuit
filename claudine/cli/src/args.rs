@@ -3,7 +3,13 @@ use clap::{Parser, Subcommand};
 
 /// Claudine — cross-agent hook/event system for agentic CLIs.
 #[derive(Parser)]
-#[command(name = "claudine", version, about, disable_help_flag = true, disable_help_subcommand = true)]
+#[command(
+    name = "claudine",
+    version,
+    about,
+    disable_help_flag = true,
+    disable_help_subcommand = true
+)]
 pub(crate) struct Cli {
     /// Increase verbosity (-v for verbose, -vv for debug).
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]

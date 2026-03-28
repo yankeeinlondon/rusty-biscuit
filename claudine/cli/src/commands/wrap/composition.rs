@@ -6,15 +6,15 @@
 //! effective (composed) frontmatter, structured streaming, and inline
 //! closure.
 
-
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::{
-    CompositionClosurePlan, CompositionError, CompositionExecutionRequest, InlineClosurePlan,
-    SelectedProvider, SelectionReason, build_candidate_set, select_provider,
+    CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
+    InlineClosurePlan, SelectedProvider, SelectionReason, build_candidate_set, select_provider,
 };
 use claudine::events::Provider;
 use claudine::stream::stderr::Verbosity;
@@ -28,10 +28,33 @@ use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, LiveStreamSink, StructuredCodexOutput,
     StructuredSummaryDetails, build_harness_shell_options, emit_stream_summary,
-    emit_stream_summary_no_separator, resolve_binary_path, run_harness_loop,
-    strip_prompt_from_args, structured_verbosity, wrap_terminal,
+    emit_stream_summary_no_separator, materialized_harness_prompt_from_prepared,
+    resolve_binary_path, run_harness_loop, strip_prompt_from_args, structured_verbosity,
+    wrap_terminal,
 };
 use crate::log;
+
+fn composition_dispatch_context(
+    request: &CompositionExecutionRequest,
+) -> HashMap<String, serde_json::Value> {
+    let mut context = HashMap::new();
+    context.insert(
+        "composition_file_ref".into(),
+        serde_json::Value::String(request.file_ref.clone()),
+    );
+    context.insert(
+        "composition_mode".into(),
+        serde_json::Value::String(match request.mode {
+            CompositionMode::InlineFrontmatterPrompt => "inline".to_string(),
+            CompositionMode::ChainedDocument => "compose".to_string(),
+        }),
+    );
+    context.insert(
+        "composition_source_path".into(),
+        serde_json::Value::String(request.prepared.resolved_path.display().to_string()),
+    );
+    context
+}
 
 /// Execute a composition request through the wrapper-grade pipeline.
 ///
@@ -102,9 +125,7 @@ pub(crate) fn execute_composition_request(
     // -- Inline + interactive check ---------------------------------------
 
     if request.session_interactive && is_inline && !profile.supports_interactive_inline_closure() {
-        return Err(
-            CompositionError::InlineInteractiveUnsupported(provider.to_string()).into(),
-        );
+        return Err(CompositionError::InlineInteractiveUnsupported(provider.to_string()).into());
     }
 
     let effective_non_interactive = !request.session_interactive;
@@ -136,8 +157,9 @@ pub(crate) fn execute_composition_request(
         let catalog =
             McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
         let (cleaned_prompt, prompt_tags) = lex_tags(&effective_prompt);
-        let prompt_is_interactive =
-            request.session_interactive && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+        let prompt_is_interactive = request.session_interactive
+            && std::io::stdin().is_terminal()
+            && std::io::stdout().is_terminal();
         let session = compute_session_set(
             &catalog,
             repo_root_ref,
@@ -304,15 +326,13 @@ pub(crate) fn execute_composition_request(
     let env_context = claudine::events::detect_environment_fast(&cwd);
 
     if !silent {
-        eprintln!(
-            "  Using {} ({})",
-            provider,
-            reason_label(selected.reason)
-        );
+        eprintln!("  Using {} ({})", provider, reason_label(selected.reason));
         eprintln!();
     }
 
     // -- Execution --------------------------------------------------------
+
+    let dispatch_context = composition_dispatch_context(&request);
 
     if harness_enabled {
         let harness_mode = if is_inline {
@@ -324,6 +344,7 @@ pub(crate) fn execute_composition_request(
         let mut prompt_state = HarnessPromptState {
             mode: harness_mode,
             source_path: request.prepared.resolved_path.clone(),
+            base_prompt: None,
             overlay: indexmap::IndexMap::new(),
             prompt_tail: Vec::new(),
             next_prompt_override: None,
@@ -356,6 +377,8 @@ pub(crate) fn execute_composition_request(
             stream_verbosity,
             verbose_requested,
             &env_context,
+            &dispatch_context,
+            Some(materialized_harness_prompt_from_prepared(&request.prepared)),
             &term,
         )
     } else if is_inline {
@@ -382,6 +405,7 @@ pub(crate) fn execute_composition_request(
             verbose_requested,
             show_checks,
             &env_context,
+            &dispatch_context,
             &term,
         )
     } else {
@@ -400,6 +424,7 @@ pub(crate) fn execute_composition_request(
             stream_verbosity,
             verbose_requested,
             &env_context,
+            &dispatch_context,
         )
     }
 }
@@ -426,6 +451,7 @@ fn execute_inline_without_harness(
     verbose_requested: bool,
     show_checks: bool,
     env_context: &claudine::events::EnvironmentContext,
+    dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
 ) -> Result<i32> {
     // Run the provider and capture output.
@@ -442,6 +468,7 @@ fn execute_inline_without_harness(
             stderr_noise,
             stream_verbosity,
             env_context,
+            dispatch_context,
             term,
         )?
     } else {
@@ -505,22 +532,23 @@ fn execute_inline_without_harness(
     }
 
     if agent_exit == 0 {
-        let replacement_body =
-            match claudine::composition::closure::extract_replacement_body(&final_response) {
-                Ok(body) => body,
-                Err(error) => {
-                    if show_checks {
-                        log::message(&crate::output::fm_check_fail(
-                            &format!(
-                                "the referenced file -- {display_path} -- did not receive a valid replacement body: {error}"
-                            ),
-                            term,
-                        ));
-                    }
-                    final_exit = 1;
-                    String::new()
+        let replacement_body = match claudine::composition::closure::extract_replacement_body(
+            &final_response,
+        ) {
+            Ok(body) => body,
+            Err(error) => {
+                if show_checks {
+                    log::message(&crate::output::fm_check_fail(
+                        &format!(
+                            "the referenced file -- {display_path} -- did not receive a valid replacement body: {error}"
+                        ),
+                        term,
+                    ));
                 }
-            };
+                final_exit = 1;
+                String::new()
+            }
+        };
 
         if final_exit == 0 {
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -597,6 +625,7 @@ fn run_structured_inline(
     stderr_noise: &[&str],
     stream_verbosity: Verbosity,
     env_context: &claudine::events::EnvironmentContext,
+    dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
 ) -> Result<InlineRunResult> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
@@ -608,7 +637,8 @@ fn run_structured_inline(
             env_context.clone(),
             stream_verbosity,
             summary_details.clone(),
-        ),
+        )
+        .with_context_extra(dispatch_context.clone()),
         parser_config,
     );
     let stream_result = exec::run_child_stream(
@@ -787,6 +817,7 @@ fn execute_direct_without_harness(
     stream_verbosity: Verbosity,
     verbose_requested: bool,
     env_context: &claudine::events::EnvironmentContext,
+    dispatch_context: &HashMap<String, serde_json::Value>,
 ) -> Result<i32> {
     if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
@@ -798,7 +829,8 @@ fn execute_direct_without_harness(
                 env_context.clone(),
                 stream_verbosity,
                 summary_details.clone(),
-            ),
+            )
+            .with_context_extra(dispatch_context.clone()),
             parser_config,
         );
         let stream_result = exec::run_child_stream(
