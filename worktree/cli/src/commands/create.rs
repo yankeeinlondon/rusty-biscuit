@@ -4,10 +4,10 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable as _;
 use biscuit_terminal::terminal::Terminal;
 use inquire::{InquireError, Select, Text};
+use worktree::WorktreeError;
 use worktree::config::{config_path, considered_dirs, resolve_base_dir, save_config};
 use worktree::git::repo_info;
 use worktree::worktree::create_worktree;
-use worktree::WorktreeError;
 
 pub fn run(branch: &str, stay: bool) -> Result<(), WorktreeError> {
     let terminal = Terminal::default();
@@ -15,7 +15,10 @@ pub fn run(branch: &str, stay: bool) -> Result<(), WorktreeError> {
     let base = match resolve_base_dir() {
         Ok(path) => path,
         Err(WorktreeError::BaseDirectoryNotConfigured) => prompt_for_base_dir(&terminal)?,
-        Err(WorktreeError::ConfigInvalidFormat { config_path, message }) => {
+        Err(WorktreeError::ConfigInvalidFormat {
+            config_path,
+            message,
+        }) => {
             render_invalid_format_error(&terminal, &config_path, &message, branch);
             return Ok(());
         }
@@ -49,7 +52,12 @@ pub fn run(branch: &str, stay: bool) -> Result<(), WorktreeError> {
     Ok(())
 }
 
-fn render_invalid_format_error(terminal: &Terminal, config_path: &Path, message: &str, branch: &str) {
+fn render_invalid_format_error(
+    terminal: &Terminal,
+    config_path: &Path,
+    message: &str,
+    branch: &str,
+) {
     let path_str = config_path.display().to_string();
     let msg = format!(
         "\n<red><b>Error:</b></red> <b>~/.worktree.json</b> has an invalid format: {message}\n\n\

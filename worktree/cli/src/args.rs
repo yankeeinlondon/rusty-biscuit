@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
-use clap_complete::engine::ArgValueCompleter;
 use clap_complete::Shell;
+use clap_complete::engine::ArgValueCompleter;
 
 /// A simple CLI for working with git worktrees
 #[derive(Parser)]

@@ -7,8 +7,8 @@ use biscuit_terminal::components::renderable::Renderable as _;
 use biscuit_terminal::components::terminal_image::{ImageWidth, parse_width_spec};
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
-use worktree::worktree::{default_branch, list_worktrees, WorktreeStatus};
 use worktree::WorktreeError;
+use worktree::worktree::{WorktreeStatus, default_branch, list_worktrees};
 
 use super::git_graph;
 
@@ -122,7 +122,9 @@ fn render_verbose(statuses: &[WorktreeStatus], terminal: &Terminal) {
     let branch_commits = git_graph::branch_commits_detail(branch, &default);
     if branch_commits.is_empty() {
         let mut empty_list = UnorderedList::empty();
-        empty_list.add(Prose::new("<dim>no commits since branching</dim>".to_string()));
+        empty_list.add(Prose::new(
+            "<dim>no commits since branching</dim>".to_string(),
+        ));
         eprintln!("{}", empty_list.render(terminal));
     } else {
         let mut branch_list = UnorderedList::empty();

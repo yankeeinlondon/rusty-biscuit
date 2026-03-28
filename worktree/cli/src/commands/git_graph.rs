@@ -17,10 +17,7 @@ pub fn merge_base_commit(default_branch: &str, current_branch: &str) -> Option<C
 }
 
 /// Get detailed commits on a branch since the merge-base.
-pub fn branch_commits_detail(
-    current_branch: &str,
-    default_branch: &str,
-) -> Vec<CommitDetail> {
+pub fn branch_commits_detail(current_branch: &str, default_branch: &str) -> Vec<CommitDetail> {
     let Some(base_sha) = get_merge_base(default_branch, current_branch) else {
         return vec![];
     };
@@ -35,9 +32,7 @@ const DETAIL_FMT: &str = "%h%x1f%s%x1f%at%x1f%D";
 fn commit_details(rev: &str, max: usize) -> Vec<CommitDetail> {
     let max_str = max.to_string();
     let fmt_arg = format!("--format={DETAIL_FMT}");
-    let Ok(output) =
-        git_command(&["log", &fmt_arg, "--max-count", &max_str, rev])
-    else {
+    let Ok(output) = git_command(&["log", &fmt_arg, "--max-count", &max_str, rev]) else {
         return vec![];
     };
     parse_commit_lines(&output)
@@ -46,9 +41,7 @@ fn commit_details(rev: &str, max: usize) -> Vec<CommitDetail> {
 /// Query git log for commits reachable from `target` but not `exclude`, oldest first.
 fn commit_details_since(target: &str, exclude: &str) -> Vec<CommitDetail> {
     let fmt_arg = format!("--format={DETAIL_FMT}");
-    let Ok(output) = git_command(&[
-        "log", &fmt_arg, target, "--not", exclude,
-    ]) else {
+    let Ok(output) = git_command(&["log", &fmt_arg, target, "--not", exclude]) else {
         return vec![];
     };
     parse_commit_lines(&output)
@@ -309,10 +302,7 @@ pub fn base_graph(branch_names: &[String], default_branch: &str) -> Option<Strin
     for (i, sha) in main_commits.iter().enumerate() {
         lines.push(format!("    commit id: \"{sha}\""));
         // After each main commit, insert any branches that diverge here
-        while branch_iter
-            .peek()
-            .map_or(false, |b| b.merge_base_idx == i)
-        {
+        while branch_iter.peek().map_or(false, |b| b.merge_base_idx == i) {
             let info = branch_iter.next().unwrap();
             lines.push(format!("    branch {}", info.name));
             lines.push(format!("    checkout {}", info.name));

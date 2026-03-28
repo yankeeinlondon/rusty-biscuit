@@ -3,9 +3,9 @@ use std::io::IsTerminal as _;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable as _;
 use biscuit_terminal::terminal::Terminal;
+use worktree::WorktreeError;
 use worktree::git::repo_info;
 use worktree::worktree::find_worktree;
-use worktree::WorktreeError;
 
 pub fn run(name: &str) -> Result<(), WorktreeError> {
     let entry = find_worktree(name)?;

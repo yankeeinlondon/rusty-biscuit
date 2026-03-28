@@ -133,7 +133,10 @@ mod tests {
         let result = resolve_base_dir();
         unsafe { std::env::remove_var("WT") };
 
-        assert!(matches!(result, Err(WorktreeError::BaseDirectoryNotFound(_))));
+        assert!(matches!(
+            result,
+            Err(WorktreeError::BaseDirectoryNotFound(_))
+        ));
     }
 
     #[test]

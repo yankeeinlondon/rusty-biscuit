@@ -86,11 +86,7 @@ pub fn parse_worktree_list(porcelain_output: &str) -> Vec<WorktreeEntry> {
             first = false;
         } else if let Some(rest) = line.strip_prefix("branch ") {
             // refs/heads/main -> main
-            branch = Some(
-                rest.strip_prefix("refs/heads/")
-                    .unwrap_or(rest)
-                    .to_string(),
-            );
+            branch = Some(rest.strip_prefix("refs/heads/").unwrap_or(rest).to_string());
         }
         // We skip HEAD, bare, detached, prunable lines
     }
