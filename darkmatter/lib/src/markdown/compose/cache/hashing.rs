@@ -477,10 +477,9 @@ mod tests {
 
     #[test]
     fn options_hash_sensitive_to_magic_path_position() {
-        let start = ComposeOptions::new()
-            .with_magic_path("/path", biscuit_file::PathPosition::Start);
-        let end = ComposeOptions::new()
-            .with_magic_path("/path", biscuit_file::PathPosition::End);
+        let start =
+            ComposeOptions::new().with_magic_path("/path", biscuit_file::PathPosition::Start);
+        let end = ComposeOptions::new().with_magic_path("/path", biscuit_file::PathPosition::End);
 
         assert_ne!(options_hash(&start), options_hash(&end));
     }

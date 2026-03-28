@@ -1,10 +1,10 @@
 //! Local extraction of markdown-native links and images with provenance.
 
-use crate::markdown::compose::ComposeSource;
 use super::types::{
-    ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSyntax,
-    classify_target, make_reference_id,
+    ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSyntax, classify_target,
+    make_reference_id,
 };
+use crate::markdown::compose::ComposeSource;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 /// Extract Markdown-native links as [`ReferenceRecord`]s with provenance.
@@ -25,7 +25,9 @@ pub(crate) fn extract_markdown_links(
 
     for (event, range) in parser.into_offset_iter() {
         match event {
-            Event::Start(Tag::Link { dest_url, title, .. }) => {
+            Event::Start(Tag::Link {
+                dest_url, title, ..
+            }) => {
                 in_link = true;
                 current_href = dest_url.to_string();
                 current_title = title.to_string();
@@ -99,7 +101,9 @@ pub(crate) fn extract_markdown_images(
 
     for (event, range) in parser.into_offset_iter() {
         match event {
-            Event::Start(Tag::Image { dest_url, title, .. }) => {
+            Event::Start(Tag::Image {
+                dest_url, title, ..
+            }) => {
                 in_image = true;
                 current_src = dest_url.to_string();
                 current_title = title.to_string();
@@ -191,7 +195,9 @@ mod tests {
         let records = extract_markdown_links(content, &ComposeSource::Unknown);
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].kind, ReferenceKind::Hyperlink);
-        assert!(matches!(&records[0].target, super::super::types::ReferenceTarget::LocalPath { raw } if raw == "./file.md"));
+        assert!(
+            matches!(&records[0].target, super::super::types::ReferenceTarget::LocalPath { raw } if raw == "./file.md")
+        );
         assert_eq!(records[0].origin.syntax, ReferenceSyntax::MarkdownLink);
         assert_eq!(records[0].origin.line, 1);
     }
@@ -201,7 +207,10 @@ mod tests {
         let content = "[example](https://example.com)";
         let records = extract_markdown_links(content, &ComposeSource::Unknown);
         assert_eq!(records.len(), 1);
-        assert!(matches!(&records[0].target, super::super::types::ReferenceTarget::RemoteUrl { .. }));
+        assert!(matches!(
+            &records[0].target,
+            super::super::types::ReferenceTarget::RemoteUrl { .. }
+        ));
     }
 
     #[test]
@@ -209,7 +218,10 @@ mod tests {
         let content = "[section](#section)";
         let records = extract_markdown_links(content, &ComposeSource::Unknown);
         assert_eq!(records.len(), 1);
-        assert!(matches!(&records[0].target, super::super::types::ReferenceTarget::Fragment { .. }));
+        assert!(matches!(
+            &records[0].target,
+            super::super::types::ReferenceTarget::Fragment { .. }
+        ));
     }
 
     #[test]
@@ -217,7 +229,10 @@ mod tests {
         let content = "[email](mailto:user@example.com)";
         let records = extract_markdown_links(content, &ComposeSource::Unknown);
         assert_eq!(records.len(), 1);
-        assert!(matches!(&records[0].target, super::super::types::ReferenceTarget::OtherScheme { .. }));
+        assert!(matches!(
+            &records[0].target,
+            super::super::types::ReferenceTarget::OtherScheme { .. }
+        ));
     }
 
     #[test]
@@ -226,7 +241,9 @@ mod tests {
         let records = extract_markdown_images(content, &ComposeSource::Unknown);
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].kind, ReferenceKind::Image);
-        assert!(matches!(&records[0].target, super::super::types::ReferenceTarget::LocalPath { raw } if raw == "./img.png"));
+        assert!(
+            matches!(&records[0].target, super::super::types::ReferenceTarget::LocalPath { raw } if raw == "./img.png")
+        );
         assert_eq!(records[0].origin.syntax, ReferenceSyntax::MarkdownImage);
     }
 
@@ -235,7 +252,10 @@ mod tests {
         let content = "![alt](data:image/png;base64,abc123)";
         let records = extract_markdown_images(content, &ComposeSource::Unknown);
         assert_eq!(records.len(), 1);
-        assert!(matches!(&records[0].target, super::super::types::ReferenceTarget::DataUri { .. }));
+        assert!(matches!(
+            &records[0].target,
+            super::super::types::ReferenceTarget::DataUri { .. }
+        ));
     }
 
     #[test]
@@ -243,7 +263,12 @@ mod tests {
         let content = "[click `here`](./doc.md)";
         let records = extract_markdown_links(content, &ComposeSource::Unknown);
         assert_eq!(records.len(), 1);
-        let display = records[0].attributes.get("display").unwrap().as_str().unwrap();
+        let display = records[0]
+            .attributes
+            .get("display")
+            .unwrap()
+            .as_str()
+            .unwrap();
         assert_eq!(display, "click `here`");
     }
 

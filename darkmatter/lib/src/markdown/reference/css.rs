@@ -6,11 +6,11 @@
 
 use cssparser::{Parser, ParserInput, Token};
 
-use crate::markdown::compose::ComposeSource;
 use super::types::{
-    ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSyntax,
-    classify_target, make_reference_id,
+    ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSyntax, classify_target,
+    make_reference_id,
 };
+use crate::markdown::compose::ComposeSource;
 
 /// Extract `@import` URLs from CSS content.
 ///
@@ -123,8 +123,8 @@ fn try_extract_import_url(parser: &mut Parser) -> Option<String> {
             Token::UnquotedUrl(ref s) => return Some(s.to_string()),
             Token::Function(ref name) if name.eq_ignore_ascii_case("url") => {
                 // Parse inside url()
-                let result: Result<String, cssparser::ParseError<'_, ()>> =
-                    parser.parse_nested_block(|p| {
+                let result: Result<String, cssparser::ParseError<'_, ()>> = parser
+                    .parse_nested_block(|p| {
                         while let Ok(inner) = p.next_including_whitespace_and_comments().cloned() {
                             match inner {
                                 Token::WhiteSpace(_) | Token::Comment(_) => continue,
@@ -174,8 +174,8 @@ fn extract_font_face_urls<'i>(
             }
             Token::Function(ref name) if in_src && name.eq_ignore_ascii_case("url") => {
                 let url_byte_start = parser.position().byte_index();
-                let result: Result<String, cssparser::ParseError<'_, ()>> =
-                    parser.parse_nested_block(|p| {
+                let result: Result<String, cssparser::ParseError<'_, ()>> = parser
+                    .parse_nested_block(|p| {
                         while let Ok(inner) = p.next_including_whitespace_and_comments().cloned() {
                             match inner {
                                 Token::WhiteSpace(_) | Token::Comment(_) => continue,
@@ -237,8 +237,8 @@ fn skip_until_semicolon(parser: &mut Parser) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::ReferenceTarget;
+    use super::*;
 
     #[test]
     fn import_url_with_quotes() {

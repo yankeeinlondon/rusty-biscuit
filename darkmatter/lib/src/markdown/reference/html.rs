@@ -4,28 +4,22 @@
 //! - `<a>` and `<img>` (Phase 1)
 //! - `<style>`, `<script>`, `<link>`, `<meta>` (Phase 2)
 
+use super::types::{
+    ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSyntax, ReferenceTarget,
+    classify_target, make_reference_id,
+};
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::output;
-use super::types::{
-    ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSyntax,
-    ReferenceTarget, classify_target, make_reference_id,
-};
 use markdown::mdast::Node;
 use tracing::trace;
 
 /// Extract HTML `<a>` tags as [`ReferenceRecord`]s with provenance.
-pub(crate) fn extract_html_links(
-    content: &str,
-    source: &ComposeSource,
-) -> Vec<ReferenceRecord> {
+pub(crate) fn extract_html_links(content: &str, source: &ComposeSource) -> Vec<ReferenceRecord> {
     collect_from_html_nodes(content, source, classify_a_tag)
 }
 
 /// Extract HTML `<img>` tags as [`ReferenceRecord`]s with provenance.
-pub(crate) fn extract_html_images(
-    content: &str,
-    source: &ComposeSource,
-) -> Vec<ReferenceRecord> {
+pub(crate) fn extract_html_images(content: &str, source: &ComposeSource) -> Vec<ReferenceRecord> {
     collect_from_html_nodes(content, source, classify_img_tag)
 }
 
@@ -106,13 +100,16 @@ fn walk_html_nodes(
             let mut offset = span_start;
             for (li, tag_line) in lines.iter().enumerate() {
                 let line_end = offset + tag_line.len();
-                if let Some(record) = classifier(tag_line, source, base_line + li, offset, line_end) {
+                if let Some(record) = classifier(tag_line, source, base_line + li, offset, line_end)
+                {
                     records.push(record);
                 }
                 // +1 for the newline character
                 offset = line_end + 1;
             }
-        } else if let Some(record) = classifier(&html_node.value, source, base_line, span_start, span_end) {
+        } else if let Some(record) =
+            classifier(&html_node.value, source, base_line, span_start, span_end)
+        {
             records.push(record);
         }
     }
@@ -219,10 +216,7 @@ fn classify_style_tag(
     let css_content = extract_inner_text(html).unwrap_or_default();
 
     let mut attributes = serde_json::Map::new();
-    attributes.insert(
-        "css_content".into(),
-        serde_json::Value::String(css_content),
-    );
+    attributes.insert("css_content".into(), serde_json::Value::String(css_content));
 
     Some(ReferenceRecord {
         id: make_reference_id(source, line, span_start),
@@ -607,7 +601,11 @@ mod tests {
         // rec #7a: <link> tags must NOT be classified as hyperlinks by extract_html_links
         let content = r#"<link rel="stylesheet" href="style.css">"#;
         let records = extract_html_links(content, &ComposeSource::Unknown);
-        assert_eq!(records.len(), 0, "<link> should not be emitted as a hyperlink");
+        assert_eq!(
+            records.len(),
+            0,
+            "<link> should not be emitted as a hyperlink"
+        );
     }
 
     #[test]

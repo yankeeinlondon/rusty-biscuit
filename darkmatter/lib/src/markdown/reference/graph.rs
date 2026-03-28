@@ -5,20 +5,20 @@
 
 use std::collections::BTreeMap;
 
-use crate::markdown::Markdown;
-use crate::markdown::compose::{ComposeOperation, ComposeSource, EffectiveStateBuilder};
-use crate::markdown::compose::cache::RunLocalCache;
-use crate::markdown::compose::conditions;
-use crate::markdown::compose::toc_linking;
-use crate::markdown::compose::transclusion::{
-    parse_directives, parse_frontmatter_refs, DirectiveKind, TransclusionRuntime,
-};
-use crate::markdown::types::MarkdownResult;
 use super::types::{
     ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
     ReferenceInsertionContext, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSet,
     ReferenceSyntax, classify_target, make_reference_id,
 };
+use crate::markdown::Markdown;
+use crate::markdown::compose::cache::RunLocalCache;
+use crate::markdown::compose::conditions;
+use crate::markdown::compose::toc_linking;
+use crate::markdown::compose::transclusion::{
+    DirectiveKind, TransclusionRuntime, parse_directives, parse_frontmatter_refs,
+};
+use crate::markdown::compose::{ComposeOperation, ComposeSource, EffectiveStateBuilder};
+use crate::markdown::types::MarkdownResult;
 
 /// Runtime state for reference graph analysis.
 ///
@@ -47,10 +47,8 @@ fn make_cache(options: &ReferenceGraphOptions) -> RunLocalCache {
 
     let cache = RunLocalCache::new(options.compose.cache_access_mode);
     if let Some(ref root) = options.compose.cache_root {
-        let resolved = FileStore::resolve_cache_root(
-            Some(root),
-            options.compose.cache_namespace.as_deref(),
-        );
+        let resolved =
+            FileStore::resolve_cache_root(Some(root), options.compose.cache_namespace.as_deref());
         cache.with_persistent(resolved)
     } else {
         cache
@@ -127,11 +125,7 @@ pub(crate) fn flatten_graph(graph: &ReferenceGraph) -> ReferenceSet {
 /// When a transclusion record and its child insertion share the same line
 /// (which is the normal case), the child subtree is emitted immediately
 /// after the transclusion record.
-fn flatten_node(
-    node: &ReferenceGraphNode,
-    graph: &ReferenceGraph,
-    out: &mut Vec<ReferenceRecord>,
-) {
+fn flatten_node(node: &ReferenceGraphNode, graph: &ReferenceGraph, out: &mut Vec<ReferenceRecord>) {
     // Build an index of child insertions by directive line for interleaving.
     let mut insertion_map: BTreeMap<usize, Vec<&ReferenceInsertion>> = BTreeMap::new();
     for insertion in &node.child_insertions {
@@ -215,7 +209,10 @@ fn build_heading_index(prepared_content: &str) -> Vec<(usize, String, u8)> {
 /// Look up the active section for a given line number.
 ///
 /// Finds the heading with the greatest start line that is `<= target_line`.
-fn section_at_line(heading_index: &[(usize, String, u8)], target_line: usize) -> Option<(&str, u8)> {
+fn section_at_line(
+    heading_index: &[(usize, String, u8)],
+    target_line: usize,
+) -> Option<(&str, u8)> {
     heading_index
         .iter()
         .rev()
@@ -261,8 +258,12 @@ fn build_node(
     // Uses the document's frontmatter merged with any external state from
     // options, plus runtime context (including environment variables).
     let effective_state = {
-        let fm: std::collections::HashMap<String, serde_json::Value> =
-            md.frontmatter().as_map().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let fm: std::collections::HashMap<String, serde_json::Value> = md
+            .frontmatter()
+            .as_map()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         let mut builder = EffectiveStateBuilder::new().with_frontmatter(fm);
         if let Some(ref ext) = options.compose.external_state {
             builder = builder.with_external_state(ext.clone());
@@ -275,9 +276,9 @@ fn build_node(
         for directive in &directives {
             // Evaluate `when=` condition — skip directive entirely if false.
             if let Some(ref when_expr) = directive.options.when_expr {
-                let condition_met = conditions::evaluate_condition(
-                    when_expr, &effective_state, directive.line,
-                ).unwrap_or(false);
+                let condition_met =
+                    conditions::evaluate_condition(when_expr, &effective_state, directive.line)
+                        .unwrap_or(false);
                 if !condition_met {
                     continue;
                 }
@@ -306,7 +307,11 @@ fn build_node(
 
             if directive.kind == DirectiveKind::File {
                 // Try to resolve and recurse into the child
-                if let Some(child_path) = resolve_local_target(&directive.raw_target, source, &options.compose.magic_paths) {
+                if let Some(child_path) = resolve_local_target(
+                    &directive.raw_target,
+                    source,
+                    &options.compose.magic_paths,
+                ) {
                     let child_source = ComposeSource::File(child_path.clone());
                     let child_id = source_to_id(&child_source);
 
@@ -321,10 +326,12 @@ fn build_node(
                                 extract_references,
                             )?;
 
-                            let (sec_text, sec_level) = section_at_line(&heading_index, directive.line)
-                                .map(|(t, l)| (Some(t.to_string()), Some(l)))
-                                .unwrap_or((None, None));
-                            let ref_id = make_reference_id(source, directive.line, directive.span.start);
+                            let (sec_text, sec_level) =
+                                section_at_line(&heading_index, directive.line)
+                                    .map(|(t, l)| (Some(t.to_string()), Some(l)))
+                                    .unwrap_or((None, None));
+                            let ref_id =
+                                make_reference_id(source, directive.line, directive.span.start);
                             child_insertions.push(ReferenceInsertion {
                                 child_node_id: child_node.node_id.clone(),
                                 directive_line: directive.line,
@@ -349,7 +356,9 @@ fn build_node(
 
     // ::toc-linking directives generate synthesized TOC hyperlinks AND
     // create child graph nodes for follow-mode expansion.
-    if let Ok(toc_directives) = crate::markdown::compose::toc_linking::parse_directives(&prepared_content) {
+    if let Ok(toc_directives) =
+        crate::markdown::compose::toc_linking::parse_directives(&prepared_content)
+    {
         let transclusion_options = transclusion_options_for_source(options, source);
 
         for directive in &toc_directives {
@@ -377,7 +386,6 @@ fn build_node(
                         },
                         attributes: serde_json::Map::new(),
                     });
-
                 }
 
                 // Create a child graph node so follow mode can expand the
@@ -389,16 +397,12 @@ fn build_node(
                 // node (composed view). Tagged so the model builder only
                 // includes them when follow=true.
                 if extract_references {
-                    for mut record in generate_toc_link_references(
-                        &display_target,
-                        &path,
-                        directive,
-                        source,
-                    ) {
-                        record.attributes.insert(
-                            "toc_synthesized".to_string(),
-                            serde_json::Value::Bool(true),
-                        );
+                    for mut record in
+                        generate_toc_link_references(&display_target, &path, directive, source)
+                    {
+                        record
+                            .attributes
+                            .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
                         local_references.records.push(record);
                     }
                 }
@@ -434,7 +438,10 @@ fn build_node(
                 // If no child insertion was created (target couldn't load),
                 // still create a context-only insertion so the caption has
                 // section information.
-                if !child_insertions.iter().any(|ins| ins.reference_id.as_deref() == Some(&ref_id)) {
+                if !child_insertions
+                    .iter()
+                    .any(|ins| ins.reference_id.as_deref() == Some(&ref_id))
+                {
                     child_insertions.push(ReferenceInsertion {
                         child_node_id: String::new(),
                         directive_line: directive.line,
@@ -451,9 +458,7 @@ fn build_node(
             } else {
                 // Target didn't resolve — still emit reference record and
                 // a context-only insertion for the caption.
-                if extract_references
-                    && let Some(raw_target) = directive.targets.first()
-                {
+                if extract_references && let Some(raw_target) = directive.targets.first() {
                     local_references.records.push(ReferenceRecord {
                         id: ref_id.clone(),
                         kind: ReferenceKind::Transclusion,
@@ -496,10 +501,8 @@ fn build_node(
                     // Extract links from literal content for follow mode
                     let links = super::local::extract_markdown_links(prologue, source);
                     for mut link in links {
-                        link.attributes.insert(
-                            "toc_synthesized".to_string(),
-                            serde_json::Value::Bool(true),
-                        );
+                        link.attributes
+                            .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
                         local_references.records.push(link);
                     }
                 }
@@ -522,7 +525,8 @@ fn build_node(
             }
 
             if !is_literal
-                && let Some(child_path) = resolve_local_target(prologue, source, &options.compose.magic_paths)
+                && let Some(child_path) =
+                    resolve_local_target(prologue, source, &options.compose.magic_paths)
             {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
@@ -568,10 +572,8 @@ fn build_node(
                     // Extract links from literal content for follow mode
                     let links = super::local::extract_markdown_links(epilogue, source);
                     for mut link in links {
-                        link.attributes.insert(
-                            "toc_synthesized".to_string(),
-                            serde_json::Value::Bool(true),
-                        );
+                        link.attributes
+                            .insert("toc_synthesized".to_string(), serde_json::Value::Bool(true));
                         local_references.records.push(link);
                     }
                 }
@@ -594,7 +596,8 @@ fn build_node(
             }
 
             if !is_literal
-                && let Some(child_path) = resolve_local_target(epilogue, source, &options.compose.magic_paths)
+                && let Some(child_path) =
+                    resolve_local_target(epilogue, source, &options.compose.magic_paths)
             {
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
@@ -609,7 +612,8 @@ fn build_node(
                             extract_references,
                         )?;
 
-                        let (sec_text, sec_level) = heading_index.last()
+                        let (sec_text, sec_level) = heading_index
+                            .last()
                             .map(|(_, t, l)| (Some(t.clone()), Some(*l)))
                             .unwrap_or((None, None));
                         let ref_id = make_reference_id(source, usize::MAX, idx);
@@ -718,15 +722,12 @@ fn prepare_content(
     source: &ComposeSource,
     options: &ReferenceGraphOptions,
 ) -> MarkdownResult<String> {
-    let mut inline_pre_options = options
-        .compose
-        .clone()
-        .only(&[
-            ComposeOperation::TextReplacement,
-            ComposeOperation::PageBlocks,
-            ComposeOperation::Interpolation,
-            ComposeOperation::ShellExpansion,
-        ]);
+    let mut inline_pre_options = options.compose.clone().only(&[
+        ComposeOperation::TextReplacement,
+        ComposeOperation::PageBlocks,
+        ComposeOperation::Interpolation,
+        ComposeOperation::ShellExpansion,
+    ]);
 
     // Set the source for this specific node (may differ from root)
     inline_pre_options = match source {
@@ -905,7 +906,11 @@ mod tests {
 
         // Create child document with a link
         let child_path = dir.path().join("child.md");
-        std::fs::write(&child_path, "# Child\n\n[child-link](https://child.example.com)").unwrap();
+        std::fs::write(
+            &child_path,
+            "# Child\n\n[child-link](https://child.example.com)",
+        )
+        .unwrap();
 
         // Create root document that transcludes the child
         let root_path = dir.path().join("root.md");
@@ -943,10 +948,18 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
 
         let prologue_path = dir.path().join("prologue.md");
-        std::fs::write(&prologue_path, "[prologue-link](https://prologue.example.com)").unwrap();
+        std::fs::write(
+            &prologue_path,
+            "[prologue-link](https://prologue.example.com)",
+        )
+        .unwrap();
 
         let epilogue_path = dir.path().join("epilogue.md");
-        std::fs::write(&epilogue_path, "[epilogue-link](https://epilogue.example.com)").unwrap();
+        std::fs::write(
+            &epilogue_path,
+            "[epilogue-link](https://epilogue.example.com)",
+        )
+        .unwrap();
 
         let root_path = dir.path().join("root.md");
         std::fs::write(
@@ -982,7 +995,11 @@ mod tests {
         let graph = build_reference_graph(&root_md, &options).unwrap();
 
         // A two-node cycle should produce exactly 2 unique nodes
-        assert_eq!(graph.node_count(), 2, "two-node cycle should produce exactly 2 nodes");
+        assert_eq!(
+            graph.node_count(),
+            2,
+            "two-node cycle should produce exactly 2 nodes"
+        );
 
         // Verify no duplicate node IDs
         let mut ids: Vec<&str> = vec![&graph.root.node_id];
@@ -1006,7 +1023,11 @@ mod tests {
         let flat = flatten_graph(&graph);
 
         // composed_references should be finite and non-duplicative
-        assert!(flat.len() <= 10, "flattened refs should be bounded, got {}", flat.len());
+        assert!(
+            flat.len() <= 10,
+            "flattened refs should be bounded, got {}",
+            flat.len()
+        );
     }
 
     #[test]

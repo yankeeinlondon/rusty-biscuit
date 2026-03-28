@@ -51,12 +51,12 @@ pub mod shell_expansion;
 pub mod toc_linking;
 pub mod transclusion;
 
+pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 pub use shell_expansion::ShellExpansionError;
 pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
-pub use biscuit_file::PathPosition;
 pub use types::{
     ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePhase,
     ComposeReport, ComposeSource, ComposeWarning,

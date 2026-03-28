@@ -1,4 +1,6 @@
-use crate::args::{Cli, Command as CliCommand, GraphFormat, OutputFormat, ValidateOutputFormat, ValidateTarget};
+use crate::args::{
+    Cli, Command as CliCommand, GraphFormat, OutputFormat, ValidateOutputFormat, ValidateTarget,
+};
 use crate::output::{
     OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_artifact,
     open_output_artifact, print_delta, print_toc_tree, render_terminal_output,
@@ -30,10 +32,7 @@ impl ComposeAllowFlags {
     }
 
     /// Returns `true` if the given issue kind is allowed by the current flags.
-    fn is_allowed(
-        &self,
-        kind: darkmatter::markdown::reference::types::ReferenceKind,
-    ) -> bool {
+    fn is_allowed(&self, kind: darkmatter::markdown::reference::types::ReferenceKind) -> bool {
         use darkmatter::markdown::reference::types::ReferenceKind;
         match kind {
             ReferenceKind::Hyperlink => self.hyperlinks,
@@ -338,7 +337,7 @@ pub fn run_compose(
         use biscuit_terminal::terminal::Terminal;
         use darkmatter::markdown::reference::ReferenceGraphOptions;
         use darkmatter::markdown::reference::validate::{
-            ReferenceValidationOptions, ReferenceSeverity,
+            ReferenceSeverity, ReferenceValidationOptions,
         };
 
         let val_options = ReferenceValidationOptions {
@@ -1172,8 +1171,8 @@ mod tests {
 }
 
 fn run_validate(target: ValidateTarget) -> Result<()> {
-    use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
     use darkmatter::markdown::reference::ReferenceGraphOptions;
+    use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
 
     match target {
         ValidateTarget::Refs {
@@ -1192,7 +1191,8 @@ fn run_validate(target: ValidateTarget) -> Result<()> {
             // If --graph requested, print graph and exit
             if let Some(graph_format) = graph {
                 let graph_options = ReferenceGraphOptions::default();
-                let ref_graph = md.reference_graph(graph_options)
+                let ref_graph = md
+                    .reference_graph(graph_options)
                     .wrap_err("Failed to build reference graph")?;
 
                 match graph_format {
@@ -1226,10 +1226,7 @@ fn run_validate(target: ValidateTarget) -> Result<()> {
             if report.is_valid() {
                 Ok(())
             } else {
-                Err(eyre!(
-                    "{} error(s) found",
-                    report.error_count()
-                ))
+                Err(eyre!("{} error(s) found", report.error_count()))
             }
         }
     }
@@ -1258,11 +1255,10 @@ fn print_validation_report_text(
         };
 
         let source = match &issue.origin.source {
-            darkmatter::markdown::compose::ComposeSource::File(p) => {
-                p.file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| input.display().to_string())
-            }
+            darkmatter::markdown::compose::ComposeSource::File(p) => p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| input.display().to_string()),
             _ => input.display().to_string(),
         };
 
@@ -1498,9 +1494,7 @@ fn target_to_json(
 }
 
 /// Serialize a `ReferenceSyntax` to a snake_case string.
-fn syntax_to_json(
-    syntax: darkmatter::markdown::reference::types::ReferenceSyntax,
-) -> &'static str {
+fn syntax_to_json(syntax: darkmatter::markdown::reference::types::ReferenceSyntax) -> &'static str {
     use darkmatter::markdown::reference::types::ReferenceSyntax;
     match syntax {
         ReferenceSyntax::MarkdownLink => "markdown_link",
@@ -1571,7 +1565,9 @@ fn insertion_to_json(
 
     // Find the target path from the child node
     let child_node = graph.node_by_id(&insertion.child_node_id);
-    let target = child_node.map(|n| source_to_json(&n.source)).unwrap_or(serde_json::Value::Null);
+    let target = child_node
+        .map(|n| source_to_json(&n.source))
+        .unwrap_or(serde_json::Value::Null);
 
     let mut obj = serde_json::json!({
         "kind": kind_str,
@@ -1590,9 +1586,7 @@ fn insertion_to_json(
     }
 
     // Recursively expand child node when following
-    if follow
-        && let Some(child) = child_node
-    {
+    if follow && let Some(child) = child_node {
         obj["node"] = graph_node_to_json(child, graph, true);
     }
 
@@ -1702,9 +1696,7 @@ fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Resul
         if let Some(graph) = tree.graph() {
             let mut root_json = graph_node_to_json(&graph.root, graph, follow);
 
-            if validate
-                && let Some(report) = tree.validation_report()
-            {
+            if validate && let Some(report) = tree.validation_report() {
                 root_json["validation"] = validation_report_to_json(report);
             }
 
@@ -1719,9 +1711,7 @@ fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Resul
     print!("{}", tree.display(&term));
 
     // Validation summary footer
-    if validate
-        && let Some(report) = tree.validation_report()
-    {
+    if validate && let Some(report) = tree.validation_report() {
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable as _;
 

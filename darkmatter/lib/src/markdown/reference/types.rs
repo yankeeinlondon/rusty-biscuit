@@ -346,9 +346,7 @@ impl ReferenceGraph {
         let id = mermaid_safe_id(&node.node_id);
         let label = short_label(&node.node_id);
         let ref_count = node.local_references.len();
-        out.push_str(&format!(
-            "    {id}[\"{label}<br/>{ref_count} refs\"]\n"
-        ));
+        out.push_str(&format!("    {id}[\"{label}<br/>{ref_count} refs\"]\n"));
     }
 
     /// Renders the graph as a DOT (Graphviz) diagram.
@@ -391,7 +389,13 @@ impl ReferenceGraph {
 /// Creates a Mermaid-safe node ID.
 fn mermaid_safe_id(id: &str) -> String {
     id.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -399,7 +403,13 @@ fn mermaid_safe_id(id: &str) -> String {
 fn dot_safe_id(id: &str) -> String {
     let safe: String = id
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     format!("n_{safe}")
 }
@@ -424,7 +434,6 @@ pub struct ReferenceGraphOptions {
     /// external state, shell settings, and other pipeline behavior.
     pub compose: ComposeOptions,
 }
-
 
 // ── Transclusion query types ────────────────────────────────────────
 
@@ -576,7 +585,10 @@ impl From<ReferenceRecord> for InlineCssBlock {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        Self { record, css_content }
+        Self {
+            record,
+            css_content,
+        }
     }
 }
 

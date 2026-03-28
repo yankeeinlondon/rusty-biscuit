@@ -8,9 +8,7 @@ use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::reference::types::{
     ReferenceGraphOptions, ReferenceKind, ReferenceSyntax, ReferenceTarget,
 };
-use darkmatter::markdown::reference::validate::{
-    ReferenceIssueCode, ReferenceValidationOptions,
-};
+use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceValidationOptions};
 use tempfile::TempDir;
 
 // ── Helper ──────────────────────────────────────────────────────────
@@ -40,8 +38,14 @@ fn recursive_file_traversal() {
     write_files(
         &dir,
         &[
-            ("root.md", "# Root\n\n[root-link](https://root.example.com)\n\n::file child.md\n"),
-            ("child.md", "# Child\n\n[child-link](https://child.example.com)\n"),
+            (
+                "root.md",
+                "# Root\n\n[root-link](https://root.example.com)\n\n::file child.md\n",
+            ),
+            (
+                "child.md",
+                "# Child\n\n[child-link](https://child.example.com)\n",
+            ),
         ],
     );
 
@@ -119,17 +123,18 @@ fn cycle_detection_stops_infinite_recursion() {
     let dir = TempDir::new().unwrap();
     write_files(
         &dir,
-        &[
-            ("a.md", "::file b.md\n"),
-            ("b.md", "::file a.md\n"),
-        ],
+        &[("a.md", "::file b.md\n"), ("b.md", "::file a.md\n")],
     );
 
     let md = load_md(&dir, "a.md");
     let options = ReferenceGraphOptions::default();
     // Should not hang and should produce exactly 2 unique nodes
     let graph = md.reference_graph(options).unwrap();
-    assert_eq!(graph.node_count(), 2, "two-node cycle should produce exactly 2 unique nodes");
+    assert_eq!(
+        graph.node_count(),
+        2,
+        "two-node cycle should produce exactly 2 unique nodes"
+    );
 
     // Verify no duplicate node IDs
     let mut ids = vec![graph.root.node_id.clone()];
@@ -159,7 +164,10 @@ fn cycle_composed_references_stay_finite() {
         .iter()
         .filter(|r| r.kind == ReferenceKind::Hyperlink)
         .count();
-    assert!(link_count <= 4, "composed links should be bounded, got {link_count}");
+    assert!(
+        link_count <= 4,
+        "composed links should be bounded, got {link_count}"
+    );
 }
 
 #[test]
@@ -253,7 +261,11 @@ fn toc_linking_dependency_and_generated_links_appear_in_composed_references() {
                 )
         })
         .collect();
-    assert_eq!(generated_links.len(), 1, "expected generated toc link in composed refs");
+    assert_eq!(
+        generated_links.len(),
+        1,
+        "expected generated toc link in composed refs"
+    );
 }
 
 #[test]
@@ -261,10 +273,7 @@ fn mermaid_output_includes_child_nodes() {
     let dir = TempDir::new().unwrap();
     write_files(
         &dir,
-        &[
-            ("root.md", "::file child.md\n"),
-            ("child.md", "# Child\n"),
-        ],
+        &[("root.md", "::file child.md\n"), ("child.md", "# Child\n")],
     );
 
     let md = load_md(&dir, "root.md");
@@ -282,10 +291,7 @@ fn dot_output_includes_child_nodes() {
     let dir = TempDir::new().unwrap();
     write_files(
         &dir,
-        &[
-            ("root.md", "::file child.md\n"),
-            ("child.md", "# Child\n"),
-        ],
+        &[("root.md", "::file child.md\n"), ("child.md", "# Child\n")],
     );
 
     let md = load_md(&dir, "root.md");
@@ -407,7 +413,10 @@ fn validate_fail_fast_stops_early() {
     let dir = TempDir::new().unwrap();
     write_files(
         &dir,
-        &[("root.md", "[a](./missing1.md)\n[b](./missing2.md)\n[c](./missing3.md)\n")],
+        &[(
+            "root.md",
+            "[a](./missing1.md)\n[b](./missing2.md)\n[c](./missing3.md)\n",
+        )],
     );
 
     let source_path = dir.path().join("root.md");
@@ -419,7 +428,11 @@ fn validate_fail_fast_stops_early() {
         ..Default::default()
     };
     let report = md.validate_references(options).unwrap();
-    assert_eq!(report.error_count(), 1, "fail_fast should stop after first error");
+    assert_eq!(
+        report.error_count(),
+        1,
+        "fail_fast should stop after first error"
+    );
 }
 
 #[test]
@@ -467,10 +480,7 @@ fn validate_cross_doc_fragment_with_interpolated_heading() {
         &dir,
         &[
             ("root.md", "[go](./target.md#visible)\n"),
-            (
-                "target.md",
-                "---\ntitle: Visible\n---\n\n# {{ title }}\n",
-            ),
+            ("target.md", "---\ntitle: Visible\n---\n\n# {{ title }}\n"),
         ],
     );
 
@@ -531,8 +541,14 @@ fn inline_css_graph_collects_across_nodes() {
     write_files(
         &dir,
         &[
-            ("root.md", "<style>\nbody { color: red; }\n</style>\n\n::file child.md\n"),
-            ("child.md", "# Child\n\n<style>\n.child { color: blue; }\n</style>\n"),
+            (
+                "root.md",
+                "<style>\nbody { color: red; }\n</style>\n\n::file child.md\n",
+            ),
+            (
+                "child.md",
+                "# Child\n\n<style>\n.child { color: blue; }\n</style>\n",
+            ),
         ],
     );
 
@@ -552,15 +568,25 @@ fn script_import_graph_collects_across_nodes() {
     write_files(
         &dir,
         &[
-            ("root.md", "<script src=\"root.js\"></script>\n\n::file child.md\n"),
-            ("child.md", "# Child\n\n<script src=\"child.js\"></script>\n"),
+            (
+                "root.md",
+                "<script src=\"root.js\"></script>\n\n::file child.md\n",
+            ),
+            (
+                "child.md",
+                "# Child\n\n<script src=\"child.js\"></script>\n",
+            ),
         ],
     );
 
     let md = load_md(&dir, "root.md");
     let options = ReferenceGraphOptions::default();
     let imports = md.script_import_graph(options).unwrap();
-    assert!(imports.len() >= 2, "Expected 2 script imports, found {}", imports.len());
+    assert!(
+        imports.len() >= 2,
+        "Expected 2 script imports, found {}",
+        imports.len()
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -574,8 +600,14 @@ fn reference_graph_with_cache_root() {
     write_files(
         &dir,
         &[
-            ("root.md", "# Root\n\n[link](https://example.com)\n\n::file child.md\n"),
-            ("child.md", "# Child\n\n[child-link](https://child.example.com)\n"),
+            (
+                "root.md",
+                "# Root\n\n[link](https://example.com)\n\n::file child.md\n",
+            ),
+            (
+                "child.md",
+                "# Child\n\n[child-link](https://child.example.com)\n",
+            ),
         ],
     );
 
@@ -642,10 +674,7 @@ fn transclusion_ref_resolved_target_filled() {
     let dir = TempDir::new().unwrap();
     write_files(
         &dir,
-        &[
-            ("root.md", "::file child.md\n"),
-            ("child.md", "# Child\n"),
-        ],
+        &[("root.md", "::file child.md\n"), ("child.md", "# Child\n")],
     );
 
     let md = load_md(&dir, "root.md");
@@ -663,7 +692,10 @@ fn transclusion_ref_all_kinds() {
     write_files(
         &dir,
         &[
-            ("root.md", "::file child.md\n::code example.rs\n::url https://example.com\n"),
+            (
+                "root.md",
+                "::file child.md\n::code example.rs\n::url https://example.com\n",
+            ),
             ("child.md", ""),
             ("example.rs", ""),
         ],
@@ -700,9 +732,7 @@ fn transclusion_ref_resolved_target_is_correct_path() {
     let resolved_canon = std::path::Path::new(resolved)
         .canonicalize()
         .unwrap_or_else(|_| std::path::PathBuf::from(resolved));
-    let expected_canon = expected
-        .canonicalize()
-        .unwrap_or_else(|_| expected.clone());
+    let expected_canon = expected.canonicalize().unwrap_or_else(|_| expected.clone());
     assert_eq!(
         resolved_canon, expected_canon,
         "resolved_target should point to the actual child file"
@@ -737,10 +767,7 @@ fn reference_graph_cache_honors_namespace() {
     assert_eq!(graph.node_count(), 2);
 
     // Verify the namespaced cache directory was created
-    let expected_cache = cache_dir
-        .path()
-        .join(".darkmatter")
-        .join("cache");
+    let expected_cache = cache_dir.path().join(".darkmatter").join("cache");
     // The version directory should exist under the namespace
     assert!(
         expected_cache.exists(),
@@ -753,15 +780,26 @@ fn reference_graph_cache_honors_namespace() {
 #[test]
 fn section_context_populated_in_graph() {
     let dir = TempDir::new().unwrap();
-    write_files(&dir, &[
-        ("root.md", "# Title\n\n## Intro\n\nSome text.\n\n::file child.md\n\n## Details\n\nMore text."),
-        ("child.md", "# Child\n\nChild content."),
-    ]);
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "# Title\n\n## Intro\n\nSome text.\n\n::file child.md\n\n## Details\n\nMore text.",
+            ),
+            ("child.md", "# Child\n\nChild content."),
+        ],
+    );
 
     let md = load_md(&dir, "root.md");
-    let graph = md.reference_graph(ReferenceGraphOptions::default()).unwrap();
+    let graph = md
+        .reference_graph(ReferenceGraphOptions::default())
+        .unwrap();
 
-    assert!(!graph.root.child_insertions.is_empty(), "expected child insertions");
+    assert!(
+        !graph.root.child_insertions.is_empty(),
+        "expected child insertions"
+    );
     let insertion = &graph.root.child_insertions[0];
     assert_eq!(
         insertion.context.section_heading_text.as_deref(),
@@ -781,10 +819,16 @@ fn file_tree_builds_from_real_document() {
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
-    write_files(&dir, &[
-        ("doc.md", "# Doc\n\n[link](https://example.com)\n\n![img](./logo.png)\n\n<style>body{}</style>\n\n::file child.md"),
-        ("child.md", "# Child"),
-    ]);
+    write_files(
+        &dir,
+        &[
+            (
+                "doc.md",
+                "# Doc\n\n[link](https://example.com)\n\n![img](./logo.png)\n\n<style>body{}</style>\n\n::file child.md",
+            ),
+            ("child.md", "# Child"),
+        ],
+    );
 
     let path = dir.path().join("doc.md");
     let mut tree = FileTree::new(&path).unwrap();
@@ -792,10 +836,19 @@ fn file_tree_builds_from_real_document() {
 
     let output = tree.render_optimistic(Some(120));
     assert!(output.contains("doc.md"), "expected file label in output");
-    assert!(output.contains("example.com"), "expected hyperlink in output");
+    assert!(
+        output.contains("example.com"),
+        "expected hyperlink in output"
+    );
     assert!(output.contains("logo.png"), "expected image ref in output");
-    assert!(output.contains("child.md"), "expected transclusion in output");
-    assert!(output.contains("1 inline CSS block"), "expected inline CSS in summary");
+    assert!(
+        output.contains("child.md"),
+        "expected transclusion in output"
+    );
+    assert!(
+        output.contains("1 inline CSS block"),
+        "expected inline CSS in summary"
+    );
 }
 
 #[test]
@@ -804,10 +857,16 @@ fn file_tree_follow_mode() {
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
-    write_files(&dir, &[
-        ("root.md", "# Root\n\n::file child.md"),
-        ("child.md", "# Child\n\n[child-link](https://child.example.com)"),
-    ]);
+    write_files(
+        &dir,
+        &[
+            ("root.md", "# Root\n\n::file child.md"),
+            (
+                "child.md",
+                "# Child\n\n[child-link](https://child.example.com)",
+            ),
+        ],
+    );
 
     let path = dir.path().join("root.md");
     let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
@@ -816,7 +875,10 @@ fn file_tree_follow_mode() {
     let output = tree.render_optimistic(Some(120));
     assert!(output.contains("root.md"), "expected root label");
     assert!(output.contains("child.md"), "expected child label");
-    assert!(output.contains("child.example.com"), "expected child's hyperlink in follow mode");
+    assert!(
+        output.contains("child.example.com"),
+        "expected child's hyperlink in follow mode"
+    );
 }
 
 // ── Issue #1: ::toc-linking in follow mode ──────────────────────────
@@ -827,10 +889,16 @@ fn file_tree_toc_linking_follow_mode() {
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
-    write_files(&dir, &[
-        ("root.md", "# Root\n\n::toc-linking child.md"),
-        ("child.md", "# Child\n\n## Section A\n\n## Section B\n\n[link](https://child.example.com)"),
-    ]);
+    write_files(
+        &dir,
+        &[
+            ("root.md", "# Root\n\n::toc-linking child.md"),
+            (
+                "child.md",
+                "# Child\n\n## Section A\n\n## Section B\n\n[link](https://child.example.com)",
+            ),
+        ],
+    );
 
     let path = dir.path().join("root.md");
     let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
@@ -839,7 +907,10 @@ fn file_tree_toc_linking_follow_mode() {
     let output = tree.render_optimistic(Some(120));
     assert!(output.contains("root.md"), "expected root label");
     // The child document should appear as a nested subtree in follow mode
-    assert!(output.contains("child.md"), "expected nested child label from toc-linking follow");
+    assert!(
+        output.contains("child.md"),
+        "expected nested child label from toc-linking follow"
+    );
     // Prove that follow mode actually rendered the child's content (not just the edge label)
     assert!(
         output.contains("child.example.com"),
@@ -852,10 +923,13 @@ fn file_tree_toc_linking_follow_validate_catches_child_issues() {
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
-    write_files(&dir, &[
-        ("root.md", "# Root\n\n::toc-linking child.md"),
-        ("child.md", "# Child\n\n[broken](./missing.md)"),
-    ]);
+    write_files(
+        &dir,
+        &[
+            ("root.md", "# Root\n\n::toc-linking child.md"),
+            ("child.md", "# Child\n\n[broken](./missing.md)"),
+        ],
+    );
 
     let path = dir.path().join("root.md");
     let mut tree = FileTree::new(&path)
@@ -864,12 +938,18 @@ fn file_tree_toc_linking_follow_validate_catches_child_issues() {
         .validate();
     tree.ensure_built().unwrap();
 
-    let report = tree.validation_report().expect("should have validation report");
+    let report = tree
+        .validation_report()
+        .expect("should have validation report");
     // The broken link in child.md should be reported
-    let has_missing = report.issues.iter().any(|i| {
-        i.code == ReferenceIssueCode::MissingLocalTarget
-    });
-    assert!(has_missing, "expected MissingLocalTarget issue from child document");
+    let has_missing = report
+        .issues
+        .iter()
+        .any(|i| i.code == ReferenceIssueCode::MissingLocalTarget);
+    assert!(
+        has_missing,
+        "expected MissingLocalTarget issue from child document"
+    );
 }
 
 // ── Issue #2: Epilogue follow mode ──────────────────────────────────
@@ -880,10 +960,19 @@ fn file_tree_epilogue_follow_mode() {
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
-    write_files(&dir, &[
-        ("root.md", "---\nepilogue: epilogue.md\n---\n\n# Root\n\n[main](https://main.example.com)"),
-        ("epilogue.md", "# Epilogue\n\n[epi-link](https://epilogue.example.com)"),
-    ]);
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "---\nepilogue: epilogue.md\n---\n\n# Root\n\n[main](https://main.example.com)",
+            ),
+            (
+                "epilogue.md",
+                "# Epilogue\n\n[epi-link](https://epilogue.example.com)",
+            ),
+        ],
+    );
 
     let path = dir.path().join("root.md");
     let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
@@ -891,7 +980,10 @@ fn file_tree_epilogue_follow_mode() {
 
     let output = tree.render_optimistic(Some(120));
     assert!(output.contains("root.md"), "expected root label");
-    assert!(output.contains("epilogue.md"), "expected epilogue child in follow mode");
+    assert!(
+        output.contains("epilogue.md"),
+        "expected epilogue child in follow mode"
+    );
     assert!(
         output.contains("epilogue.example.com"),
         "expected epilogue's hyperlink in nested subtree"
@@ -906,11 +998,17 @@ fn file_tree_multiple_prologues_follow_mode() {
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
-    write_files(&dir, &[
-        ("root.md", "---\nprologue:\n  - a.md\n  - b.md\n---\n\n# Root"),
-        ("a.md", "# A\n\n[a-link](https://a.example.com)"),
-        ("b.md", "# B\n\n[b-link](https://b.example.com)"),
-    ]);
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "---\nprologue:\n  - a.md\n  - b.md\n---\n\n# Root",
+            ),
+            ("a.md", "# A\n\n[a-link](https://a.example.com)"),
+            ("b.md", "# B\n\n[b-link](https://b.example.com)"),
+        ],
+    );
 
     let path = dir.path().join("root.md");
     let mut tree = FileTree::new(&path).unwrap().follow_transclusions();
@@ -918,7 +1016,10 @@ fn file_tree_multiple_prologues_follow_mode() {
 
     let output = tree.render_optimistic(Some(120));
     assert!(output.contains("a.md"), "expected first prologue child");
-    assert!(output.contains("b.md"), "expected second prologue child (not a duplicate of first)");
+    assert!(
+        output.contains("b.md"),
+        "expected second prologue child (not a duplicate of first)"
+    );
     assert!(output.contains("a.example.com"), "expected a.md's link");
     assert!(output.contains("b.example.com"), "expected b.md's link");
 }
@@ -931,10 +1032,16 @@ fn file_tree_show_root_false_preserves_subtree() {
     use darkmatter::markdown::reference::file_tree::FileTree;
 
     let dir = TempDir::new().unwrap();
-    write_files(&dir, &[
-        ("root.md", "# Root\n\n[link](https://example.com)\n\n::file child.md"),
-        ("child.md", "# Child"),
-    ]);
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "# Root\n\n[link](https://example.com)\n\n::file child.md",
+            ),
+            ("child.md", "# Child"),
+        ],
+    );
 
     let path = dir.path().join("root.md");
     let mut tree = FileTree::new(&path).unwrap().show_root(false);
@@ -942,9 +1049,18 @@ fn file_tree_show_root_false_preserves_subtree() {
 
     let output = tree.render_optimistic(Some(120));
     // Root label should not appear but refs and transclusions should
-    assert!(!output.contains("\u{1F4C4}root.md"), "root file head should be hidden");
-    assert!(output.contains("example.com"), "reference groups should still render");
-    assert!(output.contains("child.md"), "transclusion edges should still render");
+    assert!(
+        !output.contains("\u{1F4C4}root.md"),
+        "root file head should be hidden"
+    );
+    assert!(
+        output.contains("example.com"),
+        "reference groups should still render"
+    );
+    assert!(
+        output.contains("child.md"),
+        "transclusion edges should still render"
+    );
 }
 
 // ── Issue #5: Section captions for non-H2 headings ─────────────────
@@ -952,10 +1068,16 @@ fn file_tree_show_root_false_preserves_subtree() {
 #[test]
 fn file_tree_section_caption_respects_heading_level() {
     let dir = TempDir::new().unwrap();
-    write_files(&dir, &[
-        ("root.md", "# Root\n\n## Intro\n\n### Details\n\n::file child.md"),
-        ("child.md", "# Child"),
-    ]);
+    write_files(
+        &dir,
+        &[
+            (
+                "root.md",
+                "# Root\n\n## Intro\n\n### Details\n\n::file child.md",
+            ),
+            ("child.md", "# Child"),
+        ],
+    );
 
     let md = load_md(&dir, "root.md");
     let options = ReferenceGraphOptions::default();

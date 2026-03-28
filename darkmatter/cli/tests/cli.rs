@@ -1270,11 +1270,7 @@ fn test_compose_with_nonexistent_command_fails() {
 fn validate_refs_text_output() {
     let dir = tempfile::TempDir::new().unwrap();
     let md_path = dir.path().join("test.md");
-    std::fs::write(
-        &md_path,
-        "# Heading\n\n[link](https://example.com)\n",
-    )
-    .unwrap();
+    std::fs::write(&md_path, "# Heading\n\n[link](https://example.com)\n").unwrap();
 
     md_cmd()
         .arg("validate")
@@ -1325,11 +1321,7 @@ fn validate_refs_nonzero_exit_on_errors() {
 fn validate_refs_with_fragments() {
     let dir = tempfile::TempDir::new().unwrap();
     let md_path = dir.path().join("test.md");
-    std::fs::write(
-        &md_path,
-        "# Hello\n\n[link](#hello)\n",
-    )
-    .unwrap();
+    std::fs::write(&md_path, "# Hello\n\n[link](#hello)\n").unwrap();
 
     md_cmd()
         .arg("validate")
@@ -1454,10 +1446,20 @@ fn test_graph_validate_invalid() {
         .output()
         .unwrap();
 
-    assert_eq!(output.status.code(), Some(2), "expected exit code 2 for validation errors");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "expected exit code 2 for validation errors"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("[missing]"), "expected [missing] suffix in output");
-    assert!(stdout.contains("1 issues"), "expected issue count in summary");
+    assert!(
+        stdout.contains("[missing]"),
+        "expected [missing] suffix in output"
+    );
+    assert!(
+        stdout.contains("1 issues"),
+        "expected issue count in summary"
+    );
 }
 
 #[test]
@@ -1517,11 +1519,7 @@ fn test_graph_follow_multiple_prologues() {
     let root = dir.path().join("root.md");
     let a = dir.path().join("a.md");
     let b = dir.path().join("b.md");
-    std::fs::write(
-        &root,
-        "---\nprologue:\n  - a.md\n  - b.md\n---\n\n# Root",
-    )
-    .unwrap();
+    std::fs::write(&root, "---\nprologue:\n  - a.md\n  - b.md\n---\n\n# Root").unwrap();
     std::fs::write(&a, "# A\n\n[a-link](https://a.example.com)").unwrap();
     std::fs::write(&b, "# B\n\n[b-link](https://b.example.com)").unwrap();
 

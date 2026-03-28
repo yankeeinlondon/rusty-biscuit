@@ -14,12 +14,12 @@
 
 use biscuit_terminal::terminal::Terminal;
 
-use crate::markdown::reference::validate::ReferenceSeverity;
 use super::icons;
 use super::model::{
     FileTreeModel, FileTreeNode, FileTreeReferenceGroup, FileTreeTransclusionEdge,
     FileTreeTransclusionKind,
 };
+use crate::markdown::reference::validate::ReferenceSeverity;
 
 // ── Connector strings ───────────────────────────────────────────────
 //
@@ -35,20 +35,20 @@ use super::model::{
 //  ╰─▸      last toc-linking      (terminates branch)
 
 // ── Vertical ────────────────────────────────────────────────────────
-const VERT: &str       = "    \u{2502}";
+const VERT: &str = "    \u{2502}";
 
 // ── Reference row branches ──────────────────────────────────────────
-const REF_FIRST: &str  = "    \u{256D}\u{2500}\u{2500} ";  // ╭── (nothing above)
-const REF_MID: &str    = "    \u{251C}\u{2500}\u{2500} ";  // ├── (continues)
+const REF_FIRST: &str = "    \u{256D}\u{2500}\u{2500} "; // ╭── (nothing above)
+const REF_MID: &str = "    \u{251C}\u{2500}\u{2500} "; // ├── (continues)
 
 // ── Transclusion edge branches ──────────────────────────────────────
-const TRANS_IN: &str       = "    \u{2502}\u{25C0}\u{2500} ";  // │◀─
-const TRANS_IN_LAST: &str  = "    \u{2570}\u{25C0}\u{2500} ";  // ╰◀─
-const TRANS_OUT: &str      = "    \u{251C}\u{2500}\u{25B6} ";  // ├─▶
-const TRANS_OUT_LAST: &str = "    \u{2570}\u{2500}\u{25B6} ";  // ╰─▶
+const TRANS_IN: &str = "    \u{2502}\u{25C0}\u{2500} "; // │◀─
+const TRANS_IN_LAST: &str = "    \u{2570}\u{25C0}\u{2500} "; // ╰◀─
+const TRANS_OUT: &str = "    \u{251C}\u{2500}\u{25B6} "; // ├─▶
+const TRANS_OUT_LAST: &str = "    \u{2570}\u{2500}\u{25B6} "; // ╰─▶
 
 // ── Child indents ───────────────────────────────────────────────────
-const INDENT_CHILD: &str      = "    \u{2502}   ";
+const INDENT_CHILD: &str = "    \u{2502}   ";
 const INDENT_CHILD_LAST: &str = "        ";
 
 // ── Public rendering entry points ───────────────────────────────────
@@ -90,7 +90,14 @@ fn render_node(
     width: usize,
 ) {
     // Zone 1: Reference groups above the file line
-    render_reference_groups(&node.reference_groups, lines, indent, is_nerd_font, is_tty, width);
+    render_reference_groups(
+        &node.reference_groups,
+        lines,
+        indent,
+        is_nerd_font,
+        is_tty,
+        width,
+    );
 
     // Zone 2: File head line
     render_file_head(node, lines, indent, is_nerd_font, is_tty);
@@ -110,7 +117,14 @@ fn render_node_children_only(
     width: usize,
 ) {
     // Zone 1: Reference groups
-    render_reference_groups(&node.reference_groups, lines, indent, is_nerd_font, is_tty, width);
+    render_reference_groups(
+        &node.reference_groups,
+        lines,
+        indent,
+        is_nerd_font,
+        is_tty,
+        width,
+    );
 
     // Zone 3+4: Transclusion edges unified with follow-mode children
     render_transclusions_unified(node, lines, indent, is_nerd_font, is_tty, width);
@@ -257,16 +271,19 @@ fn render_transclusions_unified(
         render_single_edge(edge, connector, lines, indent, is_nerd_font, is_tty, width);
 
         // If this edge was followed, render the child's content below it
-        let is_followed = edge.followable
-            && edge.child_node_id.is_some()
-            && child_idx < node.children.len();
+        let is_followed =
+            edge.followable && edge.child_node_id.is_some() && child_idx < node.children.len();
 
         if is_followed {
             let child = &node.children[child_idx];
             child_idx += 1;
 
             // After ╰ the vertical is terminated; use blank indent
-            let child_indent_str = if is_last { INDENT_CHILD_LAST } else { INDENT_CHILD };
+            let child_indent_str = if is_last {
+                INDENT_CHILD_LAST
+            } else {
+                INDENT_CHILD
+            };
             let child_indent = format!("{indent}{child_indent_str}");
 
             render_reference_groups(
@@ -290,9 +307,9 @@ fn render_transclusions_unified(
 fn pick_edge_connector(kind: FileTreeTransclusionKind, is_last: bool) -> &'static str {
     let is_out = kind == FileTreeTransclusionKind::TocLinking;
     match (is_out, is_last) {
-        (true, true)   => TRANS_OUT_LAST,
-        (true, false)  => TRANS_OUT,
-        (false, true)  => TRANS_IN_LAST,
+        (true, true) => TRANS_OUT_LAST,
+        (true, false) => TRANS_OUT,
+        (false, true) => TRANS_IN_LAST,
         (false, false) => TRANS_IN,
     }
 }
@@ -363,7 +380,10 @@ fn render_single_edge(
         if is_literal_fm {
             format!("{prefix}[{label}] {}{suffix}", edge.caption)
         } else {
-            format!("{prefix}[{label}] references {}{suffix}", edge.display_target)
+            format!(
+                "{prefix}[{label}] references {}{suffix}",
+                edge.display_target
+            )
         }
     } else {
         let caption = if edge.caption.is_empty() {
@@ -508,12 +528,18 @@ mod tests {
         assert!(output.contains("./logo.png"));
         assert!(output.contains("test.md"));
 
-        let link_line = lines.iter().position(|l| l.contains("example.com")).unwrap();
+        let link_line = lines
+            .iter()
+            .position(|l| l.contains("example.com"))
+            .unwrap();
         let file_line = lines.iter().position(|l| l.contains("test.md")).unwrap();
         assert!(link_line < file_line);
 
         // First ref row should use ╭
-        assert!(lines[link_line].contains('\u{256D}'), "first ref should use ╭");
+        assert!(
+            lines[link_line].contains('\u{256D}'),
+            "first ref should use ╭"
+        );
     }
 
     #[test]
@@ -542,7 +568,10 @@ mod tests {
         assert!(trans_line > file_line);
 
         // Single transclusion should use ╰ (last/only)
-        assert!(lines[trans_line].contains('\u{25C0}'), "incoming edge should have ◀");
+        assert!(
+            lines[trans_line].contains('\u{25C0}'),
+            "incoming edge should have ◀"
+        );
     }
 
     #[test]
@@ -574,7 +603,10 @@ mod tests {
 
         let link_idx = lines.iter().position(|l| l.contains("a.com")).unwrap();
         let img_idx = lines.iter().position(|l| l.contains("img.png")).unwrap();
-        assert!(img_idx - link_idx >= 2, "expected blank line between groups");
+        assert!(
+            img_idx - link_idx >= 2,
+            "expected blank line between groups"
+        );
     }
 
     #[test]
@@ -621,7 +653,10 @@ mod tests {
 
         let output = render_model_optimistic(&model, 120, false);
         assert!(!output.contains("test.md"), "root label should be hidden");
-        assert!(output.contains("child.md"), "child should still render via edge");
+        assert!(
+            output.contains("child.md"),
+            "child should still render via edge"
+        );
     }
 
     #[test]
@@ -639,7 +674,10 @@ mod tests {
 
         let output = render_model_optimistic(&model, 120, false);
         assert!(!output.contains("test.md"), "root label should be hidden");
-        assert!(output.contains("child.md"), "transclusions should still render");
+        assert!(
+            output.contains("child.md"),
+            "transclusions should still render"
+        );
     }
 
     #[test]
@@ -805,7 +843,10 @@ mod tests {
             ..Default::default()
         };
         let output = render_model(&model, &term, true);
-        assert!(output.contains("\x1b[38;5;75m./child.md"), "target should be blue");
+        assert!(
+            output.contains("\x1b[38;5;75m./child.md"),
+            "target should be blue"
+        );
         assert!(output.contains("\x1b[2;3m"), "caption should be dim+italic");
     }
 
@@ -859,7 +900,13 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
 
         let edge_idx = lines.iter().position(|l| l.contains("./child.md")).unwrap();
-        let ref_idx = lines.iter().position(|l| l.contains("example.com")).unwrap();
-        assert!(ref_idx > edge_idx, "child refs should render below the edge");
+        let ref_idx = lines
+            .iter()
+            .position(|l| l.contains("example.com"))
+            .unwrap();
+        assert!(
+            ref_idx > edge_idx,
+            "child refs should render below the edge"
+        );
     }
 }

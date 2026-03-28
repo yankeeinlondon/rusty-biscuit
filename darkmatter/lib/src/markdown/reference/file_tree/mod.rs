@@ -30,16 +30,13 @@ use biscuit_terminal::utils::layout::Layout;
 use crate::markdown::Markdown;
 use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::types::{ReferenceGraph, ReferenceGraphOptions};
-use crate::markdown::reference::validate::{
-    ReferenceValidationOptions, ReferenceValidationReport,
-};
+use crate::markdown::reference::validate::{ReferenceValidationOptions, ReferenceValidationReport};
 use crate::markdown::types::MarkdownError;
 
 pub use model::{
-    FileTreeIconKind, FileTreeInlineSummary, FileTreeModel, FileTreeNode,
-    FileTreeNodeValidation, FileTreeReferenceGroup, FileTreeReferenceGroupKind,
-    FileTreeReferenceRow, FileTreeReferenceValidation, FileTreeTransclusionEdge,
-    FileTreeTransclusionKind,
+    FileTreeIconKind, FileTreeInlineSummary, FileTreeModel, FileTreeNode, FileTreeNodeValidation,
+    FileTreeReferenceGroup, FileTreeReferenceGroupKind, FileTreeReferenceRow,
+    FileTreeReferenceValidation, FileTreeTransclusionEdge, FileTreeTransclusionKind,
 };
 
 /// Error type for FileTree operations.
@@ -191,20 +188,15 @@ impl FileTree {
         let report = if self.do_validate {
             let mut val_opts = self.validation_options.clone();
             val_opts.graph = self.graph_options.clone();
-            Some(
-                self.md
-                    .validate_references(val_opts)
-                    .map_err(|e| match e {
-                        MarkdownError::Reference(re) => FileTreeError::Reference(re),
-                        other => FileTreeError::Markdown(other),
-                    })?,
-            )
+            Some(self.md.validate_references(val_opts).map_err(|e| match e {
+                MarkdownError::Reference(re) => FileTreeError::Reference(re),
+                other => FileTreeError::Markdown(other),
+            })?)
         } else {
             None
         };
 
-        let built_model =
-            model::build_file_tree_model(&graph, report.as_ref(), self.follow);
+        let built_model = model::build_file_tree_model(&graph, report.as_ref(), self.follow);
 
         self.graph = Some(graph);
         self.validation_report = report;
@@ -333,8 +325,11 @@ mod tests {
     fn file_tree_from_real_file() {
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("test.md");
-        std::fs::write(&file_path, "# Test\n\n[link](https://example.com)\n\n![img](./logo.png)")
-            .unwrap();
+        std::fs::write(
+            &file_path,
+            "# Test\n\n[link](https://example.com)\n\n![img](./logo.png)",
+        )
+        .unwrap();
 
         let mut tree = FileTree::new(&file_path).unwrap();
         tree.ensure_built().unwrap();

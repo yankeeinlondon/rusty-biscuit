@@ -9,10 +9,10 @@ use std::collections::HashMap;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::reference::types::{
     ReferenceGraph, ReferenceGraphNode, ReferenceInsertionContext, ReferenceKind, ReferenceRecord,
-    ReferenceTarget, ReferenceSyntax,
+    ReferenceSyntax, ReferenceTarget,
 };
 use crate::markdown::reference::validate::{
-    ReferenceIssueCode, ReferenceValidationReport, ReferenceSeverity,
+    ReferenceIssueCode, ReferenceSeverity, ReferenceValidationReport,
 };
 
 // ── View model types ────────────────────────────────────────────────
@@ -61,9 +61,7 @@ pub struct FileTreeInlineSummary {
 
 impl FileTreeInlineSummary {
     pub fn is_empty(&self) -> bool {
-        self.inline_css_count == 0
-            && self.inline_script_count == 0
-            && self.meta_tag_count == 0
+        self.inline_css_count == 0 && self.inline_script_count == 0 && self.meta_tag_count == 0
     }
 
     /// Returns a formatted summary string like "(2 inline scripts, 3 meta tags)".
@@ -77,7 +75,11 @@ impl FileTreeInlineSummary {
             parts.push(format!("{} inline CSS block{s}", self.inline_css_count));
         }
         if self.inline_script_count > 0 {
-            let s = if self.inline_script_count == 1 { "" } else { "s" };
+            let s = if self.inline_script_count == 1 {
+                ""
+            } else {
+                "s"
+            };
             parts.push(format!("{} inline script{s}", self.inline_script_count));
         }
         if self.meta_tag_count > 0 {
@@ -177,13 +179,12 @@ pub fn build_file_tree_model(
     report: Option<&ReferenceValidationReport>,
     follow: bool,
 ) -> FileTreeModel {
-    let issue_map = report
-        .map(build_issue_map)
-        .unwrap_or_default();
+    let issue_map = report.map(build_issue_map).unwrap_or_default();
 
     // Build an id → &ReferenceGraphNode map once for O(1) lookups
     // during recursive model construction (avoids O(n²) linear scans).
-    let mut node_map: HashMap<&str, &ReferenceGraphNode> = HashMap::with_capacity(graph.nodes.len() + 1);
+    let mut node_map: HashMap<&str, &ReferenceGraphNode> =
+        HashMap::with_capacity(graph.nodes.len() + 1);
     node_map.insert(&graph.root.node_id, &graph.root);
     for node in &graph.nodes {
         node_map.insert(&node.node_id, node);
@@ -194,7 +195,9 @@ pub fn build_file_tree_model(
 }
 
 /// Build a HashMap of reference_id → validation info for fast lookup.
-fn build_issue_map(report: &ReferenceValidationReport) -> HashMap<String, FileTreeReferenceValidation> {
+fn build_issue_map(
+    report: &ReferenceValidationReport,
+) -> HashMap<String, FileTreeReferenceValidation> {
     let mut map = HashMap::new();
     for issue in &report.issues {
         let suffix = match issue.code {
@@ -205,11 +208,12 @@ fn build_issue_map(report: &ReferenceValidationReport) -> HashMap<String, FileTr
             ReferenceIssueCode::MissingFragmentTarget => Some("[missing fragment]".to_string()),
             _ => Some("[issue]".to_string()),
         };
-        map.entry(issue.reference_id.clone()).or_insert(FileTreeReferenceValidation {
-            is_valid: false,
-            suffix,
-            severity: issue.severity,
-        });
+        map.entry(issue.reference_id.clone())
+            .or_insert(FileTreeReferenceValidation {
+                is_valid: false,
+                suffix,
+                severity: issue.severity,
+            });
     }
     map
 }
@@ -230,7 +234,8 @@ fn build_node_model(
 
     // Classify references into groups and inline summary
     let mut inline_summary = FileTreeInlineSummary::default();
-    let mut group_map: HashMap<FileTreeReferenceGroupKind, Vec<FileTreeReferenceRow>> = HashMap::new();
+    let mut group_map: HashMap<FileTreeReferenceGroupKind, Vec<FileTreeReferenceRow>> =
+        HashMap::new();
     let mut transclusion_records: Vec<&ReferenceRecord> = Vec::new();
 
     for record in &node.local_references.records {
@@ -243,12 +248,15 @@ fn build_node_model(
             Some(group_kind) => {
                 let display_target = record.target.raw().unwrap_or("").to_string();
                 let validation = issue_map.get(&record.id).cloned();
-                group_map.entry(group_kind).or_default().push(FileTreeReferenceRow {
-                    kind: record.kind,
-                    display_target,
-                    raw_reference_id: record.id.clone(),
-                    validation,
-                });
+                group_map
+                    .entry(group_kind)
+                    .or_default()
+                    .push(FileTreeReferenceRow {
+                        kind: record.kind,
+                        display_target,
+                        raw_reference_id: record.id.clone(),
+                        validation,
+                    });
             }
             None => {
                 // Inline types or transclusions
@@ -272,7 +280,10 @@ fn build_node_model(
                 .into_iter()
                 .filter(|r| seen.insert(r.display_target.clone()))
                 .collect();
-            FileTreeReferenceGroup { kind, rows: deduped }
+            FileTreeReferenceGroup {
+                kind,
+                rows: deduped,
+            }
         })
         .collect();
     reference_groups.sort_by_key(|g| g.kind.sort_order());
@@ -290,20 +301,20 @@ fn build_node_model(
             record.target.raw().unwrap_or("").to_string()
         };
         let is_local_path = matches!(&record.target, ReferenceTarget::LocalPath { .. });
-        let followable = !is_literal
-            && record.origin.syntax.is_followable_transclusion()
-            && is_local_path;
+        let followable =
+            !is_literal && record.origin.syntax.is_followable_transclusion() && is_local_path;
 
         // Find the matching child insertion for caption context.
         // Match by reference_id when available (stable across frontmatter
         // entries that share the same line number), falling back to
         // directive_line for backwards compatibility.
-        let insertion = node.child_insertions.iter().find(|ins| {
-            match &ins.reference_id {
+        let insertion = node
+            .child_insertions
+            .iter()
+            .find(|ins| match &ins.reference_id {
                 Some(ref_id) => ref_id == &record.id,
                 None => ins.directive_line == record.origin.line,
-            }
-        });
+            });
 
         let caption = if is_literal {
             "includes static text".to_string()
@@ -328,11 +339,17 @@ fn build_node_model(
         });
 
         // Follow into child if enabled
-        if follow && followable
+        if follow
+            && followable
             && let Some(ref cid) = child_node_id
             && let Some(child_graph_node) = node_map.get(cid.as_str())
         {
-            children.push(build_node_model(child_graph_node, node_map, issue_map, follow));
+            children.push(build_node_model(
+                child_graph_node,
+                node_map,
+                issue_map,
+                follow,
+            ));
         }
     }
 
@@ -553,7 +570,14 @@ mod tests {
         sorted.sort_by_key(|g| g.sort_order());
         assert_eq!(
             sorted,
-            vec![RemoteHyperlinks, LocalHyperlinks, Images, CssImports, ScriptImports, FontImports]
+            vec![
+                RemoteHyperlinks,
+                LocalHyperlinks,
+                Images,
+                CssImports,
+                ScriptImports,
+                FontImports
+            ]
         );
     }
 
@@ -696,7 +720,9 @@ mod tests {
                 records: vec![ReferenceRecord {
                     id: "a_link".into(),
                     kind: ReferenceKind::Hyperlink,
-                    target: ReferenceTarget::RemoteUrl { raw: "https://a.example.com".into() },
+                    target: ReferenceTarget::RemoteUrl {
+                        raw: "https://a.example.com".into(),
+                    },
                     origin: ReferenceOrigin {
                         source: ComposeSource::Unknown,
                         line: 1,
@@ -716,7 +742,9 @@ mod tests {
                 records: vec![ReferenceRecord {
                     id: "b_link".into(),
                     kind: ReferenceKind::Hyperlink,
-                    target: ReferenceTarget::RemoteUrl { raw: "https://b.example.com".into() },
+                    target: ReferenceTarget::RemoteUrl {
+                        raw: "https://b.example.com".into(),
+                    },
                     origin: ReferenceOrigin {
                         source: ComposeSource::Unknown,
                         line: 1,
@@ -737,7 +765,11 @@ mod tests {
         let model = build_file_tree_model(&graph, None, true);
 
         // Both children should appear (not a duplicated first child)
-        assert_eq!(model.root.children.len(), 2, "expected 2 children, not duplicates of first");
+        assert_eq!(
+            model.root.children.len(),
+            2,
+            "expected 2 children, not duplicates of first"
+        );
         assert_eq!(model.root.children[0].file_label, "a.md");
         assert_eq!(model.root.children[1].file_label, "b.md");
     }
@@ -756,7 +788,9 @@ mod tests {
                 records: vec![ReferenceRecord {
                     id: "epi_ref".into(),
                     kind: ReferenceKind::Transclusion,
-                    target: ReferenceTarget::LocalPath { raw: "epilogue.md".into() },
+                    target: ReferenceTarget::LocalPath {
+                        raw: "epilogue.md".into(),
+                    },
                     origin: ReferenceOrigin {
                         source: ComposeSource::Unknown,
                         line: usize::MAX,

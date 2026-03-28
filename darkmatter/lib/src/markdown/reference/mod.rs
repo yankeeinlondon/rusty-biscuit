@@ -3,15 +3,15 @@
 //! Provides local transclusion queries, unified reference types with provenance,
 //! reference graph traversal through composed document trees, and validation.
 
-pub mod types;
+mod css;
 pub mod errors;
 pub mod file_tree;
-mod local;
-mod html;
 mod graph;
-pub mod validate;
-mod css;
+mod html;
+mod local;
 pub mod meta;
+pub mod types;
+pub mod validate;
 
 pub use errors::ReferenceError;
 pub use types::*;
@@ -19,8 +19,7 @@ pub use types::*;
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::transclusion::{
-    parse_directives, parse_frontmatter_refs,
-    BlockOptions, DirectiveKind,
+    BlockOptions, DirectiveKind, parse_directives, parse_frontmatter_refs,
 };
 use crate::markdown::types::MarkdownResult;
 
@@ -67,7 +66,8 @@ impl Markdown {
         }
 
         // Check toc-linking directives
-        if let Ok(toc_directives) = crate::markdown::compose::toc_linking::parse_directives(self.content())
+        if let Ok(toc_directives) =
+            crate::markdown::compose::toc_linking::parse_directives(self.content())
             && !toc_directives.is_empty()
         {
             return true;
@@ -92,8 +92,8 @@ impl Markdown {
         let mut refs = Vec::new();
 
         // Block directives (::file, ::code, ::url)
-        let directives = parse_directives(self.content())
-            .map_err(|e| ReferenceError::ParseDirective {
+        let directives =
+            parse_directives(self.content()).map_err(|e| ReferenceError::ParseDirective {
                 line: 0,
                 message: e.to_string(),
             })?;
@@ -136,7 +136,9 @@ impl Markdown {
         }
 
         // ::toc-linking directives
-        if let Ok(toc_directives) = crate::markdown::compose::toc_linking::parse_directives(self.content()) {
+        if let Ok(toc_directives) =
+            crate::markdown::compose::toc_linking::parse_directives(self.content())
+        {
             for td in &toc_directives {
                 refs.push(TransclusionRef {
                     kind: TransclusionRefKind::TocLinking,
@@ -335,7 +337,10 @@ impl Markdown {
         let style_records = html::extract_html_style_blocks(self.content(), &source);
         let mut imports = Vec::new();
         for record in &style_records {
-            if let Some(css_content) = record.attributes.get("css_content").and_then(|v| v.as_str())
+            if let Some(css_content) = record
+                .attributes
+                .get("css_content")
+                .and_then(|v| v.as_str())
             {
                 let css_records =
                     css::extract_css_imports(css_content, &source, record.origin.line);
@@ -384,7 +389,10 @@ impl Markdown {
         // From @font-face in <style> blocks
         let style_records = html::extract_html_style_blocks(self.content(), &source);
         for record in &style_records {
-            if let Some(css_content) = record.attributes.get("css_content").and_then(|v| v.as_str())
+            if let Some(css_content) = record
+                .attributes
+                .get("css_content")
+                .and_then(|v| v.as_str())
             {
                 let font_records =
                     css::extract_font_face_sources(css_content, &source, record.origin.line);
@@ -450,9 +458,7 @@ fn block_options_to_ref_options(opts: &BlockOptions) -> TransclusionRefOptions {
         replace: match &opts.replace {
             ReplaceOption::InheritDefault => None,
             ReplaceOption::ParentWins => Some("parent-wins".into()),
-            ReplaceOption::OneOff(map) => {
-                Some(serde_json::to_string(map).unwrap_or_default())
-            }
+            ReplaceOption::OneOff(map) => Some(serde_json::to_string(map).unwrap_or_default()),
         },
         quotation: opts.quotation.clone(),
         disclosure: opts.disclosure.clone(),

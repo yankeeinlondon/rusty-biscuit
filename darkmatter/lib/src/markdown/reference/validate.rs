@@ -8,12 +8,12 @@
 
 use std::time::Duration;
 
-use crate::markdown::Markdown;
-use crate::markdown::compose::ComposeSource;
 use super::errors::ReferenceError;
 use super::types::{
     ReferenceGraphOptions, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceTarget,
 };
+use crate::markdown::Markdown;
+use crate::markdown::compose::ComposeSource;
 
 /// Options for reference validation.
 #[derive(Clone)]
@@ -171,14 +171,25 @@ pub(crate) fn validate(
             ReferenceTarget::LocalPath { raw } => {
                 // Check for fragment in local path (e.g., "./other.md#section")
                 let (path_part, fragment) = split_path_fragment(raw);
-                validate_local_path(&path_part, ref_source, record, &mut report, &options.graph.compose.magic_paths);
+                validate_local_path(
+                    &path_part,
+                    ref_source,
+                    record,
+                    &mut report,
+                    &options.graph.compose.magic_paths,
+                );
 
                 // Validate fragment if enabled and path exists
                 if options.validate_fragments
                     && let Some(ref frag) = fragment
                 {
                     validate_cross_doc_fragment(
-                        &path_part, frag, ref_source, record, &mut report, &options.graph,
+                        &path_part,
+                        frag,
+                        ref_source,
+                        record,
+                        &mut report,
+                        &options.graph,
                     );
                 }
 
@@ -203,7 +214,9 @@ pub(crate) fn validate(
                     report.references_valid += 1;
                 } else {
                     report.references_valid += 1;
-                    report.warnings.push(format!("Remote URL not verified: {raw}"));
+                    report
+                        .warnings
+                        .push(format!("Remote URL not verified: {raw}"));
                 }
                 if options.fail_fast && report.error_count() > 0 {
                     return Ok(report);
@@ -547,10 +560,7 @@ enum RemoteResult {
 }
 
 /// Validates remote URLs via HTTP HEAD (falling back to GET on 405).
-fn validate_remote_urls(
-    records: &[&ReferenceRecord],
-    timeout: Duration,
-) -> Vec<RemoteResult> {
+fn validate_remote_urls(records: &[&ReferenceRecord], timeout: Duration) -> Vec<RemoteResult> {
     use tokio::runtime::Handle;
 
     // Try to use the existing tokio runtime, or create a temporary one
@@ -792,8 +802,7 @@ mod tests {
         let source_path = dir.path().join("source.md");
         std::fs::write(&source_path, "").unwrap();
 
-        let md = Markdown::new("[link](./exists.md)")
-            .with_source(ComposeSource::File(source_path));
+        let md = Markdown::new("[link](./exists.md)").with_source(ComposeSource::File(source_path));
 
         let options = ReferenceValidationOptions::default();
         let report = validate(&md, &options).unwrap();
@@ -807,8 +816,8 @@ mod tests {
         let source_path = dir.path().join("source.md");
         std::fs::write(&source_path, "").unwrap();
 
-        let md = Markdown::new("[link](./missing.md)")
-            .with_source(ComposeSource::File(source_path));
+        let md =
+            Markdown::new("[link](./missing.md)").with_source(ComposeSource::File(source_path));
 
         let options = ReferenceValidationOptions::default();
         let report = validate(&md, &options).unwrap();

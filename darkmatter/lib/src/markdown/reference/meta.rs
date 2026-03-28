@@ -5,10 +5,10 @@
 
 use indexmap::IndexMap;
 
+use super::html;
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::types::MarkdownResult;
-use super::html;
 
 /// A meta tag value (single or multiple).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,9 +113,11 @@ pub fn merge_meta_into_frontmatter(
     for (key, value) in meta {
         let fm_value = match value {
             MetaValue::String(s) => serde_json::Value::String(s.clone()),
-            MetaValue::Many(v) => {
-                serde_json::Value::Array(v.iter().map(|s| serde_json::Value::String(s.clone())).collect())
-            }
+            MetaValue::Many(v) => serde_json::Value::Array(
+                v.iter()
+                    .map(|s| serde_json::Value::String(s.clone()))
+                    .collect(),
+            ),
         };
 
         let existing: Option<serde_json::Value> = md.fm_get(key)?;
@@ -365,7 +367,10 @@ mod tests {
 
         let tags = parse_meta_tags(md.content());
         assert_eq!(tags.get("og:title").unwrap().as_str(), "My Page");
-        assert!(md.content().contains("<meta property=\"og:title\" content=\"My Page\">"));
+        assert!(
+            md.content()
+                .contains("<meta property=\"og:title\" content=\"My Page\">")
+        );
     }
 
     #[test]
@@ -440,7 +445,10 @@ mod tests {
         // OG property with content before property attribute
         let mut md = Markdown::new("<meta content=\"Old Title\" property=\"og:title\">\n");
         let updated = set_meta_tag(&mut md, "og:title", "New Title");
-        assert_eq!(updated, 1, "should find OG tag despite reordered attributes");
+        assert_eq!(
+            updated, 1,
+            "should find OG tag despite reordered attributes"
+        );
 
         let tags = parse_meta_tags(md.content());
         assert_eq!(tags.get("og:title").unwrap().as_str(), "New Title");

@@ -74,7 +74,11 @@ pub(crate) fn resolve_path(
         return std::fs::canonicalize(&candidate).map_err(|e| {
             TransclusionError::Io(std::io::Error::new(
                 e.kind(),
-                format!("'{}' (resolved to '{}'): {e}", raw_target, candidate.display()),
+                format!(
+                    "'{}' (resolved to '{}'): {e}",
+                    raw_target,
+                    candidate.display()
+                ),
             ))
         });
     }
@@ -148,7 +152,11 @@ pub(crate) fn resolve_path(
     std::fs::canonicalize(&candidate).map_err(|e| {
         TransclusionError::Io(std::io::Error::new(
             e.kind(),
-            format!("'{}' (resolved to '{}'): {e}", raw_target, candidate.display()),
+            format!(
+                "'{}' (resolved to '{}'): {e}",
+                raw_target,
+                candidate.display()
+            ),
         ))
     })
 }
@@ -399,12 +407,7 @@ mod tests {
         opts.magic_paths
             .push((magic_dir.clone(), biscuit_file::PathPosition::Start));
 
-        let resolved = resolve_path(
-            "@/special.md",
-            &opts,
-            &ComposeSource::File(source_path),
-            1,
-        );
+        let resolved = resolve_path("@/special.md", &opts, &ComposeSource::File(source_path), 1);
 
         std::env::set_current_dir(&original_dir).unwrap();
 
