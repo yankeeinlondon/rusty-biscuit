@@ -1,6 +1,6 @@
 ---
 name: biscuit-terminal
-description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (13+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), Mermaid diagram rendering (10 diagram types), OS/font detection, escape code analysis, color system (BasicColor, WebColor, Tailwind), and composable rendering components. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline support, or querying terminal environment. Darkmatter depends on this for all terminal rendering.
+description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (13+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), terminal-facing Mermaid and graph adapters backed by biscuit-visualized, OS/font detection, escape code analysis, color system (BasicColor, WebColor, Tailwind), and composable rendering components. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline support, or querying terminal environment. Darkmatter depends on this for terminal Mermaid rendering.
 ---
 
 # biscuit-terminal
@@ -39,13 +39,13 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 | [Terminal Struct](./terminal-struct.md) | Main struct, static vs dynamic properties, enums |
 | [Components](./components.md) | All renderable components: Compose, Section, BlockQuote, Todo, TwoColumn, FileSystem, Progress, InlineContent |
 | [Image Rendering](./image-rendering.md) | Kitty/iTerm2 protocols, width parsing, cursor behavior, policy controls |
-| [Mermaid Diagrams](./mermaid-diagrams.md) | 10 diagram types via mmdc CLI |
+| [Mermaid Diagrams](./mermaid-diagrams.md) | Terminal-facing `MermaidDiagram` adapter backed by biscuit-visualized |
 | [Color System](./color-system.md) | BasicColor, RgbColor, WebColor, Tailwind, HdrColor with TermColor trait |
 | [Detection Functions](./discovery.md) | App, color, underline, multiplex detection |
 | [OS & Environment](./os-environment.md) | OS, distro, CI, fonts, locale |
 | [Escape Codes](./escape-codes.md) | Strip, analyze, visual width calculation |
 | [Styling](./styling.md) | Terminal-aware styling, Prose component, TextBlock |
-| [bt Command](./cli.md) | CLI tool: 16 commands for inspection, diagrams, text, and filesystem |
+| [bt Command](./cli.md) | CLI tool: 17 commands for inspection, diagrams, text, and filesystem |
 
 ## Common Patterns
 
@@ -63,14 +63,29 @@ match term.image_support {
 ### Mermaid Diagram
 
 ```rust
-use biscuit_terminal::components::mermaid::MermaidRenderer;
+use biscuit_terminal::components::mermaid::MermaidDiagram;
+use biscuit_terminal::terminal::Terminal;
 
-let renderer = MermaidRenderer::for_terminal("flowchart LR\n    A --> B");
-if let Err(err) = renderer.render_for_terminal() {
+let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+let term = Terminal::new();
+
+if let Err(err) = diagram.try_render(&term) {
     eprintln!("Diagram render failed: {err}");
     // Optional app-level fallback if you want textual output:
-    println!("{}", renderer.fallback_code_block());
+    println!("{}", diagram.fallback_code_block());
 }
+```
+
+### Graph Diagram
+
+```rust
+use biscuit_terminal::components::graph_expression::{
+    GraphExpression, GraphInputSyntax, GraphOrientation,
+};
+
+let graph = GraphExpression::for_terminal("a -> b -> c", GraphInputSyntax::Auto)?
+    .with_orientation(GraphOrientation::LeftToRight)
+    .with_title("Example graph");
 ```
 
 ### Light/Dark Adaptation
@@ -137,7 +152,8 @@ bt graph-expression --syntax dot "digraph { A -> B; }"  # DOT syntax
 
 Diagram options: `--example`, `--width`, `--inverse`, `--title`, `--json`, `--meta`
 Bar/line chart extras: `--horizontal`, `--show-data-label`, `--aspect-ratio`
-Graph extras: `--syntax` (arrow, dash, dot), `--orientation` (left-to-right, top-to-bottom)
+Graph extras: `--syntax` (auto, expression, dot), `--orientation` (left-to-right, top-to-bottom)
+Graph note: mixed `->` and `--` expression syntax is rejected; use separate graphs instead.
 
 ## Module Structure
 
@@ -171,8 +187,8 @@ biscuit_terminal/
 │   ├── filesystem.rs     # File/directory tree rendering
 │   ├── terminal_image.rs # Image (Kitty/iTerm2 protocols)
 │   ├── image_options.rs  # Policy options/helpers (app-enforced)
-│   ├── mermaid.rs        # Diagram rendering
-│   └── mermaid_cache.rs  # Content-hashed diagram cache
+│   ├── mermaid.rs        # Terminal-facing Mermaid adapter
+│   └── graph_expression.rs # Terminal-facing graph adapter
 └── utils/
     ├── layout.rs         # Layout, Margin, WordWrap, Alignment
     ├── color.rs          # Color, BasicColor, RgbColor, WebColor, Tailwind, HdrColor
@@ -188,7 +204,7 @@ biscuit_terminal/
 ## Key Dependencies
 
 - `sniff` - Git/repo/monorepo detection used by `Terminal::new()`
-- `biscuit-visualized` - Mermaid and graph rendering (pure Rust, no external dependencies)
+- `biscuit-visualized` - Owns Mermaid and graph artifact generation, theming, rasterization, and caching
 
 ## Resources
 
