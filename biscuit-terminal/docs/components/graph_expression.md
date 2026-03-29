@@ -14,6 +14,11 @@ let graph = GraphExpression::for_terminal("a -> b -> c", GraphInputSyntax::Auto)
 let term = Terminal::new();
 println!("{}", graph.render(&term));
 
+match graph.try_render(&term) {
+    Ok(result) => eprintln!("Rendered {}", result.png_path.display()),
+    Err(err) => eprintln!("Render failed: {err}"),
+}
+
 // With orientation and title
 let graph = GraphExpression::for_terminal("a -> b -> c", GraphInputSyntax::Auto)?
     .with_orientation(GraphOrientation::LeftToRight)
@@ -30,8 +35,10 @@ let graph = GraphExpression::for_terminal("a -> b\nb -> c", GraphInputSyntax::Au
 | Method | Description |
 |--------|-------------|
 | `GraphExpression::for_terminal(source, syntax)` | Parse and create a graph (fallible) |
+| `GraphExpression::inverted_for_terminal(source, syntax)` | Use the opposite terminal theme with an opaque surface |
 | `.with_orientation(GraphOrientation)` | Set layout direction (LR, TB, etc.) |
 | `.with_title(str)` | Add a diagram title |
+| `.try_render(&Terminal)` | Fallible render returning `GraphRenderResult` |
 | `.left_margin(Margin)` | Set left margin |
 
 ### Input Syntaxes
@@ -48,7 +55,8 @@ Exposed via `bt graph-expression`:
 
 ```bash
 bt graph-expression "a -> b -> c"
-bt graph-expression "a -> b\nb -> c" --orientation lr
+bt graph-expression --orientation left-to-right "a -> b\nb -> c"
+bt graph-expression --meta "a -> b -> c"
 ```
 
 Layout args are supported: `--margin-left`, `--width`, `--alignment`, etc.

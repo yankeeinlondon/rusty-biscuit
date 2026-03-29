@@ -20,7 +20,8 @@ println!("{}", diagram.display(&term));
 match diagram.try_render(&term) {
     Ok(result) => {
         print!("{}", result.output);
-        eprintln!("Rendered in {}ms", result.render_time_ms);
+        eprintln!("PNG: {}", result.png_path.display());
+        eprintln!("Cache hit: {}", result.cache_hit);
     }
     Err(e) => eprintln!("Render failed: {}", e),
 }
