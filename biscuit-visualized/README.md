@@ -1,6 +1,6 @@
 # Biscuit Visualized
 
-`biscuit-visualized` is the visualization backend for the terminal and markdown tooling in this monorepo. It renders diagrams in pure Rust and caches generated artifacts in the OS temp directory.
+`biscuit-visualized` is the visualization backend for the terminal and markdown tooling in this monorepo. It renders Mermaid and graph artifacts in pure Rust and caches generated SVG/PNG outputs in the OS temp directory.
 
 ## Capabilities
 
@@ -9,7 +9,7 @@
 3. SVG and PNG artifact generation
 4. Content-addressed file caching via `biscuit-hash`
 
-This crate is library-only. For terminal display, use the `bt` CLI from [`biscuit-terminal`](../biscuit-terminal/).
+This crate is library-only. It owns visualization generation, not terminal display. For terminal rendering, use `biscuit-terminal`'s `MermaidDiagram` and `GraphExpression` adapters or the `bt` CLI from [`biscuit-terminal`](../biscuit-terminal/).
 
 ## Modules
 
@@ -34,6 +34,8 @@ println!("{}", artifact.path.display());
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+`biscuit-visualized` only generates the artifact. Width selection, terminal image protocols, render metadata display, and fallback-to-code-block behavior live in `biscuit-terminal`.
+
 ## Graph Example
 
 ```rust,no_run
@@ -51,6 +53,17 @@ let artifact = graph.render(&RenderRequest {
 })?;
 
 println!("{}", artifact.path.display());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Graph diagrams also support explicit theming before rendering:
+
+```rust,no_run
+use biscuit_visualized::graph::{GraphColorTheme, GraphDiagram, GraphInputSyntax};
+
+let graph = GraphDiagram::parse("a -> b -> c", GraphInputSyntax::Auto)?
+    .with_color_theme(GraphColorTheme::dark())
+    .with_title("Dark graph");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
@@ -74,6 +87,8 @@ let graph = GraphBuilder::directed()
 - Undirected expression syntax: `a -- b -- c`
 - DOT: `digraph { A -> B; B -> C; }`
 
+Mixed directed and undirected expression syntax is not supported in a single parsed expression.
+
 Graph orientation support currently matches `layout-rs`:
 
 - `top-to-bottom`
@@ -85,6 +100,7 @@ Graph orientation support currently matches `layout-rs`:
 bt graph-expression --example
 bt graph-expression "a -> b -> c"
 bt graph-expression --syntax dot "digraph { A -> B; B -> C; }"
+bt graph-expression --meta "a -> b"
 bt flowchart --example
 bt quadrant --example
 ```
