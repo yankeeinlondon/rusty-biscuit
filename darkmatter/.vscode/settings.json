@@ -42,5 +42,25 @@
         "vgremove",
         "wipefs",
         "ying"
-    ]
+    ],
+    "[markdown]": {
+        "editor.unicodeHighlight.ambiguousCharacters": false,
+        "editor.unicodeHighlight.invisibleCharacters": false,
+        "diffEditor.ignoreTrimWhitespace": false,
+        "editor.quickSuggestions": {
+            "comments": "off",
+            "strings": "off",
+            "other": "off"
+        },
+        "togglequotes.chars": [
+            "\"",
+            "'",
+            "`"
+        ],
+        "cSpell.fixSpellingWithRenameProvider": true,
+        "cSpell.advanced.feature.useReferenceProviderWithRename": true,
+        "cSpell.advanced.feature.useReferenceProviderRemove": "/^#+\\s/",
+        "editor.wordWrapColumn": 300,
+        "editor.wordWrap": "bounded"
+    },
 }
