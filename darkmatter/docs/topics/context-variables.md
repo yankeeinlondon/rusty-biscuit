@@ -2,169 +2,212 @@
 
 Context variables are variables which Darkmatter provides to the **Interpolation** process as a key/value dictionary under the name of `ctx`.
 
-- it is recommended that document authors not use the `ctx` frontmatter variable because of the namespace collision it causes
-- However, when composing a document with `md compose` if the document DOES have a `ctx` property defined then we will merge the two dictionaries; the Darkmatter's values will take president over the page's when `ctx` keys overlap
-- we will report to STDERR this event using the `Status` struct (from `biscuit-terminal`) using the "warning" state and a message of:
-    - `the document <a href={absolute-filepath}><blue-500>{relative-filepath}</blue-500></a> is using the <inverse>ctx</inverse> property; results were merged with <b>Darkmatter</b>'s <inverse>ctx</inverse> information (<dim><i>all keys were preserved</i></dim>).`
-    - `the document <a href={absolute-filepath}><blue-500>{relative-filepath}</blue-500></a> is using the <inverse>ctx</inverse> property; results were merged with <b>Darkmatter</b>'s <inverse>ctx</inverse> information (<dim><i>document keys were overwritten</i></dim>).`
+- It is recommended that document authors not use the `ctx` frontmatter variable because of the namespace collision it causes
+- However, when composing a document with `md compose`, if the document DOES have a `ctx` property defined then we will merge the two dictionaries; Darkmatter's runtime values take precedence over the page's when `ctx` keys overlap
+- We will report to STDERR this event as a warning with a message of:
 
-    The status message shown (from above) depends on whether there was a key collision or not.
-- if there is a `ctx` property defined on the page that is _not_ a dictionary then we will:
-    - by default we'll return an error to STDOUT using the `Status` struct and stop composition returning an error exit code:
-        - ``
-    - if the user uses the `--allow-ctx-override` CLI switch when composing a document we will change the error above to a warning and proceed with the composition
+    - `Document defines ctx keys that collide with runtime context; runtime values take precedence` (when key collisions occur)
+    - No warning when merge succeeds without collisions
 
+- If there is a `ctx` property defined on the page that is _not_ a dictionary then we will:
+
+    - By default return an error and stop composition
+    - If the user uses the `--allow-ctx-override` CLI switch, downgrade to a warning and proceed with composition using the runtime context
 
 ## Timing in Compose
 
-When composing a document graph, we should only calculate the context once and use it across the full graph of documents. 
+When composing a document graph, we calculate the context once and reuse it across the full graph of documents.
 
-- this is more efficient
-- it also ensures that we have the same date/time info throughout the composed document
+- This is more efficient
+- It also ensures that we have the same date/time info throughout the composed document
+
+## CWD in Compose
+
+Some of the information provided in the context is based on the current working directory (process CWD, not the input file location).
 
 ## Information Provided
 
-We will now provide a grouped overview of all the information stored in **Darkmatter**'s `ctx` variable:
+We will now provide a grouped overview of all the information stored in Darkmatter's `ctx` variable:
 
-> **Note:** all date and time related information is reporting using _local_ time but there will be a `_utc` variant that provides the same utility only uses UTC time to resolve.
+> **Note:** all date and time related information is reported using _local_ time but there will be a `_utc` variant that provides the same utility only using UTC time to resolve.
 
 ### Date
 
-- `today` 
-    - provides an ISO Date string for the date when this was rendered (`YYYY-MM-DD` format); uses local time to calculate the date
-    - has `today_utc` variant
-- `yesterday`
-    - provides an ISO Date string for yesterday's date (`YYYY-MM-DD` format); uses local time to calculate the date
-    - has `yesterday_utc` variant
-- `tomorrow`
-    - provides an ISO Date string for tomorrow's date (`YYYY-MM-DD` format); uses local time to calculate the date
-    - has `tomorrow_utc` variant
-- `start_of_week_sun`
-    - provides the date (`YYYY-MM-DD`) for the start of the given week (based on the week starting on Sunday)
-    - has `start_of_week_sun_utc` variant
-- `start_of_week_mon`
-    - provides the date (`YYYY-MM-DD`) for the start of the given week (based on the week starting on Monday)
-    - has `start_of_week_mon_utc` variant
-- `end_of_week_sun`
-    - provides the date (`YYYY-MM-DD`) for the end of the given week (based on the week ending on Sunday)
-    - has `end_of_week_sun_utc` variant
-- `end_of_week_mon`
-    - provides the date (`YYYY-MM-DD`) for the end of the given week (based on the week ending on Monday)
-    - has `end_of_week_mon_utc` variant
+| Variable                | Type     | Description                                 |
+|-------------------------|----------|---------------------------------------------|
+| `today`                 | `String` | ISO Date string (`YYYY-MM-DD`), local time  |
+| `today_utc`             | `String` | ISO Date string (`YYYY-MM-DD`), UTC         |
+| `yesterday`             | `String` | Yesterday's date (`YYYY-MM-DD`), local time |
+| `yesterday_utc`         | `String` | Yesterday's date (`YYYY-MM-DD`), UTC        |
+| `tomorrow`              | `String` | Tomorrow's date (`YYYY-MM-DD`), local time  |
+| `tomorrow_utc`          | `String` | Tomorrow's date (`YYYY-MM-DD`), UTC         |
+| `start_of_week_sun`     | `String` | Start of week (Sunday), `YYYY-MM-DD`        |
+| `start_of_week_sun_utc` | `String` | Start of week (Sunday), UTC                 |
+| `start_of_week_mon`     | `String` | Start of week (Monday), `YYYY-MM-DD`        |
+| `start_of_week_mon_utc` | `String` | Start of week (Monday), UTC                 |
+| `end_of_week_sun`       | `String` | End of week (Saturday), `YYYY-MM-DD`        |
+| `end_of_week_sun_utc`   | `String` | End of week (Saturday), UTC                 |
+| `end_of_week_mon`       | `String` | End of week (Sunday), `YYYY-MM-DD`          |
+| `end_of_week_mon_utc`   | `String` | End of week (Sunday), UTC                   |
 
 ### Date and Time
 
-- `now` - provides an ISO Datetime string for the host's locale (`YYYY-MM-DD hh:mm:ss.xxxT...`)
-- `now_utc` - provides an ISO Datetime string for the UTC time when this was rendered (`YYYY-MM-DD hh:mm:ss.xxxTZ`)
+| Variable  | Type     | Description                                                |
+|-----------|----------|------------------------------------------------------------|
+| `now`     | `String` | ISO Datetime string for local time (`YYYY-MM-DDThh:mm:ss`) |
+| `now_utc` | `String` | ISO Datetime string for UTC (`YYYY-MM-DDThh:mm:ssZ`)       |
+| `utc`     | `String` | **Alias** for `now_utc` (backward compatibility)           |
 
-## Time
+### Time
 
-- `time` - provides time in a `hh:mm a` format (e.g., `12:43 am`, `1:15 pm`, etc.)
-- `time_military` - provides time based on a 24 hour clock format (e.g., `22:30`, `9:45`, etc.)
+| Variable          | Type     | Description                                     |
+|-------------------|----------|-------------------------------------------------|
+| `time`            | `String` | Time in `hh:mm AM/PM` format (e.g., `12:43 PM`) |
+| `time_military`   | `String` | Time in 24-hour format (e.g., `22:30`)          |
+| `timezone`        | `String` | Timezone abbreviation (e.g., `PDT`, `UTC`)      |
+| `timezone_offset` | `String` | UTC offset (e.g., `-0700`)                      |
 
 ### Calendar
 
-- `day` (NOTE: this used to be `dow`) 
-    - the day of the week (e.g., Monday, Tuesday, etc.)
-    - has `day_utc` variant
-- `day_abbr`
-    - an abbreviation for the day of the week (e.g., Mon, Tue, etc.)
-    - has `day_abbr_utc` variant
-- `year`
-    - Shows the current year, based on local time
-    - has `year_utc` variant
-- `day_of_month` - the numeric value for the day of the month
-- `day_of_month_suffixed` - the numeric value for the day of the month plus the appropriate suffix (1st, 2nd, 3rd, etc.)
-- `month` - the numeric value for today's month
-- `month_name` - the name for today's month (e.g., January, February, etc.)
-- `month_name_abbr` - an abbreviated name for today's month (e.
-- `season` - provides appropriate value in `Season` enumeration of `["Summer", "Spring", "Fall", "Winter"]
+| Variable                | Type     | Description                                         |
+|-------------------------|----------|-----------------------------------------------------|
+| `day`                   | `String` | Day of the week (e.g., Monday, Tuesday)             |
+| `dow`                   | `String` | **Alias** for `day` (backward compatibility)        |
+| `day_abbr`              | `String` | Abbreviated day (e.g., Mon, Tue)                    |
+| `dow_abbr`              | `String` | **Alias** for `day_abbr` (backward compatibility)   |
+| `day_utc`               | `String` | Day of the week, UTC                                |
+| `day_abbr_utc`          | `String` | Abbreviated day, UTC                                |
+| `year`                  | `String` | Four-digit year, local time                         |
+| `year_utc`              | `String` | Four-digit year, UTC                                |
+| `day_of_month`          | `String` | Numeric day of month                                |
+| `day_of_month_suffixed` | `String` | Day with ordinal suffix (1st, 2nd, 3rd, etc.)       |
+| `month`                 | `String` | Two-digit month (01-12)                             |
+| `month_name`            | `String` | Full month name (e.g., January)                     |
+| `month_name_abbr`       | `String` | Abbreviated month name (e.g., Jan)                  |
+| `season`                | `String` | Meteorological season: Spring, Summer, Fall, Winter |
 
 ### Timestamps
 
-- `timestamp`
-    - provides an EPOCH timestamp in seconds
-- `timestamp_ms`
-    - provides an EPOCH timestamp in milliseconds
+| Variable       | Type     | Description                     |
+|----------------|----------|---------------------------------|
+| `timestamp`    | `Number` | EPOCH timestamp in seconds      |
+| `timestamp_ms` | `Number` | EPOCH timestamp in milliseconds |
 
 ### Filesystem and Git
 
-> **Note:** most if not all of the discovery in this section leverages the `sniff` library
-> **Note:** rendering of markdown unordered lists will leverage `biscuit-terminal`'s `UnorderedList` component
+> **Note:** most discovery in this section leverages the `sniff` library
 
-- `repo`
-    - provides the name of the current repo (based on where `md compose` is run from)
-    - null if not in a repo
-- `is_monorepo`
-    - provides a boolean expressing whether the current repo is a monorepo
-- `packages`
-    - provides a list of _packages_ for the current repo 
-    - null if not a monorepo
-    - null if not in a repo
-- `package_areas`
-    - provides a list of _packages areas_ for the current repo 
-    - null if not a monorepo
-    - null if not in a repo
-- `current_package`
-    - always returns `null` if not a monorepo or not in a repo at all
-    - returns `null` if in a monorepo but _not_ in a package's directory tree
-    - provides the name of the current package (based on where `md compose` is run from)
-- `current_package_area`
-    - always returns `null` if not a monorepo or not in a repo at all
-    - returns `null` if in a monorepo but _not_ in a package area's directory tree
-    - provides the name of the current package area (based on where `md compose` is run from)
+| Variable               | Type              | Description                                                                        |
+|------------------------|-------------------|------------------------------------------------------------------------------------|
+| `repo`                 | `String \| null`   | Repository name; null if not in a git repo                                         |
+| `repo_root`            | `String \| null`   | Absolute path to repo root; null if not in a git repo                              |
+| `is_monorepo`          | `bool`            | Whether the repo is a monorepo; false if not in a repo                             |
+| `package_root`         | `String \| null`   | Absolute path to current package root; null if not monorepo or not in a package    |
+| `package_area_root`    | `String \| null`   | Absolute path to current package area root; null if not monorepo or not in an area |
+| `packages`             | `[String] \| null` | List of package names; null if not a monorepo                                      |
+| `package_areas`        | `[String] \| null` | List of unique package areas; null if not a monorepo                               |
+| `current_package`      | `String \| null`   | Current package name; null if not in a monorepo package                            |
+| `current_package_area` | `String \| null`   | Current package area; null if not in a monorepo area                               |
 
-- `dirty_files`
-    - provides a comma separated list of files that are "dirty" (aka, have changed since last commit or are untracked)
-- `dirty_files_list`
-    - provides a list of files that are "dirty" (aka, have changed since last commit or are untracked) as a Markdown Unordered List
-- `dirty_source_code_files`
-    - provides a comma separated list of source code files that are "dirty" (aka, have changed since last commit or are untracked)
-- `dirty_source_code_files_list`
-    - provides a list of source code files that are "dirty" (aka, have changed since last commit or are untracked) as a Markdown Unordered List
-- `staged_files`
-    - provides a comma separated list of files that are _staged_ to be committed
-- `staged_files_list`
-    - provides a list of files that are _staged_ to be committed as a Markdown unordered list
-- `untracked_files`
-    - provides a comma separated list of files that are _untracked_ to be committed
-- `untracked_files_list`
-    - provides a list of files that are _untracked_ to be committed as a Markdown unordered list
+#### Changed Files
 
-- `dirty_packages`
-    - provides a comma separated list of packages that are "dirty" (aka, have changes since last commit)
-- `dirty_packages_list`
-    - provides a list of packages that are "dirty" (aka, have changes since last commit) as a Markdown Unordered List
+| Variable                       | Type     | Description                                      |
+|--------------------------------|----------|--------------------------------------------------|
+| `dirty_files`                  | `String` | Comma-separated dirty file paths (empty if none) |
+| `dirty_files_list`             | `String` | Markdown bullet list of dirty files              |
+| `dirty_source_code_files`      | `String` | Comma-separated dirty source code file paths     |
+| `dirty_source_code_files_list` | `String` | Markdown bullet list of dirty source code files  |
+| `staged_files`                 | `String` | Comma-separated staged file paths                |
+| `staged_files_list`            | `String` | Markdown bullet list of staged files             |
+| `untracked_files`              | `String` | Comma-separated untracked file paths             |
+| `untracked_files_list`         | `String` | Markdown bullet list of untracked files          |
 
-- `dirty_package_areas`
-    - provides a comma separated list of package areas that are "dirty" (aka, have changes since last commit)
-- `dirty_package_areas_list`
-    - provides a list of package areas that are "dirty" (aka, have changes since last commit) as a Markdown Unordered List
+#### Package-Level Changes
 
-- `staged_packages`
-    - provides a comma separated list of packages that are "dirty" (aka, have changes since last commit)
-- `staged_packages_list`
-    - provides a list of packages that are "dirty" (aka, have changes since last commit) as a Markdown Unordered List
+| Variable                                | Type     | Description                                   |
+|-----------------------------------------|----------|-----------------------------------------------|
+| `dirty_packages`                        | `String` | Comma-separated dirty package names           |
+| `dirty_packages_list`                   | `String` | Markdown bullet list of dirty packages        |
+| `dirty_package_areas`                   | `String` | Comma-separated dirty package area names      |
+| `dirty_package_areas_list`              | `String` | Markdown bullet list of dirty package areas   |
+| `staged_packages`                       | `String` | Comma-separated staged package names          |
+| `staged_packages_list`                  | `String` | Markdown bullet list of staged packages       |
+| `staged_package_areas`                  | `String` | Comma-separated staged package area names     |
+| `staged_package_areas_list`             | `String` | Markdown bullet list of staged package areas  |
+| `current_package_has_staged_files`      | `bool`   | Whether current package has staged files      |
+| `current_package_area_has_staged_files` | `bool`   | Whether current package area has staged files |
+| `current_package_has_dirty_files`       | `bool`   | Whether current package has dirty files       |
+| `current_package_area_has_dirty_files`  | `bool`   | Whether current package area has dirty files  |
 
-- `staged_package_areas`
-    - provides a comma separated list of package areas that have "staged" files (aka, have changes since last commit)
-- `staged_package_areas_list`
-    - provides a list of package areas that have "staged" files (aka, have changes since last commit) as a Markdown Unordered List
+### Programming Language
 
-- `current_package_has_staged_files`
-    - boolean flag which indicates whether the current package has staged files
-    - always false if not monorepo or not in a repo
-    - always false if CWD is not in a package directory tree
-- `current_package_area_has_staged_files`
-    - boolean flag which indicates whether the current package area has staged files
-    - always false if not monorepo or not in a repo
-    - always false if CWD is not in a package area directory tree
+| Variable                        | Type            | Description                                                                 |
+|---------------------------------|-----------------|-----------------------------------------------------------------------------|
+| `programming_languages_in_repo` | `String \| null` | Comma-separated unique languages across all packages; null if not in a repo |
+| `programming_language`          | `String \| null` | Context-sensitive primary language (see rules below); null if not in a repo |
+| `package_manager`               | `String \| null` | Context-sensitive package manager (see rules below); null if not in a repo  |
 
-- `current_package_has_dirty_files`
-    - boolean flag which indicates whether the current package has dirty files
-    - always false if not monorepo or not in a repo
-    - always false if CWD is not in a package directory tree
-- `current_package_area_has_dirty_files`
-    - boolean flag which indicates whether the current package area has dirty files
-    - always false if not monorepo or not in a repo
-    - always false if CWD is not in a package area directory tree
+**`programming_language` rules:**
+
+- Not in a repo: null
+- In monorepo + in a package: that package's primary language
+- In monorepo + in a package area: comma-separated unique primary languages across packages in that area
+- Not in monorepo: repo's primary language
+
+**`package_manager` rules:**
+
+- Not in a repo: null
+- In monorepo + in package: that package's package manager
+- In monorepo + in package area: single answer if all packages agree, else null
+- Not in monorepo: detected package manager
+
+### Documents
+
+| Variable            | Type            | Description                                                          |
+|---------------------|-----------------|----------------------------------------------------------------------|
+| `docs_readme`       | `String`        | Comma-separated README paths, scope-filtered                         |
+| `docs_blast_radius` | `String`        | Comma-separated docs with `blast_radius` frontmatter, scope-filtered |
+| `docs_drift`        | `String`        | Comma-separated docs at risk of drift from source changes            |
+| `docs_skill`        | `String \| null` | Repo-relative path to best matching SKILL.md; null if none found     |
+
+**Scope filtering** (for monorepos):
+
+- In a package: filter to that package
+- In a package area: filter to packages in that area
+- Otherwise: repo-wide
+
+**`docs_drift` algorithm:** Intersects dirty source code files with markdown docs that have `blast_radius` metadata matching those files.
+
+**`docs_skill` discovery:** Scans `{repo_root}/.claude/skills/*/SKILL.md` and `{repo_root}/.agents/skills/*/SKILL.md`, preferring skills whose directory name matches the current package, area, or repo name.
+
+### Operating System
+
+| Variable             | Type            | Description                                                   |
+|----------------------|-----------------|---------------------------------------------------------------|
+| `os`                 | `String \| null` | `"Windows"`, `"macOS"`, or `"Linux"`; null for other OS types |
+| `os_distro`          | `String`        | Linux distribution name; empty string on macOS/Windows        |
+| `os_package_manager` | `String \| null` | Primary system package manager; null if not detected          |
+| `os_version`         | `String`        | Operating system version                                      |
+
+### Hardware
+
+| Variable       | Type            | Description                                                |
+|----------------|-----------------|------------------------------------------------------------|
+| `memory_total` | `Number`        | Total system memory in bytes                               |
+| `memory_used`  | `Number`        | Percentage of memory currently used                        |
+| `memory_avail` | `Number`        | Available memory in bytes                                  |
+| `cpu_cores`    | `Number`        | Number of logical CPU cores                                |
+| `cpu_arch`     | `String`        | CPU architecture (e.g., `aarch64`, `x86_64`)               |
+| `gpu`          | `String \| null` | GPU device name(s), comma-separated; null if none detected |
+
+## Compatibility Aliases
+
+These aliases exist for backward compatibility:
+
+| Legacy Name | Canonical Name |
+|-------------|----------------|
+| `utc`       | `now_utc`      |
+| `dow`       | `day`          |
+| `dow_abbr`  | `day_abbr`     |
+
+Both the legacy name and canonical name are present in the context and return the same value.

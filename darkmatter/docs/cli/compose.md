@@ -52,6 +52,11 @@ md compose doc.md --show
 - `--allow-missing-image-refs`: allow broken image reference targets; same behavior as above for images.
 - `--allow-missing-transclusions`: allow missing transclusion targets; the directive is removed from the output and issues are reported on stderr with exit code 0.
 - `--allow-any-missing-reference`: combines all `--allow-missing-*` flags.
+- `--allow-ctx-override`: allow non-object `ctx` frontmatter. By default, a document that defines `ctx` as a non-object (e.g., a string or array) causes a hard error. This flag downgrades the error to a warning, and the runtime context is used instead.
+
+### Compose Warnings
+
+Compose warnings (context merge collisions, partial runtime capture failures, etc.) are printed to stderr after the composed content is written to stdout.
 
 ### Output Behavior
 
