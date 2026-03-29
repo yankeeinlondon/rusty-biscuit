@@ -7,7 +7,7 @@ blast_radius:
   - sniff/lib/src/filesystem/git.rs
 ---
 
-# The `sniff repo repo-root` Subcommand
+# The `sniff repo root` Subcommand
 
 Outputs the absolute path to the root of the git repository. Exits with code 1 if the current directory is not inside a git repository.
 
@@ -36,17 +36,17 @@ This subcommand takes no positional arguments. The global `-b/--base <DIR>` flag
 
 ```bash
 # From anywhere in the monorepo
-sniff repo repo-root
+sniff repo root
 # → /Users/ken/projects/rusty-biscuit
 
 # From a deeply nested directory
 cd sniff/cli/src/output/
-sniff repo repo-root
+sniff repo root
 # → /Users/ken/projects/rusty-biscuit
 
 # From inside a worktree
 cd /Users/ken/.claudine/worktrees/feat-sniff-tuning/
-sniff repo repo-root
+sniff repo root
 # → /Users/ken/projects/rusty-biscuit (the base repo root)
 ```
 
@@ -54,10 +54,10 @@ sniff repo repo-root
 
 ```bash
 # Navigate to repo root from any location
-cd "$(sniff repo repo-root)"
+cd "$(sniff repo root)"
 
 # Set REPO_ROOT for use in scripts
-REPO_ROOT=$(sniff repo repo-root)
+REPO_ROOT=$(sniff repo root)
 echo "Repo root: $REPO_ROOT"
 ```
 
@@ -67,4 +67,4 @@ echo "Repo root: $REPO_ROOT"
 |------------|---------|
 | [`package-root`](./repo_package-root.md) | Absolute path to current package root |
 | [`package-area-root`](./repo_package-area-root.md) | Absolute path to current area root |
-| `repo-root` | Absolute path to repository root |
+| `root` | Absolute path to repository root |

@@ -70,4 +70,4 @@ cd "$(sniff repo package-area-root)" && just test
 | [`package-area`](./repo_package-area.md) | Area name |
 | [`package-root`](./repo_package-root.md) | Absolute path to package root |
 | `package-area-root` | Absolute path to area root |
-| [`repo-root`](./repo_repo-root.md) | Absolute path to repository root |
+| [`root`](./repo_repo-root.md) | Absolute path to repository root |
