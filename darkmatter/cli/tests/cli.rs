@@ -511,6 +511,48 @@ fn test_compose_set_requires_json_object() {
 }
 
 // =============================================================================
+//                      CTX OVERRIDE BEHAVIOR TESTS
+// =============================================================================
+
+#[test]
+fn test_compose_scalar_ctx_without_allow_override_fails() {
+    // A document with scalar ctx should fail by default
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin("---\nctx: hello\n---\n# Test {{ ctx.today }}")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("must be a JSON object"));
+}
+
+#[test]
+fn test_compose_scalar_ctx_with_allow_override_succeeds() {
+    // --allow-ctx-override downgrades the error to a warning
+    md_cmd()
+        .args(["compose", "-", "--allow-ctx-override"])
+        .write_stdin("---\nctx: hello\n---\n# Test")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "warning[context]: Document ctx was not an object",
+        ));
+}
+
+#[test]
+fn test_compose_object_ctx_collision_emits_warning() {
+    // A document with an object ctx that collides with runtime keys should
+    // succeed but emit a collision warning on stderr.
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin("---\nctx:\n  today: custom-value\n---\n# Test")
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "warning[context]: Document defines ctx keys that collide with runtime context",
+        ));
+}
+
+// =============================================================================
 //                          HASH SUBCOMMAND TESTS
 // =============================================================================
 
