@@ -388,7 +388,7 @@ impl LiveStreamSink {
                 session_id,
                 self.model.as_deref(),
             );
-            eprintln!("{line}\n");
+            eprintln!("{line}");
             self.start_emitted = true;
         }
     }

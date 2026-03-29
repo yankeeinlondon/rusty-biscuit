@@ -509,7 +509,6 @@ pub(crate) fn execute_composition_request(
         }
 
         // Composed prompt block: always shown unless --silent.
-        log::message("");
         crate::output::log_compose_prompt(
             &request.prepared.prompt,
             verbose_requested,

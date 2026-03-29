@@ -121,26 +121,28 @@ pub(crate) fn log_wrapper_header(
 /// In verbose mode the entire prompt is shown. Otherwise the first 10 lines
 /// are rendered with a truncation notice.
 pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
+    use biscuit_terminal::utils::color::{Color, Tailwind};
+
     log::message(&Prose::new("<bold>Prompt:</bold>").render(term));
 
-    if verbose {
-        let block = BlockQuote::from(prompt);
-        log::message(&block.render(term));
+    let display_text = if verbose {
+        prompt.to_string()
     } else {
         let lines: Vec<&str> = prompt.lines().collect();
-        let truncated: String = lines.iter().take(10).copied().collect::<Vec<_>>().join("\n");
-        let block = BlockQuote::from(truncated.as_str());
-        log::message(&block.render(term));
+        lines.iter().take(10).copied().collect::<Vec<_>>().join("\n")
+    };
 
-        if lines.len() > 10 {
-            log::message("");
-            log::message(
-                &Prose::new(
-                    "<dim><i>remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</i></dim>",
-                )
-                .render(term),
-            );
-        }
+    let block = BlockQuote::from(Prose::new(format!("<dim>{}</dim>", display_text.replace('<', "\\<"))))
+        .with_left_block_color(Color::Tailwind(Tailwind::Green500));
+    log::message(&block.render(term));
+
+    if !verbose && prompt.lines().count() > 10 {
+        let items = vec![RenderableContent::from(Prose::new(
+            "<dim><i>Remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</i></dim>",
+        ))];
+        log::message(
+            &UnorderedList::from(items).render(term),
+        );
     }
 }
 
@@ -567,10 +569,11 @@ pub(crate) fn format_session_start(
     } else {
         String::new()
     };
-    Prose::new(format!(
-        "<dim>- <i>{name}</i> session ID </dim>{short_id}<dim>{model_part}</dim>"
-    ))
-    .render(&crate::log::terminal())
+    let term = crate::log::terminal();
+    let items = vec![RenderableContent::from(Prose::new(format!(
+        "<i>{name}</i><dim> session ID </dim>{short_id}<dim>{model_part}</dim>"
+    )))];
+    UnorderedList::from(items).render(&term)
 }
 
 /// Render assistant terminal text through `Prose` so wrapping and styling are terminal-aware.
