@@ -724,9 +724,11 @@ impl ComposeOptions {
         self
     }
 
-    /// Creates options with a specific context (for testing).
-    #[cfg(test)]
-    pub(crate) fn with_context(mut self, context: ComposeContext) -> Self {
+    /// Replaces the captured runtime context.
+    ///
+    /// Use this to share a single captured context between validation
+    /// and compose, avoiding redundant capture work.
+    pub fn with_context(mut self, context: ComposeContext) -> Self {
         self.context = context;
         self
     }
@@ -814,52 +816,72 @@ impl Default for TransclusionOptions {
 /// ensuring consistent values throughout the compose pipeline even
 /// if the compose takes significant time.
 ///
+/// Backed by `Arc` for cheap cloning across transclusion graphs.
 /// The `values` map is the canonical backing store for all context variables.
 /// Legacy public fields are kept for backward compatibility but are also
 /// mirrored in the `values` map.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ComposeContext {
-    /// ISO 8601 local datetime (e.g., "2024-01-15T14:30:00").
-    pub now: String,
+    inner: std::sync::Arc<ComposeContextInner>,
+}
 
-    /// ISO 8601 UTC datetime (e.g., "2024-01-15T22:30:00Z").
-    pub utc: String,
-
-    /// Local date in YYYY-MM-DD format.
-    pub today: String,
-
-    /// Yesterday's date in YYYY-MM-DD format.
-    pub yesterday: String,
-
-    /// Tomorrow's date in YYYY-MM-DD format.
-    pub tomorrow: String,
-
-    /// Full day of week name (e.g., "Monday").
-    pub dow: String,
-
-    /// Abbreviated day of week (e.g., "Mon").
-    pub dow_abbr: String,
-
-    /// Four-digit year as string.
-    pub year: String,
-
-    /// Two-digit month as string (01-12).
-    pub month: String,
-
-    /// Full month name (e.g., "January").
-    pub month_name: String,
-
-    /// Abbreviated month name (e.g., "Jan").
-    pub month_name_abbr: String,
-
-    /// Environment variables snapshot.
-    pub env: HashMap<String, String>,
-
-    /// Full context values map (backing store for all ctx variables).
-    pub(crate) values: serde_json::Map<String, serde_json::Value>,
-
-    /// Diagnostics from runtime capture (partial failures, etc.).
+/// Inner storage for ComposeContext, shared via Arc.
+#[derive(Debug, Clone)]
+struct ComposeContextInner {
+    now: String,
+    utc: String,
+    today: String,
+    yesterday: String,
+    tomorrow: String,
+    dow: String,
+    dow_abbr: String,
+    year: String,
+    month: String,
+    month_name: String,
+    month_name_abbr: String,
+    env: HashMap<String, String>,
+    values: serde_json::Map<String, serde_json::Value>,
     capture_diagnostics: Vec<super::context::ContextMergeDiagnostic>,
+}
+
+impl PartialEq for ComposeContext {
+    fn eq(&self, other: &Self) -> bool {
+        // Same Arc instance = equal; otherwise compare values
+        std::sync::Arc::ptr_eq(&self.inner, &other.inner)
+            || self.inner.values == other.inner.values
+    }
+}
+
+impl Eq for ComposeContext {}
+
+// Legacy public field accessors (backward compatible)
+impl ComposeContext {
+    /// ISO 8601 local datetime.
+    pub fn now(&self) -> &str { &self.inner.now }
+    /// ISO 8601 UTC datetime.
+    pub fn utc(&self) -> &str { &self.inner.utc }
+    /// Local date YYYY-MM-DD.
+    pub fn today(&self) -> &str { &self.inner.today }
+    /// Yesterday YYYY-MM-DD.
+    pub fn yesterday(&self) -> &str { &self.inner.yesterday }
+    /// Tomorrow YYYY-MM-DD.
+    pub fn tomorrow(&self) -> &str { &self.inner.tomorrow }
+    /// Full day of week name.
+    pub fn dow(&self) -> &str { &self.inner.dow }
+    /// Abbreviated day of week.
+    pub fn dow_abbr(&self) -> &str { &self.inner.dow_abbr }
+    /// Four-digit year.
+    pub fn year(&self) -> &str { &self.inner.year }
+    /// Two-digit month (01-12).
+    pub fn month(&self) -> &str { &self.inner.month }
+    /// Full month name.
+    pub fn month_name(&self) -> &str { &self.inner.month_name }
+    /// Abbreviated month name.
+    pub fn month_name_abbr(&self) -> &str { &self.inner.month_name_abbr }
+    /// Environment variables snapshot.
+    pub fn env(&self) -> &HashMap<String, String> { &self.inner.env }
+    /// Access the values map (crate-internal).
+    pub(crate) fn values(&self) -> &serde_json::Map<String, serde_json::Value> { &self.inner.values }
 }
 
 
@@ -887,33 +909,7 @@ impl ComposeContext {
                     }],
                 );
                 super::context::capture::populate_datetime(&mut values);
-
-                let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-
-                let get_str = |key: &str| -> String {
-                    values
-                        .get(key)
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string()
-                };
-
-                Self {
-                    now: get_str("now"),
-                    utc: get_str("utc"),
-                    today: get_str("today"),
-                    yesterday: get_str("yesterday"),
-                    tomorrow: get_str("tomorrow"),
-                    dow: get_str("dow"),
-                    dow_abbr: get_str("dow_abbr"),
-                    year: get_str("year"),
-                    month: get_str("month"),
-                    month_name: get_str("month_name"),
-                    month_name_abbr: get_str("month_name_abbr"),
-                    env,
-                    values,
-                    capture_diagnostics: diagnostics,
-                }
+                Self::from_values(values, diagnostics)
             }
         }
     }
@@ -922,7 +918,26 @@ impl ComposeContext {
     pub fn capture_for_dir(base_dir: &std::path::Path) -> Self {
         let (values, capture_diagnostics) =
             super::context::capture::capture_runtime_context(base_dir);
+        Self::from_values(values, capture_diagnostics)
+    }
 
+    /// Demand-driven capture: scans `content` for `ctx.*` references and
+    /// only captures the context groups actually needed.
+    ///
+    /// If the document uses no `ctx.*` variables, only date/time (zero I/O)
+    /// is captured. This avoids git, repo, docs, OS, and hardware detection
+    /// for documents that don't need them.
+    pub fn capture_for_content(base_dir: &std::path::Path, content: &str) -> Self {
+        let (values, capture_diagnostics) =
+            super::context::capture::capture_runtime_context_for_content(base_dir, content);
+        Self::from_values(values, capture_diagnostics)
+    }
+
+    /// Build a `ComposeContext` from pre-computed values.
+    fn from_values(
+        values: serde_json::Map<String, serde_json::Value>,
+        capture_diagnostics: Vec<super::context::ContextMergeDiagnostic>,
+    ) -> Self {
         let env: HashMap<String, String> = std::env::vars().collect();
 
         let get_str = |key: &str| -> String {
@@ -934,44 +949,57 @@ impl ComposeContext {
         };
 
         Self {
-            now: get_str("now"),
-            utc: get_str("utc"),
-            today: get_str("today"),
-            yesterday: get_str("yesterday"),
-            tomorrow: get_str("tomorrow"),
-            dow: get_str("dow"),
-            dow_abbr: get_str("dow_abbr"),
-            year: get_str("year"),
-            month: get_str("month"),
-            month_name: get_str("month_name"),
-            month_name_abbr: get_str("month_name_abbr"),
-            env,
-            values,
-            capture_diagnostics,
+            inner: std::sync::Arc::new(ComposeContextInner {
+                now: get_str("now"),
+                utc: get_str("utc"),
+                today: get_str("today"),
+                yesterday: get_str("yesterday"),
+                tomorrow: get_str("tomorrow"),
+                dow: get_str("dow"),
+                dow_abbr: get_str("dow_abbr"),
+                year: get_str("year"),
+                month: get_str("month"),
+                month_name: get_str("month_name"),
+                month_name_abbr: get_str("month_name_abbr"),
+                env,
+                values,
+                capture_diagnostics,
+            }),
         }
     }
 
     /// Looks up a value from the backing store.
     pub fn get(&self, key: &str) -> Option<&serde_json::Value> {
-        self.values.get(key)
+        self.inner.values.get(key)
     }
 
     /// Returns the full context as a JSON object.
     pub fn as_object(&self) -> serde_json::Value {
-        serde_json::Value::Object(self.values.clone())
+        serde_json::Value::Object(self.inner.values.clone())
     }
 
     /// Returns diagnostics from the capture phase.
     pub fn diagnostics(&self) -> &[super::context::ContextMergeDiagnostic] {
-        &self.capture_diagnostics
+        &self.inner.capture_diagnostics
     }
 
     /// Iterates the exposed key names.
     pub fn keys(&self) -> impl Iterator<Item = &str> {
-        self.values.keys().map(String::as_str)
+        self.inner.values.keys().map(String::as_str)
+    }
+
+    /// Returns a mutable reference to the inner env map.
+    ///
+    /// Clones the `Arc` on write if shared. This is intentionally
+    /// test-only since production code should not mutate a captured context.
+    #[cfg(test)]
+    pub fn env_mut(&mut self) -> &mut HashMap<String, String> {
+        &mut std::sync::Arc::make_mut(&mut self.inner).env
     }
 
     /// Creates a context with fixed values for testing.
+    ///
+    /// Uses an empty environment to ensure deterministic test behavior.
     #[cfg(test)]
     pub fn fixed_for_testing() -> Self {
         let mut values = serde_json::Map::new();
@@ -995,21 +1023,31 @@ impl ComposeContext {
             values.insert((*k).to_string(), serde_json::Value::String(v.to_string()));
         }
 
+        let get_str = |key: &str| -> String {
+            values
+                .get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+
         Self {
-            now: "2024-06-15T10:30:00".to_string(),
-            utc: "2024-06-15T17:30:00Z".to_string(),
-            today: "2024-06-15".to_string(),
-            yesterday: "2024-06-14".to_string(),
-            tomorrow: "2024-06-16".to_string(),
-            dow: "Saturday".to_string(),
-            dow_abbr: "Sat".to_string(),
-            year: "2024".to_string(),
-            month: "06".to_string(),
-            month_name: "June".to_string(),
-            month_name_abbr: "Jun".to_string(),
-            env: HashMap::new(),
-            values,
-            capture_diagnostics: Vec::new(),
+            inner: std::sync::Arc::new(ComposeContextInner {
+                now: get_str("now"),
+                utc: get_str("utc"),
+                today: get_str("today"),
+                yesterday: get_str("yesterday"),
+                tomorrow: get_str("tomorrow"),
+                dow: get_str("dow"),
+                dow_abbr: get_str("dow_abbr"),
+                year: get_str("year"),
+                month: get_str("month"),
+                month_name: get_str("month_name"),
+                month_name_abbr: get_str("month_name_abbr"),
+                env: HashMap::new(),
+                values,
+                capture_diagnostics: Vec::new(),
+            }),
         }
     }
 }
@@ -1242,9 +1280,9 @@ mod tests {
         let ctx = options.context();
 
         // Context should have captured current date
-        assert!(!ctx.today.is_empty());
-        assert!(!ctx.year.is_empty());
-        assert!(!ctx.dow.is_empty());
+        assert!(!ctx.today().is_empty());
+        assert!(!ctx.year().is_empty());
+        assert!(!ctx.dow().is_empty());
     }
 
     #[test]
@@ -1293,8 +1331,8 @@ mod tests {
         let fixed_ctx = ComposeContext::fixed_for_testing();
         let options = ComposeOptions::new().with_context(fixed_ctx.clone());
 
-        assert_eq!(options.context().today, "2024-06-15");
-        assert_eq!(options.context().year, "2024");
+        assert_eq!(options.context().today(), "2024-06-15");
+        assert_eq!(options.context().year(), "2024");
     }
 
     #[test]
@@ -1431,23 +1469,23 @@ mod tests {
         let ctx = ComposeContext::capture();
 
         // Should have reasonable values
-        assert!(ctx.year.parse::<i32>().is_ok());
-        assert!(ctx.month.len() == 2);
-        assert!(!ctx.today.is_empty());
-        assert!(!ctx.yesterday.is_empty());
-        assert!(!ctx.tomorrow.is_empty());
+        assert!(ctx.year().parse::<i32>().is_ok());
+        assert!(ctx.month().len() == 2);
+        assert!(!ctx.today().is_empty());
+        assert!(!ctx.yesterday().is_empty());
+        assert!(!ctx.tomorrow().is_empty());
     }
 
     #[test]
     fn test_compose_context_fixed_for_testing() {
         let ctx = ComposeContext::fixed_for_testing();
 
-        assert_eq!(ctx.today, "2024-06-15");
-        assert_eq!(ctx.yesterday, "2024-06-14");
-        assert_eq!(ctx.tomorrow, "2024-06-16");
-        assert_eq!(ctx.dow, "Saturday");
-        assert_eq!(ctx.year, "2024");
-        assert_eq!(ctx.month, "06");
+        assert_eq!(ctx.today(), "2024-06-15");
+        assert_eq!(ctx.yesterday(), "2024-06-14");
+        assert_eq!(ctx.tomorrow(), "2024-06-16");
+        assert_eq!(ctx.dow(), "Saturday");
+        assert_eq!(ctx.year(), "2024");
+        assert_eq!(ctx.month(), "06");
     }
 
     #[test]

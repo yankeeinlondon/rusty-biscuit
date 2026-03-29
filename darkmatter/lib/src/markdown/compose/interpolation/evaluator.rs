@@ -912,7 +912,7 @@ mod tests {
         #[test]
         fn resolves_env_variable() {
             let mut ctx = test_context();
-            ctx.env.insert("HOME".to_string(), "/home/user".to_string());
+            ctx.env_mut().insert("HOME".to_string(), "/home/user".to_string());
 
             let fm = HashMap::new();
             let state = EffectiveStateBuilder::new()

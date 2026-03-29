@@ -184,25 +184,25 @@ impl EffectiveState {
 
         // 3. Legacy field-by-field fallback (safety during transition)
         let value = match key {
-            "now" => &self.context.now,
-            "utc" => &self.context.utc,
-            "today" => &self.context.today,
-            "yesterday" => &self.context.yesterday,
-            "tomorrow" => &self.context.tomorrow,
-            "dow" => &self.context.dow,
-            "dow_abbr" => &self.context.dow_abbr,
-            "year" => &self.context.year,
-            "month" => &self.context.month,
-            "month_name" => &self.context.month_name,
-            "month_name_abbr" => &self.context.month_name_abbr,
+            "now" => self.context.now(),
+            "utc" => self.context.utc(),
+            "today" => self.context.today(),
+            "yesterday" => self.context.yesterday(),
+            "tomorrow" => self.context.tomorrow(),
+            "dow" => self.context.dow(),
+            "dow_abbr" => self.context.dow_abbr(),
+            "year" => self.context.year(),
+            "month" => self.context.month(),
+            "month_name" => self.context.month_name(),
+            "month_name_abbr" => self.context.month_name_abbr(),
             _ => return None,
         };
-        Some(Value::String(value.clone()))
+        Some(Value::String(value.to_string()))
     }
 
     /// Gets an environment variable value.
     fn get_env_value(&self, key: &str) -> Option<Value> {
-        self.context.env.get(key).map(|v| Value::String(v.clone()))
+        self.context.env().get(key).map(|v| Value::String(v.clone()))
     }
 
     /// Gets a value from nested data using dot notation.
@@ -426,8 +426,8 @@ mod tests {
     #[test]
     fn test_effective_state_env_lookup() {
         let mut ctx = test_context();
-        ctx.env.insert("HOME".to_string(), "/home/user".to_string());
-        ctx.env.insert("USER".to_string(), "alice".to_string());
+        ctx.env_mut().insert("HOME".to_string(), "/home/user".to_string());
+        ctx.env_mut().insert("USER".to_string(), "alice".to_string());
 
         let fm = HashMap::new();
         let state = EffectiveState::new(&fm, None, ctx);
@@ -666,7 +666,7 @@ mod tests {
     #[test]
     fn test_env_lookup_still_works() {
         let mut ctx = test_context();
-        ctx.env.insert("HOME".to_string(), "/home/user".to_string());
+        ctx.env_mut().insert("HOME".to_string(), "/home/user".to_string());
 
         let state = EffectiveStateBuilder::new()
             .with_context(ctx)

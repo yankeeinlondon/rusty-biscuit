@@ -1484,7 +1484,7 @@ impl Markdown {
 
         options
             .context()
-            .env
+            .env()
             .get("IGNORE_INVALID")
             .and_then(|raw| parse_bool(raw))
             .unwrap_or(false)
@@ -1673,8 +1673,8 @@ mod tests {
         let ctx = options.context();
 
         // Context should have been captured
-        assert!(!ctx.today.is_empty());
-        assert!(!ctx.year.is_empty());
+        assert!(!ctx.today().is_empty());
+        assert!(!ctx.year().is_empty());
     }
 
     #[test]
@@ -2894,7 +2894,7 @@ Rounded: {{ round(pi) }}"#;
 
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::ComposeContext::capture();
-        ctx.env.insert("AGENT".to_string(), "claude".to_string());
+        ctx.env_mut().insert("AGENT".to_string(), "claude".to_string());
         let options = ComposeOptions::new()
             .with_source_file(root)
             .with_context(ctx);
@@ -2920,7 +2920,7 @@ Rounded: {{ round(pi) }}"#;
 
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::ComposeContext::capture();
-        ctx.env.insert("AGENT".to_string(), "opencode".to_string());
+        ctx.env_mut().insert("AGENT".to_string(), "opencode".to_string());
         let options = ComposeOptions::new()
             .with_source_file(root)
             .with_context(ctx);
@@ -2984,7 +2984,7 @@ Rounded: {{ round(pi) }}"#;
         // Test 1: AGENT=claude → only cc.md included
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::ComposeContext::capture();
-        ctx.env.insert("AGENT".to_string(), "claude".to_string());
+        ctx.env_mut().insert("AGENT".to_string(), "claude".to_string());
         let opts = ComposeOptions::new()
             .with_source_file(&root)
             .with_context(ctx);
@@ -3001,7 +3001,7 @@ Rounded: {{ round(pi) }}"#;
         // Test 2: AGENT=opencode → only oc.md included
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::ComposeContext::capture();
-        ctx.env.insert("AGENT".to_string(), "opencode".to_string());
+        ctx.env_mut().insert("AGENT".to_string(), "opencode".to_string());
         let opts = ComposeOptions::new()
             .with_source_file(&root)
             .with_context(ctx);

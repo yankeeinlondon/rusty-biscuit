@@ -1,5 +1,6 @@
 //! Raw runtime fact capture from chrono, std::env, and sniff.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
@@ -12,6 +13,144 @@ use sniff::os::{self, OsInfo, OsType};
 
 use super::diagnostics::ContextMergeDiagnostic;
 use super::format;
+
+// ── Context groups for demand-driven capture ─────────────────────
+
+/// Groups of context variables that can be independently captured.
+///
+/// Used for demand-driven capture: only groups whose variables are
+/// actually referenced in the document are captured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ContextGroup {
+    /// Date/time variables: now, today, year, month, dow, etc.
+    DateTime,
+    /// Git and repo structure: repo, repo_root, is_monorepo, packages, etc.
+    Repo,
+    /// File change tracking: dirty_files, staged_files, dirty_packages, etc.
+    FileChanges,
+    /// Programming language and package manager context.
+    Languages,
+    /// Document discovery: docs_readme, docs_blast_radius, docs_drift, docs_skill.
+    Documents,
+    /// OS detection: os, os_distro, os_version, os_package_manager.
+    Os,
+    /// Hardware summary: memory_total, memory_used, cpu_cores, cpu_arch, gpu.
+    Hardware,
+}
+
+impl ContextGroup {
+    /// All available groups.
+    pub(crate) fn all() -> HashSet<ContextGroup> {
+        [
+            Self::DateTime,
+            Self::Repo,
+            Self::FileChanges,
+            Self::Languages,
+            Self::Documents,
+            Self::Os,
+            Self::Hardware,
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    /// Map a ctx variable name to its owning group.
+    fn for_key(key: &str) -> Option<ContextGroup> {
+        match key {
+            // DateTime
+            "now" | "utc" | "now_utc" | "today" | "yesterday" | "tomorrow"
+            | "today_utc" | "yesterday_utc" | "tomorrow_utc"
+            | "dow" | "day" | "dow_abbr" | "day_abbr"
+            | "day_utc" | "day_abbr_utc"
+            | "year" | "year_utc" | "month" | "month_name" | "month_name_abbr"
+            | "day_of_month" | "day_of_month_suffixed"
+            | "time" | "time_military" | "timezone" | "timezone_offset"
+            | "start_of_week_sun" | "end_of_week_sun"
+            | "start_of_week_mon" | "end_of_week_mon"
+            | "start_of_week_sun_utc" | "end_of_week_sun_utc"
+            | "start_of_week_mon_utc" | "end_of_week_mon_utc"
+            | "season" | "timestamp" | "timestamp_ms" => Some(Self::DateTime),
+
+            // Repo
+            "repo" | "repo_root" | "is_monorepo"
+            | "package_root" | "package_area_root"
+            | "packages" | "package_areas"
+            | "current_package" | "current_package_area" => Some(Self::Repo),
+
+            // FileChanges
+            "dirty_files" | "dirty_files_list"
+            | "dirty_source_code_files" | "dirty_source_code_files_list"
+            | "staged_files" | "staged_files_list"
+            | "untracked_files" | "untracked_files_list"
+            | "dirty_packages" | "dirty_packages_list"
+            | "dirty_package_areas" | "dirty_package_areas_list"
+            | "staged_packages" | "staged_packages_list"
+            | "staged_package_areas" | "staged_package_areas_list"
+            | "current_package_has_staged_files" | "current_package_area_has_staged_files"
+            | "current_package_has_dirty_files" | "current_package_area_has_dirty_files" => Some(Self::FileChanges),
+
+            // Languages
+            "programming_languages_in_repo"
+            | "programming_language" | "package_manager" => Some(Self::Languages),
+
+            // Documents
+            "docs_readme" | "docs_blast_radius" | "docs_drift" | "docs_skill" => Some(Self::Documents),
+
+            // OS
+            "os" | "os_distro" | "os_package_manager" | "os_version" => Some(Self::Os),
+
+            // Hardware
+            "memory_total" | "memory_used" | "memory_avail"
+            | "cpu_cores" | "cpu_arch" | "gpu" => Some(Self::Hardware),
+
+            _ => None,
+        }
+    }
+}
+
+/// Scan document content for referenced `ctx.*` variables and return
+/// the set of context groups needed.
+///
+/// Scans `{{ ctx.KEY }}` patterns in interpolation expressions and
+/// `when="..."` condition strings. Does not parse the full AST — uses
+/// simple substring scanning for speed.
+pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {
+    let mut groups = HashSet::new();
+
+    // Fast path: if no "ctx." anywhere, nothing to capture
+    if !content.contains("ctx.") {
+        return groups;
+    }
+
+    // Scan for ctx.KEY patterns — covers both {{ ctx.KEY }} and when="ctx.KEY ..."
+    let bytes = content.as_bytes();
+    let prefix = b"ctx.";
+    let mut pos = 0;
+    while pos + prefix.len() < bytes.len() {
+        if let Some(offset) = content[pos..].find("ctx.") {
+            let start = pos + offset + prefix.len();
+            // Extract the key name (alphanumeric + underscore)
+            let key_end = content[start..]
+                .find(|c: char| !c.is_alphanumeric() && c != '_')
+                .map(|i| start + i)
+                .unwrap_or(content.len());
+            let key = &content[start..key_end];
+            if !key.is_empty() {
+                if let Some(group) = ContextGroup::for_key(key) {
+                    groups.insert(group);
+                } else {
+                    // Unknown key — could be user-defined ctx, capture all
+                    return ContextGroup::all();
+                }
+            }
+            pos = key_end;
+        } else {
+            break;
+        }
+    }
+
+    groups
+}
 
 /// Intermediate struct holding all raw sniff results.
 ///
@@ -32,37 +171,141 @@ struct ContextCapture {
 }
 
 impl ContextCapture {
-    /// Build the capture from a base directory.
-    fn new(base_dir: &Path) -> Self {
+    /// Build the capture from a base directory for the requested groups.
+    ///
+    /// Uses lightweight sniff summary APIs and parallelizes independent
+    /// probes after the initial git detection (which provides repo_root
+    /// needed by downstream probes).
+    fn new(base_dir: &Path, groups: &HashSet<ContextGroup>) -> Self {
         let mut diagnostics = Vec::new();
 
-        // Git detection
-        let git_info = match git::detect_git(base_dir, false, 10) {
-            Ok(info) => info,
-            Err(e) => {
-                diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
-                    area: "git",
-                    detail: e.to_string(),
-                });
-                None
-            }
-        };
+        // Determine which heavyweight probes are needed
+        let need_git = groups.iter().any(|g| matches!(g,
+            ContextGroup::Repo | ContextGroup::FileChanges | ContextGroup::Languages | ContextGroup::Documents
+        ));
+        let need_repo = groups.iter().any(|g| matches!(g,
+            ContextGroup::Repo | ContextGroup::FileChanges | ContextGroup::Languages | ContextGroup::Documents
+        ));
+        let need_docs = groups.contains(&ContextGroup::Documents);
+        let need_os = groups.contains(&ContextGroup::Os);
+        let need_hw = groups.contains(&ContextGroup::Hardware);
 
-        let repo_root = git_info.as_ref().map(|g| g.repo_root.clone());
-
-        // Repo/monorepo detection
-        let repo_info = repo_root.as_ref().and_then(|root| {
-            match repo::detect_repo(root) {
+        // ── Phase 1: Git detection (sequential — provides repo_root) ──
+        let git_info = if need_git {
+            match git::detect_git(base_dir, false, 10) {
                 Ok(info) => info,
                 Err(e) => {
                     diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
-                        area: "repo",
+                        area: "git",
                         detail: e.to_string(),
                     });
                     None
                 }
             }
+        } else {
+            None
+        };
+
+        let repo_root = git_info.as_ref().map(|g| g.repo_root.clone());
+
+        // ── Phase 2: Repo detection (sequential — needed by docs) ─────
+        let repo_info = if need_repo {
+            repo_root.as_ref().and_then(|root| {
+                match repo::detect_repo(root) {
+                    Ok(info) => info,
+                    Err(e) => {
+                        diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                            area: "repo",
+                            detail: e.to_string(),
+                        });
+                        None
+                    }
+                }
+            })
+        } else {
+            None
+        };
+
+        // Pre-compute package list for docs (avoids redundant detect_repo)
+        let package_list: Vec<(String, std::path::PathBuf)> = repo_info
+            .as_ref()
+            .and_then(|ri| ri.packages.as_ref())
+            .map(|pkgs| {
+                pkgs.iter()
+                    .map(|p| {
+                        let rel_path = p.path.strip_prefix(
+                            repo_info.as_ref().map(|r| &r.root).unwrap()
+                        ).unwrap_or(&p.path).to_path_buf();
+                        (p.name.clone(), rel_path)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // ── Phase 3: Parallel independent probes ───���──────────────────
+        let (docs, os_info, hardware_info) = std::thread::scope(|s| {
+            let docs_handle = if need_docs {
+                let pl = &package_list;
+                let rr = &repo_root;
+                Some(s.spawn(move || {
+                    rr.as_ref().and_then(|root| {
+                        docs::detect_docs_with_packages(root, pl)
+                    })
+                }))
+            } else {
+                None
+            };
+
+            let os_handle = if need_os {
+                Some(s.spawn(os::detect_os))
+            } else {
+                None
+            };
+
+            let hw_handle = if need_hw {
+                Some(s.spawn(hardware::detect_hardware_summary))
+            } else {
+                None
+            };
+
+            let docs = docs_handle.and_then(|h| h.join().unwrap_or(None));
+            let os_info = os_handle.map(|h| {
+                h.join().map_err(|_| "OS detection panicked".to_string())
+                    .and_then(|r| r.map_err(|e| e.to_string()))
+            });
+            let hw_info = hw_handle.map(|h| {
+                h.join().map_err(|_| "hardware detection panicked".to_string())
+                    .and_then(|r| r.map_err(|e| e.to_string()))
+            });
+
+            (docs, os_info, hw_info)
         });
+
+        let os_info = match os_info {
+            Some(Ok(info)) => Some(info),
+            Some(Err(detail)) => {
+                diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                    area: "os",
+                    detail,
+                });
+                None
+            }
+            None => None,
+        };
+
+        let hardware_info = match hardware_info {
+            Some(Ok(info)) => Some(info),
+            Some(Err(detail)) => {
+                diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                    area: "hardware",
+                    detail,
+                });
+                None
+            }
+            None => None,
+        };
+
+        // ── Derived fields from git/repo ──────────────────────────────
 
         // Current package and package area
         let (current_package, current_package_area) =
@@ -72,7 +315,6 @@ impl ContextCapture {
                         packages.iter().find(|p| base_dir.starts_with(&p.path)).cloned()
                     });
                     let area = pkg.as_ref().map(|p| p.package_area.clone()).or_else(|| {
-                        // Check if we're in a package area (but not a specific package)
                         ri.packages.as_ref().and_then(|packages| {
                             let areas: Vec<_> = packages
                                 .iter()
@@ -116,33 +358,6 @@ impl ContextCapture {
             .map(|fc| fc.path.clone())
             .collect();
 
-        // Docs detection
-        let docs = repo_root.as_ref().and_then(|root| docs::detect_docs(root));
-
-        // OS detection
-        let os_info = match os::detect_os() {
-            Ok(info) => Some(info),
-            Err(e) => {
-                diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
-                    area: "os",
-                    detail: e.to_string(),
-                });
-                None
-            }
-        };
-
-        // Hardware detection
-        let hardware_info = match hardware::detect_hardware() {
-            Ok(info) => Some(info),
-            Err(e) => {
-                diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
-                    area: "hardware",
-                    detail: e.to_string(),
-                });
-                None
-            }
-        };
-
         Self {
             git_info,
             repo_info,
@@ -166,33 +381,62 @@ impl ContextCapture {
 pub(crate) fn capture_runtime_context(
     base_dir: &Path,
 ) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>) {
-    let cap = ContextCapture::new(base_dir);
+    capture_runtime_context_for_groups(base_dir, &ContextGroup::all())
+}
+
+/// Capture only the context groups needed for the given document content.
+///
+/// Scans `content` for `ctx.*` references and only captures the required
+/// groups. If no `ctx.*` references are found, only populates datetime
+/// (which is purely local computation with no I/O).
+pub(crate) fn capture_runtime_context_for_content(
+    base_dir: &Path,
+    content: &str,
+) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>) {
+    let groups = scan_needed_groups(content);
+    // DateTime is always included (zero-cost local computation)
+    let mut groups = groups;
+    groups.insert(ContextGroup::DateTime);
+    capture_runtime_context_for_groups(base_dir, &groups)
+}
+
+/// Capture runtime context for the specified groups only.
+fn capture_runtime_context_for_groups(
+    base_dir: &Path,
+    groups: &HashSet<ContextGroup>,
+) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>) {
+    let cap = ContextCapture::new(base_dir, groups);
     let mut values = Map::new();
 
-    // Date/time context
-    populate_datetime(&mut values);
+    if groups.contains(&ContextGroup::DateTime) {
+        populate_datetime(&mut values);
+    }
 
-    // Repo context
-    populate_repo(&cap, &mut values);
+    if groups.contains(&ContextGroup::Repo) {
+        populate_repo(&cap, &mut values);
+    }
 
-    // Dirty/staged/untracked files
-    populate_file_changes(&cap, &mut values);
+    if groups.contains(&ContextGroup::FileChanges) {
+        populate_file_changes(&cap, &mut values);
+        populate_package_changes(&cap, &mut values);
+    }
 
-    // Package/area dirty/staged
-    populate_package_changes(&cap, &mut values);
+    if groups.contains(&ContextGroup::Languages) {
+        populate_languages(&cap, &mut values);
+    }
 
-    // Programming language and package manager
-    populate_languages(&cap, &mut values);
+    if groups.contains(&ContextGroup::Documents) {
+        populate_docs(&cap, &mut values);
+        populate_skills(&cap, &mut values);
+    }
 
-    // Document context
-    populate_docs(&cap, &mut values);
+    if groups.contains(&ContextGroup::Os) {
+        populate_os(&cap, &mut values);
+    }
 
-    // Skill context
-    populate_skills(&cap, &mut values);
-
-    // OS and hardware
-    populate_os(&cap, &mut values);
-    populate_hardware(&cap, &mut values);
+    if groups.contains(&ContextGroup::Hardware) {
+        populate_hardware(&cap, &mut values);
+    }
 
     (values, cap.diagnostics)
 }

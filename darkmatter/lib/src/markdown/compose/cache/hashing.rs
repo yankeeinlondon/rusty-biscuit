@@ -102,7 +102,7 @@ pub(crate) fn effective_state_hash(state: &EffectiveState) -> u64 {
 /// and volatile system state (`memory_used`, `memory_avail`).
 pub(crate) fn context_hash(ctx: &ComposeContext) -> u64 {
     // Clone the values map and remove volatile fields
-    let mut values = ctx.values.clone();
+    let mut values = ctx.values().clone();
     // Per-second volatile fields
     values.remove("now");
     values.remove("now_utc");
@@ -119,7 +119,7 @@ pub(crate) fn context_hash(ctx: &ComposeContext) -> u64 {
     let mut parts = vec![canonical];
 
     // Sort env vars for determinism (kept separate for clarity)
-    let mut env_pairs: Vec<_> = ctx.env.iter().collect();
+    let mut env_pairs: Vec<_> = ctx.env().iter().collect();
     env_pairs.sort_by_key(|(k, _)| *k);
     for (k, v) in env_pairs {
         parts.push(format!("env.{}={}", k, v));
