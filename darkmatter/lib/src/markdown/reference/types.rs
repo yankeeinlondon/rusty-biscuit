@@ -428,11 +428,34 @@ fn short_label(id: &str) -> String {
 use crate::markdown::compose::ComposeOptions;
 
 /// Options for building a reference graph.
-#[derive(Clone, Default)]
+///
+/// Use `with_compose()` to supply pre-configured compose options that
+/// share an already-captured context, avoiding redundant capture work.
+#[derive(Clone)]
 pub struct ReferenceGraphOptions {
     /// Compose options controlling InlinePre execution, cache settings,
     /// external state, shell settings, and other pipeline behavior.
     pub compose: ComposeOptions,
+}
+
+impl Default for ReferenceGraphOptions {
+    /// Creates default options, which eagerly captures runtime context.
+    ///
+    /// Prefer `ReferenceGraphOptions::with_compose()` when a
+    /// `ComposeOptions` (with its captured context) is already available.
+    fn default() -> Self {
+        Self {
+            compose: ComposeOptions::default(),
+        }
+    }
+}
+
+impl ReferenceGraphOptions {
+    /// Creates options that share the compose options (and their captured
+    /// context) instead of triggering a new capture.
+    pub fn with_compose(compose: ComposeOptions) -> Self {
+        Self { compose }
+    }
 }
 
 // ── Transclusion query types ────────────────────────────────────────

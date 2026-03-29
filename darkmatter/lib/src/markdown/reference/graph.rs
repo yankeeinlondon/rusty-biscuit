@@ -264,7 +264,9 @@ fn build_node(
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        let mut builder = EffectiveStateBuilder::new().with_frontmatter(fm);
+        let mut builder = EffectiveStateBuilder::new()
+            .with_frontmatter(fm)
+            .with_context(options.compose.context().clone());
         if let Some(ref ext) = options.compose.external_state {
             builder = builder.with_external_state(ext.clone());
         }
@@ -272,6 +274,7 @@ fn build_node(
             // Context merge failure during reference analysis: fall back to
             // a state without user ctx so reference extraction can proceed.
             EffectiveStateBuilder::new()
+                .with_context(options.compose.context().clone())
                 .build()
                 .expect("empty frontmatter has no user ctx")
         })
