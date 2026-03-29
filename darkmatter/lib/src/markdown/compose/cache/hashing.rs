@@ -91,19 +91,30 @@ pub(crate) fn effective_state_hash(state: &EffectiveState) -> u64 {
     xx_hash(&canonical)
 }
 
-/// Hash of the runtime context (timestamps, env vars).
+/// Hash of the runtime context (all stable output-affecting fields + env vars).
 ///
-/// Only includes fields that affect compose output. We hash `today`
-/// (which covers date-dependent interpolations) and skip volatile
-/// fields like `now`/`utc` that change every second.
+/// Hashes the full normalized values map from `ComposeContext`, excluding
+/// volatile per-second fields (`now`, `utc`, `time`, `timestamp`, etc.)
+/// and volatile system state (`memory_used`, `memory_avail`).
 pub(crate) fn context_hash(ctx: &ComposeContext) -> u64 {
-    // Hash only stable, output-affecting context fields
-    let mut parts = Vec::new();
-    parts.push(format!("today={}", ctx.today));
-    parts.push(format!("yesterday={}", ctx.yesterday));
-    parts.push(format!("tomorrow={}", ctx.tomorrow));
+    // Clone the values map and remove volatile fields
+    let mut values = ctx.values.clone();
+    // Per-second volatile fields
+    values.remove("now");
+    values.remove("now_utc");
+    values.remove("utc");
+    values.remove("time");
+    values.remove("time_military");
+    values.remove("timestamp");
+    values.remove("timestamp_ms");
+    // Volatile system state
+    values.remove("memory_used");
+    values.remove("memory_avail");
 
-    // Sort env vars for determinism
+    let canonical = canonical_json_sorted(&Value::Object(values));
+    let mut parts = vec![canonical];
+
+    // Sort env vars for determinism (kept separate for clarity)
     let mut env_pairs: Vec<_> = ctx.env.iter().collect();
     env_pairs.sort_by_key(|(k, _)| *k);
     for (k, v) in env_pairs {

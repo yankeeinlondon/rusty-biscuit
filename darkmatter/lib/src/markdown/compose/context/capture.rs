@@ -1,0 +1,986 @@
+//! Raw runtime fact capture from chrono, std::env, and sniff.
+
+use std::path::{Path, PathBuf};
+
+use serde_json::{Map, Value};
+use sniff::filesystem::blast_radius;
+use sniff::filesystem::docs::{self, MarkdownMeta};
+use sniff::filesystem::git::{self, FileStatus, GitInfo};
+use sniff::filesystem::repo::{self, Package, RepoInfo};
+use sniff::hardware::{self, HardwareInfo};
+use sniff::os::{self, OsInfo, OsType};
+
+use super::diagnostics::ContextMergeDiagnostic;
+use super::format;
+
+/// Intermediate struct holding all raw sniff results.
+///
+/// Built once per compose run to avoid repeated sniff calls. All derived
+/// context variables are computed from this single struct.
+struct ContextCapture {
+    git_info: Option<GitInfo>,
+    repo_info: Option<RepoInfo>,
+    docs: Option<Vec<MarkdownMeta>>,
+    os_info: Option<OsInfo>,
+    hardware_info: Option<HardwareInfo>,
+    current_package: Option<Package>,
+    current_package_area: Option<String>,
+    dirty_paths: Vec<PathBuf>,
+    staged_paths: Vec<PathBuf>,
+    untracked_paths: Vec<PathBuf>,
+    diagnostics: Vec<ContextMergeDiagnostic>,
+}
+
+impl ContextCapture {
+    /// Build the capture from a base directory.
+    fn new(base_dir: &Path) -> Self {
+        let mut diagnostics = Vec::new();
+
+        // Git detection
+        let git_info = match git::detect_git(base_dir, false, 10) {
+            Ok(info) => info,
+            Err(e) => {
+                diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                    area: "git",
+                    detail: e.to_string(),
+                });
+                None
+            }
+        };
+
+        let repo_root = git_info.as_ref().map(|g| g.repo_root.clone());
+
+        // Repo/monorepo detection
+        let repo_info = repo_root.as_ref().and_then(|root| {
+            match repo::detect_repo(root) {
+                Ok(info) => info,
+                Err(e) => {
+                    diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                        area: "repo",
+                        detail: e.to_string(),
+                    });
+                    None
+                }
+            }
+        });
+
+        // Current package and package area
+        let (current_package, current_package_area) =
+            if let Some(ref ri) = repo_info {
+                if ri.is_monorepo {
+                    let pkg = ri.packages.as_ref().and_then(|packages| {
+                        packages.iter().find(|p| base_dir.starts_with(&p.path)).cloned()
+                    });
+                    let area = pkg.as_ref().map(|p| p.package_area.clone()).or_else(|| {
+                        // Check if we're in a package area (but not a specific package)
+                        ri.packages.as_ref().and_then(|packages| {
+                            let areas: Vec<_> = packages
+                                .iter()
+                                .filter(|p| {
+                                    let area_path = ri.root.join(&p.package_area);
+                                    base_dir.starts_with(&area_path)
+                                })
+                                .collect();
+                            areas.first().map(|p| p.package_area.clone())
+                        })
+                    });
+                    (pkg, area)
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+
+        // File changes from git
+        let file_changes = git_info
+            .as_ref()
+            .map(|g| &g.file_changes[..])
+            .unwrap_or(&[]);
+
+        let dirty_paths = file_changes
+            .iter()
+            .filter(|fc| matches!(fc.status, FileStatus::Modified | FileStatus::Both | FileStatus::Staged | FileStatus::Untracked))
+            .map(|fc| fc.path.clone())
+            .collect();
+
+        let staged_paths = file_changes
+            .iter()
+            .filter(|fc| matches!(fc.status, FileStatus::Staged | FileStatus::Both))
+            .map(|fc| fc.path.clone())
+            .collect();
+
+        let untracked_paths = file_changes
+            .iter()
+            .filter(|fc| matches!(fc.status, FileStatus::Untracked))
+            .map(|fc| fc.path.clone())
+            .collect();
+
+        // Docs detection
+        let docs = repo_root.as_ref().and_then(|root| docs::detect_docs(root));
+
+        // OS detection
+        let os_info = match os::detect_os() {
+            Ok(info) => Some(info),
+            Err(e) => {
+                diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                    area: "os",
+                    detail: e.to_string(),
+                });
+                None
+            }
+        };
+
+        // Hardware detection
+        let hardware_info = match hardware::detect_hardware() {
+            Ok(info) => Some(info),
+            Err(e) => {
+                diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                    area: "hardware",
+                    detail: e.to_string(),
+                });
+                None
+            }
+        };
+
+        Self {
+            git_info,
+            repo_info,
+            docs,
+            os_info,
+            hardware_info,
+            current_package,
+            current_package_area,
+            dirty_paths,
+            staged_paths,
+            untracked_paths,
+            diagnostics,
+        }
+    }
+}
+
+/// Capture all runtime context variables for the given base directory.
+///
+/// Returns a `(Map, Vec<ContextMergeDiagnostic>)` tuple. The map contains all
+/// context variables; the diagnostics list any partial capture failures.
+pub(crate) fn capture_runtime_context(
+    base_dir: &Path,
+) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>) {
+    let cap = ContextCapture::new(base_dir);
+    let mut values = Map::new();
+
+    // Date/time context
+    populate_datetime(&mut values);
+
+    // Repo context
+    populate_repo(&cap, &mut values);
+
+    // Dirty/staged/untracked files
+    populate_file_changes(&cap, &mut values);
+
+    // Package/area dirty/staged
+    populate_package_changes(&cap, &mut values);
+
+    // Programming language and package manager
+    populate_languages(&cap, &mut values);
+
+    // Document context
+    populate_docs(&cap, &mut values);
+
+    // Skill context
+    populate_skills(&cap, &mut values);
+
+    // OS and hardware
+    populate_os(&cap, &mut values);
+    populate_hardware(&cap, &mut values);
+
+    (values, cap.diagnostics)
+}
+
+// ── Date/time helpers ─────────────────────────────────────────────
+
+fn populate_datetime(values: &mut Map<String, Value>) {
+    use chrono::{Datelike, Local, Utc};
+
+    let now_local = Local::now();
+    let now_utc = Utc::now();
+
+    let today = now_local.date_naive();
+    let yesterday = today - chrono::Duration::days(1);
+    let tomorrow = today + chrono::Duration::days(1);
+
+    let today_utc = now_utc.date_naive();
+    let yesterday_utc = today_utc - chrono::Duration::days(1);
+    let tomorrow_utc = today_utc + chrono::Duration::days(1);
+
+    // Legacy fields
+    let now_str = now_local.format("%Y-%m-%dT%H:%M:%S").to_string();
+    let utc_str = now_utc.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let today_str = today.format("%Y-%m-%d").to_string();
+    let yesterday_str = yesterday.format("%Y-%m-%d").to_string();
+    let tomorrow_str = tomorrow.format("%Y-%m-%d").to_string();
+    let dow_str = now_local.format("%A").to_string();
+    let dow_abbr_str = now_local.format("%a").to_string();
+    let year_str = now_local.format("%Y").to_string();
+    let month_str = now_local.format("%m").to_string();
+    let month_name_str = now_local.format("%B").to_string();
+    let month_name_abbr_str = now_local.format("%b").to_string();
+
+    // Core date/time
+    values.insert("now".into(), Value::String(now_str));
+    values.insert("utc".into(), Value::String(utc_str.clone()));
+    values.insert("now_utc".into(), Value::String(utc_str));
+    values.insert("today".into(), Value::String(today_str));
+    values.insert("yesterday".into(), Value::String(yesterday_str));
+    values.insert("tomorrow".into(), Value::String(tomorrow_str));
+
+    // UTC date variants
+    values.insert("today_utc".into(), Value::String(today_utc.format("%Y-%m-%d").to_string()));
+    values.insert("yesterday_utc".into(), Value::String(yesterday_utc.format("%Y-%m-%d").to_string()));
+    values.insert("tomorrow_utc".into(), Value::String(tomorrow_utc.format("%Y-%m-%d").to_string()));
+
+    // Day of week (with aliases)
+    values.insert("dow".into(), Value::String(dow_str.clone()));
+    values.insert("day".into(), Value::String(dow_str));
+    values.insert("dow_abbr".into(), Value::String(dow_abbr_str.clone()));
+    values.insert("day_abbr".into(), Value::String(dow_abbr_str));
+
+    // UTC day of week
+    let dow_utc_str = now_utc.format("%A").to_string();
+    let dow_abbr_utc_str = now_utc.format("%a").to_string();
+    values.insert("day_utc".into(), Value::String(dow_utc_str));
+    values.insert("day_abbr_utc".into(), Value::String(dow_abbr_utc_str));
+
+    // Year/month
+    values.insert("year".into(), Value::String(year_str));
+    values.insert("year_utc".into(), Value::String(now_utc.format("%Y").to_string()));
+    values.insert("month".into(), Value::String(month_str));
+    values.insert("month_name".into(), Value::String(month_name_str));
+    values.insert("month_name_abbr".into(), Value::String(month_name_abbr_str));
+
+    // Day of month
+    let day_of_month = today.day();
+    values.insert("day_of_month".into(), Value::String(day_of_month.to_string()));
+    values.insert(
+        "day_of_month_suffixed".into(),
+        Value::String(format!("{}{}", day_of_month, format::ordinal_suffix(day_of_month))),
+    );
+
+    // Time fields
+    values.insert("time".into(), Value::String(now_local.format("%I:%M %p").to_string()));
+    values.insert("time_military".into(), Value::String(now_local.format("%H:%M").to_string()));
+    values.insert("timezone".into(), Value::String(now_local.format("%Z").to_string()));
+    values.insert("timezone_offset".into(), Value::String(now_local.format("%z").to_string()));
+
+    // Week boundaries (Sunday start)
+    let weekday_num = today.weekday().num_days_from_sunday();
+    let start_of_week_sun = today - chrono::Duration::days(weekday_num as i64);
+    let end_of_week_sun = start_of_week_sun + chrono::Duration::days(6);
+    values.insert("start_of_week_sun".into(), Value::String(start_of_week_sun.format("%Y-%m-%d").to_string()));
+    values.insert("end_of_week_sun".into(), Value::String(end_of_week_sun.format("%Y-%m-%d").to_string()));
+
+    // Week boundaries (Monday start)
+    let weekday_mon = today.weekday().num_days_from_monday();
+    let start_of_week_mon = today - chrono::Duration::days(weekday_mon as i64);
+    let end_of_week_mon = start_of_week_mon + chrono::Duration::days(6);
+    values.insert("start_of_week_mon".into(), Value::String(start_of_week_mon.format("%Y-%m-%d").to_string()));
+    values.insert("end_of_week_mon".into(), Value::String(end_of_week_mon.format("%Y-%m-%d").to_string()));
+
+    // UTC week boundaries
+    let weekday_utc_sun = today_utc.weekday().num_days_from_sunday();
+    let start_utc_sun = today_utc - chrono::Duration::days(weekday_utc_sun as i64);
+    let end_utc_sun = start_utc_sun + chrono::Duration::days(6);
+    values.insert("start_of_week_sun_utc".into(), Value::String(start_utc_sun.format("%Y-%m-%d").to_string()));
+    values.insert("end_of_week_sun_utc".into(), Value::String(end_utc_sun.format("%Y-%m-%d").to_string()));
+
+    let weekday_utc_mon = today_utc.weekday().num_days_from_monday();
+    let start_utc_mon = today_utc - chrono::Duration::days(weekday_utc_mon as i64);
+    let end_utc_mon = start_utc_mon + chrono::Duration::days(6);
+    values.insert("start_of_week_mon_utc".into(), Value::String(start_utc_mon.format("%Y-%m-%d").to_string()));
+    values.insert("end_of_week_mon_utc".into(), Value::String(end_utc_mon.format("%Y-%m-%d").to_string()));
+
+    // Season
+    values.insert(
+        "season".into(),
+        Value::String(format::determine_season(today.month(), today.day()).to_string()),
+    );
+
+    // Timestamps
+    values.insert("timestamp".into(), Value::Number(now_utc.timestamp().into()));
+    values.insert("timestamp_ms".into(), Value::Number(now_utc.timestamp_millis().into()));
+}
+
+// ── Repo context ──────────────────────────────────────────────────
+
+fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
+    let git = cap.git_info.as_ref();
+    let repo = cap.repo_info.as_ref();
+
+    // repo and repo_root
+    values.insert("repo".into(), git.and_then(|g| g.repo.as_ref()).map_or(Value::Null, |r| Value::String(r.clone())));
+    values.insert(
+        "repo_root".into(),
+        git.map_or(Value::Null, |g| Value::String(g.repo_root.to_string_lossy().to_string())),
+    );
+
+    // is_monorepo
+    values.insert("is_monorepo".into(), Value::Bool(repo.is_some_and(|r| r.is_monorepo)));
+
+    // Package fields (null if not monorepo)
+    let is_mono = repo.is_some_and(|r| r.is_monorepo);
+    if is_mono {
+        values.insert(
+            "package_root".into(),
+            cap.current_package
+                .as_ref()
+                .map_or(Value::Null, |p| Value::String(p.path.to_string_lossy().to_string())),
+        );
+
+        values.insert(
+            "package_area_root".into(),
+            cap.current_package_area.as_ref().map_or(Value::Null, |area| {
+                let root = repo.unwrap().root.join(area);
+                Value::String(root.to_string_lossy().to_string())
+            }),
+        );
+
+        let packages: Vec<String> = repo
+            .and_then(|r| r.packages.as_ref())
+            .map(|pkgs| pkgs.iter().map(|p| p.name.clone()).collect())
+            .unwrap_or_default();
+        values.insert("packages".into(), Value::Array(packages.iter().map(|n| Value::String(n.clone())).collect()));
+
+        let areas: Vec<String> = repo
+            .and_then(|r| r.packages.as_ref())
+            .map(|pkgs| {
+                let mut areas: Vec<String> = pkgs.iter().map(|p| p.package_area.clone()).collect();
+                areas.sort();
+                areas.dedup();
+                areas
+            })
+            .unwrap_or_default();
+        values.insert("package_areas".into(), Value::Array(areas.iter().map(|a| Value::String(a.clone())).collect()));
+
+        values.insert(
+            "current_package".into(),
+            cap.current_package
+                .as_ref()
+                .map_or(Value::Null, |p| Value::String(p.name.clone())),
+        );
+        values.insert(
+            "current_package_area".into(),
+            cap.current_package_area
+                .as_ref()
+                .map_or(Value::Null, |a| Value::String(a.clone())),
+        );
+    } else {
+        values.insert("package_root".into(), Value::Null);
+        values.insert("package_area_root".into(), Value::Null);
+        values.insert("packages".into(), Value::Null);
+        values.insert("package_areas".into(), Value::Null);
+        values.insert("current_package".into(), Value::Null);
+        values.insert("current_package_area".into(), Value::Null);
+    }
+}
+
+// ── File changes context ──────────────────────────────────────────
+
+fn populate_file_changes(cap: &ContextCapture, values: &mut Map<String, Value>) {
+    // Dirty files
+    let mut dirty: Vec<String> = cap.dirty_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    dirty.sort();
+    values.insert("dirty_files".into(), Value::String(format::format_csv(&dirty)));
+    values.insert("dirty_files_list".into(), Value::String(format::format_md_list(&dirty)));
+
+    // Dirty source code files
+    let dirty_source: Vec<String> = dirty
+        .iter()
+        .filter(|p| blast_radius::is_source_code_path(Path::new(p.as_str())))
+        .cloned()
+        .collect();
+    values.insert("dirty_source_code_files".into(), Value::String(format::format_csv(&dirty_source)));
+    values.insert("dirty_source_code_files_list".into(), Value::String(format::format_md_list(&dirty_source)));
+
+    // Staged files
+    let mut staged: Vec<String> = cap.staged_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    staged.sort();
+    values.insert("staged_files".into(), Value::String(format::format_csv(&staged)));
+    values.insert("staged_files_list".into(), Value::String(format::format_md_list(&staged)));
+
+    // Untracked files
+    let mut untracked: Vec<String> = cap.untracked_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    untracked.sort();
+    values.insert("untracked_files".into(), Value::String(format::format_csv(&untracked)));
+    values.insert("untracked_files_list".into(), Value::String(format::format_md_list(&untracked)));
+}
+
+// ── Package/area dirty/staged context ─────────────────────────────
+
+fn populate_package_changes(cap: &ContextCapture, values: &mut Map<String, Value>) {
+    let repo = cap.repo_info.as_ref();
+    let packages = repo.and_then(|r| r.packages.as_ref());
+    let is_mono = repo.is_some_and(|r| r.is_monorepo);
+
+    if !is_mono || packages.is_none() {
+        // Default boolean flags to false
+        values.insert("dirty_packages".into(), Value::String(String::new()));
+        values.insert("dirty_packages_list".into(), Value::String(String::new()));
+        values.insert("dirty_package_areas".into(), Value::String(String::new()));
+        values.insert("dirty_package_areas_list".into(), Value::String(String::new()));
+        values.insert("staged_packages".into(), Value::String(String::new()));
+        values.insert("staged_packages_list".into(), Value::String(String::new()));
+        values.insert("staged_package_areas".into(), Value::String(String::new()));
+        values.insert("staged_package_areas_list".into(), Value::String(String::new()));
+        values.insert("current_package_has_staged_files".into(), Value::Bool(false));
+        values.insert("current_package_area_has_staged_files".into(), Value::Bool(false));
+        values.insert("current_package_has_dirty_files".into(), Value::Bool(false));
+        values.insert("current_package_area_has_dirty_files".into(), Value::Bool(false));
+        return;
+    }
+
+    let pkgs = packages.unwrap();
+
+    // Helper: check if a repo-relative path belongs to a package
+    let path_in_package = |path: &Path, pkg: &Package| -> bool {
+        let pkg_rel = &pkg.relative;
+        let path_str = path.to_string_lossy();
+        path_str.starts_with(pkg_rel)
+    };
+
+    // Dirty packages
+    let mut dirty_pkg_names: Vec<String> = pkgs
+        .iter()
+        .filter(|pkg| cap.dirty_paths.iter().any(|p| path_in_package(p, pkg)))
+        .map(|p| p.name.clone())
+        .collect();
+    dirty_pkg_names.sort();
+    dirty_pkg_names.dedup();
+
+    let mut dirty_area_names: Vec<String> = pkgs
+        .iter()
+        .filter(|pkg| cap.dirty_paths.iter().any(|p| path_in_package(p, pkg)))
+        .map(|p| p.package_area.clone())
+        .collect();
+    dirty_area_names.sort();
+    dirty_area_names.dedup();
+
+    values.insert("dirty_packages".into(), Value::String(format::format_csv(&dirty_pkg_names)));
+    values.insert("dirty_packages_list".into(), Value::String(format::format_md_list(&dirty_pkg_names)));
+    values.insert("dirty_package_areas".into(), Value::String(format::format_csv(&dirty_area_names)));
+    values.insert("dirty_package_areas_list".into(), Value::String(format::format_md_list(&dirty_area_names)));
+
+    // Staged packages
+    let mut staged_pkg_names: Vec<String> = pkgs
+        .iter()
+        .filter(|pkg| cap.staged_paths.iter().any(|p| path_in_package(p, pkg)))
+        .map(|p| p.name.clone())
+        .collect();
+    staged_pkg_names.sort();
+    staged_pkg_names.dedup();
+
+    let mut staged_area_names: Vec<String> = pkgs
+        .iter()
+        .filter(|pkg| cap.staged_paths.iter().any(|p| path_in_package(p, pkg)))
+        .map(|p| p.package_area.clone())
+        .collect();
+    staged_area_names.sort();
+    staged_area_names.dedup();
+
+    values.insert("staged_packages".into(), Value::String(format::format_csv(&staged_pkg_names)));
+    values.insert("staged_packages_list".into(), Value::String(format::format_md_list(&staged_pkg_names)));
+    values.insert("staged_package_areas".into(), Value::String(format::format_csv(&staged_area_names)));
+    values.insert("staged_package_areas_list".into(), Value::String(format::format_md_list(&staged_area_names)));
+
+    // Current package/area boolean flags
+    let cur_pkg_name = cap.current_package.as_ref().map(|p| &p.name);
+    let cur_area = cap.current_package_area.as_deref();
+
+    values.insert(
+        "current_package_has_staged_files".into(),
+        Value::Bool(cur_pkg_name.is_some_and(|name| staged_pkg_names.contains(name))),
+    );
+    values.insert(
+        "current_package_area_has_staged_files".into(),
+        Value::Bool(cur_area.is_some_and(|area| staged_area_names.iter().any(|a| a == area))),
+    );
+    values.insert(
+        "current_package_has_dirty_files".into(),
+        Value::Bool(cur_pkg_name.is_some_and(|name| dirty_pkg_names.contains(name))),
+    );
+    values.insert(
+        "current_package_area_has_dirty_files".into(),
+        Value::Bool(cur_area.is_some_and(|area| dirty_area_names.iter().any(|a| a == area))),
+    );
+}
+
+// ── Programming language and package manager ──────────────────────
+
+fn populate_languages(cap: &ContextCapture, values: &mut Map<String, Value>) {
+    let repo = cap.repo_info.as_ref();
+    let git = cap.git_info.as_ref();
+
+    if git.is_none() {
+        values.insert("programming_languages_in_repo".into(), Value::Null);
+        values.insert("programming_language".into(), Value::Null);
+        values.insert("package_manager".into(), Value::Null);
+        return;
+    }
+
+    let packages = repo.and_then(|r| r.packages.as_ref());
+    let is_mono = repo.is_some_and(|r| r.is_monorepo);
+
+    // All languages across packages
+    let all_langs: Vec<String> = packages
+        .map(|pkgs| {
+            let mut langs: Vec<String> = pkgs
+                .iter()
+                .filter_map(|p| p.primary_language.as_ref())
+                .map(|l| format!("{l:?}"))
+                .collect();
+            langs.sort();
+            langs.dedup();
+            langs
+        })
+        .unwrap_or_default();
+
+    values.insert(
+        "programming_languages_in_repo".into(),
+        if all_langs.is_empty() {
+            Value::Null
+        } else {
+            Value::String(format::format_csv(&all_langs))
+        },
+    );
+
+    // programming_language
+    let programming_language = if is_mono {
+        if let Some(ref pkg) = cap.current_package {
+            // In a package: that package's primary language
+            pkg.primary_language.as_ref().map(|l| format!("{l:?}"))
+        } else if let Some(ref area) = cap.current_package_area {
+            // In a package area: unique languages across packages in that area
+            packages.map(|pkgs| {
+                let mut area_langs: Vec<String> = pkgs
+                    .iter()
+                    .filter(|p| &p.package_area == area)
+                    .filter_map(|p| p.primary_language.as_ref())
+                    .map(|l| format!("{l:?}"))
+                    .collect();
+                area_langs.sort();
+                area_langs.dedup();
+                format::format_csv(&area_langs)
+            })
+        } else {
+            // In monorepo root but not in a package/area
+            if all_langs.len() == 1 {
+                Some(all_langs[0].clone())
+            } else {
+                None
+            }
+        }
+    } else {
+        // Not monorepo: repo's primary language
+        if all_langs.len() == 1 {
+            Some(all_langs[0].clone())
+        } else {
+            all_langs.first().cloned()
+        }
+    };
+    values.insert(
+        "programming_language".into(),
+        programming_language.map_or(Value::Null, Value::String),
+    );
+
+    // package_manager
+    let package_manager = if is_mono {
+        if let Some(ref pkg) = cap.current_package {
+            pkg.package_managers.first().cloned()
+        } else if let Some(ref area) = cap.current_package_area {
+            let mut managers: Vec<String> = packages
+                .map(|pkgs| {
+                    pkgs.iter()
+                        .filter(|p| &p.package_area == area)
+                        .filter_map(|p| p.package_managers.first().cloned())
+                        .collect()
+                })
+                .unwrap_or_default();
+            managers.sort();
+            managers.dedup();
+            if managers.len() == 1 {
+                Some(managers.remove(0))
+            } else {
+                None
+            }
+        } else {
+            let mut managers: Vec<String> = packages
+                .map(|pkgs| {
+                    pkgs.iter()
+                        .filter_map(|p| p.package_managers.first().cloned())
+                        .collect()
+                })
+                .unwrap_or_default();
+            managers.sort();
+            managers.dedup();
+            if managers.len() == 1 {
+                Some(managers.remove(0))
+            } else {
+                None
+            }
+        }
+    } else {
+        packages.and_then(|pkgs| pkgs.first().and_then(|p| p.package_managers.first().cloned()))
+    };
+    values.insert(
+        "package_manager".into(),
+        package_manager.map_or(Value::Null, Value::String),
+    );
+}
+
+// ── Document context ──────────────────────────────────────────────
+
+fn populate_docs(cap: &ContextCapture, values: &mut Map<String, Value>) {
+    let docs = cap.docs.as_ref();
+    let is_mono = cap.repo_info.as_ref().is_some_and(|r| r.is_monorepo);
+
+    // Scope filter: filter docs to the active scope
+    let scope_filter = |doc: &MarkdownMeta| -> bool {
+        if !is_mono {
+            return true;
+        }
+        if let Some(ref pkg) = cap.current_package {
+            doc.package.as_deref() == Some(&pkg.name)
+        } else if let Some(ref area) = cap.current_package_area {
+            // In an area: include docs from packages in this area
+            cap.repo_info
+                .as_ref()
+                .and_then(|r| r.packages.as_ref())
+                .map(|pkgs| {
+                    pkgs.iter()
+                        .filter(|p| &p.package_area == area)
+                        .any(|p| doc.package.as_deref() == Some(&p.name))
+                })
+                .unwrap_or(false)
+        } else {
+            true // repo-wide
+        }
+    };
+
+    // docs_readme
+    let readmes: Vec<String> = docs
+        .map(|all_docs| {
+            all_docs
+                .iter()
+                .filter(|d| scope_filter(d))
+                .filter(|d| {
+                    d.filepath
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.eq_ignore_ascii_case("readme.md"))
+                        .unwrap_or(false)
+                })
+                .map(|d| d.relative.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    values.insert("docs_readme".into(), Value::String(format::format_csv(&readmes)));
+
+    // docs_blast_radius: docs with blast_radius frontmatter
+    let blast_radius_docs: Vec<String> = docs
+        .map(|all_docs| {
+            all_docs
+                .iter()
+                .filter(|d| scope_filter(d))
+                .filter(|d| d.blast_radius.is_some())
+                .map(|d| d.relative.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    values.insert("docs_blast_radius".into(), Value::String(format::format_csv(&blast_radius_docs)));
+
+    // docs_drift: docs whose blast_radius intersects dirty source set
+    let dirty_source: Vec<&str> = cap
+        .dirty_paths
+        .iter()
+        .filter(|p| blast_radius::is_source_code_path(p))
+        .filter_map(|p| p.to_str())
+        .collect();
+
+    let drift_docs: Vec<String> = docs
+        .map(|all_docs| {
+            all_docs
+                .iter()
+                .filter(|d| scope_filter(d))
+                .filter(|d| {
+                    if let Some(ref br) = d.blast_radius {
+                        br.iter().any(|pattern| {
+                            let pattern_str = pattern.to_string_lossy();
+                            dirty_source.iter().any(|dirty| dirty.contains(pattern_str.as_ref()))
+                        })
+                    } else {
+                        false
+                    }
+                })
+                .map(|d| d.relative.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+    values.insert("docs_drift".into(), Value::String(format::format_csv(&drift_docs)));
+}
+
+// ── Skill context ─────────────────────────────────────────────────
+
+fn populate_skills(cap: &ContextCapture, values: &mut Map<String, Value>) {
+    let repo_root = cap.git_info.as_ref().map(|g| &g.repo_root);
+
+    let skill = repo_root.and_then(|root| {
+        find_best_skill(root, cap.current_package.as_ref(), cap.current_package_area.as_deref())
+    });
+
+    values.insert(
+        "docs_skill".into(),
+        skill.map_or(Value::Null, Value::String),
+    );
+}
+
+fn find_best_skill(
+    repo_root: &Path,
+    current_package: Option<&Package>,
+    current_area: Option<&str>,
+) -> Option<String> {
+    let skill_dirs = [".claude/skills", ".agents/skills"];
+
+    for base in &skill_dirs {
+        let skills_dir = repo_root.join(base);
+        if !skills_dir.is_dir() {
+            continue;
+        }
+
+        let entries: Vec<_> = std::fs::read_dir(&skills_dir)
+            .ok()?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .collect();
+
+        // Try matching by package name, then area name, then repo name
+        let target_names: Vec<&str> = [
+            current_package.map(|p| p.name.as_str()),
+            current_area,
+            repo_root.file_name().and_then(|n| n.to_str()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        for target in &target_names {
+            for entry in &entries {
+                let dir_name = entry.file_name();
+                let dir_name_str = dir_name.to_string_lossy();
+                if dir_name_str == *target {
+                    let skill_file = entry.path().join("SKILL.md");
+                    if skill_file.exists() {
+                        let relative = skill_file
+                            .strip_prefix(repo_root)
+                            .ok()?
+                            .to_string_lossy()
+                            .to_string();
+                        return Some(relative);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+// ── OS context ────────────────────────────────────────────────────
+
+fn populate_os(cap: &ContextCapture, values: &mut Map<String, Value>) {
+    let os_info = cap.os_info.as_ref();
+
+    values.insert(
+        "os".into(),
+        os_info.map_or(Value::Null, |info| {
+            Value::String(
+                match info.os_type {
+                    OsType::Windows => "Windows",
+                    OsType::MacOS => "macOS",
+                    OsType::Linux => "Linux",
+                    _ => return Value::Null,
+                }
+                .to_string(),
+            )
+        }),
+    );
+
+    values.insert(
+        "os_distro".into(),
+        Value::String(
+            os_info
+                .and_then(|info| info.distribution.clone())
+                .unwrap_or_default(),
+        ),
+    );
+
+    values.insert(
+        "os_package_manager".into(),
+        os_info
+            .and_then(|info| {
+                info.system_package_managers
+                    .as_ref()
+                    .and_then(|spm| spm.primary.as_ref())
+                    .map(|pm| Value::String(format!("{pm:?}")))
+            })
+            .unwrap_or(Value::Null),
+    );
+
+    values.insert(
+        "os_version".into(),
+        Value::String(os_info.map(|info| info.version.clone()).unwrap_or_default()),
+    );
+}
+
+// ── Hardware context ──────────────────────────────────────────────
+
+fn populate_hardware(cap: &ContextCapture, values: &mut Map<String, Value>) {
+    let hw = cap.hardware_info.as_ref();
+
+    values.insert(
+        "memory_total".into(),
+        hw.map_or(Value::Null, |h| {
+            Value::Number(h.memory.total_bytes.into())
+        }),
+    );
+
+    values.insert(
+        "memory_used".into(),
+        hw.map_or(Value::Null, |h| {
+            if h.memory.total_bytes > 0 {
+                Value::Number(((h.memory.used_bytes * 100) / h.memory.total_bytes).into())
+            } else {
+                Value::Number(0.into())
+            }
+        }),
+    );
+
+    values.insert(
+        "memory_avail".into(),
+        hw.map_or(Value::Null, |h| {
+            Value::Number(h.memory.available_bytes.into())
+        }),
+    );
+
+    values.insert(
+        "cpu_cores".into(),
+        hw.map_or(Value::Null, |h| {
+            Value::Number(h.cpu.logical_cores.into())
+        }),
+    );
+
+    values.insert(
+        "cpu_arch".into(),
+        hw.map_or(Value::Null, |h| {
+            Value::String(h.cpu.arch.clone())
+        }),
+    );
+
+    values.insert(
+        "gpu".into(),
+        hw.map_or(Value::Null, |h| {
+            if h.gpu.is_empty() {
+                Value::Null
+            } else {
+                let names: Vec<String> = h.gpu.iter().map(|g| g.name.clone()).collect();
+                Value::String(format::format_csv(&names))
+            }
+        }),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn populate_datetime_produces_all_expected_keys() {
+        let mut values = Map::new();
+        populate_datetime(&mut values);
+
+        // Legacy fields
+        assert!(values.contains_key("now"));
+        assert!(values.contains_key("utc"));
+        assert!(values.contains_key("now_utc"));
+        assert!(values.contains_key("today"));
+        assert!(values.contains_key("yesterday"));
+        assert!(values.contains_key("tomorrow"));
+        assert!(values.contains_key("dow"));
+        assert!(values.contains_key("day"));
+        assert!(values.contains_key("dow_abbr"));
+        assert!(values.contains_key("day_abbr"));
+        assert!(values.contains_key("year"));
+        assert!(values.contains_key("month"));
+        assert!(values.contains_key("month_name"));
+        assert!(values.contains_key("month_name_abbr"));
+
+        // New date/time fields
+        assert!(values.contains_key("today_utc"));
+        assert!(values.contains_key("yesterday_utc"));
+        assert!(values.contains_key("tomorrow_utc"));
+        assert!(values.contains_key("day_utc"));
+        assert!(values.contains_key("day_abbr_utc"));
+        assert!(values.contains_key("year_utc"));
+        assert!(values.contains_key("day_of_month"));
+        assert!(values.contains_key("day_of_month_suffixed"));
+        assert!(values.contains_key("time"));
+        assert!(values.contains_key("time_military"));
+        assert!(values.contains_key("timezone"));
+        assert!(values.contains_key("timezone_offset"));
+        assert!(values.contains_key("start_of_week_sun"));
+        assert!(values.contains_key("end_of_week_sun"));
+        assert!(values.contains_key("start_of_week_mon"));
+        assert!(values.contains_key("end_of_week_mon"));
+        assert!(values.contains_key("season"));
+        assert!(values.contains_key("timestamp"));
+        assert!(values.contains_key("timestamp_ms"));
+    }
+
+    #[test]
+    fn aliases_match() {
+        let mut values = Map::new();
+        populate_datetime(&mut values);
+
+        // dow == day
+        assert_eq!(values.get("dow"), values.get("day"));
+        // dow_abbr == day_abbr
+        assert_eq!(values.get("dow_abbr"), values.get("day_abbr"));
+        // utc == now_utc
+        assert_eq!(values.get("utc"), values.get("now_utc"));
+    }
+
+    #[test]
+    fn day_of_month_suffixed_formats_correctly() {
+        use super::format::ordinal_suffix;
+        assert_eq!(ordinal_suffix(1), "st");
+        assert_eq!(ordinal_suffix(2), "nd");
+        assert_eq!(ordinal_suffix(3), "rd");
+        assert_eq!(ordinal_suffix(4), "th");
+        assert_eq!(ordinal_suffix(11), "th");
+        assert_eq!(ordinal_suffix(12), "th");
+        assert_eq!(ordinal_suffix(13), "th");
+        assert_eq!(ordinal_suffix(21), "st");
+        assert_eq!(ordinal_suffix(22), "nd");
+        assert_eq!(ordinal_suffix(23), "rd");
+        assert_eq!(ordinal_suffix(31), "st");
+    }
+
+    #[test]
+    fn season_determination() {
+        use super::format::determine_season;
+        // Meteorological seasons
+        assert_eq!(determine_season(1, 15), "Winter");
+        assert_eq!(determine_season(3, 1), "Spring");
+        assert_eq!(determine_season(6, 1), "Summer");
+        assert_eq!(determine_season(9, 1), "Fall");
+        assert_eq!(determine_season(12, 15), "Winter");
+    }
+}

@@ -4,6 +4,7 @@
 //! to produce the effective state used by replacement and interpolation stages.
 
 use super::super::frontmatter::MergeStrategy;
+use super::context::ContextMergeDiagnostic;
 use super::types::ComposeContext;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -60,6 +61,9 @@ pub struct EffectiveState {
 
     /// Runtime context for `ctx.*` lookups.
     context: ComposeContext,
+
+    /// Diagnostics from context capture and merge.
+    ctx_diagnostics: Vec<ContextMergeDiagnostic>,
 }
 
 impl EffectiveState {
@@ -88,7 +92,16 @@ impl EffectiveState {
             None => frontmatter.clone(),
         };
 
-        Self { data, context }
+        Self {
+            data,
+            context,
+            ctx_diagnostics: Vec::new(),
+        }
+    }
+
+    /// Returns context merge diagnostics.
+    pub fn ctx_diagnostics(&self) -> &[ContextMergeDiagnostic] {
+        &self.ctx_diagnostics
     }
 
     /// Looks up a value by path.
@@ -152,7 +165,23 @@ impl EffectiveState {
     }
 
     /// Gets a context value by key.
+    ///
+    /// First tries the materialized `ctx` namespace in `data`, then falls back
+    /// to the `values` map on `ComposeContext`, then to legacy field-by-field match.
     fn get_context_value(&self, key: &str) -> Option<Value> {
+        // 1. Try materialized data["ctx"][key]
+        if let Some(ctx_obj) = self.data.get("ctx")
+            && let Some(val) = ctx_obj.get(key)
+        {
+            return Some(val.clone());
+        }
+
+        // 2. Try values map on ComposeContext
+        if let Some(val) = self.context.get(key) {
+            return Some(val.clone());
+        }
+
+        // 3. Legacy field-by-field fallback (safety during transition)
         let value = match key {
             "now" => &self.context.now,
             "utc" => &self.context.utc,
@@ -206,6 +235,7 @@ pub struct EffectiveStateBuilder {
     merge_strategy: MergeStrategy,
     replace_parent_wins: bool,
     context: Option<ComposeContext>,
+    allow_ctx_override: bool,
 }
 
 impl EffectiveStateBuilder {
@@ -217,6 +247,7 @@ impl EffectiveStateBuilder {
             merge_strategy: MergeStrategy::PreferExternal,
             replace_parent_wins: false,
             context: None,
+            allow_ctx_override: false,
         }
     }
 
@@ -256,7 +287,17 @@ impl EffectiveStateBuilder {
         self
     }
 
+    /// Allow non-object ctx frontmatter (downgrade error to warning).
+    #[must_use]
+    pub fn with_allow_ctx_override(mut self, allow: bool) -> Self {
+        self.allow_ctx_override = allow;
+        self
+    }
+
     /// Builds the effective state.
+    ///
+    /// After merging frontmatter/external state, materializes the runtime `ctx`
+    /// namespace into `data["ctx"]` using the merge policy.
     pub fn build(self) -> EffectiveState {
         let context = self.context.unwrap_or_else(ComposeContext::capture);
 
@@ -294,7 +335,28 @@ impl EffectiveStateBuilder {
             }
         }
 
-        EffectiveState { data, context }
+        // Materialize ctx: merge user-defined ctx with runtime ctx
+        let mut ctx_diagnostics = Vec::new();
+        let user_ctx = data.get("ctx");
+        let runtime_ctx = context.as_object();
+
+        match super::context::merge_ctx(user_ctx, runtime_ctx, self.allow_ctx_override) {
+            Ok(result) => {
+                data.insert("ctx".to_string(), result.merged_ctx);
+                ctx_diagnostics.extend(result.diagnostics);
+            }
+            Err(_e) => {
+                // Invalid user ctx and not allowed: keep runtime ctx, add diagnostic
+                data.insert("ctx".to_string(), context.as_object());
+                ctx_diagnostics.push(ContextMergeDiagnostic::InvalidUserCtxReplaced);
+            }
+        }
+
+        EffectiveState {
+            data,
+            context,
+            ctx_diagnostics,
+        }
     }
 }
 
@@ -421,7 +483,9 @@ mod tests {
             .with_context(test_context())
             .build();
 
-        assert!(state.data().is_empty());
+        // Only the materialized "ctx" key should be present (no user frontmatter)
+        assert_eq!(state.data().len(), 1);
+        assert!(state.data().contains_key("ctx"));
     }
 
     #[test]
@@ -556,5 +620,58 @@ mod tests {
         assert_eq!(merged.get("A"), Some(&json!("child")));
         assert_eq!(merged["nested"]["left"], json!("x"));
         assert_eq!(merged["nested"]["right"], json!("y"));
+    }
+
+    // ── Phase 8: Regression tests for context materialization ─────
+
+    #[test]
+    fn test_ctx_today_resolves_via_data_lookup() {
+        let fm = HashMap::new();
+        let state = EffectiveStateBuilder::new()
+            .with_frontmatter(fm)
+            .with_context(test_context())
+            .build();
+
+        // ctx.today should resolve via the materialized data["ctx"] namespace
+        assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
+        assert_eq!(state.get("ctx.year"), Some(json!("2024")));
+        assert_eq!(state.get("ctx.dow"), Some(json!("Saturday")));
+    }
+
+    #[test]
+    fn test_ctx_aliases_via_materialized_data() {
+        let fm = HashMap::new();
+        let state = EffectiveStateBuilder::new()
+            .with_frontmatter(fm)
+            .with_context(test_context())
+            .build();
+
+        // day == dow (aliases both present)
+        assert_eq!(state.get("ctx.day"), state.get("ctx.dow"));
+        assert_eq!(state.get("ctx.day_abbr"), state.get("ctx.dow_abbr"));
+        assert_eq!(state.get("ctx.now_utc"), state.get("ctx.utc"));
+    }
+
+    #[test]
+    fn test_env_lookup_still_works() {
+        let mut ctx = test_context();
+        ctx.env.insert("HOME".to_string(), "/home/user".to_string());
+
+        let state = EffectiveStateBuilder::new()
+            .with_context(ctx)
+            .build();
+
+        assert_eq!(state.get("env.HOME"), Some(json!("/home/user")));
+        assert_eq!(state.get("env.MISSING"), None);
+    }
+
+    #[test]
+    fn test_ctx_diagnostics_empty_by_default() {
+        let state = EffectiveStateBuilder::new()
+            .with_context(test_context())
+            .build();
+
+        // No user ctx means no diagnostics
+        assert!(state.ctx_diagnostics().is_empty());
     }
 }

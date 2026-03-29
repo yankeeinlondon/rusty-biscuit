@@ -242,6 +242,11 @@ pub struct ComposeOptions {
     /// the pipeline continues with remaining operations.
     pub fail_fast: bool,
 
+    // ── Context override ──────────────────────────────────────────
+    /// When `true`, non-object `ctx` frontmatter is downgraded from an error
+    /// to a warning and the runtime context is used instead.
+    pub allow_ctx_override: bool,
+
     // ── Source context ─────────────────────────────────────────────
     /// Source location of the document being composed.
     ///
@@ -420,6 +425,7 @@ impl ComposeOptions {
         Self {
             enabled_operations: ComposeOperation::all(),
             fail_fast: false,
+            allow_ctx_override: false,
             source: ComposeSource::Unknown,
             external_state: None,
             set_overrides: None,
@@ -545,6 +551,13 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_fail_fast(mut self, fail_fast: bool) -> Self {
         self.fail_fast = fail_fast;
+        self
+    }
+
+    /// Allow non-object ctx frontmatter (downgrade error to warning).
+    #[must_use]
+    pub fn with_allow_ctx_override(mut self, allow: bool) -> Self {
+        self.allow_ctx_override = allow;
         self
     }
 
@@ -800,7 +813,11 @@ impl Default for TransclusionOptions {
 /// All date/time values are captured once when the context is created,
 /// ensuring consistent values throughout the compose pipeline even
 /// if the compose takes significant time.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// The `values` map is the canonical backing store for all context variables.
+/// Legacy public fields are kept for backward compatibility but are also
+/// mirrored in the `values` map.
+#[derive(Debug, Clone)]
 pub struct ComposeContext {
     /// ISO 8601 local datetime (e.g., "2024-01-15T14:30:00").
     pub now: String,
@@ -837,10 +854,32 @@ pub struct ComposeContext {
 
     /// Environment variables snapshot.
     pub env: HashMap<String, String>,
+
+    /// Full context values map (backing store for all ctx variables).
+    pub(crate) values: serde_json::Map<String, serde_json::Value>,
 }
 
+impl PartialEq for ComposeContext {
+    fn eq(&self, other: &Self) -> bool {
+        self.now == other.now
+            && self.utc == other.utc
+            && self.today == other.today
+            && self.yesterday == other.yesterday
+            && self.tomorrow == other.tomorrow
+            && self.dow == other.dow
+            && self.dow_abbr == other.dow_abbr
+            && self.year == other.year
+            && self.month == other.month
+            && self.month_name == other.month_name
+            && self.month_name_abbr == other.month_name_abbr
+            && self.env == other.env
+    }
+}
+
+impl Eq for ComposeContext {}
+
 impl ComposeContext {
-    /// Captures the current runtime context.
+    /// Captures the current runtime context using CWD as the base directory.
     ///
     /// This snapshots:
     /// - Current local and UTC time
@@ -848,35 +887,83 @@ impl ComposeContext {
     /// - Day of week (full and abbreviated)
     /// - Year, month (numeric and named)
     /// - All environment variables
+    /// - Repository, monorepo, OS, and hardware information (via sniff)
     pub fn capture() -> Self {
-        use chrono::{Local, Utc};
+        let base_dir = std::env::current_dir().unwrap_or_default();
+        Self::capture_for_dir(&base_dir)
+    }
 
-        let now_local = Local::now();
-        let now_utc = Utc::now();
+    /// Captures the runtime context using the given base directory.
+    pub fn capture_for_dir(base_dir: &std::path::Path) -> Self {
+        let (values, _diagnostics) =
+            super::context::capture::capture_runtime_context(base_dir);
 
-        let today = now_local.date_naive();
-        let yesterday = today - chrono::Duration::days(1);
-        let tomorrow = today + chrono::Duration::days(1);
+        let env: HashMap<String, String> = std::env::vars().collect();
+
+        let get_str = |key: &str| -> String {
+            values
+                .get(key)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
 
         Self {
-            now: now_local.format("%Y-%m-%dT%H:%M:%S").to_string(),
-            utc: now_utc.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
-            today: today.format("%Y-%m-%d").to_string(),
-            yesterday: yesterday.format("%Y-%m-%d").to_string(),
-            tomorrow: tomorrow.format("%Y-%m-%d").to_string(),
-            dow: now_local.format("%A").to_string(),
-            dow_abbr: now_local.format("%a").to_string(),
-            year: now_local.format("%Y").to_string(),
-            month: now_local.format("%m").to_string(),
-            month_name: now_local.format("%B").to_string(),
-            month_name_abbr: now_local.format("%b").to_string(),
-            env: std::env::vars().collect(),
+            now: get_str("now"),
+            utc: get_str("utc"),
+            today: get_str("today"),
+            yesterday: get_str("yesterday"),
+            tomorrow: get_str("tomorrow"),
+            dow: get_str("dow"),
+            dow_abbr: get_str("dow_abbr"),
+            year: get_str("year"),
+            month: get_str("month"),
+            month_name: get_str("month_name"),
+            month_name_abbr: get_str("month_name_abbr"),
+            env,
+            values,
         }
+    }
+
+    /// Looks up a value from the backing store.
+    pub fn get(&self, key: &str) -> Option<&serde_json::Value> {
+        self.values.get(key)
+    }
+
+    /// Returns the full context as a JSON object.
+    pub fn as_object(&self) -> serde_json::Value {
+        serde_json::Value::Object(self.values.clone())
+    }
+
+    /// Iterates the exposed key names.
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.values.keys().map(String::as_str)
     }
 
     /// Creates a context with fixed values for testing.
     #[cfg(test)]
     pub fn fixed_for_testing() -> Self {
+        let mut values = serde_json::Map::new();
+        let fields = [
+            ("now", "2024-06-15T10:30:00"),
+            ("utc", "2024-06-15T17:30:00Z"),
+            ("now_utc", "2024-06-15T17:30:00Z"),
+            ("today", "2024-06-15"),
+            ("yesterday", "2024-06-14"),
+            ("tomorrow", "2024-06-16"),
+            ("dow", "Saturday"),
+            ("day", "Saturday"),
+            ("dow_abbr", "Sat"),
+            ("day_abbr", "Sat"),
+            ("year", "2024"),
+            ("month", "06"),
+            ("month_name", "June"),
+            ("month_name_abbr", "Jun"),
+        ];
+        for (k, v) in &fields {
+            values.insert((*k).to_string(), serde_json::Value::String(v.to_string()));
+        }
+
         Self {
             now: "2024-06-15T10:30:00".to_string(),
             utc: "2024-06-15T17:30:00Z".to_string(),
@@ -890,6 +977,7 @@ impl ComposeContext {
             month_name: "June".to_string(),
             month_name_abbr: "Jun".to_string(),
             env: HashMap::new(),
+            values,
         }
     }
 }

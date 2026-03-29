@@ -65,6 +65,9 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 
 # Hashing (for Mermaid diagram caching and markdown TOC)
 biscuit-hash = { path = "../../biscuit-hash/lib" }
+
+# System detection (OS, hardware, repo, docs)
+sniff = { path = "../../sniff/lib" }
 serde_yaml = "0.9.34"
 
 [dev-dependencies]

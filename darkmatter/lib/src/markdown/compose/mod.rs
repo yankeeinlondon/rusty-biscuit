@@ -40,6 +40,7 @@
 
 pub(crate) mod cache;
 pub mod conditions;
+pub(crate) mod context;
 pub(crate) mod parse_utils;
 mod state;
 mod types;
@@ -53,6 +54,7 @@ pub mod transclusion;
 
 pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
+pub use context::ContextMergeDiagnostic;
 pub use shell_expansion::ShellExpansionError;
 pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
@@ -286,7 +288,39 @@ impl Markdown {
                 .with_merge_strategy(super::MergeStrategy::PreferDocument)
                 .with_replace_parent_wins(options.replace_parent_wins)
                 .with_context(options.context().clone())
+                .with_allow_ctx_override(options.allow_ctx_override)
                 .build();
+
+            // Convert ctx diagnostics to compose warnings
+            for diag in effective_state.ctx_diagnostics() {
+                let warning = match diag {
+                    context::ContextMergeDiagnostic::UserCtxMerged {
+                        had_key_collisions: false,
+                    } => {
+                        // No warning needed when merge succeeded without collisions
+                        continue;
+                    }
+                    context::ContextMergeDiagnostic::UserCtxMerged {
+                        had_key_collisions: true,
+                    } => ComposeWarning::new(
+                        "context",
+                        "Document defines ctx keys that collide with runtime context; runtime values take precedence",
+                    ),
+                    context::ContextMergeDiagnostic::InvalidUserCtxReplaced => {
+                        ComposeWarning::new(
+                            "context",
+                            "Document ctx was not an object; replaced with runtime context",
+                        )
+                    }
+                    context::ContextMergeDiagnostic::PartialRuntimeCapture { area, detail } => {
+                        ComposeWarning::new(
+                            "context",
+                            format!("Partial runtime capture for {area}: {detail}"),
+                        )
+                    }
+                };
+                report.warnings.push(warning);
+            }
 
             let mut transclusion_ran = false;
             for operation in ComposeOperation::default_order() {
