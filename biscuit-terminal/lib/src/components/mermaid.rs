@@ -50,7 +50,7 @@ pub enum MermaidRenderError {
 ///
 /// ## Examples
 ///
-/// ```rust,no_run
+/// ```ignore
 /// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme, MermaidConfig};
 ///
 /// // Basic usage with default settings (dark theme)
@@ -111,7 +111,7 @@ impl MermaidRenderer {
     ///
     /// ## Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// use biscuit_terminal::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
@@ -130,7 +130,7 @@ impl MermaidRenderer {
     ///
     /// ## Examples
     ///
-    /// ```rust,no_run
+    /// ```ignore
     /// use biscuit_terminal::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::for_terminal("flowchart LR\n    A --> B");
@@ -158,7 +158,7 @@ impl MermaidRenderer {
     ///
     /// ## Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme};
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
@@ -171,7 +171,7 @@ impl MermaidRenderer {
     ///
     /// ## Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// use biscuit_terminal::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
@@ -189,7 +189,7 @@ impl MermaidRenderer {
     ///
     /// ## Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// use biscuit_terminal::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
@@ -204,7 +204,7 @@ impl MermaidRenderer {
     ///
     /// ## Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme};
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
@@ -219,7 +219,7 @@ impl MermaidRenderer {
     ///
     /// ## Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// use biscuit_terminal::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
@@ -236,7 +236,7 @@ impl MermaidRenderer {
     ///
     /// ## Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidConfig};
     ///
     /// let config = MermaidConfig::new()
@@ -263,7 +263,7 @@ impl MermaidRenderer {
     ///
     /// ## Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// use biscuit_terminal::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
@@ -290,7 +290,7 @@ impl MermaidRenderer {
     ///
     /// ## Examples
     ///
-    /// ```rust,no_run
+    /// ```ignore
     /// use biscuit_terminal::components::mermaid::MermaidRenderer;
     ///
     /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");

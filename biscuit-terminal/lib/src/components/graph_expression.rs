@@ -126,31 +126,22 @@ impl GraphExpression {
         source: impl Into<String>,
         syntax: GraphInputSyntax,
     ) -> Result<Self, GraphRenderError> {
-        use biscuit_visualized::graph::GraphColorTheme;
+        Self::for_terminal_mode(source, syntax, false)
+    }
 
-        let color_mode = Terminal::color_mode();
-        let is_dark = matches!(
-            color_mode,
-            crate::discovery::detection::ColorMode::Dark
-                | crate::discovery::detection::ColorMode::Unknown
-        );
-
-        let theme = if is_dark {
-            GraphColorTheme::dark()
-        } else {
-            GraphColorTheme::light()
-        };
-
-        let diagram =
-            biscuit_visualized::graph::GraphDiagram::parse(source, syntax)?.with_color_theme(theme);
-
-        Ok(Self {
-            diagram,
-            scale: 2,
-            transparent_background: true,
-            width: ImageWidth::Percent(0.5),
-            layout: Layout::default(),
-        })
+    /// Creates a `GraphExpression` with an explicit inverse theme.
+    ///
+    /// The inverse theme uses an opaque surface and the opposite terminal color
+    /// palette so diagrams remain legible on both light and dark terminals.
+    ///
+    /// ## Errors
+    ///
+    /// Returns `GraphRenderError` if parsing fails.
+    pub fn inverted_for_terminal(
+        source: impl Into<String>,
+        syntax: GraphInputSyntax,
+    ) -> Result<Self, GraphRenderError> {
+        Self::for_terminal_mode(source, syntax, true)
     }
 
     /// Sets the title for the diagram.
@@ -196,6 +187,33 @@ impl GraphExpression {
         self
     }
 
+    /// Uses inverted colors (solid background with the opposite terminal theme).
+    pub fn inverted(mut self, is_dark_mode: bool) -> Self {
+        let theme = if is_dark_mode {
+            GraphColorTheme::light()
+        } else {
+            GraphColorTheme::dark()
+        };
+        self.diagram = self.diagram.with_color_theme(theme);
+        self.transparent_background = false;
+        self
+    }
+
+    /// Renders the graph to a terminal-displayable string.
+    ///
+    /// This is the fallible render path. Use it when callers need the rendered
+    /// output and cache metadata instead of silent fallback behavior.
+    pub fn try_render(&self, term: &Terminal) -> Result<GraphRenderResult, GraphRenderError> {
+        let (output, png_path, cache_hit) = self.render_to_image(term)?;
+        let output = self.layout.apply_layout(&output, term.width());
+
+        Ok(GraphRenderResult {
+            output,
+            png_path,
+            cache_hit,
+        })
+    }
+
     /// Renders the diagram to a cached PNG file, returning the path and cache hit status.
     ///
     /// ## Errors
@@ -233,35 +251,72 @@ impl GraphExpression {
         self.diagram.fallback_code_block()
     }
 
-    /// Builds a `TerminalImage` from the cached PNG, inheriting this
-    /// component's layout and width settings.
-    fn to_terminal_image(&self) -> Result<TerminalImage, GraphRenderError> {
-        let (png_path, _cache_hit) = self.render_to_cached_png()?;
+    fn render_to_image(
+        &self,
+        term: &Terminal,
+    ) -> Result<(String, PathBuf, bool), GraphRenderError> {
+        let (png_path, cache_hit) = self.render_to_cached_png()?;
 
-        let mut term_image = TerminalImage::new(&png_path)
+        let term_image = TerminalImage::new(&png_path)
             .map_err(|e| GraphRenderError::DisplayError(e.to_string()))?
             .with_width(self.width.clone());
 
-        // Copy our layout to the terminal image
-        *term_image.layout_mut() = self.layout.clone();
+        let output = term_image.render(term);
+        if output.is_empty() {
+            return Err(GraphRenderError::NoImageSupport);
+        }
 
-        Ok(term_image)
+        Ok((output, png_path, cache_hit))
+    }
+
+    fn render_raw(&self, term: &Terminal) -> String {
+        match self.render_to_image(term) {
+            Ok((output, _, _)) => output,
+            Err(_) => self.fallback_code_block(),
+        }
+    }
+
+    fn for_terminal_mode(
+        source: impl Into<String>,
+        syntax: GraphInputSyntax,
+        inverse: bool,
+    ) -> Result<Self, GraphRenderError> {
+        let color_mode = Terminal::color_mode();
+        let is_dark = matches!(
+            color_mode,
+            crate::discovery::detection::ColorMode::Dark
+                | crate::discovery::detection::ColorMode::Unknown
+        );
+
+        let theme = if inverse {
+            if is_dark {
+                GraphColorTheme::light()
+            } else {
+                GraphColorTheme::dark()
+            }
+        } else if is_dark {
+            GraphColorTheme::dark()
+        } else {
+            GraphColorTheme::light()
+        };
+
+        let diagram =
+            biscuit_visualized::graph::GraphDiagram::parse(source, syntax)?.with_color_theme(theme);
+
+        Ok(Self {
+            diagram,
+            scale: 2,
+            transparent_background: !inverse,
+            width: ImageWidth::Percent(0.5),
+            layout: Layout::default(),
+        })
     }
 }
 
 impl Renderable for GraphExpression {
     fn render(&self, term: &Terminal) -> String {
-        match self.to_terminal_image() {
-            Ok(img) => {
-                let output = img.render(term);
-                if output.is_empty() {
-                    self.fallback_code_block()
-                } else {
-                    output
-                }
-            }
-            Err(_) => self.fallback_code_block(),
-        }
+        let content = self.render_raw(term);
+        self.layout.apply_layout(&content, term.width())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -291,6 +346,17 @@ impl TryFrom<&str> for GraphExpression {
     fn try_from(source: &str) -> Result<Self, Self::Error> {
         Self::parse(source, GraphInputSyntax::Auto)
     }
+}
+
+/// Successful render result from [`GraphExpression::try_render()`].
+#[derive(Debug, Clone)]
+pub struct GraphRenderResult {
+    /// The rendered terminal output string.
+    pub output: String,
+    /// Path to the cached PNG file.
+    pub png_path: PathBuf,
+    /// Whether the PNG was served from cache.
+    pub cache_hit: bool,
 }
 
 #[cfg(test)]

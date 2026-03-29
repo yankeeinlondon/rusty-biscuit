@@ -36,10 +36,7 @@ fn force_component_hanging_indent(content: &mut RenderableContent, hanging_inden
         && !component.is_block_level()
     {
         let layout = component.layout_mut();
-        layout.word_wrap = layout
-            .word_wrap
-            .clone()
-            .with_hanging_indent(hanging_indent);
+        layout.word_wrap = layout.word_wrap.clone().with_hanging_indent(hanging_indent);
     }
 }
 

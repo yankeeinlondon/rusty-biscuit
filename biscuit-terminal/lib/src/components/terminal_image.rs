@@ -1816,7 +1816,10 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
-            .cell_size(CellSize { width: 8, height: 16 })
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
             .build();
 
         // Use render_kitty_for_terminal to avoid cursor_position() hanging
@@ -1840,7 +1843,10 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::ITerm)
             .width(80)
-            .cell_size(CellSize { width: 8, height: 16 })
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
             .build();
 
         // Use render_iterm2_for_terminal to avoid cursor_position() hang.
@@ -1863,7 +1869,10 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
-            .cell_size(CellSize { width: 8, height: 16 })
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
             .build();
 
         // Use render_kitty_for_terminal to avoid cursor_position() hang.
@@ -1888,7 +1897,10 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
-            .cell_size(CellSize { width: 8, height: 16 })
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
             .build();
 
         // iTerm2 with Kitty advertised should still use iterm2 protocol.
@@ -1910,14 +1922,20 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
-            .cell_size(CellSize { width: 8, height: 16 })
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
             .build();
         let warp = Terminal::builder()
             .app(TerminalApp::Warp)
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
-            .cell_size(CellSize { width: 8, height: 16 })
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
             .build();
 
         // Use render_kitty_for_terminal directly to avoid cursor_position()
@@ -1948,7 +1966,10 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::ITerm)
             .width(80)
-            .cell_size(CellSize { width: 8, height: 16 })
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
             .build();
 
         // Verify ceil rounding from a single render_iterm2_for_terminal call.
@@ -1970,7 +1991,10 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
-            .cell_size(CellSize { width: 8, height: 16 })
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
             .build();
 
         // Verify ceil rounding directly from a single render_kitty_for_terminal
@@ -1995,7 +2019,10 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
-            .cell_size(CellSize { width: 8, height: 16 })
+            .cell_size(CellSize {
+                width: 8,
+                height: 16,
+            })
             .build();
 
         // Get raw_height from the terminal's cached cell_size via render_kitty_for_terminal.

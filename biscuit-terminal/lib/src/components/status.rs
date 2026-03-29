@@ -7,7 +7,7 @@ use crate::components::prose::Prose;
 use crate::components::renderable::Renderable;
 use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
-use crate::utils::color::{TailwindColorWrapper, Tailwind};
+use crate::utils::color::{Tailwind, TailwindColorWrapper};
 use crate::utils::layout::{Layout, RenderableWrapper};
 
 // ── Nerd Font icons ── Circular theme ──────────────────────────────────────
@@ -40,11 +40,11 @@ const NERD_TIMELINE_INFO: &str = "\u{f0bd4}";
 // ── Unicode fallback icons (shared across all themes) ──────────────────────
 
 const FB_NOT_STARTED: &str = "\u{25fb}"; // ◻
-const FB_ACTIVE: &str = "\u{25fd}";      // ◽
-const FB_SUCCESS: &str = "\u{2713}";     // ✓
-const FB_FAILURE: &str = "\u{2a2b}";     // ⤫
-const FB_WARNING: &str = "\u{26a0}";     // ⚠
-const FB_INFO: &str = "\u{2139}";        // ℹ
+const FB_ACTIVE: &str = "\u{25fd}"; // ◽
+const FB_SUCCESS: &str = "\u{2713}"; // ✓
+const FB_FAILURE: &str = "\u{2a2b}"; // ⤫
+const FB_WARNING: &str = "\u{26a0}"; // ⚠
+const FB_INFO: &str = "\u{2139}"; // ℹ
 
 /// The state of a status item.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

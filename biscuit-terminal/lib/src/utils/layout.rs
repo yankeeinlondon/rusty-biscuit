@@ -800,8 +800,7 @@ mod tests {
 
     #[test]
     fn test_with_hanging_indent_on_bespoke_prose() {
-        let wrap =
-            WordWrap::BespokeProse(Some(10), vec![' ', ','], Some(2)).with_hanging_indent(6);
+        let wrap = WordWrap::BespokeProse(Some(10), vec![' ', ','], Some(2)).with_hanging_indent(6);
         assert_eq!(
             wrap,
             WordWrap::BespokeProse(Some(10), vec![' ', ','], Some(6))
@@ -828,21 +827,14 @@ mod tests {
 
     #[test]
     fn test_with_hanging_indent_if_none_on_bespoke() {
-        let wrap =
-            WordWrap::BespokeProse(Some(10), vec![' '], None).with_hanging_indent_if_none(3);
-        assert_eq!(
-            wrap,
-            WordWrap::BespokeProse(Some(10), vec![' '], Some(3))
-        );
+        let wrap = WordWrap::BespokeProse(Some(10), vec![' '], None).with_hanging_indent_if_none(3);
+        assert_eq!(wrap, WordWrap::BespokeProse(Some(10), vec![' '], Some(3)));
     }
 
     #[test]
     fn test_with_hanging_indent_if_none_bespoke_preserves_existing() {
         let wrap =
             WordWrap::BespokeProse(Some(10), vec![' '], Some(2)).with_hanging_indent_if_none(4);
-        assert_eq!(
-            wrap,
-            WordWrap::BespokeProse(Some(10), vec![' '], Some(2))
-        );
+        assert_eq!(wrap, WordWrap::BespokeProse(Some(10), vec![' '], Some(2)));
     }
 }
