@@ -40,7 +40,7 @@
 
 pub(crate) mod cache;
 pub mod conditions;
-pub(crate) mod context;
+pub mod context;
 pub(crate) mod parse_utils;
 mod state;
 mod types;
@@ -289,7 +289,7 @@ impl Markdown {
                 .with_replace_parent_wins(options.replace_parent_wins)
                 .with_context(options.context().clone())
                 .with_allow_ctx_override(options.allow_ctx_override)
-                .build();
+                .build()?;
 
             // Convert ctx diagnostics to compose warnings
             for diag in effective_state.ctx_diagnostics() {
@@ -650,7 +650,8 @@ impl Markdown {
             let scoped_state = EffectiveStateBuilder::new()
                 .with_frontmatter(frontmatter)
                 .with_context(options.context().clone())
-                .build();
+                .build()
+                .expect("replace-only state has no user ctx");
             replacement::apply_replacements(&self.content, &scoped_state)
         } else {
             replacement::apply_replacements(&self.content, state)
@@ -1422,7 +1423,8 @@ impl Markdown {
                     let temp_state = EffectiveStateBuilder::new()
                         .with_frontmatter(frontmatter)
                         .with_context(context.clone())
-                        .build();
+                        .build()
+                        .expect("replace-only state has no user ctx");
                     let (replaced, _) = replacement::apply_replacements(&raw, &temp_state);
                     replaced
                 };

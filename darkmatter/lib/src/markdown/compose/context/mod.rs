@@ -7,7 +7,7 @@
 pub(crate) mod capture;
 pub(crate) mod diagnostics;
 pub(crate) mod format;
-pub(crate) mod merge;
+pub mod merge;
 
 pub use diagnostics::ContextMergeDiagnostic;
 pub use merge::merge_ctx;

@@ -55,7 +55,8 @@
 //!
 //! let state = EffectiveStateBuilder::new()
 //!     .with_frontmatter(fm)
-//!     .build();
+//!     .build()
+//!     .unwrap();
 //!
 //! let evaluator = Evaluator::new(&state);
 //! let expr = parse("name").unwrap();
@@ -614,6 +615,7 @@ mod tests {
             .with_frontmatter(fm)
             .with_context(test_context())
             .build()
+            .unwrap()
     }
 
     mod eval_result {
@@ -916,7 +918,8 @@ mod tests {
             let state = EffectiveStateBuilder::new()
                 .with_frontmatter(fm)
                 .with_context(ctx)
-                .build();
+                .build()
+                .unwrap();
 
             let evaluator = Evaluator::new(&state);
             let expr = parse("env.HOME").unwrap();

@@ -26,7 +26,8 @@
 //!
 //! let state = EffectiveStateBuilder::new()
 //!     .with_frontmatter(fm)
-//!     .build();
+//!     .build()
+//!     .unwrap();
 //!
 //! let (result, count) = apply_replacements("foo and foobar", &state);
 //! assert_eq!(result, "bar and baz");
@@ -76,7 +77,8 @@ struct ReplacementRule {
 ///
 /// let state = EffectiveStateBuilder::new()
 ///     .with_frontmatter(fm)
-///     .build();
+///     .build()
+///     .unwrap();
 ///
 /// let (result, count) = apply_replacements("foo is foo", &state);
 /// assert_eq!(result, "bar is bar");
@@ -211,6 +213,7 @@ mod tests {
             .with_frontmatter(fm)
             .with_context(test_context())
             .build()
+            .unwrap()
     }
 
     // ============================================
@@ -419,7 +422,8 @@ mod tests {
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(fm)
             .with_context(test_context())
-            .build();
+            .build()
+            .unwrap();
 
         let (result, count) = apply_replacements("foo", &state);
 

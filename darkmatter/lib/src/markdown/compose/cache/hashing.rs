@@ -82,11 +82,15 @@ pub(crate) fn frontmatter_hash(fm: &Map<String, Value>) -> u64 {
 
 /// Hash of the effective state (merged frontmatter + external state).
 ///
-/// Hashes the data map using canonical JSON. Environment variables
-/// and context are excluded — they're covered by `context_hash`.
+/// Hashes the data map using canonical JSON, excluding the `ctx`
+/// namespace which is covered separately by `context_hash`.
 pub(crate) fn effective_state_hash(state: &EffectiveState) -> u64 {
     let data = state.data();
-    let as_map: Map<String, Value> = data.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let as_map: Map<String, Value> = data
+        .iter()
+        .filter(|(k, _)| k.as_str() != "ctx")
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     let canonical = canonical_json_sorted(&Value::Object(as_map));
     xx_hash(&canonical)
 }

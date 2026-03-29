@@ -58,6 +58,7 @@ mod tests {
             .with_frontmatter(fm)
             .with_context(ComposeContext::fixed_for_testing())
             .build()
+            .unwrap()
     }
 
     #[test]
@@ -131,7 +132,8 @@ mod tests {
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(HashMap::new())
             .with_context(ctx)
-            .build();
+            .build()
+            .unwrap();
 
         assert!(evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
         assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1).unwrap());
@@ -150,7 +152,8 @@ mod tests {
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(HashMap::new())
             .with_context(ctx)
-            .build();
+            .build()
+            .unwrap();
 
         assert!(evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
         assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1).unwrap());

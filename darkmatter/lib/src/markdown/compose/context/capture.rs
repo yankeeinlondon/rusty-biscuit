@@ -697,12 +697,14 @@ fn populate_docs(cap: &ContextCapture, values: &mut Map<String, Value>) {
         .unwrap_or_default();
     values.insert("docs_blast_radius".into(), Value::String(format::format_csv(&blast_radius_docs)));
 
-    // docs_drift: docs whose blast_radius intersects dirty source set
-    let dirty_source: Vec<&str> = cap
+    // docs_drift: docs whose blast_radius intersects dirty source set.
+    // Uses normalized PathBuf comparison consistent with sniff's
+    // find_blast_radius_documents() rather than substring matching.
+    let dirty_source: std::collections::HashSet<PathBuf> = cap
         .dirty_paths
         .iter()
         .filter(|p| blast_radius::is_source_code_path(p))
-        .filter_map(|p| p.to_str())
+        .cloned()
         .collect();
 
     let drift_docs: Vec<String> = docs
@@ -712,10 +714,7 @@ fn populate_docs(cap: &ContextCapture, values: &mut Map<String, Value>) {
                 .filter(|d| scope_filter(d))
                 .filter(|d| {
                     if let Some(ref br) = d.blast_radius {
-                        br.iter().any(|pattern| {
-                            let pattern_str = pattern.to_string_lossy();
-                            dirty_source.iter().any(|dirty| dirty.contains(pattern_str.as_ref()))
-                        })
+                        br.iter().any(|p| dirty_source.contains(p))
                     } else {
                         false
                     }

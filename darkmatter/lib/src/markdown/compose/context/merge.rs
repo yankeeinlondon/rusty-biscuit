@@ -48,7 +48,7 @@ pub fn merge_ctx(
             runtime_ctx
         }
         Some(Value::Object(user_obj)) => {
-            // User ctx is an object: deep-merge (runtime wins)
+            // User ctx is an object: deep-merge (runtime wins on collision)
             let runtime_obj = match &runtime_ctx {
                 Value::Object(m) => m.clone(),
                 _ => Map::new(),
@@ -56,17 +56,17 @@ pub fn merge_ctx(
 
             let had_collisions = user_obj.keys().any(|k| runtime_obj.contains_key(k));
 
-            // Start with user ctx, overlay runtime (runtime wins)
-            let mut merged = user_obj.clone();
-            for (key, value) in runtime_obj {
-                merged.insert(key, value);
-            }
+            // Deep merge: start with user ctx as base, overlay runtime
+            let merged = crate::markdown::compose::state::deep_merge(
+                &Value::Object(user_obj.clone()),
+                &Value::Object(runtime_obj),
+            );
 
             diagnostics.push(ContextMergeDiagnostic::UserCtxMerged {
                 had_key_collisions: had_collisions,
             });
 
-            Value::Object(merged)
+            merged
         }
         Some(other) => {
             if !allow_override {
@@ -195,5 +195,35 @@ mod tests {
             result.diagnostics,
             vec![ContextMergeDiagnostic::InvalidUserCtxReplaced]
         );
+    }
+
+    #[test]
+    fn deep_merge_nested_user_ctx() {
+        let user = json!({
+            "meta": {
+                "author": "Alice",
+                "version": "1.0"
+            },
+            "custom": "value"
+        });
+        let runtime = json!({
+            "today": "2024-06-15",
+            "meta": {
+                "version": "2.0",
+                "generated": true
+            }
+        });
+        let result = merge_ctx(Some(&user), runtime, false).unwrap();
+
+        let merged = result.merged_ctx.as_object().unwrap();
+        // User non-colliding key preserved
+        assert_eq!(merged.get("custom"), Some(&json!("value")));
+        // Runtime top-level key present
+        assert_eq!(merged.get("today"), Some(&json!("2024-06-15")));
+        // Nested deep merge: user's "author" preserved, runtime's "version" wins
+        let meta = merged.get("meta").unwrap().as_object().unwrap();
+        assert_eq!(meta.get("author"), Some(&json!("Alice")));
+        assert_eq!(meta.get("version"), Some(&json!("2.0")));
+        assert_eq!(meta.get("generated"), Some(&json!(true)));
     }
 }

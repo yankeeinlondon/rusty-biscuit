@@ -5,6 +5,7 @@
 
 use super::super::frontmatter::MergeStrategy;
 use super::context::ContextMergeDiagnostic;
+use super::context::merge::CtxMergeError;
 use super::types::ComposeContext;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -298,7 +299,12 @@ impl EffectiveStateBuilder {
     ///
     /// After merging frontmatter/external state, materializes the runtime `ctx`
     /// namespace into `data["ctx"]` using the merge policy.
-    pub fn build(self) -> EffectiveState {
+    ///
+    /// ## Errors
+    ///
+    /// Returns `CtxMergeError::InvalidUserCtx` when the document defines `ctx`
+    /// as a non-object value and `allow_ctx_override` is false.
+    pub fn build(self) -> Result<EffectiveState, CtxMergeError> {
         let context = self.context.unwrap_or_else(ComposeContext::capture);
 
         let frontmatter_value = Value::Object(self.frontmatter.clone().into_iter().collect());
@@ -335,28 +341,26 @@ impl EffectiveStateBuilder {
             }
         }
 
-        // Materialize ctx: merge user-defined ctx with runtime ctx
+        // Materialize ctx: merge user-defined ctx with runtime ctx.
+        // When allow_ctx_override is false, a non-object user ctx is a hard error.
         let mut ctx_diagnostics = Vec::new();
+
+        // Include capture diagnostics from context
+        ctx_diagnostics.extend(context.diagnostics().iter().cloned());
+
         let user_ctx = data.get("ctx");
         let runtime_ctx = context.as_object();
 
-        match super::context::merge_ctx(user_ctx, runtime_ctx, self.allow_ctx_override) {
-            Ok(result) => {
-                data.insert("ctx".to_string(), result.merged_ctx);
-                ctx_diagnostics.extend(result.diagnostics);
-            }
-            Err(_e) => {
-                // Invalid user ctx and not allowed: keep runtime ctx, add diagnostic
-                data.insert("ctx".to_string(), context.as_object());
-                ctx_diagnostics.push(ContextMergeDiagnostic::InvalidUserCtxReplaced);
-            }
-        }
+        let merge_result =
+            super::context::merge_ctx(user_ctx, runtime_ctx, self.allow_ctx_override)?;
+        data.insert("ctx".to_string(), merge_result.merged_ctx);
+        ctx_diagnostics.extend(merge_result.diagnostics);
 
-        EffectiveState {
+        Ok(EffectiveState {
             data,
             context,
             ctx_diagnostics,
-        }
+        })
     }
 }
 
@@ -481,7 +485,8 @@ mod tests {
     fn test_builder_default() {
         let state = EffectiveStateBuilder::new()
             .with_context(test_context())
-            .build();
+            .build()
+            .unwrap();
 
         // Only the materialized "ctx" key should be present (no user frontmatter)
         assert_eq!(state.data().len(), 1);
@@ -496,7 +501,8 @@ mod tests {
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(fm)
             .with_context(test_context())
-            .build();
+            .build()
+            .unwrap();
 
         assert_eq!(state.get("key"), Some(json!("value")));
     }
@@ -513,7 +519,8 @@ mod tests {
             .with_external_state(external)
             .with_merge_strategy(MergeStrategy::PreferDocument)
             .with_context(test_context())
-            .build();
+            .build()
+            .unwrap();
 
         // Document wins with PreferDocument
         assert_eq!(state.get("key"), Some(json!("original")));
@@ -531,7 +538,8 @@ mod tests {
             .with_external_state(external)
             .with_merge_strategy(MergeStrategy::PreferExternal)
             .with_context(test_context())
-            .build();
+            .build()
+            .unwrap();
 
         // External wins with PreferExternal
         assert_eq!(state.get("key"), Some(json!("external")));
@@ -561,7 +569,8 @@ mod tests {
             .with_merge_strategy(MergeStrategy::PreferDocument)
             .with_replace_parent_wins(true)
             .with_context(test_context())
-            .build();
+            .build()
+            .unwrap();
 
         let replace = state.get_replace_map().unwrap();
         assert_eq!(replace.get("TOKEN"), Some(&json!("parent")));
@@ -630,7 +639,8 @@ mod tests {
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(fm)
             .with_context(test_context())
-            .build();
+            .build()
+            .unwrap();
 
         // ctx.today should resolve via the materialized data["ctx"] namespace
         assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
@@ -644,7 +654,8 @@ mod tests {
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(fm)
             .with_context(test_context())
-            .build();
+            .build()
+            .unwrap();
 
         // day == dow (aliases both present)
         assert_eq!(state.get("ctx.day"), state.get("ctx.dow"));
@@ -659,7 +670,8 @@ mod tests {
 
         let state = EffectiveStateBuilder::new()
             .with_context(ctx)
-            .build();
+            .build()
+            .unwrap();
 
         assert_eq!(state.get("env.HOME"), Some(json!("/home/user")));
         assert_eq!(state.get("env.MISSING"), None);
@@ -669,7 +681,8 @@ mod tests {
     fn test_ctx_diagnostics_empty_by_default() {
         let state = EffectiveStateBuilder::new()
             .with_context(test_context())
-            .build();
+            .build()
+            .unwrap();
 
         // No user ctx means no diagnostics
         assert!(state.ctx_diagnostics().is_empty());

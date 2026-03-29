@@ -857,6 +857,9 @@ pub struct ComposeContext {
 
     /// Full context values map (backing store for all ctx variables).
     pub(crate) values: serde_json::Map<String, serde_json::Value>,
+
+    /// Diagnostics from runtime capture (partial failures, etc.).
+    capture_diagnostics: Vec<super::context::ContextMergeDiagnostic>,
 }
 
 impl PartialEq for ComposeContext {
@@ -895,7 +898,7 @@ impl ComposeContext {
 
     /// Captures the runtime context using the given base directory.
     pub fn capture_for_dir(base_dir: &std::path::Path) -> Self {
-        let (values, _diagnostics) =
+        let (values, capture_diagnostics) =
             super::context::capture::capture_runtime_context(base_dir);
 
         let env: HashMap<String, String> = std::env::vars().collect();
@@ -922,6 +925,7 @@ impl ComposeContext {
             month_name_abbr: get_str("month_name_abbr"),
             env,
             values,
+            capture_diagnostics,
         }
     }
 
@@ -933,6 +937,11 @@ impl ComposeContext {
     /// Returns the full context as a JSON object.
     pub fn as_object(&self) -> serde_json::Value {
         serde_json::Value::Object(self.values.clone())
+    }
+
+    /// Returns diagnostics from the capture phase.
+    pub fn diagnostics(&self) -> &[super::context::ContextMergeDiagnostic] {
+        &self.capture_diagnostics
     }
 
     /// Iterates the exposed key names.
@@ -978,6 +987,7 @@ impl ComposeContext {
             month_name_abbr: "Jun".to_string(),
             env: HashMap::new(),
             values,
+            capture_diagnostics: Vec::new(),
         }
     }
 }

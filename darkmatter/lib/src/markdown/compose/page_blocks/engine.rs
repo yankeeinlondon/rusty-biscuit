@@ -107,6 +107,7 @@ mod tests {
             .with_frontmatter(fm)
             .with_context(ComposeContext::fixed_for_testing())
             .build()
+            .unwrap()
     }
 
     fn render(content: &str, state: &EffectiveState) -> (String, ComposeReport) {
@@ -161,7 +162,8 @@ mod tests {
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(HashMap::new())
             .with_context(ctx)
-            .build();
+            .build()
+            .unwrap();
 
         let regions = parse_page_blocks(content).unwrap();
         let mut report = ComposeReport::default();
