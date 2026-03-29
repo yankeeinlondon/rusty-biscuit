@@ -132,16 +132,20 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
         lines.iter().take(10).copied().collect::<Vec<_>>().join("\n")
     };
 
-    let block = BlockQuote::from(Prose::new(format!("<dim>{}</dim>", display_text.replace('<', "\\<"))))
-        .with_left_block_color(Color::Tailwind(Tailwind::Green500));
+    let block = BlockQuote::from(Prose::new(format!(
+        "<dim>{}</dim>",
+        display_text.replace('<', "\\<")
+    )))
+    .with_left_block_color(Color::Tailwind(Tailwind::Green500));
     log::message(&block.render(term));
 
     if !verbose && prompt.lines().count() > 10 {
-        let items = vec![RenderableContent::from(Prose::new(
-            "<dim><i>Remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</i></dim>",
-        ))];
         log::message(
-            &UnorderedList::from(items).render(term),
+            &Prose::new(
+                "- <dim><i>Remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</i></dim>",
+            )
+            .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
+            .render(term),
         );
     }
 }
@@ -569,11 +573,11 @@ pub(crate) fn format_session_start(
     } else {
         String::new()
     };
-    let term = crate::log::terminal();
-    let items = vec![RenderableContent::from(Prose::new(format!(
-        "<i>{name}</i><dim> session ID </dim>{short_id}<dim>{model_part}</dim>"
-    )))];
-    UnorderedList::from(items).render(&term)
+    Prose::new(format!(
+        "- <i>{name}</i><dim> session ID </dim>{short_id}<dim>{model_part}</dim>"
+    ))
+    .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
+    .render(&crate::log::terminal())
 }
 
 /// Render assistant terminal text through `Prose` so wrapping and styling are terminal-aware.
