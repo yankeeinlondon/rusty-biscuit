@@ -615,15 +615,17 @@ let html = diagram.render_for_html();
 println!("<head>{}</head><body>{}</body>", html.head, html.body);
 ```
 
-For terminal output, use biscuit-terminal's `MermaidRenderer`:
+For terminal output, use biscuit-terminal's `MermaidDiagram`:
 
 ```rust
-use biscuit_terminal::components::mermaid::MermaidRenderer;
+use biscuit_terminal::components::mermaid::MermaidDiagram;
+use biscuit_terminal::terminal::Terminal;
 
-let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
-match renderer.render_for_terminal() {
-    Ok(()) => {},
-    Err(_) => println!("{}", renderer.fallback_code_block()),
+let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+let term = Terminal::new();
+match diagram.try_render(&term) {
+    Ok(result) => print!("{}", result.output),
+    Err(_) => println!("{}", diagram.fallback_code_block()),
 }
 ```
 

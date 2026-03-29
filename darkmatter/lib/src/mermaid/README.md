@@ -65,7 +65,7 @@ All rendering uses the "base" theme with 14 custom CSS variable mappings:
 
 ## Terminal Rendering
 
-Terminal rendering is delegated to `biscuit-terminal`. The `render_terminal.rs` module is a thin wrapper that creates a `biscuit_terminal::components::mermaid::MermaidRenderer` and calls its `render_for_terminal()` method. All implementation details (mmdc CLI execution, 10KB size validation, viuer display, caching via `MermaidCache`, npx fallback chain) live in `biscuit-terminal`.
+Terminal rendering is delegated to `biscuit-terminal`. The `render_terminal.rs` module is a thin wrapper over `biscuit_terminal::components::mermaid::MermaidDiagram::try_render()`. All implementation details (pure-Rust diagram rendering via `biscuit-visualized`, terminal image display, and cached PNG artifacts) live in `biscuit-terminal`.
 
 This module re-exports `MermaidRenderError` from `biscuit-terminal` for API compatibility and provides fallback helpers:
 

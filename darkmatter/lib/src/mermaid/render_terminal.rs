@@ -2,7 +2,8 @@
 //!
 //! This module provides thin wrappers around `biscuit_terminal::components::mermaid`
 //! for rendering Mermaid diagrams in the terminal. The actual implementation
-//! (mmdc CLI execution, viuer display) is handled by biscuit-terminal.
+//! (pure-Rust rendering via biscuit-visualized, image display, caching) is handled
+//! by biscuit-terminal.
 //!
 //! ## Re-exports
 //!
@@ -33,8 +34,8 @@ use biscuit_terminal::components::mermaid::MermaidDiagram;
 ///
 /// Returns `MermaidRenderError` if:
 /// - Terminal doesn't support image rendering
-/// - mmdc is not installed or not in PATH
-/// - mmdc execution fails (invalid syntax, etc.)
+/// - Diagram rendering fails
+/// - Terminal image display fails
 #[tracing::instrument(skip(instructions))]
 pub fn render_for_terminal(instructions: &str) -> Result<(), MermaidRenderError> {
     let diagram = MermaidDiagram::new(instructions);
