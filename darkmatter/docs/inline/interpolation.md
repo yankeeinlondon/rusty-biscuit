@@ -49,22 +49,10 @@ The Darkmatter DSL provides a mechanism for _interpolation_ of frontmatter into 
       Bob's favorite color is {{ color | blue == "blue" ? blue (how original) : nice choice! }}
       ```
 
-- **Context Properties**
+- **Context Variables**
 
-    - there are a certain set of properties that will always be provided to a page
-    - these properties are attached to the `ctx` property and include:
-        - `ctx.today` - provides an ISO Date string for the date when this was rendered (`YYYY-MM-DD` format)
-        - `ctx.now` - provides an ISO Datetime string for the host's locale (`YYYY-MM-DD hh:mm:ss.xxxT...`)
-        - `ctx.utc` - provides an ISO Datetime string for the UTC time when this was rendered (`YYYY-MM-DD hh:mm:ss.xxxTZ`)
-        - `ctx.yesterday`
-        - `ctx.tomorrow`
-        - `ctx.dow` - the day of the week (e.g., Monday, Tuesday, etc.)
-        - `ctx.dow_abbr` - an abbreviation for the day of the week (e.g., Mon, Tue, etc.)
-        - `ctx.year` - tod
-        - `ctx.date` - today's date
-        - `ctx.month` - the numeric value for today's month
-        - `ctx.month_name` - the name for today's month (e.g., January, February, etc.)
-        - `ctx.month_name_abbr` - an abbreviated name for today's month (e.g., Jan, Feb, etc.)
+    - there are a certain set of properties that will always be provided to a page as the `ctx` frontmatter value
+    - Details on all of the available information provided is found in the document: [Context Variables](../topics/context-variables.md)
 
 - **Environment Variables**
 
