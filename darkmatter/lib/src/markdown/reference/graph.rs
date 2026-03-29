@@ -268,7 +268,13 @@ fn build_node(
         if let Some(ref ext) = options.compose.external_state {
             builder = builder.with_external_state(ext.clone());
         }
-        builder.build()
+        builder.build().unwrap_or_else(|_| {
+            // Context merge failure during reference analysis: fall back to
+            // a state without user ctx so reference extraction can proceed.
+            EffectiveStateBuilder::new()
+                .build()
+                .expect("empty frontmatter has no user ctx")
+        })
     };
 
     // Block directives

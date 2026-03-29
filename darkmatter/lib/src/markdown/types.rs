@@ -68,6 +68,10 @@ pub enum MarkdownError {
     /// Reference analysis error.
     #[error("Reference error: {0}")]
     Reference(#[from] crate::markdown::reference::ReferenceError),
+
+    /// Context merge error (invalid user ctx).
+    #[error("Context error: {0}")]
+    CtxMerge(#[from] crate::markdown::compose::context::merge::CtxMergeError),
 }
 
 /// Result type for markdown operations.
