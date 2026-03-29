@@ -103,6 +103,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             allow_missing_image_refs,
             allow_missing_transclusions,
             allow_any_missing_reference,
+            allow_ctx_override,
         } => {
             let mode = resolve_list_spacing(compact, loose);
             let allow = ComposeAllowFlags {
@@ -120,6 +121,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 mode,
                 indent,
                 &allow,
+                allow_ctx_override,
                 cli,
             )?;
         }
@@ -317,6 +319,7 @@ pub fn run_compose(
     list_spacing: ListSpacingMode,
     indent: Option<usize>,
     allow: &ComposeAllowFlags,
+    allow_ctx_override: bool,
     cli: &Cli,
 ) -> Result<()> {
     let md = load_markdown(input)?;
@@ -432,11 +435,12 @@ pub fn run_compose(
 
     options = options.with_shell(shell_opts);
     options = options.with_list_spacing(list_spacing);
+    options = options.with_allow_ctx_override(allow_ctx_override);
     if let Some(size) = indent {
         options = options.with_indent_size(size);
     }
 
-    let (composed, _report) = md.compose_with(options).map_err(|e| {
+    let (composed, report) = md.compose_with(options).map_err(|e| {
         use darkmatter::markdown::MarkdownError::ShellExpansion;
         use darkmatter::markdown::compose::ShellExpansionError;
 
@@ -531,6 +535,13 @@ pub fn run_compose(
         OutputFormat::Json => {
             let artifact = json_artifact(&composed)?;
             emit_or_show_artifact(artifact, show)?;
+        }
+    }
+
+    // Emit compose warnings to stderr
+    if !report.warnings.is_empty() {
+        for warning in &report.warnings {
+            eprintln!("warning[{}]: {}", warning.stage, warning.message);
         }
     }
 

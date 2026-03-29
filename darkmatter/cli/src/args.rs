@@ -134,6 +134,10 @@ pub enum Command {
         /// Allow any missing reference (combines all --allow-missing-* flags)
         #[arg(long)]
         allow_any_missing_reference: bool,
+
+        /// Allow non-object ctx frontmatter (downgrade error to warning)
+        #[arg(long)]
+        allow_ctx_override: bool,
     },
 
     /// Show markdown table of contents.
