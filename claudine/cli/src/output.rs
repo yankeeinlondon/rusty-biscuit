@@ -136,10 +136,12 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
         "<dim>{}</dim>",
         display_text.replace('<', "\\<")
     )))
-    .with_left_block_color(Color::Tailwind(Tailwind::Green500));
+    .with_left_block_color(Color::Tailwind(Tailwind::Green500))
+    .with_border("▌ ");
     log::message(&block.render(term));
 
     if !verbose && prompt.lines().count() > 10 {
+        log::message(""); // blank line between block quote and bullet
         log::message(
             &Prose::new(
                 "- <dim><i>Remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</i></dim>",

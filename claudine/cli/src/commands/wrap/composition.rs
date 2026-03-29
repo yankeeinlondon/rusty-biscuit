@@ -514,9 +514,6 @@ pub(crate) fn execute_composition_request(
             verbose_requested,
             &term,
         );
-
-        // Blank line to separate preamble from execution output
-        log::message("");
     }
 
     // -- Execution --------------------------------------------------------
