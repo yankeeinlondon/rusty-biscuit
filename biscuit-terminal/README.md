@@ -11,8 +11,8 @@
         <li>OSC8 links, OSC52 clipboard, and OSC10/11/12 color queries</li>
         <li>multiplex detection for tmux/Zellij plus native WezTerm/Ghostty/Kitty support</li>
         <li>inline image rendering via Kitty/iTerm2 protocols with graceful fallback</li>
-        <li>Mermaid diagram rendering (10 diagram types) via biscuit-visualized (pure Rust)</li>
-        <li>Graph visualization with arrow, dash, and DOT syntax support</li>
+        <li>terminal-facing Mermaid rendering via <code>MermaidDiagram</code>, backed by <code>biscuit-visualized</code> (pure Rust)</li>
+        <li>terminal-facing graph rendering via <code>GraphExpression</code>, with arrow, dash, and DOT syntax support</li>
         <li>color system: BasicColor (16 ANSI), RgbColor, WebColor (148 CSS), Tailwind (22 families × 11 shades)</li>
         <li>composable rendering components: Prose, Table, List, Section, FileSystem, TwoColumn, and more</li>
       </ul>
@@ -54,10 +54,9 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
     - [`TerminalImage`](./docs/components/terminal_image.md)
     - [`Filesystem`](./docs/components/file_system.md)
     - `Progress`
-    - `MermaidDiagram`
-    - `GraphExpression`
+    - `MermaidDiagram` (Mermaid adapter backed by `biscuit-visualized`)
+    - `GraphExpression` (graph adapter backed by `biscuit-visualized`)
     - `Todo`
-    - `Mermaid`
     - `PadLeft` and `PadRight`
     - `OrderedList` and `UnorderedList`
     - `TextBlock`

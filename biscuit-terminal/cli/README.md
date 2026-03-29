@@ -1,6 +1,6 @@
 # biscuit-terminal-cli
 
-A CLI tool (`bt`) for inspecting terminal capabilities, rendering images, styled text, directory trees, and generating Mermaid diagrams.
+A CLI tool (`bt`) for inspecting terminal capabilities and rendering images, styled text, directory trees, Mermaid diagrams, and graph diagrams.
 
 ## Installation
 
@@ -402,7 +402,7 @@ Relationships: `||--||` (one-to-one), `||--o{` (one-to-many), `}o--o{` (many-to-
 
 ### Graph Expression Rendering
 
-Render graph structures using layout-rs with multiple syntax options:
+Render graph structures using `biscuit-visualized`'s `layout-rs` backend with multiple syntax options:
 
 ```bash
 bt graph-expression "a -> b -> c"                           # Arrow syntax (directed)
@@ -410,8 +410,10 @@ bt graph-expression "a -- b -- c"                           # Dash syntax (undir
 bt graph-expression --syntax dot "digraph { A -> B; B -> C; }"  # DOT syntax
 bt graph-expression --title "Data Flow" "start -> validate -> render"
 bt graph-expression --orientation top-to-bottom "a -> b -> c"
+bt graph-expression --orientation left-to-right "a -> b -> c"
 bt graph-expression --width 60% "a -> b -> c"
 bt graph-expression --inverse "a -> b -> c"
+bt graph-expression --meta "a -> b"
 bt graph-expression --json "a -> b"
 ```
 
@@ -419,6 +421,8 @@ bt graph-expression --json "a -> b"
 - **Arrow (`->`)**: Directed edges, e.g., `a -> b -> c; b -> d`
 - **Dash (`--`)**: Undirected edges, e.g., `a -- b -- c`
 - **DOT**: Full Graphviz DOT language support, e.g., `digraph { A -> B; }`
+
+Mixed directed and undirected expression syntax is rejected. For example, `a -> b; c -- d` is invalid and should be split into separate graphs.
 
 **Orientation:**
 - `top-to-bottom` (default)
@@ -431,6 +435,7 @@ bt graph-expression --json "a -> b"
 - **Color mode detection**: Automatically uses light or dark theme
 - **Transparent background**: Blends with terminal (default)
 - **Inverse mode**: Solid background with contrasting colors (`--inverse`)
+- **Metadata output**: `--meta` writes render metadata to stderr (filename, cache hit, file size, render time)
 - **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill` (default: 50%)
 
 ### Common Diagram Options

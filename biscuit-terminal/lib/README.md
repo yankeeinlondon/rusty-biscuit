@@ -168,43 +168,46 @@ All image rendering is string-based: `render()`, `render_optimistic()`, and `ren
 - Large images: we don't upscale the default 50% case; explicit widths can upscale.
 - Unsupported terminals: you'll see the generated alt text instead of an image.
 
-## Mermaid Diagrams (MermaidRenderer)
+## Mermaid Diagrams (MermaidDiagram)
 
-`MermaidRenderer` provides a terminal-aware adapter for rendering Mermaid diagrams via `biscuit-visualized`. The rendering uses pure Rust (`mermaid-rs-renderer`) with no external dependencies like Node.js or mmdc. Rendered diagrams are cached using content-addressed xxHash keys.
+`MermaidDiagram` is the public terminal-facing adapter for Mermaid rendering in `biscuit-terminal`. It delegates raster generation and caching to `biscuit-visualized`, then displays the cached PNG inline via `TerminalImage`.
+
+The rendering stack is pure Rust: `biscuit-visualized` uses `mermaid-rs-renderer`, and no Node.js, npm, Chromium, or `mmdc` dependency is required.
 
 ### Basic Usage
 
 ```rust
-use biscuit_terminal::components::mermaid::MermaidRenderer;
+use biscuit_terminal::components::mermaid::MermaidDiagram;
+use biscuit_terminal::terminal::Terminal;
 
-// Simple usage with default settings
-let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
+let diagram = MermaidDiagram::new("flowchart LR\n    A --> B");
+let term = Terminal::new();
 
-match renderer.render_for_terminal() {
-    Ok(()) => println!("Diagram rendered!"),
-    Err(_) => println!("{}", renderer.fallback_code_block()),
+match diagram.try_render(&term) {
+    Ok(result) => print!("{}", result.output),
+    Err(_) => println!("{}", diagram.fallback_code_block()),
 }
 ```
 
 ### Terminal-Aware Rendering
 
-For best results, use `for_terminal()` which automatically detects color mode:
+`MermaidDiagram::new(...)` is already terminal-aware. It auto-selects a light or dark theme based on `Terminal::color_mode()` and defaults to a transparent background with 50% width.
 
 ```rust
-use biscuit_terminal::components::mermaid::MermaidRenderer;
+use biscuit_terminal::components::mermaid::MermaidDiagram;
+use biscuit_terminal::components::terminal_image::ImageWidth;
 
-// Automatically uses appropriate theme and transparent background
-let renderer = MermaidRenderer::for_terminal("flowchart LR\n    A --> B");
-renderer.render_for_terminal()?;
+let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
+    .with_width(ImageWidth::Percent(0.6));
 ```
 
 ### Theme and Rendering Options
 
 ```rust
-use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme};
+use biscuit_terminal::components::mermaid::{MermaidDiagram, MermaidTheme};
 
-let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
-    .with_theme(MermaidTheme::Dark)        // dark, default, forest, neutral
+let diagram = MermaidDiagram::new("flowchart LR\n    A --> B")
+    .with_theme(MermaidTheme::Dark)         // dark, default, forest, neutral
     .with_scale(3)                          // Higher resolution (default: 2)
     .with_transparent_background(true);     // Blend with terminal background
 ```
@@ -214,7 +217,7 @@ let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
 Use `MermaidConfig` to customize quadrant chart styling:
 
 ```rust
-use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidConfig};
+use biscuit_terminal::components::mermaid::{MermaidConfig, MermaidDiagram};
 
 let config = MermaidConfig::new()
     .with_point_label_font_size(18)    // Font size for point labels (default: 12)
@@ -222,7 +225,7 @@ let config = MermaidConfig::new()
     .with_quadrant_fill(1, "#1e2a1e")  // Top-right (quadrant-1) fill color
     .with_quadrant_fill(3, "#2a1e1e"); // Bottom-left (quadrant-3) fill color
 
-let renderer = MermaidRenderer::new("quadrantChart\n    Item: [0.5, 0.5]")
+let diagram = MermaidDiagram::new("quadrantChart\n    Item: [0.5, 0.5]")
     .with_config(config);
 ```
 
@@ -306,6 +309,12 @@ let inverse_theme = theme.inverse();  // For solid background rendering
 - **Size limit**: Diagrams over 10KB are rejected
 - **Terminal check**: Only renders when image protocols are supported
 
+### Public API Notes
+
+- Use `MermaidDiagram::try_render(&Terminal)` when you need the rendered output plus metadata (`png_path`, `cache_hit`).
+- Use the `Renderable` implementation when you want graceful fallback to a fenced Mermaid code block on terminals without image support.
+- `MermaidRenderer` exists as an internal helper inside the module; application code should prefer `MermaidDiagram`.
+
 ### Display Notes
 
 **Aspect Ratio Preservation**: `render_to_terminal()` preserves aspect ratio using terminal-aware rendering:
@@ -353,6 +362,48 @@ parse_width_spec("fill");  // ImageWidth::Fill
 ```
 
 The `ch` suffix provides explicit character-based sizing, useful for CLI tools accepting width from users.
+
+## Graph Diagrams (GraphExpression)
+
+`GraphExpression` is the terminal-facing adapter for graph rendering. It delegates parsing, layout, theming, SVG/PNG generation, and caching to `biscuit-visualized`, then displays the cached PNG via `TerminalImage`.
+
+Supported input modes:
+
+- expression syntax with directed edges: `a -> b -> c`
+- expression syntax with undirected edges: `a -- b -- c`
+- DOT input: `digraph { A -> B; }`
+
+Mixed directed and undirected expression syntax is rejected in a single graph expression.
+
+### Basic Usage
+
+```rust
+use biscuit_terminal::components::graph_expression::{
+    GraphExpression, GraphInputSyntax, GraphOrientation,
+};
+use biscuit_terminal::terminal::Terminal;
+
+let graph = GraphExpression::for_terminal("a -> b -> c", GraphInputSyntax::Auto)?
+    .with_orientation(GraphOrientation::LeftToRight)
+    .with_title("Example graph");
+
+let term = Terminal::new();
+match graph.try_render(&term) {
+    Ok(result) => print!("{}", result.output),
+    Err(_) => println!("{}", graph.fallback_code_block()),
+}
+# Ok::<(), biscuit_terminal::components::graph_expression::GraphRenderError>(())
+```
+
+### Graph Features
+
+- terminal-aware light/dark themes by default
+- explicit inverse rendering via `GraphExpression::inverted_for_terminal(...)`
+- width control through `ImageWidth`
+- optional font-family override with `.with_font_family(...)`
+- render metadata via `GraphRenderResult` (`png_path`, `cache_hit`)
+
+Like Mermaid rendering, graph rendering is pure Rust. `biscuit-visualized` uses `layout-rs` for layout and `resvg` for rasterization; no Graphviz binary is required.
 
 ## Terminal Detection
 
