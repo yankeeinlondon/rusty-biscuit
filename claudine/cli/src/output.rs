@@ -118,10 +118,15 @@ pub(crate) fn log_wrapper_header(
 
 /// Render the composed prompt as a BlockQuote after environment details.
 ///
+/// The prompt is rendered as Markdown via Darkmatter (for proper wrapping,
+/// bold, links, code, etc.) and then wrapped in a green-bordered BlockQuote.
+///
 /// In verbose mode the entire prompt is shown. Otherwise the first 10 lines
 /// are rendered with a truncation notice.
 pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     use biscuit_terminal::utils::color::{Color, Tailwind};
+    use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     log::message(&Prose::new("<bold>Prompt:</bold>").render(term));
 
@@ -132,19 +137,34 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
         lines.iter().take(10).copied().collect::<Vec<_>>().join("\n")
     };
 
-    let block = BlockQuote::from(Prose::new(format!(
-        "<dim>{}</dim>",
-        display_text.replace('<', "\\<")
-    )))
-    .with_left_block_color(Color::Tailwind(Tailwind::Green500))
-    .with_border("▌ ");
+    // Render prompt as Markdown through Darkmatter, constraining width to
+    // account for the block quote border ("▌ " = 2 visible cols) and
+    // left margin (2 cols).
+    let left_margin: u16 = 2;
+    let border_width: u16 = 2;
+    let content_width = (term.width() as u16)
+        .saturating_sub(border_width)
+        .saturating_sub(left_margin);
+    let mut opts = TerminalOptions::default();
+    opts.max_width = Some(content_width);
+    let rendered = match for_terminal(&Markdown::new(display_text.trim()), opts) {
+        Ok(r) => r,
+        Err(_) => display_text.clone(),
+    };
+
+    // Wrap in a BlockQuote with green border, left margin, and no additional
+    // word wrapping (Darkmatter already wrapped to the correct width).
+    let mut block = BlockQuote::new(RenderableContent::from(rendered.trim_end().to_string()), None::<&str>)
+        .with_left_block_color(Color::Tailwind(Tailwind::Green700))
+        .with_border("▌ ");
+    block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Fixed(left_margin as u32);
     log::message(&block.render(term));
 
     if !verbose && prompt.lines().count() > 10 {
         log::message(""); // blank line between block quote and bullet
         log::message(
             &Prose::new(
-                "- <dim><i>Remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</i></dim>",
+                "- <dim>remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</dim>",
             )
             .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
             .render(term),
