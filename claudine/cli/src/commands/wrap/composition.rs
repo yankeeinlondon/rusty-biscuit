@@ -137,6 +137,37 @@ pub(crate) fn execute_composition_request(
     }
 
     let effective_non_interactive = !request.session_interactive;
+
+    // -- Early header --------------------------------------------------------
+    // Emit the execution line as early as possible so the user sees feedback
+    // before expensive env/MCP/harness work begins.
+
+    let compose_display = if is_inline {
+        Some(crate::output::ComposeDisplay::InlineCompose)
+    } else {
+        Some(crate::output::ComposeDisplay::Compose)
+    };
+
+    // Show the original file reference (e.g., "@prompts/commit.md")
+    let compose_source_hint = request.file_ref.clone();
+
+    if !silent {
+        crate::output::log_wrapper_header(
+            profile,
+            request.yolo,
+            effective_non_interactive,
+            request.session_interactive, // interactive_override placeholder
+            verbose_requested,
+            request.repo,
+            compose_display.as_ref(),
+            request.operation.as_deref(),
+            None, // no inline prompt text for compose
+            Some(&compose_source_hint),
+            &Default::default(), // env_plan not built yet; header doesn't need it for compose
+            &term,
+        );
+    }
+
     let needs_mcp_shadow_home = (request.mcp || !request.mcp_use.is_empty())
         && matches!(provider, Provider::Codex | Provider::Gemini);
     let needs_repo_shadow_home = request.repo;
@@ -456,7 +487,9 @@ pub(crate) fn execute_composition_request(
         None
     };
 
-    // -- Preflight output -------------------------------------------------
+    // -- Preflight output (env details + prompt block) ---------------------
+    // The header was already emitted early (right after profile lookup).
+    // Now emit the env details and prompt block with full env_plan.
 
     // Detect the environment from the source repo root when available so
     // that git/repo metadata reflects the composition source, not the
@@ -464,37 +497,17 @@ pub(crate) fn execute_composition_request(
     let env_detect_root = effective_repo_root.unwrap_or(&cwd);
     let env_context = claudine::events::detect_environment_fast(env_detect_root);
 
-    let compose_display = if is_inline {
-        Some(crate::output::ComposeDisplay::InlineCompose)
-    } else {
-        Some(crate::output::ComposeDisplay::Compose)
-    };
-
-    // Truncate prompt for display (first ~80 chars, flattened)
-    let prompt_display = {
-        let raw = &request.prepared.prompt;
-        let flat = raw.replace('\n', "\\n").replace('\r', "\\r");
-        if flat.len() > 120 {
-            Some(format!("{}...", &flat[..120]))
-        } else {
-            Some(flat)
-        }
-    };
-
-    let interactive_override = request.session_interactive && !effective_prompt.is_empty();
-
     if !silent {
-        crate::output::log_wrapper_header(
-            profile,
-            yolo_enabled,
-            effective_non_interactive,
-            interactive_override,
+        // Env details: suppressed by --quiet; for non-interactive compose
+        // only shown with --verbose.
+        if !quiet && (request.session_interactive || verbose_requested) {
+            crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
+        }
+
+        // Composed prompt block: always shown unless --silent.
+        crate::output::log_compose_prompt(
+            &request.prepared.prompt,
             verbose_requested,
-            request.repo,
-            compose_display.as_ref(),
-            request.operation.as_deref(),
-            prompt_display.as_deref(),
-            &env_plan,
             &term,
         );
     }

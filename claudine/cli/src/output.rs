@@ -4,9 +4,8 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
-use claudine::badges::{
-    COMPOSE, INLINE_COMPOSE, INTERACTIVE, NON_INTERACTIVE, REPO_FLAG, VERBOSE, YOLO,
-};
+use biscuit_terminal::components::block_quote::BlockQuote;
+use claudine::badges::{COMPOSE, INLINE_COMPOSE, INTERACTIVE, REPO_FLAG, VERBOSE, YOLO};
 use claudine::events::Provider;
 use std::path::Path;
 
@@ -30,12 +29,13 @@ pub(crate) fn log_wrapper_header(
     profile: &dyn WrapperProfile,
     yolo_requested: bool,
     non_interactive: bool,
-    interactive_override: bool,
+    _interactive_override: bool,
     verbose_requested: bool,
     repo_requested: bool,
     compose_display: Option<&ComposeDisplay>,
     operation: Option<&str>,
     prompt_display: Option<&str>,
+    compose_source_hint: Option<&str>,
     env_plan: &EnvPlan,
     term: &Terminal,
 ) {
@@ -51,11 +51,10 @@ pub(crate) fn log_wrapper_header(
         header_parts.push(YOLO.to_string());
     }
 
-    // Show Non-Interactive badge when session is non-interactive
-    // Show Interactive badge only when user explicitly forced it (prompt + -i)
-    if non_interactive {
-        header_parts.push(NON_INTERACTIVE.to_string());
-    } else if interactive_override {
+    // Non-interactive is the norm when a prompt is given — no badge needed.
+    // Show Interactive badge when session is interactive (explicit -i override
+    // or no prompt at all).
+    if !non_interactive {
         header_parts.push(INTERACTIVE.to_string());
     }
 
@@ -74,7 +73,12 @@ pub(crate) fn log_wrapper_header(
     }
 
     if let Some(op) = operation {
-        header_parts.push(Prose::new(format!("<green><bold>OP:</bold> {op}</green>")).render(term));
+        header_parts.push(
+            Prose::new(format!(
+                "<bg-green-900><green-100><bold> Op(<dim><i>{op}</i></dim>) </bold></green-100></bg-green-900>"
+            ))
+            .render(term),
+        );
     }
 
     if let Some(package_name) = package_name_display(env_plan) {
@@ -86,9 +90,17 @@ pub(crate) fn log_wrapper_header(
         );
     }
 
-    // Show only the user's prompt text (no provider-specific switches).
-    // The prompt may contain `<` characters so we escape them for Prose.
-    if let Some(prompt) = prompt_display {
+    // For compose-based prompts, show the source file instead of the prompt text.
+    // For static string prompts, show truncated prompt text as before.
+    if let Some(filename) = compose_source_hint {
+        let prose_safe = filename.replace('<', "\\<");
+        header_parts.push(
+            Prose::new(format!(
+                "<dim><i>prompt sourced from <blue>{prose_safe}</blue></i></dim>"
+            ))
+            .render(term),
+        );
+    } else if let Some(prompt) = prompt_display {
         let flattened = prompt.replace('\n', "\\n").replace('\r', "\\r");
         let escaped = shell_escape(&flattened);
         let prefix = header_parts.join(" ");
@@ -102,6 +114,66 @@ pub(crate) fn log_wrapper_header(
     }
 
     log::message(&format!("\n{}\n", header_parts.join(" ")));
+}
+
+/// Render the composed prompt as a BlockQuote after environment details.
+///
+/// The prompt is rendered as Markdown via Darkmatter (for proper wrapping,
+/// bold, links, code, etc.) and then wrapped in a green-bordered BlockQuote.
+///
+/// In verbose mode the entire prompt is shown. Otherwise the first 10 lines
+/// are rendered with a truncation notice.
+pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
+    use biscuit_terminal::utils::color::{Color, Tailwind};
+    use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+
+    log::message(&Prose::new("<bold>Agent Prompt:</bold>").render(term));
+    log::message("");
+
+    let display_text = if verbose {
+        prompt.to_string()
+    } else {
+        let lines: Vec<&str> = prompt.lines().collect();
+        lines.iter().take(10).copied().collect::<Vec<_>>().join("\n")
+    };
+
+    // Render prompt as Markdown through Darkmatter, constraining width to
+    // account for the block quote border ("▌ " = 2 visible cols) and
+    // margins (2 cols each side).
+    let left_margin: u16 = 2;
+    let right_margin: u16 = 2;
+    let border_width: u16 = 2;
+    let content_width = (term.width() as u16)
+        .saturating_sub(border_width)
+        .saturating_sub(left_margin)
+        .saturating_sub(right_margin);
+    let mut opts = TerminalOptions::default();
+    opts.max_width = Some(content_width);
+    let rendered = match for_terminal(&Markdown::new(display_text.trim()), opts) {
+        Ok(r) => r,
+        Err(_) => display_text.clone(),
+    };
+
+    // Wrap in a BlockQuote with green border, left margin, and no additional
+    // word wrapping (Darkmatter already wrapped to the correct width).
+    let mut block = BlockQuote::new(RenderableContent::from(rendered.trim_end().to_string()), None::<&str>)
+        .with_left_block_color(Color::Tailwind(Tailwind::Green700))
+        .with_border("▌ ");
+    block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(left_margin as u32);
+    block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
+    log::message(&block.render(term));
+
+    if !verbose && prompt.lines().count() > 10 {
+        log::message(""); // blank line between block quote and bullet
+        log::message(
+            &Prose::new(
+                "- <dim>remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</dim>",
+            )
+            .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
+            .render(term),
+        );
+    }
 }
 
 /// Print environment variable details (removed, included, added).
@@ -528,8 +600,9 @@ pub(crate) fn format_session_start(
         String::new()
     };
     Prose::new(format!(
-        "<dim>- <i>{name}</i> session ID </dim>{short_id}<dim>{model_part}</dim>"
+        "- <i>{name}</i><dim> session ID </dim>{short_id}<dim>{model_part}</dim>"
     ))
+    .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
     .render(&crate::log::terminal())
 }
 

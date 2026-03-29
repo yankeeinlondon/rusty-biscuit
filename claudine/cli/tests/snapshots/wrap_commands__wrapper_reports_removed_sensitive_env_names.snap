@@ -3,7 +3,7 @@ source: claudine/cli/tests/wrap_commands.rs
 expression: redact_session_id(&strip_ansi(&stderr))
 ---
 
-Claudine ▸ Codex PACKAGE_NAME: claudine-cli (area: claudine)
+Claudine ▸ Codex  Interactive  PACKAGE_NAME: claudine-cli (area: claudine)
 
 Environment Variables:
 • INTERNAL_TOKEN

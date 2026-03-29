@@ -392,7 +392,8 @@ impl LiveStreamSink {
                 session_id,
                 self.model.as_deref(),
             );
-            eprintln!("{line}\n");
+            eprintln!("{line}");
+            eprintln!(); // blank line before execution output
             self.start_emitted = true;
         }
     }
@@ -1043,6 +1044,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             None,
             effective_operation.as_deref(),
             prompt_display.as_deref(),
+            None, // no compose source hint for direct wrapper
             &env_plan,
             &term,
         );
@@ -2524,14 +2526,18 @@ fn emit_stream_summary_inner(
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable;
 
-        let separator = if summary.assistant_text.is_empty() {
-            ""
-        } else if summary.assistant_text.ends_with('\n') {
-            "\n"
-        } else {
-            "\n\n"
-        };
-        eprint!("{separator}");
+        // Ensure exactly one blank line between streamed output and the
+        // summary metadata, regardless of how many trailing newlines the
+        // assistant text already has.
+        if !summary.assistant_text.is_empty() {
+            if summary.assistant_text.ends_with("\n\n") {
+                // Already has a trailing blank line — no separator needed
+            } else if summary.assistant_text.ends_with('\n') {
+                eprint!("\n");
+            } else {
+                eprint!("\n\n");
+            }
+        }
         if let Some(markup) = primary_markup {
             let term = crate::log::terminal();
             let rendered = Prose::new(markup).render(&term);

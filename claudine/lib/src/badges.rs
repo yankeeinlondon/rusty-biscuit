@@ -80,7 +80,7 @@ pub static VERBOSE: LazyLock<String> = LazyLock::new(|| {
 
 pub static INTERACTIVE: LazyLock<String> = LazyLock::new(|| {
     Prose::new(
-        "<bg-green-300><bold><green-900><bold> Interactive </bold></green-900></bold></bg-green-300>",
+        "<bg-purple-900><bold><slate-300><bold> Interactive </bold></slate-300></bold></bg-purple-900>",
     )
     .render_optimistic(None)
     .to_string()

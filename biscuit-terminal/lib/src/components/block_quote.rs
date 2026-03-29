@@ -7,7 +7,7 @@ use crate::{
     },
     terminal::Terminal,
     utils::{
-        block_constraint::{split_lines, wrap_lines},
+        block_constraint::{split_lines, visible_width, wrap_lines},
         color::{Color, Tailwind},
         layout::Layout,
     },
@@ -34,7 +34,8 @@ use crate::{
 /// // Simple block quote from a string
 /// let quote = BlockQuote::from("The only way to do great work is to love what you do.");
 /// let result = quote.render_optimistic(Some(60));
-/// assert!(result.contains("│ The only way"));
+/// assert!(result.contains("The only way"));
+/// assert!(result.contains("│")); // colored border present
 ///
 /// // Block quote with attribution
 /// let quote = BlockQuote::new(
@@ -42,8 +43,8 @@ use crate::{
 ///     Some("William Shakespeare")
 /// );
 /// let result = quote.render_optimistic(None);
-/// assert!(result.contains("│ To be, or not to be"));
-/// assert!(result.contains("│ — William Shakespeare"));
+/// assert!(result.contains("To be, or not to be"));
+/// assert!(result.contains("— William Shakespeare"));
 ///
 /// // Styled block quote with custom colors
 /// use biscuit_terminal::utils::color::{Color, Tailwind};
@@ -52,7 +53,7 @@ use crate::{
 ///     .with_bg_color(Color::Tailwind(Tailwind::Gray800))
 ///     .with_left_block_color(Color::Tailwind(Tailwind::Blue400));
 /// let result = quote.render_optimistic(None);
-/// assert!(result.contains("│ Important quote"));
+/// assert!(result.contains("Important quote"));
 ///
 /// // Block quote from Prose component (rich text)
 /// use biscuit_terminal::components::prose::Prose;
@@ -78,6 +79,8 @@ pub struct BlockQuote {
     text_color: Option<Color>,
     bg_color: Option<Color>,
     left_block_color: Option<Color>,
+    /// The border string prefixed to each line (default: `"│ "`).
+    border: String,
     layout: Layout,
 }
 
@@ -90,6 +93,7 @@ impl Default for BlockQuote {
             text_color: None,
             bg_color: None,
             left_block_color: Some(Color::Tailwind(Tailwind::Gray500)),
+            border: "│ ".to_string(),
             layout: Layout {
                 word_wrap: WordWrap::WrapProse(Some(8), None),
                 ..Layout::default()
@@ -159,13 +163,22 @@ impl BlockQuote {
         self
     }
 
+    /// Set a custom border string (default: `"│ "`).
+    ///
+    /// The visible width of the border is subtracted from the available
+    /// content width, so wider borders reduce the text area accordingly.
+    pub fn with_border(mut self, border: impl Into<String>) -> Self {
+        self.border = border.into();
+        self
+    }
+
     /// Render the block quote content with a left border.
     ///
-    /// The border "│ " consumes 2 columns, so child content width
-    /// is reduced accordingly.
+    /// The border width is determined by the `border` field and the
+    /// child content width is reduced accordingly.
     fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
-        // Border "│ " is 2 visible characters wide
-        let child_width = term_width.saturating_sub(2);
+        let border_width = visible_width(&self.border);
+        let child_width = term_width.saturating_sub(border_width);
 
         // Render child content with constrained width
         let content: String = match &self.content {
@@ -184,20 +197,28 @@ impl BlockQuote {
                 )
             }
         };
+
+        // Build the colored border string
+        let colored_border = self.colorize_border(&self.border);
+        // Attribution border uses the first visible char only (no trailing space)
+        let border_char = self.border.trim_end();
+        let colored_border_char = self.colorize_border(border_char);
+
         let mut result = String::new();
 
         // Split content into lines and prefix each with the quote border
-        let border = "│ ";
         for line in content.lines() {
-            result.push_str(border);
+            result.push_str(&colored_border);
             result.push_str(line);
             result.push('\n');
         }
 
         // Add attribution if present (with blank line separator)
         if let Some(ref attribution) = self.attribution {
-            result.push_str("│\n"); // blank line
-            result.push_str("│ — ");
+            result.push_str(&colored_border_char);
+            result.push('\n'); // blank line
+            result.push_str(&colored_border_char);
+            result.push_str(" — ");
             result.push_str(attribution);
             result.push('\n');
         }
@@ -208,6 +229,19 @@ impl BlockQuote {
         }
 
         result
+    }
+
+    /// Apply `left_block_color` to a border string segment.
+    fn colorize_border(&self, border: &str) -> String {
+        match &self.left_block_color {
+            Some(color) => match color.to_rgb() {
+                Some((r, g, b)) => {
+                    format!("\x1b[38;2;{r};{g};{b}m{border}\x1b[39m")
+                }
+                None => border.to_string(),
+            },
+            None => border.to_string(),
+        }
     }
 }
 
@@ -247,6 +281,24 @@ impl Renderable for BlockQuote {
 mod tests {
     use super::*;
 
+    /// Strip ANSI escape sequences for test assertions.
+    fn strip_ansi(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        let mut in_escape = false;
+        for ch in s.chars() {
+            if in_escape {
+                if ch.is_ascii_alphabetic() {
+                    in_escape = false;
+                }
+            } else if ch == '\x1b' {
+                in_escape = true;
+            } else {
+                result.push(ch);
+            }
+        }
+        result
+    }
+
     // =========================================================================
     // Basic Construction Tests
     // =========================================================================
@@ -255,14 +307,14 @@ mod tests {
     fn test_simple_block_quote_from_str() {
         let quote = BlockQuote::from("Hello world");
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ Hello world");
+        assert_eq!(strip_ansi(&result), "│ Hello world");
     }
 
     #[test]
     fn test_simple_block_quote_from_string() {
         let quote = BlockQuote::from(String::from("Hello world"));
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ Hello world");
+        assert_eq!(strip_ansi(&result), "│ Hello world");
     }
 
     #[test]
@@ -270,14 +322,14 @@ mod tests {
         let content = String::from("Hello world");
         let quote = BlockQuote::from(&content);
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ Hello world");
+        assert_eq!(strip_ansi(&result), "│ Hello world");
     }
 
     #[test]
     fn test_block_quote_new_with_renderable_content() {
         let quote = BlockQuote::new(RenderableContent::from("Direct content"), None::<&str>);
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ Direct content");
+        assert_eq!(strip_ansi(&result), "│ Direct content");
     }
 
     // =========================================================================
@@ -288,21 +340,21 @@ mod tests {
     fn test_multiline_block_quote() {
         let quote = BlockQuote::new(RenderableContent::from("Line 1\nLine 2"), None::<&str>);
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ Line 1\n│ Line 2");
+        assert_eq!(strip_ansi(&result), "│ Line 1\n│ Line 2");
     }
 
     #[test]
     fn test_multiline_block_quote_three_lines() {
         let quote = BlockQuote::from("First\nSecond\nThird");
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ First\n│ Second\n│ Third");
+        assert_eq!(strip_ansi(&result), "│ First\n│ Second\n│ Third");
     }
 
     #[test]
     fn test_block_quote_with_empty_lines() {
         let quote = BlockQuote::from("Before\n\nAfter");
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ Before\n│ \n│ After");
+        assert_eq!(strip_ansi(&result), "│ Before\n│ \n│ After");
     }
 
     // =========================================================================
@@ -316,7 +368,7 @@ mod tests {
             Some("Shakespeare"),
         );
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ To be or not to be\n│\n│ — Shakespeare");
+        assert_eq!(strip_ansi(&result), "│ To be or not to be\n│\n│ — Shakespeare");
     }
 
     #[test]
@@ -327,7 +379,7 @@ mod tests {
         );
         let result = quote.render_optimistic(None);
         assert_eq!(
-            result,
+            strip_ansi(&result),
             "│ The unexamined life is not worth living\n│\n│ — Socrates"
         );
     }
@@ -339,7 +391,7 @@ mod tests {
             Some("Author"),
         );
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ Line one\n│ Line two\n│\n│ — Author");
+        assert_eq!(strip_ansi(&result), "│ Line one\n│ Line two\n│\n│ — Author");
     }
 
     // =========================================================================
@@ -449,21 +501,21 @@ mod tests {
     fn test_single_character() {
         let quote = BlockQuote::from("X");
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ X");
+        assert_eq!(strip_ansi(&result), "│ X");
     }
 
     #[test]
     fn test_unicode_content() {
         let quote = BlockQuote::from("Hello 世界 🌍");
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ Hello 世界 🌍");
+        assert_eq!(strip_ansi(&result), "│ Hello 世界 🌍");
     }
 
     #[test]
     fn test_whitespace_only() {
         let quote = BlockQuote::from("   ");
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│    ");
+        assert_eq!(strip_ansi(&result), "│    ");
     }
 
     // =========================================================================
@@ -510,7 +562,7 @@ mod tests {
         let content = RenderableContent::String("direct string".to_string());
         let quote = BlockQuote::new(content, None::<&str>);
         let result = quote.render_optimistic(None);
-        assert_eq!(result, "│ direct string");
+        assert_eq!(strip_ansi(&result), "│ direct string");
     }
 
     #[test]
@@ -520,7 +572,7 @@ mod tests {
         let quote = BlockQuote::new(content, None::<&str>);
         let result = quote.render_optimistic(None);
         // The prose renders its bold content, which should appear in the quote
-        assert!(result.starts_with("│ "));
+        assert!(strip_ansi(&result).starts_with("│ "));
         assert!(result.contains("bold content"));
     }
 
@@ -530,7 +582,7 @@ mod tests {
         let quote = BlockQuote::from(prose);
         let result = quote.render_optimistic(None);
         // Should contain the border and the content
-        assert!(result.contains("│ "));
+        assert!(strip_ansi(&result).contains("│ "));
         assert!(result.contains("error"));
         assert!(result.contains("something went wrong"));
     }
@@ -541,7 +593,8 @@ mod tests {
         let quote = BlockQuote::from(prose);
         let result = quote.render_optimistic(None);
         // Each line should have a border
-        let lines: Vec<&str> = result.lines().collect();
+        let stripped = strip_ansi(&result);
+        let lines: Vec<&str> = stripped.lines().collect();
         assert_eq!(lines.len(), 3);
         assert!(lines[0].starts_with("│ "));
         assert!(lines[1].starts_with("│ "));
@@ -569,7 +622,8 @@ mod tests {
         let content = "First paragraph.\n\nSecond paragraph.";
         let quote = BlockQuote::from(content);
         let result = quote.render_optimistic(None);
-        let lines: Vec<&str> = result.lines().collect();
+        let stripped = strip_ansi(&result);
+        let lines: Vec<&str> = stripped.lines().collect();
         assert_eq!(lines.len(), 3);
         assert_eq!(lines[0], "│ First paragraph.");
         assert_eq!(lines[1], "│ ");
@@ -580,8 +634,9 @@ mod tests {
     fn test_block_quote_with_tabs() {
         let quote = BlockQuote::from("Code:\n\tindented");
         let result = quote.render_optimistic(None);
-        assert!(result.contains("│ Code:"));
-        assert!(result.contains("│ \tindented"));
+        let stripped = strip_ansi(&result);
+        assert!(stripped.contains("│ Code:"));
+        assert!(stripped.contains("│ \tindented"));
     }
 
     #[test]
@@ -589,8 +644,9 @@ mod tests {
         // Attribution with empty-ish content
         let quote = BlockQuote::new(RenderableContent::from("Quote"), Some("Author"));
         let result = quote.render_optimistic(None);
-        assert!(result.contains("│ Quote"));
-        assert!(result.contains("│ — Author"));
+        let stripped = strip_ansi(&result);
+        assert!(stripped.contains("│ Quote"));
+        assert!(stripped.contains("│ — Author"));
     }
 
     // =========================================================================
@@ -604,7 +660,8 @@ mod tests {
         let long = "word ".repeat(20); // 100 chars
         let quote = BlockQuote::from(long.trim());
         let result = quote.render_optimistic(Some(40));
-        let lines: Vec<&str> = result.lines().collect();
+        let stripped = strip_ansi(&result);
+        let lines: Vec<&str> = stripped.lines().collect();
         assert!(
             lines.len() > 1,
             "Expected wrapping but got single line: {result}"
@@ -618,7 +675,8 @@ mod tests {
         let text = "Do a deep dive on JSON Schema:\n- what types? - how is validation done?\nFor any code examples always use Rust.";
         let quote = BlockQuote::from(text);
         let result = quote.render_optimistic(Some(80));
-        let lines: Vec<&str> = result.lines().collect();
+        let stripped = strip_ansi(&result);
+        let lines: Vec<&str> = stripped.lines().collect();
         // Should have at least 3 border-prefixed lines (one per \n-separated segment)
         assert!(
             lines.len() >= 3,
@@ -637,7 +695,8 @@ mod tests {
     fn test_short_string_does_not_wrap() {
         let quote = BlockQuote::from("short text");
         let result = quote.render_optimistic(Some(80));
-        let lines: Vec<&str> = result.lines().collect();
+        let stripped = strip_ansi(&result);
+        let lines: Vec<&str> = stripped.lines().collect();
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0], "│ short text");
     }
