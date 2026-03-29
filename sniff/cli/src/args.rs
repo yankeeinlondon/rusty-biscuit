@@ -62,7 +62,7 @@ pub enum RepoAction {
     },
     PackageRoot,
     PackageAreaRoot,
-    RepoRoot,
+    Root,
     IsCurrentPackageAreaDirty,
     PackageAreaHasSourceCodeChanges,
     DirtySourceCode(FileListArgs),
@@ -611,7 +611,7 @@ pub enum RepoSubcommand {
     /// Output the root directory of the current package area
     PackageAreaRoot,
     /// Output the root directory of the repository
-    RepoRoot,
+    Root,
     /// Exit 0 if the current package area has uncommitted changes, exit 1 otherwise
     IsCurrentPackageAreaDirty,
     /// Exit 0 if the current package area has source code changes, exit 1 otherwise
@@ -925,7 +925,7 @@ impl Commands {
                 }
                 Some(RepoSubcommand::PackageRoot) => RepoAction::PackageRoot,
                 Some(RepoSubcommand::PackageAreaRoot) => RepoAction::PackageAreaRoot,
-                Some(RepoSubcommand::RepoRoot) => RepoAction::RepoRoot,
+                Some(RepoSubcommand::Root) => RepoAction::Root,
                 Some(RepoSubcommand::IsCurrentPackageAreaDirty) => {
                     RepoAction::IsCurrentPackageAreaDirty
                 }

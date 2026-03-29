@@ -1736,7 +1736,9 @@ pub fn render_repo_package_root(result: &sniff::SniffResult, base_dir: Option<&P
 
 /// Render the root directory of the package area containing the given directory.
 ///
-/// Returns empty string if not in a package area.
+/// Returns empty string if not in a package area. Root-level packages (area
+/// `"root"`) are not considered to be inside a package area directory, so this
+/// also returns empty for them.
 pub fn render_repo_package_area_root(
     result: &sniff::SniffResult,
     base_dir: Option<&Path>,
@@ -1746,8 +1748,8 @@ pub fn render_repo_package_area_root(
 
     if let Some(area) = repo.and_then(|r| r.package_area_for_dir(&dir)) {
         if area == "root" {
-            // Root-level packages have the repo root as their area root
-            repo.unwrap().root.display().to_string()
+            // Root-level packages have no real package area directory
+            String::new()
         } else {
             repo.unwrap().root.join(area).display().to_string()
         }
