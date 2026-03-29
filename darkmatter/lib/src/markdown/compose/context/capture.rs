@@ -199,7 +199,7 @@ pub(crate) fn capture_runtime_context(
 
 // ── Date/time helpers ─────────────────────────────────────────────
 
-fn populate_datetime(values: &mut Map<String, Value>) {
+pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
     use chrono::{Datelike, Local, Utc};
 
     let now_local = Local::now();

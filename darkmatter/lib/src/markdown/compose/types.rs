@@ -817,7 +817,7 @@ impl Default for TransclusionOptions {
 /// The `values` map is the canonical backing store for all context variables.
 /// Legacy public fields are kept for backward compatibility but are also
 /// mirrored in the `values` map.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposeContext {
     /// ISO 8601 local datetime (e.g., "2024-01-15T14:30:00").
     pub now: String,
@@ -862,24 +862,6 @@ pub struct ComposeContext {
     capture_diagnostics: Vec<super::context::ContextMergeDiagnostic>,
 }
 
-impl PartialEq for ComposeContext {
-    fn eq(&self, other: &Self) -> bool {
-        self.now == other.now
-            && self.utc == other.utc
-            && self.today == other.today
-            && self.yesterday == other.yesterday
-            && self.tomorrow == other.tomorrow
-            && self.dow == other.dow
-            && self.dow_abbr == other.dow_abbr
-            && self.year == other.year
-            && self.month == other.month
-            && self.month_name == other.month_name
-            && self.month_name_abbr == other.month_name_abbr
-            && self.env == other.env
-    }
-}
-
-impl Eq for ComposeContext {}
 
 impl ComposeContext {
     /// Captures the current runtime context using CWD as the base directory.
@@ -892,8 +874,48 @@ impl ComposeContext {
     /// - All environment variables
     /// - Repository, monorepo, OS, and hardware information (via sniff)
     pub fn capture() -> Self {
-        let base_dir = std::env::current_dir().unwrap_or_default();
-        Self::capture_for_dir(&base_dir)
+        match std::env::current_dir() {
+            Ok(base_dir) => Self::capture_for_dir(&base_dir),
+            Err(e) => {
+                // CWD discovery failed: populate date/time/env but leave
+                // sniff-derived fields null, and record the failure.
+                let (mut values, diagnostics) = (
+                    serde_json::Map::new(),
+                    vec![super::context::ContextMergeDiagnostic::PartialRuntimeCapture {
+                        area: "cwd",
+                        detail: format!("current_dir() failed: {e}"),
+                    }],
+                );
+                super::context::capture::populate_datetime(&mut values);
+
+                let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+
+                let get_str = |key: &str| -> String {
+                    values
+                        .get(key)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                };
+
+                Self {
+                    now: get_str("now"),
+                    utc: get_str("utc"),
+                    today: get_str("today"),
+                    yesterday: get_str("yesterday"),
+                    tomorrow: get_str("tomorrow"),
+                    dow: get_str("dow"),
+                    dow_abbr: get_str("dow_abbr"),
+                    year: get_str("year"),
+                    month: get_str("month"),
+                    month_name: get_str("month_name"),
+                    month_name_abbr: get_str("month_name_abbr"),
+                    env,
+                    values,
+                    capture_diagnostics: diagnostics,
+                }
+            }
+        }
     }
 
     /// Captures the runtime context using the given base directory.
