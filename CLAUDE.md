@@ -83,6 +83,7 @@ This repository has the following local Agent skills defined `.claude/skills/`:
 - `biscuit-hash` - Hashing trifecta: xxHash (fast), BLAKE3 (crypto), Argon2id (passwords)
 - `biscuit-speaks` - Cross-platform TTS library and CLI (`so-you-say`) with multi-provider support (ElevenLabs, Say, eSpeak, Kokoro, etc.)
 - `biscuit-terminal` - **Terminal authority**: detection, image rendering (Kitty/iTerm2 protocols), mermaid diagrams
+- `biscuit-visualized` - Visualization backend: Mermaid diagrams, graph rendering, SVG/PNG rasterization, caching
 - `claudine` - Universal hook/event handler for agentic CLIs (Claude, Codex, Gemini, Goose, Kimi, OpenCode, Qwen)
 - `darkmatter` - Markdown parsing/rendering (delegates terminal rendering to biscuit-terminal)
 - `homelab` - Home automation AV control (Sony ES receivers, Arcam amplifiers) via CLI and REST API
