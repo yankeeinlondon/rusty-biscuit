@@ -27,6 +27,7 @@ pub use crate::components::terminal_image::{
     parse_filepath_and_width, parse_width_spec,
 };
 pub use crate::components::text_block::TextBlock;
+pub use crate::components::status::{Status, StatusState, StatusTheme};
 pub use crate::components::todo::Todo;
 pub use crate::components::two_column::{ColumnWidth, TwoColumn};
 pub use crate::terminal::Terminal;

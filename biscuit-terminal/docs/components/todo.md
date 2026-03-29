@@ -11,6 +11,9 @@ use biscuit_terminal::components::todo::{Todo, TodoState};
 // Create a new open TODO
 let todo = Todo::new("Review pull request #42");
 
+// Create with Prose-formatted description
+let todo = Todo::from_prose("review <red>critical</red> PR");
+
 // Render
 let term = Terminal::default();
 let output = todo.display(&term);
