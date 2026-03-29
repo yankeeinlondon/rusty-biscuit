@@ -252,7 +252,14 @@ impl GraphExpression {
 impl Renderable for GraphExpression {
     fn render(&self, term: &Terminal) -> String {
         match self.to_terminal_image() {
-            Ok(img) => img.render(term),
+            Ok(img) => {
+                let output = img.render(term);
+                if output.is_empty() {
+                    self.fallback_code_block()
+                } else {
+                    output
+                }
+            }
             Err(_) => self.fallback_code_block(),
         }
     }

@@ -1584,23 +1584,20 @@ pub fn handle_mermaid_error(
     let reset = if no_color { "" } else { "\x1b[0m" };
 
     match error {
+        MermaidRenderError::NoImageSupport => {
+            // Graceful degradation: output the diagram as a fenced code block
+            // so piped/non-TTY consumers still get useful output.
+            println!("```mermaid\n{}\n```", instructions);
+            return Ok(());
+        }
         MermaidRenderError::Visualization(ref viz_err) => {
-            // Show the error message
             eprintln!();
             eprintln!("{}{}Error:{} {}", red, bold, reset, viz_err);
-
-            // Show the mermaid block that was defined
             eprintln!(
                 "\n{}Mermaid {} was defined as:{}\n",
                 dim, diagram_type, reset
             );
             eprintln!("```mermaid\n{}\n```", instructions);
-        }
-        MermaidRenderError::NoImageSupport => {
-            eprintln!(
-                "{}{}Error:{} Terminal does not support image rendering.\n\nUse a terminal with image support (Kitty, iTerm2, WezTerm, Ghostty).",
-                red, bold, reset
-            );
         }
         MermaidRenderError::DisplayError(ref msg) => {
             eprintln!(
@@ -1610,7 +1607,6 @@ pub fn handle_mermaid_error(
         }
     }
 
-    // Return error to get non-zero exit code
     std::process::exit(1);
 }
 
