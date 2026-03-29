@@ -1283,6 +1283,26 @@ fn test_graph_expression_json_dot_mode() {
 }
 
 #[test]
+fn test_graph_expression_json_reports_inverse_flag() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("graph-expression")
+        .arg("--json")
+        .arg("--inverse")
+        .arg("a -> b")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    assert_eq!(parsed.get("inverse").unwrap(), true);
+    assert_eq!(parsed.get("source").unwrap().as_str().unwrap(), "a -> b");
+}
+
+#[test]
 fn test_graph_expression_falls_back_to_code_block_on_non_tty() {
     let output = cargo_bin_cmd!("bt")
         .arg("graph-expression")
