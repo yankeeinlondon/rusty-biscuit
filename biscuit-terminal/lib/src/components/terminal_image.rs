@@ -609,7 +609,8 @@ impl TerminalImage {
         let img = self.load_image()?;
         let target_cells = dims.image_width;
 
-        let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
+        let (cell_pixel_width, cell_pixel_height) = term
+            .cell_size()
             .map(|cs| (cs.width.max(1), cs.height.max(1)))
             .unwrap_or((8u32, 16u32));
 
@@ -652,7 +653,8 @@ impl TerminalImage {
         let dims = self.resolve_dimensions(term_width);
         let img = self.load_image()?;
         let target_cells = dims.image_width;
-        let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
+        let (cell_pixel_width, cell_pixel_height) = term
+            .cell_size()
             .map(|cs| (cs.width.max(1), cs.height.max(1)))
             .unwrap_or((8u32, 16u32));
         let image_aspect = img.height() as f32 / img.width() as f32;
@@ -787,7 +789,8 @@ impl TerminalImage {
         let x_offset = dims.x_offset;
 
         let img = self.load_image()?;
-        let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
+        let (cell_pixel_width, cell_pixel_height) = term
+            .cell_size()
             .map(|cs| (cs.width.max(1), cs.height.max(1)))
             .unwrap_or((8u32, 16u32));
         let image_aspect = img.height() as f32 / img.width() as f32;
@@ -1314,6 +1317,7 @@ pub fn parse_filepath_and_width(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discovery::fonts::CellSize;
     use serial_test::serial;
     use std::io::Write;
 
@@ -1812,6 +1816,7 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
+            .cell_size(CellSize { width: 8, height: 16 })
             .build();
 
         // Use render_kitty_for_terminal to avoid cursor_position() hanging
@@ -1835,6 +1840,7 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::ITerm)
             .width(80)
+            .cell_size(CellSize { width: 8, height: 16 })
             .build();
 
         // Use render_iterm2_for_terminal to avoid cursor_position() hang.
@@ -1857,6 +1863,7 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
+            .cell_size(CellSize { width: 8, height: 16 })
             .build();
 
         // Use render_kitty_for_terminal to avoid cursor_position() hang.
@@ -1881,6 +1888,7 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
+            .cell_size(CellSize { width: 8, height: 16 })
             .build();
 
         // iTerm2 with Kitty advertised should still use iterm2 protocol.
@@ -1902,12 +1910,14 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
+            .cell_size(CellSize { width: 8, height: 16 })
             .build();
         let warp = Terminal::builder()
             .app(TerminalApp::Warp)
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
+            .cell_size(CellSize { width: 8, height: 16 })
             .build();
 
         // Use render_kitty_for_terminal directly to avoid cursor_position()
@@ -1938,10 +1948,10 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::ITerm)
             .width(80)
+            .cell_size(CellSize { width: 8, height: 16 })
             .build();
 
-        // Verify ceil rounding directly from a single render_iterm2_for_terminal
-        // call. Avoids cursor_position() hang and cell_size() variance.
+        // Verify ceil rounding from a single render_iterm2_for_terminal call.
         let (_, height_cells, raw_height) = term_img.render_iterm2_for_terminal(&iterm2).unwrap();
         assert_eq!(
             height_cells,
@@ -1960,6 +1970,7 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
+            .cell_size(CellSize { width: 8, height: 16 })
             .build();
 
         // Verify ceil rounding directly from a single render_kitty_for_terminal
@@ -1984,11 +1995,10 @@ mod tests {
             .is_tty(true)
             .image_support(crate::discovery::detection::ImageSupport::Kitty)
             .width(80)
+            .cell_size(CellSize { width: 8, height: 16 })
             .build();
 
-        // Get raw_height from a single cell_size() call via render_kitty_for_terminal.
-        // This avoids intermittent failures when two render_to_terminal calls
-        // query the terminal independently and get different cell dimensions.
+        // Get raw_height from the terminal's cached cell_size via render_kitty_for_terminal.
         let (_, height_cells, raw_height) = term_img.render_kitty_for_terminal(&kitty).unwrap();
         let ceil_rows = (raw_height.ceil() as u32).max(1);
         let floor_rows = (raw_height.floor() as u32).max(1);

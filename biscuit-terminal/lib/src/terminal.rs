@@ -7,7 +7,7 @@ use crate::discovery::detection::{
     osc8_link_support, terminal_height, terminal_width, underline_support,
 };
 use crate::discovery::fonts::{
-    FontLigature, detect_nerd_font, font_ligatures, font_name, font_size,
+    CellSize, FontLigature, cell_size, detect_nerd_font, font_ligatures, font_name, font_size,
 };
 use crate::discovery::locale::{CharEncoding, TerminalLocale};
 use crate::discovery::os_detection::{
@@ -62,6 +62,7 @@ fn new_terminal() -> Terminal {
         locale: TerminalLocale::default(),
         fixed_width: None,
         fixed_height: None,
+        cell_size: cell_size(),
     }
 }
 
@@ -211,6 +212,11 @@ pub struct Terminal {
     /// Fixed terminal height (rows). When `Some`, this overrides dynamic detection.
     /// When `None`, height is queried dynamically via `terminal_height()`.
     pub fixed_height: Option<u32>,
+
+    /// Cached cell size in pixels. When `Some`, `cell_size()` returns this value
+    /// instead of querying the terminal via CSI 14t. Prevents `/dev/tty` races
+    /// when multiple threads need cell dimensions simultaneously.
+    pub cell_size: Option<CellSize>,
 }
 
 impl Default for Terminal {
@@ -246,6 +252,7 @@ impl From<&Terminal> for Terminal {
             locale: value.locale.clone(),
             fixed_width: value.fixed_width,
             fixed_height: value.fixed_height,
+            cell_size: value.cell_size,
         }
     }
 }
@@ -348,6 +355,7 @@ impl Terminal {
             locale: TerminalLocale::default(),
             fixed_width: Some(width),
             fixed_height: None,
+            cell_size: None,
         }
     }
 
@@ -387,6 +395,14 @@ impl Terminal {
     /// ```
     pub fn height(&self) -> u32 {
         self.fixed_height.unwrap_or_else(terminal_height)
+    }
+
+    /// Get the cell size in pixels.
+    ///
+    /// Returns the cached cell size if available (set during detection or via builder),
+    /// otherwise falls back to a live terminal query via CSI 14t.
+    pub fn cell_size(&self) -> Option<CellSize> {
+        self.cell_size.or_else(cell_size)
     }
 
     /// Detect whether the terminal is in "light" or "dark" mode.
@@ -492,6 +508,7 @@ pub struct TerminalBuilder {
     is_nerd_font: Option<Option<bool>>,
     fixed_width: Option<u32>,
     fixed_height: Option<u32>,
+    cell_size: Option<CellSize>,
 }
 
 impl TerminalBuilder {
@@ -573,6 +590,16 @@ impl TerminalBuilder {
         self
     }
 
+    /// Set the cell size in pixels.
+    ///
+    /// When set, `Terminal::cell_size()` returns this value instead of
+    /// querying the terminal via CSI 14t. Prevents `/dev/tty` races
+    /// in multi-threaded test environments.
+    pub fn cell_size(mut self, value: CellSize) -> Self {
+        self.cell_size = Some(value);
+        self
+    }
+
     /// Build the Terminal, using auto-detected values for unset fields.
     pub fn build(self) -> Terminal {
         let detected = new_terminal();
@@ -602,6 +629,7 @@ impl TerminalBuilder {
             remote: detected.remote,
             char_encoding: detected.char_encoding,
             locale: detected.locale,
+            cell_size: self.cell_size.or(detected.cell_size),
         }
     }
 }
