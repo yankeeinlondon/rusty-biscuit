@@ -128,7 +128,8 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     use darkmatter::markdown::Markdown;
     use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
-    log::message(&Prose::new("<bold>Prompt:</bold>").render(term));
+    log::message(&Prose::new("<bold>Agent Prompt:</bold>").render(term));
+    log::message("");
 
     let display_text = if verbose {
         prompt.to_string()
@@ -139,12 +140,14 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
 
     // Render prompt as Markdown through Darkmatter, constraining width to
     // account for the block quote border ("▌ " = 2 visible cols) and
-    // left margin (2 cols).
+    // margins (2 cols each side).
     let left_margin: u16 = 2;
+    let right_margin: u16 = 2;
     let border_width: u16 = 2;
     let content_width = (term.width() as u16)
         .saturating_sub(border_width)
-        .saturating_sub(left_margin);
+        .saturating_sub(left_margin)
+        .saturating_sub(right_margin);
     let mut opts = TerminalOptions::default();
     opts.max_width = Some(content_width);
     let rendered = match for_terminal(&Markdown::new(display_text.trim()), opts) {
@@ -157,7 +160,8 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     let mut block = BlockQuote::new(RenderableContent::from(rendered.trim_end().to_string()), None::<&str>)
         .with_left_block_color(Color::Tailwind(Tailwind::Green700))
         .with_border("▌ ");
-    block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Fixed(left_margin as u32);
+    block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(left_margin as u32);
+    block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
     log::message(&block.render(term));
 
     if !verbose && prompt.lines().count() > 10 {
