@@ -1,24 +1,24 @@
 {
     "folders": [
         {
-            "name": "ai",
-            "path": ".ai"
+            "name": "Darkmatter",
+            "path": "darkmatter"
         },
         {
-            "name": "Monorepo Docs",
-            "path": "docs"
+            "name": "Claudine Prompts",
+            "path": ".claudine/prompts"
         },
         {
             "name": "Monorepo Prompts",
             "path": "prompts"
         },
         {
-            "name": "Monorepo Scripts",
-            "path": "scripts"
+            "name": "Monorepo Skills",
+            "path": ".claude/skills"
         },
         {
-            "name": "darkmatter",
-            "path": "darkmatter"
+            "name": "Monorepo Memory",
+            "path": ".memory"
         },
         {
             "name": "~ monorepo",
