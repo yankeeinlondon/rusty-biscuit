@@ -334,6 +334,16 @@ pub fn run_compose(
         None
     };
 
+    // Demand-driven context capture: scan document for ctx.* references and
+    // only capture the groups actually needed. Shared between validation and compose.
+    let shared_context = {
+        let base_dir = std::env::current_dir().unwrap_or_default();
+        darkmatter::markdown::compose::ComposeContext::capture_for_content(
+            &base_dir,
+            md.content(),
+        )
+    };
+
     // ── Reference validation ───────────────────────────────────────────
     // Validate before composing so broken references are caught early.
     let deferred_report = if resolved_input.is_some() {
@@ -344,7 +354,9 @@ pub fn run_compose(
         };
 
         let val_options = ReferenceValidationOptions {
-            graph: ReferenceGraphOptions::default(),
+            graph: ReferenceGraphOptions::with_compose(
+                ComposeOptions::new().with_context(shared_context.clone()),
+            ),
             ..Default::default()
         };
 
@@ -380,7 +392,7 @@ pub fn run_compose(
         None
     };
 
-    let mut options = ComposeOptions::new();
+    let mut options = ComposeOptions::new().with_context(shared_context);
 
     // Parse --state as JSON or JSON5
     if let Some(json_str) = state_json {
