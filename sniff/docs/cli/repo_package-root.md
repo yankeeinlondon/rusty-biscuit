@@ -64,4 +64,4 @@ PKG_ROOT=$(sniff repo package-root)
 | [`package`](./repo_package.md) | Package name |
 | `package-root` | Absolute path to package root |
 | [`package-area-root`](./repo_package-area-root.md) | Absolute path to area root |
-| [`repo-root`](./repo_repo-root.md) | Absolute path to repository root |
+| [`root`](./repo_repo-root.md) | Absolute path to repository root |

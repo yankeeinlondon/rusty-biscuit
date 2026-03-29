@@ -484,7 +484,7 @@ pub fn render_text(
                     out.push_str(&rendered);
                     out.push('\n');
                 }
-                Some(RepoAction::RepoRoot) => {
+                Some(RepoAction::Root) => {
                     let rendered = render_repo_root(result);
                     if rendered.is_empty() {
                         std::process::exit(1);

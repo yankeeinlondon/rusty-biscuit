@@ -60,7 +60,7 @@ These flags apply to all `sniff repo` subcommands:
 |------------|-------------|
 | [`package-root`](./repo_package-root.md) | Absolute path to root of current package |
 | [`package-area-root`](./repo_package-area-root.md) | Absolute path to root of current package area |
-| [`repo-root`](./repo_repo-root.md) | Absolute path to repository root |
+| [`root`](./repo_repo-root.md) | Absolute path to repository root |
 
 ### Exit Code Checks
 
