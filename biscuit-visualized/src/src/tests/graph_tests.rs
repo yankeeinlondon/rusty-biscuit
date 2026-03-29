@@ -2,7 +2,8 @@ use crate::{
     artifact::{OutputFormat, RenderRequest},
     cache::FileCache,
     graph::{
-        EdgeKind, GraphBuilder, GraphDiagram, GraphExpression, GraphInputSyntax, GraphOrientation,
+        EdgeKind, GraphBuilder, GraphColorTheme, GraphDiagram, GraphExpression, GraphInputSyntax,
+        GraphOrientation,
     },
 };
 use serial_test::serial;
@@ -55,6 +56,15 @@ fn expression_parse_newline_separator() {
 
     assert_eq!(expr.nodes.len(), 3);
     assert_eq!(expr.edges.len(), 2);
+}
+
+#[test]
+fn expression_parse_rejects_mixed_edge_kinds() {
+    let result = GraphExpression::parse("a -> b; c -- d");
+    assert!(matches!(
+        result,
+        Err(crate::graph::GraphError::MixedEdgeKinds)
+    ));
 }
 
 #[test]
@@ -326,4 +336,36 @@ fn graph_render_cache_separates_transparency() {
     let transparent_svg = std::fs::read_to_string(transparent.path).unwrap();
     assert!(opaque_svg.contains("fill=\"#ffffff\""));
     assert!(!transparent_svg.contains("fill=\"#ffffff\""));
+}
+
+#[test]
+#[serial]
+fn graph_render_opaque_background_uses_theme_surface_color() {
+    let cache = FileCache::new();
+    let _ = cache.clear();
+
+    let light = GraphDiagram::from_expression("a -> b")
+        .unwrap()
+        .with_color_theme(GraphColorTheme::light())
+        .render(&RenderRequest {
+            format: OutputFormat::Svg,
+            scale: 1,
+            transparent_background: false,
+        })
+        .unwrap();
+    let dark = GraphDiagram::from_expression("a -> b")
+        .unwrap()
+        .with_color_theme(GraphColorTheme::dark())
+        .render(&RenderRequest {
+            format: OutputFormat::Svg,
+            scale: 1,
+            transparent_background: false,
+        })
+        .unwrap();
+
+    let light_svg = std::fs::read_to_string(light.path).unwrap();
+    let dark_svg = std::fs::read_to_string(dark.path).unwrap();
+
+    assert!(light_svg.contains("fill=\"#f8fafc\""));
+    assert!(dark_svg.contains("fill=\"#020617\""));
 }

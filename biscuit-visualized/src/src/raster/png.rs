@@ -4,6 +4,8 @@ use std::path::Path;
 
 use resvg::usvg;
 
+use super::cloned_system_font_database;
+
 /// Errors that can occur during SVG rasterization.
 #[derive(Debug, thiserror::Error)]
 pub enum RasterError {
@@ -20,7 +22,7 @@ fn render_svg_to_pixmap(
     scale: u32,
 ) -> Result<resvg::tiny_skia::Pixmap, RasterError> {
     let mut opts = usvg::Options::default();
-    opts.fontdb_mut().load_system_fonts();
+    *opts.fontdb_mut() = cloned_system_font_database();
     let tree = usvg::Tree::from_str(svg_data, &opts)
         .map_err(|e| RasterError::SvgParseFailed(e.to_string()))?;
 

@@ -91,6 +91,12 @@ impl GraphExpression {
             ));
         }
 
+        let has_directed = edges.iter().any(|edge| edge.kind == EdgeKind::Directed);
+        let has_undirected = edges.iter().any(|edge| edge.kind == EdgeKind::Undirected);
+        if has_directed && has_undirected {
+            return Err(GraphError::MixedEdgeKinds);
+        }
+
         Ok(Self { nodes, edges })
     }
 

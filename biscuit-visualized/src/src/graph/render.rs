@@ -65,6 +65,8 @@ impl GraphOrientation {
 /// against different background colors (e.g., dark vs light terminals).
 #[derive(Debug, Clone)]
 pub struct GraphColorTheme {
+    /// Surface/background color for opaque renders.
+    pub surface_color: String,
     /// Node border color (hex, e.g. "#ffffff")
     pub node_color: String,
     /// Node fill color (hex)
@@ -81,8 +83,9 @@ impl GraphColorTheme {
     /// Theme suitable for dark backgrounds.
     pub fn dark() -> Self {
         Self {
+            surface_color: "#020617".to_string(),
             node_color: "#aaaaaa".to_string(),
-            node_fill: "#2a2a2a".to_string(),
+            node_fill: "#1f2937".to_string(),
             font_color: "#e0e0e0".to_string(),
             edge_color: "#cccccc".to_string(),
             font_family: "Helvetica, Arial, sans-serif".to_string(),
@@ -92,6 +95,7 @@ impl GraphColorTheme {
     /// Theme suitable for light backgrounds.
     pub fn light() -> Self {
         Self {
+            surface_color: "#f8fafc".to_string(),
             node_color: "#333333".to_string(),
             node_fill: "#ffffff".to_string(),
             font_color: "#000000".to_string(),
@@ -385,7 +389,11 @@ impl GraphDiagram {
         // Trim excess padding from layout-rs output
         svg_content = trim_svg_padding(&svg_content, 20.0);
 
-        svg_content = apply_graph_background(&svg_content, request.transparent_background);
+        svg_content = apply_graph_background(
+            &svg_content,
+            request.transparent_background,
+            self.color_theme.as_ref(),
+        );
 
         // layout-rs ignores DOT fontcolor/fontname, so apply via SVG post-processing
         if let Some(theme) = &self.color_theme {
@@ -418,8 +426,13 @@ impl GraphDiagram {
     fn cache_key(&self, request: &RenderRequest) -> String {
         let theme_key = self.color_theme.as_ref().map(|t| {
             format!(
-                "{}/{}/{}/{}/{}",
-                t.node_color, t.node_fill, t.font_color, t.edge_color, t.font_family
+                "{}/{}/{}/{}/{}/{}",
+                t.surface_color,
+                t.node_color,
+                t.node_fill,
+                t.font_color,
+                t.edge_color,
+                t.font_family
             )
         });
         let options_json = serde_json::to_string(&serde_json::json!({
@@ -455,7 +468,11 @@ impl GraphDiagram {
     }
 }
 
-fn apply_graph_background(svg: &str, transparent_background: bool) -> String {
+fn apply_graph_background(
+    svg: &str,
+    transparent_background: bool,
+    theme: Option<&GraphColorTheme>,
+) -> String {
     if transparent_background {
         return svg.to_string();
     }
@@ -470,7 +487,12 @@ fn apply_graph_background(svg: &str, transparent_background: bool) -> String {
     let insert_pos = svg_start + open_end + 1;
     let mut output = String::with_capacity(svg.len() + 48);
     output.push_str(&svg[..insert_pos]);
-    output.push_str(r##"<rect width="100%" height="100%" fill="#ffffff"/>"##);
+    let fill = theme
+        .map(|theme| theme.surface_color.as_str())
+        .unwrap_or("#ffffff");
+    output.push_str(&format!(
+        r#"<rect width="100%" height="100%" fill="{fill}"/>"#
+    ));
     output.push_str(&svg[insert_pos..]);
     output
 }

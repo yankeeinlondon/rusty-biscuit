@@ -438,3 +438,54 @@ fn mermaid_alt_text_defaults_to_mermaid_diagram() {
 
     assert_eq!(artifact.alt_text, "Mermaid diagram");
 }
+
+#[test]
+#[serial]
+fn mermaid_backend_smoke_renders_supported_cli_diagram_families() {
+    let cache = FileCache::new();
+    let _ = cache.clear();
+
+    let diagrams = [
+        (
+            "flowchart",
+            "flowchart LR\n    A[Start] --> B{Decision}\n    B --> C[Done]",
+        ),
+        (
+            "git-graph",
+            "gitGraph\n    commit\n    branch feature\n    checkout feature\n    commit\n    checkout main\n    merge feature",
+        ),
+        (
+            "bar-chart",
+            "xychart-beta\n    title \"Monthly Revenue\"\n    x-axis [Jan, Feb, Mar]\n    y-axis \"Revenue\" 0 --> 30\n    bar [12, 28, 20]",
+        ),
+        (
+            "line-chart",
+            "xychart-beta\n    title \"Weekly Temperature\"\n    x-axis [Mon, Tue, Wed]\n    y-axis \"C\" 0 --> 30\n    line [20, 22, 19]",
+        ),
+        (
+            "timeline",
+            "timeline\n    title Company History\n    2020 : Founded\n    2022 : IPO",
+        ),
+        (
+            "state-diagram",
+            "---\ntitle: Process States\n---\nstateDiagram-v2\n    [*] --> Idle\n    Idle --> Running\n    Running --> [*]",
+        ),
+        (
+            "erd",
+            "---\ntitle: E-Commerce Schema\n---\nerDiagram\n    Customer ||--o{ Order : places",
+        ),
+    ];
+
+    for (name, instructions) in diagrams {
+        let artifact = MermaidDiagram::new(instructions)
+            .render(&RenderRequest {
+                format: OutputFormat::Svg,
+                scale: 1,
+                transparent_background: true,
+            })
+            .unwrap_or_else(|err| panic!("{name} should render successfully: {err}"));
+
+        let svg = std::fs::read_to_string(artifact.path).unwrap();
+        assert!(svg.contains("<svg"), "{name} should produce SVG output");
+    }
+}

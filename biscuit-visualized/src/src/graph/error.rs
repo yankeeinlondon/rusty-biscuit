@@ -3,6 +3,8 @@
 pub enum GraphError {
     #[error("Expression parse error: {0}")]
     ExpressionParseFailed(String),
+    #[error("Mixed directed and undirected edges are not supported in the same expression")]
+    MixedEdgeKinds,
     #[error("DOT parse error: {0}")]
     DotParseFailed(String),
     #[error("Unsupported DOT feature: {0}")]
