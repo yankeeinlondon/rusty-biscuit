@@ -121,6 +121,12 @@
         "rust-analyzer.files.excludeDirs": [
             "~ monorepo"
         ],
+
+        "workbench.colorCustomizations": {
+            "titleBar.activeBackground": "#5A1E1E",
+            "statusBar.background": "#5A1E1E",
+            "activityBar.background": "#401414"
+        },
         "cSpell.words": [
             "ALAC",
             "ALSA",
