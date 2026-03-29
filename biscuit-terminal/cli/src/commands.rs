@@ -287,6 +287,13 @@ pub fn build_mermaid_diagram(
     Ok(diagram)
 }
 
+fn with_mermaid_frontmatter_title(body: &str, title: Option<&str>) -> String {
+    match title {
+        Some(title) => format!("---\ntitle: {title}\n---\n{body}"),
+        None => body.to_string(),
+    }
+}
+
 /// Display a [`MermaidDiagram`] and optionally output metadata.
 ///
 /// Uses [`MermaidDiagram::try_render()`] for proper error reporting.
@@ -340,6 +347,67 @@ pub fn display_mermaid(
     }
 
     // Let terminal settle after image rendering
+    settle_terminal();
+
+    Ok(())
+}
+
+/// Display a [`GraphExpression`] and optionally output metadata.
+pub fn display_graph(
+    graph: &biscuit_terminal::components::graph_expression::GraphExpression,
+    source: &str,
+    layout: &LayoutArgs,
+    meta: bool,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::graph_expression::GraphRenderError;
+    use biscuit_terminal::components::renderable::Renderable;
+    use std::time::Instant;
+
+    let start_time = Instant::now();
+    let terminal = Terminal::new();
+
+    let result = match graph.try_render(&terminal) {
+        Ok(result) => result,
+        Err(GraphRenderError::NoImageSupport) => {
+            for _ in 0..layout.margin_top.unwrap_or(0) {
+                println!();
+            }
+            print!("{}", graph.render(&terminal));
+            for _ in 0..layout.margin_bottom.unwrap_or(0) {
+                println!();
+            }
+            return Ok(());
+        }
+        Err(error) => return handle_graph_error(error, &graph.fallback_code_block(), source),
+    };
+
+    let render_time_ms = start_time.elapsed().as_millis() as u64;
+
+    for _ in 0..layout.margin_top.unwrap_or(0) {
+        println!();
+    }
+
+    emit_image_output(&result.output)?;
+
+    if meta {
+        let file_size_bytes = std::fs::metadata(&result.png_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        let render_meta = RenderMeta {
+            filename: result.png_path.to_string_lossy().to_string(),
+            cache_hit: result.cache_hit,
+            file_size_bytes,
+            render_time_ms,
+        };
+
+        eprintln!("{}", serde_json::to_string(&render_meta)?);
+    }
+
+    for _ in 0..layout.margin_bottom.unwrap_or(0) {
+        println!();
+    }
+
     settle_terminal();
 
     Ok(())
@@ -1263,7 +1331,7 @@ pub fn render_timeline(
         }
     }
 
-    let instructions = lines.join("\n");
+    let instructions = with_mermaid_frontmatter_title(&lines.join("\n"), eff_title);
 
     if json {
         let output = serde_json::json!({
@@ -1338,15 +1406,11 @@ pub fn render_state_diagram(
     // Build the state diagram
     let mut lines = vec!["stateDiagram-v2".to_string()];
 
-    // Add title if provided (using note or direction for now, title isn't directly supported)
-    // Actually, stateDiagram doesn't have a title directive, we'll skip it for the diagram itself
-    // but include it in JSON output
-
     for transition in &transitions {
         lines.push(format!("    {}", transition));
     }
 
-    let instructions = lines.join("\n");
+    let instructions = with_mermaid_frontmatter_title(&lines.join("\n"), eff_title);
 
     if json {
         let output = serde_json::json!({
@@ -1389,12 +1453,11 @@ pub fn render_graph_expression(
     font: Option<&str>,
     orientation: args::GraphOrientationArg,
     layout: &LayoutArgs,
-    _meta: bool,
+    meta: bool,
     content: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::graph_expression::GraphExpression;
-    use biscuit_terminal::components::renderable::Renderable;
     use std::io::Write;
 
     let _ = std::io::stdout().flush();
@@ -1429,9 +1492,8 @@ pub fn render_graph_expression(
 
     // Configure graph based on inverse flag
     let mut graph = if inverse {
-        GraphExpression::parse(&source, syntax.into())
+        GraphExpression::inverted_for_terminal(&source, syntax.into())
             .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
-            .with_transparent_background(false)
     } else {
         GraphExpression::for_terminal(&source, syntax.into())
             .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
@@ -1457,9 +1519,7 @@ pub fn render_graph_expression(
     // Apply layout (margins, alignment) via Renderable trait
     apply_renderable_layout(&mut graph, layout);
 
-    // Render and display
-    let terminal = Terminal::new();
-    print!("{}", graph.display(&terminal));
+    display_graph(&graph, &source, layout, meta)?;
 
     // Print command used if example mode
     if example {
@@ -1542,7 +1602,7 @@ pub fn render_erd(
         lines.push(format!("    {}", rel));
     }
 
-    let instructions = lines.join("\n");
+    let instructions = with_mermaid_frontmatter_title(&lines.join("\n"), eff_title);
 
     if json {
         let output = serde_json::json!({
@@ -1604,6 +1664,44 @@ pub fn handle_mermaid_error(
                 "{}{}Error:{} Failed to display image: {}",
                 red, bold, reset, msg
             );
+        }
+    }
+
+    std::process::exit(1);
+}
+
+/// Handle graph rendering errors with user-friendly output.
+pub fn handle_graph_error(
+    error: biscuit_terminal::components::graph_expression::GraphRenderError,
+    fallback: &str,
+    source: &str,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::graph_expression::GraphRenderError;
+
+    let no_color = std::env::var("NO_COLOR").is_ok();
+    let red = if no_color { "" } else { "\x1b[31m" };
+    let bold = if no_color { "" } else { "\x1b[1m" };
+    let dim = if no_color { "" } else { "\x1b[2m" };
+    let reset = if no_color { "" } else { "\x1b[0m" };
+
+    match error {
+        GraphRenderError::NoImageSupport => {
+            println!("{fallback}");
+            return Ok(());
+        }
+        GraphRenderError::Visualization(ref viz_err) => {
+            eprintln!();
+            eprintln!("{}{}Error:{} {}", red, bold, reset, viz_err);
+            eprintln!("\n{}Graph expression was defined as:{}\n", dim, reset);
+            eprintln!("{fallback}");
+        }
+        GraphRenderError::DisplayError(ref msg) => {
+            eprintln!(
+                "{}{}Error:{} Failed to display image: {}",
+                red, bold, reset, msg
+            );
+            eprintln!("\n{}Graph expression source was:{}\n", dim, reset);
+            eprintln!("{source}");
         }
     }
 

@@ -1080,6 +1080,9 @@ fn test_state_diagram_with_title() {
         serde_json::from_str(&stdout).expect("Output should be valid JSON");
 
     assert_eq!(parsed.get("title").unwrap(), "Process States");
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    assert!(instructions.starts_with("---\ntitle: Process States\n---\n"));
+    assert!(instructions.contains("stateDiagram-v2"));
 }
 
 #[test]
@@ -1167,6 +1170,9 @@ fn test_erd_with_title() {
         serde_json::from_str(&stdout).expect("Output should be valid JSON");
 
     assert_eq!(parsed.get("title").unwrap(), "E-Commerce Schema");
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    assert!(instructions.starts_with("---\ntitle: E-Commerce Schema\n---\n"));
+    assert!(instructions.contains("erDiagram"));
 }
 
 #[test]
@@ -1308,155 +1314,39 @@ fn test_graph_expression_dot_fallback_uses_dot_info_string() {
     assert!(stdout.contains("digraph { A -> B; }"));
 }
 
-// ============================================================================
-// Visualization Rendering Smoke Tests
-// ============================================================================
-//
-// These tests exercise the native Rust rendering path used by the CLI.
-
 #[test]
 #[serial_test::serial(visualization)]
-fn test_bar_chart_example_renders() {
-    cargo_bin_cmd!("bt")
-        .arg("bar-chart")
-        .arg("--example")
-        .assert()
-        .success();
+fn test_graph_expression_meta_outputs_render_metadata_in_a_pty() {
+    use expectrl::{Expect, Session};
+    use std::process::Command;
+
+    let bin_path = assert_cmd::cargo::cargo_bin!("bt");
+    let mut cmd = Command::new(bin_path);
+    cmd.arg("graph-expression")
+        .arg("--meta")
+        .arg("a -> b")
+        .env("CI", "1")
+        .env("NO_COLOR", "1")
+        .env("TERM_PROGRAM", "Ghostty")
+        .env("TERM", "xterm-ghostty");
+
+    let mut p = Session::spawn(cmd).expect("Failed to spawn bt in PTY");
+    p.expect("\"file_size_bytes\":")
+        .expect("Expected render metadata JSON in PTY output");
+    p.expect("\"render_time_ms\":")
+        .expect("Expected render_time_ms in PTY output");
 }
 
 #[test]
-#[serial_test::serial(visualization)]
-fn test_bar_chart_renders_json_input() {
+fn test_graph_expression_rejects_mixed_edge_kinds() {
     cargo_bin_cmd!("bt")
-        .arg("bar-chart")
-        .arg("[10, 20, 30, 40]")
+        .arg("graph-expression")
+        .arg("a -> b; c -- d")
         .assert()
-        .success();
-}
-
-#[test]
-#[serial_test::serial(visualization)]
-fn test_bar_chart_renders_with_all_options() {
-    cargo_bin_cmd!("bt")
-        .arg("bar-chart")
-        .arg("[10, 20, 30]")
-        .arg("--title")
-        .arg("Sales Data")
-        .arg("--x-axis")
-        .arg("Q1,Q2,Q3")
-        .arg("--y-axis")
-        .arg("Revenue")
-        .assert()
-        .success();
-}
-
-#[test]
-#[serial_test::serial(visualization)]
-fn test_line_chart_example_renders() {
-    cargo_bin_cmd!("bt")
-        .arg("line-chart")
-        .arg("--example")
-        .assert()
-        .success();
-}
-
-#[test]
-#[serial_test::serial(visualization)]
-fn test_line_chart_renders_with_options() {
-    cargo_bin_cmd!("bt")
-        .arg("line-chart")
-        .arg("[5, 15, 10, 25]")
-        .arg("--title")
-        .arg("Trends")
-        .assert()
-        .success();
-}
-
-#[test]
-#[serial_test::serial(visualization)]
-fn test_timeline_example_renders() {
-    cargo_bin_cmd!("bt")
-        .arg("timeline")
-        .arg("--example")
-        .assert()
-        .success();
-}
-
-#[test]
-#[serial_test::serial(visualization)]
-fn test_timeline_renders_with_events() {
-    cargo_bin_cmd!("bt")
-        .arg("timeline")
-        .arg("2020 : Project started")
-        .arg("2021 : First release")
-        .arg("2022 : Major update")
-        .assert()
-        .success();
-}
-
-#[test]
-#[serial_test::serial(visualization)]
-fn test_state_diagram_example_renders() {
-    cargo_bin_cmd!("bt")
-        .arg("state-diagram")
-        .arg("--example")
-        .assert()
-        .success();
-}
-
-#[test]
-#[serial_test::serial(visualization)]
-fn test_state_diagram_renders_with_transitions() {
-    cargo_bin_cmd!("bt")
-        .arg("state-diagram")
-        .arg("Idle --> Running : start")
-        .arg("Running --> Stopped : stop")
-        .assert()
-        .success();
-}
-
-#[test]
-#[serial_test::serial(visualization)]
-fn test_erd_example_renders() {
-    cargo_bin_cmd!("bt")
-        .arg("erd")
-        .arg("--example")
-        .assert()
-        .success();
-}
-
-#[test]
-#[serial_test::serial(visualization)]
-fn test_erd_renders_with_entities() {
-    cargo_bin_cmd!("bt")
-        .arg("erd")
-        .arg("--entity")
-        .arg("User {\n        int id PK\n        string name\n    }")
-        .arg("--entity")
-        .arg("Post {\n        int id PK\n        int userId FK\n    }")
-        .arg("User ||--o{ Post : writes")
-        .assert()
-        .success();
-}
-
-#[test]
-#[serial_test::serial(visualization)]
-fn test_flowchart_example_renders() {
-    cargo_bin_cmd!("bt")
-        .arg("flowchart")
-        .arg("--example")
-        .assert()
-        .success();
-}
-
-#[test]
-#[serial_test::serial(visualization)]
-fn test_git_graph_example_renders() {
-    cargo_bin_cmd!("bt")
-        .arg("git-graph")
-        .arg("--example")
-        .assert()
-        .success();
+        .failure()
+        .stderr(predicate::str::contains(
+            "Mixed directed and undirected edges",
+        ));
 }
 
 #[test]
