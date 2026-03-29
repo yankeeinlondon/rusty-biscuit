@@ -335,4 +335,3 @@ fn parse_excluded(exclude: &[String], silent: bool) -> BTreeSet<Provider> {
         })
         .collect()
 }
-

@@ -339,10 +339,7 @@ mod tests {
             "composition_file_ref".into(),
             Value::String("notes/weekly.md".into()),
         );
-        context.insert(
-            "composition_mode".into(),
-            Value::String("inline".into()),
-        );
+        context.insert("composition_mode".into(), Value::String("inline".into()));
         context.insert(
             "composition_source_path".into(),
             Value::String("/tmp/notes/weekly.md".into()),
@@ -379,12 +376,8 @@ mod tests {
         let env = make_test_env();
 
         let meta_plain = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &env);
-        let meta_none = summary_to_event_meta_with_context(
-            &summary,
-            StreamProtocol::StreamJson,
-            &env,
-            None,
-        );
+        let meta_none =
+            summary_to_event_meta_with_context(&summary, StreamProtocol::StreamJson, &env, None);
 
         assert_eq!(meta_plain.extra.len(), meta_none.extra.len());
         assert!(!meta_none.extra.contains_key("composition_file_ref"));

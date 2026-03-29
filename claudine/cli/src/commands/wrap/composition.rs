@@ -159,9 +159,7 @@ pub(crate) fn execute_composition_request(
     // -- Operation env override -----------------------------------------------
 
     if let Some(ref op) = request.operation {
-        env_plan
-            .env
-            .insert("OPERATION".into(), op.clone().into());
+        env_plan.env.insert("OPERATION".into(), op.clone().into());
     }
 
     let mut effective_prompt = request.prepared.prompt.clone();
@@ -286,7 +284,8 @@ pub(crate) fn execute_composition_request(
     if request.yolo {
         let mut env_overrides = Vec::new();
         if let Some(warn) = profile.apply_yolo(&mut child_args, &mut env_overrides)?
-            && !silent && !quiet
+            && !silent
+            && !quiet
         {
             log::warn(&warn);
         }
@@ -310,7 +309,8 @@ pub(crate) fn execute_composition_request(
     if let Some(ref model) = request.model {
         let mut env_overrides = Vec::new();
         if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
-            && !silent && !quiet
+            && !silent
+            && !quiet
         {
             log::warn(&warn);
         }
@@ -319,9 +319,7 @@ pub(crate) fn execute_composition_request(
         }
         // OpenCode needs MODEL env var when --model is passed via passthrough
         if provider == Provider::OpenCode && effective_non_interactive {
-            env_plan
-                .env
-                .insert("MODEL".into(), model.clone().into());
+            env_plan.env.insert("MODEL".into(), model.clone().into());
         }
     }
 
@@ -330,7 +328,8 @@ pub(crate) fn execute_composition_request(
         use super::profile::OutputFormat;
         let format: OutputFormat = output_str.parse().map_err(|e: String| eyre!(e))?;
         if let Some(warn) = profile.apply_output_format(&mut child_args, format)
-            && !silent && !quiet
+            && !silent
+            && !quiet
         {
             log::warn(&warn);
         }
@@ -340,7 +339,8 @@ pub(crate) fn execute_composition_request(
     if let Some(ref prompt) = request.system_prompt {
         let resolved = super::resolve_system_prompt(prompt)?;
         if let Some(warn) = profile.apply_system_prompt(&mut child_args, &resolved)
-            && !silent && !quiet
+            && !silent
+            && !quiet
         {
             log::warn(&warn);
         }
@@ -349,7 +349,8 @@ pub(crate) fn execute_composition_request(
     // Universal --sandbox flag
     if request.sandbox
         && let Some(warn) = profile.apply_sandbox(&mut child_args)
-        && !silent && !quiet
+        && !silent
+        && !quiet
     {
         log::warn(&warn);
     }
@@ -393,10 +394,8 @@ pub(crate) fn execute_composition_request(
             source_path: &request.prepared.resolved_path,
             repo_root: effective_repo_root,
         };
-        let shell_options = build_harness_shell_options(
-            &request.prepared.resolved_path,
-            effective_repo_root,
-        );
+        let shell_options =
+            build_harness_shell_options(&request.prepared.resolved_path, effective_repo_root);
         // Validate that the harness plan can be parsed before proceeding.
         let mut plan = claudine::harness::parse_harness_plan_with_shell(
             &request.prepared.effective_frontmatter,
@@ -423,11 +422,8 @@ pub(crate) fn execute_composition_request(
         // provider-policy check that the harness path uses. Without harness
         // frontmatter there is no handler system to recover, so a failure
         // here is fatal.
-        let permission_probe = WrapperHarnessPermissionProbe::new(
-            provider,
-            child_args.clone(),
-            effective_repo_root,
-        );
+        let permission_probe =
+            WrapperHarnessPermissionProbe::new(provider, child_args.clone(), effective_repo_root);
         claudine::harness::check_write_permission(
             &request.prepared.resolved_path,
             &request.prepared.resolved_path,
@@ -773,12 +769,7 @@ fn execute_inline_without_harness(
     } else {
         // Legacy (non-structured) inline path: emit synthetic session-end
         // event so composition metadata is consistently logged.
-        emit_legacy_composition_session_event(
-            provider,
-            final_exit,
-            env_context,
-            dispatch_context,
-        );
+        emit_legacy_composition_session_event(provider, final_exit, env_context, dispatch_context);
     }
 
     Ok(final_exit)
@@ -1078,12 +1069,7 @@ fn execute_direct_without_harness(
 
         // Emit a synthetic session-end event for non-structured composition
         // runs so that composition metadata is consistently logged.
-        emit_legacy_composition_session_event(
-            provider,
-            result.data,
-            env_context,
-            dispatch_context,
-        );
+        emit_legacy_composition_session_event(provider, result.data, env_context, dispatch_context);
 
         Ok(result.data)
     }
@@ -1140,8 +1126,7 @@ fn load_config_favorite(cwd: &Path) -> Option<Provider> {
         .ok()
         .flatten()
         .map(|info| info.repo_root);
-    let config =
-        claudine::dispatch::loader::load_config(None, repo_root.as_deref()).ok()?;
+    let config = claudine::dispatch::loader::load_config(None, repo_root.as_deref()).ok()?;
     config.settings.linking?.preference.first().copied()
 }
 
@@ -1162,10 +1147,7 @@ fn emit_legacy_composition_session_event(
     use claudine::events::{AgenticEvent, EventMeta};
 
     let mut extra = HashMap::new();
-    extra.insert(
-        "synthetic".into(),
-        serde_json::Value::Bool(true),
-    );
+    extra.insert("synthetic".into(), serde_json::Value::Bool(true));
     extra.insert(
         "synthetic_kind".into(),
         serde_json::Value::String("composition_legacy_summary".into()),
@@ -1200,4 +1182,3 @@ fn emit_legacy_composition_session_event(
         tracing::warn!("Failed to write legacy composition session event: {e}");
     }
 }
-

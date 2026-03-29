@@ -184,7 +184,11 @@ pub(crate) struct WrapperHarnessPermissionProbe {
 }
 
 impl WrapperHarnessPermissionProbe {
-    pub(crate) fn new(provider: Provider, child_args: Vec<String>, repo_root: Option<&Path>) -> Self {
+    pub(crate) fn new(
+        provider: Provider,
+        child_args: Vec<String>,
+        repo_root: Option<&Path>,
+    ) -> Self {
         Self {
             provider,
             child_args,
@@ -561,10 +565,7 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 /// `claudine inline-compose`.
 fn reject_retired_composition_flags(args: &[String]) -> Result<()> {
     const RETIRED: &[(&str, &str)] = &[
-        (
-            "--compose",
-            "claudine compose --<provider> <file>",
-        ),
+        ("--compose", "claudine compose --<provider> <file>"),
         (
             "--frontmatter-prompt",
             "claudine inline-compose --<provider> <file>",
@@ -576,7 +577,10 @@ fn reject_retired_composition_flags(args: &[String]) -> Result<()> {
     ];
 
     for (flag, replacement) in RETIRED {
-        if args.iter().any(|a| a == flag || a.starts_with(&format!("{flag}="))) {
+        if args
+            .iter()
+            .any(|a| a == flag || a.starts_with(&format!("{flag}=")))
+        {
             return Err(eyre!(
                 "{flag} has been retired; use `{replacement}` instead"
             ));
@@ -1828,7 +1832,7 @@ fn try_inline_closure(
     show_checks: bool,
     term: &Terminal,
 ) -> Result<(), Vec<claudine::harness::ValidationFailure>> {
-    use claudine::harness::{ValidationEvent, ValidationFailure, ValidationRuleId, FailurePhase};
+    use claudine::harness::{FailurePhase, ValidationEvent, ValidationFailure, ValidationRuleId};
 
     let display_path = source_path
         .strip_prefix(child_cwd)
@@ -1877,9 +1881,7 @@ fn try_inline_closure(
             Ok(())
         }
         Err(error) => {
-            let is_unchanged = error
-                .to_string()
-                .contains("unchanged");
+            let is_unchanged = error.to_string().contains("unchanged");
             let event = if is_unchanged {
                 ValidationEvent::InlineBodyUnchanged
             } else {
@@ -2297,15 +2299,14 @@ pub(crate) fn run_harness_loop(
                 term,
             )
         {
-            let contexts =
-                claudine::harness::build_validation_failure_context(
-                    &failures,
-                    provider.as_slug(),
-                    plan.source_path.as_path(),
-                    attempt,
-                    outcome.session_id.clone(),
-                    Some(outcome.clone()),
-                );
+            let contexts = claudine::harness::build_validation_failure_context(
+                &failures,
+                provider.as_slug(),
+                plan.source_path.as_path(),
+                attempt,
+                outcome.session_id.clone(),
+                Some(outcome.clone()),
+            );
 
             let mut next_plan = None;
             for failure_ctx in &contexts {
@@ -2469,7 +2470,15 @@ pub(crate) fn emit_stream_summary(
     verbose: bool,
     details: &StructuredSummaryDetails,
 ) {
-    emit_stream_summary_inner(summary, profile, env_context, verbosity, verbose, details, None);
+    emit_stream_summary_inner(
+        summary,
+        profile,
+        env_context,
+        verbosity,
+        verbose,
+        details,
+        None,
+    );
 }
 
 pub(crate) fn emit_stream_summary_with_context(

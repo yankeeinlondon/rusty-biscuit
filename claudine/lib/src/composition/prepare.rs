@@ -7,11 +7,7 @@ use darkmatter::markdown::compose::ComposeOptions;
 
 /// Walk up from a file path to find the nearest `.git` directory.
 fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
-    let start = if path.is_file() {
-        path.parent()?
-    } else {
-        path
-    };
+    let start = if path.is_file() { path.parent()? } else { path };
     let mut dir = start;
     loop {
         if dir.join(".git").exists() {

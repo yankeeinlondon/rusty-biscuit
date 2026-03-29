@@ -2174,21 +2174,11 @@ fn ambiguous_agent_hint_no_tty_returns_error() {
     let md_file = workspace.path().join("test.md");
     // "agent: c" matches both claude and codex via prefix matching,
     // producing an ambiguous hint that requires interactive selection.
-    fs::write(
-        &md_file,
-        "---\ntitle: test\nagent: c\n---\nPrompt\n",
-    )
-    .unwrap();
+    fs::write(&md_file, "---\ntitle: test\nagent: c\n---\nPrompt\n").unwrap();
 
     // Install both claude and codex so "c" is ambiguous
-    write_executable(
-        &path_dir.join("claude"),
-        "#!/bin/sh\nexit 0\n",
-    );
-    write_executable(
-        &path_dir.join("codex"),
-        "#!/bin/sh\nexit 0\n",
-    );
+    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
 
     // Write empty stdin via a file to prevent TTY detection
     let stdin_file = workspace.path().join("empty-stdin.txt");
@@ -2378,10 +2368,7 @@ fn inline_compose_harness_writability_pre_check_fires() {
 
     write_executable(
         &path_dir.join("goose"),
-        &format!(
-            "#!/bin/sh\ntouch \"{}\"\n",
-            marker_path.display()
-        ),
+        &format!("#!/bin/sh\ntouch \"{}\"\n", marker_path.display()),
     );
 
     let assert = cargo_bin_cmd!("claudine")
