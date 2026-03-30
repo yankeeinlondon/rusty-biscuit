@@ -37,7 +37,7 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 | Topic | Description |
 |-------|-------------|
 | [Terminal Struct](./terminal-struct.md) | Main struct, static vs dynamic properties, enums |
-| [Components](./components.md) | All renderable components: Compose, Section, BlockQuote, Todo, TwoColumn, FileSystem, Progress, InlineContent |
+| [Components](./components.md) | All renderable components: BlockQuote, Compose, FileSystem, GraphExpression, InlineContent, MermaidDiagram, OrderedList, UnorderedList, PadLeft, PadRight, Progress, Prose, Section, Status, Table, TerminalImage, TextBlock, Todo, TwoColumn |
 | [Image Rendering](./image-rendering.md) | Kitty/iTerm2 protocols, width parsing, cursor behavior, policy controls |
 | [Mermaid Diagrams](./mermaid-diagrams.md) | Terminal-facing `MermaidDiagram` adapter backed by biscuit-visualized |
 | [Color System](./color-system.md) | BasicColor, RgbColor, WebColor, Tailwind, HdrColor with TermColor trait |

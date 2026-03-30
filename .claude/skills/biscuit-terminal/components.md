@@ -14,20 +14,25 @@ Every component owns a `Layout` for margins, alignment, word-wrap, and row-fill.
 
 | Component | Module | Block-level | Description |
 |-----------|--------|-------------|-------------|
-| `Prose` | `prose.rs` | No | Styled text with inline tokens (atomic + block) |
-| `TextBlock` | `text_block.rs` | No | Uniform styling across text (bold, color, underline) |
-| `Section` | `section.rs` | Yes | Heading (h1-h6) with content body |
 | `BlockQuote` | `block_quote.rs` | Yes | Quoted text with left border and attribution |
+| `Compose` | `compose.rs` | No | Combine multiple renderables into one output |
+| `FileSystem` | `filesystem.rs` | Yes | File/directory tree rendering with icons and gitignore awareness |
+| `GraphExpression` | `graph_expression.rs` | Yes | Graph diagrams via biscuit-visualized with terminal image display |
+| `InlineContent` | `inline_content.rs` | No | Inline concatenation of items without newlines |
+| `MermaidDiagram` | `mermaid.rs` | Yes | Mermaid diagram rendering via biscuit-visualized |
 | `OrderedList` | `list.rs` | Yes | Numbered list with nested renderable support |
 | `UnorderedList` | `list.rs` | Yes | Bullet list with custom bullets, hanging indent |
-| `Table` | `table/` | Yes | Box-drawing table with auto-sized columns |
-| `TwoColumn` | `two_column.rs` | Yes | Side-by-side columns (supports inline images) |
-| `Compose` | `compose.rs` | No | Combine multiple renderables into one output |
-| `Todo` | `todo.rs` | No | Task item with state (Open, InProgress, Completed, Blocked, Cancelled) |
+| `PadLeft` | `pad.rs` | No | Right-align content by padding with spaces on the left |
+| `PadRight` | `pad.rs` | No | Left-align content by padding with spaces on the right |
 | `Progress` | `progress.rs` | No | Progress indicator rendering |
-| `FileSystem` | `filesystem.rs` | Yes | File/directory tree rendering with icons and gitignore awareness |
-| `InlineContent` | `inline_content.rs` | No | Inline concatenation of items without newlines |
+| `Prose` | `prose.rs` | No | Styled text with inline tokens (atomic + block) |
+| `Section` | `section.rs` | Yes | Heading (h1-h6) with content body |
+| `Status` | `status.rs` | No | Status items with icons (success, failure, warning, info, active, not-started) |
+| `Table` | `table/` | Yes | Box-drawing table with auto-sized columns |
 | `TerminalImage` | `terminal_image.rs` | Yes | Inline images via Kitty/iTerm2 protocols |
+| `TextBlock` | `text_block.rs` | No | Uniform styling across text (bold, color, underline) |
+| `Todo` | `todo.rs` | No | Task item with state (Open, InProgress, Completed, Blocked, Cancelled) |
+| `TwoColumn` | `two_column.rs` | Yes | Side-by-side columns (supports inline images) |
 
 ## Compose
 
