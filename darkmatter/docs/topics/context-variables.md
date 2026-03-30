@@ -201,14 +201,3 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `cpu_arch`     | `String`        | CPU architecture (e.g., `aarch64`, `x86_64`)               |
 | `gpu`          | `String \| null` | GPU device name(s), comma-separated; null if none detected |
 
-## Compatibility Aliases
-
-These aliases exist for backward compatibility:
-
-| Legacy Name | Canonical Name |
-|-------------|----------------|
-| `utc`       | `now_utc`      |
-| `dow`       | `day`          |
-| `dow_abbr`  | `day_abbr`     |
-
-Both the legacy name and canonical name are present in the context and return the same value.
