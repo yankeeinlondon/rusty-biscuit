@@ -1592,8 +1592,12 @@ impl Markdown {
         let mut inherited: Map<String, Value> = state.data().clone().into_iter().collect();
 
         // Prologue/epilogue are scoped to the defining document — never propagate.
+        // ctx is captured fresh per-document by EffectiveStateBuilder, so the
+        // parent's merged runtime context must not leak into children (it would
+        // appear as a document-defined ctx and trigger false collision warnings).
         inherited.remove("prologue");
         inherited.remove("epilogue");
+        inherited.remove("ctx");
 
         Value::Object(inherited)
     }
