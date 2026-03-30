@@ -8,13 +8,6 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-#[cfg(test)]
-use biscuit_terminal::components::prose::Prose;
-#[cfg(test)]
-use biscuit_terminal::prelude::Renderable;
-#[cfg(test)]
-use biscuit_terminal::terminal::Terminal;
-
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
     AttemptOutcome, FailurePhase, FileFingerprint, HarnessPermissionProbe, HarnessPlan,
@@ -141,7 +134,7 @@ fn run_checks(
             post_run_markdown.as_ref(),
         );
         let passed = result.is_ok();
-        let markup = build_check_markup(rule, &result);
+        let markup = build_check_markup(rule);
         let failure_message = result.err();
 
         outcomes.push(ValidationCheckOutcome {
@@ -693,46 +686,47 @@ fn get_post_run_markdown<'a>(
 /// Default message templates per validation kind.
 fn default_message(kind: &ValidationKind, vars: &HashMap<&str, String>) -> String {
     let template = match kind {
-        ValidationKind::FileExists { .. } => "{{status}} the file {{file}} exists",
-        ValidationKind::DirExists { .. } => "{{status}} the directory {{dir}} exists",
-        ValidationKind::JsonFileExists { .. } => "{{status}} {{file}} is a valid JSON file",
-        ValidationKind::YamlFileExists { .. } => "{{status}} {{file}} is a valid YAML file",
-        ValidationKind::TomlFileExists { .. } => "{{status}} {{file}} is a valid TOML file",
-        ValidationKind::HasWritePermission { .. } => "{{status}} write permission for {{file}}",
-        ValidationKind::ShellCommand { .. } => "{{status}} shell command: {{command}}",
-        ValidationKind::NoDirtySourceCode { .. } => "{{status}} no dirty source code in {{dir}}",
-        ValidationKind::HasDirtySourceCode { .. } => {
-            "{{status}} dirty source code found in {{dir}}"
-        }
-        ValidationKind::FileChanged { .. } => "{{status}} the file {{file}} was modified",
-        ValidationKind::FileUnchanged { .. } => "{{status}} the file {{file}} was not modified",
+        ValidationKind::FileExists { .. } => "the file {{file}} exists",
+        ValidationKind::DirExists { .. } => "the directory {{dir}} exists",
+        ValidationKind::JsonFileExists { .. } => "{{file}} is a valid JSON file",
+        ValidationKind::YamlFileExists { .. } => "{{file}} is a valid YAML file",
+        ValidationKind::TomlFileExists { .. } => "{{file}} is a valid TOML file",
+        ValidationKind::HasWritePermission { .. } => "write permission for {{file}}",
+        ValidationKind::ShellCommand { .. } => "shell command: {{command}}",
+        ValidationKind::NoDirtySourceCode { .. } => "no dirty source code in {{dir}}",
+        ValidationKind::HasDirtySourceCode { .. } => "dirty source code found in {{dir}}",
+        ValidationKind::FileChanged { .. } => "the file {{file}} was modified",
+        ValidationKind::FileUnchanged { .. } => "the file {{file}} was not modified",
         ValidationKind::FrontmatterPropChanged { .. } => {
-            "{{status}} frontmatter property \"{{prop}}\" was modified"
+            "frontmatter property \"{{prop}}\" was modified"
         }
         ValidationKind::FrontmatterPropUnchanged { .. } => {
-            "{{status}} frontmatter property \"{{prop}}\" was not modified"
+            "frontmatter property \"{{prop}}\" was not modified"
         }
         ValidationKind::FrontmatterPropEquals { .. } => {
-            "{{status}} frontmatter properties match expected values"
+            "frontmatter properties match expected values"
         }
         ValidationKind::ResponseLengthAtLeast { .. } => {
-            "{{status}} response is at least {{length}} characters (actual: {{response_length}})"
+            "response is at least {{length}} characters (actual: {{response_length}})"
         }
         ValidationKind::ResponseLengthAtMost { .. } => {
-            "{{status}} response is at most {{length}} characters (actual: {{response_length}})"
+            "response is at most {{length}} characters (actual: {{response_length}})"
         }
-        ValidationKind::ResponseIncludes { .. } => "{{status}} response includes \"{{expected}}\"",
+        ValidationKind::ResponseIncludes { .. } => "response includes \"{{expected}}\"",
         ValidationKind::ResponseMissing { .. } => {
-            "{{status}} response does not include \"{{expected}}\""
+            "response does not include \"{{expected}}\""
         }
     };
     render_template(template, vars)
 }
 
 /// Build the template variable map for a validation rule.
-fn build_vars<'a>(kind: &'a ValidationKind, status: &'a str) -> HashMap<&'a str, String> {
+///
+/// All user-controlled values are escaped for safe Prose interpolation.
+fn build_vars(kind: &ValidationKind) -> HashMap<&str, String> {
+    use crate::harness::report::prose_escape;
+
     let mut vars: HashMap<&str, String> = HashMap::new();
-    vars.insert("status", status.to_string());
 
     match kind {
         ValidationKind::FileExists { file }
@@ -742,19 +736,19 @@ fn build_vars<'a>(kind: &'a ValidationKind, status: &'a str) -> HashMap<&'a str,
         | ValidationKind::HasWritePermission { file }
         | ValidationKind::FileChanged { file }
         | ValidationKind::FileUnchanged { file } => {
-            vars.insert("file", file.display().to_string());
+            vars.insert("file", prose_escape(&file.display().to_string()));
         }
         ValidationKind::DirExists { dir }
         | ValidationKind::NoDirtySourceCode { root: dir }
         | ValidationKind::HasDirtySourceCode { root: dir } => {
-            vars.insert("dir", dir.display().to_string());
+            vars.insert("dir", prose_escape(&dir.display().to_string()));
         }
         ValidationKind::ShellCommand { command, .. } => {
-            vars.insert("command", command.raw.clone());
+            vars.insert("command", prose_escape(&command.raw));
         }
         ValidationKind::FrontmatterPropChanged { prop }
         | ValidationKind::FrontmatterPropUnchanged { prop } => {
-            vars.insert("prop", prop.clone());
+            vars.insert("prop", prose_escape(prop));
         }
         ValidationKind::FrontmatterPropEquals { .. } => {}
         ValidationKind::ResponseLengthAtLeast { length }
@@ -763,7 +757,7 @@ fn build_vars<'a>(kind: &'a ValidationKind, status: &'a str) -> HashMap<&'a str,
         }
         ValidationKind::ResponseIncludes { needle }
         | ValidationKind::ResponseMissing { needle } => {
-            vars.insert("expected", needle.clone());
+            vars.insert("expected", prose_escape(needle));
         }
     }
 
@@ -772,38 +766,17 @@ fn build_vars<'a>(kind: &'a ValidationKind, status: &'a str) -> HashMap<&'a str,
 
 /// Build the prose-ready markup string for a check result.
 ///
-/// Returns a markup body suitable for `Status::from_prose(...)` or
-/// `Prose::new(...)`. Does not render to a terminal.
-pub(crate) fn build_check_markup(rule: &ValidationRule, result: &CheckResult) -> String {
-    let passed = result.is_ok();
-    let status_token = if passed {
-        "<b><green-500>\u{2713}</green-500></b>"
-    } else {
-        "<b><red-500>\u{2a2f}</red-500></b>"
-    };
-
-    let vars = build_vars(&rule.kind, status_token);
+/// Returns a markup body suitable for `Status::from_prose(...)`.
+/// Does not render to a terminal. The `Status` component provides the
+/// pass/fail indicator via `StatusState`, so no inline glyph is emitted.
+pub(crate) fn build_check_markup(rule: &ValidationRule) -> String {
+    let vars = build_vars(&rule.kind);
 
     if let Some(ref tmpl) = rule.message_template {
         render_template(tmpl, &vars)
     } else {
         default_message(&rule.kind, &vars)
     }
-}
-
-/// Render a check result into a formatted line (legacy wrapper).
-///
-/// Returns `(passed, rendered_string)`.
-#[cfg(test)]
-fn render_check_result(
-    rule: &ValidationRule,
-    result: &CheckResult,
-    term: &Terminal,
-) -> (bool, String) {
-    let passed = result.is_ok();
-    let markup = build_check_markup(rule, result);
-    let rendered = Prose::new(&markup).render(term);
-    (passed, rendered)
 }
 
 /// Simple Handlebars-style template renderer: replaces `{{key}}` with values.
@@ -1359,15 +1332,13 @@ mod tests {
         let kind = ValidationKind::FileExists {
             file: std::path::PathBuf::from("/test/file.txt"),
         };
-        let vars = build_vars(&kind, "OK");
+        let vars = build_vars(&kind);
         let msg = default_message(&kind, &vars);
         assert!(msg.contains("/test/file.txt"));
-        assert!(msg.contains("OK"));
     }
 
     #[test]
-    fn render_check_result_success_token() {
-        let term = Terminal::default();
+    fn build_check_markup_contains_description_not_glyph() {
         let rule = make_rule(
             0,
             ValidationEvent::FileExists,
@@ -1375,26 +1346,25 @@ mod tests {
                 file: std::path::PathBuf::from("/test.txt"),
             },
         );
-        let (passed, rendered) = render_check_result(&rule, &Ok(()), &term);
-        assert!(passed);
-        // The rendered output should contain the check mark character
-        assert!(rendered.contains('\u{2713}'));
+        let markup = build_check_markup(&rule);
+        // Status component handles the indicator — no inline glyph
+        assert!(!markup.contains('\u{2713}'));
+        assert!(!markup.contains('\u{2a2f}'));
+        assert!(markup.contains("/test.txt"));
     }
 
     #[test]
-    fn render_check_result_failure_token() {
-        let term = Terminal::default();
+    fn build_check_markup_escapes_user_values() {
         let rule = make_rule(
             0,
             ValidationEvent::FileExists,
             ValidationKind::FileExists {
-                file: std::path::PathBuf::from("/test.txt"),
+                file: std::path::PathBuf::from("/path/<evil>.txt"),
             },
         );
-        let (passed, rendered) = render_check_result(&rule, &Err("not found".to_string()), &term);
-        assert!(!passed);
-        // The rendered output should contain the cross mark character
-        assert!(rendered.contains('\u{2a2f}'));
+        let markup = build_check_markup(&rule);
+        assert!(!markup.contains("<evil>"));
+        assert!(markup.contains("\\<evil\\>"));
     }
 
     // -- Public check_write_permission tests (non-harness inline path) ----

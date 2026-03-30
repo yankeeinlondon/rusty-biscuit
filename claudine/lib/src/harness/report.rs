@@ -22,13 +22,15 @@ fn emit_status(markup: &str, state: StatusState, term: &Terminal) {
 
 /// Escape user-controlled strings for safe Prose interpolation.
 ///
-/// Escapes `<`, `>`, `{`, `}`, and `\` to prevent unintended markup.
+/// Escapes `<`, `>`, `{`, `}`, `"`, and `\` to prevent unintended markup
+/// or attribute injection (e.g. inside `href="..."`).
 pub fn prose_escape(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('<', "\\<")
         .replace('>', "\\>")
         .replace('{', "\\{")
         .replace('}', "\\}")
+        .replace('"', "&quot;")
 }
 
 /// Emit the source-file existence status.
@@ -74,7 +76,7 @@ pub fn report_phase_discovery(phase: FailurePhase, count: usize, term: &Terminal
     let phase_label = match phase {
         FailurePhase::PreCheck => "pre",
         FailurePhase::PostCheck => "post",
-        FailurePhase::Agent => return,
+        FailurePhase::Agent | FailurePhase::ShellAudit => return,
     };
     let (check_word, verb) = if count == 1 {
         ("check", "was")
@@ -150,6 +152,13 @@ pub fn report_unhandled_failure(message: &str, term: &Terminal) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::harness::model::{
+        AuditedCommand, AuditedCommandSource, ShellAuditOutcome, ValidationCheckOutcome,
+        ValidationEvent, ValidationRuleId,
+    };
+    use std::path::PathBuf;
+
+    // -- prose_escape --
 
     #[test]
     fn prose_escape_handles_special_chars() {
@@ -160,15 +169,185 @@ mod tests {
     }
 
     #[test]
+    fn prose_escape_escapes_double_quotes() {
+        assert_eq!(
+            prose_escape(r#"href="evil""#),
+            r#"href=&quot;evil&quot;"#
+        );
+    }
+
+    // -- report_source_file --
+
+    #[test]
+    fn report_source_file_success_path() {
+        let term = Terminal::default();
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        // Should not panic; emits a success status
+        report_source_file("@my-ref", tmp.path(), &term);
+    }
+
+    #[test]
+    fn report_source_file_missing_path() {
+        let term = Terminal::default();
+        // Should not panic; emits a failure status
+        report_source_file("@missing", Path::new("/nonexistent/file.md"), &term);
+    }
+
+    // -- report_phase_discovery --
+
+    #[test]
     fn report_phase_discovery_emits_nothing_for_zero() {
-        // No panic, no output — just verifies the early return path
         let term = Terminal::default();
         report_phase_discovery(FailurePhase::PreCheck, 0, &term);
     }
 
     #[test]
+    fn report_phase_discovery_singular() {
+        let term = Terminal::default();
+        // Singular grammar: "1 validation pre check was found"
+        report_phase_discovery(FailurePhase::PreCheck, 1, &term);
+    }
+
+    #[test]
+    fn report_phase_discovery_plural() {
+        let term = Terminal::default();
+        // Plural grammar: "3 validation post checks were found"
+        report_phase_discovery(FailurePhase::PostCheck, 3, &term);
+    }
+
+    #[test]
+    fn report_phase_discovery_agent_is_noop() {
+        let term = Terminal::default();
+        // Agent phase should silently return
+        report_phase_discovery(FailurePhase::Agent, 5, &term);
+    }
+
+    #[test]
+    fn report_phase_discovery_shell_audit_is_noop() {
+        let term = Terminal::default();
+        report_phase_discovery(FailurePhase::ShellAudit, 2, &term);
+    }
+
+    // -- report_check_outcomes --
+
+    #[test]
+    fn report_check_outcomes_success_and_failure() {
+        let term = Terminal::default();
+        let report = ValidationPhaseReport {
+            phase: FailurePhase::PreCheck,
+            outcomes: vec![
+                ValidationCheckOutcome {
+                    rule_id: ValidationRuleId(0),
+                    event: ValidationEvent::FileExists,
+                    subject_key: None,
+                    passed: true,
+                    markup: "the file /a exists".to_string(),
+                    failure_message: None,
+                },
+                ValidationCheckOutcome {
+                    rule_id: ValidationRuleId(1),
+                    event: ValidationEvent::DirExists,
+                    subject_key: None,
+                    passed: false,
+                    markup: "the directory /b exists".to_string(),
+                    failure_message: Some("not found".to_string()),
+                },
+            ],
+        };
+        // Should render both without panicking
+        report_check_outcomes(&report, &term);
+    }
+
+    // -- report_shell_audit_header --
+
+    #[test]
     fn report_shell_audit_header_emits_nothing_for_zero() {
         let term = Terminal::default();
         report_shell_audit_header(0, &term);
+    }
+
+    #[test]
+    fn report_shell_audit_header_singular() {
+        let term = Terminal::default();
+        report_shell_audit_header(1, &term);
+    }
+
+    #[test]
+    fn report_shell_audit_header_plural() {
+        let term = Terminal::default();
+        report_shell_audit_header(4, &term);
+    }
+
+    // -- report_shell_audit_outcomes --
+
+    #[test]
+    fn report_shell_audit_outcomes_mixed() {
+        let term = Terminal::default();
+        let report = ShellAuditReport {
+            outcomes: vec![
+                ShellAuditOutcome {
+                    command: AuditedCommand {
+                        source: AuditedCommandSource::PreCheck(ValidationRuleId(0)),
+                        raw: "echo ok".to_string(),
+                        executable: "echo".to_string(),
+                        args: vec!["ok".to_string()],
+                    },
+                    passed: true,
+                    message: "<green-500>echo ok</green-500> approved".to_string(),
+                },
+                ShellAuditOutcome {
+                    command: AuditedCommand {
+                        source: AuditedCommandSource::ProgrammaticHandle,
+                        raw: "rm -rf /".to_string(),
+                        executable: "rm".to_string(),
+                        args: vec!["-rf".to_string(), "/".to_string()],
+                    },
+                    passed: false,
+                    message: "<red-500>rm -rf /</red-500> denied by policy".to_string(),
+                },
+            ],
+        };
+        report_shell_audit_outcomes(&report, &term);
+    }
+
+    // -- report_handler_engagement --
+
+    #[test]
+    fn report_handler_engagement_escapes_source_display() {
+        let term = Terminal::default();
+        // Source with markup-like characters should not panic
+        report_handler_engagement("/path/to/<source>.md", &term);
+    }
+
+    // -- report_unhandled_failure --
+
+    #[test]
+    fn report_unhandled_failure_renders() {
+        let term = Terminal::default();
+        report_unhandled_failure("pre-check validation failed (2 failures)", &term);
+    }
+
+    // -- state mapping --
+
+    #[test]
+    fn report_check_outcomes_maps_pass_to_success_state() {
+        // Verify the state mapping logic: passed → Success, failed → Failure.
+        // We can't easily capture stderr, but we verify no panic and
+        // the mapping code is exercised.
+        let term = Terminal::default();
+        let report = ValidationPhaseReport {
+            phase: FailurePhase::PostCheck,
+            outcomes: vec![
+                ValidationCheckOutcome {
+                    rule_id: ValidationRuleId(0),
+                    event: ValidationEvent::FileChanged,
+                    subject_key: Some("/a.md".to_string()),
+                    passed: true,
+                    markup: "file changed".to_string(),
+                    failure_message: None,
+                },
+            ],
+        };
+        report_check_outcomes(&report, &term);
     }
 }

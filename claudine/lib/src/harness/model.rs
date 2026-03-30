@@ -97,6 +97,7 @@ pub enum FailurePhase {
     PreCheck,
     PostCheck,
     Agent,
+    ShellAudit,
 }
 
 impl std::fmt::Display for FailurePhase {
@@ -105,6 +106,7 @@ impl std::fmt::Display for FailurePhase {
             Self::PreCheck => write!(f, "pre_check"),
             Self::PostCheck => write!(f, "post_check"),
             Self::Agent => write!(f, "agent"),
+            Self::ShellAudit => write!(f, "shell_audit"),
         }
     }
 }
@@ -288,6 +290,7 @@ pub enum FailureEvent {
     AgentFailure,
     Timeout,
     Validation(ValidationEvent),
+    ShellAuditDenied,
 }
 
 impl std::fmt::Display for FailureEvent {
@@ -296,6 +299,7 @@ impl std::fmt::Display for FailureEvent {
             Self::AgentFailure => write!(f, "agent_failure"),
             Self::Timeout => write!(f, "timeout"),
             Self::Validation(v) => write!(f, "{v}"),
+            Self::ShellAuditDenied => write!(f, "shell_audit_denied"),
         }
     }
 }
@@ -470,7 +474,9 @@ impl ValidationPhaseReport {
         } else {
             let failures = self.failures();
             match self.phase {
-                FailurePhase::PreCheck => Err(HarnessError::PreCheckFailed { failures }),
+                FailurePhase::PreCheck | FailurePhase::ShellAudit => {
+                    Err(HarnessError::PreCheckFailed { failures })
+                }
                 FailurePhase::PostCheck => Err(HarnessError::PostCheckFailed { failures }),
                 FailurePhase::Agent => Err(HarnessError::PreCheckFailed { failures }),
             }

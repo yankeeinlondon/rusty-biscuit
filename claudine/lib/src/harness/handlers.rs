@@ -441,6 +441,48 @@ pub fn build_agent_failure_context(
     }
 }
 
+/// Build `FailureContext` values from shell-audit failures.
+///
+/// Only non-source failures (pre-check, post-check, programmatic, declarative)
+/// are converted. Source-page `::shell` failures are terminal in v1 and should
+/// be handled separately before calling this function.
+pub fn build_audit_failure_context(
+    failures: &[&crate::harness::model::ShellAuditOutcome],
+    provider: &str,
+    source_file: &Path,
+    attempt: u32,
+) -> Vec<FailureContext> {
+    use crate::harness::model::AuditedCommandSource;
+
+    failures
+        .iter()
+        .map(|outcome| {
+            let subject_key = match &outcome.command.source {
+                AuditedCommandSource::PreCheck(id) => Some(format!("pre_check_{}", id.0)),
+                AuditedCommandSource::PostCheck(id) => Some(format!("post_check_{}", id.0)),
+                AuditedCommandSource::ProgrammaticHandle => Some("handle".to_string()),
+                AuditedCommandSource::DeclarativeHandler {
+                    subject_key, ..
+                } => subject_key.clone(),
+                AuditedCommandSource::ComposeSourceLine { .. } => None,
+            };
+
+            FailureContext {
+                provider: provider.to_string(),
+                source_file: Some(source_file.to_path_buf()),
+                event: FailureEvent::ShellAuditDenied,
+                failure_phase: FailurePhase::ShellAudit,
+                check: None,
+                subject_key,
+                message: outcome.message.clone(),
+                attempt,
+                session_id: None,
+                outcome: None,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

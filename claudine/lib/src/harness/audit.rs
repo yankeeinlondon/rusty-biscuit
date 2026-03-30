@@ -302,4 +302,76 @@ mod tests {
         ));
         assert_eq!(commands[0].executable, "echo");
     }
+
+    // -- audit_shell_commands tests --
+
+    fn make_audited_command(executable: &str, args: &[&str]) -> AuditedCommand {
+        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let raw = std::iter::once(executable.to_string())
+            .chain(args.iter().cloned())
+            .collect::<Vec<_>>()
+            .join(" ");
+        AuditedCommand {
+            source: AuditedCommandSource::PreCheck(ValidationRuleId(0)),
+            raw,
+            executable: executable.to_string(),
+            args,
+        }
+    }
+
+    fn permissive_options() -> ShellApprovalOptions {
+        // No policy root, no approval handler → commands on PATH are approved
+        ShellApprovalOptions::default()
+    }
+
+    #[test]
+    fn audit_approved_command() {
+        let cmd = make_audited_command("echo", &["hello"]);
+        let report = audit_shell_commands(&[cmd], &permissive_options());
+        assert_eq!(report.outcomes.len(), 1);
+        assert!(report.outcomes[0].passed);
+        assert!(report.outcomes[0].message.contains("approved"));
+        assert!(report.all_passed());
+        assert!(report.failures().is_empty());
+    }
+
+    #[test]
+    fn audit_blacklisted_command() {
+        let cmd = make_audited_command("rm", &["-rf", "/"]);
+        let report = audit_shell_commands(&[cmd], &permissive_options());
+        assert_eq!(report.outcomes.len(), 1);
+        assert!(!report.outcomes[0].passed);
+        assert!(report.outcomes[0].message.contains("blacklisted"));
+        assert!(!report.all_passed());
+        assert_eq!(report.failures().len(), 1);
+    }
+
+    #[test]
+    fn audit_empty_commands_returns_empty_report() {
+        let report = audit_shell_commands(&[], &permissive_options());
+        assert!(report.outcomes.is_empty());
+        assert!(report.all_passed());
+        assert!(report.failures().is_empty());
+    }
+
+    #[test]
+    fn audit_mixed_commands() {
+        let good = make_audited_command("echo", &["ok"]);
+        let bad = make_audited_command("rm", &["-rf", "/"]);
+        let report = audit_shell_commands(&[good, bad], &permissive_options());
+        assert_eq!(report.outcomes.len(), 2);
+        assert!(report.outcomes[0].passed);
+        assert!(!report.outcomes[1].passed);
+        assert!(!report.all_passed());
+        assert_eq!(report.failures().len(), 1);
+    }
+
+    #[test]
+    fn audit_message_escapes_command_text() {
+        // Command with markup characters should be escaped in the message
+        let cmd = make_audited_command("echo", &["<b>bold</b>"]);
+        let report = audit_shell_commands(&[cmd], &permissive_options());
+        // The raw text should be escaped (no unescaped <b>)
+        assert!(!report.outcomes[0].message.contains("<b>bold</b>"));
+    }
 }
