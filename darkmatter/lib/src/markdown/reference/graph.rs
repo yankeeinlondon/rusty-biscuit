@@ -778,7 +778,12 @@ fn resolve_local_target(
                     file_ref = file_ref.add_magic_path(path, *position);
                 }
                 if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
-                    return Some(resolved.canonicalize().unwrap_or(resolved));
+                    // resolve_relative() returns a path relative to base_dir;
+                    // join it back so canonicalize() doesn't resolve against CWD.
+                    let abs = base_dir
+                        .map(|bd| bd.join(&resolved))
+                        .unwrap_or(resolved);
+                    return Some(abs.canonicalize().unwrap_or(abs));
                 }
             }
 
