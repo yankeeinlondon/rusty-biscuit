@@ -2533,7 +2533,7 @@ fn emit_stream_summary_inner(
             if summary.assistant_text.ends_with("\n\n") {
                 // Already has a trailing blank line — no separator needed
             } else if summary.assistant_text.ends_with('\n') {
-                eprint!("\n");
+                eprintln!();
             } else {
                 eprint!("\n\n");
             }

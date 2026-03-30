@@ -172,7 +172,7 @@ pub(crate) fn execute_composition_request(
         && matches!(provider, Provider::Codex | Provider::Gemini);
     let needs_repo_shadow_home = request.repo;
     let raw_agent_params: Vec<String> = std::env::args().skip(1).collect();
-    let mut yolo_enabled = request.yolo;
+    let yolo_enabled = request.yolo;
     let mut env_plan = env::build_child_env(
         profile,
         provider,
@@ -323,9 +323,7 @@ pub(crate) fn execute_composition_request(
         for (key, value) in env_overrides {
             env_plan.env.insert(key.into(), value.into());
         }
-        if !profile.has_supported_yolo() {
-            yolo_enabled = false;
-        }
+        // Note: yolo support already consumed at env_plan build time
     }
 
     if effective_non_interactive {
