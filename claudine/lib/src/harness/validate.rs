@@ -8,41 +8,37 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+#[cfg(test)]
 use biscuit_terminal::components::prose::Prose;
+#[cfg(test)]
 use biscuit_terminal::prelude::Renderable;
+#[cfg(test)]
 use biscuit_terminal::terminal::Terminal;
 
 use crate::harness::error::HarnessError;
 use crate::harness::model::{
     AttemptOutcome, FailurePhase, FileFingerprint, HarnessPermissionProbe, HarnessPlan,
-    PermissionAssessment, PreRunSnapshot, StructuredShape, ValidationFailure, ValidationKind,
-    ValidationRule,
+    PermissionAssessment, PreRunSnapshot, StructuredShape, ValidationCheckOutcome, ValidationKind,
+    ValidationPhaseReport, ValidationRule,
 };
 
 /// Evaluate all pre-checks in declaration order.
 ///
-/// Runs every rule and collects all failures (does not short-circuit).
-/// Returns `Ok(())` if all pass, or `HarnessError::PreCheckFailed` with
-/// all failures.
+/// Runs every rule and collects all outcomes (does not short-circuit).
+/// Returns a `ValidationPhaseReport`; the caller decides whether failures
+/// are fatal and controls rendering.
 pub fn evaluate_pre_checks(
     plan: &HarnessPlan,
     permission_probe: Option<&dyn HarnessPermissionProbe>,
-    term: &Terminal,
-) -> Result<(), HarnessError> {
-    let failures = run_checks(
+) -> ValidationPhaseReport {
+    run_checks(
         &plan.pre_checks,
         None,
         None,
         &plan.source_path,
         permission_probe,
         FailurePhase::PreCheck,
-        term,
-    );
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(HarnessError::PreCheckFailed { failures })
-    }
+    )
 }
 
 /// Capture a pre-run snapshot for subjects referenced by post-checks.
@@ -96,32 +92,25 @@ pub fn capture_pre_run_snapshot(plan: &HarnessPlan) -> Result<PreRunSnapshot, Ha
 /// Evaluate all post-checks in declaration order.
 ///
 /// Uses pre-state from `snapshot` and post-state from disk/outcome.
-/// The `source_path` is used to re-read the current on-disk frontmatter
-/// for frontmatter comparison checks.
+/// Returns a `ValidationPhaseReport`; the caller decides whether failures
+/// are fatal and controls rendering.
 pub fn evaluate_post_checks(
     plan: &HarnessPlan,
     snapshot: &PreRunSnapshot,
     outcome: &AttemptOutcome,
     permission_probe: Option<&dyn HarnessPermissionProbe>,
-    term: &Terminal,
-) -> Result<(), HarnessError> {
-    let failures = run_checks(
+) -> ValidationPhaseReport {
+    run_checks(
         &plan.post_checks,
         Some(snapshot),
         Some(outcome),
         &plan.source_path,
         permission_probe,
         FailurePhase::PostCheck,
-        term,
-    );
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(HarnessError::PostCheckFailed { failures })
-    }
+    )
 }
 
-/// Run a set of checks and return all failures.
+/// Run a set of checks and return a structured phase report.
 fn run_checks(
     rules: &[ValidationRule],
     snapshot: Option<&PreRunSnapshot>,
@@ -129,9 +118,8 @@ fn run_checks(
     source_path: &Path,
     permission_probe: Option<&dyn HarnessPermissionProbe>,
     failure_phase: FailurePhase,
-    term: &Terminal,
-) -> Vec<ValidationFailure> {
-    let mut failures = Vec::new();
+) -> ValidationPhaseReport {
+    let mut outcomes = Vec::new();
 
     // For post-checks involving frontmatter, parse the current on-disk
     // markdown once and share it across all frontmatter checks.
@@ -152,22 +140,24 @@ fn run_checks(
             permission_probe,
             post_run_markdown.as_ref(),
         );
-        let (passed, rendered) = render_check_result(rule, &result, term);
-        // Print the check line
-        eprintln!("{rendered}");
+        let passed = result.is_ok();
+        let markup = build_check_markup(rule, &result);
+        let failure_message = result.err();
 
-        if !passed {
-            failures.push(ValidationFailure {
-                rule_id: rule.id,
-                event: rule.event.clone(),
-                phase: failure_phase,
-                subject_key: rule.subject_key.clone(),
-                message: result.unwrap_err(),
-            });
-        }
+        outcomes.push(ValidationCheckOutcome {
+            rule_id: rule.id,
+            event: rule.event.clone(),
+            subject_key: rule.subject_key.clone(),
+            passed,
+            markup,
+            failure_message,
+        });
     }
 
-    failures
+    ValidationPhaseReport {
+        phase: failure_phase,
+        outcomes,
+    }
 }
 
 /// Result of evaluating a single validation: `Ok(())` for pass, `Err(message)` for fail.
@@ -780,14 +770,11 @@ fn build_vars<'a>(kind: &'a ValidationKind, status: &'a str) -> HashMap<&'a str,
     vars
 }
 
-/// Render a check result into a formatted line.
+/// Build the prose-ready markup string for a check result.
 ///
-/// Returns `(passed, rendered_string)`.
-fn render_check_result(
-    rule: &ValidationRule,
-    result: &CheckResult,
-    term: &Terminal,
-) -> (bool, String) {
+/// Returns a markup body suitable for `Status::from_prose(...)` or
+/// `Prose::new(...)`. Does not render to a terminal.
+pub(crate) fn build_check_markup(rule: &ValidationRule, result: &CheckResult) -> String {
     let passed = result.is_ok();
     let status_token = if passed {
         "<b><green-500>\u{2713}</green-500></b>"
@@ -797,13 +784,25 @@ fn render_check_result(
 
     let vars = build_vars(&rule.kind, status_token);
 
-    let message = if let Some(ref tmpl) = rule.message_template {
+    if let Some(ref tmpl) = rule.message_template {
         render_template(tmpl, &vars)
     } else {
         default_message(&rule.kind, &vars)
-    };
+    }
+}
 
-    let rendered = Prose::new(&message).render(term);
+/// Render a check result into a formatted line (legacy wrapper).
+///
+/// Returns `(passed, rendered_string)`.
+#[cfg(test)]
+fn render_check_result(
+    rule: &ValidationRule,
+    result: &CheckResult,
+    term: &Terminal,
+) -> (bool, String) {
+    let passed = result.is_ok();
+    let markup = build_check_markup(rule, result);
+    let rendered = Prose::new(&markup).render(term);
     (passed, rendered)
 }
 
@@ -1278,17 +1277,15 @@ mod tests {
             ),
         ];
 
-        let term = Terminal::default();
-        let failures = run_checks(
+        let report = run_checks(
             &rules,
             None,
             None,
             std::path::Path::new("/tmp/source.md"),
             None,
             FailurePhase::PreCheck,
-            &term,
         );
-        assert_eq!(failures.len(), 3, "all failures should be collected");
+        assert_eq!(report.failures().len(), 3, "all failures should be collected");
     }
 
     // --- Snapshot tests ---

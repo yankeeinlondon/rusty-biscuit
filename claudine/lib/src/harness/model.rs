@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+use crate::harness::error::HarnessError;
+
 /// Top-level harness plan parsed from composed frontmatter.
 #[derive(Debug, Clone)]
 pub struct HarnessPlan {
@@ -406,6 +408,129 @@ pub struct ResumeLaunchSpec {
     pub supported: bool,
     /// Human-readable description of resume behavior.
     pub description: Vec<&'static str>,
+}
+
+// ---------------------------------------------------------------------------
+// Structured validation outcomes (used by report.rs)
+// ---------------------------------------------------------------------------
+
+/// Structured outcome of evaluating a single validation rule.
+#[derive(Debug, Clone)]
+pub struct ValidationCheckOutcome {
+    pub rule_id: ValidationRuleId,
+    pub event: ValidationEvent,
+    pub subject_key: Option<String>,
+    pub passed: bool,
+    /// Prose-ready markup body (not ANSI-rendered). Rendering belongs in `report.rs`.
+    pub markup: String,
+    /// Human-readable failure reason when `passed` is false.
+    pub failure_message: Option<String>,
+}
+
+/// All outcomes for one validation phase (pre or post).
+#[derive(Debug, Clone)]
+pub struct ValidationPhaseReport {
+    pub phase: FailurePhase,
+    pub outcomes: Vec<ValidationCheckOutcome>,
+}
+
+impl ValidationPhaseReport {
+    /// True when every outcome passed.
+    pub fn all_passed(&self) -> bool {
+        self.outcomes.iter().all(|o| o.passed)
+    }
+
+    /// Collect failed outcomes into `Vec<ValidationFailure>` for existing error propagation.
+    pub fn failures(&self) -> Vec<ValidationFailure> {
+        self.outcomes
+            .iter()
+            .filter(|o| !o.passed)
+            .map(|o| ValidationFailure {
+                rule_id: o.rule_id,
+                event: o.event.clone(),
+                phase: self.phase,
+                subject_key: o.subject_key.clone(),
+                message: o
+                    .failure_message
+                    .clone()
+                    .unwrap_or_else(|| "check failed".to_string()),
+            })
+            .collect()
+    }
+
+    /// Number of checks in this phase.
+    pub fn count(&self) -> usize {
+        self.outcomes.len()
+    }
+
+    /// Convert to the legacy error if any checks failed.
+    pub fn into_result(self) -> Result<Self, HarnessError> {
+        if self.all_passed() {
+            Ok(self)
+        } else {
+            let failures = self.failures();
+            match self.phase {
+                FailurePhase::PreCheck => Err(HarnessError::PreCheckFailed { failures }),
+                FailurePhase::PostCheck => Err(HarnessError::PostCheckFailed { failures }),
+                FailurePhase::Agent => Err(HarnessError::PreCheckFailed { failures }),
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shell audit types (used by audit.rs)
+// ---------------------------------------------------------------------------
+
+/// Where an audited command originates.
+#[derive(Debug, Clone)]
+pub enum AuditedCommandSource {
+    PreCheck(ValidationRuleId),
+    PostCheck(ValidationRuleId),
+    ProgrammaticHandle,
+    DeclarativeHandler {
+        event: FailureEvent,
+        subject_key: Option<String>,
+    },
+    ComposeSourceLine {
+        line: usize,
+    },
+}
+
+/// A command discovered during shell audit.
+#[derive(Debug, Clone)]
+pub struct AuditedCommand {
+    pub source: AuditedCommandSource,
+    pub raw: String,
+    pub executable: String,
+    pub args: Vec<String>,
+}
+
+/// Result of auditing a single command.
+#[derive(Debug, Clone)]
+pub struct ShellAuditOutcome {
+    pub command: AuditedCommand,
+    pub passed: bool,
+    /// Prose-ready human-readable message.
+    pub message: String,
+}
+
+/// Complete audit report.
+#[derive(Debug, Clone)]
+pub struct ShellAuditReport {
+    pub outcomes: Vec<ShellAuditOutcome>,
+}
+
+impl ShellAuditReport {
+    /// True when every audited command passed.
+    pub fn all_passed(&self) -> bool {
+        self.outcomes.iter().all(|o| o.passed)
+    }
+
+    /// Collect failed outcomes.
+    pub fn failures(&self) -> Vec<&ShellAuditOutcome> {
+        self.outcomes.iter().filter(|o| !o.passed).collect()
+    }
 }
 
 // Note: HarnessResolutionContext lives in resolve.rs
