@@ -343,20 +343,11 @@ fn validate_local_path(
                 for (path, position) in magic_paths {
                     file_ref = file_ref.add_magic_path(path, *position);
                 }
-                if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
-                    if resolved.exists() {
-                        report.references_valid += 1;
-                    } else {
-                        report.issues.push(ReferenceIssue {
-                            code: ReferenceIssueCode::MissingLocalTarget,
-                            message: format!("Missing local target: {raw}"),
-                            severity: ReferenceSeverity::Error,
-                            kind: record.kind,
-                            reference_display: raw.to_string(),
-                            reference_id: record.id.clone(),
-                            origin: record.origin.clone(),
-                        });
-                    }
+                if let Ok(Some(_resolved)) = file_ref.resolve_relative(base_dir) {
+                    // resolve_relative() internally calls resolve(), which only returns
+                    // Some after confirming the candidate is_file(). No need to re-check
+                    // with .exists() — that would resolve against CWD, not base_dir.
+                    report.references_valid += 1;
                     return;
                 }
             }
@@ -484,13 +475,22 @@ fn validate_cross_doc_fragment(
     };
     let base_dir = base_path.parent();
 
-    // Resolve via FileReference for @repo-root support, fallback to simple join
+    // Resolve via FileReference for @repo-root support, fallback to simple join.
+    // resolve_relative() returns a path relative to base_dir, so join it back
+    // with base_dir to get a CWD-independent absolute path for existence checks.
     let target_path = if let Ok(file_ref) = biscuit_file::FileReference::new(path) {
         let mut file_ref = file_ref;
         for (mp, position) in &graph_options.compose.magic_paths {
             file_ref = file_ref.add_magic_path(mp, *position);
         }
-        file_ref.resolve_relative(base_dir).ok().flatten()
+        file_ref
+            .resolve_relative(base_dir)
+            .ok()
+            .flatten()
+            .map(|rel| match base_dir {
+                Some(bd) => bd.join(&rel),
+                None => rel,
+            })
     } else {
         None
     }
@@ -909,5 +909,52 @@ mod tests {
         assert_eq!(slugify("Getting Started"), "getting-started");
         assert_eq!(slugify("My API (v2)"), "my-api-v2");
         assert_eq!(slugify("Hello World!"), "hello-world");
+    }
+
+    /// Regression test: magic-path (`@`) references must validate correctly
+    /// regardless of CWD. Previously, `validate_local_path` called `.exists()`
+    /// on a relative path returned by `resolve_relative()`, which resolved
+    /// against CWD instead of the document's base directory.
+    #[test]
+    fn validate_magic_path_independent_of_cwd() {
+        use biscuit_file::PathPosition;
+
+        // Build a temp directory tree that mimics a repo with a magic path:
+        //   <tmp>/
+        //     darkmatter/docs/inline/text-replacement.md   (target)
+        //     example-docs/composition/source.md           (source with @-link)
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        let target_dir = root.join("darkmatter/docs/inline");
+        std::fs::create_dir_all(&target_dir).unwrap();
+        std::fs::write(target_dir.join("text-replacement.md"), "# Text Replacement").unwrap();
+
+        let source_dir = root.join("example-docs/composition");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        let source_path = source_dir.join("source.md");
+        std::fs::write(&source_path, "").unwrap();
+
+        // The markdown references the target via a magic path
+        let md = Markdown::new("[Text Replacement](@darkmatter/docs/inline/text-replacement.md)")
+            .with_source(ComposeSource::File(source_path));
+
+        // Configure the magic path: @darkmatter → <tmp>/darkmatter
+        let mut options = ReferenceValidationOptions::default();
+        options
+            .graph
+            .compose
+            .magic_paths
+            .push((root.to_path_buf(), PathPosition::Start));
+
+        // CWD is whatever the test runner uses — NOT source_dir.
+        // This is the exact scenario that was broken before the fix.
+        let report = validate(&md, &options).unwrap();
+        assert!(
+            report.is_valid(),
+            "Magic-path reference should be valid regardless of CWD, got issues: {:?}",
+            report.issues
+        );
+        assert_eq!(report.references_valid, 1);
     }
 }

@@ -5,8 +5,8 @@
 pub enum ContextMergeDiagnostic {
     /// User ctx was an object; merged successfully.
     UserCtxMerged {
-        /// Whether any user-defined keys collided with runtime keys.
-        had_key_collisions: bool,
+        /// The user-defined keys that collided with runtime keys (empty if none).
+        colliding_keys: Vec<String>,
     },
     /// User ctx was not an object; replaced with runtime ctx.
     InvalidUserCtxReplaced,

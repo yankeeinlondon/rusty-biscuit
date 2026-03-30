@@ -578,8 +578,14 @@ pub fn run_compose(
 
     // Emit compose warnings to stderr
     if !report.warnings.is_empty() {
+        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::prelude::{Status, StatusState};
+        use biscuit_terminal::terminal::Terminal;
+        let term = Terminal::default();
         for warning in &report.warnings {
-            eprintln!("warning[{}]: {}", warning.stage, warning.message);
+            let status = Status::from_prose(&warning.message)
+                .state(StatusState::Warning);
+            eprintln!("{}", status.render(&term));
         }
     }
 

@@ -1,14 +1,13 @@
-## Context
+## Context 
 
-- You are working in the **rusty-biscuit** monorepo.
-- This session was started in the "{{env.PACKAGE_AREA}}" package area
-    - you should always use the agent skill '{{env.PACKAGE_AREA}}'
+- you are working in the **rusty-biscuit** monorepo
+- this session was started with a focus on the **{{env.PACKAGE_AREA}}** package area
+    - you must use the '{{env.PACKAGE_AREA}}' agent skill
 
 ## Best Practices
 
-- When rendering to the terminal, ALWAYS use:
-
-    - if you need to render Markdown content to the terminal then use [Darkmatter Rendering](@darkmatter/README.md)
-    - use `biscuit-terminal`'s [components](@biscuit-terminal/docs/components/index.md) to render to the terminal for everything else
-        - If you are reporting status to STDERR you should almost surely be using the `Status` component from biscuit-terminal
-
+- when rendering to the terminal ALWAYS try to use:
+    - if rendering Markdown:
+        - use the [Darkmatter](@darkmatter/lib/README.md) library's rendering functionality to target the terminal
+        - if the Markdown you're rendering uses Darkmatter DSL then use the [Darkmatter composition pipeline](@darkmatter/docs/darkmatter-composition-pipeline.md), and then render to the terminal
+    - `biscuit-terminal` [components](@darkmatter/docs/components/index.md) 

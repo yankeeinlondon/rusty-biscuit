@@ -559,7 +559,7 @@ fn test_compose_scalar_ctx_with_allow_override_succeeds() {
         .assert()
         .success()
         .stderr(predicate::str::contains(
-            "warning[context]: Document ctx was not an object",
+            "Document ctx was not an object",
         ));
 }
 
@@ -572,9 +572,7 @@ fn test_compose_object_ctx_collision_emits_warning() {
         .write_stdin("---\nctx:\n  today: custom-value\n---\n# Test")
         .assert()
         .success()
-        .stderr(predicate::str::contains(
-            "warning[context]: Document defines ctx keys that collide with runtime context",
-        ));
+        .stderr(predicate::str::contains("conflict with those provided by Darkmatter"));
 }
 
 // =============================================================================
