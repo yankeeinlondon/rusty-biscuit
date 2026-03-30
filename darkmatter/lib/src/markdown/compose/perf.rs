@@ -98,6 +98,7 @@ impl PerfCollector {
     }
 
     /// Times a closure and records the elapsed duration.
+    #[cfg(test)]
     pub(crate) fn measure<F, R>(&mut self, kind: PerfMetricKind, f: F) -> R
     where
         F: FnOnce() -> R,

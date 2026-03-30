@@ -15,6 +15,9 @@ use sniff::os::{self, OsInfo, OsType};
 use super::diagnostics::ContextMergeDiagnostic;
 use super::format;
 
+/// Result of a context capture pass: merged values, any diagnostics, and per-group timings.
+type CaptureResult = (Map<String, Value>, Vec<ContextMergeDiagnostic>, Vec<(String, Duration)>);
+
 // ── Context groups for demand-driven capture ─────────────────────
 
 /// Groups of context variables that can be independently captured.
@@ -142,13 +145,13 @@ pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {
                 .map(|i| start + i)
                 .unwrap_or(content.len());
             let key = &content[start..key_end];
-            if !key.is_empty() {
-                if let Some(group) = ContextGroup::for_key(key) {
-                    groups.insert(group);
-                }
-                // Unknown keys are user-defined ctx (from frontmatter),
-                // not runtime-captured — no additional groups needed.
+            if !key.is_empty()
+                && let Some(group) = ContextGroup::for_key(key)
+            {
+                groups.insert(group);
             }
+            // Unknown keys are user-defined ctx (from frontmatter),
+            // not runtime-captured — no additional groups needed.
             pos = key_end;
         } else {
             break;
@@ -350,11 +353,11 @@ impl ContextCapture {
                     Err(_) => Err("hardware detection panicked".to_string()),
                 });
 
-                let gpu_names = gpu_handle.map(|h| {
+                let gpu_names = gpu_handle.and_then(|h| {
                     let (names, elapsed) = h.join().unwrap_or((None, Duration::ZERO));
                     timings.push(("gpu".into(), elapsed));
                     names
-                }).flatten();
+                });
 
                 (file_changes, repo_info, docs, os_info, hardware_info, gpu_names)
             });
@@ -451,7 +454,7 @@ impl ContextCapture {
 /// Capture all runtime context variables for the given base directory.
 pub(crate) fn capture_runtime_context(
     base_dir: &Path,
-) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>, Vec<(String, Duration)>) {
+) -> CaptureResult {
     capture_runtime_context_for_groups(base_dir, &ContextGroup::all())
 }
 
@@ -463,7 +466,7 @@ pub(crate) fn capture_runtime_context(
 pub(crate) fn capture_runtime_context_for_content(
     base_dir: &Path,
     content: &str,
-) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>, Vec<(String, Duration)>) {
+) -> CaptureResult {
     let groups = scan_needed_groups(content);
     // DateTime is always included (zero-cost local computation)
     let mut groups = groups;
@@ -475,7 +478,7 @@ pub(crate) fn capture_runtime_context_for_content(
 fn capture_runtime_context_for_groups(
     base_dir: &Path,
     groups: &HashSet<ContextGroup>,
-) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>, Vec<(String, Duration)>) {
+) -> CaptureResult {
     let cap = ContextCapture::new(base_dir, groups);
     let mut values = Map::new();
 
@@ -583,9 +586,9 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
     // Timezone: sniff owns abbreviation derivation (handles chrono's
     // %Z offset fallback on macOS via IANA-to-abbreviation mapping).
     let tz_info = sniff::os::detect_timezone();
-    values.insert("timezone".into(), tz_info.timezone_abbr.map_or(Value::Null, |s| Value::String(s)));
+    values.insert("timezone".into(), tz_info.timezone_abbr.map_or(Value::Null, Value::String));
     values.insert("timezone_offset".into(), Value::String(now_local.format("%z").to_string()));
-    values.insert("timezone_iana".into(), tz_info.timezone.map_or(Value::Null, |s| Value::String(s)));
+    values.insert("timezone_iana".into(), tz_info.timezone.map_or(Value::Null, Value::String));
 
     // Week boundaries (Sunday start)
     let weekday_num = today.weekday().num_days_from_sunday();
