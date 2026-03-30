@@ -17,6 +17,10 @@
             "path": ".claude/skills"
         },
         {
+            "name": "Agent Definitions",
+            "path": ".claude/agents"
+        },
+        {
             "name": "Monorepo Memory",
             "path": ".memory"
         },
@@ -100,6 +104,7 @@
             "ZENMUX",
             "zigbuild"
         ],
-        "svgPreview.autoOpen": false
+        "svgPreview.autoOpen": false,
+        "editor.wordWrapColumn": 120
     }
 }
