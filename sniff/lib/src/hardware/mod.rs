@@ -170,11 +170,13 @@ pub fn detect_hardware_summary() -> Result<HardwareInfo> {
         used_swap: sys.used_swap(),
     };
 
+    let gpu = detect_gpus();
+
     Ok(HardwareInfo {
         cpu,
         memory,
         storage: Vec::new(),
-        gpu: Vec::new(),
+        gpu,
         audio_devices: Vec::new(),
     })
 }
