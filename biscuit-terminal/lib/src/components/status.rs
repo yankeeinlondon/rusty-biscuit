@@ -308,13 +308,15 @@ pub struct Status {
 
 impl Default for Status {
     fn default() -> Self {
+        let mut layout = Layout::default();
+        layout.word_wrap = layout.word_wrap.with_hanging_indent(2);
         Self {
             state: StatusState::NotStarted,
             theme: StatusTheme::Circular,
             description: String::new(),
             color_icons: true,
             use_prose: false,
-            layout: Layout::default(),
+            layout,
         }
     }
 }
