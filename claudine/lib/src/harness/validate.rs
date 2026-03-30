@@ -713,9 +713,7 @@ fn default_message(kind: &ValidationKind, vars: &HashMap<&str, String>) -> Strin
             "response is at most {{length}} characters (actual: {{response_length}})"
         }
         ValidationKind::ResponseIncludes { .. } => "response includes \"{{expected}}\"",
-        ValidationKind::ResponseMissing { .. } => {
-            "response does not include \"{{expected}}\""
-        }
+        ValidationKind::ResponseMissing { .. } => "response does not include \"{{expected}}\"",
     };
     render_template(template, vars)
 }
@@ -1258,7 +1256,11 @@ mod tests {
             None,
             FailurePhase::PreCheck,
         );
-        assert_eq!(report.failures().len(), 3, "all failures should be collected");
+        assert_eq!(
+            report.failures().len(),
+            3,
+            "all failures should be collected"
+        );
     }
 
     // --- Snapshot tests ---

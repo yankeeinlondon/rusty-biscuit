@@ -53,7 +53,12 @@ pub fn collect_auditable_commands(
     }
 
     // 4. Declarative deviate handlers
-    for rule in plan.handlers.exact.iter().chain(plan.handlers.generic.iter()) {
+    for rule in plan
+        .handlers
+        .exact
+        .iter()
+        .chain(plan.handlers.generic.iter())
+    {
         if let HandlerAction::Deviate { command, .. } = &rule.action {
             commands.push(AuditedCommand {
                 source: AuditedCommandSource::DeclarativeHandler {
@@ -69,12 +74,10 @@ pub fn collect_auditable_commands(
 
     // 5. Source page ::shell directives
     if let Some(text) = source_text {
-        let directives =
-            darkmatter::markdown::compose::shell_expansion::parse_directives(text).map_err(
-                |e| HarnessError::ShellAuditParseError {
-                    detail: e.to_string(),
-                },
-            )?;
+        let directives = darkmatter::markdown::compose::shell_expansion::parse_directives(text)
+            .map_err(|e| HarnessError::ShellAuditParseError {
+                detail: e.to_string(),
+            })?;
         for directive in directives {
             commands.push(AuditedCommand {
                 source: AuditedCommandSource::ComposeSourceLine {
@@ -105,17 +108,13 @@ pub fn audit_shell_commands(
                 .chain(cmd.args.iter().cloned())
                 .collect();
 
-            let result =
-                crate::harness::shell::validate_and_approve_command_parts(&parts, options);
+            let result = crate::harness::shell::validate_and_approve_command_parts(&parts, options);
 
             match result {
                 Ok(_) => ShellAuditOutcome {
                     command: cmd.clone(),
                     passed: true,
-                    message: format!(
-                        "<green-500>{}</green-500> approved",
-                        prose_escape(&cmd.raw)
-                    ),
+                    message: format!("<green-500>{}</green-500> approved", prose_escape(&cmd.raw)),
                 },
                 Err(HarnessError::ShellCommandDenied { .. }) => ShellAuditOutcome {
                     command: cmd.clone(),
@@ -158,10 +157,7 @@ mod tests {
         ValidationRule, ValidationRuleId,
     };
 
-    fn make_shell_rule(
-        id: u32,
-        phase_checks: &str,
-    ) -> (ValidationRule, bool) {
+    fn make_shell_rule(id: u32, phase_checks: &str) -> (ValidationRule, bool) {
         let cmd = ApprovedRuntimeCommand {
             raw: "echo hello".to_string(),
             executable: "echo".to_string(),

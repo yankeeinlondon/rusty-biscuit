@@ -461,9 +461,7 @@ pub fn build_audit_failure_context(
                 AuditedCommandSource::PreCheck(id) => Some(format!("pre_check_{}", id.0)),
                 AuditedCommandSource::PostCheck(id) => Some(format!("post_check_{}", id.0)),
                 AuditedCommandSource::ProgrammaticHandle => Some("handle".to_string()),
-                AuditedCommandSource::DeclarativeHandler {
-                    subject_key, ..
-                } => subject_key.clone(),
+                AuditedCommandSource::DeclarativeHandler { subject_key, .. } => subject_key.clone(),
                 AuditedCommandSource::ComposeSourceLine { .. } => None,
             };
 

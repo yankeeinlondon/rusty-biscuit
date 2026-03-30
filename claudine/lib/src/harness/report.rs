@@ -144,6 +144,36 @@ pub fn report_handler_engagement(source_display: &str, term: &Terminal) {
     );
 }
 
+/// Emit the prompt frontmatter property status.
+///
+/// Reports success when `prompt` exists and is a non-empty string,
+/// failure otherwise. The `outcome` describes what was found.
+pub fn report_prompt_property(
+    has_prompt: bool,
+    is_non_empty: bool,
+    term: &Terminal,
+) {
+    if has_prompt && is_non_empty {
+        emit_status(
+            "the <blue-500>prompt</blue-500> frontmatter property is present and non-empty",
+            StatusState::Success,
+            term,
+        );
+    } else if has_prompt {
+        emit_status(
+            "the <blue-500>prompt</blue-500> frontmatter property is present but empty",
+            StatusState::Failure,
+            term,
+        );
+    } else {
+        emit_status(
+            "the <blue-500>prompt</blue-500> frontmatter property is missing",
+            StatusState::Failure,
+            term,
+        );
+    }
+}
+
 /// Emit a terminal unhandled failure banner.
 pub fn report_unhandled_failure(message: &str, term: &Terminal) {
     emit_status(message, StatusState::Failure, term);
@@ -170,10 +200,7 @@ mod tests {
 
     #[test]
     fn prose_escape_escapes_double_quotes() {
-        assert_eq!(
-            prose_escape(r#"href="evil""#),
-            r#"href=&quot;evil&quot;"#
-        );
+        assert_eq!(prose_escape(r#"href="evil""#), r#"href=&quot;evil&quot;"#);
     }
 
     // -- report_source_file --
@@ -319,6 +346,26 @@ mod tests {
         report_handler_engagement("/path/to/<source>.md", &term);
     }
 
+    // -- report_prompt_property --
+
+    #[test]
+    fn report_prompt_property_present_and_non_empty() {
+        let term = Terminal::default();
+        report_prompt_property(true, true, &term);
+    }
+
+    #[test]
+    fn report_prompt_property_present_but_empty() {
+        let term = Terminal::default();
+        report_prompt_property(true, false, &term);
+    }
+
+    #[test]
+    fn report_prompt_property_missing() {
+        let term = Terminal::default();
+        report_prompt_property(false, false, &term);
+    }
+
     // -- report_unhandled_failure --
 
     #[test]
@@ -337,16 +384,14 @@ mod tests {
         let term = Terminal::default();
         let report = ValidationPhaseReport {
             phase: FailurePhase::PostCheck,
-            outcomes: vec![
-                ValidationCheckOutcome {
-                    rule_id: ValidationRuleId(0),
-                    event: ValidationEvent::FileChanged,
-                    subject_key: Some("/a.md".to_string()),
-                    passed: true,
-                    markup: "file changed".to_string(),
-                    failure_message: None,
-                },
-            ],
+            outcomes: vec![ValidationCheckOutcome {
+                rule_id: ValidationRuleId(0),
+                event: ValidationEvent::FileChanged,
+                subject_key: Some("/a.md".to_string()),
+                passed: true,
+                markup: "file changed".to_string(),
+                failure_message: None,
+            }],
         };
         report_check_outcomes(&report, &term);
     }
