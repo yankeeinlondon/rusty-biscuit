@@ -329,12 +329,8 @@ pub fn run_compose(
 
     let cmd_start = perf.then(Instant::now);
 
-    let load_start = perf.then(Instant::now);
-    let md = load_markdown(input)?;
-    let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
-
-    // Resolve the input path through FileReference (handles @-prefixed paths)
-    // so that source_file and policy_root use the real filesystem path.
+    // Resolve the input path once through FileReference (handles @-prefixed paths)
+    // and reuse for both loading and source_file/policy_root.
     let resolve_start = perf.then(Instant::now);
     let resolved_input = if let Some(path) = input
         && path.to_str() != Some("-")
@@ -344,6 +340,15 @@ pub fn run_compose(
         None
     };
     let resolve_input_dur = resolve_start.map(|s| s.elapsed()).unwrap_or_default();
+
+    let load_start = perf.then(Instant::now);
+    let md = if let Some(ref resolved) = resolved_input {
+        Markdown::try_from(resolved.as_path())
+            .wrap_err_with(|| format!("Failed to load file: {:?}", resolved))?
+    } else {
+        load_markdown(None)?
+    };
+    let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
 
     // Demand-driven context capture: scan document for ctx.* references and
     // only capture the groups actually needed. Shared between validation and compose.
