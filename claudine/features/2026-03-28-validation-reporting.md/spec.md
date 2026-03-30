@@ -17,4 +17,9 @@ When a non-interactive session starts up we will:
 3. look for all validation properties (_in `pre_checks` and `post_checks`_) and report:
    - if `pre_checks` populated:
        - report with StatusState::Info `<b>{#}</b> validation <i>pre {check|checks}</i> {was|were} found:` 
+       - then iterate over the checks providing a status message for each
+   - if `post_checks` populated:
+       - follow the same process as for `pre_checks`
+   - if an error state has been raised:
+       - if there are no handlers then report the error and exit with an error code
 
