@@ -560,8 +560,10 @@ feature feat:
 
 # Install the CLI
 install *args="":
+    @echo -e "Building {{BOLD}}biscuit-terminal{{RESET}} library"
+    @cargo build -p biscuit-terminal --release || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo
-    @echo -e "{{BOLD}}Building {{LIB_NAME}}{{RESET}}"
+    @echo -e "Building {{BOLD}}{{LIB_NAME}}{{RESET}}"
     @echo
     @cargo build -p {{LIBRARY}} --release  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo
