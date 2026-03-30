@@ -290,8 +290,50 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
 fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32> {
     let excluded = parse_excluded(&args.exclude, args.silent || args.quiet);
     let explicit_provider = args.provider.resolve();
+    let show_checks = !args.silent;
+    let term = if show_checks {
+        Some(crate::log::terminal())
+    } else {
+        None
+    };
 
-    let source = composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
+    // -- Pre-validation: file resolution ------------------------------------
+
+    let source = match composition::resolve_composition_source(&args.file) {
+        Ok(source) => {
+            if let Some(ref t) = term {
+                claudine::harness::report::report_source_file(
+                    &args.file,
+                    &source.resolved_path,
+                    t,
+                );
+            }
+            source
+        }
+        Err(e) => {
+            if let Some(ref t) = term {
+                claudine::harness::report::report_source_file(
+                    &args.file,
+                    std::path::Path::new(""),
+                    t,
+                );
+            }
+            return Err(eyre!("{e}"));
+        }
+    };
+
+    // -- Pre-validation: prompt frontmatter property ------------------------
+
+    let prompt_value = source.markdown.frontmatter().as_map().get("prompt").cloned();
+    let has_prompt = prompt_value.is_some();
+    let is_non_empty = prompt_value
+        .as_ref()
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.trim().is_empty());
+
+    if let Some(ref t) = term {
+        claudine::harness::report::report_prompt_property(has_prompt, is_non_empty, t);
+    }
 
     let prepared = composition::prepare_inline(&source).map_err(|e| eyre!("{e}"))?;
 

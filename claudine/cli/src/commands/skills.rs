@@ -375,6 +375,16 @@ fn render_exceptions(
                             detail_list.add(Prose::new(label));
                         }
                     }
+                    ExceptionType::YamlTabs => {
+                        for e in entries {
+                            let label = format!(
+                                r#"<b><a href="{}">{}</a></b> (<i>contains tab characters in YAML indentation</i>)"#,
+                                e.skill_md_path.display(),
+                                e.topic
+                            );
+                            detail_list.add(Prose::new(label));
+                        }
+                    }
                     ExceptionType::BrokenLink => {
                         // Group broken links by topic, then list each broken link underneath
                         let mut by_topic: BTreeMap<&str, Vec<&SkillException>> = BTreeMap::new();
@@ -481,6 +491,7 @@ fn render_fix_summary(term: &Terminal, summary: &SkillFixSummary) {
         format!("already_linked={}", summary.already_linked),
         format!("skipped={}", summary.skipped),
         format!("names_inserted={}", summary.names_inserted),
+        format!("yaml_tabs_fixed={}", summary.yaml_tabs_fixed),
         format!("not_shareable={}", summary.not_shareable),
     ];
     let detail = Prose::new(format!("<dim>{}</dim>", parts.join(", ")));

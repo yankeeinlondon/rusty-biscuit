@@ -1012,6 +1012,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
     let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
 
+    profile.apply_project_dir(&mut child_args, child_cwd);
+
     // --dry-run: print what would be executed and exit
     if args.dry_run {
         crate::output::log_dry_run(
@@ -2222,21 +2224,14 @@ pub(crate) fn run_harness_loop(
 
         // Shell audit preflight
         let source_text = std::fs::read_to_string(&prompt_state.source_path).ok();
-        let auditable = claudine::harness::collect_auditable_commands(
-            &plan,
-            source_text.as_deref(),
-        )?;
+        let auditable =
+            claudine::harness::collect_auditable_commands(&plan, source_text.as_deref())?;
 
-        let audit_report = claudine::harness::audit_shell_commands(
-            &auditable,
-            harness_context.shell_options(),
-        );
+        let audit_report =
+            claudine::harness::audit_shell_commands(&auditable, harness_context.shell_options());
 
         if show_checks {
-            claudine::harness::report::report_shell_audit_header(
-                audit_report.outcomes.len(),
-                term,
-            );
+            claudine::harness::report::report_shell_audit_header(audit_report.outcomes.len(), term);
             claudine::harness::report::report_shell_audit_outcomes(&audit_report, term);
         }
 
@@ -2299,8 +2294,7 @@ pub(crate) fn run_harness_loop(
             }
         }
 
-        let pre_report =
-            claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe));
+        let pre_report = claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe));
 
         if show_checks {
             claudine::harness::report::report_phase_discovery(
@@ -2340,7 +2334,11 @@ pub(crate) fn run_harness_loop(
             let fail_msg = format!(
                 "pre-check validation failed ({} {})",
                 failures.len(),
-                if failures.len() == 1 { "failure" } else { "failures" }
+                if failures.len() == 1 {
+                    "failure"
+                } else {
+                    "failures"
+                }
             );
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&fail_msg, term);
@@ -2475,7 +2473,11 @@ pub(crate) fn run_harness_loop(
             let fail_msg = format!(
                 "inline closure validation failed ({} {})",
                 failures.len(),
-                if failures.len() == 1 { "failure" } else { "failures" }
+                if failures.len() == 1 {
+                    "failure"
+                } else {
+                    "failures"
+                }
             );
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&fail_msg, term);
@@ -2533,7 +2535,11 @@ pub(crate) fn run_harness_loop(
         let fail_msg = format!(
             "post-check validation failed ({} {})",
             failures.len(),
-            if failures.len() == 1 { "failure" } else { "failures" }
+            if failures.len() == 1 {
+                "failure"
+            } else {
+                "failures"
+            }
         );
         if show_checks {
             claudine::harness::report::report_unhandled_failure(&fail_msg, term);
