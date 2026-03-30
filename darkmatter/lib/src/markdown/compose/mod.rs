@@ -79,6 +79,48 @@ use std::path::{Path, PathBuf};
 use cache::operation::CacheableOperation;
 use shell_expansion::{apply_replacements_in_reverse, execute_directive};
 
+/// Shorten an absolute path for display in diagnostics.
+///
+/// Tries to make the path relative to the git repo root discovered by
+/// walking up from the file's parent directory. Falls back to `~/…` when
+/// the path is under the user's home directory, or the absolute path
+/// otherwise.
+fn abbreviate_path(path: &Path) -> String {
+    // Try git repo root first (walk up looking for .git)
+    if let Some(root) = find_git_root_from(path) {
+        if let Ok(rel) = path.strip_prefix(&root) {
+            return rel.display().to_string();
+        }
+    }
+
+    // Fall back to ~/… for paths under HOME
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(rel) = path.strip_prefix(&home) {
+            return format!("~/{}", rel.display());
+        }
+    }
+
+    path.display().to_string()
+}
+
+/// Walk up from `start` (or its parent if it's a file) looking for a `.git`
+/// directory, returning the repo root if found.
+fn find_git_root_from(start: &Path) -> Option<PathBuf> {
+    let mut dir = if start.is_dir() {
+        start.to_path_buf()
+    } else {
+        start.parent()?.to_path_buf()
+    };
+    loop {
+        if dir.join(".git").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
 #[derive(Clone)]
 enum PreparedTransclusion {
     FixedReplace {
@@ -299,7 +341,7 @@ impl Markdown {
 
             // Convert ctx diagnostics to compose warnings
             let source_display = match &options.source {
-                ComposeSource::File(p) => p.display().to_string(),
+                ComposeSource::File(p) => abbreviate_path(p),
                 ComposeSource::Url(u) => u.to_string(),
                 ComposeSource::Unknown => "unknown".to_string(),
             };
