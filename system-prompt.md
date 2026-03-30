@@ -1,3 +1,9 @@
+## Context
+
+- You are working in the **rusty-biscuit** monorepo.
+- This session was started in the "{{env.PACKAGE_AREA}}" package area
+    - you should always use the agent skill '{{env.PACKAGE_AREA}}'
+
 ## Best Practices
 
 - When rendering to the terminal, ALWAYS use:
