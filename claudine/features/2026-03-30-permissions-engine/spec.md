@@ -68,7 +68,7 @@ In addition to checking what the policy is we want to be able to change the poli
 let proposal = PolicyChange::new().grant_read_access("/some/file/path");
 
 // this will execute the change request by changing Claude's configuration files
-proposal.execute_for(Provider::Claude);
+proposal.change_configuration(Provider::Claude);
 
 // this would NOT change any configured permissions but instead indicate the
 // CLI arguments to use to provide one-time access
