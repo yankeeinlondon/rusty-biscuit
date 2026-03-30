@@ -519,9 +519,7 @@ pub struct GitRepo {
 
 impl std::fmt::Debug for GitRepo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GitRepo")
-            .field("repo_root", &self.repo_root)
-            .finish_non_exhaustive()
+        f.debug_struct("GitRepo").field("repo_root", &self.repo_root).finish_non_exhaustive()
     }
 }
 
@@ -538,7 +536,10 @@ impl GitRepo {
             .workdir()
             .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?
             .to_path_buf();
-        Ok(Some(Self { repo, repo_root }))
+        Ok(Some(Self {
+            repo,
+            repo_root,
+        }))
     }
 
     /// Absolute path to the repository working directory.
@@ -548,12 +549,7 @@ impl GitRepo {
 
     /// Current branch name (`None` for detached HEAD).
     pub fn current_branch(&self) -> Option<String> {
-        self.repo
-            .head()
-            .ok()
-            .as_ref()
-            .and_then(|h| h.shorthand())
-            .map(String::from)
+        self.repo.head().ok().as_ref().and_then(|h| h.shorthand()).map(String::from)
     }
 
     /// Whether the working directory is a linked worktree.
