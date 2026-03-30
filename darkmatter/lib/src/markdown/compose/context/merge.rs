@@ -31,7 +31,7 @@ pub struct CtxMergeResult {
 ///
 /// 1. No user `ctx` → insert runtime `ctx` directly. No diagnostics.
 /// 2. User `ctx` is an object → deep-merge user into runtime (runtime wins on collision).
-///    Emits `UserCtxMerged { had_key_collisions }`.
+///    Emits `UserCtxMerged { colliding_keys }`.
 /// 3. User `ctx` is not an object:
 ///    - `allow_override = false` → returns `Err(InvalidUserCtx)`
 ///    - `allow_override = true` → uses runtime ctx, emits `InvalidUserCtxReplaced`
@@ -54,7 +54,11 @@ pub fn merge_ctx(
                 _ => Map::new(),
             };
 
-            let had_collisions = user_obj.keys().any(|k| runtime_obj.contains_key(k));
+            let colliding_keys: Vec<String> = user_obj
+                .keys()
+                .filter(|k| runtime_obj.contains_key(*k))
+                .cloned()
+                .collect();
 
             // Deep merge: start with user ctx as base, overlay runtime
             let merged = crate::markdown::compose::state::deep_merge(
@@ -62,9 +66,7 @@ pub fn merge_ctx(
                 &Value::Object(runtime_obj),
             );
 
-            diagnostics.push(ContextMergeDiagnostic::UserCtxMerged {
-                had_key_collisions: had_collisions,
-            });
+            diagnostics.push(ContextMergeDiagnostic::UserCtxMerged { colliding_keys });
 
             merged
         }
@@ -135,7 +137,7 @@ mod tests {
         assert_eq!(
             result.diagnostics,
             vec![ContextMergeDiagnostic::UserCtxMerged {
-                had_key_collisions: false
+                colliding_keys: vec![]
             }]
         );
     }
@@ -154,7 +156,7 @@ mod tests {
         assert_eq!(
             result.diagnostics,
             vec![ContextMergeDiagnostic::UserCtxMerged {
-                had_key_collisions: true
+                colliding_keys: vec!["today".to_string()]
             }]
         );
     }

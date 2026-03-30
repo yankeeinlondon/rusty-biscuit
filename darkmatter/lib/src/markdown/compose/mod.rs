@@ -298,20 +298,30 @@ impl Markdown {
             }
 
             // Convert ctx diagnostics to compose warnings
+            let source_display = match &options.source {
+                ComposeSource::File(p) => p.display().to_string(),
+                ComposeSource::Url(u) => u.to_string(),
+                ComposeSource::Unknown => "unknown".to_string(),
+            };
             for diag in effective_state.ctx_diagnostics() {
                 let warning = match diag {
                     context::ContextMergeDiagnostic::UserCtxMerged {
-                        had_key_collisions: false,
-                    } => {
+                        colliding_keys,
+                    } if colliding_keys.is_empty() => {
                         // No warning needed when merge succeeded without collisions
                         continue;
                     }
                     context::ContextMergeDiagnostic::UserCtxMerged {
-                        had_key_collisions: true,
-                    } => ComposeWarning::new(
-                        "context",
-                        "Document defines ctx keys that collide with runtime context; runtime values take precedence",
-                    ),
+                        colliding_keys,
+                    } => {
+                        let keys_list = colliding_keys.join(", ");
+                        ComposeWarning::new(
+                            "context",
+                            format!(
+                                "the <blue>{source_display}</blue> document <i>defines</i> a <inverse>ctx</inverse> property and keys [<dim>{keys_list}</dim>] in the <inverse>ctx</inverse> dictionary conflict with those provided by Darkmatter's normal context dictionary!"
+                            ),
+                        )
+                    }
                     context::ContextMergeDiagnostic::InvalidUserCtxReplaced => {
                         ComposeWarning::new(
                             "context",
