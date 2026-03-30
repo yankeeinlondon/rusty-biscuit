@@ -853,12 +853,12 @@ pub struct ComposeContext {
 #[derive(Debug, Clone)]
 struct ComposeContextInner {
     now: String,
-    utc: String,
+    now_utc: String,
     today: String,
     yesterday: String,
     tomorrow: String,
-    dow: String,
-    dow_abbr: String,
+    day: String,
+    day_abbr: String,
     year: String,
     month: String,
     month_name: String,
@@ -884,7 +884,7 @@ impl ComposeContext {
     /// ISO 8601 local datetime.
     pub fn now(&self) -> &str { &self.inner.now }
     /// ISO 8601 UTC datetime.
-    pub fn utc(&self) -> &str { &self.inner.utc }
+    pub fn now_utc(&self) -> &str { &self.inner.now_utc }
     /// Local date YYYY-MM-DD.
     pub fn today(&self) -> &str { &self.inner.today }
     /// Yesterday YYYY-MM-DD.
@@ -892,9 +892,9 @@ impl ComposeContext {
     /// Tomorrow YYYY-MM-DD.
     pub fn tomorrow(&self) -> &str { &self.inner.tomorrow }
     /// Full day of week name.
-    pub fn dow(&self) -> &str { &self.inner.dow }
+    pub fn day(&self) -> &str { &self.inner.day }
     /// Abbreviated day of week.
-    pub fn dow_abbr(&self) -> &str { &self.inner.dow_abbr }
+    pub fn day_abbr(&self) -> &str { &self.inner.day_abbr }
     /// Four-digit year.
     pub fn year(&self) -> &str { &self.inner.year }
     /// Two-digit month (01-12).
@@ -977,12 +977,12 @@ impl ComposeContext {
         Self {
             inner: std::sync::Arc::new(ComposeContextInner {
                 now: get_str("now"),
-                utc: get_str("utc"),
+                now_utc: get_str("now_utc"),
                 today: get_str("today"),
                 yesterday: get_str("yesterday"),
                 tomorrow: get_str("tomorrow"),
-                dow: get_str("dow"),
-                dow_abbr: get_str("dow_abbr"),
+                day: get_str("day"),
+                day_abbr: get_str("day_abbr"),
                 year: get_str("year"),
                 month: get_str("month"),
                 month_name: get_str("month_name"),
@@ -1040,14 +1040,11 @@ impl ComposeContext {
         let mut values = serde_json::Map::new();
         let fields = [
             ("now", "2024-06-15T10:30:00"),
-            ("utc", "2024-06-15T17:30:00Z"),
             ("now_utc", "2024-06-15T17:30:00Z"),
             ("today", "2024-06-15"),
             ("yesterday", "2024-06-14"),
             ("tomorrow", "2024-06-16"),
-            ("dow", "Saturday"),
             ("day", "Saturday"),
-            ("dow_abbr", "Sat"),
             ("day_abbr", "Sat"),
             ("year", "2024"),
             ("month", "06"),
@@ -1069,12 +1066,12 @@ impl ComposeContext {
         Self {
             inner: std::sync::Arc::new(ComposeContextInner {
                 now: get_str("now"),
-                utc: get_str("utc"),
+                now_utc: get_str("now_utc"),
                 today: get_str("today"),
                 yesterday: get_str("yesterday"),
                 tomorrow: get_str("tomorrow"),
-                dow: get_str("dow"),
-                dow_abbr: get_str("dow_abbr"),
+                day: get_str("day"),
+                day_abbr: get_str("day_abbr"),
                 year: get_str("year"),
                 month: get_str("month"),
                 month_name: get_str("month_name"),
@@ -1379,7 +1376,7 @@ mod tests {
         // Context should have captured current date
         assert!(!ctx.today().is_empty());
         assert!(!ctx.year().is_empty());
-        assert!(!ctx.dow().is_empty());
+        assert!(!ctx.day().is_empty());
     }
 
     #[test]
@@ -1580,7 +1577,7 @@ mod tests {
         assert_eq!(ctx.today(), "2024-06-15");
         assert_eq!(ctx.yesterday(), "2024-06-14");
         assert_eq!(ctx.tomorrow(), "2024-06-16");
-        assert_eq!(ctx.dow(), "Saturday");
+        assert_eq!(ctx.day(), "Saturday");
         assert_eq!(ctx.year(), "2024");
         assert_eq!(ctx.month(), "06");
     }

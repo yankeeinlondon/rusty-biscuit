@@ -188,12 +188,12 @@ impl EffectiveState {
         // 3. Legacy field-by-field fallback (safety during transition)
         let value = match key {
             "now" => self.context.now(),
-            "utc" => self.context.utc(),
+            "now_utc" => self.context.now_utc(),
             "today" => self.context.today(),
             "yesterday" => self.context.yesterday(),
             "tomorrow" => self.context.tomorrow(),
-            "dow" => self.context.dow(),
-            "dow_abbr" => self.context.dow_abbr(),
+            "day" => self.context.day(),
+            "day_abbr" => self.context.day_abbr(),
             "year" => self.context.year(),
             "month" => self.context.month(),
             "month_name" => self.context.month_name(),
@@ -422,7 +422,7 @@ mod tests {
 
         assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
         assert_eq!(state.get("ctx.year"), Some(json!("2024")));
-        assert_eq!(state.get("ctx.dow"), Some(json!("Saturday")));
+        assert_eq!(state.get("ctx.day"), Some(json!("Saturday")));
         assert_eq!(state.get("ctx.unknown"), None);
     }
 
@@ -648,22 +648,7 @@ mod tests {
         // ctx.today should resolve via the materialized data["ctx"] namespace
         assert_eq!(state.get("ctx.today"), Some(json!("2024-06-15")));
         assert_eq!(state.get("ctx.year"), Some(json!("2024")));
-        assert_eq!(state.get("ctx.dow"), Some(json!("Saturday")));
-    }
-
-    #[test]
-    fn test_ctx_aliases_via_materialized_data() {
-        let fm = HashMap::new();
-        let state = EffectiveStateBuilder::new()
-            .with_frontmatter(fm)
-            .with_context(test_context())
-            .build()
-            .unwrap();
-
-        // day == dow (aliases both present)
-        assert_eq!(state.get("ctx.day"), state.get("ctx.dow"));
-        assert_eq!(state.get("ctx.day_abbr"), state.get("ctx.dow_abbr"));
-        assert_eq!(state.get("ctx.now_utc"), state.get("ctx.utc"));
+        assert_eq!(state.get("ctx.day"), Some(json!("Saturday")));
     }
 
     #[test]

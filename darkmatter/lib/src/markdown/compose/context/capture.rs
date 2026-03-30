@@ -35,8 +35,10 @@ pub(crate) enum ContextGroup {
     Documents,
     /// OS detection: os, os_distro, os_version, os_package_manager.
     Os,
-    /// Hardware summary: memory_total, memory_used, cpu_cores, cpu_arch, gpu.
+    /// Hardware summary: memory_total, memory_used, cpu_cores, cpu_arch.
     Hardware,
+    /// GPU detection (separate — requires subprocess on macOS).
+    Gpu,
 }
 
 impl ContextGroup {
@@ -50,6 +52,7 @@ impl ContextGroup {
             Self::Documents,
             Self::Os,
             Self::Hardware,
+            Self::Gpu,
         ]
         .into_iter()
         .collect()
@@ -59,10 +62,9 @@ impl ContextGroup {
     fn for_key(key: &str) -> Option<ContextGroup> {
         match key {
             // DateTime
-            "now" | "utc" | "now_utc" | "today" | "yesterday" | "tomorrow"
+            "now" | "now_utc" | "today" | "yesterday" | "tomorrow"
             | "today_utc" | "yesterday_utc" | "tomorrow_utc"
-            | "dow" | "day" | "dow_abbr" | "day_abbr"
-            | "day_utc" | "day_abbr_utc"
+            | "day" | "day_abbr" | "day_utc" | "day_abbr_utc"
             | "year" | "year_utc" | "month" | "month_name" | "month_name_abbr"
             | "day_of_month" | "day_of_month_suffixed"
             | "time" | "time_military" | "timezone" | "timezone_offset" | "timezone_iana"
@@ -101,9 +103,12 @@ impl ContextGroup {
             // OS
             "os" | "os_distro" | "os_package_manager" | "os_version" => Some(Self::Os),
 
-            // Hardware
+            // Hardware (CPU + memory — no subprocess)
             "memory_total" | "memory_used" | "memory_avail"
-            | "cpu_cores" | "cpu_arch" | "gpu" => Some(Self::Hardware),
+            | "cpu_cores" | "cpu_arch" => Some(Self::Hardware),
+
+            // GPU (requires ioreg subprocess on macOS)
+            "gpu" => Some(Self::Gpu),
 
             _ => None,
         }
@@ -171,6 +176,7 @@ struct ContextCapture {
     docs: Option<Vec<MarkdownMeta>>,
     os_info: Option<OsInfo>,
     hardware_info: Option<HardwareInfo>,
+    gpu_names: Option<String>,
     current_package: Option<Package>,
     current_package_area: Option<String>,
     dirty_paths: Vec<PathBuf>,
@@ -200,6 +206,7 @@ impl ContextCapture {
         let need_docs = groups.contains(&ContextGroup::Documents);
         let need_os = groups.contains(&ContextGroup::Os);
         let need_hw = groups.contains(&ContextGroup::Hardware);
+        let need_gpu = groups.contains(&ContextGroup::Gpu);
 
         // ── Git discovery (near-instant — just finds .git) ───────────
         let t = Instant::now();
@@ -226,7 +233,7 @@ impl ContextCapture {
         if need_git { timings.push(("git".into(), t.elapsed())); }
 
         // ── All remaining probes run in parallel ─────────────────────
-        let (file_changes, repo_info, docs, os_info, hardware_info) =
+        let (file_changes, repo_info, docs, os_info, hardware_info, gpu_names) =
             std::thread::scope(|s| {
                 let fc_handle = if need_file_changes && has_git {
                     let bd = base_dir.to_path_buf();
@@ -268,6 +275,21 @@ impl ContextCapture {
                         let t = Instant::now();
                         let result = hardware::detect_hardware_summary();
                         (result, t.elapsed())
+                    }))
+                } else {
+                    None
+                };
+
+                let gpu_handle = if need_gpu {
+                    Some(s.spawn(|| {
+                        let t = Instant::now();
+                        let gpus = hardware::detect_gpus();
+                        let names = if gpus.is_empty() {
+                            None
+                        } else {
+                            Some(gpus.iter().map(|g| g.name.as_str()).collect::<Vec<_>>().join(", "))
+                        };
+                        (names, t.elapsed())
                     }))
                 } else {
                     None
@@ -328,7 +350,13 @@ impl ContextCapture {
                     Err(_) => Err("hardware detection panicked".to_string()),
                 });
 
-                (file_changes, repo_info, docs, os_info, hardware_info)
+                let gpu_names = gpu_handle.map(|h| {
+                    let (names, elapsed) = h.join().unwrap_or((None, Duration::ZERO));
+                    timings.push(("gpu".into(), elapsed));
+                    names
+                }).flatten();
+
+                (file_changes, repo_info, docs, os_info, hardware_info, gpu_names)
             });
 
         let os_info = match os_info {
@@ -408,6 +436,7 @@ impl ContextCapture {
             docs,
             os_info,
             hardware_info,
+            gpu_names,
             current_package,
             current_package_area,
             dirty_paths,
@@ -505,8 +534,6 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
     let today_str = today.format("%Y-%m-%d").to_string();
     let yesterday_str = yesterday.format("%Y-%m-%d").to_string();
     let tomorrow_str = tomorrow.format("%Y-%m-%d").to_string();
-    let dow_str = now_local.format("%A").to_string();
-    let dow_abbr_str = now_local.format("%a").to_string();
     let year_str = now_local.format("%Y").to_string();
     let month_str = now_local.format("%m").to_string();
     let month_name_str = now_local.format("%B").to_string();
@@ -514,7 +541,6 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
 
     // Core date/time
     values.insert("now".into(), Value::String(now_str));
-    values.insert("utc".into(), Value::String(utc_str.clone()));
     values.insert("now_utc".into(), Value::String(utc_str));
     values.insert("today".into(), Value::String(today_str));
     values.insert("yesterday".into(), Value::String(yesterday_str));
@@ -525,11 +551,9 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
     values.insert("yesterday_utc".into(), Value::String(yesterday_utc.format("%Y-%m-%d").to_string()));
     values.insert("tomorrow_utc".into(), Value::String(tomorrow_utc.format("%Y-%m-%d").to_string()));
 
-    // Day of week (with aliases)
-    values.insert("dow".into(), Value::String(dow_str.clone()));
-    values.insert("day".into(), Value::String(dow_str));
-    values.insert("dow_abbr".into(), Value::String(dow_abbr_str.clone()));
-    values.insert("day_abbr".into(), Value::String(dow_abbr_str));
+    // Day of week
+    values.insert("day".into(), Value::String(now_local.format("%A").to_string()));
+    values.insert("day_abbr".into(), Value::String(now_local.format("%a").to_string()));
 
     // UTC day of week
     let dow_utc_str = now_utc.format("%A").to_string();
@@ -1181,14 +1205,7 @@ fn populate_hardware(cap: &ContextCapture, values: &mut Map<String, Value>) {
 
     values.insert(
         "gpu".into(),
-        hw.map_or(Value::Null, |h| {
-            if h.gpu.is_empty() {
-                Value::Null
-            } else {
-                let names: Vec<String> = h.gpu.iter().map(|g| g.name.clone()).collect();
-                Value::String(format::format_csv(&names))
-            }
-        }),
+        cap.gpu_names.as_ref().map_or(Value::Null, |n| Value::String(n.clone())),
     );
 }
 
@@ -1203,14 +1220,11 @@ mod tests {
 
         // Legacy fields
         assert!(values.contains_key("now"));
-        assert!(values.contains_key("utc"));
         assert!(values.contains_key("now_utc"));
         assert!(values.contains_key("today"));
         assert!(values.contains_key("yesterday"));
         assert!(values.contains_key("tomorrow"));
-        assert!(values.contains_key("dow"));
         assert!(values.contains_key("day"));
-        assert!(values.contains_key("dow_abbr"));
         assert!(values.contains_key("day_abbr"));
         assert!(values.contains_key("year"));
         assert!(values.contains_key("month"));
@@ -1237,19 +1251,6 @@ mod tests {
         assert!(values.contains_key("season"));
         assert!(values.contains_key("timestamp"));
         assert!(values.contains_key("timestamp_ms"));
-    }
-
-    #[test]
-    fn aliases_match() {
-        let mut values = Map::new();
-        populate_datetime(&mut values);
-
-        // dow == day
-        assert_eq!(values.get("dow"), values.get("day"));
-        // dow_abbr == day_abbr
-        assert_eq!(values.get("dow_abbr"), values.get("day_abbr"));
-        // utc == now_utc
-        assert_eq!(values.get("utc"), values.get("now_utc"));
     }
 
     #[test]
