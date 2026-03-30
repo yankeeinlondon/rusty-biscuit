@@ -66,6 +66,7 @@ We will now provide a grouped overview of all the information stored in Darkmatt
 | `time_military`   | `String` | Time in 24-hour format (e.g., `22:30`)          |
 | `timezone`        | `String` | Timezone abbreviation (e.g., `PDT`, `UTC`)      |
 | `timezone_offset` | `String` | UTC offset (e.g., `-0700`)                      |
+| `timezone_iana`   | `String` | UTC offset (e.g., `America/Los_Angeles`)                      |
 
 ### Calendar
 
