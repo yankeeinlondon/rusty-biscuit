@@ -137,6 +137,22 @@ pub fn detect_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
     }
 }
 
+/// Detect markdown documents using pre-computed package info.
+///
+/// Avoids the redundant `detect_repo()` call that `detect_docs()` performs
+/// internally. Use this when repo/package info has already been gathered.
+pub fn detect_docs_with_packages(
+    repo_root: &Path,
+    packages: &[(String, PathBuf)],
+) -> Option<Vec<MarkdownMeta>> {
+    let docs = collect_markdown_files(repo_root, packages);
+    if docs.is_empty() {
+        None
+    } else {
+        Some(docs)
+    }
+}
+
 /// Collect all markdown files from repo root using .gitignore-aware walking.
 fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> Vec<MarkdownMeta> {
     let walker = WalkBuilder::new(repo_root)

@@ -127,6 +127,58 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
     })
 }
 
+/// Lightweight hardware summary for compose context.
+///
+/// Returns only CPU (cores, arch) and memory information.
+/// Skips audio device enumeration (~1.5s on macOS), storage inventory,
+/// and GPU detection.
+pub fn detect_hardware_summary() -> Result<HardwareInfo> {
+    let sys = System::new_with_specifics(
+        RefreshKind::nothing()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything()),
+    );
+
+    let cpu = CpuInfo {
+        brand: sys.cpus().first().map(|c| c.brand().to_string()).unwrap_or_default(),
+        arch: {
+            let arch = System::cpu_arch();
+            if arch.is_empty() {
+                std::env::consts::ARCH.to_string()
+            } else {
+                arch
+            }
+        },
+        logical_cores: sys.cpus().len(),
+        physical_cores: System::physical_core_count(),
+        simd: detect_simd(),
+    };
+
+    let available = sys.available_memory();
+    let available_bytes = if available == 0 {
+        sys.free_memory()
+    } else {
+        available
+    };
+
+    let memory = MemoryInfo {
+        total_bytes: sys.total_memory(),
+        available_bytes,
+        used_bytes: sys.used_memory(),
+        total_swap: sys.total_swap(),
+        free_swap: sys.free_swap(),
+        used_swap: sys.used_swap(),
+    };
+
+    Ok(HardwareInfo {
+        cpu,
+        memory,
+        storage: Vec::new(),
+        gpu: Vec::new(),
+        audio_devices: Vec::new(),
+    })
+}
+
 /// Detects hardware information with optional CPU usage sampling.
 ///
 /// This function is identical to [`detect_hardware`] but is designed
