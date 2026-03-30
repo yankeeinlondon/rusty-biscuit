@@ -494,6 +494,181 @@ fn extract_remote_host(url: &str) -> Option<&str> {
     None
 }
 
+/// Lightweight handle to a discovered git repository.
+///
+/// Wraps a `git2::Repository` and exposes atomic query methods so callers
+/// can request only the data they need without paying for a full
+/// `detect_git` sweep.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use sniff::filesystem::git::GitRepo;
+/// use std::path::Path;
+///
+/// if let Some(repo) = GitRepo::discover(Path::new(".")).unwrap() {
+///     println!("root: {:?}", repo.repo_root());
+///     let (org, name) = repo.org_and_repo();
+///     println!("org={org:?}  repo={name:?}");
+/// }
+/// ```
+pub struct GitRepo {
+    repo: Repository,
+    repo_root: PathBuf,
+}
+
+impl std::fmt::Debug for GitRepo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitRepo")
+            .field("repo_root", &self.repo_root)
+            .finish_non_exhaustive()
+    }
+}
+
+impl GitRepo {
+    /// Discover a repository containing `path`.
+    ///
+    /// Returns `Ok(None)` when `path` is not inside a git repository.
+    pub fn discover(path: &Path) -> Result<Option<Self>> {
+        let repo = match Repository::discover(path) {
+            Ok(r) => r,
+            Err(_) => return Ok(None),
+        };
+        let repo_root = repo
+            .workdir()
+            .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?
+            .to_path_buf();
+        Ok(Some(Self { repo, repo_root }))
+    }
+
+    /// Absolute path to the repository working directory.
+    pub fn repo_root(&self) -> &Path {
+        &self.repo_root
+    }
+
+    /// Current branch name (`None` for detached HEAD).
+    pub fn current_branch(&self) -> Option<String> {
+        self.repo
+            .head()
+            .ok()
+            .as_ref()
+            .and_then(|h| h.shorthand())
+            .map(String::from)
+    }
+
+    /// Whether the working directory is a linked worktree.
+    pub fn in_worktree(&self) -> bool {
+        self.repo.is_worktree()
+    }
+
+    /// Base repository root when inside a worktree.
+    pub fn base_repo_root(&self) -> Option<PathBuf> {
+        if self.repo.is_worktree() {
+            self.repo.commondir().parent().map(Path::to_path_buf)
+        } else {
+            None
+        }
+    }
+
+    /// Organization and repository name parsed from the preferred remote URL.
+    pub fn org_and_repo(&self) -> (Option<String>, Option<String>) {
+        let remotes = get_remotes(&self.repo, false);
+        preferred_remote(&remotes)
+            .and_then(|r| r.url.as_deref())
+            .map(parse_org_repo)
+            .unwrap_or((None, None))
+    }
+
+    /// File-level working tree status (staged, modified, untracked).
+    pub fn file_changes(&self) -> Result<Vec<FileChange>> {
+        let (_status, changes) = get_repo_status_with_changes(&self.repo)?;
+        Ok(changes)
+    }
+
+    /// Aggregated working tree status.
+    pub fn repo_status(&self) -> Result<RepoStatus> {
+        let (status, _changes) = get_repo_status_with_changes(&self.repo)?;
+        Ok(status)
+    }
+
+    /// Recent commits from HEAD.
+    pub fn recent_commits(&self, count: usize) -> Vec<CommitInfo> {
+        get_recent_commits(&self.repo, count)
+    }
+
+    /// Configured remotes.
+    pub fn remotes(&self, include_details: bool) -> Vec<RemoteInfo> {
+        get_remotes(&self.repo, include_details)
+    }
+
+    /// Linked worktrees.
+    pub fn worktrees(&self) -> HashMap<String, WorktreeInfo> {
+        get_worktrees(&self.repo)
+    }
+
+    /// Git user configuration.
+    pub fn config(&self) -> GitConfig {
+        get_git_config(&self.repo)
+    }
+
+    /// Local branch information.
+    pub fn branches(&self) -> Vec<LocalBranchInfo> {
+        let current = self.current_branch();
+        get_local_branches(&self.repo, current.as_deref())
+    }
+
+    /// Per-remote tracking status (ahead/behind).
+    pub fn tracking_status(&self) -> Vec<RemoteTrackingStatus> {
+        let current = self.current_branch();
+        get_tracking_status(&self.repo, current.as_deref())
+    }
+
+    /// Full detection — equivalent to `detect_git()` but reuses
+    /// the already-opened repository handle.
+    pub fn detect_full(&self, deep: bool, commit_count: usize) -> Result<GitInfo> {
+        let current_branch = self.current_branch();
+
+        if deep {
+            refresh_remote_tracking_refs(&self.repo);
+        }
+
+        let mut recent = get_recent_commits(&self.repo, commit_count);
+        let (mut status, file_changes) = get_repo_status_with_changes(&self.repo)?;
+        let remotes = get_remotes(&self.repo, deep);
+        let worktrees = get_worktrees(&self.repo);
+        let config = get_git_config(&self.repo);
+        let branches = get_local_branches(&self.repo, current_branch.as_deref());
+        let tracking = get_tracking_status(&self.repo, current_branch.as_deref());
+
+        if deep {
+            status.is_behind = summarize_behind_status(&tracking);
+            populate_recent_commit_remotes(&self.repo, &mut recent);
+        }
+
+        let (org, repo) = preferred_remote(&remotes)
+            .and_then(|r| r.url.as_deref())
+            .map(parse_org_repo)
+            .unwrap_or((None, None));
+
+        Ok(GitInfo {
+            repo_root: self.repo_root.clone(),
+            org,
+            repo,
+            current_branch,
+            branches,
+            in_worktree: self.repo.is_worktree(),
+            base_repo_root: self.base_repo_root(),
+            recent,
+            status,
+            remotes,
+            worktrees,
+            config,
+            tracking,
+            file_changes,
+        })
+    }
+}
+
 /// Complete Git repository information.
 ///
 /// Contains repository metadata including location, branch, commit history,
@@ -912,65 +1087,10 @@ fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
 /// - The repository exists but has no working directory (bare repo)
 /// - Git operations fail due to filesystem permissions or corruption
 pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option<GitInfo>> {
-    let repo = match Repository::discover(path) {
-        Ok(r) => r,
-        Err(_) => return Ok(None),
-    };
-
-    let repo_root =
-        repo.workdir().ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?.to_path_buf();
-
-    let head = repo.head().ok();
-    let current_branch = head.as_ref().and_then(|h| h.shorthand()).map(String::from);
-
-    let in_worktree = repo.is_worktree();
-
-    // When inside a worktree, resolve the base repository root from commondir.
-    // commondir points to the base repo's .git directory; its parent is the workdir.
-    let base_repo_root = if in_worktree {
-        repo.commondir().parent().map(Path::to_path_buf)
-    } else {
-        None
-    };
-
-    if deep {
-        refresh_remote_tracking_refs(&repo);
+    match GitRepo::discover(path)? {
+        Some(handle) => handle.detect_full(deep, commit_count).map(Some),
+        None => Ok(None),
     }
-
-    let mut recent = get_recent_commits(&repo, commit_count);
-    let (mut status, file_changes) = get_repo_status_with_changes(&repo)?;
-    let remotes = get_remotes(&repo, deep);
-    let worktrees = get_worktrees(&repo);
-    let config = get_git_config(&repo);
-    let branches = get_local_branches(&repo, current_branch.as_deref());
-    let tracking = get_tracking_status(&repo, current_branch.as_deref());
-
-    if deep {
-        status.is_behind = summarize_behind_status(&tracking);
-        populate_recent_commit_remotes(&repo, &mut recent);
-    }
-
-    let (org, repo) = preferred_remote(&remotes)
-        .and_then(|r| r.url.as_deref())
-        .map(parse_org_repo)
-        .unwrap_or((None, None));
-
-    Ok(Some(GitInfo {
-        repo_root,
-        org,
-        repo,
-        current_branch,
-        branches,
-        in_worktree,
-        base_repo_root,
-        recent,
-        status,
-        remotes,
-        worktrees,
-        config,
-        tracking,
-        file_changes,
-    }))
 }
 
 /// Collects all refs (branches, remote tracking, tags) pointing to each commit.
