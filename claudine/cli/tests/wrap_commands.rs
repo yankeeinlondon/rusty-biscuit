@@ -24,6 +24,26 @@ fn write_executable(path: &Path, content: &str) {
     }
 }
 
+/// Strip provider-specific project-dir flags (e.g. `--cd <path>`, `--dir <path>`,
+/// `--work-dir <path>`) from captured args so assertions remain portable.
+fn strip_project_dir_flags<'a>(args: &'a [&'a str]) -> Vec<&'a str> {
+    let dir_flags: &[&str] = &["--cd", "-C", "--dir", "--work-dir", "-w"];
+    let mut result = Vec::new();
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if dir_flags.contains(arg) {
+            skip_next = true;
+            continue;
+        }
+        result.push(*arg);
+    }
+    result
+}
+
 fn redact_session_id(input: &str) -> String {
     const PREFIX: &str = "CLAUDINE_SESSION_ID=";
     let Some(start) = input.find(PREFIX) else {
@@ -205,8 +225,9 @@ exit 0
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
+    assert!(args.contains(&"--cd"), "codex args should include --cd for project dir");
     assert_eq!(
-        args,
+        strip_project_dir_flags(&args),
         vec![
             "exec",
             "--json",
@@ -351,7 +372,11 @@ exit 0
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert_eq!(args, vec!["exec", "--json", "summarize repo"]);
+    assert!(args.contains(&"--cd"), "codex args should include --cd for project dir");
+    assert_eq!(
+        strip_project_dir_flags(&args),
+        vec!["exec", "--json", "summarize repo"]
+    );
 }
 
 #[cfg(unix)]
