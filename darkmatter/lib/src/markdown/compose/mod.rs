@@ -42,6 +42,7 @@ pub(crate) mod cache;
 pub mod conditions;
 pub mod context;
 pub(crate) mod parse_utils;
+pub(crate) mod perf;
 mod state;
 mod types;
 
@@ -60,8 +61,8 @@ pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
-    ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePhase,
-    ComposeReport, ComposeSource, ComposeWarning,
+    ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePerfMetric,
+    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeWarning,
 };
 
 // Internal re-exports for crate modules that still use TransclusionOptions
@@ -247,6 +248,7 @@ impl Markdown {
 
         let result = (|| {
             let mut report = ComposeReport::new();
+            let mut perf = perf::PerfCollector::new(options.perf_enabled);
 
             // Apply external state as defaults: fill in null/missing frontmatter keys
             // so the document's frontmatter reflects the merged values.
@@ -271,6 +273,7 @@ impl Markdown {
             }
 
             // Build effective state for replacement/interpolation and condition checks.
+            let esb_start = perf.is_enabled().then(std::time::Instant::now);
             let effective_state = EffectiveStateBuilder::new()
                 .with_frontmatter(
                     self.frontmatter()
@@ -290,6 +293,9 @@ impl Markdown {
                 .with_context(options.context().clone())
                 .with_allow_ctx_override(options.allow_ctx_override)
                 .build()?;
+            if let Some(start) = esb_start {
+                perf.record(perf::PerfMetricKind::EffectiveStateBuild, start.elapsed());
+            }
 
             // Convert ctx diagnostics to compose warnings
             for diag in effective_state.ctx_diagnostics() {
@@ -330,6 +336,7 @@ impl Markdown {
 
                 match operation.phase() {
                     ComposePhase::InlinePre => {
+                        let op_start = perf.is_enabled().then(std::time::Instant::now);
                         self.run_inline_pre_operation(
                             *operation,
                             &effective_state,
@@ -337,6 +344,16 @@ impl Markdown {
                             runtime,
                             &mut report,
                         )?;
+                        if let Some(start) = op_start {
+                            let kind = match operation {
+                                ComposeOperation::TextReplacement => perf::PerfMetricKind::TextReplacement,
+                                ComposeOperation::PageBlocks => perf::PerfMetricKind::PageBlocks,
+                                ComposeOperation::Interpolation => perf::PerfMetricKind::Interpolation,
+                                ComposeOperation::ShellExpansion => perf::PerfMetricKind::ShellExpansion,
+                                _ => unreachable!(),
+                            };
+                            perf.record(kind, start.elapsed());
+                        }
                     }
                     ComposePhase::Transclusion => {
                         if transclusion_ran {
@@ -357,16 +374,27 @@ impl Markdown {
                             &options,
                             runtime,
                             &mut report,
+                            &mut perf,
                         )?;
                         transclusion_ran = true;
                     }
                     ComposePhase::InlinePost => {
+                        let op_start = perf.is_enabled().then(std::time::Instant::now);
                         self.run_inline_post_operation(*operation, &options, &mut report)?;
+                        if let Some(start) = op_start {
+                            let kind = match operation {
+                                ComposeOperation::Cleanup => perf::PerfMetricKind::Cleanup,
+                                ComposeOperation::Normalization => perf::PerfMetricKind::Normalization,
+                                _ => unreachable!(),
+                            };
+                            perf.record(kind, start.elapsed());
+                        }
                     }
                 }
             }
 
             report.max_transclusion_depth = runtime.transclusion.deepest_seen;
+            report.perf = perf.finish();
             Ok(report)
         })();
 
@@ -459,12 +487,15 @@ impl Markdown {
         options: &ComposeOptions,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
+        perf_collector: &mut perf::PerfCollector,
     ) -> MarkdownResult<()> {
         use rayon::prelude::*;
 
         if operations.is_empty() {
             return Ok(());
         }
+
+        let parse_start = perf_collector.is_enabled().then(std::time::Instant::now);
 
         let parsed_directives = if operations.iter().any(|op| {
             matches!(
@@ -490,6 +521,12 @@ impl Markdown {
         } else {
             None
         };
+
+        if let Some(start) = parse_start {
+            perf_collector.record(perf::PerfMetricKind::TransclusionParse, start.elapsed());
+        }
+
+        let prepare_start = perf_collector.is_enabled().then(std::time::Instant::now);
 
         let mut prepared = Vec::new();
         let mut next_order = 0usize;
@@ -548,15 +585,27 @@ impl Markdown {
             }
         }
 
+        if let Some(start) = prepare_start {
+            perf_collector.record(perf::PerfMetricKind::TransclusionPrepare, start.elapsed());
+        }
+
         if prepared.is_empty() {
             return Ok(());
         }
+
+        let resolve_start = perf_collector.is_enabled().then(std::time::Instant::now);
 
         let runtime_mutex = std::sync::Mutex::new(runtime);
         let results = prepared
             .into_par_iter()
             .map(|item| self.resolve_prepared_transclusion(item, state, options, &runtime_mutex))
             .collect::<Vec<_>>();
+
+        if let Some(start) = resolve_start {
+            perf_collector.record(perf::PerfMetricKind::TransclusionResolve, start.elapsed());
+        }
+
+        let apply_start = perf_collector.is_enabled().then(std::time::Instant::now);
 
         let mut replacements = Vec::new();
         let prologue_count = frontmatter_refs
@@ -633,6 +682,10 @@ impl Markdown {
                     .filter(|part| !part.trim().is_empty()),
             );
             self.content = sections.join("\n\n");
+        }
+
+        if let Some(start) = apply_start {
+            perf_collector.record(perf::PerfMetricKind::TransclusionApply, start.elapsed());
         }
 
         Ok(())
@@ -3162,5 +3215,48 @@ Rounded: {{ round(pi) }}"#;
         );
         assert_eq!(report.page_blocks_rendered, 0);
         assert_eq!(report.page_blocks_skipped, 0);
+    }
+
+    #[test]
+    fn perf_disabled_produces_no_report() {
+        let content = "# Test\nSome content";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new(); // perf_enabled defaults to false
+        let (_, report) = md.compose_with(options).unwrap();
+        assert!(report.perf.is_none(), "Perf should be None when disabled");
+    }
+
+    #[test]
+    fn perf_enabled_produces_report() {
+        let content = "# Test\nSome content";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().with_perf(true);
+        let (_, report) = md.compose_with(options).unwrap();
+        assert!(report.perf.is_some(), "Perf should be populated when enabled");
+
+        let perf = report.perf.unwrap();
+        assert!(perf.total > std::time::Duration::ZERO);
+        assert!(!perf.metrics.is_empty(), "Should have at least one metric");
+
+        // Verify expected metric names are present
+        let names: Vec<&str> = perf.metrics.iter().map(|m| m.name.as_str()).collect();
+        assert!(names.contains(&"effective state build"));
+        assert!(names.contains(&"cleanup"));
+    }
+
+    #[test]
+    fn perf_enabled_with_interpolation() {
+        let content = "---\nname: World\n---\nHello {{ name }}!";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().with_perf(true);
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert!(composed.content().contains("Hello World!"));
+        let perf = report.perf.unwrap();
+        let interp = perf.metrics.iter().find(|m| m.name == "interpolation").unwrap();
+        assert_eq!(interp.calls, 1);
     }
 }
