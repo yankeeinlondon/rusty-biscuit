@@ -1,20 +1,12 @@
 {
     "folders": [
         {
-            "name": "ai",
-            "path": ".ai"
-        },
-        {
-            "name": "Monorepo Docs",
-            "path": "docs"
-        },
-        {
             "name": "Monorepo Prompts",
             "path": "prompts"
         },
         {
-            "name": "Monorepo Scripts",
-            "path": "scripts"
+            "name": "Agent Skills",
+            "path": ".claude/skills"
         },
         {
             "name": "biscuit-terminal",
@@ -42,7 +34,7 @@
             "codegen",
             "darkmatter",
             "Darkmatter",
-            "dasound",
+            "danone",
             "dasp",
             "dumpsys",
             "eaee",
