@@ -524,6 +524,7 @@ pub(crate) fn execute_composition_request(
         let mut prompt_state = HarnessPromptState {
             mode: harness_mode,
             source_path: request.prepared.resolved_path.clone(),
+            original_ref: request.file_ref.clone(),
             base_prompt: None,
             overlay: indexmap::IndexMap::new(),
             prompt_tail: Vec::new(),

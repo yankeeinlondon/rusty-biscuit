@@ -332,17 +332,6 @@ fn render_exceptions(
         }
     }
 
-    // Render format-incompatible providers as simple one-liners
-    if !format_incompatible_providers.is_empty() {
-        let mut fi_list = UnorderedList::empty();
-        for provider_name in &format_incompatible_providers {
-            fi_list.add(Prose::new(format!(
-                "<b>{provider_name}</b> — ❌ uses a non-standard format which is incompatible with Claudine."
-            )));
-        }
-        log::data(&fi_list.render(term));
-    }
-
     // Render regular providers with full exception detail
     if !regular_providers.is_empty() {
         let mut outer_list = UnorderedList::empty();
@@ -436,6 +425,29 @@ fn render_exceptions(
         }
 
         log::data(&outer_list.render(term));
+    }
+
+    // Render format-incompatible providers as a quiet footnote
+    if !format_incompatible_providers.is_empty() {
+        let names: Vec<String> = format_incompatible_providers
+            .iter()
+            .map(|n| format!("<b>{n}</b>"))
+            .collect();
+        let joined = match names.len() {
+            1 => names[0].clone(),
+            2 => format!("{} and {}", names[0], names[1]),
+            _ => {
+                let (last, rest) = names.split_last().unwrap();
+                format!("{}, and {last}", rest.join(", "))
+            }
+        };
+        log::data("");
+        log::data(
+            &Prose::new(format!(
+                "<dim><i>{joined} use a non-standard format which is not supported under <b>Claudine</b></i></dim>"
+            ))
+            .render(term),
+        );
     }
 }
 
