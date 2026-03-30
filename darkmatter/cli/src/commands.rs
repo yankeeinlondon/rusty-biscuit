@@ -104,6 +104,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             allow_missing_transclusions,
             allow_any_missing_reference,
             allow_ctx_override,
+            perf,
         } => {
             let mode = resolve_list_spacing(compact, loose);
             let allow = ComposeAllowFlags {
@@ -122,6 +123,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 indent,
                 &allow,
                 allow_ctx_override,
+                perf,
                 cli,
             )?;
         }
@@ -320,12 +322,20 @@ pub fn run_compose(
     indent: Option<usize>,
     allow: &ComposeAllowFlags,
     allow_ctx_override: bool,
+    perf: bool,
     cli: &Cli,
 ) -> Result<()> {
+    use std::time::Instant;
+
+    let cmd_start = perf.then(Instant::now);
+
+    let load_start = perf.then(Instant::now);
     let md = load_markdown(input)?;
+    let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
 
     // Resolve the input path through FileReference (handles @-prefixed paths)
     // so that source_file and policy_root use the real filesystem path.
+    let resolve_start = perf.then(Instant::now);
     let resolved_input = if let Some(path) = input
         && path.to_str() != Some("-")
     {
@@ -333,9 +343,11 @@ pub fn run_compose(
     } else {
         None
     };
+    let resolve_input_dur = resolve_start.map(|s| s.elapsed()).unwrap_or_default();
 
     // Demand-driven context capture: scan document for ctx.* references and
     // only capture the groups actually needed. Shared between validation and compose.
+    let ctx_start = perf.then(Instant::now);
     let shared_context = {
         let base_dir = std::env::current_dir().unwrap_or_default();
         darkmatter::markdown::compose::ComposeContext::capture_for_content(
@@ -343,9 +355,11 @@ pub fn run_compose(
             md.content(),
         )
     };
+    let capture_context_dur = ctx_start.map(|s| s.elapsed()).unwrap_or_default();
 
     // ── Reference validation ───────────────────────────────────────────
     // Validate before composing so broken references are caught early.
+    let val_start = perf.then(Instant::now);
     let deferred_report = if resolved_input.is_some() {
         use biscuit_terminal::terminal::Terminal;
         use darkmatter::markdown::reference::ReferenceGraphOptions;
@@ -391,7 +405,9 @@ pub fn run_compose(
     } else {
         None
     };
+    let validate_refs_dur = val_start.map(|s| s.elapsed()).unwrap_or_default();
 
+    let opts_start = perf.then(Instant::now);
     let mut options = ComposeOptions::new().with_context(shared_context);
 
     // Parse --state as JSON or JSON5
@@ -448,10 +464,13 @@ pub fn run_compose(
     options = options.with_shell(shell_opts);
     options = options.with_list_spacing(list_spacing);
     options = options.with_allow_ctx_override(allow_ctx_override);
+    options = options.with_perf(perf);
     if let Some(size) = indent {
         options = options.with_indent_size(size);
     }
+    let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
 
+    let compose_start = perf.then(Instant::now);
     let (composed, report) = md.compose_with(options).map_err(|e| {
         use darkmatter::markdown::MarkdownError::ShellExpansion;
         use darkmatter::markdown::compose::ShellExpansionError;
@@ -513,6 +532,7 @@ pub fn run_compose(
             _ => eyre!("{e}"),
         }
     })?;
+    let compose_pipeline_dur = compose_start.map(|s| s.elapsed()).unwrap_or_default();
 
     let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
     let code_theme = cli
@@ -565,6 +585,22 @@ pub fn run_compose(
         if !formatted.is_empty() {
             eprint!("\n{formatted}");
         }
+    }
+
+    // Emit perf report to stderr (after all other diagnostics)
+    if perf {
+        let total_dur = cmd_start.map(|s| s.elapsed()).unwrap_or_default();
+        let cli_perf = CliComposePerfReport {
+            load_input: load_input_dur,
+            resolve_input: resolve_input_dur,
+            capture_context: capture_context_dur,
+            validate_references: validate_refs_dur,
+            build_options: build_options_dur,
+            compose_pipeline: compose_pipeline_dur,
+            total: total_dur,
+        };
+        let rendered = format_compose_perf_report(&cli_perf, report.perf.as_ref());
+        eprint!("\n{rendered}");
     }
 
     Ok(())
@@ -1191,6 +1227,87 @@ mod tests {
     fn wait_args_unknown_binary_returns_empty() {
         assert!(wait_args_for_editor("my-custom-editor").is_empty());
     }
+
+    #[test]
+    fn format_duration_milliseconds() {
+        assert_eq!(format_duration(std::time::Duration::from_millis(0)), "0ms");
+        assert_eq!(format_duration(std::time::Duration::from_millis(42)), "42ms");
+        assert_eq!(
+            format_duration(std::time::Duration::from_millis(999)),
+            "999ms"
+        );
+    }
+
+    #[test]
+    fn format_duration_seconds() {
+        assert_eq!(
+            format_duration(std::time::Duration::from_millis(1000)),
+            "1.00s"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_millis(2600)),
+            "2.60s"
+        );
+    }
+
+    #[test]
+    fn format_compose_perf_report_contains_sections() {
+        use darkmatter::markdown::compose::{ComposePerfMetric, ComposePerfReport};
+
+        let cli_perf = CliComposePerfReport {
+            load_input: std::time::Duration::from_millis(8),
+            resolve_input: std::time::Duration::from_millis(1),
+            capture_context: std::time::Duration::from_millis(50),
+            validate_references: std::time::Duration::from_millis(100),
+            build_options: std::time::Duration::from_millis(2),
+            compose_pipeline: std::time::Duration::from_millis(54),
+            total: std::time::Duration::from_millis(215),
+        };
+
+        let compose_perf = ComposePerfReport {
+            total: std::time::Duration::from_millis(54),
+            metrics: vec![
+                ComposePerfMetric {
+                    name: "cleanup".to_string(),
+                    elapsed: std::time::Duration::from_millis(3),
+                    calls: 1,
+                },
+                ComposePerfMetric {
+                    name: "normalization".to_string(),
+                    elapsed: std::time::Duration::from_millis(5),
+                    calls: 1,
+                },
+            ],
+        };
+
+        let rendered = format_compose_perf_report(&cli_perf, Some(&compose_perf));
+
+        assert!(rendered.contains("Command Setup"));
+        assert!(rendered.contains("Compose Pipeline"));
+        assert!(rendered.contains("load input:"));
+        assert!(rendered.contains("cleanup:"));
+        assert!(rendered.contains("normalization:"));
+        // Verify the yellow border is present (ANSI escape for the block quote bar)
+        assert!(rendered.contains("│"));
+    }
+
+    #[test]
+    fn format_compose_perf_report_without_pipeline() {
+        let cli_perf = CliComposePerfReport {
+            load_input: std::time::Duration::from_millis(1),
+            resolve_input: std::time::Duration::ZERO,
+            capture_context: std::time::Duration::ZERO,
+            validate_references: std::time::Duration::ZERO,
+            build_options: std::time::Duration::ZERO,
+            compose_pipeline: std::time::Duration::ZERO,
+            total: std::time::Duration::from_millis(1),
+        };
+
+        let rendered = format_compose_perf_report(&cli_perf, None);
+
+        assert!(rendered.contains("Command Setup"));
+        assert!(!rendered.contains("Compose Pipeline"));
+    }
 }
 
 fn run_validate(target: ValidateTarget) -> Result<()> {
@@ -1756,4 +1873,100 @@ fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Resul
     }
 
     Ok(())
+}
+
+// ── Compose performance report ────────────────────────────────────────
+
+/// CLI-envelope timings for the compose command.
+struct CliComposePerfReport {
+    load_input: std::time::Duration,
+    resolve_input: std::time::Duration,
+    capture_context: std::time::Duration,
+    validate_references: std::time::Duration,
+    build_options: std::time::Duration,
+    compose_pipeline: std::time::Duration,
+    total: std::time::Duration,
+}
+
+/// Formats a duration as a human-readable string.
+///
+/// Sub-second durations are shown in milliseconds (e.g., "8ms").
+/// Longer durations are shown in seconds with two decimals (e.g., "2.60s").
+fn format_duration(d: std::time::Duration) -> String {
+    let millis = d.as_millis();
+    if millis < 1000 {
+        format!("{}ms", millis)
+    } else {
+        format!("{:.2}s", d.as_secs_f64())
+    }
+}
+
+/// Builds the full perf report string for the compose command.
+fn format_compose_perf_report(
+    cli_perf: &CliComposePerfReport,
+    compose_perf: Option<&darkmatter::markdown::compose::ComposePerfReport>,
+) -> String {
+    use biscuit_terminal::components::block_quote::BlockQuote;
+    use biscuit_terminal::components::renderable::Renderable as _;
+    use biscuit_terminal::utils::color::{BasicColor, Color};
+
+    let mut body = String::from("compose performance\n");
+
+    // Command Setup section
+    body.push_str("\nCommand Setup\n");
+    body.push_str(&format!(
+        "  load input:           {}\n",
+        format_duration(cli_perf.load_input)
+    ));
+    body.push_str(&format!(
+        "  resolve input:        {}\n",
+        format_duration(cli_perf.resolve_input)
+    ));
+    body.push_str(&format!(
+        "  capture context:      {}\n",
+        format_duration(cli_perf.capture_context)
+    ));
+    body.push_str(&format!(
+        "  validate references:  {}\n",
+        format_duration(cli_perf.validate_references)
+    ));
+    body.push_str(&format!(
+        "  build options:        {}\n",
+        format_duration(cli_perf.build_options)
+    ));
+    body.push_str(&format!(
+        "  compose pipeline:     {}\n",
+        format_duration(cli_perf.compose_pipeline)
+    ));
+    body.push_str(&format!(
+        "  total:                {}\n",
+        format_duration(cli_perf.total)
+    ));
+
+    // Compose Pipeline section
+    if let Some(perf) = compose_perf {
+        body.push_str("\nCompose Pipeline\n");
+        for metric in &perf.metrics {
+            let calls_suffix = if metric.calls > 0 {
+                format!(" ({} call{})", metric.calls, if metric.calls == 1 { "" } else { "s" })
+            } else {
+                String::new()
+            };
+            body.push_str(&format!(
+                "  {:24}{}{}\n",
+                format!("{}:", metric.name),
+                format_duration(metric.elapsed),
+                calls_suffix,
+            ));
+        }
+        body.push_str(&format!(
+            "  {:24}{}\n",
+            "total:",
+            format_duration(perf.total)
+        ));
+    }
+
+    BlockQuote::from(body.trim_end())
+        .with_left_block_color(Color::BasicColor(BasicColor::Yellow))
+        .render_optimistic(None)
 }

@@ -138,6 +138,10 @@ pub enum Command {
         /// Allow non-object ctx frontmatter (downgrade error to warning)
         #[arg(long)]
         allow_ctx_override: bool,
+
+        /// Emit a compose performance report to stderr after completion
+        #[arg(long)]
+        perf: bool,
     },
 
     /// Show markdown table of contents.
@@ -605,5 +609,23 @@ mod tests {
             .map(|value| normalize_path(&value))
             .collect();
         assert!(deep_values.contains(&"docs/deep/nested.md".to_string()));
+    }
+
+    #[test]
+    fn compose_perf_flag_sets_true() {
+        let cli = Cli::try_parse_from(["md", "compose", "doc.md", "--perf"]).unwrap();
+        match cli.command {
+            Some(Command::Compose { perf, .. }) => assert!(perf),
+            _ => panic!("Expected Compose command"),
+        }
+    }
+
+    #[test]
+    fn compose_without_perf_defaults_false() {
+        let cli = Cli::try_parse_from(["md", "compose", "doc.md"]).unwrap();
+        match cli.command {
+            Some(Command::Compose { perf, .. }) => assert!(!perf),
+            _ => panic!("Expected Compose command"),
+        }
     }
 }
