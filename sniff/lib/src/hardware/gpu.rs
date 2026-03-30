@@ -114,81 +114,123 @@ pub struct GpuInfo {
 /// model name and core count in ~25 ms.
 #[cfg(target_os = "macos")]
 pub fn detect_gpus() -> Vec<GpuInfo> {
-    use std::process::Command;
+    detect_gpus_iokit().unwrap_or_default()
+}
 
-    let output = match Command::new("ioreg")
-        .args([
-            "-rd1",
-            "-c",
-            "IOAccelerator",
-        ])
-        .output()
-    {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => return Vec::new(),
-    };
+/// Queries IOKit directly for GPU info, avoiding a subprocess spawn.
+///
+/// Reads the `IOAccelerator` IOService entries for `model` and
+/// `gpu-core-count` properties — the same data `ioreg -rd1 -c IOAccelerator`
+/// returns, but via direct FFI (~200µs vs ~22ms for process spawn).
+#[cfg(target_os = "macos")]
+fn detect_gpus_iokit() -> Option<Vec<GpuInfo>> {
+    use core_foundation::base::{CFType, TCFType, kCFAllocatorDefault};
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::CFString;
 
-    let name = parse_ioreg_string(&output, "model");
-    let core_count = parse_ioreg_int(&output, "gpu-core-count");
+    type CFMutableDictionaryRef = *mut std::ffi::c_void;
+    type CFAllocatorRef = *const std::ffi::c_void;
 
-    if let Some(name) = name {
-        let vendor = infer_vendor(&name);
-        // Apple Silicon always has unified memory and integrated GPU
-        let is_apple_silicon = vendor.as_deref() == Some("Apple");
+    // IOKit FFI — these are stable C APIs, not Metal framework
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IOServiceMatching(name: *const std::ffi::c_char) -> CFMutableDictionaryRef;
+        fn IOServiceGetMatchingServices(
+            main_port: u32,
+            matching: CFMutableDictionaryRef,
+            existing: *mut u32,
+        ) -> i32;
+        fn IOIteratorNext(iterator: u32) -> u32;
+        fn IORegistryEntryCreateCFProperties(
+            entry: u32,
+            properties: *mut CFMutableDictionaryRef,
+            allocator: CFAllocatorRef,
+            options: u32,
+        ) -> i32;
+        fn IOObjectRelease(object: u32) -> i32;
+    }
 
-        vec![
-            GpuInfo {
-                name,
-                vendor,
-                device_type: if is_apple_silicon {
-                    GpuDeviceType::Integrated
-                } else {
-                    GpuDeviceType::Unknown
-                },
-                backend: "Metal".to_string(),
-                memory_bytes: None,
-                max_buffer_bytes: None,
-                is_headless: false,
-                is_removable: false,
-                registry_id: None,
-                metal_family: None,
-                capabilities: GpuCapabilities {
-                    unified_memory: is_apple_silicon,
-                    ..Default::default()
-                },
-                core_count,
-            },
-        ]
-    } else {
-        Vec::new()
+    unsafe {
+        let class_name = std::ffi::CString::new("IOAccelerator").ok()?;
+        let matching = IOServiceMatching(class_name.as_ptr());
+        if matching.is_null() {
+            return None;
+        }
+
+        let mut iterator: u32 = 0;
+        let kr = IOServiceGetMatchingServices(0, matching, &mut iterator);
+        if kr != 0 || iterator == 0 {
+            return None;
+        }
+
+        let mut gpus = Vec::new();
+
+        loop {
+            let entry = IOIteratorNext(iterator);
+            if entry == 0 {
+                break;
+            }
+
+            let mut props_ref: CFMutableDictionaryRef = std::ptr::null_mut();
+            let kr = IORegistryEntryCreateCFProperties(
+                entry,
+                &mut props_ref,
+                kCFAllocatorDefault as CFAllocatorRef,
+                0,
+            );
+
+            if kr == 0 && !props_ref.is_null() {
+                let props: CFDictionary<CFString, CFType> =
+                    CFDictionary::wrap_under_create_rule(props_ref as _);
+
+                let name = props
+                    .find(CFString::new("model"))
+                    .and_then(|v| v.downcast::<CFString>())
+                    .map(|s| s.to_string());
+
+                let core_count = props
+                    .find(CFString::new("gpu-core-count"))
+                    .and_then(|v| v.downcast::<CFNumber>())
+                    .and_then(|n| n.to_i64())
+                    .map(|n| n as u32);
+
+                if let Some(name) = name {
+                    let vendor = infer_vendor(&name);
+                    let is_apple_silicon = vendor.as_deref() == Some("Apple");
+
+                    gpus.push(GpuInfo {
+                        name,
+                        vendor,
+                        device_type: if is_apple_silicon {
+                            GpuDeviceType::Integrated
+                        } else {
+                            GpuDeviceType::Unknown
+                        },
+                        backend: "Metal".to_string(),
+                        memory_bytes: None,
+                        max_buffer_bytes: None,
+                        is_headless: false,
+                        is_removable: false,
+                        registry_id: None,
+                        metal_family: None,
+                        capabilities: GpuCapabilities {
+                            unified_memory: is_apple_silicon,
+                            ..Default::default()
+                        },
+                        core_count,
+                    });
+                }
+            }
+
+            IOObjectRelease(entry);
+        }
+
+        IOObjectRelease(iterator);
+        Some(gpus)
     }
 }
 
-/// Parses a string value from ioreg text output.
-///
-/// Looks for patterns like `"key" = "value"`.
-#[cfg(target_os = "macos")]
-fn parse_ioreg_string(output: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{}\" = \"", key);
-    output.lines().find_map(|line| {
-        let trimmed = line.trim();
-        let rest = trimmed.strip_prefix(&pattern)?;
-        rest.strip_suffix('"').map(String::from)
-    })
-}
-
-/// Parses an integer value from ioreg text output.
-///
-/// Looks for patterns like `"key" = 40`.
-#[cfg(target_os = "macos")]
-fn parse_ioreg_int(output: &str, key: &str) -> Option<u32> {
-    let pattern = format!("\"{}\" = ", key);
-    output.lines().find_map(|line| {
-        let trimmed = line.trim();
-        let rest = trimmed.strip_prefix(&pattern)?;
-        rest.parse().ok()
-    })
-}
 
 /// Infers the GPU vendor from the device name.
 #[cfg(target_os = "macos")]
