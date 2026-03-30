@@ -30,6 +30,20 @@ pub struct ReferenceValidationOptions {
     pub fail_fast: bool,
 }
 
+impl ReferenceValidationOptions {
+    /// Creates validation options using the given graph options,
+    /// avoiding the cost of constructing a default `ComposeOptions`.
+    pub fn with_graph(graph: ReferenceGraphOptions) -> Self {
+        Self {
+            graph,
+            validate_remote: false,
+            remote_timeout: Duration::from_secs(10),
+            validate_fragments: false,
+            fail_fast: false,
+        }
+    }
+}
+
 impl Default for ReferenceValidationOptions {
     fn default() -> Self {
         Self {
