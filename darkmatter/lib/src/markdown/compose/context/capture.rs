@@ -65,7 +65,7 @@ impl ContextGroup {
             | "day_utc" | "day_abbr_utc"
             | "year" | "year_utc" | "month" | "month_name" | "month_name_abbr"
             | "day_of_month" | "day_of_month_suffixed"
-            | "time" | "time_military" | "timezone" | "timezone_offset"
+            | "time" | "time_military" | "timezone" | "timezone_offset" | "timezone_iana"
             | "start_of_week_sun" | "end_of_week_sun"
             | "start_of_week_mon" | "end_of_week_mon"
             | "start_of_week_sun_utc" | "end_of_week_sun_utc"
@@ -554,8 +554,13 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
     // Time fields
     values.insert("time".into(), Value::String(now_local.format("%I:%M %p").to_string()));
     values.insert("time_military".into(), Value::String(now_local.format("%H:%M").to_string()));
-    values.insert("timezone".into(), Value::String(now_local.format("%Z").to_string()));
+
+    // Timezone: sniff owns abbreviation derivation (handles chrono's
+    // %Z offset fallback on macOS via IANA-to-abbreviation mapping).
+    let tz_info = sniff::os::detect_timezone();
+    values.insert("timezone".into(), tz_info.timezone_abbr.map_or(Value::Null, |s| Value::String(s)));
     values.insert("timezone_offset".into(), Value::String(now_local.format("%z").to_string()));
+    values.insert("timezone_iana".into(), tz_info.timezone.map_or(Value::Null, |s| Value::String(s)));
 
     // Week boundaries (Sunday start)
     let weekday_num = today.weekday().num_days_from_sunday();
