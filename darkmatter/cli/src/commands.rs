@@ -1297,11 +1297,12 @@ mod tests {
 
         assert!(rendered.contains("Command Setup"));
         assert!(rendered.contains("Compose Pipeline"));
+        assert!(rendered.contains("Compose Performance"));
         assert!(rendered.contains("load input:"));
         assert!(rendered.contains("cleanup:"));
         assert!(rendered.contains("normalization:"));
-        // Verify the yellow border is present (ANSI escape for the block quote bar)
-        assert!(rendered.contains("│"));
+        // Verify the border is present
+        assert!(rendered.contains("▌"));
     }
 
     #[test]
@@ -1920,85 +1921,99 @@ fn format_duration(d: std::time::Duration) -> String {
     }
 }
 
+/// Formats a single metric line with optional dim/italic for skipped stages.
+fn format_metric_line(name: &str, elapsed: std::time::Duration, calls: usize) -> String {
+    if calls == 0 {
+        format!("<dim><i>{:24}--</i></dim>", format!("{}:", name))
+    } else {
+        let calls_suffix = if calls > 1 {
+            format!(" <dim>({} calls)</dim>", calls)
+        } else {
+            String::new()
+        };
+        format!(
+            "{:24}{}{}",
+            format!("{}:", name),
+            format_duration(elapsed),
+            calls_suffix,
+        )
+    }
+}
+
 /// Builds the full perf report string for the compose command.
 fn format_compose_perf_report(
     cli_perf: &CliComposePerfReport,
     compose_perf: Option<&darkmatter::markdown::compose::ComposePerfReport>,
 ) -> String {
     use biscuit_terminal::components::block_quote::BlockQuote;
+    use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::Renderable as _;
-    use biscuit_terminal::utils::color::{BasicColor, Color};
+    use biscuit_terminal::components::two_column::TwoColumn;
+    use biscuit_terminal::utils::color::{Color, Tailwind};
 
-    let mut body = String::from("compose performance\n");
-
-    // Command Setup section
-    body.push_str(&format!(
-        "\nCommand Setup (elapsed {})\n",
+    // ── Left column: Command Setup ───────────────────────────────────
+    let mut left = format!(
+        "<b>Command Setup</b> <dim>(</dim><i>elapsed</i> {}<dim>)</dim>\n",
         format_duration(cli_perf.elapsed)
-    ));
-    body.push_str(&format!(
-        "  load input:           {}\n",
-        format_duration(cli_perf.load_input)
-    ));
-    body.push_str(&format!(
-        "  resolve input:        {}\n",
-        format_duration(cli_perf.resolve_input)
-    ));
-    body.push_str(&format!(
-        "  capture context:      {}\n",
-        format_duration(cli_perf.capture_context)
-    ));
+    );
+    let cli_metrics: &[(&str, std::time::Duration)] = &[
+        ("load input", cli_perf.load_input),
+        ("resolve input", cli_perf.resolve_input),
+        ("capture context", cli_perf.capture_context),
+    ];
+    for (name, dur) in cli_metrics {
+        left.push_str(&format!("  {:22}{}\n", format!("{}:", name), format_duration(*dur)));
+    }
     for (name, elapsed) in &cli_perf.capture_context_details {
-        body.push_str(&format!(
-            "    {:<20}{}\n",
+        left.push_str(&format!(
+            "    <dim>{:20}{}</dim>\n",
             format!("{}:", name),
             format_duration(*elapsed),
         ));
     }
-    body.push_str(&format!(
-        "  validate references:  {}\n",
-        format_duration(cli_perf.validate_references)
-    ));
-    body.push_str(&format!(
-        "  build options:        {}\n",
-        format_duration(cli_perf.build_options)
-    ));
-    body.push_str(&format!(
-        "  compose pipeline:     {}\n",
-        format_duration(cli_perf.compose_pipeline)
-    ));
-
-    // Compose Pipeline section
-    if let Some(perf) = compose_perf {
-        body.push_str(&format!(
-            "\nCompose Pipeline (elapsed {})\n",
-            format_duration(perf.total)
-        ));
-        for metric in &perf.metrics {
-            if metric.calls == 0 {
-                // No-op: dim + italic to indicate skipped
-                body.push_str(&format!(
-                    "  \x1b[2m\x1b[3m{:24}--\x1b[23m\x1b[22m\n",
-                    format!("{}:", metric.name),
-                ));
-            } else {
-                let calls_suffix = if metric.calls > 1 {
-                    format!(" ({} calls)", metric.calls)
-                } else {
-                    String::new()
-                };
-                body.push_str(&format!(
-                    "  {:24}{}{}\n",
-                    format!("{}:", metric.name),
-                    format_duration(metric.elapsed),
-                    calls_suffix,
-                ));
-            }
-        }
+    let remaining: &[(&str, std::time::Duration)] = &[
+        ("validate references", cli_perf.validate_references),
+        ("build options", cli_perf.build_options),
+        ("compose pipeline", cli_perf.compose_pipeline),
+    ];
+    for (name, dur) in remaining {
+        left.push_str(&format!("  {:22}{}\n", format!("{}:", name), format_duration(*dur)));
     }
 
-    let mut rendered = BlockQuote::from(body.trim_end())
-        .with_left_block_color(Color::BasicColor(BasicColor::Yellow))
+    // ── Right column: Compose Pipeline ───────────────────────────────
+    let right = if let Some(perf) = compose_perf {
+        let mut col = format!(
+            "<b>Compose Pipeline</b> <dim>(</dim><i>elapsed</i> {}<dim>)</dim>\n",
+            format_duration(perf.total)
+        );
+        for metric in &perf.metrics {
+            col.push_str(&format_metric_line(&metric.name, metric.elapsed, metric.calls));
+            col.push('\n');
+        }
+        col
+    } else {
+        String::new()
+    };
+
+    // ── Title ────────────────────────────────────────────────────────
+    let title = Prose::new("<b><yellow>Compose Performance</yellow></b>")
+        .render_optimistic(None);
+
+    // ── Two-column layout ────────────────────────────────────────────
+    let columns = TwoColumn::new(
+        Prose::new(left.trim_end()),
+        Prose::new(right.trim_end()),
+    )
+    .with_left_percent(0.5)
+    .with_gap(2);
+
+    let body = columns.render_optimistic(None);
+
+    // ── Wrap in a styled block quote ─────────────────────────────────
+    let content = format!("{title}\n{body}");
+    let mut rendered = BlockQuote::from(content.trim_end())
+        .with_left_block_color(Color::Tailwind(Tailwind::Yellow400))
+        .with_border("▌ ")
         .render_optimistic(None);
     if !rendered.ends_with('\n') {
         rendered.push('\n');
