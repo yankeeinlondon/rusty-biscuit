@@ -1520,6 +1520,7 @@ fn build_untracked_files(paths: &[PathBuf], repo_root: &Option<PathBuf>) -> Vec<
 
 /// Gets git configuration (user info, GPG, signing).
 fn get_git_config(repo: &Repository) -> GitConfig {
+    #[allow(unused_mut)]
     let mut config = match repo.config() {
         Ok(c) => c,
         Err(_) => return GitConfig::default(),
