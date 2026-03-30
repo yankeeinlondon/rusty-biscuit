@@ -882,10 +882,10 @@ mod tests {
         }
 
         #[test]
-        fn resolves_ctx_dow() {
+        fn resolves_ctx_day() {
             let state = create_test_state(json!({}));
             let evaluator = Evaluator::new(&state);
-            let expr = parse("ctx.dow").unwrap();
+            let expr = parse("ctx.day").unwrap();
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "Saturday"),
