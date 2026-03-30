@@ -11,6 +11,7 @@ use super::super::normalize::NormalizationReport;
 use super::cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use url::Url;
 
 /// Every discrete operation in the compose pipeline.
@@ -360,6 +361,11 @@ pub struct ComposeOptions {
     /// prevent cross-contamination between different contexts.
     pub cache_namespace: Option<String>,
 
+    // ── Performance ─────────────────────────────────────────────────
+    /// When `true`, the pipeline collects per-stage timing metrics
+    /// and populates `ComposeReport::perf`. Default: `false`.
+    pub perf_enabled: bool,
+
     // ── Internal (crate-private) ───────────────────────────────────
     /// Runtime context captured at construction time (timestamps,
     /// environment variables).
@@ -408,6 +414,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("cache_freshness_mode", &self.cache_freshness_mode)
             .field("cache_root", &self.cache_root)
             .field("cache_namespace", &self.cache_namespace)
+            .field("perf_enabled", &self.perf_enabled)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
             .field("context", &self.context)
@@ -447,6 +454,7 @@ impl ComposeOptions {
             cache_freshness_mode: CacheFreshnessMode::default(),
             cache_root: None,
             cache_namespace: None,
+            perf_enabled: false,
             context: ComposeContext::capture(),
             replace_parent_wins: false,
             one_off_replace: None,
@@ -730,6 +738,13 @@ impl ComposeOptions {
     /// and compose, avoiding redundant capture work.
     pub fn with_context(mut self, context: ComposeContext) -> Self {
         self.context = context;
+        self
+    }
+
+    /// Enables or disables performance metric collection.
+    #[must_use]
+    pub fn with_perf(mut self, enabled: bool) -> Self {
+        self.perf_enabled = enabled;
         self
     }
 }
@@ -1052,6 +1067,57 @@ impl ComposeContext {
     }
 }
 
+/// A single timing metric from the compose pipeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposePerfMetric {
+    /// Human-readable stage name (e.g., "text replacement").
+    pub name: String,
+    /// Accumulated elapsed time for this metric.
+    pub elapsed: Duration,
+    /// Number of times this metric was recorded.
+    pub calls: usize,
+}
+
+/// Aggregated performance timings from the compose pipeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposePerfReport {
+    /// Total compose pipeline time.
+    pub total: Duration,
+    /// Per-stage metrics in deterministic order.
+    pub metrics: Vec<ComposePerfMetric>,
+}
+
+impl ComposePerfReport {
+    /// Creates an empty perf report.
+    pub fn new() -> Self {
+        Self {
+            total: Duration::ZERO,
+            metrics: Vec::new(),
+        }
+    }
+
+    /// Merges another perf report into this one by summing matching
+    /// metric durations and call counts.
+    pub fn merge(&mut self, other: &ComposePerfReport) {
+        self.total += other.total;
+
+        for other_metric in &other.metrics {
+            if let Some(existing) = self.metrics.iter_mut().find(|m| m.name == other_metric.name) {
+                existing.elapsed += other_metric.elapsed;
+                existing.calls += other_metric.calls;
+            } else {
+                self.metrics.push(other_metric.clone());
+            }
+        }
+    }
+}
+
+impl Default for ComposePerfReport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Report of changes made during compose execution.
 ///
 /// Contains counts of changes made by each stage and any warnings
@@ -1099,6 +1165,9 @@ pub struct ComposeReport {
 
     /// Cache statistics from this compose run.
     pub cache_stats: Option<CacheStats>,
+
+    /// Performance timings when `ComposeOptions::perf_enabled` is `true`.
+    pub perf: Option<ComposePerfReport>,
 }
 
 impl ComposeReport {
@@ -1231,6 +1300,13 @@ impl ComposeReport {
         match (&mut self.cache_stats, other.cache_stats) {
             (Some(self_stats), Some(ref other_stats)) => self_stats.merge(other_stats),
             (None, Some(other_stats)) => self.cache_stats = Some(other_stats),
+            _ => {}
+        }
+
+        // Merge perf reports
+        match (&mut self.perf, other.perf) {
+            (Some(self_perf), Some(ref other_perf)) => self_perf.merge(other_perf),
+            (None, Some(other_perf)) => self.perf = Some(other_perf),
             _ => {}
         }
     }
@@ -1607,5 +1683,130 @@ mod tests {
 
         let transclusion = options.transclusion_options();
         assert!(transclusion.magic_paths.is_empty());
+    }
+
+    #[test]
+    fn perf_disabled_by_default() {
+        let options = ComposeOptions::new();
+        assert!(!options.perf_enabled);
+    }
+
+    #[test]
+    fn with_perf_enables_collection() {
+        let options = ComposeOptions::new().with_perf(true);
+        assert!(options.perf_enabled);
+    }
+
+    #[test]
+    fn compose_report_perf_none_by_default() {
+        let report = ComposeReport::new();
+        assert!(report.perf.is_none());
+    }
+
+    #[test]
+    fn compose_perf_report_merge_sums_durations() {
+        let mut parent = ComposePerfReport {
+            total: Duration::from_millis(10),
+            metrics: vec![
+                ComposePerfMetric {
+                    name: "cleanup".to_string(),
+                    elapsed: Duration::from_millis(3),
+                    calls: 1,
+                },
+                ComposePerfMetric {
+                    name: "interpolation".to_string(),
+                    elapsed: Duration::from_millis(5),
+                    calls: 2,
+                },
+            ],
+        };
+        let child = ComposePerfReport {
+            total: Duration::from_millis(7),
+            metrics: vec![
+                ComposePerfMetric {
+                    name: "cleanup".to_string(),
+                    elapsed: Duration::from_millis(2),
+                    calls: 1,
+                },
+                ComposePerfMetric {
+                    name: "normalization".to_string(),
+                    elapsed: Duration::from_millis(4),
+                    calls: 1,
+                },
+            ],
+        };
+
+        parent.merge(&child);
+
+        assert_eq!(parent.total, Duration::from_millis(17));
+
+        let cleanup = parent.metrics.iter().find(|m| m.name == "cleanup").unwrap();
+        assert_eq!(cleanup.elapsed, Duration::from_millis(5));
+        assert_eq!(cleanup.calls, 2);
+
+        let interp = parent
+            .metrics
+            .iter()
+            .find(|m| m.name == "interpolation")
+            .unwrap();
+        assert_eq!(interp.elapsed, Duration::from_millis(5));
+        assert_eq!(interp.calls, 2);
+
+        let norm = parent
+            .metrics
+            .iter()
+            .find(|m| m.name == "normalization")
+            .unwrap();
+        assert_eq!(norm.elapsed, Duration::from_millis(4));
+        assert_eq!(norm.calls, 1);
+    }
+
+    #[test]
+    fn compose_report_merge_with_perf_none_and_some() {
+        let mut report_a = ComposeReport::new();
+        assert!(report_a.perf.is_none());
+
+        let mut report_b = ComposeReport::new();
+        report_b.perf = Some(ComposePerfReport {
+            total: Duration::from_millis(5),
+            metrics: vec![ComposePerfMetric {
+                name: "cleanup".to_string(),
+                elapsed: Duration::from_millis(5),
+                calls: 1,
+            }],
+        });
+
+        report_a.merge(report_b);
+        assert!(report_a.perf.is_some());
+        assert_eq!(report_a.perf.as_ref().unwrap().total, Duration::from_millis(5));
+    }
+
+    #[test]
+    fn compose_report_merge_with_both_perf() {
+        let mut report_a = ComposeReport::new();
+        report_a.perf = Some(ComposePerfReport {
+            total: Duration::from_millis(10),
+            metrics: vec![ComposePerfMetric {
+                name: "cleanup".to_string(),
+                elapsed: Duration::from_millis(3),
+                calls: 1,
+            }],
+        });
+
+        let mut report_b = ComposeReport::new();
+        report_b.perf = Some(ComposePerfReport {
+            total: Duration::from_millis(7),
+            metrics: vec![ComposePerfMetric {
+                name: "cleanup".to_string(),
+                elapsed: Duration::from_millis(2),
+                calls: 1,
+            }],
+        });
+
+        report_a.merge(report_b);
+        let perf = report_a.perf.as_ref().unwrap();
+        assert_eq!(perf.total, Duration::from_millis(17));
+        assert_eq!(perf.metrics[0].elapsed, Duration::from_millis(5));
+        assert_eq!(perf.metrics[0].calls, 2);
     }
 }
