@@ -742,6 +742,26 @@ impl Markdown {
             match parse(&loc.expression) {
                 Ok(expr) => match evaluator.eval(&expr) {
                     EvalResult::Value(replacement) => {
+                        // For multiline replacements, inherit the indentation
+                        // of the line where {{ ... }} appears so nested lists
+                        // and other block content stay properly aligned.
+                        let replacement = if replacement.contains('\n') {
+                            let line_start = new_content[..loc.start]
+                                .rfind('\n')
+                                .map(|i| i + 1)
+                                .unwrap_or(0);
+                            let indent: String = new_content[line_start..loc.start]
+                                .chars()
+                                .take_while(|c| c.is_whitespace())
+                                .collect();
+                            if indent.is_empty() {
+                                replacement
+                            } else {
+                                replacement.replace('\n', &format!("\n{indent}"))
+                            }
+                        } else {
+                            replacement
+                        };
                         new_content.replace_range(loc.start..loc.end, &replacement);
                         count += 1;
                     }

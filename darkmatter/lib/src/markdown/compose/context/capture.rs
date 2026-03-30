@@ -75,7 +75,8 @@ impl ContextGroup {
             // Repo
             "repo" | "repo_root" | "is_monorepo"
             | "package_root" | "package_area_root"
-            | "packages" | "package_areas"
+            | "packages" | "packages_list"
+            | "package_areas" | "package_areas_list"
             | "current_package" | "current_package_area" => Some(Self::Repo),
 
             // FileChanges
@@ -245,7 +246,7 @@ impl ContextCapture {
                     let rr = &repo_root;
                     Some(s.spawn(move || {
                         let t = Instant::now();
-                        let result = rr.as_ref().and_then(|root| repo::detect_repo(root).ok().flatten());
+                        let result = rr.as_ref().and_then(|root| repo::detect_repo_structure(root).ok().flatten());
                         (result, t.elapsed())
                     }))
                 } else {
@@ -637,7 +638,8 @@ fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
             .and_then(|r| r.packages.as_ref())
             .map(|pkgs| pkgs.iter().map(|p| p.name.clone()).collect())
             .unwrap_or_default();
-        values.insert("packages".into(), Value::Array(packages.iter().map(|n| Value::String(n.clone())).collect()));
+        values.insert("packages".into(), Value::String(format::format_csv(&packages)));
+        values.insert("packages_list".into(), Value::String(format::format_md_list(&packages)));
 
         let areas: Vec<String> = repo
             .and_then(|r| r.packages.as_ref())
@@ -648,7 +650,8 @@ fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
                 areas
             })
             .unwrap_or_default();
-        values.insert("package_areas".into(), Value::Array(areas.iter().map(|a| Value::String(a.clone())).collect()));
+        values.insert("package_areas".into(), Value::String(format::format_csv(&areas)));
+        values.insert("package_areas_list".into(), Value::String(format::format_md_list(&areas)));
 
         values.insert(
             "current_package".into(),
@@ -666,7 +669,9 @@ fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
         values.insert("package_root".into(), Value::Null);
         values.insert("package_area_root".into(), Value::Null);
         values.insert("packages".into(), Value::Null);
+        values.insert("packages_list".into(), Value::Null);
         values.insert("package_areas".into(), Value::Null);
+        values.insert("package_areas_list".into(), Value::Null);
         values.insert("current_package".into(), Value::Null);
         values.insert("current_package_area".into(), Value::Null);
     }
@@ -1135,7 +1140,7 @@ fn populate_hardware(cap: &ContextCapture, values: &mut Map<String, Value>) {
     values.insert(
         "memory_total".into(),
         hw.map_or(Value::Null, |h| {
-            Value::Number(h.memory.total_bytes.into())
+            Value::String(format::format_bytes(h.memory.total_bytes))
         }),
     );
 
@@ -1143,9 +1148,12 @@ fn populate_hardware(cap: &ContextCapture, values: &mut Map<String, Value>) {
         "memory_used".into(),
         hw.map_or(Value::Null, |h| {
             if h.memory.total_bytes > 0 {
-                Value::Number(((h.memory.used_bytes * 100) / h.memory.total_bytes).into())
+                Value::String(format!(
+                    "{}%",
+                    (h.memory.used_bytes * 100) / h.memory.total_bytes
+                ))
             } else {
-                Value::Number(0.into())
+                Value::String("0%".to_string())
             }
         }),
     );
@@ -1153,7 +1161,7 @@ fn populate_hardware(cap: &ContextCapture, values: &mut Map<String, Value>) {
     values.insert(
         "memory_avail".into(),
         hw.map_or(Value::Null, |h| {
-            Value::Number(h.memory.available_bytes.into())
+            Value::String(format::format_bytes(h.memory.available_bytes))
         }),
     );
 

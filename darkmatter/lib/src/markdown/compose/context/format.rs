@@ -17,6 +17,31 @@ pub(crate) fn format_md_list(items: &[impl AsRef<str>]) -> String {
         .collect::<String>()
 }
 
+/// Formats a byte count as a human-readable string (e.g., "128 GB").
+///
+/// Uses binary units (GiB thresholds) but labels as GB/MB/KB for
+/// readability in prose contexts.
+pub(crate) fn format_bytes(bytes: u64) -> String {
+    const GB: u64 = 1_073_741_824;
+    const MB: u64 = 1_048_576;
+    const KB: u64 = 1_024;
+
+    if bytes >= GB {
+        let gb = bytes as f64 / GB as f64;
+        if gb.fract().abs() < 0.05 {
+            format!("{:.0} GB", gb)
+        } else {
+            format!("{:.1} GB", gb)
+        }
+    } else if bytes >= MB {
+        format!("{:.0} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.0} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} bytes")
+    }
+}
+
 /// Returns the ordinal suffix for a day number ("st", "nd", "rd", "th").
 pub(crate) fn ordinal_suffix(n: u32) -> &'static str {
     if (11..=13).contains(&(n % 100)) {
