@@ -123,17 +123,13 @@ impl PerfCollector {
 
         let metrics = PerfMetricKind::all()
             .iter()
-            .filter_map(|kind| {
+            .map(|kind| {
                 let idx = *kind as usize;
                 let (elapsed, calls) = self.durations[idx];
-                if calls > 0 {
-                    Some(ComposePerfMetric {
-                        name: kind.label().to_string(),
-                        elapsed,
-                        calls,
-                    })
-                } else {
-                    None
+                ComposePerfMetric {
+                    name: kind.label().to_string(),
+                    elapsed,
+                    calls,
                 }
             })
             .collect();

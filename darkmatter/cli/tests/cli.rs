@@ -424,7 +424,7 @@ fn test_compose_perf_emits_report_to_stderr() {
         .stdout(predicate::str::contains("World"))
         .stderr(predicate::str::contains("Command Setup"))
         .stderr(predicate::str::contains("Compose Pipeline"))
-        .stderr(predicate::str::contains("total:"));
+        .stderr(predicate::str::contains("elapsed"));
 }
 
 #[test]

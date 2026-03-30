@@ -2,11 +2,12 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value};
 use sniff::filesystem::blast_radius;
 use sniff::filesystem::docs::{self, MarkdownMeta};
-use sniff::filesystem::git::{self, FileStatus, GitInfo};
+use sniff::filesystem::git::{FileStatus, GitRepo};
 use sniff::filesystem::repo::{self, Package, RepoInfo};
 use sniff::hardware::{self, HardwareInfo};
 use sniff::os::{self, OsInfo, OsType};
@@ -138,10 +139,9 @@ pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {
             if !key.is_empty() {
                 if let Some(group) = ContextGroup::for_key(key) {
                     groups.insert(group);
-                } else {
-                    // Unknown key — could be user-defined ctx, capture all
-                    return ContextGroup::all();
                 }
+                // Unknown keys are user-defined ctx (from frontmatter),
+                // not runtime-captured — no additional groups needed.
             }
             pos = key_end;
         } else {
@@ -156,8 +156,16 @@ pub(crate) fn scan_needed_groups(content: &str) -> HashSet<ContextGroup> {
 ///
 /// Built once per compose run to avoid repeated sniff calls. All derived
 /// context variables are computed from this single struct.
+///
+/// Uses `GitRepo` for atomic queries instead of the monolithic `detect_git`,
+/// so only the fields actually needed are computed.
 struct ContextCapture {
-    git_info: Option<GitInfo>,
+    /// Repository root path (cheap: from `GitRepo::discover`).
+    repo_root: Option<PathBuf>,
+    /// Repo name parsed from preferred remote URL (cheap: reads git config).
+    repo_name: Option<String>,
+    /// Whether a git repo was found at all.
+    has_git: bool,
     repo_info: Option<RepoInfo>,
     docs: Option<Vec<MarkdownMeta>>,
     os_info: Option<OsInfo>,
@@ -168,21 +176,23 @@ struct ContextCapture {
     staged_paths: Vec<PathBuf>,
     untracked_paths: Vec<PathBuf>,
     diagnostics: Vec<ContextMergeDiagnostic>,
+    timings: Vec<(String, Duration)>,
 }
 
 impl ContextCapture {
     /// Build the capture from a base directory for the requested groups.
     ///
-    /// Uses lightweight sniff summary APIs and parallelizes independent
-    /// probes after the initial git detection (which provides repo_root
-    /// needed by downstream probes).
+    /// Uses `GitRepo` for atomic queries. `GitRepo::discover` is the only
+    /// sequential step (cheap — just finds `.git`). All other probes run
+    /// in parallel via `std::thread::scope`.
     fn new(base_dir: &Path, groups: &HashSet<ContextGroup>) -> Self {
         let mut diagnostics = Vec::new();
+        let mut timings = Vec::new();
 
-        // Determine which heavyweight probes are needed
         let need_git = groups.iter().any(|g| matches!(g,
             ContextGroup::Repo | ContextGroup::FileChanges | ContextGroup::Languages | ContextGroup::Documents
         ));
+        let need_file_changes = groups.contains(&ContextGroup::FileChanges);
         let need_repo = groups.iter().any(|g| matches!(g,
             ContextGroup::Repo | ContextGroup::FileChanges | ContextGroup::Languages | ContextGroup::Documents
         ));
@@ -190,10 +200,11 @@ impl ContextCapture {
         let need_os = groups.contains(&ContextGroup::Os);
         let need_hw = groups.contains(&ContextGroup::Hardware);
 
-        // ── Phase 1: Git detection (sequential — provides repo_root) ──
-        let git_info = if need_git {
-            match git::detect_git(base_dir, false, 10) {
-                Ok(info) => info,
+        // ── Git discovery (near-instant — just finds .git) ───────────
+        let t = Instant::now();
+        let git_handle = if need_git {
+            match GitRepo::discover(base_dir) {
+                Ok(handle) => handle,
                 Err(e) => {
                     diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
                         area: "git",
@@ -205,81 +216,119 @@ impl ContextCapture {
         } else {
             None
         };
-
-        let repo_root = git_info.as_ref().map(|g| g.repo_root.clone());
-
-        // ── Phase 2: Repo detection (sequential — needed by docs) ─────
-        let repo_info = if need_repo {
-            repo_root.as_ref().and_then(|root| {
-                match repo::detect_repo(root) {
-                    Ok(info) => info,
-                    Err(e) => {
-                        diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
-                            area: "repo",
-                            detail: e.to_string(),
-                        });
-                        None
-                    }
-                }
-            })
-        } else {
-            None
-        };
-
-        // Pre-compute package list for docs (avoids redundant detect_repo)
-        let package_list: Vec<(String, std::path::PathBuf)> = repo_info
+        let has_git = git_handle.is_some();
+        let repo_root = git_handle.as_ref().map(|h| h.repo_root().to_path_buf());
+        let (_org, repo_name) = git_handle
             .as_ref()
-            .and_then(|ri| ri.packages.as_ref())
-            .map(|pkgs| {
-                pkgs.iter()
-                    .map(|p| {
-                        let rel_path = p.path.strip_prefix(
-                            repo_info.as_ref().map(|r| &r.root).unwrap()
-                        ).unwrap_or(&p.path).to_path_buf();
-                        (p.name.clone(), rel_path)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+            .map(|h| h.org_and_repo())
+            .unwrap_or((None, None));
+        if need_git { timings.push(("git".into(), t.elapsed())); }
 
-        // ── Phase 3: Parallel independent probes ───���──────────────────
-        let (docs, os_info, hardware_info) = std::thread::scope(|s| {
-            let docs_handle = if need_docs {
-                let pl = &package_list;
-                let rr = &repo_root;
-                Some(s.spawn(move || {
-                    rr.as_ref().and_then(|root| {
-                        docs::detect_docs_with_packages(root, pl)
-                    })
-                }))
-            } else {
-                None
-            };
+        // ── All remaining probes run in parallel ─────────────────────
+        let (file_changes, repo_info, docs, os_info, hardware_info) =
+            std::thread::scope(|s| {
+                let fc_handle = if need_file_changes && has_git {
+                    let bd = base_dir.to_path_buf();
+                    Some(s.spawn(move || {
+                        let t = Instant::now();
+                        let result = GitRepo::discover(&bd)
+                            .ok()
+                            .flatten()
+                            .and_then(|h| h.file_changes().ok());
+                        (result.unwrap_or_default(), t.elapsed())
+                    }))
+                } else {
+                    None
+                };
 
-            let os_handle = if need_os {
-                Some(s.spawn(os::detect_os))
-            } else {
-                None
-            };
+                let repo_handle = if need_repo {
+                    let rr = &repo_root;
+                    Some(s.spawn(move || {
+                        let t = Instant::now();
+                        let result = rr.as_ref().and_then(|root| repo::detect_repo(root).ok().flatten());
+                        (result, t.elapsed())
+                    }))
+                } else {
+                    None
+                };
 
-            let hw_handle = if need_hw {
-                Some(s.spawn(hardware::detect_hardware_summary))
-            } else {
-                None
-            };
+                let os_handle = if need_os {
+                    Some(s.spawn(|| {
+                        let t = Instant::now();
+                        let result = os::detect_os();
+                        (result, t.elapsed())
+                    }))
+                } else {
+                    None
+                };
 
-            let docs = docs_handle.and_then(|h| h.join().unwrap_or(None));
-            let os_info = os_handle.map(|h| {
-                h.join().map_err(|_| "OS detection panicked".to_string())
-                    .and_then(|r| r.map_err(|e| e.to_string()))
+                let hw_handle = if need_hw {
+                    Some(s.spawn(|| {
+                        let t = Instant::now();
+                        let result = hardware::detect_hardware_summary();
+                        (result, t.elapsed())
+                    }))
+                } else {
+                    None
+                };
+
+                // Collect repo first — docs depends on it
+                let (repo_info, repo_elapsed) = repo_handle
+                    .map(|h| h.join().unwrap_or((None, Duration::ZERO)))
+                    .unwrap_or((None, Duration::ZERO));
+
+                // Docs runs after repo because it needs the package list.
+                // It still runs concurrently with file_changes/os/hw which
+                // haven't been joined yet.
+                let docs = if need_docs {
+                    let t = Instant::now();
+                    let package_list: Vec<(String, PathBuf)> = repo_info
+                        .as_ref()
+                        .and_then(|ri| ri.packages.as_ref())
+                        .map(|pkgs| {
+                            pkgs.iter()
+                                .map(|p| {
+                                    let rel_path = p.path.strip_prefix(&repo_info.as_ref().unwrap().root)
+                                        .unwrap_or(&p.path).to_path_buf();
+                                    (p.name.clone(), rel_path)
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let result = repo_root.as_ref().and_then(|root| {
+                        docs::detect_docs_with_packages(root, &package_list)
+                    });
+                    timings.push(("docs".into(), t.elapsed()));
+                    result
+                } else {
+                    None
+                };
+
+                if need_repo { timings.push(("repo".into(), repo_elapsed)); }
+
+                let (file_changes, fc_elapsed) = fc_handle
+                    .map(|h| h.join().unwrap_or((Vec::new(), Duration::ZERO)))
+                    .unwrap_or((Vec::new(), Duration::ZERO));
+                if need_file_changes { timings.push(("file_changes".into(), fc_elapsed)); }
+
+                let os_info = os_handle.map(|h| match h.join() {
+                    Ok((result, elapsed)) => {
+                        timings.push(("os".into(), elapsed));
+                        result.map_err(|e| e.to_string())
+                    }
+                    Err(_) => Err("OS detection panicked".to_string()),
+                });
+
+                let hardware_info = hw_handle.map(|h| match h.join() {
+                    Ok((result, elapsed)) => {
+                        timings.push(("hardware".into(), elapsed));
+                        result.map_err(|e| e.to_string())
+                    }
+                    Err(_) => Err("hardware detection panicked".to_string()),
+                });
+
+                (file_changes, repo_info, docs, os_info, hardware_info)
             });
-            let hw_info = hw_handle.map(|h| {
-                h.join().map_err(|_| "hardware detection panicked".to_string())
-                    .and_then(|r| r.map_err(|e| e.to_string()))
-            });
-
-            (docs, os_info, hw_info)
-        });
 
         let os_info = match os_info {
             Some(Ok(info)) => Some(info),
@@ -306,8 +355,6 @@ impl ContextCapture {
         };
 
         // ── Derived fields from git/repo ──────────────────────────────
-
-        // Current package and package area
         let (current_package, current_package_area) =
             if let Some(ref ri) = repo_info {
                 if ri.is_monorepo {
@@ -334,12 +381,6 @@ impl ContextCapture {
                 (None, None)
             };
 
-        // File changes from git
-        let file_changes = git_info
-            .as_ref()
-            .map(|g| &g.file_changes[..])
-            .unwrap_or(&[]);
-
         let dirty_paths = file_changes
             .iter()
             .filter(|fc| matches!(fc.status, FileStatus::Modified | FileStatus::Both | FileStatus::Staged | FileStatus::Untracked))
@@ -359,7 +400,9 @@ impl ContextCapture {
             .collect();
 
         Self {
-            git_info,
+            repo_root,
+            repo_name,
+            has_git,
             repo_info,
             docs,
             os_info,
@@ -370,17 +413,15 @@ impl ContextCapture {
             staged_paths,
             untracked_paths,
             diagnostics,
+            timings,
         }
     }
 }
 
 /// Capture all runtime context variables for the given base directory.
-///
-/// Returns a `(Map, Vec<ContextMergeDiagnostic>)` tuple. The map contains all
-/// context variables; the diagnostics list any partial capture failures.
 pub(crate) fn capture_runtime_context(
     base_dir: &Path,
-) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>) {
+) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>, Vec<(String, Duration)>) {
     capture_runtime_context_for_groups(base_dir, &ContextGroup::all())
 }
 
@@ -392,7 +433,7 @@ pub(crate) fn capture_runtime_context(
 pub(crate) fn capture_runtime_context_for_content(
     base_dir: &Path,
     content: &str,
-) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>) {
+) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>, Vec<(String, Duration)>) {
     let groups = scan_needed_groups(content);
     // DateTime is always included (zero-cost local computation)
     let mut groups = groups;
@@ -404,7 +445,7 @@ pub(crate) fn capture_runtime_context_for_content(
 fn capture_runtime_context_for_groups(
     base_dir: &Path,
     groups: &HashSet<ContextGroup>,
-) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>) {
+) -> (Map<String, Value>, Vec<ContextMergeDiagnostic>, Vec<(String, Duration)>) {
     let cap = ContextCapture::new(base_dir, groups);
     let mut values = Map::new();
 
@@ -438,7 +479,7 @@ fn capture_runtime_context_for_groups(
         populate_hardware(&cap, &mut values);
     }
 
-    (values, cap.diagnostics)
+    (values, cap.diagnostics, cap.timings)
 }
 
 // ── Date/time helpers ─────────────────────────────────────────────
@@ -557,14 +598,13 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
 // ── Repo context ──────────────────────────────────────────────────
 
 fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
-    let git = cap.git_info.as_ref();
     let repo = cap.repo_info.as_ref();
 
     // repo and repo_root
-    values.insert("repo".into(), git.and_then(|g| g.repo.as_ref()).map_or(Value::Null, |r| Value::String(r.clone())));
+    values.insert("repo".into(), cap.repo_name.as_ref().map_or(Value::Null, |r| Value::String(r.clone())));
     values.insert(
         "repo_root".into(),
-        git.map_or(Value::Null, |g| Value::String(g.repo_root.to_string_lossy().to_string())),
+        cap.repo_root.as_ref().map_or(Value::Null, |r| Value::String(r.to_string_lossy().to_string())),
     );
 
     // is_monorepo
@@ -761,9 +801,8 @@ fn populate_package_changes(cap: &ContextCapture, values: &mut Map<String, Value
 
 fn populate_languages(cap: &ContextCapture, values: &mut Map<String, Value>) {
     let repo = cap.repo_info.as_ref();
-    let git = cap.git_info.as_ref();
 
-    if git.is_none() {
+    if !cap.has_git {
         values.insert("programming_languages_in_repo".into(), Value::Null);
         values.insert("programming_language".into(), Value::Null);
         values.insert("package_manager".into(), Value::Null);
@@ -973,7 +1012,7 @@ fn populate_docs(cap: &ContextCapture, values: &mut Map<String, Value>) {
 // ── Skill context ─────────────────────────────────────────────────
 
 fn populate_skills(cap: &ContextCapture, values: &mut Map<String, Value>) {
-    let repo_root = cap.git_info.as_ref().map(|g| &g.repo_root);
+    let repo_root = cap.repo_root.as_ref();
 
     let skill = repo_root.and_then(|root| {
         find_best_skill(root, cap.current_package.as_ref(), cap.current_package_area.as_deref())

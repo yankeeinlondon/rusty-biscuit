@@ -356,6 +356,8 @@ pub fn run_compose(
         )
     };
     let capture_context_dur = ctx_start.map(|s| s.elapsed()).unwrap_or_default();
+    // Keep a cheap Arc clone for perf report context timings
+    let options_ctx_ref = shared_context.clone();
 
     // ── Reference validation ───────────────────────────────────────────
     // Validate before composing so broken references are caught early.
@@ -367,12 +369,11 @@ pub fn run_compose(
             ReferenceSeverity, ReferenceValidationOptions,
         };
 
-        let val_options = ReferenceValidationOptions {
-            graph: ReferenceGraphOptions::with_compose(
-                ComposeOptions::new().with_context(shared_context.clone()),
+        let val_options = ReferenceValidationOptions::with_graph(
+            ReferenceGraphOptions::with_compose(
+                ComposeOptions::new_with_context(shared_context.clone()),
             ),
-            ..Default::default()
-        };
+        );
 
         match md.validate_references(val_options) {
             Ok(report) => {
@@ -408,7 +409,7 @@ pub fn run_compose(
     let validate_refs_dur = val_start.map(|s| s.elapsed()).unwrap_or_default();
 
     let opts_start = perf.then(Instant::now);
-    let mut options = ComposeOptions::new().with_context(shared_context);
+    let mut options = ComposeOptions::new_with_context(shared_context);
 
     // Parse --state as JSON or JSON5
     if let Some(json_str) = state_json {
@@ -589,19 +590,23 @@ pub fn run_compose(
 
     // Emit perf report to stderr (after all other diagnostics)
     if perf {
-        let total_dur = cmd_start.map(|s| s.elapsed()).unwrap_or_default();
+        let elapsed = cmd_start.map(|s| s.elapsed()).unwrap_or_default();
         let cli_perf = CliComposePerfReport {
             load_input: load_input_dur,
             resolve_input: resolve_input_dur,
             capture_context: capture_context_dur,
+            capture_context_details: options_ctx_ref.capture_timings().to_vec(),
             validate_references: validate_refs_dur,
             build_options: build_options_dur,
             compose_pipeline: compose_pipeline_dur,
-            total: total_dur,
+            elapsed,
         };
         let rendered = format_compose_perf_report(&cli_perf, report.perf.as_ref());
         eprint!("\n{rendered}");
     }
+
+    // Drop the context reference (only held for perf timings)
+    drop(options_ctx_ref);
 
     Ok(())
 }
@@ -1229,13 +1234,17 @@ mod tests {
     }
 
     #[test]
+    fn format_duration_microseconds() {
+        assert_eq!(format_duration(std::time::Duration::from_micros(0)), "0µs");
+        assert_eq!(format_duration(std::time::Duration::from_micros(42)), "42µs");
+        assert_eq!(format_duration(std::time::Duration::from_micros(999)), "999µs");
+    }
+
+    #[test]
     fn format_duration_milliseconds() {
-        assert_eq!(format_duration(std::time::Duration::from_millis(0)), "0ms");
-        assert_eq!(format_duration(std::time::Duration::from_millis(42)), "42ms");
-        assert_eq!(
-            format_duration(std::time::Duration::from_millis(999)),
-            "999ms"
-        );
+        assert_eq!(format_duration(std::time::Duration::from_micros(1_000)), "1.0ms");
+        assert_eq!(format_duration(std::time::Duration::from_millis(42)), "42.0ms");
+        assert_eq!(format_duration(std::time::Duration::from_micros(5_200)), "5.2ms");
     }
 
     #[test]
@@ -1258,10 +1267,14 @@ mod tests {
             load_input: std::time::Duration::from_millis(8),
             resolve_input: std::time::Duration::from_millis(1),
             capture_context: std::time::Duration::from_millis(50),
+            capture_context_details: vec![
+                ("git".to_string(), std::time::Duration::from_millis(20)),
+                ("repo".to_string(), std::time::Duration::from_millis(15)),
+            ],
             validate_references: std::time::Duration::from_millis(100),
             build_options: std::time::Duration::from_millis(2),
             compose_pipeline: std::time::Duration::from_millis(54),
-            total: std::time::Duration::from_millis(215),
+            elapsed: std::time::Duration::from_millis(215),
         };
 
         let compose_perf = ComposePerfReport {
@@ -1297,10 +1310,11 @@ mod tests {
             load_input: std::time::Duration::from_millis(1),
             resolve_input: std::time::Duration::ZERO,
             capture_context: std::time::Duration::ZERO,
+            capture_context_details: Vec::new(),
             validate_references: std::time::Duration::ZERO,
             build_options: std::time::Duration::ZERO,
             compose_pipeline: std::time::Duration::ZERO,
-            total: std::time::Duration::from_millis(1),
+            elapsed: std::time::Duration::from_millis(1),
         };
 
         let rendered = format_compose_perf_report(&cli_perf, None);
@@ -1882,20 +1896,25 @@ struct CliComposePerfReport {
     load_input: std::time::Duration,
     resolve_input: std::time::Duration,
     capture_context: std::time::Duration,
+    capture_context_details: Vec<(String, std::time::Duration)>,
     validate_references: std::time::Duration,
     build_options: std::time::Duration,
     compose_pipeline: std::time::Duration,
-    total: std::time::Duration,
+    elapsed: std::time::Duration,
 }
 
-/// Formats a duration as a human-readable string.
+/// Formats a duration as a human-readable string with appropriate units.
 ///
-/// Sub-second durations are shown in milliseconds (e.g., "8ms").
-/// Longer durations are shown in seconds with two decimals (e.g., "2.60s").
+/// Uses the most readable unit for the magnitude:
+/// - Under 1ms: microseconds (e.g., "42µs")
+/// - Under 1s: milliseconds with decimals (e.g., "5.2ms")
+/// - 1s and above: seconds with decimals (e.g., "2.60s")
 fn format_duration(d: std::time::Duration) -> String {
-    let millis = d.as_millis();
-    if millis < 1000 {
-        format!("{}ms", millis)
+    let micros = d.as_micros();
+    if micros < 1_000 {
+        format!("{}µs", micros)
+    } else if micros < 1_000_000 {
+        format!("{:.1}ms", micros as f64 / 1_000.0)
     } else {
         format!("{:.2}s", d.as_secs_f64())
     }
@@ -1913,7 +1932,10 @@ fn format_compose_perf_report(
     let mut body = String::from("compose performance\n");
 
     // Command Setup section
-    body.push_str("\nCommand Setup\n");
+    body.push_str(&format!(
+        "\nCommand Setup (elapsed {})\n",
+        format_duration(cli_perf.elapsed)
+    ));
     body.push_str(&format!(
         "  load input:           {}\n",
         format_duration(cli_perf.load_input)
@@ -1926,6 +1948,13 @@ fn format_compose_perf_report(
         "  capture context:      {}\n",
         format_duration(cli_perf.capture_context)
     ));
+    for (name, elapsed) in &cli_perf.capture_context_details {
+        body.push_str(&format!(
+            "    {:<20}{}\n",
+            format!("{}:", name),
+            format_duration(*elapsed),
+        ));
+    }
     body.push_str(&format!(
         "  validate references:  {}\n",
         format_duration(cli_perf.validate_references)
@@ -1938,35 +1967,41 @@ fn format_compose_perf_report(
         "  compose pipeline:     {}\n",
         format_duration(cli_perf.compose_pipeline)
     ));
-    body.push_str(&format!(
-        "  total:                {}\n",
-        format_duration(cli_perf.total)
-    ));
 
     // Compose Pipeline section
     if let Some(perf) = compose_perf {
-        body.push_str("\nCompose Pipeline\n");
-        for metric in &perf.metrics {
-            let calls_suffix = if metric.calls > 0 {
-                format!(" ({} call{})", metric.calls, if metric.calls == 1 { "" } else { "s" })
-            } else {
-                String::new()
-            };
-            body.push_str(&format!(
-                "  {:24}{}{}\n",
-                format!("{}:", metric.name),
-                format_duration(metric.elapsed),
-                calls_suffix,
-            ));
-        }
         body.push_str(&format!(
-            "  {:24}{}\n",
-            "total:",
+            "\nCompose Pipeline (elapsed {})\n",
             format_duration(perf.total)
         ));
+        for metric in &perf.metrics {
+            if metric.calls == 0 {
+                // No-op: dim + italic to indicate skipped
+                body.push_str(&format!(
+                    "  \x1b[2m\x1b[3m{:24}--\x1b[23m\x1b[22m\n",
+                    format!("{}:", metric.name),
+                ));
+            } else {
+                let calls_suffix = if metric.calls > 1 {
+                    format!(" ({} calls)", metric.calls)
+                } else {
+                    String::new()
+                };
+                body.push_str(&format!(
+                    "  {:24}{}{}\n",
+                    format!("{}:", metric.name),
+                    format_duration(metric.elapsed),
+                    calls_suffix,
+                ));
+            }
+        }
     }
 
-    BlockQuote::from(body.trim_end())
+    let mut rendered = BlockQuote::from(body.trim_end())
         .with_left_block_color(Color::BasicColor(BasicColor::Yellow))
-        .render_optimistic(None)
+        .render_optimistic(None);
+    if !rendered.ends_with('\n') {
+        rendered.push('\n');
+    }
+    rendered
 }

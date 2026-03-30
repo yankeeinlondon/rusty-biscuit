@@ -425,10 +425,19 @@ impl std::fmt::Debug for ComposeOptions {
 impl ComposeOptions {
     /// Creates new compose options with all operations enabled and captured context.
     ///
-    /// This is the only way to construct `ComposeOptions` because the
-    /// runtime context must be captured at a known point in time for
-    /// deterministic output.
+    /// Captures runtime context (timestamps, environment variables) at
+    /// construction time. If you already have a `ComposeContext`, use
+    /// [`new_with_context`](Self::new_with_context) to avoid redundant capture.
     pub fn new() -> Self {
+        Self::new_with_context(ComposeContext::capture())
+    }
+
+    /// Creates new compose options using a pre-captured context.
+    ///
+    /// Use this when you have already captured a `ComposeContext` (e.g.,
+    /// via `ComposeContext::capture_for_content`) and want to avoid
+    /// the cost of a redundant capture.
+    pub fn new_with_context(context: ComposeContext) -> Self {
         Self {
             enabled_operations: ComposeOperation::all(),
             fail_fast: false,
@@ -455,7 +464,7 @@ impl ComposeOptions {
             cache_root: None,
             cache_namespace: None,
             perf_enabled: false,
-            context: ComposeContext::capture(),
+            context,
             replace_parent_wins: false,
             one_off_replace: None,
         }
@@ -857,6 +866,7 @@ struct ComposeContextInner {
     env: HashMap<String, String>,
     values: serde_json::Map<String, serde_json::Value>,
     capture_diagnostics: Vec<super::context::ContextMergeDiagnostic>,
+    capture_timings: Vec<(String, Duration)>,
 }
 
 impl PartialEq for ComposeContext {
@@ -924,16 +934,16 @@ impl ComposeContext {
                     }],
                 );
                 super::context::capture::populate_datetime(&mut values);
-                Self::from_values(values, diagnostics)
+                Self::from_values(values, diagnostics, Vec::new())
             }
         }
     }
 
     /// Captures the runtime context using the given base directory.
     pub fn capture_for_dir(base_dir: &std::path::Path) -> Self {
-        let (values, capture_diagnostics) =
+        let (values, capture_diagnostics, timings) =
             super::context::capture::capture_runtime_context(base_dir);
-        Self::from_values(values, capture_diagnostics)
+        Self::from_values(values, capture_diagnostics, timings)
     }
 
     /// Demand-driven capture: scans `content` for `ctx.*` references and
@@ -943,15 +953,16 @@ impl ComposeContext {
     /// is captured. This avoids git, repo, docs, OS, and hardware detection
     /// for documents that don't need them.
     pub fn capture_for_content(base_dir: &std::path::Path, content: &str) -> Self {
-        let (values, capture_diagnostics) =
+        let (values, capture_diagnostics, timings) =
             super::context::capture::capture_runtime_context_for_content(base_dir, content);
-        Self::from_values(values, capture_diagnostics)
+        Self::from_values(values, capture_diagnostics, timings)
     }
 
     /// Build a `ComposeContext` from pre-computed values.
     fn from_values(
         values: serde_json::Map<String, serde_json::Value>,
         capture_diagnostics: Vec<super::context::ContextMergeDiagnostic>,
+        capture_timings: Vec<(String, Duration)>,
     ) -> Self {
         let env: HashMap<String, String> = std::env::vars().collect();
 
@@ -979,6 +990,7 @@ impl ComposeContext {
                 env,
                 values,
                 capture_diagnostics,
+                capture_timings,
             }),
         }
     }
@@ -996,6 +1008,14 @@ impl ComposeContext {
     /// Returns diagnostics from the capture phase.
     pub fn diagnostics(&self) -> &[super::context::ContextMergeDiagnostic] {
         &self.inner.capture_diagnostics
+    }
+
+    /// Returns per-group timings from the capture phase.
+    ///
+    /// Each entry is `(group_name, elapsed)`. Empty when no groups
+    /// required I/O (e.g., DateTime-only capture).
+    pub fn capture_timings(&self) -> &[(String, Duration)] {
+        &self.inner.capture_timings
     }
 
     /// Iterates the exposed key names.
@@ -1062,6 +1082,7 @@ impl ComposeContext {
                 env: HashMap::new(),
                 values,
                 capture_diagnostics: Vec::new(),
+                capture_timings: Vec::new(),
             }),
         }
     }
