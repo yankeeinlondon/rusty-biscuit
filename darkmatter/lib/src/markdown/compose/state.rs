@@ -124,8 +124,11 @@ impl EffectiveState {
             return self.get_env_value(env_key);
         }
 
-        // Handle nested path or simple key
+        // Handle nested path or simple key in frontmatter, then fall back
+        // to the ctx namespace so that `when="repo"` resolves `ctx.repo`
+        // when `repo` isn't a frontmatter key.
         self.get_nested_value(path)
+            .or_else(|| self.get_context_value(path))
     }
 
     /// Gets a string value, coercing types as needed.
