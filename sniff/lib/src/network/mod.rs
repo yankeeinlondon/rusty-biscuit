@@ -419,6 +419,14 @@ fn command_output(program: &str, args: &[&str]) -> Option<String> {
     String::from_utf8(output.stdout).ok()
 }
 
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly",
+    test
+))]
 fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
     output.lines().find_map(|line| {
         line.trim()
