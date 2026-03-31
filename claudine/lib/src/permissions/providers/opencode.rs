@@ -489,13 +489,18 @@ fn choose_target(
                     "OpenCode user config path is unavailable".to_owned(),
                 )
             }),
-        PolicyChangeTarget::RepoConfig | PolicyChangeTarget::LocalOverride => repo_path
+        PolicyChangeTarget::RepoConfig => repo_path
             .map(|path| ("opencode-repo".to_owned(), path))
             .ok_or_else(|| {
                 ClaudineError::PolicyAmbiguousContext(
                     "OpenCode repo config path is unavailable".to_owned(),
                 )
             }),
+        PolicyChangeTarget::LocalOverride => Err(ClaudineError::PolicyUnsupportedMutation {
+            provider: Provider::OpenCode,
+            op: "LocalOverride target is not supported by OpenCode (no local override concept)"
+                .to_owned(),
+        }),
         PolicyChangeTarget::Auto => {
             let has_repo = current
                 .sources

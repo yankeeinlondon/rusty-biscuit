@@ -852,13 +852,18 @@ fn choose_config_target(
                     "Codex user config path is unavailable".to_owned(),
                 )
             }),
-        PolicyChangeTarget::RepoConfig | PolicyChangeTarget::LocalOverride => repo_path
+        PolicyChangeTarget::RepoConfig => repo_path
             .map(|path| ("codex-repo".to_owned(), path))
             .ok_or_else(|| {
                 ClaudineError::PolicyAmbiguousContext(
                     "Codex repo config path is unavailable".to_owned(),
                 )
             }),
+        PolicyChangeTarget::LocalOverride => Err(ClaudineError::PolicyUnsupportedMutation {
+            provider: Provider::Codex,
+            op: "LocalOverride target is not supported by Codex (no local override concept)"
+                .to_owned(),
+        }),
         PolicyChangeTarget::Auto => {
             let has_repo = current
                 .sources
@@ -1150,10 +1155,7 @@ network_access = false
         ctx.trust.source = crate::permissions::TrustSource::Unknown;
 
         fs::write(
-            ctx.repo_root
-                .as_ref()
-                .unwrap()
-                .join(".codex/config.toml"),
+            ctx.repo_root.as_ref().unwrap().join(".codex/config.toml"),
             r#"
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
@@ -1161,10 +1163,7 @@ approval_policy = "never"
         )
         .unwrap();
         fs::write(
-            ctx.home_dir
-                .as_ref()
-                .unwrap()
-                .join(".codex/config.toml"),
+            ctx.home_dir.as_ref().unwrap().join(".codex/config.toml"),
             r#"
 sandbox_mode = "read-only"
 approval_policy = "on-request"
@@ -1223,10 +1222,22 @@ enabled_tools = ["navigate"]
             ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
 
         assert!(snapshot.can_use_mcp_server("filesystem").is_allowed());
-        assert!(snapshot.can_use_mcp_tool("filesystem", "read_file").is_allowed());
-        assert!(snapshot.can_use_mcp_tool("filesystem", "delete_file").is_denied());
+        assert!(
+            snapshot
+                .can_use_mcp_tool("filesystem", "read_file")
+                .is_allowed()
+        );
+        assert!(
+            snapshot
+                .can_use_mcp_tool("filesystem", "delete_file")
+                .is_denied()
+        );
         assert!(snapshot.can_use_mcp_server("github").is_denied());
-        assert!(snapshot.can_use_mcp_tool("browser", "navigate").is_allowed());
+        assert!(
+            snapshot
+                .can_use_mcp_tool("browser", "navigate")
+                .is_allowed()
+        );
         assert!(snapshot.can_use_mcp_tool("browser", "click").is_denied());
     }
 
@@ -1263,5 +1274,74 @@ enabled_tools = ["navigate"]
                 .argv
                 .contains(&"mcp_servers.github.enabled=false".to_owned())
         );
+    }
+
+    #[test]
+    fn codex_mcp_round_trip_mutation_changes_query_result() {
+        let (_dir, ctx) = setup_ctx();
+        let backend = CodexPolicyBackend;
+        let current = NativeEffectivePolicy::new(
+            Provider::Codex,
+            Vec::new(),
+            CodexState {
+                layers: Vec::new(),
+                cli: CodexCliOverrides::default(),
+            },
+        );
+        let change = PolicyChange::persistent(vec![
+            PolicyChangeOp::DenyMcpServer("github".to_owned()),
+            PolicyChangeOp::AllowMcpTool {
+                server: "filesystem".to_owned(),
+                tool: "read_file".to_owned(),
+            },
+        ]);
+
+        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let edit = &plan.persistent_plan.as_ref().unwrap().edits[0];
+        fs::create_dir_all(edit.path.parent().unwrap()).unwrap();
+        fs::write(&edit.path, edit.after_preview.as_bytes()).unwrap();
+
+        let sources = backend.discover_sources(&ctx).unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
+
+        assert!(snapshot.can_use_mcp_server("github").is_denied());
+        assert!(
+            snapshot
+                .can_use_mcp_tool("github", "create_issue")
+                .is_denied()
+        );
+        assert!(
+            snapshot
+                .can_use_mcp_tool("filesystem", "read_file")
+                .is_allowed()
+        );
+    }
+
+    #[test]
+    fn codex_local_override_target_returns_error() {
+        let (_dir, ctx) = setup_ctx();
+        let backend = CodexPolicyBackend;
+        let current = NativeEffectivePolicy::new(
+            Provider::Codex,
+            Vec::new(),
+            CodexState {
+                layers: Vec::new(),
+                cli: CodexCliOverrides::default(),
+            },
+        );
+        let change = PolicyChange {
+            operations: vec![PolicyChangeOp::DenyMcpServer("github".to_owned())],
+            target: crate::permissions::PolicyChangeTarget::LocalOverride,
+            persistence: crate::permissions::PolicyPersistence::Persistent,
+        };
+
+        let result = backend.plan_change(&ctx, &current, &change);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("LocalOverride"));
     }
 }

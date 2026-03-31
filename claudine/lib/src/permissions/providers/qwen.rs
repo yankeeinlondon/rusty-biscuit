@@ -888,7 +888,7 @@ fn choose_target(
                 )
             })?,
         )),
-        PolicyChangeTarget::RepoConfig | PolicyChangeTarget::LocalOverride => Ok((
+        PolicyChangeTarget::RepoConfig => Ok((
             "qwen-project".to_owned(),
             repo_path.ok_or_else(|| {
                 ClaudineError::PolicyAmbiguousContext(
@@ -896,6 +896,13 @@ fn choose_target(
                 )
             })?,
         )),
+        PolicyChangeTarget::LocalOverride => {
+            return Err(ClaudineError::PolicyUnsupportedMutation {
+                provider: Provider::QwenCode,
+                op: "LocalOverride target is not supported by Qwen (no local override concept)"
+                    .to_owned(),
+            });
+        }
         PolicyChangeTarget::Auto => {
             let has_repo = current
                 .sources
@@ -1213,5 +1220,81 @@ mod tests {
 
         assert!(snapshot.can_use_mcp_server("filesystem").is_allowed());
         assert!(snapshot.can_use_mcp_server("github").is_denied());
+        // Tool queries on unlisted servers must also be denied.
+        assert!(
+            snapshot
+                .can_use_mcp_tool("github", "create_issue")
+                .is_denied()
+        );
+    }
+
+    #[test]
+    fn qwen_mcp_round_trip_mutation_changes_query_result() {
+        let (_dir, ctx) = setup_ctx();
+        let backend = QwenPolicyBackend;
+        let current = NativeEffectivePolicy::new(
+            Provider::QwenCode,
+            Vec::new(),
+            QwenState {
+                layers: Vec::new(),
+                cli: QwenCliOverrides::default(),
+            },
+        );
+        let change = PolicyChange::persistent(vec![
+            PolicyChangeOp::DenyMcpServer("github".to_owned()),
+            PolicyChangeOp::AllowMcpTool {
+                server: "filesystem".to_owned(),
+                tool: "read_file".to_owned(),
+            },
+        ]);
+
+        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let edit = &plan.persistent_plan.as_ref().unwrap().edits[0];
+        fs::create_dir_all(edit.path.parent().unwrap()).unwrap();
+        fs::write(&edit.path, edit.after_preview.as_bytes()).unwrap();
+
+        let sources = backend.discover_sources(&ctx).unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::QwenCode, native, canonical, &ctx);
+
+        assert!(snapshot.can_use_mcp_server("github").is_denied());
+        // Server-level deny must propagate to tool queries on that server.
+        assert!(
+            snapshot
+                .can_use_mcp_tool("github", "create_issue")
+                .is_denied()
+        );
+        assert!(
+            snapshot
+                .can_use_mcp_tool("filesystem", "read_file")
+                .is_allowed()
+        );
+    }
+
+    #[test]
+    fn qwen_local_override_target_returns_error() {
+        let (_dir, ctx) = setup_ctx();
+        let backend = QwenPolicyBackend;
+        let current = NativeEffectivePolicy::new(
+            Provider::QwenCode,
+            Vec::new(),
+            QwenState {
+                layers: Vec::new(),
+                cli: QwenCliOverrides::default(),
+            },
+        );
+        let change = PolicyChange {
+            operations: vec![PolicyChangeOp::DenyMcpServer("github".to_owned())],
+            target: crate::permissions::PolicyChangeTarget::LocalOverride,
+            persistence: crate::permissions::PolicyPersistence::Persistent,
+        };
+
+        let result = backend.plan_change(&ctx, &current, &change);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("LocalOverride"));
     }
 }

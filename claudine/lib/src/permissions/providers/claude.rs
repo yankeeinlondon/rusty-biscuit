@@ -956,12 +956,7 @@ fn normalize_relative_pattern(pattern: &str, workspace_root: &std::path::Path) -
         return normalize_path_like_pattern(pattern);
     }
 
-    normalize_path_like_pattern(
-        &workspace_root
-            .join(pattern)
-            .to_string_lossy()
-            .into_owned(),
-    )
+    normalize_path_like_pattern(&workspace_root.join(pattern).to_string_lossy().into_owned())
 }
 
 fn normalize_path_like_pattern(pattern: &str) -> String {

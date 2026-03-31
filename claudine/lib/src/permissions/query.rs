@@ -463,13 +463,19 @@ fn resolve_query(
     query: &PolicyQuery,
     query_context: &SnapshotQueryContext,
 ) -> QueryResult {
-    match query {
-        PolicyQuery::ReadPath(pq) => {
-            resolve_path_query(policy, &policy.axes.filesystem.read_rules, pq, query_context)
-        }
-        PolicyQuery::WritePath(pq) => {
-            resolve_path_query(policy, &policy.axes.filesystem.write_rules, pq, query_context)
-        }
+    let mut result = match query {
+        PolicyQuery::ReadPath(pq) => resolve_path_query(
+            policy,
+            &policy.axes.filesystem.read_rules,
+            pq,
+            query_context,
+        ),
+        PolicyQuery::WritePath(pq) => resolve_path_query(
+            policy,
+            &policy.axes.filesystem.write_rules,
+            pq,
+            query_context,
+        ),
         PolicyQuery::TraversePath(pq) => resolve_path_query(
             policy,
             &policy.axes.filesystem.traversal_rules,
@@ -489,17 +495,26 @@ fn resolve_query(
         PolicyQuery::SpawnSubagent { name } => {
             resolve_subagent_query(policy, &policy.axes.agents.subagent_rules, name.as_deref())
         }
-        PolicyQuery::SwitchMode { target } => {
-            resolve_mode_switch_query(
-                policy,
-                &policy.axes.agents.mode_switch_rules,
-                target.as_deref(),
-            )
-        }
+        PolicyQuery::SwitchMode { target } => resolve_mode_switch_query(
+            policy,
+            &policy.axes.agents.mode_switch_rules,
+            target.as_deref(),
+        ),
         PolicyQuery::ModifyProviderConfig => {
             resolve_config_modify_query(policy, &policy.axes.filesystem.protected_config_paths)
         }
+    };
+
+    // Apply CLI sensitivity only for configured snapshots and only for axes
+    // where the provider actually has CLI overrides that can change the answer.
+    if result.stability == QueryStability::Stable
+        && policy.mode == super::canonical::PolicyMode::Configured
+        && is_cli_sensitive(policy.provider, query)
+    {
+        result.stability = QueryStability::MayChangeWithCli;
     }
+
+    result
 }
 
 fn resolve_path_query(
@@ -576,13 +591,13 @@ fn resolve_domain_query(
         return finalize_result(
             policy,
             QueryResult {
-            effect: Some(PolicyEffect::Deny),
-            certainty: PolicyCertainty::Exact,
-            stability: QueryStability::Stable,
-            matched_rules: Vec::new(),
-            explanation: PolicyExplanation::new("Network access is disabled.", Vec::new()),
-            warnings: Vec::new(),
-        },
+                effect: Some(PolicyEffect::Deny),
+                certainty: PolicyCertainty::Exact,
+                stability: QueryStability::Stable,
+                matched_rules: Vec::new(),
+                explanation: PolicyExplanation::new("Network access is disabled.", Vec::new()),
+                warnings: Vec::new(),
+            },
         );
     }
 
@@ -606,19 +621,19 @@ fn resolve_domain_query(
         TernaryState::Yes => finalize_result(
             policy,
             QueryResult {
-            effect: Some(PolicyEffect::Allow),
-            certainty: PolicyCertainty::BestEffort,
-            stability: QueryStability::Stable,
-            matched_rules: Vec::new(),
-            explanation: PolicyExplanation::new(
-                format!(
-                    "Network access is enabled and no domain-specific rule matched `{}`.",
-                    dq.domain
+                effect: Some(PolicyEffect::Allow),
+                certainty: PolicyCertainty::BestEffort,
+                stability: QueryStability::Stable,
+                matched_rules: Vec::new(),
+                explanation: PolicyExplanation::new(
+                    format!(
+                        "Network access is enabled and no domain-specific rule matched `{}`.",
+                        dq.domain
+                    ),
+                    Vec::new(),
                 ),
-                Vec::new(),
-            ),
-            warnings: Vec::new(),
-        },
+                warnings: Vec::new(),
+            },
         ),
         TernaryState::Unknown => no_match_result(
             policy,
@@ -665,6 +680,13 @@ fn resolve_mcp_tool_query(
     server: &str,
     tool: &str,
 ) -> QueryResult {
+    // Check server-level rules first: if the server itself is denied,
+    // all tools on that server inherit the denial.
+    let server_result = resolve_mcp_server_query(policy, &policy.axes.mcp.server_rules, server);
+    if server_result.effect == Some(PolicyEffect::Deny) {
+        return server_result;
+    }
+
     for (i, rule) in rules.iter().enumerate() {
         let server_match = rule.server_id == server || rule.server_id == "*";
         let tool_match = rule.tool_name == tool || rule.tool_name == "*";
@@ -967,8 +989,6 @@ fn finalize_result(policy: &CanonicalPolicy, mut result: QueryResult) -> QueryRe
         }
     }
 
-    result.stability = base_stability(policy, result.stability);
-
     if let Some(warning) = policy
         .warnings
         .iter()
@@ -995,14 +1015,43 @@ fn finalize_result(policy: &CanonicalPolicy, mut result: QueryResult) -> QueryRe
     result
 }
 
-fn base_stability(policy: &CanonicalPolicy, current: QueryStability) -> QueryStability {
-    if current != QueryStability::Stable {
-        return current;
-    }
-
-    match policy.mode {
-        super::canonical::PolicyMode::Configured => QueryStability::MayChangeWithCli,
-        super::canonical::PolicyMode::Effective => QueryStability::Stable,
+/// Returns whether a configured result should be marked as `MayChangeWithCli`
+/// for the given provider and query type.
+///
+/// Each provider's CLI overrides only affect certain policy axes:
+/// - **Claude**: `--settings`, `--allowedTools`, `--disallowedTools`, `--dangerously-skip-permissions`
+///   can affect all axes.
+/// - **Codex**: `--sandbox-mode`, `--approval-policy`, `--full-auto`, `--writable-roots`
+///   affect filesystem and runtime axes.
+/// - **Gemini**: `--approval-mode`, `--sandbox`, `--allowed-tools` affect runtime and commands.
+/// - **OpenCode**: `--full-auto` and config content override affect runtime.
+/// - **Qwen**: `--allowed-mcp-server-names`, `--allowed-tools`, `--excluded-tools`,
+///   `--sandbox` affect MCP, commands, and runtime.
+fn is_cli_sensitive(provider: Provider, query: &PolicyQuery) -> bool {
+    match provider {
+        Provider::Claude => true,
+        Provider::Codex => matches!(
+            query,
+            PolicyQuery::ReadPath(_)
+                | PolicyQuery::WritePath(_)
+                | PolicyQuery::TraversePath(_)
+                | PolicyQuery::ExecuteCommand(_)
+                | PolicyQuery::AccessDomain(_)
+                | PolicyQuery::ModifyProviderConfig
+        ),
+        Provider::Gemini => matches!(
+            query,
+            PolicyQuery::ExecuteCommand(_) | PolicyQuery::ModifyProviderConfig
+        ),
+        Provider::OpenCode => matches!(query, PolicyQuery::ModifyProviderConfig),
+        Provider::QwenCode => matches!(
+            query,
+            PolicyQuery::ExecuteCommand(_)
+                | PolicyQuery::UseMcpServer { .. }
+                | PolicyQuery::UseMcpTool { .. }
+                | PolicyQuery::ModifyProviderConfig
+        ),
+        _ => false,
     }
 }
 

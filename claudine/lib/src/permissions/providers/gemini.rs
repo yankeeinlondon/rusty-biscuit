@@ -749,7 +749,7 @@ fn choose_targets(
                 )
             })?,
         )),
-        PolicyChangeTarget::RepoConfig | PolicyChangeTarget::LocalOverride => Ok((
+        PolicyChangeTarget::RepoConfig => Ok((
             "gemini-repo-settings".to_owned(),
             repo_settings.ok_or_else(|| {
                 ClaudineError::PolicyAmbiguousContext(
@@ -763,6 +763,13 @@ fn choose_targets(
                 )
             })?,
         )),
+        PolicyChangeTarget::LocalOverride => {
+            return Err(ClaudineError::PolicyUnsupportedMutation {
+                provider: Provider::Gemini,
+                op: "LocalOverride target is not supported by Gemini (no local override concept)"
+                    .to_owned(),
+            });
+        }
         PolicyChangeTarget::Auto => {
             let has_repo = current.sources.iter().any(|source| {
                 matches!(
@@ -874,9 +881,9 @@ fn repo_policy_exists(ctx: &PolicyContext) -> bool {
     policy_dir.exists()
         && fs::read_dir(policy_dir)
             .map(|entries| {
-                entries
-                    .flatten()
-                    .any(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("toml"))
+                entries.flatten().any(|entry| {
+                    entry.path().extension().and_then(|ext| ext.to_str()) == Some("toml")
+                })
             })
             .unwrap_or(false)
 }
@@ -1004,10 +1011,7 @@ priority = 100
         )
         .unwrap();
         fs::write(
-            ctx.home_dir
-                .as_ref()
-                .unwrap()
-                .join(".gemini/settings.json"),
+            ctx.home_dir.as_ref().unwrap().join(".gemini/settings.json"),
             serde_json::to_string_pretty(&json!({
                 "general": { "defaultApprovalMode": "default" }
             }))
@@ -1035,5 +1039,68 @@ priority = 100
                 .iter()
                 .any(|warning| warning.code == "gemini.trust_unknown")
         );
+    }
+
+    #[test]
+    fn gemini_round_trip_mutation_changes_query_result() {
+        let (_dir, ctx) = setup_ctx();
+        let backend = GeminiPolicyBackend;
+        let current = NativeEffectivePolicy::new(
+            Provider::Gemini,
+            Vec::new(),
+            GeminiState {
+                layers: Vec::new(),
+                cli: GeminiCliOverrides::default(),
+            },
+        );
+        let change = PolicyChange::persistent(vec![
+            PolicyChangeOp::SetApprovalMode(CanonicalApprovalMode::AutoApprove),
+            PolicyChangeOp::AllowCommand(CommandPattern::new("npm test")),
+            PolicyChangeOp::AllowMcpServer("filesystem".to_owned()),
+        ]);
+
+        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        for edit in &plan.persistent_plan.as_ref().unwrap().edits {
+            fs::create_dir_all(edit.path.parent().unwrap()).unwrap();
+            fs::write(&edit.path, edit.after_preview.as_bytes()).unwrap();
+        }
+
+        let sources = backend.discover_sources(&ctx).unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
+
+        assert!(
+            snapshot
+                .can_execute(&CommandQuery::from_raw("npm test"))
+                .is_allowed()
+        );
+        assert!(snapshot.can_use_mcp_server("filesystem").is_allowed());
+    }
+
+    #[test]
+    fn gemini_local_override_target_returns_error() {
+        let (_dir, ctx) = setup_ctx();
+        let backend = GeminiPolicyBackend;
+        let current = NativeEffectivePolicy::new(
+            Provider::Gemini,
+            Vec::new(),
+            GeminiState {
+                layers: Vec::new(),
+                cli: GeminiCliOverrides::default(),
+            },
+        );
+        let change = PolicyChange {
+            operations: vec![PolicyChangeOp::AllowMcpServer("fs".to_owned())],
+            target: crate::permissions::PolicyChangeTarget::LocalOverride,
+            persistence: crate::permissions::PolicyPersistence::Persistent,
+        };
+
+        let result = backend.plan_change(&ctx, &current, &change);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("LocalOverride"));
     }
 }
