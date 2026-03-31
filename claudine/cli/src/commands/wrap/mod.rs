@@ -1529,7 +1529,7 @@ fn materialize_harness_prompt(
                 original_text: source_text.clone(),
                 markdown: effective_markdown.clone(),
             };
-            let prepared = claudine::composition::prepare_inline(&source)
+            let prepared = claudine::composition::prepare_inline(&source, None)
                 .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
             (
                 prepared.prompt,

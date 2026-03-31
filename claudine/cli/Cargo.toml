@@ -10,6 +10,7 @@ name = "claudine"
 path = "src/main.rs"
 
 [dependencies]
+biscuit-file = { path = "../../biscuit-file/lib" }
 claudine = { path = "../lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects"] }
 sniff = { path = "../../sniff/lib" }
