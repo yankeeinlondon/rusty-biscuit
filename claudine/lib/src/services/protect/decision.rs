@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::events::Provider;
 use crate::permissions::PolicyWarning;
+use crate::permissions::query::QueryResult;
+
+use super::intent::ProtectIntent;
+use super::redact::ProtectRedactionPlan;
 
 /// Whether the evaluation used effective (CLI-resolved) or configured policy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,17 +25,38 @@ pub struct ProtectEvaluation {
     pub decision: ProtectDecision,
     pub policy_mode: ProtectPolicyMode,
     pub findings: Vec<ProtectFinding>,
-    pub redaction: Option<ProtectRedactionPlanStub>,
+    pub redaction: Option<ProtectRedactionPlan>,
     pub warnings: Vec<PolicyWarning>,
 }
 
-/// Stub for redaction plan (populated in Phase 5).
+/// One finding produced during protect evaluation.
 #[derive(Debug, Clone)]
-pub struct ProtectRedactionPlanStub;
+pub struct ProtectFinding {
+    pub intent: ProtectIntent,
+    pub result: QueryResult,
+    pub severity: ProtectSeverity,
+    pub source: ProtectFindingSource,
+}
 
-/// Stub for a finding (populated in Phase 4).
-#[derive(Debug, Clone)]
-pub struct ProtectFinding;
+/// Where a finding originated.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtectFindingSource {
+    PolicyQuery,
+    RuntimeGuard,
+    McpRedaction,
+    CompletionLoop,
+}
+
+/// Severity level for a protect finding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtectSeverity {
+    Info,
+    Medium,
+    High,
+    Critical,
+}
 
 /// Normalized outcome produced by Protect.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,11 +72,9 @@ pub enum ProtectOutcome {
 
 /// Final decision with downgrade metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ProtectDecision {
     pub outcome: ProtectOutcome,
-    #[serde(default)]
-    pub degraded_from: Option<ProtectOutcome>,
+    pub desired_outcome: ProtectOutcome,
     pub degraded: bool,
     pub reason: String,
     #[serde(default)]
@@ -62,7 +85,7 @@ impl ProtectDecision {
     pub(crate) fn allow(reason: &str) -> Self {
         Self {
             outcome: ProtectOutcome::Allow,
-            degraded_from: None,
+            desired_outcome: ProtectOutcome::Allow,
             degraded: false,
             reason: reason.to_string(),
             capability: None,
@@ -71,15 +94,30 @@ impl ProtectDecision {
 
     pub(crate) fn degraded(
         outcome: ProtectOutcome,
-        original: ProtectOutcome,
+        desired: ProtectOutcome,
         reason: String,
     ) -> Self {
         Self {
+            degraded: outcome != desired,
             outcome,
-            degraded_from: Some(original),
-            degraded: true,
+            desired_outcome: desired,
             reason,
             capability: None,
+        }
+    }
+
+    pub(crate) fn new(
+        outcome: ProtectOutcome,
+        desired: ProtectOutcome,
+        reason: String,
+        capability: Option<GateCapability>,
+    ) -> Self {
+        Self {
+            degraded: outcome != desired,
+            outcome,
+            desired_outcome: desired,
+            reason,
+            capability,
         }
     }
 }

@@ -1,5 +1,3 @@
-#![allow(deprecated)] // ProtectInput is deprecated but still the active evaluation path.
-
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -9,11 +7,13 @@ use crate::error::Result;
 use crate::events::{AgenticEvent, EventMeta, Provider};
 use crate::permissions::PolicyEngine;
 
-use super::config::{ProtectConfig, ProtectPhase, ProtectRuntimeMode, RiskLevel};
-use super::decision::{ProtectDecision, ProtectEvaluation, ProtectOutcome, ProviderProtectProfiles};
-use super::downgrade::{capability_for_phase, downgrade_for_capability};
-#[allow(deprecated)]
-use super::evaluate::{desired_outcome, resolve_snapshot, ProtectInput};
+use super::config::{ProtectConfig, ProtectPhase};
+use super::decision::{
+    ProtectDecision, ProtectEvaluation, ProtectOutcome, ProviderProtectCapabilities,
+    ProviderProtectProfiles,
+};
+use super::downgrade::capability_for_phase;
+use super::evaluate::evaluate_request;
 use super::redact::{
     redact_json_with_policy, redact_text_with_policy, McpJsonRedaction, McpTextRedaction,
 };
@@ -30,6 +30,7 @@ pub struct ProtectService {
     config: ProtectConfig,
     profiles: ProviderProtectProfiles,
     state: ProtectState,
+    last_evaluation: Option<ProtectEvaluation>,
 }
 
 impl ProtectService {
@@ -40,6 +41,7 @@ impl ProtectService {
             config,
             profiles: ProviderProtectProfiles::defaults(),
             state: ProtectState::default(),
+            last_evaluation: None,
         }
     }
 
@@ -54,6 +56,7 @@ impl ProtectService {
             config,
             profiles,
             state: ProtectState::default(),
+            last_evaluation: None,
         }
     }
 
@@ -82,112 +85,105 @@ impl ProtectService {
     }
 
     /// Full structured evaluation from a pre-built request.
-    ///
-    /// Delegates to the legacy evaluation path internally in this phase.
-    /// Phase 4 will replace the internals with policy-backed evaluation.
     pub fn evaluate_structured(
         &mut self,
         request: &ProtectRequest,
     ) -> Result<ProtectEvaluation> {
-        // Resolve snapshot (called for side effects / caching; results not yet
-        // used for decisions until Phase 4).
-        let (_snapshot, policy_mode) =
-            resolve_snapshot(&self.engine, &request.session);
+        let policy = self.resolve_policy_for_provider(request.provider);
 
-        // Phase 4 will use the request's observation/intents directly.
-        // For now, return a no-op evaluation since we can't translate
-        // ProtectRequest back to ProtectInput without EventMeta.
-        let decision = ProtectDecision::allow("protect.structured-stub");
+        // Fast path: protect disabled for this provider
+        if !policy.enabled {
+            let eval = ProtectEvaluation {
+                decision: ProtectDecision::allow("protect.disabled"),
+                policy_mode: super::decision::ProtectPolicyMode::ConfiguredFallback,
+                findings: Vec::new(),
+                redaction: None,
+                warnings: Vec::new(),
+            };
+            return Ok(eval);
+        }
 
-        Ok(ProtectEvaluation {
-            decision,
-            policy_mode,
-            findings: Vec::new(),
-            redaction: None,
-            warnings: Vec::new(),
-        })
-    }
+        let mut eval = evaluate_request(&self.engine, &policy, request)?;
 
-    /// Convenience entry point for dispatch.
-    pub fn evaluate_event_structured(
-        &mut self,
-        provider: Provider,
-        event: AgenticEvent,
-        meta: &EventMeta,
-        ctx: &ProtectSessionContext,
-        _adapter: &dyn ProviderAdapter,
-    ) -> Result<Option<ProtectEvaluation>> {
-        let input = ProtectInput::from_event_meta(provider, event, meta);
-        let Some(input) = input else {
-            return Ok(None);
-        };
-
-        let (_snapshot, policy_mode) = resolve_snapshot(&self.engine, ctx);
-
-        let decision = self.evaluate_legacy(&input);
-
-        Ok(Some(ProtectEvaluation {
-            decision,
-            policy_mode,
-            findings: Vec::new(),
-            redaction: None,
-            warnings: Vec::new(),
-        }))
-    }
-
-    /// Legacy evaluation path — will be replaced in Phase 4.
-    pub fn evaluate_legacy(&mut self, input: &ProtectInput) -> ProtectDecision {
-        let policy = self.resolve_policy_for_provider(input.provider);
-
-        let mut decision = if !policy.enabled {
-            ProtectDecision::allow("protect.disabled")
+        // Apply capability downgrade
+        let capabilities = self.profiles.capabilities(request.provider);
+        let gate = capability_for_phase(request.phase, &capabilities);
+        if let Some(degraded) =
+            downgrade_outcome_for_capability(&eval.decision.desired_outcome, request.phase, capabilities)
+        {
+            eval.decision = ProtectDecision::degraded(
+                degraded,
+                eval.decision.desired_outcome.clone(),
+                eval.decision.reason.clone(),
+            );
+            eval.decision.capability = Some(gate);
         } else {
-            self.evaluate_enabled(input, &policy)
-        };
+            eval.decision.capability = Some(gate);
+        }
 
-        decision = self.apply_completion_retry_policy(input, &policy, decision);
+        // Apply completion retry policy
+        eval = self.apply_completion_retry_policy_structured(request, &policy, eval);
 
-        self.state.record(input, &decision);
+        // Record the evaluation
+        self.state.record_evaluation(
+            request.provider,
+            request.phase,
+            &eval,
+            request.session.session_id.as_deref(),
+        );
 
-        // Keep rolling forensic context bounded for long-running sessions.
+        // Bound rolling records
         while self.state.recent.len() > policy.max_recent_decisions as usize {
             self.state.recent.pop_front();
         }
 
-        // Preserve an explicit reason when no downgrade occurred.
-        if decision.reason.is_empty() {
-            decision.reason = "protect.default".to_string();
-        }
+        // Cache for explain_last()
+        self.last_evaluation = Some(eval.clone());
 
-        decision
+        Ok(eval)
     }
 
-    /// Evaluate one protection input and return a normalized decision.
-    ///
-    /// Delegates to [`evaluate_legacy`] for now. Phase 4 will replace the
-    /// internals with policy-backed evaluation.
-    pub fn evaluate(&mut self, input: &ProtectInput) -> ProtectDecision {
-        self.evaluate_legacy(input)
-    }
-
-    /// Build and evaluate one protect input from normalized event metadata.
-    pub fn evaluate_from_event(
+    /// Convenience entry point for dispatch: observe + evaluate.
+    pub fn evaluate_event_structured(
         &mut self,
         provider: Provider,
         event: AgenticEvent,
-        meta: &EventMeta,
-    ) -> Option<ProtectDecision> {
-        let input = ProtectInput::from_event_meta(provider, event, meta)?;
-        Some(self.evaluate(&input))
+        _meta: &EventMeta,
+        ctx: &ProtectSessionContext,
+        adapter: &dyn ProviderAdapter,
+    ) -> Result<Option<ProtectEvaluation>> {
+        let observation = adapter.observe_protect(&event, _meta);
+        let Some(obs) = observation else {
+            return Ok(None);
+        };
+
+        let phase = phase_from_event(event);
+        let request = ProtectRequest {
+            provider,
+            event,
+            phase,
+            session: ctx.clone(),
+            observation: obs,
+        };
+
+        self.evaluate_structured(&request).map(Some)
     }
 
     /// Redact MCP text payload using provider-effective policy.
+    ///
+    /// **Deprecated:** Redaction is now part of `ProtectEvaluation.redaction`.
+    /// This method remains for backward compatibility.
+    #[deprecated(note = "Redaction is now part of ProtectEvaluation.redaction")]
     pub fn redact_mcp_text(&self, provider: Provider, text: &str) -> Result<McpTextRedaction> {
         let policy = self.resolve_policy_for_provider(provider);
         redact_text_with_policy(text, &policy.mcp, &policy.rules.secret_patterns)
     }
 
     /// Redact MCP JSON payload using provider-effective policy.
+    ///
+    /// **Deprecated:** Redaction is now part of `ProtectEvaluation.redaction`.
+    /// This method remains for backward compatibility.
+    #[deprecated(note = "Redaction is now part of ProtectEvaluation.redaction")]
     pub fn redact_mcp_json(&self, provider: Provider, value: &Value) -> Result<McpJsonRedaction> {
         let policy = self.resolve_policy_for_provider(provider);
         redact_json_with_policy(value, &policy.mcp, &policy.rules.secret_patterns)
@@ -213,80 +209,42 @@ impl ProtectService {
         &self.state
     }
 
-    fn evaluate_enabled(&self, input: &ProtectInput, policy: &ProtectConfig) -> ProtectDecision {
-        let posture = policy.posture;
-        let capability = self.profiles.capabilities(input.provider);
-
-        let desired = desired_outcome(input, policy, posture);
-        let desired_reason = desired.reason_code(input.runtime_mode, posture);
-
-        if input.runtime_mode == ProtectRuntimeMode::Yolo
-            && policy.yolo.force_advisory_for_medium_risk
-            && matches!(input.risk, RiskLevel::Medium)
-            && matches!(desired.outcome, ProtectOutcome::AskThenAllowOrStop { .. })
-        {
-            return ProtectDecision::degraded(
-                ProtectOutcome::AdvisoryOnly {
-                    reason: "yolo.medium-risk-advisory".to_string(),
-                },
-                desired.outcome,
-                "protect.yolo.medium-risk-advisory".to_string(),
-            );
-        }
-
-        if input.runtime_mode == ProtectRuntimeMode::Yolo
-            && !policy.yolo.allow_critical_blocking
-            && matches!(
-                desired.outcome,
-                ProtectOutcome::StopCurrent { .. } | ProtectOutcome::StopSession { .. }
-            )
-        {
-            return ProtectDecision::degraded(
-                ProtectOutcome::AdvisoryOnly {
-                    reason: "yolo.blocking-disabled".to_string(),
-                },
-                desired.outcome,
-                "protect.yolo.blocking-disabled".to_string(),
-            );
-        }
-
-        if let Some(degraded) = downgrade_for_capability(desired.outcome.clone(), input, capability)
-        {
-            return ProtectDecision::degraded(degraded, desired.outcome, desired_reason);
-        }
-
-        ProtectDecision {
-            outcome: desired.outcome,
-            degraded_from: None,
-            degraded: false,
-            reason: desired_reason,
-            capability: Some(capability_for_phase(input.phase, &capability)),
-        }
+    /// Render an explanation for the most recently evaluated request.
+    ///
+    /// Returns `None` if no evaluations have been performed yet, or if
+    /// the last evaluation has no cached data. This is a convenience method;
+    /// callers can also call [`explain::explain_evaluation`] directly on
+    /// a `ProtectEvaluation`.
+    pub fn explain_last(&self) -> Option<super::explain::ProtectExplanation> {
+        self.last_evaluation
+            .as_ref()
+            .map(super::explain::explain_evaluation)
     }
 
-    fn apply_completion_retry_policy(
+    fn apply_completion_retry_policy_structured(
         &mut self,
-        input: &ProtectInput,
+        request: &ProtectRequest,
         policy: &ProtectConfig,
-        mut decision: ProtectDecision,
-    ) -> ProtectDecision {
-        if input.phase != ProtectPhase::Completion || !policy.completion.enabled {
-            return decision;
+        mut eval: ProtectEvaluation,
+    ) -> ProtectEvaluation {
+        if request.phase != ProtectPhase::Completion || !policy.completion.enabled {
+            return eval;
         }
 
-        let session_key = input
+        let session_key = request
+            .session
             .session_id
             .clone()
             .unwrap_or_else(|| GLOBAL_SESSION_KEY.to_string());
 
         if matches!(
-            decision.outcome,
+            eval.decision.outcome,
             ProtectOutcome::Allow | ProtectOutcome::AllowWithRedaction { .. }
         ) {
             self.state
                 .completion_retries_by_session
                 .remove(&session_key);
-            return decision;
+            return eval;
         }
 
         let retry_count = self
@@ -297,17 +255,60 @@ impl ProtectService {
         *retry_count = retry_count.saturating_add(1);
 
         if *retry_count > policy.completion.max_retries {
-            decision = ProtectDecision {
-                outcome: ProtectOutcome::StopSession {
+            eval.decision = ProtectDecision::degraded(
+                ProtectOutcome::StopSession {
                     reason: "completion.loop-protection.max-retries".to_string(),
                 },
-                degraded_from: Some(decision.outcome),
-                degraded: true,
-                reason: "protect.completion.loop-protection".to_string(),
-                capability: decision.capability,
-            };
+                eval.decision.desired_outcome.clone(),
+                "protect.completion.loop-protection".to_string(),
+            );
         }
 
-        decision
+        eval
+    }
+}
+
+fn downgrade_outcome_for_capability(
+    desired: &ProtectOutcome,
+    phase: ProtectPhase,
+    capabilities: ProviderProtectCapabilities,
+) -> Option<ProtectOutcome> {
+    let gate = capability_for_phase(phase, &capabilities);
+
+    match desired {
+        ProtectOutcome::StopCurrent { .. } if !gate.can_stop_current() => {
+            Some(ProtectOutcome::AdvisoryOnly {
+                reason: "capability.no-stop-current".to_string(),
+            })
+        }
+        ProtectOutcome::StopSession { .. } if !gate.can_stop_session() => {
+            Some(ProtectOutcome::AdvisoryOnly {
+                reason: "capability.no-stop-session".to_string(),
+            })
+        }
+        ProtectOutcome::AskThenAllowOrStop { .. } if !gate.can_ask_user() => {
+            Some(ProtectOutcome::AdvisoryOnly {
+                reason: "capability.no-ask".to_string(),
+            })
+        }
+        ProtectOutcome::AllowWithRedaction { .. } if !gate.can_modify() => {
+            Some(ProtectOutcome::AdvisoryOnly {
+                reason: "capability.no-redaction".to_string(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn phase_from_event(event: AgenticEvent) -> ProtectPhase {
+    match event {
+        AgenticEvent::BeforePrompt => ProtectPhase::BeforePrompt,
+        AgenticEvent::BeforeTool | AgenticEvent::PermissionRequest => ProtectPhase::BeforeTool,
+        AgenticEvent::AfterTool | AgenticEvent::ToolError => ProtectPhase::AfterTool,
+        AgenticEvent::TurnComplete => ProtectPhase::Completion,
+        AgenticEvent::SubagentStart => ProtectPhase::SubagentStart,
+        AgenticEvent::SubagentStop => ProtectPhase::SubagentStop,
+        AgenticEvent::AfterModel => ProtectPhase::McpResponse,
+        _ => ProtectPhase::Runtime,
     }
 }

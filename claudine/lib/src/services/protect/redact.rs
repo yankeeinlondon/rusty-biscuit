@@ -6,6 +6,17 @@ use crate::error::{ClaudineError, Result};
 
 use super::config::McpPolicy;
 
+/// Redaction plan returned as part of a protect evaluation.
+#[derive(Debug, Clone)]
+pub enum ProtectRedactionPlan {
+    /// Replace text content with redacted version.
+    ReplaceText(McpTextRedaction),
+    /// Replace JSON content with redacted version.
+    ReplaceJson(McpJsonRedaction),
+    /// Block the entire payload.
+    BlockPayload { reason: String },
+}
+
 /// Redaction result for MCP text payloads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

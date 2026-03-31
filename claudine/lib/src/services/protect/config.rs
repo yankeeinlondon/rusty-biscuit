@@ -39,6 +39,7 @@ pub enum ProtectRuntimeMode {
 }
 
 impl ProtectRuntimeMode {
+    #[allow(dead_code)]
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             ProtectRuntimeMode::Normal => "normal",
@@ -349,6 +350,11 @@ fn merge_completion_policy(
             .unwrap_or_else(|| base.check_commands.clone()),
         secret_scan: overlay.secret_scan.unwrap_or(base.secret_scan),
     }
+}
+
+/// Merge an MCP policy overlay onto a base policy (public for cross-module use).
+pub(crate) fn merge_mcp_policy_pub(base: &McpPolicy, overlay: &McpPolicyOverride) -> McpPolicy {
+    merge_mcp_policy(base, overlay)
 }
 
 fn merge_mcp_policy(base: &McpPolicy, overlay: &McpPolicyOverride) -> McpPolicy {

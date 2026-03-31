@@ -1,16 +1,14 @@
-#![allow(deprecated)] // ProtectInput is deprecated but still used in the legacy evaluation path.
-
 use super::config::ProtectPhase;
 use super::decision::{GateCapability, ProviderProtectCapabilities, VisibilityLevel};
-use super::evaluate::ProtectInput;
 use super::ProtectOutcome;
 
+#[allow(dead_code)]
 pub(crate) fn downgrade_for_capability(
     outcome: ProtectOutcome,
-    input: &ProtectInput,
+    phase: ProtectPhase,
     capability: ProviderProtectCapabilities,
 ) -> Option<ProtectOutcome> {
-    let gate = capability_for_phase(input.phase, &capability);
+    let gate = capability_for_phase(phase, &capability);
 
     match outcome {
         ProtectOutcome::StopCurrent { .. } if !gate.can_stop_current() => {

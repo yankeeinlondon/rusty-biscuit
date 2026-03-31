@@ -1,280 +1,45 @@
-#![allow(deprecated)] // ProtectInput is deprecated but still the active evaluation path.
-
-use regex::Regex;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tracing::debug;
 
-use crate::error::{ClaudineError, Result};
-use crate::events::{AgenticEvent, EventMeta, Provider};
-use crate::permissions::{CliPolicyInput, PolicyEngine};
-
-use super::config::{
-    McpPolicy, PrivilegePolicy, ProtectConfig, ProtectPhase, ProtectPosture, ProtectRules,
-    ProtectRuntimeMode, RiskLevel,
+use crate::error::Result;
+use crate::events::Provider;
+use crate::permissions::query::QueryResult;
+use crate::permissions::{
+    CliPolicyInput, PolicyCertainty, PolicyContext, PolicyEffect, PolicyEngine, PolicyQuery,
+    PolicyWarning,
 };
-use super::decision::{ProtectOutcome, ProtectPolicyMode};
-use super::redact::{contains_instruction_payload, redact_json_with_policy, redact_text_with_policy};
-use super::request::{ProtectCliContext, ProtectSessionContext};
 
-/// Input envelope for evaluating one potential protection decision.
-///
-/// **Deprecated:** Use `ProtectRequest` with `ProtectObservation` instead.
-/// This type will be removed after Phase 4 completes.
-#[deprecated(note = "Use ProtectRequest with ProtectObservation instead")]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProtectInput {
-    pub provider: Provider,
-    pub phase: ProtectPhase,
-    #[serde(default)]
-    pub runtime_mode: ProtectRuntimeMode,
-    #[serde(default)]
-    pub risk: RiskLevel,
-    #[serde(default)]
-    pub summary: Option<String>,
-    #[serde(default)]
-    pub session_id: Option<String>,
-    #[serde(default)]
-    pub tool_name: Option<String>,
-    #[serde(default)]
-    pub command: Option<String>,
-    #[serde(default)]
-    pub paths: Vec<String>,
-    #[serde(default)]
-    pub prompt: Option<String>,
-    #[serde(default)]
-    pub payload_text: Option<String>,
-    #[serde(default)]
-    pub payload_json: Option<Value>,
-    #[serde(default)]
-    pub mcp_server_id: Option<String>,
-    #[serde(default)]
-    pub runtime_is_root: bool,
-    #[serde(default)]
-    pub runtime_has_sandbox: Option<bool>,
-    #[serde(default)]
-    pub runtime_bypass_mode: bool,
-    #[serde(default)]
-    pub network_write: bool,
-    #[serde(default)]
-    pub broad_fs_write: bool,
-}
+use super::config::{ProtectConfig, ProtectPosture};
+use super::decision::{
+    ProtectDecision, ProtectEvaluation, ProtectFinding, ProtectFindingSource, ProtectOutcome,
+    ProtectPolicyMode, ProtectSeverity,
+};
+use super::intent::ProtectIntent;
+use super::observe::{ProtectObservation, ProtectPayload, RuntimeFacts};
+use super::redact::{
+    ProtectRedactionPlan, contains_instruction_payload, redact_json_with_policy,
+    redact_text_with_policy,
+};
+use super::request::{ProtectCliContext, ProtectRequest, ProtectSessionContext};
 
-impl ProtectInput {
-    /// Build a protect input from a normalized event metadata object.
-    pub fn from_event_meta(
-        provider: Provider,
-        event: AgenticEvent,
-        meta: &EventMeta,
-    ) -> Option<ProtectInput> {
-        let phase = match event {
-            AgenticEvent::BeforePrompt => ProtectPhase::BeforePrompt,
-            AgenticEvent::BeforeTool | AgenticEvent::PermissionRequest => ProtectPhase::BeforeTool,
-            AgenticEvent::AfterTool | AgenticEvent::ToolError => ProtectPhase::AfterTool,
-            AgenticEvent::TurnComplete => ProtectPhase::Completion,
-            AgenticEvent::SubagentStart => ProtectPhase::SubagentStart,
-            AgenticEvent::SubagentStop => ProtectPhase::SubagentStop,
-            AgenticEvent::AfterModel => ProtectPhase::McpResponse,
-            _ => return None,
-        };
+// ---------------------------------------------------------------------------
+// Snapshot resolution
+// ---------------------------------------------------------------------------
 
-        let runtime_mode = detect_runtime_mode(meta);
-
-        let command = meta
-            .tool_input
-            .as_ref()
-            .and_then(extract_command_string)
-            .or_else(|| meta.prompt.clone());
-
-        let paths = collect_paths(meta);
-
-        let network_write = command_implies_network_write(command.as_deref());
-        let broad_fs_write = command_implies_broad_fs_write(command.as_deref());
-
-        Some(ProtectInput {
-            provider,
-            phase,
-            runtime_mode,
-            risk: infer_risk(meta),
-            summary: meta.notification_message.clone(),
-            session_id: meta.session_id.clone(),
-            tool_name: meta.tool_name.clone(),
-            command,
-            paths,
-            prompt: meta.prompt.clone(),
-            payload_text: meta
-                .tool_response
-                .as_ref()
-                .map(Value::to_string)
-                .or_else(|| meta.notification_message.clone()),
-            payload_json: meta.tool_response.clone(),
-            mcp_server_id: meta
-                .extra
-                .get("mcp_server_id")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned),
-            runtime_is_root: is_probably_root(meta),
-            runtime_has_sandbox: infer_sandbox_state(meta),
-            runtime_bypass_mode: runtime_mode == ProtectRuntimeMode::Yolo,
-            network_write,
-            broad_fs_write,
-        })
-    }
-}
-
-fn detect_runtime_mode(meta: &EventMeta) -> ProtectRuntimeMode {
-    let keys = [
-        "permission_mode",
-        "approval_mode",
-        "sandbox_mode",
-        "execution_mode",
-    ];
-
-    for key in keys {
-        if let Some(value) = meta.extra.get(key).and_then(Value::as_str) {
-            let lowered = value.to_ascii_lowercase();
-            if lowered.contains("yolo") || lowered.contains("bypass") || lowered.contains("danger")
-            {
-                return ProtectRuntimeMode::Yolo;
-            }
-        }
-    }
-
-    ProtectRuntimeMode::Normal
-}
-
-fn infer_risk(meta: &EventMeta) -> RiskLevel {
-    if meta.error.is_some() {
-        return RiskLevel::High;
-    }
-
-    let haystack = [
-        meta.tool_name.as_deref(),
-        meta.prompt.as_deref(),
-        meta.notification_message.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join("\n")
-    .to_ascii_lowercase();
-
-    if haystack.contains("rm -rf") || haystack.contains("drop database") {
-        RiskLevel::Critical
-    } else if haystack.contains("chmod") || haystack.contains("curl") {
-        RiskLevel::High
-    } else if haystack.contains("write") || haystack.contains("delete") {
-        RiskLevel::Medium
-    } else {
-        RiskLevel::Low
-    }
-}
-
-fn extract_command_string(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::Object(map) => map
-            .get("command")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned),
-        Value::Array(_) | Value::Bool(_) | Value::Null | Value::Number(_) => None,
-    }
-}
-
-fn collect_paths(meta: &EventMeta) -> Vec<String> {
-    let mut paths = Vec::new();
-
-    if let Some(Value::Object(map)) = meta.tool_input.as_ref() {
-        for key in ["path", "file", "target", "cwd"] {
-            if let Some(path) = map.get(key).and_then(Value::as_str) {
-                paths.push(path.to_string());
-            }
-        }
-    }
-
-    if let Some(cwd) = meta.cwd.as_ref() {
-        paths.push(cwd.clone());
-    }
-
-    paths
-}
-
-fn is_probably_root(meta: &EventMeta) -> bool {
-    meta.extra
-        .get("uid")
-        .and_then(Value::as_u64)
-        .is_some_and(|uid| uid == 0)
-        || meta
-            .extra
-            .get("is_root")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-}
-
-fn infer_sandbox_state(meta: &EventMeta) -> Option<bool> {
-    if let Some(value) = meta.extra.get("sandbox_enabled").and_then(Value::as_bool) {
-        return Some(value);
-    }
-
-    meta.extra
-        .get("sandbox_mode")
-        .and_then(Value::as_str)
-        .map(|mode| {
-            let lowered = mode.to_ascii_lowercase();
-            !(lowered.contains("none") || lowered.contains("off") || lowered.contains("danger"))
-        })
-}
-
-fn command_implies_network_write(command: Option<&str>) -> bool {
-    let Some(command) = command else {
-        return false;
-    };
-
-    let lowered = command.to_ascii_lowercase();
-    [
-        "curl -x",
-        "curl -d",
-        "wget --post",
-        "scp ",
-        "rsync ",
-        "git push",
-    ]
-    .iter()
-    .any(|pattern| lowered.contains(pattern))
-}
-
-fn command_implies_broad_fs_write(command: Option<&str>) -> bool {
-    let Some(command) = command else {
-        return false;
-    };
-
-    let lowered = command.to_ascii_lowercase();
-    ["rm -rf /", "chmod -r", "chown -r", "find / -delete"]
-        .iter()
-        .any(|pattern| lowered.contains(pattern))
-}
-
-// --- Snapshot resolution ---
-
-/// Resolve a policy snapshot from the engine, returning the policy mode
-/// that indicates whether we got effective or configured-fallback policy.
-///
-/// Results are not yet used for decisions in this phase. Phase 4 will wire
-/// snapshot query results into the evaluation pipeline.
+/// Resolve a policy snapshot from the engine, returning queryable results and
+/// the policy mode that indicates whether we got effective or configured policy.
 pub(crate) fn resolve_snapshot(
     engine: &PolicyEngine,
     session: &ProtectSessionContext,
-) -> (Option<()>, ProtectPolicyMode) {
+) -> (Option<SnapshotBox>, ProtectPolicyMode) {
     let provider = session.provider;
     let ctx = &session.policy_context;
 
     match &session.cli {
         ProtectCliContext::Argv(args) => {
             match engine.effective(provider, ctx, CliPolicyInput::Argv(args)) {
-                Ok(_snapshot) => {
+                Ok(snapshot) => {
                     debug!(%provider, "Resolved effective policy snapshot from argv");
-                    (Some(()), ProtectPolicyMode::Effective)
+                    (Some(SnapshotBox::Effective(snapshot)), ProtectPolicyMode::Effective)
                 }
                 Err(err) => {
                     debug!(%provider, %err, "Failed to resolve effective snapshot, using configured fallback");
@@ -284,9 +49,9 @@ pub(crate) fn resolve_snapshot(
         }
         ProtectCliContext::Parsed(overrides) => {
             match engine.effective(provider, ctx, CliPolicyInput::Parsed(overrides.as_ref())) {
-                Ok(_snapshot) => {
+                Ok(snapshot) => {
                     debug!(%provider, "Resolved effective policy snapshot from parsed overrides");
-                    (Some(()), ProtectPolicyMode::Effective)
+                    (Some(SnapshotBox::Effective(snapshot)), ProtectPolicyMode::Effective)
                 }
                 Err(err) => {
                     debug!(%provider, %err, "Failed to resolve effective snapshot, using configured fallback");
@@ -301,12 +66,12 @@ pub(crate) fn resolve_snapshot(
 fn try_configured_fallback(
     engine: &PolicyEngine,
     provider: Provider,
-    ctx: &crate::permissions::PolicyContext,
-) -> (Option<()>, ProtectPolicyMode) {
+    ctx: &PolicyContext,
+) -> (Option<SnapshotBox>, ProtectPolicyMode) {
     match engine.configured(provider, ctx) {
-        Ok(_snapshot) => {
+        Ok(snapshot) => {
             debug!(%provider, "Resolved configured policy snapshot (fallback)");
-            (Some(()), ProtectPolicyMode::ConfiguredFallback)
+            (Some(SnapshotBox::Configured(snapshot)), ProtectPolicyMode::ConfiguredFallback)
         }
         Err(err) => {
             debug!(%provider, %err, "Failed to resolve any policy snapshot");
@@ -315,210 +80,392 @@ fn try_configured_fallback(
     }
 }
 
-// --- Evaluation pipeline ---
-
-#[derive(Debug, Clone)]
-pub(crate) struct DesiredDecision {
-    pub outcome: ProtectOutcome,
+/// Wrapper that abstracts over both snapshot types for querying.
+pub(crate) enum SnapshotBox {
+    Effective(crate::permissions::EffectivePolicySnapshot),
+    Configured(crate::permissions::ConfiguredPolicySnapshot),
 }
 
-impl DesiredDecision {
-    pub fn reason_code(&self, mode: ProtectRuntimeMode, posture: ProtectPosture) -> String {
-        format!("protect.{}.{posture}", mode.as_str())
+impl SnapshotBox {
+    pub(crate) fn query(&self, query: &PolicyQuery) -> QueryResult {
+        match self {
+            SnapshotBox::Effective(s) => s.query(query),
+            SnapshotBox::Configured(s) => s.query(query),
+        }
     }
 }
 
-pub(crate) fn desired_outcome(
-    input: &ProtectInput,
-    policy: &ProtectConfig,
-    posture: ProtectPosture,
-) -> DesiredDecision {
-    let mut candidates = Vec::new();
+// ---------------------------------------------------------------------------
+// Full evaluation pipeline
+// ---------------------------------------------------------------------------
 
-    if let Some(privilege) = evaluate_privilege_policy(input, &policy.privilege, posture) {
-        candidates.push(privilege);
-    }
+/// Run the full policy-backed evaluation pipeline.
+///
+/// Steps:
+/// 1. Resolve posture (base + provider override)
+/// 2. Resolve policy snapshot
+/// 3. Query each intent against the snapshot
+/// 4. Apply runtime guards
+/// 5. Select desired outcome from findings
+/// 6. Apply YOLO mode overrides
+/// 7. Build redaction plan if MCP payload present
+/// 8. Assemble ProtectEvaluation
+pub(crate) fn evaluate_request(
+    engine: &PolicyEngine,
+    config: &ProtectConfig,
+    request: &ProtectRequest,
+) -> Result<ProtectEvaluation> {
+    // Step 1: Resolve posture
+    let posture = resolve_posture(config, &request.session);
 
-    if let Some(rule_outcome) = evaluate_rule_policy(input, &policy.rules, posture) {
-        candidates.push(rule_outcome);
-    }
+    // Step 2: Resolve snapshot
+    let (snapshot, policy_mode) = resolve_snapshot(engine, &request.session);
 
-    if let Some(mcp_outcome) = evaluate_mcp_policy(input, &policy.mcp, &policy.rules, posture) {
-        candidates.push(mcp_outcome);
-    }
+    // Step 3: Query each intent
+    let mut findings = Vec::new();
+    let mut warnings: Vec<PolicyWarning> = Vec::new();
 
-    candidates.push(fallback_risk_outcome(input.risk, posture));
-
-    let outcome = select_precedence(candidates);
-    DesiredDecision { outcome }
-}
-
-fn evaluate_privilege_policy(
-    input: &ProtectInput,
-    privilege: &PrivilegePolicy,
-    posture: ProtectPosture,
-) -> Option<ProtectOutcome> {
-    if privilege.deny_when_root_without_sandbox
-        && input.runtime_is_root
-        && matches!(input.runtime_has_sandbox, Some(false))
-    {
-        return Some(stop_outcome_for_posture(
-            posture,
-            "privilege.root-without-sandbox",
-        ));
-    }
-
-    if privilege.require_ask_for_network_writes && input.network_write {
-        return Some(ProtectOutcome::AskThenAllowOrStop {
-            reason: "privilege.network-write".to_string(),
-        });
-    }
-
-    if privilege.require_ask_for_broad_fs_writes && input.broad_fs_write {
-        return Some(ProtectOutcome::AskThenAllowOrStop {
-            reason: "privilege.broad-fs-write".to_string(),
-        });
-    }
-
-    None
-}
-
-fn evaluate_rule_policy(
-    input: &ProtectInput,
-    rules: &ProtectRules,
-    posture: ProtectPosture,
-) -> Option<ProtectOutcome> {
-    let command_blob = command_blob(input);
-    let text_blob = text_blob(input);
-
-    let blocked_matches =
-        match_patterns(&rules.blocked_command_patterns, &command_blob).unwrap_or_default();
-    let ask_matches =
-        match_patterns(&rules.ask_command_patterns, &command_blob).unwrap_or_default();
-
-    let protected_paths = input
-        .paths
-        .iter()
-        .filter(|path| path_matches(path, &rules.protected_paths))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let secret_matches = match_patterns(&rules.secret_patterns, &text_blob).unwrap_or_default();
-
-    let has_deny = !blocked_matches.is_empty() || !secret_matches.is_empty();
-    let has_ask = !ask_matches.is_empty() || !protected_paths.is_empty();
-
-    if has_deny {
-        let reason = if has_ask {
-            "rules.conflict-prefer-deny"
-        } else if !secret_matches.is_empty() {
-            "rules.secret-pattern"
-        } else {
-            "rules.blocked-command"
-        };
-        return Some(stop_outcome_for_posture(posture, reason));
-    }
-
-    if has_ask {
-        return Some(ProtectOutcome::AskThenAllowOrStop {
-            reason: if !protected_paths.is_empty() {
-                "rules.protected-path".to_string()
+    for intent in &request.observation.intents {
+        if let Some(pq) = intent.to_policy_query() {
+            if let Some(ref snap) = snapshot {
+                let result = snap.query(&pq);
+                let severity = classify_severity(intent, &result, posture);
+                warnings.extend(result.warnings.clone());
+                findings.push(ProtectFinding {
+                    intent: intent.clone(),
+                    result,
+                    severity,
+                    source: ProtectFindingSource::PolicyQuery,
+                });
             } else {
-                "rules.ask-command".to_string()
+                // No snapshot available — treat as unknown
+                findings.push(ProtectFinding {
+                    intent: intent.clone(),
+                    result: QueryResult::unknown(),
+                    severity: classify_unknown_severity(intent, posture),
+                    source: ProtectFindingSource::PolicyQuery,
+                });
+            }
+        } else if matches!(intent, ProtectIntent::CompletionOutputScan) {
+            // Completion scan: produce a finding based on secret scan / loop detection
+            findings.push(ProtectFinding {
+                intent: intent.clone(),
+                result: completion_scan_result(&request.observation),
+                severity: completion_scan_severity(&request.observation),
+                source: ProtectFindingSource::CompletionLoop,
+            });
+        }
+    }
+
+    // Step 4: Apply runtime guards
+    apply_runtime_guards(config, &request.observation.runtime, posture, &mut findings);
+
+    // Step 5: Select desired outcome
+    let desired = select_desired_outcome(&findings, posture);
+
+    // Step 6: Apply YOLO mode
+    let outcome = apply_yolo_mode(desired.clone(), config, &request.session, &findings);
+
+    // Step 7: Build redaction plan
+    let redaction = build_redaction_plan(config, request.session.provider, &request.observation);
+
+    // If redaction is present and outcome is Allow or AdvisoryOnly,
+    // upgrade to AllowWithRedaction since we are actively modifying content.
+    let outcome = if redaction.is_some()
+        && matches!(
+            outcome,
+            ProtectOutcome::Allow | ProtectOutcome::AdvisoryOnly { .. }
+        )
+    {
+        ProtectOutcome::AllowWithRedaction {
+            reason: "mcp.redaction-applied".to_string(),
+        }
+    } else {
+        outcome
+    };
+
+    let decision = ProtectDecision::new(outcome.clone(), desired, "protect".to_string(), None);
+
+    Ok(ProtectEvaluation {
+        decision,
+        policy_mode,
+        findings,
+        redaction,
+        warnings,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Step 1: Posture resolution
+// ---------------------------------------------------------------------------
+
+fn resolve_posture(config: &ProtectConfig, session: &ProtectSessionContext) -> ProtectPosture {
+    if let Some(override_cfg) = config.providers.get(&session.provider) {
+        if let Some(posture) = override_cfg.posture {
+            return posture;
+        }
+    }
+    config.posture
+}
+
+// ---------------------------------------------------------------------------
+// Step 3: Severity classification
+// ---------------------------------------------------------------------------
+
+fn classify_severity(
+    intent: &ProtectIntent,
+    result: &QueryResult,
+    posture: ProtectPosture,
+) -> ProtectSeverity {
+    let base = match result.effect {
+        Some(PolicyEffect::Deny) => {
+            if is_destructive_intent(intent) {
+                ProtectSeverity::Critical
+            } else {
+                ProtectSeverity::High
+            }
+        }
+        Some(PolicyEffect::Ask) => ProtectSeverity::Medium,
+        Some(PolicyEffect::Allow) => ProtectSeverity::Info,
+        None => ProtectSeverity::Medium,
+    };
+
+    // Elevate by one level under Strict posture for uncertain results
+    if posture == ProtectPosture::Strict && is_uncertain(&result.certainty) {
+        elevate_severity(base)
+    } else {
+        base
+    }
+}
+
+fn classify_unknown_severity(intent: &ProtectIntent, posture: ProtectPosture) -> ProtectSeverity {
+    let base = if is_write_intent(intent) || is_command_intent(intent) {
+        ProtectSeverity::Medium
+    } else {
+        ProtectSeverity::Info
+    };
+
+    if posture == ProtectPosture::Strict {
+        elevate_severity(base)
+    } else {
+        base
+    }
+}
+
+fn is_destructive_intent(intent: &ProtectIntent) -> bool {
+    matches!(
+        intent,
+        ProtectIntent::ModifyProviderConfig | ProtectIntent::SwitchMode { .. }
+    )
+}
+
+fn is_write_intent(intent: &ProtectIntent) -> bool {
+    matches!(
+        intent,
+        ProtectIntent::WritePath(_) | ProtectIntent::ModifyProviderConfig
+    )
+}
+
+fn is_command_intent(intent: &ProtectIntent) -> bool {
+    matches!(intent, ProtectIntent::ExecuteCommand(_))
+}
+
+fn is_uncertain(certainty: &PolicyCertainty) -> bool {
+    matches!(
+        certainty,
+        PolicyCertainty::BestEffort | PolicyCertainty::Unknown
+    )
+}
+
+fn elevate_severity(severity: ProtectSeverity) -> ProtectSeverity {
+    match severity {
+        ProtectSeverity::Info => ProtectSeverity::Medium,
+        ProtectSeverity::Medium => ProtectSeverity::High,
+        ProtectSeverity::High => ProtectSeverity::Critical,
+        ProtectSeverity::Critical => ProtectSeverity::Critical,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Step 4: Runtime guards
+// ---------------------------------------------------------------------------
+
+fn apply_runtime_guards(
+    config: &ProtectConfig,
+    runtime: &RuntimeFacts,
+    posture: ProtectPosture,
+    findings: &mut Vec<ProtectFinding>,
+) {
+    // Root without sandbox
+    if config.privilege.deny_when_root_without_sandbox
+        && runtime.is_root
+        && matches!(runtime.has_sandbox, Some(false))
+    {
+        findings.push(ProtectFinding {
+            intent: ProtectIntent::ModifyProviderConfig, // best-fit sentinel
+            result: QueryResult::denied("root-without-sandbox"),
+            severity: if posture == ProtectPosture::Strict {
+                ProtectSeverity::Critical
+            } else {
+                ProtectSeverity::High
             },
+            source: ProtectFindingSource::RuntimeGuard,
         });
     }
-
-    None
 }
 
-fn evaluate_mcp_policy(
-    input: &ProtectInput,
-    mcp: &McpPolicy,
-    rules: &ProtectRules,
+// ---------------------------------------------------------------------------
+// Step 5: Desired outcome selection (decision matrix)
+// ---------------------------------------------------------------------------
+
+/// Maps findings through the decision semantics matrix and selects the
+/// highest-precedence outcome.
+pub(crate) fn select_desired_outcome(
+    findings: &[ProtectFinding],
     posture: ProtectPosture,
-) -> Option<ProtectOutcome> {
-    if input.phase != ProtectPhase::McpResponse {
-        return None;
+) -> ProtectOutcome {
+    if findings.is_empty() {
+        return ProtectOutcome::Allow;
     }
 
-    if let Some(server_id) = input.mcp_server_id.as_deref() {
-        if !mcp.allowlist.is_empty() && !mcp.allowlist.iter().any(|allowed| allowed == server_id) {
-            return Some(ProtectOutcome::AskThenAllowOrStop {
-                reason: "mcp.server-not-allowlisted".to_string(),
-            });
-        }
-        if mcp.denylist.iter().any(|denied| denied == server_id) {
-            return Some(stop_outcome_for_posture(posture, "mcp.server-denylisted"));
-        }
-    }
+    let outcomes: Vec<ProtectOutcome> = findings
+        .iter()
+        .map(|f| finding_to_outcome(f, posture))
+        .collect();
 
-    if let Some(payload_text) = input.payload_text.as_deref() {
-        if mcp.block_instruction_payloads && contains_instruction_payload(payload_text) {
-            return Some(stop_outcome_for_posture(
-                posture,
-                "mcp.instruction-payload-blocked",
-            ));
-        }
-
-        let redaction = redact_text_with_policy(payload_text, mcp, &rules.secret_patterns).ok()?;
-        if redaction.redacted {
-            return Some(ProtectOutcome::AllowWithRedaction {
-                reason: "mcp.redacted-text".to_string(),
-            });
-        }
-    }
-
-    if let Some(payload_json) = input.payload_json.as_ref() {
-        let redaction = redact_json_with_policy(payload_json, mcp, &rules.secret_patterns).ok()?;
-
-        if redaction.blocked_instruction_payload {
-            return Some(stop_outcome_for_posture(
-                posture,
-                "mcp.instruction-payload-blocked",
-            ));
-        }
-
-        if redaction.redacted {
-            return Some(ProtectOutcome::AllowWithRedaction {
-                reason: "mcp.redacted-json".to_string(),
-            });
-        }
-    }
-
-    None
+    select_precedence(outcomes)
 }
 
-fn fallback_risk_outcome(risk: RiskLevel, posture: ProtectPosture) -> ProtectOutcome {
-    match risk {
-        RiskLevel::Low => ProtectOutcome::Allow,
-        RiskLevel::Medium => match posture {
-            ProtectPosture::Advisory => ProtectOutcome::AdvisoryOnly {
-                reason: "medium-risk".to_string(),
+/// Implement the decision semantics matrix from the design.
+///
+/// | Effect | Exact           | BestEffort (Advisory) | BestEffort (Balanced) | BestEffort (Strict)   |
+/// |--------|-----------------|-----------------------|-----------------------|-----------------------|
+/// | Allow  | Allow           | AdvisoryOnly          | Allow                 | AskThenAllowOrStop    |
+/// | Ask    | AskThenAllow    | AdvisoryOnly          | AskThenAllowOrStop    | StopCurrent           |
+/// | Deny   | StopCurrent     | AdvisoryOnly          | StopCurrent           | StopCurrent           |
+fn finding_to_outcome(finding: &ProtectFinding, posture: ProtectPosture) -> ProtectOutcome {
+    let effect = finding.result.effect;
+    let certainty = finding.result.certainty;
+
+    // RuntimeGuard findings always map to their severity directly
+    if finding.source == ProtectFindingSource::RuntimeGuard {
+        return match finding.severity {
+            ProtectSeverity::Critical => ProtectOutcome::StopSession {
+                reason: "runtime-guard.critical".to_string(),
             },
-            ProtectPosture::Balanced | ProtectPosture::Strict => {
-                ProtectOutcome::AskThenAllowOrStop {
-                    reason: "medium-risk".to_string(),
-                }
-            }
-        },
-        RiskLevel::High => match posture {
-            ProtectPosture::Advisory => ProtectOutcome::AdvisoryOnly {
-                reason: "high-risk".to_string(),
+            ProtectSeverity::High => stop_outcome_for_posture(posture, "runtime-guard"),
+            ProtectSeverity::Medium => ProtectOutcome::AskThenAllowOrStop {
+                reason: "runtime-guard".to_string(),
             },
-            ProtectPosture::Balanced | ProtectPosture::Strict => {
-                ProtectOutcome::AskThenAllowOrStop {
-                    reason: "high-risk".to_string(),
-                }
-            }
+            ProtectSeverity::Info => ProtectOutcome::AdvisoryOnly {
+                reason: "runtime-guard.info".to_string(),
+            },
+        };
+    }
+
+    // CompletionLoop findings
+    if finding.source == ProtectFindingSource::CompletionLoop {
+        return match finding.severity {
+            ProtectSeverity::Critical => ProtectOutcome::StopSession {
+                reason: "completion.loop-detected".to_string(),
+            },
+            ProtectSeverity::High => ProtectOutcome::StopCurrent {
+                reason: "completion.secret-found".to_string(),
+            },
+            _ => ProtectOutcome::Allow,
+        };
+    }
+
+    match certainty {
+        PolicyCertainty::Exact => match effect {
+            Some(PolicyEffect::Allow) => ProtectOutcome::Allow,
+            Some(PolicyEffect::Ask) => ProtectOutcome::AskThenAllowOrStop {
+                reason: "policy.ask".to_string(),
+            },
+            Some(PolicyEffect::Deny) => ProtectOutcome::StopCurrent {
+                reason: "policy.deny".to_string(),
+            },
+            None => unknown_outcome(&finding.intent, posture),
         },
-        RiskLevel::Critical => stop_outcome_for_posture(posture, "critical-risk"),
+        PolicyCertainty::BestEffort => match posture {
+            ProtectPosture::Advisory => match effect {
+                Some(PolicyEffect::Allow) | Some(PolicyEffect::Ask) | Some(PolicyEffect::Deny) => {
+                    ProtectOutcome::AdvisoryOnly {
+                        reason: "policy.best-effort".to_string(),
+                    }
+                }
+                None => ProtectOutcome::AdvisoryOnly {
+                    reason: "policy.unknown".to_string(),
+                },
+            },
+            ProtectPosture::Balanced => match effect {
+                Some(PolicyEffect::Allow) => ProtectOutcome::Allow,
+                Some(PolicyEffect::Ask) => ProtectOutcome::AskThenAllowOrStop {
+                    reason: "policy.ask.best-effort".to_string(),
+                },
+                Some(PolicyEffect::Deny) => ProtectOutcome::StopCurrent {
+                    reason: "policy.deny.best-effort".to_string(),
+                },
+                None => unknown_outcome(&finding.intent, posture),
+            },
+            ProtectPosture::Strict => match effect {
+                Some(PolicyEffect::Allow) => ProtectOutcome::AskThenAllowOrStop {
+                    reason: "policy.allow.best-effort.strict".to_string(),
+                },
+                Some(PolicyEffect::Ask) => ProtectOutcome::StopCurrent {
+                    reason: "policy.ask.best-effort.strict".to_string(),
+                },
+                Some(PolicyEffect::Deny) => ProtectOutcome::StopCurrent {
+                    reason: "policy.deny.best-effort.strict".to_string(),
+                },
+                None => ProtectOutcome::StopCurrent {
+                    reason: "policy.unknown.strict".to_string(),
+                },
+            },
+        },
+        PolicyCertainty::Unknown => unknown_outcome(&finding.intent, posture),
     }
 }
 
-pub(crate) fn select_precedence(mut outcomes: Vec<ProtectOutcome>) -> ProtectOutcome {
+/// For None/Unknown certainty under Balanced posture:
+/// - Writes, commands, MCP tools, config mutation -> AskThenAllowOrStop
+/// - Reads, domain access -> AdvisoryOnly
+fn unknown_outcome(intent: &ProtectIntent, posture: ProtectPosture) -> ProtectOutcome {
+    match posture {
+        ProtectPosture::Advisory => ProtectOutcome::AdvisoryOnly {
+            reason: "policy.unknown".to_string(),
+        },
+        ProtectPosture::Strict => ProtectOutcome::StopCurrent {
+            reason: "policy.unknown.strict".to_string(),
+        },
+        ProtectPosture::Balanced => {
+            if is_write_or_dangerous_intent(intent) {
+                ProtectOutcome::AskThenAllowOrStop {
+                    reason: "policy.unknown.write-or-dangerous".to_string(),
+                }
+            } else {
+                ProtectOutcome::AdvisoryOnly {
+                    reason: "policy.unknown.read-like".to_string(),
+                }
+            }
+        }
+    }
+}
+
+fn is_write_or_dangerous_intent(intent: &ProtectIntent) -> bool {
+    matches!(
+        intent,
+        ProtectIntent::WritePath(_)
+            | ProtectIntent::ExecuteCommand(_)
+            | ProtectIntent::UseMcpTool { .. }
+            | ProtectIntent::ModifyProviderConfig
+            | ProtectIntent::SwitchMode { .. }
+    )
+}
+
+pub(crate) fn select_precedence(outcomes: Vec<ProtectOutcome>) -> ProtectOutcome {
     outcomes
-        .drain(..)
+        .into_iter()
         .max_by_key(outcome_priority)
         .unwrap_or(ProtectOutcome::Allow)
 }
@@ -548,59 +495,131 @@ pub(crate) fn stop_outcome_for_posture(posture: ProtectPosture, reason: &str) ->
     }
 }
 
-fn command_blob(input: &ProtectInput) -> String {
-    [
-        input.command.as_deref(),
-        input.summary.as_deref(),
-        input.tool_name.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join("\n")
-}
+// ---------------------------------------------------------------------------
+// Step 6: YOLO mode
+// ---------------------------------------------------------------------------
 
-fn text_blob(input: &ProtectInput) -> String {
-    let mut parts = vec![
-        input.command.as_deref(),
-        input.summary.as_deref(),
-        input.prompt.as_deref(),
-        input.payload_text.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .map(ToOwned::to_owned)
-    .collect::<Vec<_>>();
-
-    if let Some(payload) = input.payload_json.as_ref() {
-        parts.push(payload.to_string());
+fn apply_yolo_mode(
+    desired: ProtectOutcome,
+    config: &ProtectConfig,
+    session: &ProtectSessionContext,
+    findings: &[ProtectFinding],
+) -> ProtectOutcome {
+    if !session.yolo {
+        return desired;
     }
 
-    parts.join("\n")
-}
+    // Force medium-risk ask to advisory
+    if config.yolo.force_advisory_for_medium_risk {
+        let max_severity = findings
+            .iter()
+            .map(|f| f.severity)
+            .max()
+            .unwrap_or(ProtectSeverity::Info);
 
-fn path_matches(path: &str, protected_paths: &[String]) -> bool {
-    protected_paths.iter().any(|protected| {
-        path == protected || path.starts_with(protected) || path.contains(protected)
-    })
-}
-
-fn match_patterns(patterns: &[String], text: &str) -> Result<Vec<String>> {
-    if text.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut matched = Vec::new();
-    for pattern in patterns {
-        let regex = Regex::new(pattern).map_err(|source| ClaudineError::ProtectRuleParse {
-            pattern: pattern.clone(),
-            source,
-        })?;
-
-        if regex.is_match(text) {
-            matched.push(pattern.clone());
+        if max_severity <= ProtectSeverity::Medium
+            && matches!(desired, ProtectOutcome::AskThenAllowOrStop { .. })
+        {
+            return ProtectOutcome::AdvisoryOnly {
+                reason: "yolo.medium-risk-advisory".to_string(),
+            };
         }
     }
 
-    Ok(matched)
+    // Block critical actions unless allowed
+    if !config.yolo.allow_critical_blocking
+        && matches!(
+            desired,
+            ProtectOutcome::StopCurrent { .. } | ProtectOutcome::StopSession { .. }
+        )
+    {
+        return ProtectOutcome::AdvisoryOnly {
+            reason: "yolo.blocking-disabled".to_string(),
+        };
+    }
+
+    desired
+}
+
+// ---------------------------------------------------------------------------
+// Step 7: Redaction plan
+// ---------------------------------------------------------------------------
+
+fn build_redaction_plan(
+    config: &ProtectConfig,
+    provider: Provider,
+    observation: &ProtectObservation,
+) -> Option<ProtectRedactionPlan> {
+    let payload = observation.payload.as_ref()?;
+
+    // Resolve provider-effective config
+    let effective_mcp = if let Some(override_cfg) = config.providers.get(&provider) {
+        if let Some(mcp) = override_cfg.mcp.as_ref() {
+            super::config::merge_mcp_policy_pub(&config.mcp, mcp)
+        } else {
+            config.mcp.clone()
+        }
+    } else {
+        config.mcp.clone()
+    };
+
+    match payload {
+        ProtectPayload::McpText(text) => {
+            // Check for instruction payload blocking
+            if effective_mcp.block_instruction_payloads && contains_instruction_payload(text) {
+                return Some(ProtectRedactionPlan::BlockPayload {
+                    reason: "mcp.instruction-payload-blocked".to_string(),
+                });
+            }
+
+            let redaction =
+                redact_text_with_policy(text, &effective_mcp, &config.rules.secret_patterns)
+                    .ok()?;
+            if redaction.redacted {
+                Some(ProtectRedactionPlan::ReplaceText(redaction))
+            } else {
+                None
+            }
+        }
+        ProtectPayload::McpJson(value) => {
+            let redaction =
+                redact_json_with_policy(value, &effective_mcp, &config.rules.secret_patterns)
+                    .ok()?;
+
+            if redaction.blocked_instruction_payload {
+                return Some(ProtectRedactionPlan::BlockPayload {
+                    reason: "mcp.instruction-payload-blocked".to_string(),
+                });
+            }
+
+            if redaction.redacted {
+                Some(ProtectRedactionPlan::ReplaceJson(redaction))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Completion scan helpers
+// ---------------------------------------------------------------------------
+
+fn completion_scan_result(observation: &ProtectObservation) -> QueryResult {
+    // Check for secrets in payload
+    if let Some(ProtectPayload::McpText(text)) = &observation.payload {
+        if contains_instruction_payload(text) {
+            return QueryResult::denied("completion.secret-found");
+        }
+    }
+    QueryResult::allowed("completion.clean")
+}
+
+fn completion_scan_severity(observation: &ProtectObservation) -> ProtectSeverity {
+    if let Some(ProtectPayload::McpText(text)) = &observation.payload {
+        if contains_instruction_payload(text) {
+            return ProtectSeverity::High;
+        }
+    }
+    ProtectSeverity::Info
 }
