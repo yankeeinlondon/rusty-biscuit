@@ -83,7 +83,11 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
     );
 
     let cpu = CpuInfo {
-        brand: sys.cpus().first().map(|c| c.brand().to_string()).unwrap_or_default(),
+        brand: sys
+            .cpus()
+            .first()
+            .map(|c| c.brand().to_string())
+            .unwrap_or_default(),
         arch: {
             let arch = System::cpu_arch();
             if arch.is_empty() {
@@ -140,7 +144,11 @@ pub fn detect_hardware_summary() -> Result<HardwareInfo> {
     );
 
     let cpu = CpuInfo {
-        brand: sys.cpus().first().map(|c| c.brand().to_string()).unwrap_or_default(),
+        brand: sys
+            .cpus()
+            .first()
+            .map(|c| c.brand().to_string())
+            .unwrap_or_default(),
         arch: {
             let arch = System::cpu_arch();
             if arch.is_empty() {
