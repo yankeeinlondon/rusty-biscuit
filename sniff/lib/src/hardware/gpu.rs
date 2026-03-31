@@ -231,7 +231,6 @@ fn detect_gpus_iokit() -> Option<Vec<GpuInfo>> {
     }
 }
 
-
 /// Infers the GPU vendor from the device name.
 #[cfg(target_os = "macos")]
 fn infer_vendor(name: &str) -> Option<String> {

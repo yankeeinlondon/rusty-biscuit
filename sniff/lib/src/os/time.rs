@@ -107,36 +107,66 @@ fn iana_to_abbreviation(iana: &str, is_dst: bool) -> Option<String> {
     let abbr = match iana {
         // US
         "America/New_York" | "America/Detroit" | "US/Eastern" => {
-            if is_dst { "EDT" } else { "EST" }
+            if is_dst {
+                "EDT"
+            } else {
+                "EST"
+            }
         }
         "America/Chicago" | "America/Indiana/Knox" | "US/Central" => {
-            if is_dst { "CDT" } else { "CST" }
+            if is_dst {
+                "CDT"
+            } else {
+                "CST"
+            }
         }
         "America/Denver" | "America/Boise" | "US/Mountain" => {
-            if is_dst { "MDT" } else { "MST" }
+            if is_dst {
+                "MDT"
+            } else {
+                "MST"
+            }
         }
         "America/Los_Angeles" | "America/Tijuana" | "US/Pacific" => {
-            if is_dst { "PDT" } else { "PST" }
+            if is_dst {
+                "PDT"
+            } else {
+                "PST"
+            }
         }
         "America/Anchorage" | "US/Alaska" => {
-            if is_dst { "AKDT" } else { "AKST" }
+            if is_dst {
+                "AKDT"
+            } else {
+                "AKST"
+            }
         }
         "Pacific/Honolulu" | "US/Hawaii" => "HST",
         // Europe
         "Europe/London" | "Europe/Dublin" | "Europe/Lisbon" => {
-            if is_dst { "BST" } else { "GMT" }
+            if is_dst {
+                "BST"
+            } else {
+                "GMT"
+            }
         }
-        "Europe/Paris" | "Europe/Berlin" | "Europe/Rome" | "Europe/Madrid"
-        | "Europe/Amsterdam" | "Europe/Brussels" | "Europe/Vienna"
-        | "Europe/Zurich" | "Europe/Stockholm" | "Europe/Oslo"
-        | "Europe/Copenhagen" | "Europe/Warsaw" | "Europe/Prague"
+        "Europe/Paris" | "Europe/Berlin" | "Europe/Rome" | "Europe/Madrid" | "Europe/Amsterdam"
+        | "Europe/Brussels" | "Europe/Vienna" | "Europe/Zurich" | "Europe/Stockholm"
+        | "Europe/Oslo" | "Europe/Copenhagen" | "Europe/Warsaw" | "Europe/Prague"
         | "Europe/Budapest" => {
-            if is_dst { "CEST" } else { "CET" }
+            if is_dst {
+                "CEST"
+            } else {
+                "CET"
+            }
         }
-        "Europe/Helsinki" | "Europe/Bucharest" | "Europe/Athens"
-        | "Europe/Sofia" | "Europe/Tallinn" | "Europe/Riga"
-        | "Europe/Vilnius" => {
-            if is_dst { "EEST" } else { "EET" }
+        "Europe/Helsinki" | "Europe/Bucharest" | "Europe/Athens" | "Europe/Sofia"
+        | "Europe/Tallinn" | "Europe/Riga" | "Europe/Vilnius" => {
+            if is_dst {
+                "EEST"
+            } else {
+                "EET"
+            }
         }
         "Europe/Moscow" | "Europe/Minsk" => "MSK",
         // Asia / Oceania
@@ -146,11 +176,19 @@ fn iana_to_abbreviation(iana: &str, is_dst: bool) -> Option<String> {
         "Asia/Singapore" | "Asia/Kuala_Lumpur" => "SGT",
         "Asia/Seoul" => "KST",
         "Australia/Sydney" | "Australia/Melbourne" => {
-            if is_dst { "AEDT" } else { "AEST" }
+            if is_dst {
+                "AEDT"
+            } else {
+                "AEST"
+            }
         }
         "Australia/Perth" => "AWST",
         "Pacific/Auckland" | "NZ" => {
-            if is_dst { "NZDT" } else { "NZST" }
+            if is_dst {
+                "NZDT"
+            } else {
+                "NZST"
+            }
         }
         _ => return None,
     };
@@ -359,9 +397,7 @@ pub fn detect_timezone() -> TimeInfo {
     let timezone_abbr = if chrono_tz.chars().all(|c| c.is_ascii_alphabetic()) {
         Some(chrono_tz)
     } else {
-        timezone.as_deref()
-            .and_then(|iana| iana_to_abbreviation(iana, is_dst))
-            .or(Some(chrono_tz))
+        timezone.as_deref().and_then(|iana| iana_to_abbreviation(iana, is_dst)).or(Some(chrono_tz))
     };
 
     // Detect NTP status
