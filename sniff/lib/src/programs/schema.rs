@@ -28,17 +28,11 @@ pub enum ProgramError {
 
     /// Failed to parse version output.
     #[error("failed to parse version output for '{program}': {details}")]
-    ParseFailed {
-        program: String,
-        details: String,
-    },
+    ParseFailed { program: String, details: String },
 
     /// The version command returned non-zero exit code.
     #[error("version command for '{program}' failed with exit code {code}")]
-    NonZeroExit {
-        program: String,
-        code: i32,
-    },
+    NonZeroExit { program: String, code: i32 },
 }
 
 const VERSION_COMMAND_TIMEOUT: Duration = Duration::from_secs(3);
@@ -222,8 +216,9 @@ pub trait ProgramMetadata: Sized {
         let info = self.info();
 
         // Check if program exists first
-        let path =
-            self.path().ok_or_else(|| ProgramError::NotFound(info.binary_name.to_string()))?;
+        let path = self
+            .path()
+            .ok_or_else(|| ProgramError::NotFound(info.binary_name.to_string()))?;
 
         // Get version flag arguments
         let args = info.version_flag.as_args();
@@ -349,10 +344,12 @@ fn parse_version(output: &str, info: &ProgramInfo) -> Result<String, ProgramErro
         }
 
         VersionParseStrategy::Regex => {
-            let pattern = info.version_regex.ok_or_else(|| ProgramError::ParseFailed {
-                program: program.clone(),
-                details: "regex pattern not specified".to_string(),
-            })?;
+            let pattern = info
+                .version_regex
+                .ok_or_else(|| ProgramError::ParseFailed {
+                    program: program.clone(),
+                    details: "regex pattern not specified".to_string(),
+                })?;
             let re = regex::Regex::new(pattern).map_err(|e| ProgramError::ParseFailed {
                 program: program.clone(),
                 details: format!("invalid regex: {}", e),

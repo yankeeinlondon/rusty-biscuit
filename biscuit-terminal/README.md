@@ -47,23 +47,25 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
 
     The `biscuit-terminal` library defines a **Renderable** trait which provides a consistent interface for components. These components include:
 
-    - [`Table`](./docs/components/table.md)
-    - [`TwoColumn`](./docs/components/two_column.md)
-    - [`Prose`](./docs/components/prose.md)
     - [`BlockQuote`](./docs/components/block_quote.md)
+    - [`FileSystem`](./docs/components/file_system.md)
+    - [`GraphExpression`](./docs/components/graph_expression.md) (graph adapter backed by `biscuit-visualized`)
+    - [`MermaidDiagram`](./docs/components/mermaid_diagram.md) (Mermaid adapter backed by `biscuit-visualized`)
+    - [`OrderedList` and `UnorderedList`](./docs/components/list.md)
+    - [`PadLeft`](./docs/components/pad_left.md) and [`PadRight`](./docs/components/pad_right.md)
+    - [`Progress`](./docs/components/progress.md)
+    - [`Prose`](./docs/components/prose.md)
+    - [`Section`](./docs/components/section.md)
+    - [`Status`](./docs/components/status.md)
+    - [`Table`](./docs/components/table.md)
     - [`TerminalImage`](./docs/components/terminal_image.md)
-    - [`Filesystem`](./docs/components/file_system.md)
-    - `Progress`
-    - `MermaidDiagram` (Mermaid adapter backed by `biscuit-visualized`)
-    - `GraphExpression` (graph adapter backed by `biscuit-visualized`)
-    - `Todo`
-    - `PadLeft` and `PadRight`
-    - `OrderedList` and `UnorderedList`
-    - `TextBlock`
-  
+    - [`TextBlock`](./docs/components/text_block.md)
+    - [`Todo`](./docs/components/todo.md)
+    - [`TwoColumn`](./docs/components/two_column.md)
+
     As well as compositional components:
 
-    - `Compose` and `InlineContent`
+    - [`Compose`](./docs/components/compose.md) and [`InlineContent`](./docs/components/inline_content.md)
 
     These components all respect the `Layout` struct's ideas of margins, word-wrap, and other useful features.
 

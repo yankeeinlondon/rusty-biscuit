@@ -280,36 +280,27 @@ gem *args="":
     @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
 
 
-_feature name dir:
-    @echo "{{name}}: {{dir}}"
+implement plan:
+    @echo -e "{{BOLD}}Phase 1:{{RESET}} {{BLUE}}{{plan}}{{RESET}}"
+    @md compose @prompts/implement.md --set '{ plan: "{{plan}}", phase: 1  }'
 
-_feature_create name:
-    @echo "{{name}}"
 
-feature name="":
+git-conflict:
     #!/usr/bin/env bash
-    if [ -z "{{name}}" ]; then
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} you need to provide a feature name to this recipe!"
-        echo
-        exit 1
-    fi
+    base=$(git merge-base HEAD main)
+    echo "=== commits on each side ==="
+    git log --oneline --left-right --graph HEAD...main
 
-    DIR=$(find ./features -maxdepth 1 -type d -name "*{{name}}*" 2>/dev/null | head -1)
-    if [ -n "$DIR" ]; then
-        just _feature "{{name}}" "$DIR"
-    else
-        just _feature_create "{{name}}"
-    fi
+    echo
+    echo "=== files changed on both sides ==="
+    comm -12 \
+    <(git diff --name-only $base..HEAD | sort) \
+    <(git diff --name-only $base..main | sort)
 
+    echo
+    echo "=== dry-run merge preview ==="
+    git merge-tree $base HEAD main
 
-skill-acp deploy:
-	@echo
-	@echo -e "Publishing the {{BOLD}}acp{{RESET}} skill to this monorepo"
-	@echo
-	@echo -e "{{DIM}}use the {{BLUE}}--deploy{{RESET}}{{DIM}} flag if you want to deploy to{{RESET}}"
-	@echo -e "{{DIM}}{{ITALIC}}user{{RESET}}{{DIM}} scope as well.{{RESET}}"
-	@echo
-	@just ask ""
 
 # Show the dependencies for this package
 deps:

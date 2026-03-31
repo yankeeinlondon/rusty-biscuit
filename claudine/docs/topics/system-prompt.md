@@ -6,11 +6,11 @@ Claudine provides a unified `--system-prompt` flag across all entry points (`wra
 
 All three command surfaces accept `-s` / `--system-prompt`:
 
-| Command | Clap definition | Flows into |
-|---|---|---|
-| `claudine wrap <provider> [args]` | `WrapperArgs.system_prompt` | `run_wrapper()` in `wrap/mod.rs` |
-| `claudine compose <file>` | `ComposeArgs.system_prompt` | `CompositionExecutionRequest.system_prompt` |
-| `claudine inline-compose <file>` | `InlineComposeArgs.system_prompt` | `CompositionExecutionRequest.system_prompt` |
+| Command                           | Clap definition                   | Flows into                                  |
+|-----------------------------------|-----------------------------------|---------------------------------------------|
+| `claudine wrap <provider> [args]` | `WrapperArgs.system_prompt`       | `run_wrapper()` in `wrap/mod.rs`            |
+| `claudine compose <file>`         | `ComposeArgs.system_prompt`       | `CompositionExecutionRequest.system_prompt` |
+| `claudine inline-compose <file>`  | `InlineComposeArgs.system_prompt` | `CompositionExecutionRequest.system_prompt` |
 
 The value is always `Option<String>` — either a literal prompt string or a file path.
 
@@ -39,20 +39,21 @@ The default implementation returns a warning string indicating the provider does
 
 ### Provider Implementations
 
-| Provider | Supported | CLI mapping | Profile location |
-|---|---|---|---|
-| Claude Code | Yes | `--system-prompt <prompt>` | `profile.rs:387-391` |
-| Codex | Default (warns) | — | trait default |
-| Gemini CLI | Default (warns) | — | trait default |
-| Goose | Default (warns) | — | trait default |
-| Kimi Code | Default (warns) | — | trait default |
-| OpenCode | Default (warns) | — | trait default |
-| Qwen CLI | Default (warns) | — | trait default |
-| Roo Code | Default (warns) | — | trait default |
+| Provider    | Supported       | CLI mapping                | Profile location     |
+|-------------|-----------------|----------------------------|----------------------|
+| Claude Code | Yes             | `--system-prompt <prompt>` | `profile.rs:387-391` |
+| Codex       | Default (warns) | —                          | trait default        |
+| Gemini CLI  | Default (warns) | —                          | trait default        |
+| Goose       | Default (warns) | —                          | trait default        |
+| Kimi Code   | Default (warns) | —                          | trait default        |
+| OpenCode    | Default (warns) | —                          | trait default        |
+| Qwen CLI    | Default (warns) | —                          | trait default        |
+| Roo Code    | Default (warns) | —                          | trait default        |
 
 Currently only Claude Code has an `apply_system_prompt` override. All other providers fall through to the default, which emits a warning and skips the flag.
 
 When a warning is generated:
+
 - In `wrap` mode: the warning is pushed to `deferred_warnings` and printed after execution header output
 - In `compose` / `inline-compose` mode: the warning is logged via `log::warn()` unless `--quiet` or `--silent` is set
 
@@ -78,16 +79,16 @@ pub struct SystemPromptCapabilities {
 
 ### Per-Agent Capabilities
 
-| Agent | Supplement sources | Full replacement | Replacement mechanisms | Memory files |
-|---|---|---|---|---|
-| Claude Code | `--append-system-prompt`, `--append-system-prompt-file`, `CLAUDE.md hierarchy` | Yes | `--system-prompt`, `--system-prompt-file` | `~/.claude/CLAUDE.md`, `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/CLAUDE.local.md` |
-| Codex | `AGENTS.md`, `AGENTS.override.md`, `developer_instructions` | Yes | `model_instructions_file` | `~/.codex/AGENTS.override.md`, `~/.codex/AGENTS.md`, `AGENTS.md` |
-| Gemini CLI | `GEMINI.md hierarchy`, `/memory`, `@file imports` | Yes | `GEMINI_SYSTEM_MD` | `~/.gemini/GEMINI.md`, `.gemini/GEMINI.md`, `GEMINI.md` |
-| Goose | `.goosehints`, `goose run --system`, `GOOSE_MOIM_MESSAGE_*`, `recipe instructions` | No | — | `.goosehints` |
-| Kimi Code | `AGENTS.md via /init` | Yes | `--agent-file with system_prompt_path` | `AGENTS.md` |
-| OpenCode | `AGENTS.md` | No | — | `AGENTS.md` |
-| Qwen CLI | `QWEN.md hierarchy`, `@path markdown imports`, `/memory refresh` | No | — | `~/.qwen/QWEN.md`, `QWEN.md` |
-| Roo Code | `rules directories`, `.roorules/.roorules-{mode}`, `AGENTS.md/AGENT.md`, `.rooignore` | Yes | `.roo/system-prompt-{mode-slug}` | `AGENTS.md`, `AGENT.md` |
+| Agent       | Supplement sources                                                                    | Full replacement | Replacement mechanisms                    | Memory files                                                                       |
+|-------------|---------------------------------------------------------------------------------------|------------------|-------------------------------------------|------------------------------------------------------------------------------------|
+| Claude Code | `--append-system-prompt`, `--append-system-prompt-file`, `CLAUDE.md hierarchy`        | Yes              | `--system-prompt`, `--system-prompt-file` | `~/.claude/CLAUDE.md`, `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/CLAUDE.local.md` |
+| Codex       | `AGENTS.md`, `AGENTS.override.md`, `developer_instructions`                           | Yes              | `model_instructions_file`                 | `~/.codex/AGENTS.override.md`, `~/.codex/AGENTS.md`, `AGENTS.md`                   |
+| Gemini CLI  | `GEMINI.md hierarchy`, `/memory`, `@file imports`                                     | Yes              | `GEMINI_SYSTEM_MD`                        | `~/.gemini/GEMINI.md`, `.gemini/GEMINI.md`, `GEMINI.md`                            |
+| Goose       | `.goosehints`, `goose run --system`, `GOOSE_MOIM_MESSAGE_*`, `recipe instructions`    | No               | —                                         | `.goosehints`                                                                      |
+| Kimi Code   | `AGENTS.md via /init`                                                                 | Yes              | `--agent-file with system_prompt_path`    | `AGENTS.md`                                                                        |
+| OpenCode    | `AGENTS.md`                                                                           | No               | —                                         | `AGENTS.md`                                                                        |
+| Qwen CLI    | `QWEN.md hierarchy`, `@path markdown imports`, `/memory refresh`                      | No               | —                                         | `~/.qwen/QWEN.md`, `QWEN.md`                                                       |
+| Roo Code    | `rules directories`, `.roorules/.roorules-{mode}`, `AGENTS.md/AGENT.md`, `.rooignore` | Yes              | `.roo/system-prompt-{mode-slug}`          | `AGENTS.md`, `AGENT.md`                                                            |
 
 ## Harness Integration
 
@@ -148,14 +149,14 @@ This means system prompt configuration stored in document frontmatter (e.g. `age
 
 ## Key Source Files
 
-| File | Role |
-|---|---|
-| `cli/src/commands/wrap/mod.rs` | `WrapperArgs`, `resolve_system_prompt()`, `find_wrapper_harness_source()` |
-| `cli/src/commands/wrap/profile.rs` | `WrapperProfile` trait with `apply_system_prompt()` |
-| `cli/src/commands/wrap/composition.rs` | Composition execution pipeline (system prompt application) |
-| `cli/src/commands/compose.rs` | `ComposeArgs`, `InlineComposeArgs` (clap definitions) |
-| `lib/src/agents/model.rs` | `SystemPromptCapabilities` struct |
-| `lib/src/agents/*.rs` | Per-agent capability declarations |
-| `lib/src/composition/prepare.rs` | Prompt preparation (direct and inline) |
-| `lib/src/composition/closure.rs` | Post-execution frontmatter preservation |
-| `lib/src/composition/guardrails.rs` | Inline composition guardrail loading |
+| File                                   | Role                                                                      |
+|----------------------------------------|---------------------------------------------------------------------------|
+| `cli/src/commands/wrap/mod.rs`         | `WrapperArgs`, `resolve_system_prompt()`, `find_wrapper_harness_source()` |
+| `cli/src/commands/wrap/profile.rs`     | `WrapperProfile` trait with `apply_system_prompt()`                       |
+| `cli/src/commands/wrap/composition.rs` | Composition execution pipeline (system prompt application)                |
+| `cli/src/commands/compose.rs`          | `ComposeArgs`, `InlineComposeArgs` (clap definitions)                     |
+| `lib/src/agents/model.rs`              | `SystemPromptCapabilities` struct                                         |
+| `lib/src/agents/*.rs`                  | Per-agent capability declarations                                         |
+| `lib/src/composition/prepare.rs`       | Prompt preparation (direct and inline)                                    |
+| `lib/src/composition/closure.rs`       | Post-execution frontmatter preservation                                   |
+| `lib/src/composition/guardrails.rs`    | Inline composition guardrail loading                                      |

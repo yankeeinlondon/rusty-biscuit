@@ -264,11 +264,7 @@ impl ProgramDetails {
         Self {
             name,
             description,
-            os_availability: &[
-                OsType::MacOS,
-                OsType::Linux,
-                OsType::Windows,
-            ],
+            os_availability: &[OsType::MacOS, OsType::Linux, OsType::Windows],
             website,
             repo: None,
             installation_methods: &[],
@@ -580,13 +576,19 @@ mod tests {
     #[test]
     fn test_executable_source_display() {
         assert_eq!(ExecutableSource::Path.to_string(), "PATH");
-        assert_eq!(ExecutableSource::MacOsAppBundle.to_string(), "macOS App Bundle");
+        assert_eq!(
+            ExecutableSource::MacOsAppBundle.to_string(),
+            "macOS App Bundle"
+        );
     }
 
     #[test]
     fn test_executable_source_debug() {
         assert_eq!(format!("{:?}", ExecutableSource::Path), "Path");
-        assert_eq!(format!("{:?}", ExecutableSource::MacOsAppBundle), "MacOsAppBundle");
+        assert_eq!(
+            format!("{:?}", ExecutableSource::MacOsAppBundle),
+            "MacOsAppBundle"
+        );
     }
 
     #[test]
@@ -601,7 +603,10 @@ mod tests {
     #[test]
     fn test_executable_source_equality() {
         assert_eq!(ExecutableSource::Path, ExecutableSource::Path);
-        assert_eq!(ExecutableSource::MacOsAppBundle, ExecutableSource::MacOsAppBundle);
+        assert_eq!(
+            ExecutableSource::MacOsAppBundle,
+            ExecutableSource::MacOsAppBundle
+        );
         assert_ne!(ExecutableSource::Path, ExecutableSource::MacOsAppBundle);
     }
 
@@ -641,10 +646,7 @@ mod tests {
 
     #[test]
     fn test_executable_source_roundtrip() {
-        for source in [
-            ExecutableSource::Path,
-            ExecutableSource::MacOsAppBundle,
-        ] {
+        for source in [ExecutableSource::Path, ExecutableSource::MacOsAppBundle] {
             let json = serde_json::to_string(&source).unwrap();
             let deserialized: ExecutableSource = serde_json::from_str(&json).unwrap();
             assert_eq!(source, deserialized);
@@ -657,7 +659,10 @@ mod tests {
 
     #[test]
     fn test_installation_method_package_name() {
-        assert_eq!(InstallationMethod::Brew("ripgrep").package_name(), "ripgrep");
+        assert_eq!(
+            InstallationMethod::Brew("ripgrep").package_name(),
+            "ripgrep"
+        );
         assert_eq!(InstallationMethod::Cargo("bat").package_name(), "bat");
         assert_eq!(
             InstallationMethod::RemoteBash("https://example.com/install.sh").package_name(),
@@ -682,8 +687,11 @@ mod tests {
 
     #[test]
     fn test_program_details_new() {
-        let details =
-            ProgramDetails::new("ripgrep", "Fast grep", "https://github.com/BurntSushi/ripgrep");
+        let details = ProgramDetails::new(
+            "ripgrep",
+            "Fast grep",
+            "https://github.com/BurntSushi/ripgrep",
+        );
         assert_eq!(details.name, "ripgrep");
         assert_eq!(details.description, "Fast grep");
         assert_eq!(details.website, "https://github.com/BurntSushi/ripgrep");
@@ -701,10 +709,7 @@ mod tests {
         let details = ProgramDetails::full(
             "ripgrep",
             "Fast grep",
-            &[
-                OsType::MacOS,
-                OsType::Linux,
-            ],
+            &[OsType::MacOS, OsType::Linux],
             "https://github.com/BurntSushi/ripgrep",
             Some("https://github.com/BurntSushi/ripgrep"),
             METHODS,
@@ -751,8 +756,16 @@ mod tests {
         ];
 
         for method in &methods {
-            assert!(!method.is_os_package_manager(), "{:?} should not be OS pkg mgr", method);
-            assert!(!method.is_remote_bash(), "{:?} should not be remote bash", method);
+            assert!(
+                !method.is_os_package_manager(),
+                "{:?} should not be OS pkg mgr",
+                method
+            );
+            assert!(
+                !method.is_remote_bash(),
+                "{:?} should not be remote bash",
+                method
+            );
             assert_eq!(method.package_name(), "pkg");
         }
     }
@@ -772,8 +785,16 @@ mod tests {
         ];
 
         for method in &methods {
-            assert!(method.is_os_package_manager(), "{:?} should be OS pkg mgr", method);
-            assert!(!method.is_remote_bash(), "{:?} should not be remote bash", method);
+            assert!(
+                method.is_os_package_manager(),
+                "{:?} should be OS pkg mgr",
+                method
+            );
+            assert!(
+                !method.is_remote_bash(),
+                "{:?} should not be remote bash",
+                method
+            );
             assert_eq!(method.package_name(), "pkg");
         }
     }
@@ -814,7 +835,11 @@ mod tests {
 
         for method in &all_methods {
             let name = method.manager_name();
-            assert!(!name.is_empty(), "{:?} should have non-empty manager name", method);
+            assert!(
+                !name.is_empty(),
+                "{:?} should have non-empty manager name",
+                method
+            );
         }
     }
 

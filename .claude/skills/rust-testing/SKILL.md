@@ -17,6 +17,7 @@ Comprehensive testing patterns for Rust using the built-in framework, cargo-next
 - Use descriptive test names: `fn it_returns_error_for_invalid_input()`
 - Structure tests with AAA pattern: Arrange, Act, Assert
 - Run `cargo nextest run` instead of `cargo test` for better performance and output
+- Verify the active Rust toolchain before trusting test results in multi-toolchain environments
 
 ## Quick Reference
 
@@ -44,7 +45,37 @@ cargo test -- --nocapture       # Show println! output
 cargo nextest run               # Faster test runner
 cargo nextest run -E 'test(auth)'  # Filter with expressions
 cargo bench                     # Run criterion benchmarks
+cargo +nightly test             # Pin a newer toolchain when default cargo is too old
+cargo +stable nextest run       # Pin stable explicitly when shell cargo is inconsistent
 ```
+
+## Toolchain Troubleshooting
+
+In multi-toolchain environments, the unqualified `cargo` on `PATH` may not be the toolchain you think it is. Before reporting test results or acting on build failures, verify the active toolchain:
+
+```bash
+cargo --version
+rustc --version
+rustup toolchain list
+which cargo
+```
+
+If the workspace uses Rust 2024 edition or dependencies with a newer MSRV than the default toolchain, pin the command explicitly:
+
+```bash
+cargo +stable test
+cargo +1.86.0 test
+cargo +nightly test
+cargo +nightly nextest run
+```
+
+Use this when you see failures like:
+
+- Cargo cannot parse `edition = "2024"`
+- dependencies require a newer `rustc`
+- repeated runs resolve to different Cargo/Rust versions
+
+When you need to pin a toolchain to get reliable results, include the exact command and toolchain version in your report.
 
 ## Topics
 

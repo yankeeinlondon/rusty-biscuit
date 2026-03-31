@@ -1,14 +1,14 @@
 ---
 name: claudine
 description: Details on the Claudine library and CLI, including deep research into Agentic CLI platforms such as Claude Code, Codex CLI, Goose, Opencode CLI, and all other Agentic CLI's supported by the Claudine library.
-last_updated: 2026-03-17
+last_updated: 2026-03-30
 ---
 
 ## Claudine Library
 
 Claudine is a universal event handler, skill linker, and MCP catalog manager for agentic CLIs. It normalizes 16 lifecycle events across 8 providers (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code) into a single configuration model, executes 6 action types -- TTS, sound effects, logging, shell commands, reports, and blocking calls -- when those events fire, synchronizes skills/commands/agents/scripts between providers, and manages provider-agnostic MCP storage plus provider-specific import/sync/runtime behavior.
 
-The library is organized into fourteen modules plus the shared error type: `actions` (hook action types and responses), `adapters` (provider-specific event parsers), `agents` (capability catalog for all 8 CLIs), `badges` (styled terminal badge constants), `composition` (markdown frontmatter composition for inline and chained prompt pipelines), `config` (agent detection, hook registration, atomic writes, backups), `dispatch` (event processing pipeline), `events` (the normalized 16-event lifecycle model), `harness` (typed pre/post validations, timeouts, handler resolution, shell policy adapter, and recovery actions for composed prompt pipelines), `linking` (cross-provider skill synchronization), `mcp` (catalog, defaults, provider-state, import/export, session composition, runtime injectors), `reporting` (JSONL-to-SQLite metrics index), `services` (cross-provider policy engines such as Protect), and `stream` (structured stream parsing for 6 providers with summary/reporting).
+The library is organized into fifteen modules plus the shared error type: `actions` (hook action types and responses), `adapters` (provider-specific event parsers), `agents` (capability catalog for all 8 CLIs), `badges` (styled terminal badge constants), `composition` (markdown frontmatter composition for inline and chained prompt pipelines), `config` (agent detection, hook registration, atomic writes, backups), `dispatch` (event processing pipeline), `events` (the normalized 16-event lifecycle model), `harness` (typed pre/post validations, timeouts, handler resolution, shell policy adapter, and recovery actions for composed prompt pipelines), `linking` (cross-provider skill synchronization with portability classification), `mcp` (catalog, defaults, provider-state, import/export, session composition, runtime injectors), `permissions` (provider-agnostic policy engine for permission queries and mutation planning), `reporting` (JSONL-to-SQLite metrics index), `services` (cross-provider runtime policy services such as ProtectService), and `stream` (structured stream parsing for 6 providers with summary/reporting).
 
 The dispatch pipeline supports a Handlebars-style template engine with 28 variables across 5 categories (event, OS, hardware, git, and project), shell environment variable interpolation with optional defaults, and precompiled regex matchers for event filtering. Configuration merges user-scope and repo-scope configs with an intentionally asymmetric strategy: repo provider configs fully replace user-level configs, while global settings merge field-by-field.
 
@@ -16,6 +16,9 @@ The dispatch pipeline supports a Handlebars-style template engine with 28 variab
 - [Unified Hook/Event Model](unified-hooks.md)
 - [Supported Actions](hook-actions.md)
 - [Linking Strategy](linking-strategy.md)
+- [Non-Portable Assets](non-portable-assets.md)
+- [PolicyEngine](policy-engine.md)
+- [Validations and Handlers](validations-and-handlers.md)
 
 
 ## Claudine CLI

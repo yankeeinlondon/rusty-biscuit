@@ -558,9 +558,7 @@ fn test_compose_frontmatter_interpolation_nested_state() {
             "--state",
             r#"{"meta":{"base":"/root","author":"Parent"}}"#,
         ])
-        .write_stdin(
-            "---\nmeta:\n  author: Local\nspec: \"{{meta.base}}/spec.md\"\n---\n{{spec}}",
-        )
+        .write_stdin("---\nmeta:\n  author: Local\nspec: \"{{meta.base}}/spec.md\"\n---\n{{spec}}")
         .assert()
         .success()
         .stdout(predicate::str::contains("/root/spec.md"));

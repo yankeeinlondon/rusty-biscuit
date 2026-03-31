@@ -1,10 +1,14 @@
 pub mod protect;
 
 pub use protect::{
-    CompletionPolicy, CompletionPolicyOverride, GateCapability, McpJsonRedaction, McpPolicy,
-    McpPolicyOverride, McpTextRedaction, PrivilegePolicy, PrivilegePolicyOverride, ProtectConfig,
-    ProtectDecision, ProtectInput, ProtectOutcome, ProtectPhase, ProtectPosture, ProtectRules,
-    ProtectRulesOverride, ProtectRuntimeMode, ProtectService, ProtectState, ProtectStateExport,
-    ProviderProtectCapabilities, ProviderProtectOverride, ProviderProtectProfiles, RiskLevel,
-    SubagentPolicy, SubagentPolicyOverride, VisibilityLevel, YoloPolicy, YoloPolicyOverride,
+    CompletionPolicy, CompletionPolicyOverride, FindingExplanation, GateCapability,
+    McpJsonRedaction, McpPolicy, McpPolicyOverride, McpTextRedaction, PrivilegePolicy,
+    PrivilegePolicyOverride, ProtectCliContext, ProtectConfig, ProtectDecision,
+    ProtectDecisionRecord, ProtectEvaluation, ProtectExplanation, ProtectFinding,
+    ProtectFindingSource, ProtectIntent, ProtectObservation, ProtectOutcome, ProtectPayload,
+    ProtectPhase, ProtectPolicyMode, ProtectPosture, ProtectRedactionPlan, ProtectRemediation,
+    ProtectRequest, ProtectRules, ProtectRulesOverride, ProtectService, ProtectSessionContext,
+    ProtectSeverity, ProtectState, ProtectStateExport, ProviderProtectCapabilities,
+    ProviderProtectOverride, ProviderProtectProfiles, RuntimeFacts, SubagentPolicy,
+    SubagentPolicyOverride, VisibilityLevel, YoloPolicy, YoloPolicyOverride,
 };

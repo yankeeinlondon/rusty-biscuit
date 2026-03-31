@@ -92,7 +92,11 @@ mod tests {
         fs::create_dir_all(dir.path().join("src")).unwrap();
         fs::create_dir_all(dir.path().join("frontend/src")).unwrap();
         fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
-        fs::write(dir.path().join("frontend/src/index.ts"), "console.log('hi')").unwrap();
+        fs::write(
+            dir.path().join("frontend/src/index.ts"),
+            "console.log('hi')",
+        )
+        .unwrap();
 
         let result =
             detect_languages_with_exclusions(dir.path(), &[dir.path().join("frontend")]).unwrap();
@@ -131,7 +135,11 @@ mod tests {
 
         // Create a directory that should be ignored
         fs::create_dir(dir.path().join("generated")).unwrap();
-        fs::write(dir.path().join("generated/output.rs"), "// This should be ignored").unwrap();
+        fs::write(
+            dir.path().join("generated/output.rs"),
+            "// This should be ignored",
+        )
+        .unwrap();
 
         // Create a file that should be counted
         fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
@@ -173,7 +181,11 @@ mod tests {
         assert_eq!(rust_stats.direct_files.len(), 2);
 
         assert!(rust_stats.direct_files.contains(&PathBuf::from("main.rs")));
-        assert!(rust_stats.direct_files.contains(&PathBuf::from("src/lib.rs")));
+        assert!(
+            rust_stats
+                .direct_files
+                .contains(&PathBuf::from("src/lib.rs"))
+        );
 
         assert!(rust_stats.direct_files[0] < rust_stats.direct_files[1]);
 

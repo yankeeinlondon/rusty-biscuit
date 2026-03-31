@@ -66,7 +66,10 @@ pub fn scan_file_inventory_with_exclusions(
 }
 
 fn is_excluded_entry(entry: &DirEntry, exclude_roots: &[PathBuf]) -> bool {
-    if exclude_roots.iter().any(|root| entry.path() == root || entry.path().starts_with(root)) {
+    if exclude_roots
+        .iter()
+        .any(|root| entry.path() == root || entry.path().starts_with(root))
+    {
         return true;
     }
 
@@ -91,7 +94,10 @@ fn is_excluded_entry(entry: &DirEntry, exclude_roots: &[PathBuf]) -> bool {
 
 fn classify_file(root: &Path, path: &Path) -> FileClassification {
     let relative_path = path.strip_prefix(root).unwrap_or(path).to_path_buf();
-    let file_name = path.file_name().and_then(|value| value.to_str()).unwrap_or_default();
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
     let extension = path.extension().and_then(|value| value.to_str());
 
     if let Some(descriptor) = registry::lookup_exact_filename(file_name) {
@@ -247,18 +253,10 @@ fn classify_by_binary_signature(
         FileAssociation::Audio
     } else if bytes.starts_with(b"\x7fELF")
         || bytes.starts_with(b"MZ")
-        || bytes.starts_with(&[
-            0xfe, 0xed, 0xfa, 0xce,
-        ])
-        || bytes.starts_with(&[
-            0xfe, 0xed, 0xfa, 0xcf,
-        ])
-        || bytes.starts_with(&[
-            0xcf, 0xfa, 0xed, 0xfe,
-        ])
-        || bytes.starts_with(&[
-            0xca, 0xfe, 0xba, 0xbe,
-        ])
+        || bytes.starts_with(&[0xfe, 0xed, 0xfa, 0xce])
+        || bytes.starts_with(&[0xfe, 0xed, 0xfa, 0xcf])
+        || bytes.starts_with(&[0xcf, 0xfa, 0xed, 0xfe])
+        || bytes.starts_with(&[0xca, 0xfe, 0xba, 0xbe])
     {
         if is_shared_library(path) {
             FileAssociation::Binary
@@ -328,14 +326,21 @@ mod tests {
         let file = &inventory.classifications[0];
         assert_eq!(file.association, FileAssociation::FrameworkFile);
         assert_eq!(file.framework, Some(FrameworkKind::Vue));
-        assert_eq!(file.related_languages, vec![ProgrammingLanguage::TypeScript]);
+        assert_eq!(
+            file.related_languages,
+            vec![ProgrammingLanguage::TypeScript]
+        );
         assert_eq!(file.source, ClassificationSource::EmbeddedLanguageHint);
     }
 
     #[test]
     fn generic_html_is_not_treated_as_angular_template() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("index.html"), "<!doctype html><html></html>").unwrap();
+        fs::write(
+            dir.path().join("index.html"),
+            "<!doctype html><html></html>",
+        )
+        .unwrap();
 
         let inventory = scan_file_inventory(dir.path()).unwrap();
         let file = &inventory.classifications[0];

@@ -14,10 +14,11 @@ claudine/lib/src/
 ├── config/       → Agent detection, hook registration, atomic writes, backups
 ├── dispatch/     → Event processing pipeline (loader, template, matcher, runner)
 ├── events/       → Normalized event model and types (16 events, 8 providers)
-├── linking/      → Cross-provider skill synchronization (4 resource types)
+├── linking/      → Cross-provider skill synchronization (4 resource types) with portability classification
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
+├── permissions/  → Provider-agnostic PolicyEngine for permission queries and mutation planning
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
-├── services/     → Cross-provider policy services (Protect)
+├── services/     → Cross-provider runtime policy services (ProtectService)
 ├── stream/       → Structured stream parsing for 6 providers + summary/reporting
 └── error.rs      → ClaudineError enum
 ```

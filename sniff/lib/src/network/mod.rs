@@ -204,8 +204,10 @@ impl WanIpDetector {
         let endpoints = self.endpoints.clone();
 
         std::thread::spawn(move || {
-            let runtime =
-                tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .ok()?;
 
             runtime.block_on(async move {
                 for endpoint in endpoints {
@@ -235,7 +237,9 @@ impl WanIpDetector {
 
 #[cfg(feature = "network")]
 fn detect_wan_ip() -> Option<String> {
-    WAN_IP_CACHE.get_or_init(|| WanIpDetector::new().detect()).clone()
+    WAN_IP_CACHE
+        .get_or_init(|| WanIpDetector::new().detect())
+        .clone()
 }
 
 #[cfg(not(feature = "network"))]
@@ -330,15 +334,19 @@ fn find_primary_interface_fallback(interfaces: &[NetworkInterface]) -> Option<St
             || name.starts_with("llw")
     }
 
-    let candidates: Vec<_> = interfaces.iter().filter(|i| is_primary_candidate(i)).collect();
+    let candidates: Vec<_> = interfaces
+        .iter()
+        .filter(|i| is_primary_candidate(i))
+        .collect();
 
     if candidates.is_empty() {
         return None;
     }
 
     // Priority 1: Physical + Running
-    if let Some(iface) =
-        candidates.iter().find(|i| is_physical_interface(&i.name) && i.flags.is_running)
+    if let Some(iface) = candidates
+        .iter()
+        .find(|i| is_physical_interface(&i.name) && i.flags.is_running)
     {
         return Some(iface.name.clone());
     }
@@ -349,8 +357,9 @@ fn find_primary_interface_fallback(interfaces: &[NetworkInterface]) -> Option<St
     }
 
     // Priority 3: Non-virtual + Running
-    if let Some(iface) =
-        candidates.iter().find(|i| !is_virtual_interface(&i.name) && i.flags.is_running)
+    if let Some(iface) = candidates
+        .iter()
+        .find(|i| !is_virtual_interface(&i.name) && i.flags.is_running)
     {
         return Some(iface.name.clone());
     }
@@ -377,24 +386,14 @@ fn detect_default_route_interface() -> Option<String> {
         target_os = "dragonfly"
     ))]
     {
-        command_output(
-            "route",
-            &[
-                "-n", "get", "default",
-            ],
-        )
-        .and_then(|output| parse_bsd_default_route_interface(&output))
+        command_output("route", &["-n", "get", "default"])
+            .and_then(|output| parse_bsd_default_route_interface(&output))
     }
 
     #[cfg(target_os = "linux")]
     {
-        command_output(
-            "ip",
-            &[
-                "route", "show", "default",
-            ],
-        )
-        .and_then(|output| parse_linux_default_route_interface(&output))
+        command_output("ip", &["route", "show", "default"])
+            .and_then(|output| parse_linux_default_route_interface(&output))
     }
 
     #[cfg(not(any(
@@ -441,7 +440,10 @@ fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
 fn parse_linux_default_route_interface(output: &str) -> Option<String> {
     output.lines().find_map(|line| {
         let tokens: Vec<_> = line.split_whitespace().collect();
-        tokens.windows(2).find(|window| window[0] == "dev").map(|window| window[1].to_string())
+        tokens
+            .windows(2)
+            .find(|window| window[0] == "dev")
+            .map(|window| window[1].to_string())
     })
 }
 
@@ -472,15 +474,20 @@ fn parse_linux_default_route_interface(output: &str) -> Option<String> {
 /// ```
 pub fn detect_network_filtered() -> Result<NetworkInfo> {
     let mut info = detect_network()?;
-    info.interfaces.retain(|i| !i.flags.is_loopback && i.flags.is_up);
+    info.interfaces
+        .retain(|i| !i.flags.is_loopback && i.flags.is_up);
 
     // Collect retained interface names for filtering ip_addresses
     let retained_names: std::collections::HashSet<&str> =
         info.interfaces.iter().map(|i| i.name.as_str()).collect();
 
     // Filter ip_addresses to only include addresses from retained interfaces
-    info.ip_addresses.v4.retain(|addr| retained_names.contains(addr.interface.as_str()));
-    info.ip_addresses.v6.retain(|addr| retained_names.contains(addr.interface.as_str()));
+    info.ip_addresses
+        .v4
+        .retain(|addr| retained_names.contains(addr.interface.as_str()));
+    info.ip_addresses
+        .v6
+        .retain(|addr| retained_names.contains(addr.interface.as_str()));
 
     Ok(info)
 }
@@ -543,25 +550,19 @@ mod tests {
 
     #[test]
     fn test_format_mac_address() {
-        let mac = [
-            0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e,
-        ];
+        let mac = [0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e];
         assert_eq!(format_mac_address(&mac), "00:1a:2b:3c:4d:5e");
     }
 
     #[test]
     fn test_format_mac_address_all_zeros() {
-        let mac = [
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ];
+        let mac = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         assert_eq!(format_mac_address(&mac), "00:00:00:00:00:00");
     }
 
     #[test]
     fn test_format_mac_address_all_ff() {
-        let mac = [
-            0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-        ];
+        let mac = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         assert_eq!(format_mac_address(&mac), "ff:ff:ff:ff:ff:ff");
     }
 
@@ -580,12 +581,19 @@ mod tests {
             // This is a soft assertion - not all systems will have MAC addresses visible
             // (e.g., containers, minimal VMs). We just ensure we don't crash.
             if has_mac {
-                let iface_with_mac =
-                    info.interfaces.iter().find(|i| i.mac_address.is_some()).unwrap();
+                let iface_with_mac = info
+                    .interfaces
+                    .iter()
+                    .find(|i| i.mac_address.is_some())
+                    .unwrap();
                 let mac = iface_with_mac.mac_address.as_ref().unwrap();
                 // MAC should be formatted as xx:xx:xx:xx:xx:xx
                 assert_eq!(mac.len(), 17, "MAC address should be 17 chars: {mac}");
-                assert_eq!(mac.matches(':').count(), 5, "MAC should have 5 colons: {mac}");
+                assert_eq!(
+                    mac.matches(':').count(),
+                    5,
+                    "MAC should have 5 colons: {mac}"
+                );
             }
         }
     }
@@ -778,9 +786,18 @@ mod tests {
         let json = serde_json::to_string(&info).expect("NetworkInfo should serialize to JSON");
 
         // JSON should contain ip_addresses field with v4 and v6 arrays
-        assert!(json.contains("\"ip_addresses\""), "JSON should contain ip_addresses field");
-        assert!(json.contains("\"v4\""), "JSON should contain v4 field in ip_addresses");
-        assert!(json.contains("\"v6\""), "JSON should contain v6 field in ip_addresses");
+        assert!(
+            json.contains("\"ip_addresses\""),
+            "JSON should contain ip_addresses field"
+        );
+        assert!(
+            json.contains("\"v4\""),
+            "JSON should contain v4 field in ip_addresses"
+        );
+        assert!(
+            json.contains("\"v6\""),
+            "JSON should contain v6 field in ip_addresses"
+        );
 
         // Deserialize and verify roundtrip
         let parsed: NetworkInfo =
@@ -802,8 +819,16 @@ mod tests {
         // Test that empty IpAddresses serializes with empty arrays, not null
         let empty = IpAddresses::default();
         let json = serde_json::to_string(&empty).expect("Empty IpAddresses should serialize");
-        assert!(json.contains("\"v4\":[]"), "Empty v4 should serialize as [], got: {}", json);
-        assert!(json.contains("\"v6\":[]"), "Empty v6 should serialize as [], got: {}", json);
+        assert!(
+            json.contains("\"v4\":[]"),
+            "Empty v4 should serialize as [], got: {}",
+            json
+        );
+        assert!(
+            json.contains("\"v6\":[]"),
+            "Empty v6 should serialize as [], got: {}",
+            json
+        );
     }
 
     // ============================================================================
@@ -850,7 +875,11 @@ mod tests {
         ];
 
         let primary = find_primary_interface_fallback(&interfaces);
-        assert_eq!(primary, Some("en1".to_string()), "Should prefer running physical interface");
+        assert_eq!(
+            primary,
+            Some("en1".to_string()),
+            "Should prefer running physical interface"
+        );
     }
 
     #[test]
@@ -894,7 +923,10 @@ mod tests {
         ];
 
         let primary = find_primary_interface_fallback(&interfaces);
-        assert_eq!(primary, None, "Should return None when no interfaces have IPv4 addresses");
+        assert_eq!(
+            primary, None,
+            "Should return None when no interfaces have IPv4 addresses"
+        );
     }
 
     #[test]
@@ -906,7 +938,10 @@ mod tests {
         let interfaces = vec![loopback];
 
         let primary = find_primary_interface_fallback(&interfaces);
-        assert_eq!(primary, None, "Should return None when only loopback interface exists");
+        assert_eq!(
+            primary, None,
+            "Should return None when only loopback interface exists"
+        );
     }
 
     #[test]
@@ -1039,10 +1074,7 @@ mod tests {
         let mut down = create_test_interface("en7", true, true);
         down.flags.is_up = false;
 
-        let interfaces = vec![
-            create_test_interface("en0", true, true),
-            down,
-        ];
+        let interfaces = vec![create_test_interface("en0", true, true), down];
 
         let primary = select_primary_interface(&interfaces, Some("en7"));
         assert_eq!(
@@ -1061,13 +1093,19 @@ destination: default
   interface: en7
       flags: <UP,GATEWAY,DONE,STATIC>";
 
-        assert_eq!(parse_bsd_default_route_interface(output), Some("en7".to_string()));
+        assert_eq!(
+            parse_bsd_default_route_interface(output),
+            Some("en7".to_string())
+        );
     }
 
     #[test]
     #[cfg(target_os = "linux")]
     fn test_parse_linux_default_route_interface() {
         let output = "default via 192.168.1.1 dev wlp3s0 proto dhcp src 192.168.1.42 metric 600";
-        assert_eq!(parse_linux_default_route_interface(output), Some("wlp3s0".to_string()));
+        assert_eq!(
+            parse_linux_default_route_interface(output),
+            Some("wlp3s0".to_string())
+        );
     }
 }

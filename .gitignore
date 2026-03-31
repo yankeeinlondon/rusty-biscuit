@@ -65,3 +65,4 @@ trace/*
 
 ~$*.docx
 **/debug/*
+Cargo.lock

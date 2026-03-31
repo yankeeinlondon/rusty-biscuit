@@ -834,7 +834,7 @@ mod tests {
 
         let protect = crate::services::ProtectDecision {
             outcome: crate::services::ProtectOutcome::Allow,
-            degraded_from: None,
+            desired_outcome: crate::services::ProtectOutcome::Allow,
             degraded: false,
             reason: "protect.normal.balanced".to_string(),
             capability: Some(crate::services::GateCapability::Guarantee),
@@ -854,7 +854,9 @@ mod tests {
             outcome: crate::services::ProtectOutcome::StopCurrent {
                 reason: "rules.blocked-command".to_string(),
             },
-            degraded_from: None,
+            desired_outcome: crate::services::ProtectOutcome::StopCurrent {
+                reason: "rules.blocked-command".to_string(),
+            },
             degraded: false,
             reason: "protect.normal.strict".to_string(),
             capability: Some(crate::services::GateCapability::Guarantee),

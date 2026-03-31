@@ -5,6 +5,10 @@ use serde_json::{Value, json};
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::permissions::query::{CommandQuery, DomainQuery, PathQuery};
+use crate::services::protect::intent::ProtectIntent;
+use crate::services::protect::observe::default_observe_protect;
+use crate::services::ProtectObservation;
 
 use super::{AdapterError, ProviderAdapter};
 
@@ -65,6 +69,85 @@ impl ProviderAdapter for GeminiAdapter {
         Ok((event, meta))
     }
 
+    fn observe_protect(
+        &self,
+        event: &AgenticEvent,
+        meta: &EventMeta,
+    ) -> Option<ProtectObservation> {
+        let mut obs = default_observe_protect(event, meta)?;
+
+        // Gemini-specific: extract MCP context and refine tool intents.
+        let mut intents = Vec::new();
+        let mut replaced = false;
+
+        if let Some(tool_name) = meta.tool_name.as_deref() {
+            let lowered = tool_name.to_ascii_lowercase();
+            replaced = true;
+
+            match lowered.as_str() {
+                "shell" | "execute_command" | "run_command" => {
+                    if let Some(cmd) = meta
+                        .tool_input
+                        .as_ref()
+                        .and_then(|v| v.get("command"))
+                        .and_then(Value::as_str)
+                    {
+                        intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(cmd)));
+                    }
+                }
+                "write_file" | "edit_file" | "create_file" | "patch_file" => {
+                    if let Some(path) = tool_input_path(meta) {
+                        intents.push(ProtectIntent::WritePath(PathQuery::file(&path)));
+                    }
+                }
+                "read_file" | "list_directory" => {
+                    if let Some(path) = tool_input_path(meta) {
+                        intents.push(ProtectIntent::ReadPath(PathQuery::unknown(&path)));
+                    }
+                }
+                "google_search" | "web_search" => {
+                    if let Some(query) = meta
+                        .tool_input
+                        .as_ref()
+                        .and_then(|v| v.get("query"))
+                        .and_then(Value::as_str)
+                    {
+                        intents.push(ProtectIntent::AccessDomain(DomainQuery::new(query)));
+                    }
+                }
+                _ => {
+                    replaced = false;
+                }
+            }
+        }
+
+        // Extract MCP server/tool from mcp_context extra.
+        if let Some(mcp) = meta.extra.get("mcp_context") {
+            if let Some(server) = mcp.get("server_id").and_then(Value::as_str) {
+                intents.push(ProtectIntent::UseMcpServer {
+                    server: server.to_owned(),
+                });
+                if let Some(tool) = mcp.get("tool_name").and_then(Value::as_str) {
+                    intents.push(ProtectIntent::UseMcpTool {
+                        server: server.to_owned(),
+                        tool: tool.to_owned(),
+                    });
+                }
+                replaced = true;
+            }
+        }
+
+        if replaced {
+            // Preserve completion scan intent if present.
+            if obs.intents.iter().any(|i| matches!(i, ProtectIntent::CompletionOutputScan)) {
+                intents.push(ProtectIntent::CompletionOutputScan);
+            }
+            obs.intents = intents;
+        }
+
+        Some(obs)
+    }
+
     fn can_block(&self, event: &AgenticEvent) -> bool {
         matches!(
             event,
@@ -88,6 +171,35 @@ impl ProviderAdapter for GeminiAdapter {
 
         if !self.can_block(event) {
             return Ok(Value::Null);
+        }
+
+        // Include redacted content in AfterTool responses.
+        if matches!(event, AgenticEvent::AfterTool) {
+            let mut body = serde_json::Map::new();
+            if matches!(response.decision, Some(HookDecision::Deny)) {
+                body.insert(
+                    "error".to_string(),
+                    Value::String(
+                        response
+                            .reason
+                            .clone()
+                            .unwrap_or_else(|| "blocked".to_string()),
+                    ),
+                );
+            }
+            if let Some(ref ctx) = response.additional_context {
+                body.insert(
+                    "updatedToolResult".to_string(),
+                    Value::String(ctx.clone()),
+                );
+            }
+            if let Some(ref input) = response.updated_input {
+                body.insert("updatedToolResult".to_string(), input.clone());
+            }
+            if body.is_empty() {
+                return Ok(Value::Object(Default::default()));
+            }
+            return Ok(Value::Object(body));
         }
 
         match response.decision.unwrap_or(HookDecision::Allow) {
@@ -135,6 +247,19 @@ fn map_event(event_name: &str) -> Result<AgenticEvent, AdapterError> {
 
 fn str_field(raw: &Value, key: &str) -> Option<String> {
     raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
+}
+
+fn tool_input_path(meta: &EventMeta) -> Option<String> {
+    meta.tool_input
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .and_then(|map| {
+            map.get("file_path")
+                .or_else(|| map.get("path"))
+                .or_else(|| map.get("file"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
 }
 
 #[cfg(test)]

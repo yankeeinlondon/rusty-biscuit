@@ -3,7 +3,8 @@ mod matcher;
 mod runner;
 pub mod template;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde_json::Value;
 use tracing::{debug, info};
@@ -12,8 +13,9 @@ use crate::actions::HookResponse;
 use crate::adapters::{self, AdapterError};
 use crate::error::{ClaudineError, Result};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook};
+use crate::permissions::{PolicyContext, PolicyEngine, ProjectTrustContext, TrustSource};
 use crate::services::{
-    ProtectDecision, ProtectInput, ProtectOutcome, ProtectService, ProviderProtectProfiles,
+    ProtectCliContext, ProtectDecision, ProtectOutcome, ProtectService, ProtectSessionContext,
 };
 
 /// Result of dispatching a single incoming provider event.
@@ -23,9 +25,9 @@ pub struct DispatchOutcome {
     pub response: Option<Value>,
     /// Optional process exit code for shell-based providers.
     pub exit_code: Option<i32>,
-    /// Optional protect decision evaluated before actions.
+    /// Optional protect evaluation before actions.
     pub protect_pre: Option<ProtectDecision>,
-    /// Optional protect decision evaluated after actions.
+    /// Optional protect evaluation after actions.
     pub protect_post: Option<ProtectDecision>,
 }
 
@@ -149,22 +151,41 @@ async fn dispatch_preparsed(
         can_block: adapter.can_block(&event),
     };
 
+    let engine = Arc::new(PolicyEngine::new());
     let mut protect_service = config.settings().protect.clone().map(|protect| {
-        let mut profiles = ProviderProtectProfiles::defaults();
-        profiles.insert(provider, adapter.protect_capabilities());
-        ProtectService::with_profiles(protect, profiles)
+        ProtectService::with_capabilities(
+            engine.clone(),
+            protect,
+            provider,
+            adapter.protect_capabilities(),
+        )
     });
 
-    let protect_pre = protect_service.as_mut().and_then(|service| {
-        ProtectInput::from_event_meta(provider, resolved_hook.event, &resolved_hook.meta)
-            .map(|input| service.evaluate(&input))
-    });
+    // Build session context
+    let session_ctx = build_session_context(provider, &resolved_hook.meta);
 
-    if let Some(decision) = protect_pre.as_ref()
-        && should_short_circuit_on_protect(&decision.outcome)
+    let protect_pre = if let Some(service) = protect_service.as_mut() {
+        service
+            .evaluate_event_structured(
+                provider,
+                resolved_hook.event,
+                &resolved_hook.meta,
+                &session_ctx,
+                adapter,
+            )
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+
+    let protect_pre_decision = protect_pre.as_ref().map(|e| e.decision.clone());
+
+    if let Some(eval) = protect_pre.as_ref()
+        && should_short_circuit_on_protect(&eval.decision.outcome)
     {
         let response = adapter
-            .map_protect_outcome(&resolved_hook.event, decision)
+            .map_protect_outcome(&resolved_hook.event, &eval.decision)
             .map_err(|error| {
                 ClaudineError::ProtectEnforcementMapping(format!(
                     "provider={provider} event={} pre-action: {error}",
@@ -177,7 +198,7 @@ async fn dispatch_preparsed(
             &resolved_hook.event,
             resolved_hook.can_block,
             Some(response),
-            protect_pre,
+            protect_pre_decision,
             None,
         );
     }
@@ -196,20 +217,43 @@ async fn dispatch_preparsed(
         &resolved_hook.meta,
         config.settings(),
         resolved_hook.can_block,
-        protect_pre.as_ref(),
+        protect_pre_decision.as_ref(),
     )
     .await?;
 
-    let protect_post = protect_service.as_mut().and_then(|service| {
-        build_post_action_input(provider, &resolved_hook, action_response.as_ref())
-            .map(|input| service.evaluate(&input))
-    });
+    let protect_post = if let Some(service) = protect_service.as_mut() {
+        // Only run post-action evaluation for relevant events
+        if matches!(
+            resolved_hook.event,
+            AgenticEvent::AfterTool | AgenticEvent::TurnComplete | AgenticEvent::SubagentStop
+        ) {
+            service
+                .evaluate_event_structured(
+                    provider,
+                    resolved_hook.event,
+                    &resolved_hook.meta,
+                    &session_ctx,
+                    adapter,
+                )
+                .ok()
+                .flatten()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
-    let action_response = if let Some(decision) = protect_post.as_ref() {
-        if should_short_circuit_on_protect(&decision.outcome) {
+    let protect_post_decision = protect_post.as_ref().map(|e| e.decision.clone());
+
+    // Apply redaction from post-action evaluation
+    let action_response = if let Some(eval) = protect_post.as_ref() {
+        if let Some(plan) = &eval.redaction {
+            apply_redaction(action_response, plan)
+        } else if should_short_circuit_on_protect(&eval.decision.outcome) {
             Some(
                 adapter
-                    .map_protect_outcome(&resolved_hook.event, decision)
+                    .map_protect_outcome(&resolved_hook.event, &eval.decision)
                     .map_err(|error| {
                         ClaudineError::ProtectEnforcementMapping(format!(
                             "provider={provider} event={} post-action: {error}",
@@ -229,9 +273,143 @@ async fn dispatch_preparsed(
         &resolved_hook.event,
         resolved_hook.can_block,
         action_response,
-        protect_pre,
-        protect_post,
+        protect_pre_decision,
+        protect_post_decision,
     )
+}
+
+fn build_session_context(provider: Provider, meta: &EventMeta) -> ProtectSessionContext {
+    let cwd = meta
+        .cwd
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let mut policy_ctx = PolicyContext::new(cwd);
+    if let Some(ref git) = meta.env.git {
+        policy_ctx = policy_ctx.with_repo_root(git.repo_root.clone());
+    }
+    if let Some(home) = dirs::home_dir() {
+        policy_ctx = policy_ctx.with_home_dir(home);
+    }
+
+    // Derive project trust from event metadata and wrapper state.
+    let trust = derive_trust_context(meta);
+    policy_ctx = policy_ctx.with_trust(trust);
+
+    let cli_ctx = std::env::var("AGENT_PARAMS")
+        .ok()
+        .map(|params| {
+            let argv: Vec<String> = params
+                .split_whitespace()
+                .map(String::from)
+                .collect();
+            ProtectCliContext::Argv(argv)
+        })
+        .unwrap_or(ProtectCliContext::None);
+
+    ProtectSessionContext {
+        provider,
+        policy_context: policy_ctx,
+        cli: cli_ctx,
+        interactive: std::env::var("INTERACTIVE")
+            .ok()
+            .map_or(false, |v| v == "1" || v == "true")
+            || std::env::var("CLAUDINE_INTERACTIVE")
+                .ok()
+                .map_or(false, |v| v == "1" || v == "true"),
+        yolo: std::env::var("YOLO")
+            .ok()
+            .map_or(false, |v| v == "1" || v == "true")
+            || std::env::var("CLAUDINE_YOLO")
+                .ok()
+                .map_or(false, |v| v == "1" || v == "true"),
+        session_id: meta
+            .session_id
+            .clone()
+            .or_else(|| std::env::var("CLAUDINE_SESSION_ID").ok()),
+    }
+}
+
+/// Derive project trust from event metadata extras and environment.
+///
+/// Trust sources in priority order:
+/// 1. Explicit `is_trusted` field in event extra (set by wrapper preflight)
+/// 2. `CLAUDINE_TRUST` environment variable
+/// 3. Provider permission mode (e.g., Claude's `acceptEdits` implies trusted)
+fn derive_trust_context(meta: &EventMeta) -> ProjectTrustContext {
+    // 1. Explicit trust flag from wrapper or event payload
+    if let Some(trusted) = meta.extra.get("is_trusted").and_then(Value::as_bool) {
+        return ProjectTrustContext {
+            is_trusted: Some(trusted),
+            source: TrustSource::ExplicitInput,
+        };
+    }
+
+    // 2. CLAUDINE_TRUST environment variable
+    if let Ok(val) = std::env::var("CLAUDINE_TRUST") {
+        let lowered = val.trim().to_ascii_lowercase();
+        if lowered == "1" || lowered == "true" {
+            return ProjectTrustContext {
+                is_trusted: Some(true),
+                source: TrustSource::ExplicitInput,
+            };
+        } else if lowered == "0" || lowered == "false" {
+            return ProjectTrustContext {
+                is_trusted: Some(false),
+                source: TrustSource::ExplicitInput,
+            };
+        }
+    }
+
+    // 3. Infer from provider permission mode (Claude-specific: acceptEdits implies trusted)
+    if let Some(mode) = meta.extra.get("permission_mode").and_then(Value::as_str) {
+        let lowered = mode.to_ascii_lowercase();
+        if lowered.contains("accept") || lowered.contains("trust") {
+            return ProjectTrustContext {
+                is_trusted: Some(true),
+                source: TrustSource::ProviderConfig,
+            };
+        }
+    }
+
+    ProjectTrustContext::default()
+}
+
+fn apply_redaction(
+    response: Option<HookResponse>,
+    plan: &crate::services::ProtectRedactionPlan,
+) -> Option<HookResponse> {
+    use crate::actions::HookDecision;
+    use crate::services::ProtectRedactionPlan;
+
+    let mut response = response.unwrap_or_default();
+
+    match plan {
+        ProtectRedactionPlan::ReplaceText(redaction) => {
+            response.additional_context = Some(redaction.text.clone());
+            // Preserve existing decision or set Allow so formatters know
+            // there is an active response to serialize.
+            if response.decision.is_none() {
+                response.decision = Some(HookDecision::Allow);
+            }
+        }
+        ProtectRedactionPlan::ReplaceJson(redaction) => {
+            response.updated_input = Some(redaction.value.clone());
+            if response.decision.is_none() {
+                response.decision = Some(HookDecision::Allow);
+            }
+        }
+        ProtectRedactionPlan::BlockPayload { reason } => {
+            // BlockPayload must produce an enforceable deny.
+            response.additional_context = None;
+            response.updated_input = None;
+            response.decision = Some(HookDecision::Deny);
+            response.reason = Some(reason.clone());
+        }
+    }
+
+    Some(response)
 }
 
 fn runtime_repo_root(env: &EnvironmentContext) -> Option<&Path> {
@@ -324,28 +502,6 @@ fn should_short_circuit_on_protect(outcome: &ProtectOutcome) -> bool {
             | ProtectOutcome::StopCurrent { .. }
             | ProtectOutcome::StopSession { .. }
     )
-}
-
-fn build_post_action_input(
-    provider: Provider,
-    resolved_hook: &ResolvedHook,
-    action_response: Option<&HookResponse>,
-) -> Option<ProtectInput> {
-    if !matches!(
-        resolved_hook.event,
-        crate::events::AgenticEvent::AfterTool
-            | crate::events::AgenticEvent::TurnComplete
-            | crate::events::AgenticEvent::SubagentStop
-    ) {
-        return None;
-    }
-
-    let mut input =
-        ProtectInput::from_event_meta(provider, resolved_hook.event, &resolved_hook.meta)?;
-    if let Some(reason) = action_response.and_then(|response| response.reason.clone()) {
-        input.summary = Some(reason);
-    }
-    Some(input)
 }
 
 fn has_stop_session(decision: Option<&ProtectDecision>) -> bool {
@@ -553,5 +709,169 @@ mod tests {
 
         assert!(matcher::matches_with_pattern(Some("Bash|Edit"), &meta));
         assert!(!matcher::matches_with_pattern(Some("Read"), &meta));
+    }
+
+    #[test]
+    fn derive_trust_from_explicit_extra_field() {
+        let mut meta = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::BeforeTool,
+            timestamp: chrono::Utc::now(),
+            session_id: None,
+            cwd: Some("/tmp".to_string()),
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env: EnvironmentContext::default(),
+        };
+
+        meta.extra
+            .insert("is_trusted".to_string(), json!(true));
+
+        let trust = derive_trust_context(&meta);
+        assert_eq!(trust.is_trusted, Some(true));
+        assert_eq!(trust.source, TrustSource::ExplicitInput);
+    }
+
+    #[test]
+    fn derive_trust_from_permission_mode() {
+        let mut meta = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::BeforeTool,
+            timestamp: chrono::Utc::now(),
+            session_id: None,
+            cwd: Some("/tmp".to_string()),
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env: EnvironmentContext::default(),
+        };
+
+        meta.extra
+            .insert("permission_mode".to_string(), json!("acceptEdits"));
+
+        let trust = derive_trust_context(&meta);
+        assert_eq!(trust.is_trusted, Some(true));
+        assert_eq!(trust.source, TrustSource::ProviderConfig);
+    }
+
+    #[test]
+    fn derive_trust_unknown_without_signals() {
+        let meta = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::BeforeTool,
+            timestamp: chrono::Utc::now(),
+            session_id: None,
+            cwd: Some("/tmp".to_string()),
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env: EnvironmentContext::default(),
+        };
+
+        let trust = derive_trust_context(&meta);
+        assert_eq!(trust.is_trusted, None);
+        assert_eq!(trust.source, TrustSource::Unknown);
+    }
+
+    #[test]
+    fn apply_redaction_block_payload_sets_deny() {
+        use crate::services::ProtectRedactionPlan;
+
+        let plan = ProtectRedactionPlan::BlockPayload {
+            reason: "blocked".to_string(),
+        };
+
+        let result = apply_redaction(None, &plan);
+        assert!(result.is_some());
+        let response = result.unwrap();
+        assert_eq!(response.decision, Some(HookDecision::Deny));
+        assert_eq!(response.reason.as_deref(), Some("blocked"));
+        assert!(response.additional_context.is_none());
+        assert!(response.updated_input.is_none());
+    }
+
+    #[test]
+    fn apply_redaction_replace_text_sets_allow() {
+        use crate::services::{McpTextRedaction, ProtectRedactionPlan};
+
+        let plan = ProtectRedactionPlan::ReplaceText(McpTextRedaction {
+            text: "redacted content".to_string(),
+            redacted: true,
+            blocked_instruction_payload: false,
+            redactions_applied: 1,
+        });
+
+        let result = apply_redaction(None, &plan);
+        assert!(result.is_some());
+        let response = result.unwrap();
+        assert_eq!(response.decision, Some(HookDecision::Allow));
+        assert_eq!(
+            response.additional_context.as_deref(),
+            Some("redacted content")
+        );
+    }
+
+    #[test]
+    fn apply_redaction_replace_json_sets_allow() {
+        use crate::services::{McpJsonRedaction, ProtectRedactionPlan};
+
+        let plan = ProtectRedactionPlan::ReplaceJson(McpJsonRedaction {
+            value: json!({"key": "[REDACTED]"}),
+            redacted: true,
+            blocked_instruction_payload: false,
+            redactions_applied: 1,
+        });
+
+        let result = apply_redaction(None, &plan);
+        assert!(result.is_some());
+        let response = result.unwrap();
+        assert_eq!(response.decision, Some(HookDecision::Allow));
+        assert_eq!(response.updated_input, Some(json!({"key": "[REDACTED]"})));
+    }
+
+    #[test]
+    fn build_session_context_includes_trust() {
+        let mut meta = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::BeforeTool,
+            timestamp: chrono::Utc::now(),
+            session_id: Some("s1".to_string()),
+            cwd: Some("/tmp/project".to_string()),
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env: EnvironmentContext::default(),
+        };
+
+        meta.extra
+            .insert("is_trusted".to_string(), json!(true));
+
+        let ctx = build_session_context(Provider::Claude, &meta);
+        assert_eq!(ctx.policy_context.trust.is_trusted, Some(true));
     }
 }

@@ -117,13 +117,9 @@ impl InstalledLanguagePackageManagers {
             luarocks: get("luarocks"),
             vcpkg: get("vcpkg"),
             conan: get("conan"),
-            nuget: get_any(&[
-                "dotnet", "nuget",
-            ]),
+            nuget: get_any(&["dotnet", "nuget"]),
             hex: get("mix"),
-            pip: get_any(&[
-                "pip", "pip3",
-            ]),
+            pip: get_any(&["pip", "pip3"]),
             uv: get("uv"),
             poetry: get("poetry"),
             cpan: get("cpan"),
@@ -220,7 +216,9 @@ impl InstalledLanguagePackageManagers {
     /// Returns a list of all installed language package managers.
     pub fn installed(&self) -> Vec<LanguagePackageManager> {
         use strum::IntoEnumIterator;
-        LanguagePackageManager::iter().filter(|p| self.is_installed(*p)).collect()
+        LanguagePackageManager::iter()
+            .filter(|p| self.is_installed(*p))
+            .collect()
     }
 }
 
@@ -499,9 +497,7 @@ impl InstalledOsPackageManagers {
             apt: get("apt"),
             nala: get("nala"),
             brew: get("brew"),
-            dnf: get_any(&[
-                "dnf", "yum",
-            ]),
+            dnf: get_any(&["dnf", "yum"]),
             pacman: get("pacman"),
             winget: get("winget"),
             chocolatey: get("choco"),
@@ -581,7 +577,9 @@ impl InstalledOsPackageManagers {
     /// Returns a list of all installed OS package managers.
     pub fn installed(&self) -> Vec<OsPackageManager> {
         use strum::IntoEnumIterator;
-        OsPackageManager::iter().filter(|p| self.is_installed(*p)).collect()
+        OsPackageManager::iter()
+            .filter(|p| self.is_installed(*p))
+            .collect()
     }
 }
 

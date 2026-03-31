@@ -5,7 +5,10 @@ use serde_json::Value;
 
 use crate::actions::HookResponse;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
-use crate::services::{ProtectDecision, ProtectOutcome};
+use crate::permissions::query::{CommandQuery, PathQuery};
+use crate::services::protect::intent::ProtectIntent;
+use crate::services::protect::observe::default_observe_protect;
+use crate::services::{ProtectDecision, ProtectObservation, ProtectOutcome};
 
 use super::{AdapterError, ProviderAdapter};
 
@@ -56,6 +59,103 @@ impl ProviderAdapter for RooAdapter {
         }
 
         Ok((event, meta))
+    }
+
+    fn observe_protect(
+        &self,
+        event: &AgenticEvent,
+        meta: &EventMeta,
+    ) -> Option<ProtectObservation> {
+        let mut obs = default_observe_protect(event, meta)?;
+
+        if let Some(tool_name) = meta.tool_name.as_deref() {
+            let lowered = tool_name.to_ascii_lowercase();
+            let mut intents = Vec::new();
+            let mut replaced = true;
+
+            match lowered.as_str() {
+                "execute_command" | "shell" => {
+                    let cmd = meta
+                        .tool_input
+                        .as_ref()
+                        .and_then(|v| {
+                            v.get("command")
+                                .and_then(Value::as_str)
+                                .map(ToOwned::to_owned)
+                                .or_else(|| v.as_str().map(ToOwned::to_owned))
+                        });
+                    if let Some(cmd) = cmd {
+                        intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(&cmd)));
+                    }
+                }
+                "write_to_file" | "replace_in_file" | "insert_code_block"
+                | "search_and_replace" => {
+                    if let Some(path) = roo_tool_input_path(meta) {
+                        intents.push(ProtectIntent::WritePath(PathQuery::file(&path)));
+                    }
+                }
+                "read_file" | "list_files" | "search_files" | "list_code_definition_names" => {
+                    if let Some(path) = roo_tool_input_path(meta) {
+                        intents.push(ProtectIntent::ReadPath(PathQuery::unknown(&path)));
+                    }
+                }
+                "use_mcp_tool" => {
+                    if let Some(server) = meta
+                        .tool_input
+                        .as_ref()
+                        .and_then(|v| v.get("server_name"))
+                        .and_then(Value::as_str)
+                    {
+                        intents.push(ProtectIntent::UseMcpServer {
+                            server: server.to_owned(),
+                        });
+                        if let Some(tool) = meta
+                            .tool_input
+                            .as_ref()
+                            .and_then(|v| v.get("tool_name"))
+                            .and_then(Value::as_str)
+                        {
+                            intents.push(ProtectIntent::UseMcpTool {
+                                server: server.to_owned(),
+                                tool: tool.to_owned(),
+                            });
+                        }
+                    }
+                }
+                "switch_mode" => {
+                    let target = meta
+                        .tool_input
+                        .as_ref()
+                        .and_then(|v| v.get("mode_slug"))
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned);
+                    intents.push(ProtectIntent::SwitchMode { target });
+                }
+                _ => {
+                    replaced = false;
+                }
+            }
+
+            if replaced {
+                if obs.intents.iter().any(|i| matches!(i, ProtectIntent::CompletionOutputScan)) {
+                    intents.push(ProtectIntent::CompletionOutputScan);
+                }
+                obs.intents = intents;
+            }
+        }
+
+        // Roo ModeChanged notification → SwitchMode intent.
+        if matches!(event, AgenticEvent::Notification) {
+            if let Some(Value::String(mode)) = meta.extra.get("required_action") {
+                if mode.contains("mode") {
+                    obs.intents.push(ProtectIntent::SwitchMode {
+                        target: Some(mode.clone()),
+                    });
+                }
+            }
+        }
+
+        Some(obs)
     }
 
     fn can_block(&self, _event: &AgenticEvent) -> bool {
@@ -124,6 +224,19 @@ fn map_event(event_name: &str) -> Result<AgenticEvent, AdapterError> {
         "ModeChanged" => Ok(AgenticEvent::Notification),
         other => Err(AdapterError::UnknownEvent(other.to_string())),
     }
+}
+
+fn roo_tool_input_path(meta: &EventMeta) -> Option<String> {
+    meta.tool_input
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .and_then(|map| {
+            map.get("path")
+                .or_else(|| map.get("file_path"))
+                .or_else(|| map.get("file"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
 }
 
 fn str_field(raw: &Value, key: &str) -> Option<String> {
