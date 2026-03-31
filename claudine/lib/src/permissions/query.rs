@@ -1,12 +1,14 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::events::Provider;
 
 use super::canonical::{
     CanonicalPolicy, MappingFidelity, PolicyCertainty, PolicyEffect, PolicyWarning, TernaryState,
 };
+use super::context::PolicyContext;
 use super::explain::{ExplanationReason, PolicyExplanation};
 use super::matchers;
+use super::matchers::PathClassification;
 use super::native::{NativeEffectivePolicy, ProviderCliOverrides};
 
 // --- Query types ---
@@ -244,12 +246,28 @@ pub struct ConfiguredPolicySnapshot {
     pub native: NativeEffectivePolicy,
     /// Canonical policy produced from the native state.
     pub canonical: CanonicalPolicy,
+    query_context: SnapshotQueryContext,
 }
 
 impl ConfiguredPolicySnapshot {
+    pub(crate) fn from_parts(
+        provider: Provider,
+        native: NativeEffectivePolicy,
+        canonical: CanonicalPolicy,
+        ctx: &PolicyContext,
+    ) -> Self {
+        let query_context = SnapshotQueryContext::from_parts(ctx, &native);
+        Self {
+            provider,
+            native,
+            canonical,
+            query_context,
+        }
+    }
+
     /// Evaluates a policy query against this configured snapshot.
     pub fn query(&self, query: &PolicyQuery) -> QueryResult {
-        resolve_query(&self.canonical, query)
+        resolve_query(&self.canonical, query, &self.query_context)
     }
 
     /// Can the given path be read?
@@ -337,12 +355,30 @@ pub struct EffectivePolicySnapshot {
     pub canonical: CanonicalPolicy,
     /// CLI overrides that were applied.
     pub cli: ProviderCliOverrides,
+    query_context: SnapshotQueryContext,
 }
 
 impl EffectivePolicySnapshot {
+    pub(crate) fn from_parts(
+        provider: Provider,
+        native: NativeEffectivePolicy,
+        canonical: CanonicalPolicy,
+        cli: ProviderCliOverrides,
+        ctx: &PolicyContext,
+    ) -> Self {
+        let query_context = SnapshotQueryContext::from_parts(ctx, &native);
+        Self {
+            provider,
+            native,
+            canonical,
+            cli,
+            query_context,
+        }
+    }
+
     /// Evaluates a policy query against this effective snapshot.
     pub fn query(&self, query: &PolicyQuery) -> QueryResult {
-        resolve_query(&self.canonical, query)
+        resolve_query(&self.canonical, query, &self.query_context)
     }
 
     /// Can the given path be read?
@@ -422,62 +458,97 @@ impl std::fmt::Debug for EffectivePolicySnapshot {
 ///
 /// Uses first-match-wins against rules in precedence order. If no rule
 /// matches, returns [`QueryResult::no_match()`].
-pub(crate) fn resolve_query(policy: &CanonicalPolicy, query: &PolicyQuery) -> QueryResult {
+fn resolve_query(
+    policy: &CanonicalPolicy,
+    query: &PolicyQuery,
+    query_context: &SnapshotQueryContext,
+) -> QueryResult {
     match query {
-        PolicyQuery::ReadPath(pq) => resolve_path_query(&policy.axes.filesystem.read_rules, pq),
-        PolicyQuery::WritePath(pq) => resolve_path_query(&policy.axes.filesystem.write_rules, pq),
-        PolicyQuery::TraversePath(pq) => {
-            resolve_path_query(&policy.axes.filesystem.traversal_rules, pq)
+        PolicyQuery::ReadPath(pq) => {
+            resolve_path_query(policy, &policy.axes.filesystem.read_rules, pq, query_context)
         }
+        PolicyQuery::WritePath(pq) => {
+            resolve_path_query(policy, &policy.axes.filesystem.write_rules, pq, query_context)
+        }
+        PolicyQuery::TraversePath(pq) => resolve_path_query(
+            policy,
+            &policy.axes.filesystem.traversal_rules,
+            pq,
+            query_context,
+        ),
         PolicyQuery::ExecuteCommand(cq) => {
-            resolve_command_query(&policy.axes.commands.shell_rules, cq)
+            resolve_command_query(policy, &policy.axes.commands.shell_rules, cq)
         }
-        PolicyQuery::AccessDomain(dq) => resolve_domain_query(&policy.axes.network, dq),
+        PolicyQuery::AccessDomain(dq) => resolve_domain_query(policy, &policy.axes.network, dq),
         PolicyQuery::UseMcpServer { server } => {
-            resolve_mcp_server_query(&policy.axes.mcp.server_rules, server)
+            resolve_mcp_server_query(policy, &policy.axes.mcp.server_rules, server)
         }
         PolicyQuery::UseMcpTool { server, tool } => {
-            resolve_mcp_tool_query(&policy.axes.mcp.tool_rules, server, tool)
+            resolve_mcp_tool_query(policy, &policy.axes.mcp.tool_rules, server, tool)
         }
         PolicyQuery::SpawnSubagent { name } => {
-            resolve_subagent_query(&policy.axes.agents.subagent_rules, name.as_deref())
+            resolve_subagent_query(policy, &policy.axes.agents.subagent_rules, name.as_deref())
         }
         PolicyQuery::SwitchMode { target } => {
-            resolve_mode_switch_query(&policy.axes.agents.mode_switch_rules, target.as_deref())
+            resolve_mode_switch_query(
+                policy,
+                &policy.axes.agents.mode_switch_rules,
+                target.as_deref(),
+            )
         }
         PolicyQuery::ModifyProviderConfig => {
-            resolve_config_modify_query(&policy.axes.filesystem.protected_config_paths)
+            resolve_config_modify_query(policy, &policy.axes.filesystem.protected_config_paths)
         }
     }
 }
 
-fn resolve_path_query(rules: &[super::canonical::PathAccessRule], pq: &PathQuery) -> QueryResult {
+fn resolve_path_query(
+    policy: &CanonicalPolicy,
+    rules: &[super::canonical::PathAccessRule],
+    pq: &PathQuery,
+    query_context: &SnapshotQueryContext,
+) -> QueryResult {
+    let resolved = ResolvedPathQuery::from_query(pq, query_context);
+
     for (i, rule) in rules.iter().enumerate() {
-        if matchers::path_matches(&pq.path, &rule.pattern) {
-            return build_single_match_result(
+        if matchers::path_matches(&resolved.normalized_path, &rule.pattern) {
+            let mut result = build_single_match_result(
+                policy,
                 i,
                 &format!("path rule: {}", rule.pattern),
                 rule.effect,
                 &rule.provenance,
                 &format!(
-                    "Path `{}` matched rule `{}` -> {:?}",
-                    pq.path.display(),
+                    "Path {} matched rule `{}` -> {:?}",
+                    resolved.subject(),
                     rule.pattern,
                     rule.effect,
                 ),
             );
+            result
+                .explanation
+                .reasons
+                .push(resolved.scope_reason("Query path resolved within"));
+            return result;
         }
     }
-    QueryResult::no_match()
+
+    no_match_result(
+        policy,
+        format!("No matching rules found for path {}.", resolved.subject()),
+        vec![resolved.scope_reason("Query path resolved within")],
+    )
 }
 
 fn resolve_command_query(
+    policy: &CanonicalPolicy,
     rules: &[super::canonical::CommandAccessRule],
     cq: &CommandQuery,
 ) -> QueryResult {
     for (i, rule) in rules.iter().enumerate() {
         if matchers::command_matches(&cq.raw, cq.executable.as_deref(), &rule.pattern) {
             return build_single_match_result(
+                policy,
                 i,
                 &format!("command rule: {}", rule.pattern),
                 rule.effect,
@@ -489,27 +560,36 @@ fn resolve_command_query(
             );
         }
     }
-    QueryResult::no_match()
+    no_match_result(
+        policy,
+        format!("No matching rules found for command `{}`.", cq.raw),
+        Vec::new(),
+    )
 }
 
 fn resolve_domain_query(
+    policy: &CanonicalPolicy,
     network: &super::canonical::NetworkPolicy,
     dq: &DomainQuery,
 ) -> QueryResult {
     if network.enabled == TernaryState::No {
-        return QueryResult {
+        return finalize_result(
+            policy,
+            QueryResult {
             effect: Some(PolicyEffect::Deny),
             certainty: PolicyCertainty::Exact,
             stability: QueryStability::Stable,
             matched_rules: Vec::new(),
             explanation: PolicyExplanation::new("Network access is disabled.", Vec::new()),
             warnings: Vec::new(),
-        };
+        },
+        );
     }
 
     for (i, rule) in network.domain_rules.iter().enumerate() {
         if matchers::domain_matches(&dq.domain, &rule.pattern) {
             return build_single_match_result(
+                policy,
                 i,
                 &format!("domain rule: {}", rule.pattern),
                 rule.effect,
@@ -523,7 +603,9 @@ fn resolve_domain_query(
     }
 
     match network.enabled {
-        TernaryState::Yes => QueryResult {
+        TernaryState::Yes => finalize_result(
+            policy,
+            QueryResult {
             effect: Some(PolicyEffect::Allow),
             certainty: PolicyCertainty::BestEffort,
             stability: QueryStability::Stable,
@@ -537,18 +619,28 @@ fn resolve_domain_query(
             ),
             warnings: Vec::new(),
         },
-        TernaryState::Unknown => QueryResult::no_match(),
+        ),
+        TernaryState::Unknown => no_match_result(
+            policy,
+            format!(
+                "No matching rules found for domain `{}` and network enablement is unknown.",
+                dq.domain
+            ),
+            Vec::new(),
+        ),
         TernaryState::No => unreachable!(),
     }
 }
 
 fn resolve_mcp_server_query(
+    policy: &CanonicalPolicy,
     rules: &[super::canonical::McpServerRule],
     server: &str,
 ) -> QueryResult {
     for (i, rule) in rules.iter().enumerate() {
         if rule.server_id == server || rule.server_id == "*" {
             return build_single_match_result(
+                policy,
                 i,
                 &format!("MCP server rule: {}", rule.server_id),
                 rule.effect,
@@ -560,10 +652,15 @@ fn resolve_mcp_server_query(
             );
         }
     }
-    QueryResult::no_match()
+    no_match_result(
+        policy,
+        format!("No matching rules found for MCP server `{server}`."),
+        Vec::new(),
+    )
 }
 
 fn resolve_mcp_tool_query(
+    policy: &CanonicalPolicy,
     rules: &[super::canonical::McpToolRule],
     server: &str,
     tool: &str,
@@ -573,6 +670,7 @@ fn resolve_mcp_tool_query(
         let tool_match = rule.tool_name == tool || rule.tool_name == "*";
         if server_match && tool_match {
             return build_single_match_result(
+                policy,
                 i,
                 &format!("MCP tool rule: {}::{}", rule.server_id, rule.tool_name),
                 rule.effect,
@@ -584,10 +682,15 @@ fn resolve_mcp_tool_query(
             );
         }
     }
-    QueryResult::no_match()
+    no_match_result(
+        policy,
+        format!("No matching rules found for MCP tool `{server}::{tool}`."),
+        Vec::new(),
+    )
 }
 
 fn resolve_subagent_query(
+    policy: &CanonicalPolicy,
     rules: &[super::canonical::SubagentRule],
     name: Option<&str>,
 ) -> QueryResult {
@@ -600,6 +703,7 @@ fn resolve_subagent_query(
         if matches {
             let label = rule.name.as_deref().unwrap_or("*");
             return build_single_match_result(
+                policy,
                 i,
                 &format!("subagent rule: {label}"),
                 rule.effect,
@@ -612,10 +716,18 @@ fn resolve_subagent_query(
             );
         }
     }
-    QueryResult::no_match()
+    no_match_result(
+        policy,
+        format!(
+            "No matching rules found for subagent `{}`.",
+            name.unwrap_or("(any)")
+        ),
+        Vec::new(),
+    )
 }
 
 fn resolve_mode_switch_query(
+    policy: &CanonicalPolicy,
     rules: &[super::canonical::ModeSwitchRule],
     target: Option<&str>,
 ) -> QueryResult {
@@ -628,6 +740,7 @@ fn resolve_mode_switch_query(
         if matches {
             let label = rule.target.as_deref().unwrap_or("*");
             return build_single_match_result(
+                policy,
                 i,
                 &format!("mode switch rule: {label}"),
                 rule.effect,
@@ -640,14 +753,26 @@ fn resolve_mode_switch_query(
             );
         }
     }
-    QueryResult::no_match()
+    no_match_result(
+        policy,
+        format!(
+            "No matching rules found for mode switch `{}`.",
+            target.unwrap_or("(any)")
+        ),
+        Vec::new(),
+    )
 }
 
 fn resolve_config_modify_query(
+    policy: &CanonicalPolicy,
     protected_paths: &[super::canonical::PathProtectionRule],
 ) -> QueryResult {
     if protected_paths.is_empty() {
-        return QueryResult::no_match();
+        return no_match_result(
+            policy,
+            "No protected provider config paths are registered.".to_owned(),
+            Vec::new(),
+        );
     }
 
     let reasons: Vec<ExplanationReason> = protected_paths
@@ -660,53 +785,260 @@ fn resolve_config_modify_query(
         })
         .collect();
 
-    QueryResult {
-        effect: Some(PolicyEffect::Ask),
-        certainty: PolicyCertainty::BestEffort,
-        stability: QueryStability::Stable,
-        matched_rules: Vec::new(),
-        explanation: PolicyExplanation::new(
-            format!(
-                "{} protected config path(s) registered.",
-                protected_paths.len(),
+    finalize_result(
+        policy,
+        QueryResult {
+            effect: Some(PolicyEffect::Ask),
+            certainty: PolicyCertainty::BestEffort,
+            stability: QueryStability::Stable,
+            matched_rules: Vec::new(),
+            explanation: PolicyExplanation::new(
+                format!(
+                    "{} protected config path(s) registered.",
+                    protected_paths.len(),
+                ),
+                reasons,
             ),
-            reasons,
-        ),
-        warnings: Vec::new(),
-    }
+            warnings: Vec::new(),
+        },
+    )
 }
 
 /// Builds a `QueryResult` for a single matched rule.
 fn build_single_match_result(
+    policy: &CanonicalPolicy,
     index: usize,
     description: &str,
     effect: PolicyEffect,
     provenance: &super::canonical::CanonicalRuleProvenance,
     summary: &str,
 ) -> QueryResult {
-    QueryResult {
-        effect: Some(effect),
-        certainty: match provenance.fidelity {
-            MappingFidelity::Exact => PolicyCertainty::Exact,
-            _ => PolicyCertainty::BestEffort,
-        },
-        stability: QueryStability::Stable,
-        matched_rules: vec![MatchedRule {
-            rule_index: Some(index),
-            description: description.to_owned(),
-            effect,
-            provenance: provenance.clone(),
-        }],
-        explanation: PolicyExplanation::new(
-            summary,
-            vec![ExplanationReason {
-                source_id: provenance.source_id.clone(),
-                native_reference: provenance.native_reference.clone(),
-                message: format!("Rule `{description}` with effect {effect:?}"),
-                fidelity: provenance.fidelity,
+    finalize_result(
+        policy,
+        QueryResult {
+            effect: Some(effect),
+            certainty: match provenance.fidelity {
+                MappingFidelity::Exact => PolicyCertainty::Exact,
+                _ => PolicyCertainty::BestEffort,
+            },
+            stability: QueryStability::Stable,
+            matched_rules: vec![MatchedRule {
+                rule_index: Some(index),
+                description: description.to_owned(),
+                effect,
+                provenance: provenance.clone(),
             }],
-        ),
-        warnings: Vec::new(),
+            explanation: PolicyExplanation::new(
+                summary,
+                vec![ExplanationReason {
+                    source_id: provenance.source_id.clone(),
+                    native_reference: provenance.native_reference.clone(),
+                    message: format!("Rule `{description}` with effect {effect:?}"),
+                    fidelity: provenance.fidelity,
+                }],
+            ),
+            warnings: Vec::new(),
+        },
+    )
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedPathQuery {
+    original_path: PathBuf,
+    normalized_path: PathBuf,
+    classification: PathClassification,
+}
+
+impl ResolvedPathQuery {
+    fn from_query(query: &PathQuery, query_context: &SnapshotQueryContext) -> Self {
+        let candidate = if query.path.is_absolute() {
+            query.path.clone()
+        } else {
+            query_context.cwd.join(&query.path)
+        };
+        let normalized_path = canonicalize_lossy(&candidate);
+        let provider_roots = query_context
+            .provider_config_roots
+            .iter()
+            .map(PathBuf::as_path)
+            .collect::<Vec<_>>();
+        let classification = matchers::classify_path_with_config(
+            &normalized_path,
+            Some(query_context.workspace_root.as_path()),
+            query_context.home_dir.as_deref(),
+            &provider_roots,
+        );
+
+        Self {
+            original_path: query.path.clone(),
+            normalized_path,
+            classification,
+        }
+    }
+
+    fn subject(&self) -> String {
+        if self.original_path == self.normalized_path {
+            format!(
+                "`{}` ({})",
+                self.normalized_path.display(),
+                path_classification_label(self.classification),
+            )
+        } else {
+            format!(
+                "`{}` -> `{}` ({})",
+                self.original_path.display(),
+                self.normalized_path.display(),
+                path_classification_label(self.classification),
+            )
+        }
+    }
+
+    fn scope_reason(&self, prefix: &str) -> ExplanationReason {
+        ExplanationReason {
+            source_id: "query".to_owned(),
+            native_reference: None,
+            message: format!(
+                "{prefix} {} scope at `{}`.",
+                path_classification_label(self.classification),
+                self.normalized_path.display(),
+            ),
+            fidelity: MappingFidelity::Exact,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SnapshotQueryContext {
+    cwd: PathBuf,
+    workspace_root: PathBuf,
+    home_dir: Option<PathBuf>,
+    provider_config_roots: Vec<PathBuf>,
+}
+
+impl SnapshotQueryContext {
+    fn from_parts(ctx: &PolicyContext, native: &NativeEffectivePolicy) -> Self {
+        let mut provider_config_roots = Vec::new();
+        for source in &native.sources {
+            if let Some(path) = &source.path {
+                provider_config_roots.push(canonicalize_lossy(path));
+                if let Some(parent) = path.parent() {
+                    provider_config_roots.push(canonicalize_lossy(parent));
+                }
+            }
+        }
+        provider_config_roots.sort();
+        provider_config_roots.dedup();
+
+        Self {
+            cwd: canonicalize_lossy(&ctx.cwd),
+            workspace_root: canonicalize_lossy(ctx.repo_root.as_deref().unwrap_or(&ctx.cwd)),
+            home_dir: ctx.home_dir.as_deref().map(canonicalize_lossy),
+            provider_config_roots,
+        }
+    }
+}
+
+fn no_match_result(
+    policy: &CanonicalPolicy,
+    summary: String,
+    reasons: Vec<ExplanationReason>,
+) -> QueryResult {
+    finalize_result(
+        policy,
+        QueryResult {
+            effect: None,
+            certainty: PolicyCertainty::Unknown,
+            stability: QueryStability::Unknown,
+            matched_rules: Vec::new(),
+            explanation: PolicyExplanation::new(summary, reasons),
+            warnings: Vec::new(),
+        },
+    )
+}
+
+fn finalize_result(policy: &CanonicalPolicy, mut result: QueryResult) -> QueryResult {
+    for warning in &policy.warnings {
+        if !result
+            .warnings
+            .iter()
+            .any(|existing| existing.code == warning.code && existing.message == warning.message)
+        {
+            result.warnings.push(warning.clone());
+        }
+    }
+
+    result.stability = base_stability(policy, result.stability);
+
+    if let Some(warning) = policy
+        .warnings
+        .iter()
+        .find(|warning| warning.code.ends_with(".trust_unknown"))
+    {
+        result.effect = None;
+        result.certainty = PolicyCertainty::Unknown;
+        result.stability = QueryStability::Unknown;
+        result.explanation.reasons.push(ExplanationReason {
+            source_id: warning
+                .source_id
+                .clone()
+                .unwrap_or_else(|| "policy".to_owned()),
+            native_reference: None,
+            message: warning.message.clone(),
+            fidelity: MappingFidelity::Approximate,
+        });
+        result.explanation.summary = format!(
+            "{} Trust is unknown, so repo-scoped policy may change this answer.",
+            result.explanation.summary
+        );
+    }
+
+    result
+}
+
+fn base_stability(policy: &CanonicalPolicy, current: QueryStability) -> QueryStability {
+    if current != QueryStability::Stable {
+        return current;
+    }
+
+    match policy.mode {
+        super::canonical::PolicyMode::Configured => QueryStability::MayChangeWithCli,
+        super::canonical::PolicyMode::Effective => QueryStability::Stable,
+    }
+}
+
+fn canonicalize_lossy(path: &Path) -> PathBuf {
+    normalize_path(path)
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::RootDir | Component::Prefix(_) => normalized.push(component.as_os_str()),
+            Component::Normal(segment) => normalized.push(segment),
+        }
+    }
+
+    if normalized.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalized
+    }
+}
+
+fn path_classification_label(classification: PathClassification) -> &'static str {
+    match classification {
+        PathClassification::ProviderConfig => "provider-config",
+        PathClassification::Workspace => "workspace",
+        PathClassification::Home => "home",
+        PathClassification::Temp => "temp",
+        PathClassification::System => "system",
+        PathClassification::External => "external",
     }
 }
 
@@ -761,6 +1093,10 @@ fn looks_like_env_assignment(token: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::permissions::{
+        CanonicalPolicy, CanonicalRuleProvenance, PathAccessRule, PolicyContext, PolicyMode,
+        PolicyWarning,
+    };
 
     #[test]
     fn command_query_tokenizes_quotes_and_escapes() {
@@ -780,5 +1116,67 @@ mod tests {
         assert_eq!(query.executable.as_deref(), Some("python"));
         assert_eq!(query.argv[0], "FOO=bar");
         assert_eq!(query.argv[2], "/usr/bin/python");
+    }
+
+    #[test]
+    fn path_queries_are_normalized_relative_to_cwd() {
+        let cwd = PathBuf::from("/workspace/project");
+        let ctx = PolicyContext::new(cwd.clone()).with_repo_root(cwd.clone());
+        let mut canonical = CanonicalPolicy::empty(Provider::Claude, PolicyMode::Configured);
+        canonical.axes.filesystem.write_rules.push(PathAccessRule {
+            pattern: "/workspace/project/src".to_owned(),
+            effect: PolicyEffect::Allow,
+            provenance: CanonicalRuleProvenance::exact("repo", "sandbox.filesystem.allowWrite"),
+        });
+
+        let snapshot = ConfiguredPolicySnapshot::from_parts(
+            Provider::Claude,
+            NativeEffectivePolicy::new(Provider::Claude, Vec::new(), ()),
+            canonical,
+            &ctx,
+        );
+        let result = snapshot.can_write("src/../src/main.rs");
+
+        assert!(result.is_allowed());
+        assert_eq!(result.stability, QueryStability::MayChangeWithCli);
+        assert!(result.explanation.summary.contains("workspace"));
+        assert!(
+            result
+                .explanation
+                .summary
+                .contains("/workspace/project/src/main.rs")
+        );
+    }
+
+    #[test]
+    fn trust_unknown_warnings_make_query_results_unknown() {
+        let cwd = PathBuf::from("/workspace/project");
+        let ctx = PolicyContext::new(cwd.clone()).with_repo_root(cwd);
+        let mut canonical = CanonicalPolicy::empty(Provider::Codex, PolicyMode::Configured);
+        canonical.axes.filesystem.write_rules.push(PathAccessRule {
+            pattern: "*".to_owned(),
+            effect: PolicyEffect::Deny,
+            provenance: CanonicalRuleProvenance::exact("codex-user", "sandbox_mode"),
+        });
+        canonical.warnings.push(PolicyWarning {
+            code: "codex.trust_unknown".to_owned(),
+            message: "Repo-scoped Codex config is trust-gated and trust was not supplied."
+                .to_owned(),
+            source_id: None,
+        });
+
+        let snapshot = ConfiguredPolicySnapshot::from_parts(
+            Provider::Codex,
+            NativeEffectivePolicy::new(Provider::Codex, Vec::new(), ()),
+            canonical,
+            &ctx,
+        );
+        let result = snapshot.can_write("src/main.rs");
+
+        assert!(result.is_unknown());
+        assert_eq!(result.certainty, PolicyCertainty::Unknown);
+        assert_eq!(result.stability, QueryStability::Unknown);
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.explanation.summary.contains("Trust is unknown"));
     }
 }

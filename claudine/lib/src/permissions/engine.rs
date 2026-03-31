@@ -109,11 +109,9 @@ impl PolicyEngine {
         let native = backend.compose_native_policy(ctx, &layers, None)?;
         let canonical = backend.canonicalize(ctx, &native)?;
 
-        Ok(ConfiguredPolicySnapshot {
-            provider,
-            native,
-            canonical,
-        })
+        Ok(ConfiguredPolicySnapshot::from_parts(
+            provider, native, canonical, ctx,
+        ))
     }
 
     /// Produces an effective policy snapshot (config + CLI overrides).
@@ -140,12 +138,13 @@ impl PolicyEngine {
         let native = backend.compose_native_policy(ctx, &layers, Some(&cli_overrides))?;
         let canonical = backend.canonicalize(ctx, &native)?;
 
-        Ok(EffectivePolicySnapshot {
+        Ok(EffectivePolicySnapshot::from_parts(
             provider,
             native,
             canonical,
-            cli: cli_overrides,
-        })
+            cli_overrides,
+            ctx,
+        ))
     }
 
     fn backend(&self, provider: Provider) -> Result<&dyn ProviderPolicyBackend> {
