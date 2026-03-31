@@ -369,15 +369,13 @@ impl Markdown {
             };
             for diag in effective_state.ctx_diagnostics() {
                 let warning = match diag {
-                    context::ContextMergeDiagnostic::UserCtxMerged {
-                        colliding_keys,
-                    } if colliding_keys.is_empty() => {
+                    context::ContextMergeDiagnostic::UserCtxMerged { colliding_keys }
+                        if colliding_keys.is_empty() =>
+                    {
                         // No warning needed when merge succeeded without collisions
                         continue;
                     }
-                    context::ContextMergeDiagnostic::UserCtxMerged {
-                        colliding_keys,
-                    } => {
+                    context::ContextMergeDiagnostic::UserCtxMerged { colliding_keys } => {
                         let keys_list = colliding_keys.join(", ");
                         ComposeWarning::new(
                             "context",
@@ -386,12 +384,10 @@ impl Markdown {
                             ),
                         )
                     }
-                    context::ContextMergeDiagnostic::InvalidUserCtxReplaced => {
-                        ComposeWarning::new(
-                            "context",
-                            "Document ctx was not an object; replaced with runtime context",
-                        )
-                    }
+                    context::ContextMergeDiagnostic::InvalidUserCtxReplaced => ComposeWarning::new(
+                        "context",
+                        "Document ctx was not an object; replaced with runtime context",
+                    ),
                     context::ContextMergeDiagnostic::PartialRuntimeCapture { area, detail } => {
                         ComposeWarning::new(
                             "context",
@@ -420,11 +416,19 @@ impl Markdown {
                         )?;
                         if let Some(start) = op_start {
                             let kind = match operation {
-                                ComposeOperation::FrontmatterInterpolation => perf::PerfMetricKind::FrontmatterInterpolation,
-                                ComposeOperation::TextReplacement => perf::PerfMetricKind::TextReplacement,
+                                ComposeOperation::FrontmatterInterpolation => {
+                                    perf::PerfMetricKind::FrontmatterInterpolation
+                                }
+                                ComposeOperation::TextReplacement => {
+                                    perf::PerfMetricKind::TextReplacement
+                                }
                                 ComposeOperation::PageBlocks => perf::PerfMetricKind::PageBlocks,
-                                ComposeOperation::Interpolation => perf::PerfMetricKind::Interpolation,
-                                ComposeOperation::ShellExpansion => perf::PerfMetricKind::ShellExpansion,
+                                ComposeOperation::Interpolation => {
+                                    perf::PerfMetricKind::Interpolation
+                                }
+                                ComposeOperation::ShellExpansion => {
+                                    perf::PerfMetricKind::ShellExpansion
+                                }
                                 _ => unreachable!(),
                             };
                             perf.record(kind, start.elapsed());
@@ -459,7 +463,9 @@ impl Markdown {
                         if let Some(start) = op_start {
                             let kind = match operation {
                                 ComposeOperation::Cleanup => perf::PerfMetricKind::Cleanup,
-                                ComposeOperation::Normalization => perf::PerfMetricKind::Normalization,
+                                ComposeOperation::Normalization => {
+                                    perf::PerfMetricKind::Normalization
+                                }
                                 _ => unreachable!(),
                             };
                             perf.record(kind, start.elapsed());
@@ -2999,7 +3005,8 @@ Rounded: {{ round(pi) }}"#;
 
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::ComposeContext::capture();
-        ctx.env_mut().insert("AGENT".to_string(), "claude".to_string());
+        ctx.env_mut()
+            .insert("AGENT".to_string(), "claude".to_string());
         let options = ComposeOptions::new()
             .with_source_file(root)
             .with_context(ctx);
@@ -3025,7 +3032,8 @@ Rounded: {{ round(pi) }}"#;
 
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::ComposeContext::capture();
-        ctx.env_mut().insert("AGENT".to_string(), "opencode".to_string());
+        ctx.env_mut()
+            .insert("AGENT".to_string(), "opencode".to_string());
         let options = ComposeOptions::new()
             .with_source_file(root)
             .with_context(ctx);
@@ -3089,7 +3097,8 @@ Rounded: {{ round(pi) }}"#;
         // Test 1: AGENT=claude → only cc.md included
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::ComposeContext::capture();
-        ctx.env_mut().insert("AGENT".to_string(), "claude".to_string());
+        ctx.env_mut()
+            .insert("AGENT".to_string(), "claude".to_string());
         let opts = ComposeOptions::new()
             .with_source_file(&root)
             .with_context(ctx);
@@ -3106,7 +3115,8 @@ Rounded: {{ round(pi) }}"#;
         // Test 2: AGENT=opencode → only oc.md included
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::ComposeContext::capture();
-        ctx.env_mut().insert("AGENT".to_string(), "opencode".to_string());
+        ctx.env_mut()
+            .insert("AGENT".to_string(), "opencode".to_string());
         let opts = ComposeOptions::new()
             .with_source_file(&root)
             .with_context(ctx);
@@ -3286,7 +3296,10 @@ Rounded: {{ round(pi) }}"#;
 
         let options = ComposeOptions::new().with_perf(true);
         let (_, report) = md.compose_with(options).unwrap();
-        assert!(report.perf.is_some(), "Perf should be populated when enabled");
+        assert!(
+            report.perf.is_some(),
+            "Perf should be populated when enabled"
+        );
 
         let perf = report.perf.unwrap();
         assert!(perf.total > std::time::Duration::ZERO);

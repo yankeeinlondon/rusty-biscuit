@@ -372,11 +372,10 @@ pub fn run_compose(
             ReferenceSeverity, ReferenceValidationOptions,
         };
 
-        let val_options = ReferenceValidationOptions::with_graph(
-            ReferenceGraphOptions::with_compose(
+        let val_options =
+            ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
                 ComposeOptions::new_with_context(shared_context.clone()),
-            ),
-        );
+            ));
 
         match md.validate_references(val_options) {
             Ok(report) => {
@@ -581,8 +580,7 @@ pub fn run_compose(
         use biscuit_terminal::terminal::Terminal;
         let term = Terminal::default();
         for warning in &report.warnings {
-            let status = Status::from_prose(&warning.message)
-                .state(StatusState::Warning);
+            let status = Status::from_prose(&warning.message).state(StatusState::Warning);
             eprintln!("{}", status.render(&term));
         }
     }
@@ -1245,15 +1243,30 @@ mod tests {
     #[test]
     fn format_duration_microseconds() {
         assert_eq!(format_duration(std::time::Duration::from_micros(0)), "0µs");
-        assert_eq!(format_duration(std::time::Duration::from_micros(42)), "42µs");
-        assert_eq!(format_duration(std::time::Duration::from_micros(999)), "999µs");
+        assert_eq!(
+            format_duration(std::time::Duration::from_micros(42)),
+            "42µs"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_micros(999)),
+            "999µs"
+        );
     }
 
     #[test]
     fn format_duration_milliseconds() {
-        assert_eq!(format_duration(std::time::Duration::from_micros(1_000)), "1.0ms");
-        assert_eq!(format_duration(std::time::Duration::from_millis(42)), "42.0ms");
-        assert_eq!(format_duration(std::time::Duration::from_micros(5_200)), "5.2ms");
+        assert_eq!(
+            format_duration(std::time::Duration::from_micros(1_000)),
+            "1.0ms"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_millis(42)),
+            "42.0ms"
+        );
+        assert_eq!(
+            format_duration(std::time::Duration::from_micros(5_200)),
+            "5.2ms"
+        );
     }
 
     #[test]
@@ -1971,7 +1984,11 @@ fn format_compose_perf_report(
         ("capture context", cli_perf.capture_context),
     ];
     for (name, dur) in cli_metrics {
-        left.push_str(&format!("  {:22}{}\n", format!("{}:", name), format_duration(*dur)));
+        left.push_str(&format!(
+            "  {:22}{}\n",
+            format!("{}:", name),
+            format_duration(*dur)
+        ));
     }
     for (name, elapsed) in &cli_perf.capture_context_details {
         left.push_str(&format!(
@@ -1986,7 +2003,11 @@ fn format_compose_perf_report(
         ("compose pipeline", cli_perf.compose_pipeline),
     ];
     for (name, dur) in remaining {
-        left.push_str(&format!("  {:22}{}\n", format!("{}:", name), format_duration(*dur)));
+        left.push_str(&format!(
+            "  {:22}{}\n",
+            format!("{}:", name),
+            format_duration(*dur)
+        ));
     }
 
     // ── Right column: Compose Pipeline ───────────────────────────────
@@ -1996,7 +2017,11 @@ fn format_compose_perf_report(
             format_duration(perf.total)
         );
         for metric in &perf.metrics {
-            col.push_str(&format_metric_line(&metric.name, metric.elapsed, metric.calls));
+            col.push_str(&format_metric_line(
+                &metric.name,
+                metric.elapsed,
+                metric.calls,
+            ));
             col.push('\n');
         }
         col
@@ -2005,16 +2030,12 @@ fn format_compose_perf_report(
     };
 
     // ── Title ────────────────────────────────────────────────────────
-    let title = Prose::new("<b><yellow>Compose Performance</yellow></b>")
-        .render_optimistic(None);
+    let title = Prose::new("<b><yellow>Compose Performance</yellow></b>").render_optimistic(None);
 
     // ── Two-column layout ────────────────────────────────────────────
-    let columns = TwoColumn::new(
-        Prose::new(left.trim_end()),
-        Prose::new(right.trim_end()),
-    )
-    .with_left_percent(0.5)
-    .with_gap(2);
+    let columns = TwoColumn::new(Prose::new(left.trim_end()), Prose::new(right.trim_end()))
+        .with_left_percent(0.5)
+        .with_gap(2);
 
     let body = columns.render_optimistic(None);
 
