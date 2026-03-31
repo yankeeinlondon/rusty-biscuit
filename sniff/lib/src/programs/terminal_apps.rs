@@ -107,10 +107,7 @@ impl InstalledTerminalApps {
             iterm2: get("iterm2"),
             wezterm: get("wezterm"),
             ghostty: get("ghostty"),
-            warp: get_any(&[
-                "warp-terminal",
-                "warp",
-            ]),
+            warp: get_any(&["warp-terminal", "warp"]),
             rio: get("rio"),
             tabby: get("tabby"),
             foot: get("foot"),
@@ -209,7 +206,9 @@ impl InstalledTerminalApps {
     /// Returns a list of all installed terminal apps.
     pub fn installed(&self) -> Vec<TerminalApp> {
         use strum::IntoEnumIterator;
-        TerminalApp::iter().filter(|a| self.is_installed(*a)).collect()
+        TerminalApp::iter()
+            .filter(|a| self.is_installed(*a))
+            .collect()
     }
 }
 
@@ -566,7 +565,11 @@ mod tests {
         let apps = InstalledTerminalApps::default();
         use strum::IntoEnumIterator;
         for app in TerminalApp::iter() {
-            assert!(!apps.is_installed(app), "{:?} should not be installed for default", app);
+            assert!(
+                !apps.is_installed(app),
+                "{:?} should not be installed for default",
+                app
+            );
         }
     }
 
