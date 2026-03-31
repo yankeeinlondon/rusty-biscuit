@@ -51,6 +51,7 @@ pub(crate) fn capability_for_phase(
                 VisibilityLevel::Full => GateCapability::Guarantee,
             }
         }
-        ProtectPhase::Runtime | ProtectPhase::AfterTool => GateCapability::Influence,
+        ProtectPhase::AfterTool => capabilities.post_tool_gate,
+        ProtectPhase::Runtime => GateCapability::Influence,
     }
 }

@@ -246,11 +246,9 @@ async fn dispatch_preparsed(
 
     let protect_post_decision = protect_post.as_ref().map(|e| e.decision.clone());
 
-    // Apply redaction from post-action evaluation
+    // Post-action: blocking outcomes take priority over redaction.
     let action_response = if let Some(eval) = protect_post.as_ref() {
-        if let Some(plan) = &eval.redaction {
-            apply_redaction(action_response, plan)
-        } else if should_short_circuit_on_protect(&eval.decision.outcome) {
+        if should_short_circuit_on_protect(&eval.decision.outcome) {
             Some(
                 adapter
                     .map_protect_outcome(&resolved_hook.event, &eval.decision)
@@ -261,6 +259,8 @@ async fn dispatch_preparsed(
                         ))
                     })?,
             )
+        } else if let Some(plan) = &eval.redaction {
+            apply_redaction(action_response, plan)
         } else {
             action_response
         }

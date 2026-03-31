@@ -296,7 +296,7 @@ mod tests {
     fn validate_rejects_bad_regex() {
         let config = ProtectConfig {
             rules: ProtectRules {
-                blocked_command_patterns: vec!["[unterminated".to_string()],
+                secret_patterns: vec!["[unterminated".to_string()],
                 ..ProtectRules::default()
             },
             ..ProtectConfig::default()
@@ -879,12 +879,23 @@ mod tests {
     }
 
     #[test]
-    fn deprecation_warnings_surface_for_old_fields() {
+    fn deprecated_blocked_command_patterns_rejected() {
         let config = ProtectConfig {
             rules: ProtectRules {
                 blocked_command_patterns: vec!["rm".to_string()],
                 ..ProtectRules::default()
             },
+            ..ProtectConfig::default()
+        };
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("blocked_command_patterns"));
+        assert!(error.contains("removed"));
+    }
+
+    #[test]
+    fn deprecated_mcp_allowlist_rejected() {
+        let config = ProtectConfig {
             mcp: McpPolicy {
                 allowlist: vec!["server1".to_string()],
                 ..McpPolicy::default()
@@ -892,10 +903,52 @@ mod tests {
             ..ProtectConfig::default()
         };
 
-        let warnings = config.deprecation_warnings();
-        assert!(warnings.len() >= 2);
-        assert!(warnings.iter().any(|w| w.contains("blocked_command_patterns")));
-        assert!(warnings.iter().any(|w| w.contains("allowlist")));
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("allowlist"));
+        assert!(error.contains("removed"));
+    }
+
+    #[test]
+    fn deprecated_mcp_denylist_rejected() {
+        let config = ProtectConfig {
+            mcp: McpPolicy {
+                denylist: vec!["bad-server".to_string()],
+                ..McpPolicy::default()
+            },
+            ..ProtectConfig::default()
+        };
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("denylist"));
+        assert!(error.contains("removed"));
+    }
+
+    #[test]
+    fn deprecated_ask_command_patterns_rejected() {
+        let config = ProtectConfig {
+            rules: ProtectRules {
+                ask_command_patterns: vec!["sudo".to_string()],
+                ..ProtectRules::default()
+            },
+            ..ProtectConfig::default()
+        };
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("ask_command_patterns"));
+    }
+
+    #[test]
+    fn deprecated_protected_paths_rejected() {
+        let config = ProtectConfig {
+            rules: ProtectRules {
+                protected_paths: vec!["/etc".to_string()],
+                ..ProtectRules::default()
+            },
+            ..ProtectConfig::default()
+        };
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("protected_paths"));
     }
 
     #[test]

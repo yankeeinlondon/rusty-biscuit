@@ -147,29 +147,47 @@ impl Default for ProtectConfig {
 }
 
 impl ProtectConfig {
-    /// Emit deprecation warnings for fields migrating to PolicyEngine.
-    pub fn deprecation_warnings(&self) -> Vec<String> {
-        let mut warnings = Vec::new();
+    /// Reject deprecated fields that have migrated to PolicyEngine.
+    ///
+    /// Previously these emitted warnings; they now produce validation errors
+    /// to prevent silent acceptance of config that has no runtime effect.
+    fn validate_deprecated_fields(&self) -> Result<()> {
         if !self.rules.blocked_command_patterns.is_empty() {
-            warnings.push("settings.protect.rules.blocked_command_patterns is deprecated; migrate to PolicyEngine rules".to_string());
+            return Err(ClaudineError::ProtectInvalidPolicy(
+                "settings.protect.rules.blocked_command_patterns is removed; migrate to PolicyEngine rules".to_string(),
+            ));
         }
         if !self.rules.ask_command_patterns.is_empty() {
-            warnings.push("settings.protect.rules.ask_command_patterns is deprecated; migrate to PolicyEngine rules".to_string());
+            return Err(ClaudineError::ProtectInvalidPolicy(
+                "settings.protect.rules.ask_command_patterns is removed; migrate to PolicyEngine rules".to_string(),
+            ));
         }
         if !self.rules.protected_paths.is_empty() {
-            warnings.push("settings.protect.rules.protected_paths is deprecated; migrate to PolicyEngine rules".to_string());
+            return Err(ClaudineError::ProtectInvalidPolicy(
+                "settings.protect.rules.protected_paths is removed; migrate to PolicyEngine rules".to_string(),
+            ));
         }
         if !self.mcp.allowlist.is_empty() {
-            warnings.push("settings.protect.mcp.allowlist is deprecated; use MCP catalog trust instead".to_string());
+            return Err(ClaudineError::ProtectInvalidPolicy(
+                "settings.protect.mcp.allowlist is removed; use MCP catalog trust instead".to_string(),
+            ));
         }
         if !self.mcp.denylist.is_empty() {
-            warnings.push("settings.protect.mcp.denylist is deprecated; use MCP catalog trust instead".to_string());
+            return Err(ClaudineError::ProtectInvalidPolicy(
+                "settings.protect.mcp.denylist is removed; use MCP catalog trust instead".to_string(),
+            ));
         }
-        warnings
+        Ok(())
     }
 
     /// Validate semantic constraints and regex configuration.
+    ///
+    /// Deprecated fields that formerly emitted warnings now produce hard errors.
+    /// Only `secret_patterns` and MCP `redact_patterns`/`block_instruction_payloads`
+    /// remain active runtime controls.
     pub fn validate(&self) -> Result<()> {
+        self.validate_deprecated_fields()?;
+
         if self.max_recent_decisions == 0 {
             return Err(ClaudineError::ProtectInvalidPolicy(
                 "settings.protect.max_recent_decisions must be > 0".to_string(),
@@ -189,19 +207,11 @@ impl ProtectConfig {
             ));
         }
 
-        validate_patterns(&self.rules.blocked_command_patterns)?;
-        validate_patterns(&self.rules.ask_command_patterns)?;
         validate_patterns(&self.rules.secret_patterns)?;
         validate_patterns(&self.mcp.redact_patterns)?;
 
         for (provider, override_cfg) in &self.providers {
             if let Some(rules) = override_cfg.rules.as_ref() {
-                if let Some(patterns) = rules.blocked_command_patterns.as_ref() {
-                    validate_patterns(patterns)?;
-                }
-                if let Some(patterns) = rules.ask_command_patterns.as_ref() {
-                    validate_patterns(patterns)?;
-                }
                 if let Some(patterns) = rules.secret_patterns.as_ref() {
                     validate_patterns(patterns)?;
                 }
