@@ -394,8 +394,6 @@ pub(crate) fn execute_composition_request(
     let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
     let child_cwd = effective_repo_root.unwrap_or(&cwd);
 
-    profile.apply_project_dir(&mut child_args, child_cwd);
-
     profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
 
     // --dry-run: print what would be executed and exit

@@ -1012,8 +1012,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
     let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
 
-    profile.apply_project_dir(&mut child_args, child_cwd);
-
     // --dry-run: print what would be executed and exit
     if args.dry_run {
         crate::output::log_dry_run(

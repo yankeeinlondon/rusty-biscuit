@@ -137,19 +137,6 @@ pub(crate) trait WrapperProfile: Send + Sync {
         ))
     }
 
-    // -- Project directory ------------------------------------------------------
-
-    /// Inject provider-specific flags to set the project working directory.
-    ///
-    /// Some agents (OpenCode, Codex, Kimi) have their own internal project
-    /// root detection that may disagree with the process CWD — especially
-    /// in git worktrees where `.git` is a file pointing elsewhere. This
-    /// method passes the explicit directory flag so the agent uses the
-    /// correct project root.
-    ///
-    /// Default: no-op (process CWD via `.current_dir()` is sufficient).
-    fn apply_project_dir(&self, _args: &mut Vec<String>, _dir: &std::path::Path) {}
-
     // -- Non-interactive stdout noise filtering --------------------------------
 
     /// Line prefixes that should be stripped from stdout in non-interactive mode.
@@ -598,12 +585,6 @@ impl WrapperProfile for CodexWrapper {
         }
     }
 
-    fn apply_project_dir(&self, args: &mut Vec<String>, dir: &std::path::Path) {
-        if !has_flag(args, "--cd") && !has_flag(args, "-C") {
-            args.push("--cd".to_string());
-            args.push(dir.display().to_string());
-        }
-    }
 
     fn supports_interactive_inline_closure(&self) -> bool {
         true
@@ -855,12 +836,6 @@ impl WrapperProfile for KimiWrapper {
         Ok(())
     }
 
-    fn apply_project_dir(&self, args: &mut Vec<String>, dir: &std::path::Path) {
-        if !has_flag(args, "--work-dir") && !has_flag(args, "-w") {
-            args.push("--work-dir".to_string());
-            args.push(dir.display().to_string());
-        }
-    }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
         Ok(vec![
@@ -1132,12 +1107,6 @@ impl WrapperProfile for OpencodeWrapper {
         Ok(())
     }
 
-    fn apply_project_dir(&self, args: &mut Vec<String>, dir: &std::path::Path) {
-        if !has_flag(args, "--dir") {
-            args.push("--dir".to_string());
-            args.push(dir.display().to_string());
-        }
-    }
 
     fn supports_structured_stream(&self) -> bool {
         true
