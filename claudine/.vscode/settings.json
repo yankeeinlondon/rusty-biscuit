@@ -19,6 +19,7 @@
         "startswith",
         "TAVILY",
         "unconfigured",
+        "worktrees",
         "ZENMUX"
     ]
 }
