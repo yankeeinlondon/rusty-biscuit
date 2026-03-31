@@ -16,6 +16,13 @@ pub(crate) struct ParsedMarkdown {
     pub(crate) had_frontmatter: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct FrontmatterBounds {
+    yaml_start: usize,
+    yaml_end: usize,
+    body_start: usize,
+}
+
 /// Parse a canonical markdown candidate, apply deterministic compatibility upgrades,
 /// and classify it as `Source` or `PartialSource`.
 pub fn classify_canonical_candidate(
@@ -161,10 +168,7 @@ fn canonical_file_path(resource: LinkableResource, path: &Path) -> Option<PathBu
 
 pub(crate) fn parse_markdown_document(content: &str) -> Result<ParsedMarkdown> {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
-    let Some(rest) = content
-        .strip_prefix("---\n")
-        .or_else(|| content.strip_prefix("---\r\n"))
-    else {
+    let Some(bounds) = frontmatter_bounds(content)? else {
         return Ok(ParsedMarkdown {
             frontmatter: serde_yaml_ng::Mapping::new(),
             body: content.to_string(),
@@ -172,25 +176,14 @@ pub(crate) fn parse_markdown_document(content: &str) -> Result<ParsedMarkdown> {
         });
     };
 
-    let mut offset = 0usize;
-    for line in rest.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-        if trimmed == "---" {
-            let frontmatter_raw = &rest[..offset];
-            let body = &rest[offset + line.len()..];
-            let frontmatter = parse_frontmatter_mapping(frontmatter_raw)?;
-            return Ok(ParsedMarkdown {
-                frontmatter,
-                body: body.to_string(),
-                had_frontmatter: true,
-            });
-        }
-        offset += line.len();
-    }
-
-    Err(ClaudineError::LinkingError(
-        "unclosed YAML frontmatter delimiter".to_string(),
-    ))
+    let frontmatter_raw = &content[bounds.yaml_start..bounds.yaml_end];
+    let body = &content[bounds.body_start..];
+    let frontmatter = parse_frontmatter_mapping(frontmatter_raw)?;
+    Ok(ParsedMarkdown {
+        frontmatter,
+        body: body.to_string(),
+        had_frontmatter: true,
+    })
 }
 
 fn parse_frontmatter_mapping(raw: &str) -> Result<serde_yaml_ng::Mapping> {
@@ -234,6 +227,138 @@ fn parse_frontmatter_lines(raw: &str) -> serde_yaml_ng::Mapping {
         }
     }
     mapping
+}
+
+pub(crate) fn frontmatter_has_indentation_tabs(content: &str) -> Result<bool> {
+    let Some(bounds) = frontmatter_bounds(content)? else {
+        return Ok(false);
+    };
+
+    Ok(yaml_indentation_has_tabs(
+        &content[bounds.yaml_start..bounds.yaml_end],
+    ))
+}
+
+pub(crate) fn fix_frontmatter_indentation_tabs(path: &Path) -> Result<bool> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(_) => return Ok(false),
+    };
+
+    let Some(bounds) = frontmatter_bounds(&content)? else {
+        return Ok(false);
+    };
+
+    let raw = &content[bounds.yaml_start..bounds.yaml_end];
+    if !yaml_indentation_has_tabs(raw) {
+        return Ok(false);
+    }
+
+    let normalized = normalize_yaml_indentation_tabs(raw);
+    let mut rewritten =
+        String::with_capacity(content.len() + normalized.len().saturating_sub(raw.len()));
+    rewritten.push_str(&content[..bounds.yaml_start]);
+    rewritten.push_str(&normalized);
+    rewritten.push_str(&content[bounds.yaml_end..]);
+
+    std::fs::write(path, rewritten)?;
+    Ok(true)
+}
+
+fn frontmatter_bounds(content: &str) -> Result<Option<FrontmatterBounds>> {
+    let bom_len = content
+        .strip_prefix('\u{feff}')
+        .map(|_| '\u{feff}'.len_utf8())
+        .unwrap_or(0);
+    let content = &content[bom_len..];
+
+    let opening_len = if content.starts_with("---\n") {
+        4
+    } else if content.starts_with("---\r\n") {
+        5
+    } else {
+        return Ok(None);
+    };
+
+    let rest = &content[opening_len..];
+    let mut offset = 0usize;
+    for line in rest.split_inclusive('\n') {
+        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+        if trimmed == "---" {
+            let yaml_start = bom_len + opening_len;
+            let yaml_end = yaml_start + offset;
+            let body_start = yaml_start + offset + line.len();
+            return Ok(Some(FrontmatterBounds {
+                yaml_start,
+                yaml_end,
+                body_start,
+            }));
+        }
+        offset += line.len();
+    }
+
+    if rest.trim_end_matches('\r') == "---" {
+        let yaml_start = bom_len + opening_len;
+        let yaml_end = yaml_start;
+        let body_start = bom_len + opening_len + rest.len();
+        return Ok(Some(FrontmatterBounds {
+            yaml_start,
+            yaml_end,
+            body_start,
+        }));
+    }
+
+    Err(ClaudineError::LinkingError(
+        "unclosed YAML frontmatter delimiter".to_string(),
+    ))
+}
+
+fn yaml_indentation_has_tabs(raw: &str) -> bool {
+    raw.lines().any(|line| {
+        let indent_len = line
+            .char_indices()
+            .find_map(|(idx, ch)| (!matches!(ch, ' ' | '\t')).then_some(idx))
+            .unwrap_or(line.len());
+        line[..indent_len].contains('\t')
+    })
+}
+
+fn normalize_yaml_indentation_tabs(raw: &str) -> String {
+    let mut normalized = String::with_capacity(raw.len());
+
+    for line in raw.split_inclusive('\n') {
+        let (line, ending) = if let Some(stripped) = line.strip_suffix("\r\n") {
+            (stripped, "\r\n")
+        } else if let Some(stripped) = line.strip_suffix('\n') {
+            (stripped, "\n")
+        } else {
+            (line, "")
+        };
+
+        let indent_len = line
+            .char_indices()
+            .find_map(|(idx, ch)| (!matches!(ch, ' ' | '\t')).then_some(idx))
+            .unwrap_or(line.len());
+        let indent = &line[..indent_len];
+        let rest = &line[indent_len..];
+
+        if indent.contains('\t') {
+            for ch in indent.chars() {
+                match ch {
+                    '\t' => normalized.push_str("    "),
+                    ' ' => normalized.push(' '),
+                    _ => {}
+                }
+            }
+        } else {
+            normalized.push_str(indent);
+        }
+
+        normalized.push_str(rest);
+        normalized.push_str(ending);
+    }
+
+    normalized
 }
 
 fn write_markdown_document(path: &Path, parsed: &ParsedMarkdown) -> Result<()> {
@@ -1048,5 +1173,30 @@ mod tests {
         let path = std::path::PathBuf::from("/nonexistent/file.md");
         assert!(claude_specific_properties(&path).is_empty());
         assert!(!has_claude_specific_properties(&path));
+    }
+
+    #[test]
+    fn detects_frontmatter_indentation_tabs() {
+        let content = "---\nprompt: |-\n\tline one\n    \tline two\n---\nBody.\n";
+        assert!(frontmatter_has_indentation_tabs(content).unwrap());
+    }
+
+    #[test]
+    fn fixes_frontmatter_indentation_tabs_in_place() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("SKILL.md");
+        std::fs::write(
+            &path,
+            "---\nprompt: |-\n\tline one\n\t\tline two\n---\nBody.\n",
+        )
+        .unwrap();
+
+        assert!(fix_frontmatter_indentation_tabs(&path).unwrap());
+
+        let rewritten = std::fs::read_to_string(&path).unwrap();
+        assert!(!frontmatter_has_indentation_tabs(&rewritten).unwrap());
+        assert!(rewritten.contains("    line one"));
+        assert!(rewritten.contains("        line two"));
+        assert!(rewritten.ends_with("---\nBody.\n"));
     }
 }

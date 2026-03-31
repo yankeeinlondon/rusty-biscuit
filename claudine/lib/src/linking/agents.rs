@@ -8,7 +8,10 @@ use crate::error::Result;
 use crate::events::Provider;
 
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, ResourceFormat, capabilities_for};
-use super::compatibility::{has_claude_specific_properties, parse_markdown_document};
+use super::compatibility::{
+    fix_frontmatter_indentation_tabs, frontmatter_has_indentation_tabs,
+    has_claude_specific_properties, parse_markdown_document,
+};
 use super::filter::ResourceFilter;
 use super::paths::{ProviderSkillPaths, ResourceScope};
 use super::symlink::{LinkResult, create_skill_link};
@@ -50,6 +53,8 @@ pub enum AgentExceptionType {
     Missing,
     /// Agent file missing required frontmatter properties.
     Invalid,
+    /// Agent frontmatter uses tab indentation that strict YAML parsers reject.
+    YamlTabs,
     /// No links in agent body.
     NoLinks,
     /// Agent specifies a `model` property that limits cross-provider shareability.
@@ -63,6 +68,7 @@ impl std::fmt::Display for AgentExceptionType {
         match self {
             AgentExceptionType::Missing => write!(f, "missing"),
             AgentExceptionType::Invalid => write!(f, "invalid"),
+            AgentExceptionType::YamlTabs => write!(f, "yaml-tabs"),
             AgentExceptionType::NoLinks => write!(f, "no-links"),
             AgentExceptionType::ModelPropertyNotShareable => write!(f, "model-not-shareable"),
             AgentExceptionType::FormatIncompatible => write!(f, "format-incompatible"),
@@ -122,6 +128,8 @@ pub struct AgentFixSummary {
     pub skipped: usize,
     /// Agents where format is incompatible with target provider.
     pub format_incompatible: usize,
+    /// Agent files whose YAML indentation tabs were normalized to spaces.
+    pub yaml_tabs_fixed: usize,
     /// Agents skipped because they have Claude-specific frontmatter (not shareable).
     pub not_shareable: usize,
 }
@@ -148,6 +156,12 @@ pub fn fix_missing_agents(paths: &ProviderSkillPaths) -> Result<AgentFixSummary>
     let (user_agents, user_skipped) = filter_unshareable(all_user_agents);
     let (repo_agents, repo_skipped) = filter_unshareable(all_repo_agents);
     summary.not_shareable = user_skipped + repo_skipped;
+
+    for (_name, path) in user_agents.iter().chain(repo_agents.iter()) {
+        if fix_frontmatter_indentation_tabs(path)? {
+            summary.yaml_tabs_fixed += 1;
+        }
+    }
 
     for provider in ALL_PROVIDERS {
         if provider == Provider::Claude {
@@ -394,6 +408,7 @@ fn gather_exceptions(
 
     // Check canonical agents for invalid and model property
     for (name, path) in &canonical {
+        check_yaml_tabs(&mut exceptions, name, path);
         check_invalid(&mut exceptions, name, path);
         check_model_property(&mut exceptions, name, path);
     }
@@ -513,6 +528,30 @@ fn check_scope_missing(
                 target_format: None,
             });
         }
+    }
+}
+
+fn check_yaml_tabs(exceptions: &mut Vec<AgentException>, name: &str, agent_file: &Path) {
+    let content = match fs::read_to_string(agent_file) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let has_tabs = match frontmatter_has_indentation_tabs(&content) {
+        Ok(has_tabs) => has_tabs,
+        Err(_) => return,
+    };
+
+    if has_tabs {
+        exceptions.push(AgentException {
+            provider: Provider::Claude,
+            exception_type: AgentExceptionType::YamlTabs,
+            name: name.to_string(),
+            agent_file_path: agent_file.to_path_buf(),
+            missing_properties: Vec::new(),
+            source_format: None,
+            target_format: None,
+        });
     }
 }
 
@@ -754,6 +793,41 @@ mod tests {
             .collect();
         assert_eq!(model_exceptions.len(), 1);
         assert_eq!(model_exceptions[0].name, "model-agent");
+    }
+
+    #[test]
+    fn detects_and_fixes_yaml_tabs() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_agent_paths(tmp.path());
+        let user_dir = paths
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Agent,
+                ResourceScope::User,
+            )
+            .unwrap();
+        fs::create_dir_all(&user_dir).unwrap();
+        let agent_file = user_dir.join("tabbed.md");
+        fs::write(
+            &agent_file,
+            "---\ndescription: Has tabbed yaml\nprompt: |-\n\tline one\n\t\tline two\n---\nAgent instructions here.\n",
+        )
+        .unwrap();
+
+        let report = list_agents(&paths, &[]).unwrap();
+        let yaml_tabs: Vec<_> = report
+            .exceptions
+            .iter()
+            .filter(|e| e.exception_type == AgentExceptionType::YamlTabs)
+            .collect();
+        assert_eq!(yaml_tabs.len(), 1);
+        assert_eq!(yaml_tabs[0].name, "tabbed");
+
+        let summary = fix_missing_agents(&paths).unwrap();
+        assert_eq!(summary.yaml_tabs_fixed, 1);
+
+        let content = fs::read_to_string(&agent_file).unwrap();
+        assert!(!frontmatter_has_indentation_tabs(&content).unwrap());
     }
 
     fn test_agent_paths(base: &Path) -> ProviderSkillPaths {
