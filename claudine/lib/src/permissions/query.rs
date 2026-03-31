@@ -680,9 +680,11 @@ fn resolve_mcp_tool_query(
     server: &str,
     tool: &str,
 ) -> QueryResult {
-    // Check server-level rules first: if the server itself is denied,
-    // all tools on that server inherit the denial.
+    // Check server-level rules first: a server-level decision applies to all
+    // tools on that server unless a more specific tool rule overrides it.
     let server_result = resolve_mcp_server_query(policy, &policy.axes.mcp.server_rules, server);
+
+    // Server deny always wins — short-circuit before checking tool rules.
     if server_result.effect == Some(PolicyEffect::Deny) {
         return server_result;
     }
@@ -704,6 +706,13 @@ fn resolve_mcp_tool_query(
             );
         }
     }
+
+    // No tool-specific rule matched. If the server has an Allow or Ask rule,
+    // inherit that as the fallback answer for the tool query.
+    if server_result.effect.is_some() {
+        return server_result;
+    }
+
     no_match_result(
         policy,
         format!("No matching rules found for MCP tool `{server}::{tool}`."),
@@ -1195,6 +1204,90 @@ mod tests {
                 .summary
                 .contains("/workspace/project/src/main.rs")
         );
+    }
+
+    // --- MCP server→tool inheritance tests ---
+    //
+    // These verify the precedence: tool rule beats server rule; otherwise the
+    // server rule becomes the fallback tool answer.
+
+    fn mcp_snapshot(
+        server_rules: Vec<super::super::canonical::McpServerRule>,
+        tool_rules: Vec<super::super::canonical::McpToolRule>,
+    ) -> ConfiguredPolicySnapshot {
+        let cwd = PathBuf::from("/workspace/project");
+        let ctx = PolicyContext::new(cwd.clone()).with_repo_root(cwd);
+        let mut canonical = CanonicalPolicy::empty(Provider::Claude, PolicyMode::Configured);
+        canonical.axes.mcp.server_rules = server_rules;
+        canonical.axes.mcp.tool_rules = tool_rules;
+        ConfiguredPolicySnapshot::from_parts(
+            Provider::Claude,
+            NativeEffectivePolicy::new(Provider::Claude, Vec::new(), ()),
+            canonical,
+            &ctx,
+        )
+    }
+
+    fn server_rule(
+        server: &str,
+        effect: PolicyEffect,
+    ) -> super::super::canonical::McpServerRule {
+        super::super::canonical::McpServerRule {
+            server_id: server.to_owned(),
+            effect,
+            provenance: CanonicalRuleProvenance::exact("test", "mcp.server"),
+        }
+    }
+
+    fn tool_rule(
+        server: &str,
+        tool: &str,
+        effect: PolicyEffect,
+    ) -> super::super::canonical::McpToolRule {
+        super::super::canonical::McpToolRule {
+            server_id: server.to_owned(),
+            tool_name: tool.to_owned(),
+            effect,
+            provenance: CanonicalRuleProvenance::exact("test", "mcp.tool"),
+        }
+    }
+
+    #[test]
+    fn mcp_server_deny_overrides_tool_allow() {
+        let snapshot = mcp_snapshot(
+            vec![server_rule("github", PolicyEffect::Deny)],
+            vec![tool_rule("github", "create_issue", PolicyEffect::Allow)],
+        );
+        assert!(snapshot.can_use_mcp_tool("github", "create_issue").is_denied());
+    }
+
+    #[test]
+    fn mcp_server_allow_inherits_to_tool_when_no_tool_rule() {
+        let snapshot = mcp_snapshot(
+            vec![server_rule("filesystem", PolicyEffect::Allow)],
+            vec![],
+        );
+        assert!(snapshot.can_use_mcp_tool("filesystem", "read_file").is_allowed());
+    }
+
+    #[test]
+    fn mcp_server_ask_inherits_to_tool_when_no_tool_rule() {
+        let snapshot = mcp_snapshot(
+            vec![server_rule("filesystem", PolicyEffect::Ask)],
+            vec![],
+        );
+        assert!(snapshot.can_use_mcp_tool("filesystem", "read_file").is_ask());
+    }
+
+    #[test]
+    fn mcp_tool_deny_overrides_server_allow() {
+        let snapshot = mcp_snapshot(
+            vec![server_rule("filesystem", PolicyEffect::Allow)],
+            vec![tool_rule("filesystem", "delete_file", PolicyEffect::Deny)],
+        );
+        assert!(snapshot.can_use_mcp_tool("filesystem", "delete_file").is_denied());
+        // Other tools on the same server still inherit the allow.
+        assert!(snapshot.can_use_mcp_tool("filesystem", "read_file").is_allowed());
     }
 
     #[test]

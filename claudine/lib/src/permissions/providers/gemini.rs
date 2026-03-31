@@ -1078,6 +1078,13 @@ priority = 100
                 .is_allowed()
         );
         assert!(snapshot.can_use_mcp_server("filesystem").is_allowed());
+        // Tool queries on an allowed server inherit the server-level allow,
+        // even without an explicit tool-level rule.
+        assert!(
+            snapshot
+                .can_use_mcp_tool("filesystem", "read_file")
+                .is_allowed()
+        );
     }
 
     #[test]
