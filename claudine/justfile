@@ -280,6 +280,11 @@ gem *args="":
     @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
 
 
+implement plan:
+    @echo -e "{{BOLD}}Phase 1:{{RESET}} {{BLUE}}{{plan}}{{RESET}}"
+    @md compose @prompts/implement.md --set '{ plan: "{{plan}}", phase: 1  }'
+
+
 git-conflict:
     #!/usr/bin/env bash
     base=$(git merge-base HEAD main)
