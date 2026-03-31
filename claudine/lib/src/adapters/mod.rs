@@ -265,7 +265,7 @@ mod tests {
         let fixture_decisions = [
             ProtectDecision {
                 outcome: ProtectOutcome::Allow,
-                degraded_from: None,
+                desired_outcome: ProtectOutcome::Allow,
                 degraded: false,
                 reason: "fixture.allow".to_string(),
                 capability: None,
@@ -274,7 +274,9 @@ mod tests {
                 outcome: ProtectOutcome::AskThenAllowOrStop {
                     reason: "fixture.ask".to_string(),
                 },
-                degraded_from: None,
+                desired_outcome: ProtectOutcome::AskThenAllowOrStop {
+                    reason: "fixture.ask".to_string(),
+                },
                 degraded: false,
                 reason: "fixture.ask".to_string(),
                 capability: None,
@@ -283,7 +285,9 @@ mod tests {
                 outcome: ProtectOutcome::StopCurrent {
                     reason: "fixture.stop".to_string(),
                 },
-                degraded_from: None,
+                desired_outcome: ProtectOutcome::StopCurrent {
+                    reason: "fixture.stop".to_string(),
+                },
                 degraded: false,
                 reason: "fixture.stop".to_string(),
                 capability: None,
@@ -292,9 +296,9 @@ mod tests {
                 outcome: ProtectOutcome::AdvisoryOnly {
                     reason: "fixture.advisory".to_string(),
                 },
-                degraded_from: Some(ProtectOutcome::StopSession {
+                desired_outcome: ProtectOutcome::StopSession {
                     reason: "fixture.original".to_string(),
-                }),
+                },
                 degraded: true,
                 reason: "fixture.advisory".to_string(),
                 capability: None,

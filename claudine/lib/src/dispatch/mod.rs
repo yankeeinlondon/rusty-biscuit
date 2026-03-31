@@ -1,11 +1,9 @@
-#![allow(deprecated)] // ProtectInput is deprecated but dispatch still uses the legacy path.
-
 pub mod loader;
 mod matcher;
 mod runner;
 pub mod template;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -15,10 +13,10 @@ use crate::actions::HookResponse;
 use crate::adapters::{self, AdapterError};
 use crate::error::{ClaudineError, Result};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook};
-use crate::permissions::PolicyEngine;
-#[allow(deprecated)]
+use crate::permissions::{PolicyContext, PolicyEngine};
 use crate::services::{
-    ProtectDecision, ProtectInput, ProtectOutcome, ProtectService, ProviderProtectProfiles,
+    ProtectCliContext, ProtectDecision, ProtectOutcome, ProtectService, ProtectSessionContext,
+    ProviderProtectProfiles,
 };
 
 /// Result of dispatching a single incoming provider event.
@@ -28,9 +26,9 @@ pub struct DispatchOutcome {
     pub response: Option<Value>,
     /// Optional process exit code for shell-based providers.
     pub exit_code: Option<i32>,
-    /// Optional protect decision evaluated before actions.
+    /// Optional protect evaluation before actions.
     pub protect_pre: Option<ProtectDecision>,
-    /// Optional protect decision evaluated after actions.
+    /// Optional protect evaluation after actions.
     pub protect_post: Option<ProtectDecision>,
 }
 
@@ -161,16 +159,31 @@ async fn dispatch_preparsed(
         ProtectService::with_profiles(engine.clone(), protect, profiles)
     });
 
-    let protect_pre = protect_service.as_mut().and_then(|service| {
-        ProtectInput::from_event_meta(provider, resolved_hook.event, &resolved_hook.meta)
-            .map(|input| service.evaluate(&input))
-    });
+    // Build session context
+    let session_ctx = build_session_context(provider, &resolved_hook.meta);
 
-    if let Some(decision) = protect_pre.as_ref()
-        && should_short_circuit_on_protect(&decision.outcome)
+    let protect_pre = if let Some(service) = protect_service.as_mut() {
+        service
+            .evaluate_event_structured(
+                provider,
+                resolved_hook.event,
+                &resolved_hook.meta,
+                &session_ctx,
+                adapter,
+            )
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+
+    let protect_pre_decision = protect_pre.as_ref().map(|e| e.decision.clone());
+
+    if let Some(eval) = protect_pre.as_ref()
+        && should_short_circuit_on_protect(&eval.decision.outcome)
     {
         let response = adapter
-            .map_protect_outcome(&resolved_hook.event, decision)
+            .map_protect_outcome(&resolved_hook.event, &eval.decision)
             .map_err(|error| {
                 ClaudineError::ProtectEnforcementMapping(format!(
                     "provider={provider} event={} pre-action: {error}",
@@ -183,7 +196,7 @@ async fn dispatch_preparsed(
             &resolved_hook.event,
             resolved_hook.can_block,
             Some(response),
-            protect_pre,
+            protect_pre_decision,
             None,
         );
     }
@@ -202,20 +215,43 @@ async fn dispatch_preparsed(
         &resolved_hook.meta,
         config.settings(),
         resolved_hook.can_block,
-        protect_pre.as_ref(),
+        protect_pre_decision.as_ref(),
     )
     .await?;
 
-    let protect_post = protect_service.as_mut().and_then(|service| {
-        build_post_action_input(provider, &resolved_hook, action_response.as_ref())
-            .map(|input| service.evaluate(&input))
-    });
+    let protect_post = if let Some(service) = protect_service.as_mut() {
+        // Only run post-action evaluation for relevant events
+        if matches!(
+            resolved_hook.event,
+            AgenticEvent::AfterTool | AgenticEvent::TurnComplete | AgenticEvent::SubagentStop
+        ) {
+            service
+                .evaluate_event_structured(
+                    provider,
+                    resolved_hook.event,
+                    &resolved_hook.meta,
+                    &session_ctx,
+                    adapter,
+                )
+                .ok()
+                .flatten()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
-    let action_response = if let Some(decision) = protect_post.as_ref() {
-        if should_short_circuit_on_protect(&decision.outcome) {
+    let protect_post_decision = protect_post.as_ref().map(|e| e.decision.clone());
+
+    // Apply redaction from post-action evaluation
+    let action_response = if let Some(eval) = protect_post.as_ref() {
+        if let Some(plan) = &eval.redaction {
+            apply_redaction(action_response, plan)
+        } else if should_short_circuit_on_protect(&eval.decision.outcome) {
             Some(
                 adapter
-                    .map_protect_outcome(&resolved_hook.event, decision)
+                    .map_protect_outcome(&resolved_hook.event, &eval.decision)
                     .map_err(|error| {
                         ClaudineError::ProtectEnforcementMapping(format!(
                             "provider={provider} event={} post-action: {error}",
@@ -235,9 +271,83 @@ async fn dispatch_preparsed(
         &resolved_hook.event,
         resolved_hook.can_block,
         action_response,
-        protect_pre,
-        protect_post,
+        protect_pre_decision,
+        protect_post_decision,
     )
+}
+
+fn build_session_context(provider: Provider, meta: &EventMeta) -> ProtectSessionContext {
+    let cwd = meta
+        .cwd
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let mut policy_ctx = PolicyContext::new(cwd);
+    if let Some(ref git) = meta.env.git {
+        policy_ctx = policy_ctx.with_repo_root(git.repo_root.clone());
+    }
+    if let Some(home) = dirs::home_dir() {
+        policy_ctx = policy_ctx.with_home_dir(home);
+    }
+
+    let cli_ctx = std::env::var("AGENT_PARAMS")
+        .ok()
+        .map(|params| {
+            let argv: Vec<String> = params
+                .split_whitespace()
+                .map(String::from)
+                .collect();
+            ProtectCliContext::Argv(argv)
+        })
+        .unwrap_or(ProtectCliContext::None);
+
+    ProtectSessionContext {
+        provider,
+        policy_context: policy_ctx,
+        cli: cli_ctx,
+        interactive: std::env::var("INTERACTIVE")
+            .ok()
+            .map_or(false, |v| v == "1" || v == "true")
+            || std::env::var("CLAUDINE_INTERACTIVE")
+                .ok()
+                .map_or(false, |v| v == "1" || v == "true"),
+        yolo: std::env::var("YOLO")
+            .ok()
+            .map_or(false, |v| v == "1" || v == "true")
+            || std::env::var("CLAUDINE_YOLO")
+                .ok()
+                .map_or(false, |v| v == "1" || v == "true"),
+        session_id: meta
+            .session_id
+            .clone()
+            .or_else(|| std::env::var("CLAUDINE_SESSION_ID").ok()),
+    }
+}
+
+fn apply_redaction(
+    response: Option<HookResponse>,
+    plan: &crate::services::ProtectRedactionPlan,
+) -> Option<HookResponse> {
+    use crate::services::ProtectRedactionPlan;
+
+    let mut response = response.unwrap_or_default();
+
+    match plan {
+        ProtectRedactionPlan::ReplaceText(redaction) => {
+            response.additional_context = Some(redaction.text.clone());
+        }
+        ProtectRedactionPlan::ReplaceJson(redaction) => {
+            response.updated_input = Some(redaction.value.clone());
+        }
+        ProtectRedactionPlan::BlockPayload { reason } => {
+            response.additional_context = None;
+            response.updated_input = None;
+            response.reason = Some(reason.clone());
+        }
+    }
+
+    Some(response)
 }
 
 fn runtime_repo_root(env: &EnvironmentContext) -> Option<&Path> {
@@ -330,28 +440,6 @@ fn should_short_circuit_on_protect(outcome: &ProtectOutcome) -> bool {
             | ProtectOutcome::StopCurrent { .. }
             | ProtectOutcome::StopSession { .. }
     )
-}
-
-fn build_post_action_input(
-    provider: Provider,
-    resolved_hook: &ResolvedHook,
-    action_response: Option<&HookResponse>,
-) -> Option<ProtectInput> {
-    if !matches!(
-        resolved_hook.event,
-        crate::events::AgenticEvent::AfterTool
-            | crate::events::AgenticEvent::TurnComplete
-            | crate::events::AgenticEvent::SubagentStop
-    ) {
-        return None;
-    }
-
-    let mut input =
-        ProtectInput::from_event_meta(provider, resolved_hook.event, &resolved_hook.meta)?;
-    if let Some(reason) = action_response.and_then(|response| response.reason.clone()) {
-        input.summary = Some(reason);
-    }
-    Some(input)
 }
 
 fn has_stop_session(decision: Option<&ProtectDecision>) -> bool {

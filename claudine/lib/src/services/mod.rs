@@ -1,15 +1,14 @@
-#[allow(deprecated)]
 pub mod protect;
 
-#[allow(deprecated)]
 pub use protect::{
-    CompletionPolicy, CompletionPolicyOverride, GateCapability, McpJsonRedaction, McpPolicy,
-    McpPolicyOverride, McpTextRedaction, PrivilegePolicy, PrivilegePolicyOverride,
-    ProtectCliContext, ProtectConfig, ProtectDecision, ProtectDecisionRecord, ProtectEvaluation,
-    ProtectInput, ProtectObservation, ProtectOutcome, ProtectPayload, ProtectPhase,
-    ProtectPolicyMode, ProtectPosture, ProtectRequest, ProtectRules, ProtectRulesOverride,
-    ProtectRuntimeMode, ProtectService, ProtectSessionContext, ProtectState, ProtectStateExport,
-    ProviderProtectCapabilities, ProviderProtectOverride, ProviderProtectProfiles, RiskLevel,
-    RuntimeFacts, SubagentPolicy, SubagentPolicyOverride, VisibilityLevel, YoloPolicy,
-    YoloPolicyOverride,
+    CompletionPolicy, CompletionPolicyOverride, FindingExplanation, GateCapability,
+    McpJsonRedaction, McpPolicy, McpPolicyOverride, McpTextRedaction, PrivilegePolicy,
+    PrivilegePolicyOverride, ProtectCliContext, ProtectConfig, ProtectDecision,
+    ProtectDecisionRecord, ProtectEvaluation, ProtectExplanation, ProtectFinding,
+    ProtectFindingSource, ProtectIntent, ProtectObservation, ProtectOutcome, ProtectPayload,
+    ProtectPhase, ProtectPolicyMode, ProtectPosture, ProtectRedactionPlan, ProtectRemediation,
+    ProtectRequest, ProtectRules, ProtectRulesOverride, ProtectService, ProtectSessionContext,
+    ProtectSeverity, ProtectState, ProtectStateExport, ProviderProtectCapabilities,
+    ProviderProtectOverride, ProviderProtectProfiles, RuntimeFacts, SubagentPolicy,
+    SubagentPolicyOverride, VisibilityLevel, YoloPolicy, YoloPolicyOverride,
 };
