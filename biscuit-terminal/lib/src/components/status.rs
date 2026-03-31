@@ -8,7 +8,7 @@ use crate::components::renderable::Renderable;
 use crate::discovery::detection::{ColorDepth, ColorMode};
 use crate::terminal::Terminal;
 use crate::utils::color::{Tailwind, TailwindColorWrapper};
-use crate::utils::layout::{Layout, RenderableWrapper};
+use crate::utils::layout::{Layout, RenderableWrapper, WordWrap};
 
 // ── Nerd Font icons ── Circular theme ──────────────────────────────────────
 
@@ -340,6 +340,10 @@ impl Status {
         Self {
             description: desc.into(),
             use_prose: true,
+            layout: Layout {
+                word_wrap: WordWrap::WrapProse(Some(8), Some(2)),
+                ..Layout::default()
+            },
             ..Self::default()
         }
     }

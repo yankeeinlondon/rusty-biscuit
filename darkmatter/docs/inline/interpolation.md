@@ -1,12 +1,13 @@
 # Interpolation
 
-The Darkmatter DSL provides a mechanism for _interpolation_ of frontmatter into the document's body.
+The Darkmatter compose pipeline provides interpolation of frontmatter, context, and environment values into a document.
 
-- within the body of the document all "handlebar" placeholders like `{{foo}}` or `{{bar}}` will be considered targets for interpolation.
-- when the Markdown pipeline is run with `.transform()`:
-    - the document is first transformed with the [Text Replacement](./text-replacement.md) functionality
-    - but immediately afterward we replace all `{{variable}}` segments with their frontmatter value throughout the document
-    - see the [pipeline](./darkmatter-compose-pipeline.md) for an overview of all items in the pipeline.
+Interpolation happens in two stages during the compose pipeline (see the [pipeline overview](./darkmatter-compose-pipeline.md)):
+
+1. **Frontmatter Interpolation** — resolves `{{ }}` expressions inside frontmatter values using seed (non-templated) frontmatter, `ctx.*`, and `env.*`. See [Frontmatter Interpolation](./fm-interpolation.md) for full details.
+2. **Body Interpolation** — resolves `{{ }}` expressions in the document body using the effective state (frontmatter + external state + context).
+
+Body interpolation runs after text replacement and page blocks have been applied. Within the body, all handlebar placeholders like `{{foo}}` or `{{bar}}` are replaced with their resolved values.
 - **Fallback Values**
     - if a template placeholder in the document refers to a frontmatter property that has no value then the default value of an empty string will be used.
     - this default is suitable for some situations but not others so you are allowed to express a fallback you'd like to use instead with the following syntax:
@@ -81,78 +82,16 @@ The Darkmatter DSL provides a mechanism for _interpolation_ of frontmatter into 
         - the second line will resolve to the string literal "unknown"
 
 
-## Technical Design Options
+## Implementation
 
-### Option 1: Source-First Scanner + Interpolation Parser (Recommended for v1)
+The current implementation uses a source-first scanner approach (single-pass rewrite):
 
-Implement interpolation as a direct rewrite stage inside the transform pipeline:
+- A scanner finds `{{ ... }}` spans in the document body (skipping inline code and fenced code blocks)
+- Each expression is parsed with a dedicated tokenizer and evaluator
+- The interpolation context is built from the effective state (frontmatter + external state), `ctx.*` runtime values, and `env.*` environment variables
+- Replacements are applied from the end of the string backward to preserve offsets
 
-- take the current stage input markdown body (the output from the prior transform stage)
-- produce the next stage output markdown body after interpolation
+See the source modules:
 
-- run a single-pass scanner over the source to find `{{ ... }}` spans
-- parse each expression with a small dedicated parser (tokenizer + recursive descent / Pratt parser)
-- evaluate against an interpolation context built from:
-    - document frontmatter
-    - `ctx.*` values captured once per transform call
-    - `env.*` values (from process env)
-- collect `(start, end, replacement)` edits and apply from the end of the string backward
-
-Pros:
-
-- preserves document formatting exactly (no markdown re-serialization churn)
-- straightforward to place directly after Text Replacement in the transform pipeline
-- very fast and easy to test at the string level
-
-Cons:
-
-- markdown-agnostic unless we add lightweight guards (for example, skipping fenced code or inline code)
-- we own the interpolation grammar/parser implementation end-to-end
-
-### Option 2: pulldown-cmark Event-Scoped Interpolation (Blessed Parser Path)
-
-Use `pulldown-cmark` inside the interpolation transform stage to decide where interpolation is allowed, then rewrite only those source spans:
-
-- parse the stage input buffer with `Parser::new_ext(...).into_offset_iter()`
-- identify eligible events (typically `Event::Text`; optionally include/exclude code/html events by policy)
-- detect `{{ ... }}` inside those event ranges and parse/evaluate expressions
-- patch the original source with offset-based replacements (preferred), or re-emit markdown through `pulldown-cmark-to-cmark` (higher churn)
-
-Pros:
-
-- markdown-aware targeting with an already-adopted parser in darkmatter
-- easier policy control over "interpolate everywhere" vs "skip code/pre/code span"
-- can avoid full re-serialization if we patch source by offsets
-
-Cons:
-
-- placeholders can span awkward boundaries if split by parser events
-- offset bookkeeping is more complex than a pure string scanner
-- if re-serialized, formatting normalization side effects are likely
-
-### Option 3: markdown-rs MDAST Transform Pass (Best Long-Term Pipeline Model)
-
-Treat interpolation as an AST transform step:
-
-- parse the stage input buffer with `markdown::to_mdast(..., ParseOptions::gfm())`
-- walk the tree and apply interpolation to text-bearing nodes
-- keep expression parsing/evaluation shared with other options
-- serialize to the stage output buffer for downstream transforms
-
-Pros:
-
-- strong foundation for a multi-stage transform pipeline (interpolation, transclusion, consolidation, etc.)
-- explicit tree semantics make complex future transforms safer
-- leverages darkmatter's existing `markdown-rs` usage
-
-Cons:
-
-- markdown round-trip fidelity depends on serializer quality/availability
-- higher complexity and memory cost for first milestone
-- likely overkill for initial interpolation-only delivery
-
-### Recommendation
-
-For first implementation, use **Option 1** with a reusable expression parser/evaluator module.
-If interpolation scoping becomes important early, evolve to **Option 2 (offset-based pulldown-cmark hybrid)** without throwing away parser/evaluator code.
-Reserve full **Option 3** for the stage where multiple structural transforms are implemented and the broader pipeline architecture is ready.
+- `darkmatter/lib/src/markdown/compose/interpolation/` — lexer, evaluator, rewriter
+- `darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs` — frontmatter-specific interpolation engine

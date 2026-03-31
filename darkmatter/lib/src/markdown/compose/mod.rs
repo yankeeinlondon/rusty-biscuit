@@ -4,20 +4,21 @@
 //! for running operations in three phases:
 //!
 //! **Inline Pre** (serial):
-//! 1. **Text Replacement** - Replace literal strings from frontmatter `replace` map
-//! 2. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions
-//! 3. **Interpolation** - Expand `{{variable}}` expressions
-//! 4. **Shell Expansion** - Execute `::shell` directives with security controls
+//! 1. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values
+//! 2. **Text Replacement** - Replace literal strings from frontmatter `replace` map
+//! 3. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions
+//! 4. **Interpolation** - Expand `{{variable}}` expressions in body content
+//! 5. **Shell Expansion** - Execute `::shell` directives with security controls
 //!
 //! **Transclusion** (concurrent execution after serial preparation):
-//! 5. **Block Transclusion** - Include `::file`/`::url` referenced documents
-//! 6. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
-//! 7. **Code Transclusion** - Include `::code` file content as fenced blocks
-//! 8. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 6. **Block Transclusion** - Include `::file`/`::url` referenced documents
+//! 7. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
+//! 8. **Code Transclusion** - Include `::code` file content as fenced blocks
+//! 9. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
 //!
 //! **Inline Post** (serial):
-//! 9. **Cleanup** - Normalize markdown formatting
-//! 10. **Normalization** - Adjust heading levels
+//! 10. **Cleanup** - Normalize markdown formatting
+//! 11. **Normalization** - Adjust heading levels
 //!
 //! ## Examples
 //!
@@ -41,6 +42,7 @@
 pub(crate) mod cache;
 pub mod conditions;
 pub mod context;
+mod frontmatter_interpolation;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
 mod state;
@@ -292,17 +294,16 @@ impl Markdown {
             let mut report = ComposeReport::new();
             let mut perf = perf::PerfCollector::new(options.perf_enabled);
 
-            // Apply external state as defaults: fill in null/missing frontmatter keys
-            // so the document's frontmatter reflects the merged values.
-            if let Some(external) = options.external_state.as_ref().and_then(Value::as_object) {
+            // Apply external state as defaults using deep-merge: nested keys
+            // from external state fill in missing values at every level, not
+            // just top-level keys. Frontmatter values take precedence.
+            if let Some(external) = options.external_state.as_ref() {
                 let fm = self.frontmatter_mut().as_map_mut();
-                for (key, value) in external {
-                    match fm.get(key) {
-                        None | Some(Value::Null) => {
-                            fm.insert(key.clone(), value.clone());
-                        }
-                        _ => {} // frontmatter already has a non-null value
-                    }
+                let current =
+                    Value::Object(fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                let merged = state::deep_merge(external, &current);
+                if let Value::Object(map) = merged {
+                    *fm = map.into_iter().collect();
                 }
             }
 
@@ -311,6 +312,26 @@ impl Markdown {
                 let fm = self.frontmatter_mut().as_map_mut();
                 for (key, value) in overrides {
                     fm.insert(key.clone(), value.clone());
+                }
+            }
+
+            // Frontmatter Interpolation: resolve {{ }} in frontmatter values
+            // before EffectiveState is built, since it mutates frontmatter
+            // inputs that drive later stages.
+            if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
+                let fm_start = perf.is_enabled().then(std::time::Instant::now);
+                let fm_report = frontmatter_interpolation::interpolate_frontmatter(
+                    self.frontmatter_mut(),
+                    options.context(),
+                    options.fail_fast,
+                )?;
+                report.frontmatter_interpolations_applied = fm_report.replacements;
+                report.warnings.extend(fm_report.warnings);
+                if let Some(start) = fm_start {
+                    perf.record(
+                        perf::PerfMetricKind::FrontmatterInterpolation,
+                        start.elapsed(),
+                    );
                 }
             }
 
@@ -394,6 +415,9 @@ impl Markdown {
                         )?;
                         if let Some(start) = op_start {
                             let kind = match operation {
+                                ComposeOperation::FrontmatterInterpolation => {
+                                    perf::PerfMetricKind::FrontmatterInterpolation
+                                }
                                 ComposeOperation::TextReplacement => {
                                     perf::PerfMetricKind::TextReplacement
                                 }
@@ -470,6 +494,9 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         match operation {
+            // FrontmatterInterpolation is handled before EffectiveState build,
+            // not in the generic operation loop.
+            ComposeOperation::FrontmatterInterpolation => Ok(()),
             ComposeOperation::TextReplacement => {
                 report.replacements_applied = self.run_replacement_stage(state, options);
                 Ok(())
@@ -780,71 +807,21 @@ impl Markdown {
         state: &EffectiveState,
         options: &ComposeOptions,
     ) -> MarkdownResult<usize> {
-        use interpolation::{EvalResult, Evaluator, ExpressionFinder, parse};
-
-        let finder = ExpressionFinder::new(&self.content);
-        let locations = finder.find_all();
-
-        if locations.is_empty() {
-            return Ok(0);
-        }
+        use interpolation::{Evaluator, ScanMode, interpolate_text};
 
         let evaluator = Evaluator::new(state);
-        let mut count = 0;
-        let mut new_content = self.content.clone();
+        let result = interpolate_text(
+            &self.content,
+            &evaluator,
+            ScanMode::MarkdownAware,
+            options.fail_fast,
+            "interpolation",
+        )?;
 
-        // Apply replacements from end to start to preserve offsets
-        for loc in locations.into_iter().rev() {
-            match parse(&loc.expression) {
-                Ok(expr) => match evaluator.eval(&expr) {
-                    EvalResult::Value(replacement) => {
-                        // For multiline replacements, inherit the indentation
-                        // of the line where {{ ... }} appears so nested lists
-                        // and other block content stay properly aligned.
-                        let replacement = if replacement.contains('\n') {
-                            let line_start = new_content[..loc.start]
-                                .rfind('\n')
-                                .map(|i| i + 1)
-                                .unwrap_or(0);
-                            let indent: String = new_content[line_start..loc.start]
-                                .chars()
-                                .take_while(|c| c.is_whitespace())
-                                .collect();
-                            if indent.is_empty() {
-                                replacement
-                            } else {
-                                replacement.replace('\n', &format!("\n{indent}"))
-                            }
-                        } else {
-                            replacement
-                        };
-                        new_content.replace_range(loc.start..loc.end, &replacement);
-                        count += 1;
-                    }
-                    EvalResult::Error { message, .. } if options.fail_fast => {
-                        return Err(MarkdownError::Transform(format!(
-                            "Interpolation evaluation failed for '{}': {}",
-                            loc.expression, message
-                        )));
-                    }
-                    EvalResult::Error { .. } => {
-                        // Leave original expression in place
-                    }
-                },
-                Err(e) if options.fail_fast => {
-                    return Err(MarkdownError::Transform(format!(
-                        "Interpolation parse failed for '{}': {}",
-                        loc.expression, e
-                    )));
-                }
-                Err(_) => {
-                    // Parse error - leave original
-                }
-            }
+        if result.replacements > 0 {
+            self.content = result.output;
         }
-
-        self.content = new_content;
-        Ok(count)
+        Ok(result.replacements)
     }
 
     /// Runs the normalization stage.
@@ -3349,5 +3326,312 @@ Rounded: {{ round(pi) }}"#;
             .find(|m| m.name == "interpolation")
             .unwrap();
         assert_eq!(interp.calls, 1);
+    }
+
+    // ── Frontmatter Interpolation Integration Tests ─────────────────
+
+    #[test]
+    fn test_frontmatter_interpolation_spec_example() {
+        let content = "---\nbase: /path/to/something\nspec: \"{{base}}/spec.md\"\nplan: \"{{base}}/plan.md\"\n---\nThe spec is located at: {{spec}}\nThe plan is located at: {{plan}}";
+        let md: Markdown = content.into();
+        let (composed, report) = md
+            .compose_with(ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]))
+            .unwrap();
+
+        assert_eq!(report.frontmatter_interpolations_applied, 2);
+        assert!(
+            composed
+                .content()
+                .contains("The spec is located at: /path/to/something/spec.md")
+        );
+        assert!(
+            composed
+                .content()
+                .contains("The plan is located at: /path/to/something/plan.md")
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_interpolation_with_set_overrides() {
+        let content = "---\nbase: /original\nspec: \"{{base}}/spec.md\"\n---\nSpec: {{spec}}";
+        let md: Markdown = content.into();
+        let (composed, report) = md
+            .compose_with(
+                ComposeOptions::new()
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ])
+                    .with_set_overrides(serde_json::json!({"base": "/override"})),
+            )
+            .unwrap();
+
+        assert_eq!(report.frontmatter_interpolations_applied, 1);
+        assert!(composed.content().contains("Spec: /override/spec.md"));
+    }
+
+    #[test]
+    fn test_frontmatter_interpolation_arrays_and_objects() {
+        let content = "---\nbase: /root\npaths:\n  - \"{{base}}/a\"\n  - \"{{base}}/b\"\nmeta:\n  home: \"{{base}}/home\"\n---\n";
+        let md: Markdown = content.into();
+        let (_, report) = md
+            .compose_with(ComposeOptions::new().only(&[ComposeOperation::FrontmatterInterpolation]))
+            .unwrap();
+
+        assert!(report.frontmatter_interpolations_applied >= 3);
+    }
+
+    #[test]
+    fn test_frontmatter_interpolation_disabled() {
+        let content = "---\nbase: /path\nspec: \"{{base}}/spec.md\"\n---\n{{spec}}";
+        let md: Markdown = content.into();
+        let (composed, report) = md
+            .compose_with(
+                ComposeOptions::new()
+                    .disable(ComposeOperation::FrontmatterInterpolation)
+                    .only(&[ComposeOperation::Interpolation]),
+            )
+            .unwrap();
+
+        assert_eq!(report.frontmatter_interpolations_applied, 0);
+        // body interpolation sees the raw templated value
+        assert!(composed.content().contains("{{base}}/spec.md"));
+    }
+
+    #[test]
+    fn test_frontmatter_interpolation_body_still_skips_code() {
+        let content = "---\nname: World\n---\nHello {{ name }}! Code: `{{ name }}`";
+        let md: Markdown = content.into();
+        let (composed, _) = md
+            .compose_with(ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]))
+            .unwrap();
+
+        assert!(composed.content().contains("Hello World!"));
+        assert!(composed.content().contains("`{{ name }}`"));
+    }
+
+    #[test]
+    fn test_frontmatter_interpolation_report_counted_separately() {
+        let content = "---\nbase: /path\nspec: \"{{base}}/spec.md\"\n---\nHello {{ spec }}!";
+        let md: Markdown = content.into();
+        let (_, report) = md
+            .compose_with(ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]))
+            .unwrap();
+
+        assert_eq!(report.frontmatter_interpolations_applied, 1);
+        assert_eq!(report.interpolations_applied, 1);
+    }
+
+    #[test]
+    fn test_frontmatter_interpolation_summary() {
+        let mut report = ComposeReport::new();
+        report.frontmatter_interpolations_applied = 2;
+        let summary = report.summary();
+        assert!(summary.contains("2 frontmatter interpolation(s)"));
+    }
+
+    #[test]
+    fn test_frontmatter_interpolation_report_merge() {
+        let mut r1 = ComposeReport::new();
+        r1.frontmatter_interpolations_applied = 3;
+        let mut r2 = ComposeReport::new();
+        r2.frontmatter_interpolations_applied = 5;
+        r1.merge(r2);
+        assert_eq!(r1.frontmatter_interpolations_applied, 8);
+    }
+
+    // ── Nested external state regression tests ────────────────────────
+
+    #[test]
+    fn test_frontmatter_interpolation_nested_external_state() {
+        // External state has nested keys; frontmatter references them.
+        let content = "---\nmeta:\n  author: Local\nspec: \"{{meta.base}}/spec.md\"\n---\n{{spec}}";
+        let md: Markdown = content.into();
+        let (composed, report) = md
+            .compose_with(
+                ComposeOptions::new()
+                    .with_external_state(serde_json::json!({
+                        "meta": {"base": "/root", "author": "Parent"}
+                    }))
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .unwrap();
+
+        // meta.base from external state should be deep-merged in
+        assert!(
+            composed.content().contains("/root/spec.md"),
+            "Expected /root/spec.md but got: {}",
+            composed.content()
+        );
+        // frontmatter author should win over external
+        assert_eq!(
+            composed
+                .frontmatter()
+                .as_map()
+                .get("meta")
+                .and_then(|v| v.get("author")),
+            Some(&serde_json::json!("Local"))
+        );
+        assert!(report.frontmatter_interpolations_applied >= 1);
+    }
+
+    #[test]
+    fn test_external_state_deep_merge_preserves_frontmatter_values() {
+        // Both frontmatter and external have nested objects; frontmatter wins on conflict.
+        let content =
+            "---\nconfig:\n  theme: dark\n---\ntheme={{config.theme}} lang={{config.lang}}";
+        let md: Markdown = content.into();
+        let (composed, _) = md
+            .compose_with(
+                ComposeOptions::new()
+                    .with_external_state(serde_json::json!({
+                        "config": {"theme": "light", "lang": "en"}
+                    }))
+                    .only(&[ComposeOperation::Interpolation]),
+            )
+            .unwrap();
+
+        assert!(
+            composed.content().contains("theme=dark"),
+            "Frontmatter should win: {}",
+            composed.content()
+        );
+        assert!(
+            composed.content().contains("lang=en"),
+            "External nested key should fill in: {}",
+            composed.content()
+        );
+    }
+
+    // ── Child document frontmatter from parent state ──────────────────
+
+    #[test]
+    fn test_child_frontmatter_interpolation_from_parent_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(&root, "---\nbase: /docs\n---\n::file ./child.md").unwrap();
+        std::fs::write(
+            &child,
+            "---\nspec: \"{{base}}/spec.md\"\n---\nSpec: {{spec}}",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(root);
+        let (composed, _) = md.compose_with(options).unwrap();
+
+        assert!(
+            composed.content().contains("Spec: /docs/spec.md"),
+            "Child should derive frontmatter from parent state: {}",
+            composed.content()
+        );
+    }
+
+    // ── Interpolated prologue/epilogue paths ──────────────────────────
+
+    #[test]
+    fn test_interpolated_prologue_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let intro = dir.path().join("intro.md");
+
+        std::fs::write(
+            &root,
+            "---\nparts: .\nprologue: \"{{parts}}/intro.md\"\n---\nBody",
+        )
+        .unwrap();
+        std::fs::write(&intro, "Prologue content").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(root);
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert!(
+            composed.content().contains("Prologue content"),
+            "Interpolated prologue path should resolve: {}",
+            composed.content()
+        );
+        assert!(report.frontmatter_interpolations_applied >= 1);
+    }
+
+    #[test]
+    fn test_interpolated_epilogue_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let outro = dir.path().join("outro.md");
+
+        std::fs::write(
+            &root,
+            "---\nparts: .\nepilogue: \"{{parts}}/outro.md\"\n---\nBody",
+        )
+        .unwrap();
+        std::fs::write(&outro, "Epilogue content").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = ComposeOptions::new().with_source_file(root);
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert!(
+            composed.content().contains("Epilogue content"),
+            "Interpolated epilogue path should resolve: {}",
+            composed.content()
+        );
+        assert!(report.frontmatter_interpolations_applied >= 1);
+    }
+
+    // ── Page blocks consuming interpolated frontmatter values ─────────
+
+    #[test]
+    fn test_page_block_uses_interpolated_frontmatter() {
+        // Frontmatter interpolation produces a value that page blocks consume.
+        let content = "---\nbase: show\nflag: \"{{base}}\"\n---\n\n::block when=\"flag\"\n\nVisible\n\n::end-block\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().only(&[
+            ComposeOperation::FrontmatterInterpolation,
+            ComposeOperation::PageBlocks,
+        ]);
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        assert!(
+            composed.content().contains("Visible"),
+            "Page block should see interpolated frontmatter value: {}",
+            composed.content()
+        );
+        assert!(report.frontmatter_interpolations_applied >= 1);
+        assert!(report.page_blocks_rendered >= 1);
+    }
+
+    #[test]
+    fn test_page_block_false_from_interpolated_frontmatter() {
+        let content = "---\nbase: \"\"\nflag: \"{{base}}\"\n---\n\n::block when=\"flag\"\n\nHidden\n\n::end-block\n\nAfter\n";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().only(&[
+            ComposeOperation::FrontmatterInterpolation,
+            ComposeOperation::PageBlocks,
+        ]);
+        let (composed, _) = md.compose_with(options).unwrap();
+
+        assert!(
+            !composed.content().contains("Hidden"),
+            "Page block with falsy interpolated value should be removed: {}",
+            composed.content()
+        );
+        assert!(composed.content().contains("After"));
     }
 }

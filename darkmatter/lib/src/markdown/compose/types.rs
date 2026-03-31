@@ -22,6 +22,11 @@ use url::Url;
 /// - **Inline Post**: serial, runs after transclusion
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComposeOperation {
+    /// Resolves `{{ variable }}` expressions inside frontmatter values
+    /// using non-templated frontmatter values, `ctx`, and `env` as inputs.
+    /// Runs before the final effective state is built.
+    FrontmatterInterpolation,
+
     /// Applies the frontmatter `replace` map to substitute text
     /// patterns throughout the document body.
     TextReplacement,
@@ -141,28 +146,30 @@ pub enum ComposePhase {
 
 impl ComposeOperation {
     /// Total number of compose operations.
-    pub const COUNT: usize = 10;
+    pub const COUNT: usize = 11;
 
     /// Stable discriminant index for fixed-size operation sets.
     pub const fn index(self) -> usize {
         match self {
-            Self::TextReplacement => 0,
-            Self::PageBlocks => 1,
-            Self::Interpolation => 2,
-            Self::ShellExpansion => 3,
-            Self::BlockTransclusion => 4,
-            Self::FrontmatterTransclusion => 5,
-            Self::CodeTransclusion => 6,
-            Self::TocLinking => 7,
-            Self::Cleanup => 8,
-            Self::Normalization => 9,
+            Self::FrontmatterInterpolation => 0,
+            Self::TextReplacement => 1,
+            Self::PageBlocks => 2,
+            Self::Interpolation => 3,
+            Self::ShellExpansion => 4,
+            Self::BlockTransclusion => 5,
+            Self::FrontmatterTransclusion => 6,
+            Self::CodeTransclusion => 7,
+            Self::TocLinking => 8,
+            Self::Cleanup => 9,
+            Self::Normalization => 10,
         }
     }
 
     /// Returns the default phase this operation belongs to.
     pub fn phase(&self) -> ComposePhase {
         match self {
-            Self::TextReplacement
+            Self::FrontmatterInterpolation
+            | Self::TextReplacement
             | Self::PageBlocks
             | Self::Interpolation
             | Self::ShellExpansion => ComposePhase::InlinePre,
@@ -180,6 +187,7 @@ impl ComposeOperation {
     pub fn default_order() -> &'static [ComposeOperation] {
         &[
             // Inline Pre (serial)
+            Self::FrontmatterInterpolation,
             Self::TextReplacement,
             Self::PageBlocks,
             Self::Interpolation,
@@ -978,10 +986,29 @@ impl ComposeContext {
     /// If the document uses no `ctx.*` variables, only date/time (zero I/O)
     /// is captured. This avoids git, repo, docs, OS, and hardware detection
     /// for documents that don't need them.
+    ///
+    /// **Note:** This scans only the provided string. If the document has
+    /// frontmatter values containing `ctx.*` references, use
+    /// [`capture_for_document`](Self::capture_for_document) instead.
     pub fn capture_for_content(base_dir: &std::path::Path, content: &str) -> Self {
         let (values, capture_diagnostics, timings) =
             super::context::capture::capture_runtime_context_for_content(base_dir, content);
         Self::from_values(values, capture_diagnostics, timings)
+    }
+
+    /// Demand-driven capture that scans both frontmatter values and body
+    /// content for `ctx.*` references.
+    ///
+    /// This is the correct method when composing a full document, since
+    /// frontmatter values may contain `ctx.*` references that are absent
+    /// from the body.
+    pub fn capture_for_document(
+        base_dir: &std::path::Path,
+        doc: &crate::markdown::Markdown,
+    ) -> Self {
+        let fm_json = serde_json::to_string(doc.frontmatter().as_map()).unwrap_or_default();
+        let combined = format!("{}\n{}", fm_json, doc.content());
+        Self::capture_for_content(base_dir, &combined)
     }
 
     /// Build a `ComposeContext` from pre-computed values.
@@ -1172,6 +1199,9 @@ impl Default for ComposePerfReport {
 /// generated during processing.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ComposeReport {
+    /// Number of frontmatter interpolation expressions resolved.
+    pub frontmatter_interpolations_applied: usize,
+
     /// Number of text replacements applied.
     pub replacements_applied: usize,
 
@@ -1226,7 +1256,8 @@ impl ComposeReport {
 
     /// Returns true if any changes were made by any stage.
     pub fn has_changes(&self) -> bool {
-        self.replacements_applied > 0
+        self.frontmatter_interpolations_applied > 0
+            || self.replacements_applied > 0
             || self.interpolations_applied > 0
             || self.toc_links_generated > 0
             || self.shell_expansions_applied > 0
@@ -1246,6 +1277,13 @@ impl ComposeReport {
         }
 
         let mut parts = Vec::new();
+
+        if self.frontmatter_interpolations_applied > 0 {
+            parts.push(format!(
+                "{} frontmatter interpolation(s)",
+                self.frontmatter_interpolations_applied
+            ));
+        }
 
         if self.replacements_applied > 0 {
             parts.push(format!("{} replacement(s)", self.replacements_applied));
@@ -1324,6 +1362,7 @@ impl ComposeReport {
 
     /// Merges another report into this one.
     pub fn merge(&mut self, mut other: ComposeReport) {
+        self.frontmatter_interpolations_applied += other.frontmatter_interpolations_applied;
         self.replacements_applied += other.replacements_applied;
         self.interpolations_applied += other.interpolations_applied;
         self.toc_links_generated += other.toc_links_generated;
@@ -1413,6 +1452,7 @@ mod tests {
     fn test_compose_options_default_stages() {
         let options = ComposeOptions::new();
 
+        assert!(options.is_enabled(ComposeOperation::FrontmatterInterpolation));
         assert!(options.is_enabled(ComposeOperation::TextReplacement));
         assert!(options.is_enabled(ComposeOperation::Interpolation));
         assert!(options.is_enabled(ComposeOperation::Cleanup));
@@ -1478,6 +1518,7 @@ mod tests {
         assert_eq!(
             ComposeOperation::default_order(),
             &[
+                ComposeOperation::FrontmatterInterpolation,
                 ComposeOperation::TextReplacement,
                 ComposeOperation::PageBlocks,
                 ComposeOperation::Interpolation,
@@ -1495,6 +1536,10 @@ mod tests {
     #[test]
     fn test_compose_operation_phase_mapping_is_complete() {
         let expectations = [
+            (
+                ComposeOperation::FrontmatterInterpolation,
+                ComposePhase::InlinePre,
+            ),
             (ComposeOperation::TextReplacement, ComposePhase::InlinePre),
             (ComposeOperation::PageBlocks, ComposePhase::InlinePre),
             (ComposeOperation::Interpolation, ComposePhase::InlinePre),

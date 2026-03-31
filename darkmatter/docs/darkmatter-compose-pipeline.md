@@ -6,11 +6,11 @@
 
 | Inline Pre (serial)                                       | Transclusion (concurrent)                                        | Inline Post (serial)                                            | 
 | -------------                                             | -------------                                                    | ---------------                                                 | 
-| [1. Text Replacement 🏁](./inline/text-replacement.md)    | [Block Transclusion 🏁](./transclusion/block-transclusion.md)     | [1. Cleaning 🏁](./inline/cleaning.md)                             |
-| [2. Page Blocks 🏁](./inline/page-blocks.md)              | [Frontmatter Transclusion 🏁](./transclusion/fm-transclusion.md)  | [2. Normalization 🏁](./inline/normalization-and-releveling.md)    |
-| [3. Interpolation 🏁](./inline/interpolation.md)          | [Code Block Transclusion 🏁](./transclusion/code-transclusion.md) |                                                                 |
-| [4. Shell Expansion 🏁](./inline/shell-expansion.md)      | [TOC Linking 🏁](./inline/toc-linking.md)                         |                                                                 |
-|                                                           | [AI Prompt Expansion](./transclusion/prompt-expansion.md)         |                                                                 |
+| [1. Frontmatter Interpolation](./inline/fm-interpolation.md)    | [Block Transclusion 🏁](./transclusion/block-transclusion.md)     | [1. Cleaning 🏁](./inline/cleaning.md)                             |
+| [2. Text Replacement 🏁](./inline/text-replacement.md)    | [Frontmatter Transclusion 🏁](./transclusion/fm-transclusion.md)  | [2. Normalization 🏁](./inline/normalization-and-releveling.md)    |
+| [3. Page Blocks 🏁](./inline/page-blocks.md)              | [Code Block Transclusion 🏁](./transclusion/code-transclusion.md) |                                                                 |
+| [4. Interpolation 🏁](./inline/interpolation.md)          | [TOC Linking 🏁](./inline/toc-linking.md)                         |                                                                 |
+| [5. Shell Expansion 🏁](./inline/shell-expansion.md)                                                            | [AI Prompt Expansion](./transclusion/prompt-expansion.md)         |                                                                 |
 |                                                           | [AI Summarization](./transclusion/summarization.md)               |                                                                 |
 |                                                           | [AI Consolidation](./transclusion/consolidation.md)               |                                                                 |
 
@@ -40,8 +40,9 @@ into the most valid form we can deterministically reach.
 
 #### Pre Ops
 
+- [Frontmatter Interpolation](./inline/fm-interpolation.md) - resolves `{{ variable }}` expressions inside frontmatter values using non-templated (seed) values, `ctx.*`, and `env.*` as inputs. Runs before the effective state is built so downstream stages see resolved values.
 - [Text Replacement](./inline/text-replacement.md) - when `replace` property in frontmatter is a key/value dictionary we will replace all instances of the _keys_ with the _values_ in the body of the document
-- [Page Blocks](./inline/page-blocks.md) - allow for blocks in the page to be defined, often with _conditional_ logic to determine whether the block should be rendered or removed       
+- [Page Blocks](./inline/page-blocks.md) - allow for blocks in the page to be defined, often with _conditional_ logic to determine whether the block should be rendered or removed
 - [Interpolation](./inline/interpolation.md) - looks for handlebars template markers in the page's body and replaces the template markers with data from frontmatter, ENV variables, or [context variables](./topics/context-variables.md).
 - [Shell Expansion](./inline/shell-expansion.md) - allows _approved_ commands to be run and have the STDOUT replace the directive
 - Link Validation is deferred and not part of the shipped compose pipeline yet.
@@ -125,4 +126,4 @@ The key things to remember are:
     - in the case of receiving a Markdown document _without_ any Darkmatter directives, only very mild formatting changes from operations like 
 - the [Rendering Pipeline](./darkmatter-render-pipeline.md) expects to receive Markdown content not Darkmatter and it returns one of the supported [output formats](./topics/output-formats.md).
 
-For more details on the **rendering pipeline** always refer to: [Rendering Pipeline](./darkmatter-rendering-pipeline.md)
+##### For more details on the **rendering pipeline** always refer to: [Rendering Pipeline](./darkmatter-rendering-pipeline.md)

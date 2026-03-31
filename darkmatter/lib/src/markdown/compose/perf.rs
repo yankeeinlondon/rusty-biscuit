@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 /// report has a deterministic, intuitive ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PerfMetricKind {
+    FrontmatterInterpolation,
     EffectiveStateBuild,
     TextReplacement,
     PageBlocks,
@@ -29,6 +30,7 @@ impl PerfMetricKind {
     /// Human-readable label used in the report output.
     pub(crate) fn label(self) -> &'static str {
         match self {
+            Self::FrontmatterInterpolation => "frontmatter interpolation",
             Self::EffectiveStateBuild => "effective state build",
             Self::TextReplacement => "text replacement",
             Self::PageBlocks => "page blocks",
@@ -46,6 +48,7 @@ impl PerfMetricKind {
     /// All variants in pipeline execution order.
     fn all() -> &'static [PerfMetricKind] {
         &[
+            Self::FrontmatterInterpolation,
             Self::EffectiveStateBuild,
             Self::TextReplacement,
             Self::PageBlocks,
@@ -68,7 +71,7 @@ pub(crate) struct PerfCollector {
     enabled: bool,
     start: Option<Instant>,
     /// Fixed-size array indexed by `PerfMetricKind` ordinal.
-    durations: [(Duration, usize); 11],
+    durations: [(Duration, usize); 12],
 }
 
 impl PerfCollector {
@@ -78,7 +81,7 @@ impl PerfCollector {
         Self {
             enabled,
             start: if enabled { Some(Instant::now()) } else { None },
-            durations: [(Duration::ZERO, 0); 11],
+            durations: [(Duration::ZERO, 0); 12],
         }
     }
 
