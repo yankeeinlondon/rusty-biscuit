@@ -227,14 +227,14 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
 fn parse_yaml_with_fallbacks(yaml: &str) -> MarkdownResult<FrontmatterMap> {
     // Strategy 1: direct parse
     match serde_yaml_ng::from_str(yaml) {
-        Ok(map) => return Ok(map),
+        Ok(map) => Ok(map),
         Err(original_err) => {
             // Strategy 2: tab normalization
             let normalized = normalize_frontmatter_indentation(yaml);
-            if normalized != *yaml {
-                if let Ok(map) = serde_yaml_ng::from_str(&normalized) {
-                    return Ok(map);
-                }
+            if normalized != *yaml
+                && let Ok(map) = serde_yaml_ng::from_str(&normalized)
+            {
+                return Ok(map);
             }
 
             // Strategy 3: protect interpolation expressions

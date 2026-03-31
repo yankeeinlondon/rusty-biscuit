@@ -89,17 +89,17 @@ use shell_expansion::{apply_replacements_in_reverse, execute_directive};
 /// otherwise.
 fn abbreviate_path(path: &Path) -> String {
     // Try git repo root first (walk up looking for .git)
-    if let Some(root) = find_git_root_from(path) {
-        if let Ok(rel) = path.strip_prefix(&root) {
-            return rel.display().to_string();
-        }
+    if let Some(root) = find_git_root_from(path)
+        && let Ok(rel) = path.strip_prefix(&root)
+    {
+        return rel.display().to_string();
     }
 
     // Fall back to ~/… for paths under HOME
-    if let Some(home) = dirs::home_dir() {
-        if let Ok(rel) = path.strip_prefix(&home) {
-            return format!("~/{}", rel.display());
-        }
+    if let Some(home) = dirs::home_dir()
+        && let Ok(rel) = path.strip_prefix(&home)
+    {
+        return format!("~/{}", rel.display());
     }
 
     path.display().to_string()
@@ -801,7 +801,10 @@ impl Markdown {
     /// Runs the interpolation stage.
     ///
     /// Finds `{{ expression }}` patterns in content and evaluates them
-    /// against the effective state. Expressions in code blocks are skipped.
+    /// against the effective state. By default, expressions inside code
+    /// spans and fenced code blocks are skipped. When
+    /// `interpolate_code_spans` is enabled (via options or frontmatter),
+    /// all expressions are processed regardless of surrounding code markup.
     fn run_interpolation_stage(
         &mut self,
         state: &EffectiveState,
@@ -809,11 +812,17 @@ impl Markdown {
     ) -> MarkdownResult<usize> {
         use interpolation::{Evaluator, ScanMode, interpolate_text};
 
+        let scan_mode = if self.resolve_interpolate_code_spans(options) {
+            ScanMode::Plain
+        } else {
+            ScanMode::MarkdownAware
+        };
+
         let evaluator = Evaluator::new(state);
         let result = interpolate_text(
             &self.content,
             &evaluator,
-            ScanMode::MarkdownAware,
+            scan_mode,
             options.fail_fast,
             "interpolation",
         )?;
@@ -1599,6 +1608,23 @@ impl Markdown {
             .and_then(|raw| parse_bool(raw))
             .unwrap_or(false)
     }
+
+    /// Resolves whether interpolation should process code spans.
+    ///
+    /// Checks (in priority order):
+    /// 1. `ComposeOptions::interpolate_code_spans`
+    /// 2. Frontmatter `interpolate_code_spans` key
+    fn resolve_interpolate_code_spans(&self, options: &ComposeOptions) -> bool {
+        if options.interpolate_code_spans {
+            return true;
+        }
+
+        if let Ok(Some(value)) = self.fm_get::<bool>("interpolate_code_spans") {
+            return value;
+        }
+
+        false
+    }
 }
 
 fn parse_bool(raw: &str) -> Option<bool> {
@@ -2118,6 +2144,37 @@ mod tests {
         // Only the first expression is expanded, code span preserved
         assert_eq!(composed.content(), "Hello Alice! Code: `{{ name }}`");
         assert_eq!(report.interpolations_applied, 1);
+    }
+
+    #[test]
+    fn test_interpolation_code_spans_via_option() {
+        let content = "---\nname: Alice\n---\nHello {{ name }}! Code: `{{ name }}`";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Interpolation])
+            .with_interpolate_code_spans(true);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        // Both expressions expanded when interpolate_code_spans is enabled
+        assert_eq!(composed.content(), "Hello Alice! Code: `Alice`");
+        assert_eq!(report.interpolations_applied, 2);
+    }
+
+    #[test]
+    fn test_interpolation_code_spans_via_frontmatter() {
+        let content =
+            "---\nname: Alice\ninterpolate_code_spans: true\n---\nHello {{ name }}! Code: `{{ name }}`";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        // Both expressions expanded when frontmatter flag is set
+        assert_eq!(composed.content(), "Hello Alice! Code: `Alice`");
+        assert_eq!(report.interpolations_applied, 2);
     }
 
     #[test]

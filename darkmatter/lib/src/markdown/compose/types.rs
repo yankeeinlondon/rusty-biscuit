@@ -387,6 +387,18 @@ pub struct ComposeOptions {
     /// One-off replace map applied only to this document's replacement
     /// stage, never propagated to children.
     pub(crate) one_off_replace: Option<serde_json::Map<String, serde_json::Value>>,
+
+    // ── Interpolation ─────────────────────────────────────────────
+    /// When `true`, body interpolation processes `{{ }}` expressions
+    /// inside inline code spans and fenced code blocks.
+    ///
+    /// By default (`false`), the interpolation scanner skips code
+    /// regions to preserve literal code examples. Set this to `true`
+    /// for template documents where backtick-wrapped expressions
+    /// should still be interpolated.
+    ///
+    /// Can also be set via frontmatter: `interpolate_code_spans: true`.
+    pub interpolate_code_spans: bool,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -425,6 +437,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("perf_enabled", &self.perf_enabled)
             .field("replace_parent_wins", &self.replace_parent_wins)
             .field("one_off_replace", &self.one_off_replace)
+            .field("interpolate_code_spans", &self.interpolate_code_spans)
             .field("context", &self.context)
             .finish()
     }
@@ -475,6 +488,7 @@ impl ComposeOptions {
             context,
             replace_parent_wins: false,
             one_off_replace: None,
+            interpolate_code_spans: false,
         }
     }
 
@@ -583,6 +597,17 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_allow_ctx_override(mut self, allow: bool) -> Self {
         self.allow_ctx_override = allow;
+        self
+    }
+
+    /// Enables interpolation inside code spans and fenced code blocks.
+    ///
+    /// When set, `{{ }}` expressions inside backticks and code fences
+    /// are evaluated instead of being skipped. Useful for template
+    /// documents where code formatting wraps interpolation targets.
+    #[must_use]
+    pub fn with_interpolate_code_spans(mut self, enabled: bool) -> Self {
+        self.interpolate_code_spans = enabled;
         self
     }
 
