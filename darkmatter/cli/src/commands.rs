@@ -350,15 +350,13 @@ pub fn run_compose(
     };
     let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
 
-    // Demand-driven context capture: scan document for ctx.* references and
-    // only capture the groups actually needed. Shared between validation and compose.
+    // Demand-driven context capture: scan document (body + frontmatter values)
+    // for ctx.* references and only capture the groups actually needed.
+    // Shared between validation and compose.
     let ctx_start = perf.then(Instant::now);
     let shared_context = {
         let base_dir = std::env::current_dir().unwrap_or_default();
-        darkmatter::markdown::compose::ComposeContext::capture_for_content(
-            &base_dir,
-            md.content(),
-        )
+        darkmatter::markdown::compose::ComposeContext::capture_for_document(&base_dir, &md)
     };
     let capture_context_dur = ctx_start.map(|s| s.elapsed()).unwrap_or_default();
     // Keep a cheap Arc clone for perf report context timings
