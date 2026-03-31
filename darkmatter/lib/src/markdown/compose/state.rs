@@ -231,6 +231,16 @@ impl EffectiveState {
     }
 }
 
+impl super::interpolation::InterpolationLookup for EffectiveState {
+    fn get(&self, path: &str) -> Option<Value> {
+        self.get(path)
+    }
+
+    fn get_string(&self, path: &str) -> String {
+        self.get_string(path)
+    }
+}
+
 /// Builder for creating effective state with specific merge strategies.
 #[derive(Debug, Clone)]
 pub struct EffectiveStateBuilder {

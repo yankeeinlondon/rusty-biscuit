@@ -158,6 +158,15 @@ impl<'a> ExpressionFinder<'a> {
             .any(|(start, end)| pos >= *start && pos < *end)
     }
 
+    /// Finds all `{{ }}` expressions in a plain string with no code-region exclusions.
+    pub fn find_all_plain(input: &'a str) -> Vec<ExpressionLocation> {
+        let finder = Self {
+            content: input,
+            code_regions: vec![],
+        };
+        finder.find_all()
+    }
+
     /// Finds all code regions (inline code and fenced code blocks) in content.
     fn find_code_regions(content: &str) -> Vec<(usize, usize)> {
         let mut regions = Vec::new();
