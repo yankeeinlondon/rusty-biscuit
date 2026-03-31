@@ -210,6 +210,30 @@ impl ProviderAdapter for ClaudeAdapter {
                 }
                 Ok(Value::Object(body))
             }
+            AgenticEvent::AfterTool => {
+                // Post-tool responses carry redacted content back to the provider.
+                let mut body = Map::new();
+                if matches!(response.decision, Some(HookDecision::Deny)) {
+                    body.insert("decision".to_string(), Value::String("block".to_string()));
+                }
+                if let Some(reason) = &response.reason {
+                    body.insert("reason".to_string(), Value::String(reason.clone()));
+                }
+                if let Some(ref ctx) = response.additional_context {
+                    body.insert(
+                        "updatedToolResult".to_string(),
+                        Value::String(ctx.clone()),
+                    );
+                }
+                if let Some(ref input) = response.updated_input {
+                    body.insert("updatedToolResult".to_string(), input.clone());
+                }
+                if body.is_empty() {
+                    Ok(Value::Null)
+                } else {
+                    Ok(Value::Object(body))
+                }
+            }
             _ => Ok(Value::Null),
         }
     }

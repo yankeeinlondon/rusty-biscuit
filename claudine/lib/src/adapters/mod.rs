@@ -371,4 +371,238 @@ mod tests {
             }
         }
     }
+
+    /// Verify all adapters produce observations for protect-relevant events.
+    #[test]
+    fn all_adapters_produce_observations_for_before_tool() {
+        use std::collections::HashMap;
+        use crate::events::EnvironmentContext;
+
+        for provider in [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::Gemini,
+            Provider::Goose,
+            Provider::KimiCode,
+            Provider::OpenCode,
+            Provider::QwenCode,
+            Provider::RooCode,
+        ] {
+            let adapter = adapter_for(provider);
+            let event = AgenticEvent::BeforeTool;
+            let meta = EventMeta {
+                provider,
+                event,
+                timestamp: chrono::Utc::now(),
+                session_id: Some("test".to_string()),
+                cwd: Some("/tmp".to_string()),
+                tool_name: Some("Bash".to_string()),
+                tool_input: Some(json!({"command": "echo test"})),
+                tool_response: None,
+                error: None,
+                prompt: None,
+                agent_type: None,
+                notification_type: None,
+                notification_message: None,
+                extra: HashMap::new(),
+                env: EnvironmentContext::default(),
+            };
+
+            let obs = adapter.observe_protect(&event, &meta);
+            assert!(
+                obs.is_some(),
+                "adapter for {provider} should produce observation for BeforeTool"
+            );
+            assert!(
+                !obs.as_ref().unwrap().intents.is_empty(),
+                "adapter for {provider} should extract at least one intent from BeforeTool with Bash tool"
+            );
+        }
+    }
+
+    /// Verify Claude adapter extracts MCP tool intents.
+    #[test]
+    fn claude_observe_extracts_mcp_intents() {
+        use std::collections::HashMap;
+        use crate::events::EnvironmentContext;
+        use crate::services::protect::intent::ProtectIntent;
+
+        let adapter = adapter_for(Provider::Claude);
+        let meta = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::BeforeTool,
+            timestamp: chrono::Utc::now(),
+            session_id: None,
+            cwd: None,
+            tool_name: Some("mcp__filesystem__read_file".to_string()),
+            tool_input: Some(json!({"path": "/tmp/test"})),
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env: EnvironmentContext::default(),
+        };
+
+        let obs = adapter.observe_protect(&AgenticEvent::BeforeTool, &meta).unwrap();
+        assert!(
+            obs.intents.iter().any(|i| matches!(i, ProtectIntent::UseMcpServer { server } if server == "filesystem")),
+            "Should extract MCP server intent"
+        );
+        assert!(
+            obs.intents.iter().any(|i| matches!(i, ProtectIntent::UseMcpTool { server, tool } if server == "filesystem" && tool == "read_file")),
+            "Should extract MCP tool intent"
+        );
+    }
+
+    /// Verify Codex adapter extracts command intents from item type.
+    #[test]
+    fn codex_observe_extracts_command_from_item_type() {
+        use std::collections::HashMap;
+        use crate::events::EnvironmentContext;
+        use crate::services::protect::intent::ProtectIntent;
+
+        let adapter = adapter_for(Provider::Codex);
+        let mut extra = HashMap::new();
+        extra.insert("item_type".to_string(), json!("command_execution"));
+
+        let meta = EventMeta {
+            provider: Provider::Codex,
+            event: AgenticEvent::BeforeTool,
+            timestamp: chrono::Utc::now(),
+            session_id: None,
+            cwd: None,
+            tool_name: Some("shell".to_string()),
+            tool_input: Some(json!({"params": {"command": ["cargo", "test"]}})),
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra,
+            env: EnvironmentContext::default(),
+        };
+
+        let obs = adapter.observe_protect(&AgenticEvent::BeforeTool, &meta).unwrap();
+        assert!(
+            obs.intents.iter().any(|i| matches!(i, ProtectIntent::ExecuteCommand(_))),
+            "Codex adapter should extract command intent from command_execution item"
+        );
+    }
+
+    /// Verify Roo adapter extracts SwitchMode intent.
+    #[test]
+    fn roo_observe_extracts_switch_mode() {
+        use std::collections::HashMap;
+        use crate::events::EnvironmentContext;
+        use crate::services::protect::intent::ProtectIntent;
+
+        let adapter = adapter_for(Provider::RooCode);
+        let meta = EventMeta {
+            provider: Provider::RooCode,
+            event: AgenticEvent::BeforeTool,
+            timestamp: chrono::Utc::now(),
+            session_id: None,
+            cwd: None,
+            tool_name: Some("switch_mode".to_string()),
+            tool_input: Some(json!({"mode_slug": "architect"})),
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env: EnvironmentContext::default(),
+        };
+
+        let obs = adapter.observe_protect(&AgenticEvent::BeforeTool, &meta).unwrap();
+        assert!(
+            obs.intents.iter().any(|i| matches!(i, ProtectIntent::SwitchMode { target } if target.as_deref() == Some("architect"))),
+            "Roo adapter should extract SwitchMode intent"
+        );
+    }
+
+    /// Verify Roo adapter extracts MCP tool intents.
+    #[test]
+    fn roo_observe_extracts_mcp_tool() {
+        use std::collections::HashMap;
+        use crate::events::EnvironmentContext;
+        use crate::services::protect::intent::ProtectIntent;
+
+        let adapter = adapter_for(Provider::RooCode);
+        let meta = EventMeta {
+            provider: Provider::RooCode,
+            event: AgenticEvent::BeforeTool,
+            timestamp: chrono::Utc::now(),
+            session_id: None,
+            cwd: None,
+            tool_name: Some("use_mcp_tool".to_string()),
+            tool_input: Some(json!({"server_name": "my_server", "tool_name": "my_tool"})),
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env: EnvironmentContext::default(),
+        };
+
+        let obs = adapter.observe_protect(&AgenticEvent::BeforeTool, &meta).unwrap();
+        assert!(
+            obs.intents.iter().any(|i| matches!(i, ProtectIntent::UseMcpServer { server } if server == "my_server")),
+            "Roo adapter should extract MCP server intent from use_mcp_tool"
+        );
+        assert!(
+            obs.intents.iter().any(|i| matches!(i, ProtectIntent::UseMcpTool { server, tool } if server == "my_server" && tool == "my_tool")),
+            "Roo adapter should extract MCP tool intent from use_mcp_tool"
+        );
+    }
+
+    /// Verify Gemini adapter extracts MCP from mcp_context.
+    #[test]
+    fn gemini_observe_extracts_mcp_from_context() {
+        use std::collections::HashMap;
+        use crate::events::EnvironmentContext;
+        use crate::services::protect::intent::ProtectIntent;
+
+        let adapter = adapter_for(Provider::Gemini);
+        let mut extra = HashMap::new();
+        extra.insert("mcp_context".to_string(), json!({
+            "server_id": "github",
+            "tool_name": "search_repos"
+        }));
+
+        let meta = EventMeta {
+            provider: Provider::Gemini,
+            event: AgenticEvent::BeforeTool,
+            timestamp: chrono::Utc::now(),
+            session_id: None,
+            cwd: None,
+            tool_name: Some("mcp_tool".to_string()),
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra,
+            env: EnvironmentContext::default(),
+        };
+
+        let obs = adapter.observe_protect(&AgenticEvent::BeforeTool, &meta).unwrap();
+        assert!(
+            obs.intents.iter().any(|i| matches!(i, ProtectIntent::UseMcpServer { server } if server == "github")),
+            "Gemini adapter should extract MCP server from mcp_context"
+        );
+        assert!(
+            obs.intents.iter().any(|i| matches!(i, ProtectIntent::UseMcpTool { server, tool } if server == "github" && tool == "search_repos")),
+            "Gemini adapter should extract MCP tool from mcp_context"
+        );
+    }
 }

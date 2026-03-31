@@ -5,7 +5,9 @@ use serde_json::Value;
 
 use crate::actions::HookResponse;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
-use crate::services::{ProtectDecision, ProtectOutcome};
+use crate::services::protect::intent::ProtectIntent;
+use crate::services::protect::observe::default_observe_protect;
+use crate::services::{ProtectDecision, ProtectObservation, ProtectOutcome};
 
 use super::{AdapterError, ProviderAdapter};
 
@@ -54,6 +56,23 @@ impl ProviderAdapter for GooseAdapter {
         }
 
         Ok((event, meta))
+    }
+
+    fn observe_protect(
+        &self,
+        event: &AgenticEvent,
+        meta: &EventMeta,
+    ) -> Option<ProtectObservation> {
+        let mut obs = default_observe_protect(event, meta)?;
+
+        // Goose mode changes → SwitchMode intent.
+        if let Some(Value::String(mode)) = meta.extra.get("goose_mode") {
+            obs.intents.push(ProtectIntent::SwitchMode {
+                target: Some(mode.clone()),
+            });
+        }
+
+        Some(obs)
     }
 
     fn can_block(&self, _event: &AgenticEvent) -> bool {

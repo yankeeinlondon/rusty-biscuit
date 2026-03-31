@@ -5,7 +5,10 @@ use serde_json::{Value, json};
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
-use crate::services::{ProtectDecision, ProtectOutcome};
+use crate::permissions::query::{CommandQuery, PathQuery};
+use crate::services::protect::intent::ProtectIntent;
+use crate::services::protect::observe::default_observe_protect;
+use crate::services::{ProtectDecision, ProtectObservation, ProtectOutcome};
 
 use super::{AdapterError, ProviderAdapter};
 
@@ -59,6 +62,59 @@ impl ProviderAdapter for QwenAdapter {
         capture_qwen_usage(&mut meta.extra, raw);
 
         Ok((event, meta))
+    }
+
+    fn observe_protect(
+        &self,
+        event: &AgenticEvent,
+        meta: &EventMeta,
+    ) -> Option<ProtectObservation> {
+        let mut obs = default_observe_protect(event, meta)?;
+
+        if let Some(tool_name) = meta.tool_name.as_deref() {
+            let lowered = tool_name.to_ascii_lowercase();
+            let mut intents = Vec::new();
+            let mut replaced = true;
+
+            match lowered.as_str() {
+                "bash" | "shell" | "execute_command" => {
+                    let cmd = meta
+                        .tool_input
+                        .as_ref()
+                        .and_then(|v| {
+                            v.get("command")
+                                .and_then(Value::as_str)
+                                .map(ToOwned::to_owned)
+                                .or_else(|| v.as_str().map(ToOwned::to_owned))
+                        });
+                    if let Some(cmd) = cmd {
+                        intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(&cmd)));
+                    }
+                }
+                "write_file" | "edit_file" | "create_file" => {
+                    if let Some(path) = qwen_tool_input_path(meta) {
+                        intents.push(ProtectIntent::WritePath(PathQuery::file(&path)));
+                    }
+                }
+                "read_file" | "list_dir" => {
+                    if let Some(path) = qwen_tool_input_path(meta) {
+                        intents.push(ProtectIntent::ReadPath(PathQuery::unknown(&path)));
+                    }
+                }
+                _ => {
+                    replaced = false;
+                }
+            }
+
+            if replaced {
+                if obs.intents.iter().any(|i| matches!(i, ProtectIntent::CompletionOutputScan)) {
+                    intents.push(ProtectIntent::CompletionOutputScan);
+                }
+                obs.intents = intents;
+            }
+        }
+
+        Some(obs)
     }
 
     fn can_block(&self, event: &AgenticEvent) -> bool {
@@ -153,6 +209,19 @@ fn map_event(event_name: &str) -> Result<AgenticEvent, AdapterError> {
         "StreamResult" => Ok(AgenticEvent::SessionEnd),
         other => Err(AdapterError::UnknownEvent(other.to_string())),
     }
+}
+
+fn qwen_tool_input_path(meta: &EventMeta) -> Option<String> {
+    meta.tool_input
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .and_then(|map| {
+            map.get("file_path")
+                .or_else(|| map.get("path"))
+                .or_else(|| map.get("file"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
 }
 
 fn str_field(raw: &Value, key: &str) -> Option<String> {
