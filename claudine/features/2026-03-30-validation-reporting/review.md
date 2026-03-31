@@ -15,6 +15,7 @@ The implementation landed the basic module split (`report.rs`, `audit.rs`, struc
 ### 1. Harness shell-audit failures are terminal instead of flowing through handler resolution
 
 References:
+
 - `claudine/cli/src/commands/wrap/mod.rs:2184-2218`
 - `claudine/lib/src/harness/audit.rs:14-150`
 - `claudine/features/2026-03-30-validation-reporting/tech-design.md`
@@ -32,6 +33,7 @@ Recommendation: classify non-source audit failures into `FailureContext` values 
 ### 2. Redirected attempts keep the old `original_ref`, so source-file reporting becomes inaccurate
 
 References:
+
 - `claudine/cli/src/commands/wrap/mod.rs:1910-1926`
 - `claudine/cli/src/commands/wrap/mod.rs:2133-2139`
 - `claudine/features/2026-03-30-validation-reporting/plan.md`
@@ -45,6 +47,7 @@ Recommendation: when a redirect is applied, update both the active source path a
 ### 3. Handler-engagement can be reported when no handler will actually run, and can repeat within one failure episode
 
 References:
+
 - `claudine/cli/src/commands/wrap/mod.rs:1963-1968`
 - `claudine/cli/src/commands/wrap/mod.rs:1993-1998`
 - `claudine/cli/src/commands/wrap/mod.rs:2251-2272`
@@ -63,6 +66,7 @@ Recommendation: move `report_handler_engagement(...)` to the point where a concr
 ### 4. Validation item rendering still carries old inline pass/fail tokens and does not fully escape user-controlled markup
 
 References:
+
 - `claudine/lib/src/harness/validate.rs:733-791`
 - `claudine/lib/src/harness/report.rs:23-32`
 - `claudine/lib/src/harness/report.rs:92-99`

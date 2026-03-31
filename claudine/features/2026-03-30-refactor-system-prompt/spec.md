@@ -16,3 +16,8 @@ Our goal in this feature is to implement and/or refactor so that Claudine can:
     - at `~/.claudine/system-prompt.md` (note: this is not typically recommended to populate)
 
 **Note:** if a user calls Claudine with one of the CLI switches then no attempt will be made to resolve a `system-prompt.md` in one of the standard directories.
+
+## Composition
+
+Any `system-prompt.md` file is allowed to add Darkmatter directives and _before_ the system prompt is sent into the Agent we will run a Darkmatter [compose pipeline](@darkmatter/docs/darkmatter-compose-pipeline.md) on this document.
+
