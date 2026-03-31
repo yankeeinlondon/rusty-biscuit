@@ -362,8 +362,43 @@ pub fn run_compose(
     // Keep a cheap Arc clone for perf report context timings
     let options_ctx_ref = shared_context.clone();
 
+    // ── Parse --state and --set early ────────────────────────────────────
+    // These must be available before reference validation so that
+    // interpolation inside transclusion targets (e.g., `::file @{{ctx.pkg}}/{{plan}}`)
+    // can resolve user-provided variables during the validation pass.
+    let opts_start = perf.then(Instant::now);
+    let mut options = ComposeOptions::new_with_context(shared_context);
+
+    // Parse --state as JSON or JSON5
+    if let Some(json_str) = state_json {
+        let parsed = biscuit_file::Json5::from_str(json_str)
+            .wrap_err("Invalid JSON/JSON5 in --state argument")?;
+        let state = parsed.value().clone();
+        if !state.is_object() {
+            return Err(eyre!(
+                "Invalid --state argument: expected a JSON object like {{\"name\":\"Alice\"}}"
+            ));
+        }
+        options = options.with_external_state(state);
+    }
+
+    // Parse --set as JSON or JSON5
+    if let Some(json_str) = set_json {
+        let parsed = biscuit_file::Json5::from_str(json_str)
+            .wrap_err("Invalid JSON/JSON5 in --set argument")?;
+        let set = parsed.value().clone();
+        if !set.is_object() {
+            return Err(eyre!(
+                "Invalid --set argument: expected a JSON object like {{\"name\":\"Alice\"}}"
+            ));
+        }
+        options = options.with_set_overrides(set);
+    }
+
     // ── Reference validation ───────────────────────────────────────────
     // Validate before composing so broken references are caught early.
+    // Uses the same options (including --state/--set) so interpolation
+    // inside transclusion targets resolves correctly.
     let val_start = perf.then(Instant::now);
     let deferred_report = if resolved_input.is_some() {
         use biscuit_terminal::terminal::Terminal;
@@ -374,7 +409,7 @@ pub fn run_compose(
 
         let val_options =
             ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
-                ComposeOptions::new_with_context(shared_context.clone()),
+                options.clone(),
             ));
 
         match md.validate_references(val_options) {
@@ -409,35 +444,6 @@ pub fn run_compose(
         None
     };
     let validate_refs_dur = val_start.map(|s| s.elapsed()).unwrap_or_default();
-
-    let opts_start = perf.then(Instant::now);
-    let mut options = ComposeOptions::new_with_context(shared_context);
-
-    // Parse --state as JSON or JSON5
-    if let Some(json_str) = state_json {
-        let parsed = biscuit_file::Json5::from_str(json_str)
-            .wrap_err("Invalid JSON/JSON5 in --state argument")?;
-        let state = parsed.value().clone();
-        if !state.is_object() {
-            return Err(eyre!(
-                "Invalid --state argument: expected a JSON object like {{\"name\":\"Alice\"}}"
-            ));
-        }
-        options = options.with_external_state(state);
-    }
-
-    // Parse --set as JSON or JSON5
-    if let Some(json_str) = set_json {
-        let parsed = biscuit_file::Json5::from_str(json_str)
-            .wrap_err("Invalid JSON/JSON5 in --set argument")?;
-        let set = parsed.value().clone();
-        if !set.is_object() {
-            return Err(eyre!(
-                "Invalid --set argument: expected a JSON object like {{\"name\":\"Alice\"}}"
-            ));
-        }
-        options = options.with_set_overrides(set);
-    }
 
     // Set source file for relative transclusion resolution
     if let Some(ref resolved) = resolved_input {

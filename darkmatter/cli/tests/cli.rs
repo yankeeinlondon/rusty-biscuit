@@ -579,6 +579,71 @@ fn test_compose_frontmatter_interpolation_ctx_in_frontmatter_only() {
 }
 
 // =============================================================================
+//              TRANSCLUSION + INTERPOLATION VALIDATION TESTS
+// =============================================================================
+
+#[test]
+fn test_compose_set_variables_available_during_validation() {
+    // Regression test: --set variables must be available during reference
+    // validation so that interpolated transclusion paths resolve correctly.
+    // Previously, validation ran before --set was parsed, causing
+    // `::file features/{{plan}}` to resolve to `features/` (empty plan).
+    let temp_dir = tempfile::TempDir::new().unwrap();
+
+    // Create the target file that will be transcluded
+    std::fs::create_dir(temp_dir.path().join("features")).unwrap();
+    std::fs::write(
+        temp_dir.path().join("features/my-plan.md"),
+        "# My Plan\n\nPlan content here.",
+    )
+    .unwrap();
+
+    // Create a template that uses --set variable in a ::file directive
+    let template_path = temp_dir.path().join("template.md");
+    std::fs::write(
+        &template_path,
+        "# Task\n\n::file features/{{plan}}\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&template_path)
+        .args(["--set", r#"{"plan":"my-plan.md"}"#])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Plan content here."));
+}
+
+#[test]
+fn test_compose_state_variables_available_during_validation() {
+    // Same as above but using --state instead of --set
+    let temp_dir = tempfile::TempDir::new().unwrap();
+
+    std::fs::create_dir(temp_dir.path().join("docs")).unwrap();
+    std::fs::write(
+        temp_dir.path().join("docs/readme.md"),
+        "# Readme\n\nReadme content.",
+    )
+    .unwrap();
+
+    let template_path = temp_dir.path().join("template.md");
+    std::fs::write(
+        &template_path,
+        "# Docs\n\n::file docs/{{doc}}\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&template_path)
+        .args(["--state", r#"{"doc":"readme.md"}"#])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Readme content."));
+}
+
+// =============================================================================
 //                      CTX OVERRIDE BEHAVIOR TESTS
 // =============================================================================
 
