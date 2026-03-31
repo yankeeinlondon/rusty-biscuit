@@ -372,6 +372,10 @@ impl<'a> Lexer<'a> {
         match ch {
             '|' => {
                 self.advance();
+                // Accept || as equivalent to | (fallback operator)
+                if self.current_char() == Some('|') {
+                    self.advance();
+                }
                 Ok(Token::Pipe)
             }
             '?' => {
@@ -1007,6 +1011,19 @@ After code {{ end }}."#;
             assert!(matches!(&tokens[0], Token::Variable(v) if v == "color"));
             assert!(matches!(&tokens[1], Token::Pipe));
             assert!(matches!(&tokens[2], Token::StringLiteral(s) if s == "unknown"));
+            assert!(matches!(&tokens[3], Token::Eof));
+        }
+
+        #[test]
+        fn tokenizes_double_pipe_as_single_fallback() {
+            // || is treated as equivalent to | (fallback operator)
+            let mut lexer = Lexer::new(r#"plan || "plan.md""#);
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 4);
+            assert!(matches!(&tokens[0], Token::Variable(v) if v == "plan"));
+            assert!(matches!(&tokens[1], Token::Pipe));
+            assert!(matches!(&tokens[2], Token::StringLiteral(s) if s == "plan.md"));
             assert!(matches!(&tokens[3], Token::Eof));
         }
 

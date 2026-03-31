@@ -198,24 +198,15 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
     let yaml_lines = &lines[1..closing_idx];
     let yaml_content = yaml_lines.join("\n");
 
-    // Parse YAML (retry once after normalizing leading tab indentation)
+    // Parse YAML with fallback strategies:
+    // 1. Direct parse
+    // 2. Tab normalization
+    // 3. Protect interpolation expressions ({{ }}) that may contain
+    //    YAML-significant characters (e.g., quotes in fallback values)
     let frontmatter_map: FrontmatterMap = if yaml_content.trim().is_empty() {
         FrontmatterMap::new()
     } else {
-        match serde_yaml_ng::from_str(&yaml_content) {
-            Ok(map) => map,
-            Err(original_err) => {
-                let normalized_yaml = normalize_frontmatter_indentation(&yaml_content);
-                if normalized_yaml == yaml_content {
-                    return Err(original_err.into());
-                }
-
-                match serde_yaml_ng::from_str(&normalized_yaml) {
-                    Ok(map) => map,
-                    Err(_) => return Err(original_err.into()),
-                }
-            }
-        }
+        parse_yaml_with_fallbacks(&yaml_content)?
     };
 
     // Extract remaining content
@@ -223,6 +214,140 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
     let remaining_content = content_lines.join("\n");
 
     Ok((Frontmatter::from_map(frontmatter_map), remaining_content))
+}
+
+/// Attempts to parse YAML with progressive fallback strategies.
+///
+/// 1. Direct parse
+/// 2. Tab-normalized parse
+/// 3. Expression-protected parse: temporarily replaces `{{ }}` expression
+///    bodies with safe placeholders so YAML-significant characters inside
+///    interpolation expressions (e.g., `"` in `{{ plan || "plan.md" }}`)
+///    don't break the YAML parser.
+fn parse_yaml_with_fallbacks(yaml: &str) -> MarkdownResult<FrontmatterMap> {
+    // Strategy 1: direct parse
+    match serde_yaml_ng::from_str(yaml) {
+        Ok(map) => return Ok(map),
+        Err(original_err) => {
+            // Strategy 2: tab normalization
+            let normalized = normalize_frontmatter_indentation(yaml);
+            if normalized != *yaml {
+                if let Ok(map) = serde_yaml_ng::from_str(&normalized) {
+                    return Ok(map);
+                }
+            }
+
+            // Strategy 3: protect interpolation expressions
+            let (protected, replacements) = protect_interpolation_expressions(yaml);
+            if !replacements.is_empty() {
+                let target = if normalized != *yaml {
+                    &normalized
+                } else {
+                    yaml
+                };
+                let (protected_target, target_replacements) =
+                    protect_interpolation_expressions(target);
+                let (parse_result, restore_map) = if !target_replacements.is_empty() {
+                    (
+                        serde_yaml_ng::from_str::<FrontmatterMap>(&protected_target),
+                        &target_replacements,
+                    )
+                } else {
+                    (
+                        serde_yaml_ng::from_str::<FrontmatterMap>(&protected),
+                        &replacements,
+                    )
+                };
+
+                match parse_result {
+                    Ok(map) => return Ok(restore_expressions_in_map(map, restore_map)),
+                    Err(_) => return Err(original_err.into()),
+                }
+            }
+
+            Err(original_err.into())
+        }
+    }
+}
+
+/// Replaces `{{ }}` expression bodies with safe placeholders.
+///
+/// Returns the modified string and a map of placeholder → original expression.
+fn protect_interpolation_expressions(yaml: &str) -> (String, Vec<(String, String)>) {
+    let mut result = String::with_capacity(yaml.len());
+    let mut replacements = Vec::new();
+    let bytes = yaml.as_bytes();
+    let mut pos = 0;
+
+    while pos < bytes.len() {
+        if pos + 1 < bytes.len() && bytes[pos] == b'{' && bytes[pos + 1] == b'{' {
+            // Find matching }}
+            let start = pos;
+            pos += 2;
+            let mut depth = 1;
+            while pos + 1 < bytes.len() && depth > 0 {
+                if bytes[pos] == b'{' && bytes[pos + 1] == b'{' {
+                    depth += 1;
+                    pos += 2;
+                } else if bytes[pos] == b'}' && bytes[pos + 1] == b'}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        pos += 2;
+                        break;
+                    }
+                    pos += 2;
+                } else {
+                    pos += 1;
+                }
+            }
+            let original = &yaml[start..pos];
+            let placeholder = format!("__DM_EXPR_{}__", replacements.len());
+            replacements.push((placeholder.clone(), original.to_string()));
+            result.push_str(&placeholder);
+        } else {
+            result.push(yaml[pos..pos + 1].chars().next().unwrap_or('?'));
+            pos += 1;
+        }
+    }
+
+    (result, replacements)
+}
+
+/// Restores interpolation expressions from placeholders in parsed YAML values.
+fn restore_expressions_in_map(
+    map: FrontmatterMap,
+    replacements: &[(String, String)],
+) -> FrontmatterMap {
+    map.into_iter()
+        .map(|(k, v)| (k, restore_expressions_in_value(v, replacements)))
+        .collect()
+}
+
+/// Recursively restores placeholders in a JSON value tree.
+fn restore_expressions_in_value(
+    value: serde_json::Value,
+    replacements: &[(String, String)],
+) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(s) => {
+            let mut restored = s;
+            for (placeholder, original) in replacements {
+                restored = restored.replace(placeholder, original);
+            }
+            serde_json::Value::String(restored)
+        }
+        serde_json::Value::Array(arr) => serde_json::Value::Array(
+            arr.into_iter()
+                .map(|v| restore_expressions_in_value(v, replacements))
+                .collect(),
+        ),
+        serde_json::Value::Object(obj) => serde_json::Value::Object(
+            obj.into_iter()
+                .map(|(k, v)| (k, restore_expressions_in_value(v, replacements)))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 /// Normalizes frontmatter indentation by replacing leading tabs with spaces.
@@ -423,6 +548,64 @@ This is content."#;
         assert_eq!(
             normalized,
             "key: \"a\tb\"\n   child: true\n    grandchild: 1"
+        );
+    }
+
+    #[test]
+    fn test_parse_frontmatter_with_nested_quotes_in_interpolation() {
+        // Double quotes inside {{ }} expressions break standard YAML parsing.
+        // The expression-protection fallback should handle this.
+        let content =
+            "---\ntopic: \"\"\nplan_file: \"prefix/{{topic}}/{{plan || \"plan.md\"}}\"\n---\n# Body\n";
+
+        let (fm, remaining) = parse_frontmatter(content).unwrap();
+        let topic: Option<String> = fm.get("topic").unwrap();
+        let plan_file: Option<String> = fm.get("plan_file").unwrap();
+
+        assert_eq!(topic, Some(String::new()));
+        assert_eq!(
+            plan_file,
+            Some("prefix/{{topic}}/{{plan || \"plan.md\"}}".to_string())
+        );
+        assert!(remaining.starts_with("# Body"));
+    }
+
+    #[test]
+    fn test_protect_interpolation_expressions() {
+        let yaml = r#"key: "{{foo || "bar"}}""#;
+        let (protected, replacements) = protect_interpolation_expressions(yaml);
+
+        assert_eq!(replacements.len(), 1);
+        assert!(!protected.contains("{{"));
+        assert!(protected.contains("__DM_EXPR_0__"));
+        assert_eq!(replacements[0].1, r#"{{foo || "bar"}}"#);
+    }
+
+    #[test]
+    fn test_protect_multiple_expressions() {
+        let yaml = r#"a: "{{x}}/{{y || "z"}}""#;
+        let (protected, replacements) = protect_interpolation_expressions(yaml);
+
+        assert_eq!(replacements.len(), 2);
+        assert!(protected.contains("__DM_EXPR_0__"));
+        assert!(protected.contains("__DM_EXPR_1__"));
+    }
+
+    #[test]
+    fn test_restore_expressions_in_value() {
+        let replacements = vec![
+            ("__DM_EXPR_0__".to_string(), "{{foo}}".to_string()),
+            (
+                "__DM_EXPR_1__".to_string(),
+                "{{bar || \"baz\"}}".to_string(),
+            ),
+        ];
+
+        let value = json!("prefix/__DM_EXPR_0__/__DM_EXPR_1__");
+        let restored = restore_expressions_in_value(value, &replacements);
+        assert_eq!(
+            restored,
+            json!("prefix/{{foo}}/{{bar || \"baz\"}}")
         );
     }
 }
