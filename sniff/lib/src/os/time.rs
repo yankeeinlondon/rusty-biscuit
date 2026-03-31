@@ -209,10 +209,7 @@ fn iana_to_abbreviation(iana: &str, is_dst: bool) -> Option<String> {
 /// The timezone name (e.g., "America/Los_Angeles") if found, `None` otherwise.
 pub(crate) fn extract_timezone_from_path(path: &str) -> Option<String> {
     // Common patterns for timezone paths
-    let markers = [
-        "zoneinfo/",
-        "timezone/zoneinfo/",
-    ];
+    let markers = ["zoneinfo/", "timezone/zoneinfo/"];
 
     for marker in markers {
         if let Some(pos) = path.find(marker) {
@@ -298,11 +295,7 @@ pub fn detect_ntp_status() -> NtpStatus {
     // Use timedatectl to check NTP status
     let output = run_command_with_timeout(
         "timedatectl",
-        &[
-            "show",
-            "--property=NTPSynchronized",
-            "--value",
-        ],
+        &["show", "--property=NTPSynchronized", "--value"],
         5,
     );
 
@@ -310,15 +303,8 @@ pub fn detect_ntp_status() -> NtpStatus {
         Some("yes") => NtpStatus::Synchronized,
         Some("no") => {
             // Check if NTP is active but not synced vs inactive
-            let ntp_active = run_command_with_timeout(
-                "timedatectl",
-                &[
-                    "show",
-                    "--property=NTP",
-                    "--value",
-                ],
-                5,
-            );
+            let ntp_active =
+                run_command_with_timeout("timedatectl", &["show", "--property=NTP", "--value"], 5);
             match ntp_active.as_deref().map(str::trim) {
                 Some("yes") => NtpStatus::Unsynchronized,
                 Some("no") => NtpStatus::Inactive,
@@ -397,7 +383,10 @@ pub fn detect_timezone() -> TimeInfo {
     let timezone_abbr = if chrono_tz.chars().all(|c| c.is_ascii_alphabetic()) {
         Some(chrono_tz)
     } else {
-        timezone.as_deref().and_then(|iana| iana_to_abbreviation(iana, is_dst)).or(Some(chrono_tz))
+        timezone
+            .as_deref()
+            .and_then(|iana| iana_to_abbreviation(iana, is_dst))
+            .or(Some(chrono_tz))
     };
 
     // Detect NTP status
@@ -484,20 +473,29 @@ mod tests {
     #[test]
     fn test_extract_timezone_from_path_macos_style() {
         let path = "/var/db/timezone/zoneinfo/America/Los_Angeles";
-        assert_eq!(extract_timezone_from_path(path), Some("America/Los_Angeles".to_string()));
+        assert_eq!(
+            extract_timezone_from_path(path),
+            Some("America/Los_Angeles".to_string())
+        );
     }
 
     #[test]
     fn test_extract_timezone_from_path_linux_style() {
         let path = "/usr/share/zoneinfo/Europe/London";
-        assert_eq!(extract_timezone_from_path(path), Some("Europe/London".to_string()));
+        assert_eq!(
+            extract_timezone_from_path(path),
+            Some("Europe/London".to_string())
+        );
     }
 
     #[test]
     fn test_extract_timezone_from_path_posix() {
         // Some systems use paths like this
         let path = "/usr/share/zoneinfo/Etc/UTC";
-        assert_eq!(extract_timezone_from_path(path), Some("Etc/UTC".to_string()));
+        assert_eq!(
+            extract_timezone_from_path(path),
+            Some("Etc/UTC".to_string())
+        );
     }
 
     #[test]

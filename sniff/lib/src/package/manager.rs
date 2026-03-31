@@ -200,7 +200,10 @@ mod tests {
         let lang: PackageManager = LanguagePackageManager::Npm.into();
 
         assert!(matches!(os, PackageManager::Os(OsPackageManager::Apt)));
-        assert!(matches!(lang, PackageManager::Language(LanguagePackageManager::Npm)));
+        assert!(matches!(
+            lang,
+            PackageManager::Language(LanguagePackageManager::Npm)
+        ));
     }
 
     #[test]
