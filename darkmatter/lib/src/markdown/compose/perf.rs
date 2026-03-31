@@ -206,7 +206,10 @@ mod tests {
         let mut collector = PerfCollector::new(true);
         // Record in reverse order to verify output order is by pipeline, not insertion
         collector.record(PerfMetricKind::Normalization, Duration::from_millis(1));
-        collector.record(PerfMetricKind::EffectiveStateBuild, Duration::from_millis(2));
+        collector.record(
+            PerfMetricKind::EffectiveStateBuild,
+            Duration::from_millis(2),
+        );
 
         let report = collector.finish().unwrap();
         let names: Vec<_> = report.metrics.iter().map(|m| m.name.as_str()).collect();

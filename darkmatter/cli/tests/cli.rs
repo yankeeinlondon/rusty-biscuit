@@ -601,9 +601,7 @@ fn test_compose_scalar_ctx_with_allow_override_succeeds() {
         .write_stdin("---\nctx: hello\n---\n# Test")
         .assert()
         .success()
-        .stderr(predicate::str::contains(
-            "Document ctx was not an object",
-        ));
+        .stderr(predicate::str::contains("Document ctx was not an object"));
 }
 
 #[test]
@@ -615,7 +613,9 @@ fn test_compose_object_ctx_collision_emits_warning() {
         .write_stdin("---\nctx:\n  today: custom-value\n---\n# Test")
         .assert()
         .success()
-        .stderr(predicate::str::contains("conflict with those provided by Darkmatter"));
+        .stderr(predicate::str::contains(
+            "conflict with those provided by Darkmatter",
+        ));
 }
 
 // =============================================================================

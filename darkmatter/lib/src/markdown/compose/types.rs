@@ -880,8 +880,7 @@ struct ComposeContextInner {
 impl PartialEq for ComposeContext {
     fn eq(&self, other: &Self) -> bool {
         // Same Arc instance = equal; otherwise compare values
-        std::sync::Arc::ptr_eq(&self.inner, &other.inner)
-            || self.inner.values == other.inner.values
+        std::sync::Arc::ptr_eq(&self.inner, &other.inner) || self.inner.values == other.inner.values
     }
 }
 
@@ -890,33 +889,58 @@ impl Eq for ComposeContext {}
 // Legacy public field accessors (backward compatible)
 impl ComposeContext {
     /// ISO 8601 local datetime.
-    pub fn now(&self) -> &str { &self.inner.now }
+    pub fn now(&self) -> &str {
+        &self.inner.now
+    }
     /// ISO 8601 UTC datetime.
-    pub fn now_utc(&self) -> &str { &self.inner.now_utc }
+    pub fn now_utc(&self) -> &str {
+        &self.inner.now_utc
+    }
     /// Local date YYYY-MM-DD.
-    pub fn today(&self) -> &str { &self.inner.today }
+    pub fn today(&self) -> &str {
+        &self.inner.today
+    }
     /// Yesterday YYYY-MM-DD.
-    pub fn yesterday(&self) -> &str { &self.inner.yesterday }
+    pub fn yesterday(&self) -> &str {
+        &self.inner.yesterday
+    }
     /// Tomorrow YYYY-MM-DD.
-    pub fn tomorrow(&self) -> &str { &self.inner.tomorrow }
+    pub fn tomorrow(&self) -> &str {
+        &self.inner.tomorrow
+    }
     /// Full day of week name.
-    pub fn day(&self) -> &str { &self.inner.day }
+    pub fn day(&self) -> &str {
+        &self.inner.day
+    }
     /// Abbreviated day of week.
-    pub fn day_abbr(&self) -> &str { &self.inner.day_abbr }
+    pub fn day_abbr(&self) -> &str {
+        &self.inner.day_abbr
+    }
     /// Four-digit year.
-    pub fn year(&self) -> &str { &self.inner.year }
+    pub fn year(&self) -> &str {
+        &self.inner.year
+    }
     /// Two-digit month (01-12).
-    pub fn month(&self) -> &str { &self.inner.month }
+    pub fn month(&self) -> &str {
+        &self.inner.month
+    }
     /// Full month name.
-    pub fn month_name(&self) -> &str { &self.inner.month_name }
+    pub fn month_name(&self) -> &str {
+        &self.inner.month_name
+    }
     /// Abbreviated month name.
-    pub fn month_name_abbr(&self) -> &str { &self.inner.month_name_abbr }
+    pub fn month_name_abbr(&self) -> &str {
+        &self.inner.month_name_abbr
+    }
     /// Environment variables snapshot.
-    pub fn env(&self) -> &HashMap<String, String> { &self.inner.env }
+    pub fn env(&self) -> &HashMap<String, String> {
+        &self.inner.env
+    }
     /// Access the values map (crate-internal).
-    pub(crate) fn values(&self) -> &serde_json::Map<String, serde_json::Value> { &self.inner.values }
+    pub(crate) fn values(&self) -> &serde_json::Map<String, serde_json::Value> {
+        &self.inner.values
+    }
 }
-
 
 impl ComposeContext {
     /// Captures the current runtime context using CWD as the base directory.
@@ -936,10 +960,12 @@ impl ComposeContext {
                 // sniff-derived fields null, and record the failure.
                 let (mut values, diagnostics) = (
                     serde_json::Map::new(),
-                    vec![super::context::ContextMergeDiagnostic::PartialRuntimeCapture {
-                        area: "cwd",
-                        detail: format!("current_dir() failed: {e}"),
-                    }],
+                    vec![
+                        super::context::ContextMergeDiagnostic::PartialRuntimeCapture {
+                            area: "cwd",
+                            detail: format!("current_dir() failed: {e}"),
+                        },
+                    ],
                 );
                 super::context::capture::populate_datetime(&mut values);
                 Self::from_values(values, diagnostics, Vec::new())
@@ -1147,7 +1173,11 @@ impl ComposePerfReport {
         self.total += other.total;
 
         for other_metric in &other.metrics {
-            if let Some(existing) = self.metrics.iter_mut().find(|m| m.name == other_metric.name) {
+            if let Some(existing) = self
+                .metrics
+                .iter_mut()
+                .find(|m| m.name == other_metric.name)
+            {
                 existing.elapsed += other_metric.elapsed;
                 existing.calls += other_metric.calls;
             } else {
@@ -1841,7 +1871,10 @@ mod tests {
 
         report_a.merge(report_b);
         assert!(report_a.perf.is_some());
-        assert_eq!(report_a.perf.as_ref().unwrap().total, Duration::from_millis(5));
+        assert_eq!(
+            report_a.perf.as_ref().unwrap().total,
+            Duration::from_millis(5)
+        );
     }
 
     #[test]
