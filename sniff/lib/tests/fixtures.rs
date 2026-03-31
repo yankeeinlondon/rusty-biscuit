@@ -14,8 +14,11 @@ pub fn create_test_git_repo() -> (TempDir, PathBuf) {
 /// Create a Cargo workspace structure
 pub fn create_cargo_workspace() -> (TempDir, PathBuf) {
     let dir = TempDir::new().unwrap();
-    fs::write(dir.path().join("Cargo.toml"), "[workspace]\nmembers = [\"pkg1\", \"pkg2\"]\n")
-        .unwrap();
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"pkg1\", \"pkg2\"]\n",
+    )
+    .unwrap();
     fs::create_dir(dir.path().join("pkg1")).unwrap();
     fs::create_dir(dir.path().join("pkg2")).unwrap();
     let path = dir.path().to_path_buf();
@@ -36,7 +39,11 @@ pub fn create_mixed_language_dir() -> (TempDir, PathBuf) {
 /// Create a pnpm workspace
 pub fn create_pnpm_workspace() -> (TempDir, PathBuf) {
     let dir = TempDir::new().unwrap();
-    fs::write(dir.path().join("pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n").unwrap();
+    fs::write(
+        dir.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n",
+    )
+    .unwrap();
     fs::write(dir.path().join("package.json"), "{}").unwrap();
     fs::create_dir_all(dir.path().join("packages/app")).unwrap();
     fs::create_dir_all(dir.path().join("packages/lib")).unwrap();
@@ -49,9 +56,16 @@ pub fn create_mixed_nested_workspace() -> (TempDir, PathBuf) {
     let dir = TempDir::new().unwrap();
     let _repo = Repository::init(dir.path()).unwrap();
 
-    fs::write(dir.path().join("Cargo.toml"), "[workspace]\nmembers = [\"server\"]\n").unwrap();
-    fs::write(dir.path().join("pnpm-workspace.yaml"), "packages:\n  - 'server/frontend'\n")
-        .unwrap();
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"server\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - 'server/frontend'\n",
+    )
+    .unwrap();
     fs::write(dir.path().join("package.json"), r#"{"private": true}"#).unwrap();
 
     let server_dir = dir.path().join("server");

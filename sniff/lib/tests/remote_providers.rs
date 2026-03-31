@@ -169,7 +169,10 @@ mod github_tests {
             .mount(&server)
             .await;
 
-        let metadata = provider.get_repo_metadata("test-owner", "test-repo").await.unwrap();
+        let metadata = provider
+            .get_repo_metadata("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(metadata.name, "test-repo");
         assert_eq!(metadata.full_name, "test-owner/test-repo");
@@ -181,12 +184,7 @@ mod github_tests {
         assert_eq!(metadata.forks, Some(5));
         assert!(!metadata.archived);
         assert!(metadata.license.is_some());
-        assert_eq!(
-            metadata.topics,
-            vec![
-                "testing", "rust"
-            ]
-        );
+        assert_eq!(metadata.topics, vec!["testing", "rust"]);
     }
 
     #[tokio::test]
@@ -207,24 +205,41 @@ mod github_tests {
             .mount(&server)
             .await;
 
-        let documents = provider.list_documents("test-owner", "test-repo").await.unwrap();
+        let documents = provider
+            .list_documents("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert!(!documents.is_empty());
 
         // Check that we have expected document categories
-        let readme_count =
-            documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
-        let docs_folder_count =
-            documents.iter().filter(|d| d.category == DocumentCategory::DocsFolder).count();
-        let source_doc_count =
-            documents.iter().filter(|d| d.category == DocumentCategory::SourceDoc).count();
-        let other_count =
-            documents.iter().filter(|d| d.category == DocumentCategory::Other).count();
+        let readme_count = documents
+            .iter()
+            .filter(|d| d.category == DocumentCategory::Readme)
+            .count();
+        let docs_folder_count = documents
+            .iter()
+            .filter(|d| d.category == DocumentCategory::DocsFolder)
+            .count();
+        let source_doc_count = documents
+            .iter()
+            .filter(|d| d.category == DocumentCategory::SourceDoc)
+            .count();
+        let other_count = documents
+            .iter()
+            .filter(|d| d.category == DocumentCategory::Other)
+            .count();
 
         assert!(readme_count >= 1, "Should have at least one README");
-        assert!(docs_folder_count >= 1, "Should have at least one docs folder doc");
+        assert!(
+            docs_folder_count >= 1,
+            "Should have at least one docs folder doc"
+        );
         assert!(source_doc_count >= 1, "Should have at least one source doc");
-        assert!(other_count >= 1, "Should have at least one other doc (CHANGELOG)");
+        assert!(
+            other_count >= 1,
+            "Should have at least one other doc (CHANGELOG)"
+        );
     }
 
     #[tokio::test]
@@ -237,7 +252,10 @@ mod github_tests {
             .mount(&server)
             .await;
 
-        let prs = provider.list_pull_requests("test-owner", "test-repo").await.unwrap();
+        let prs = provider
+            .list_pull_requests("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(prs.len(), 1);
         assert_eq!(prs[0].number, 42);
@@ -259,7 +277,10 @@ mod github_tests {
             .mount(&server)
             .await;
 
-        let issues = provider.list_issues("test-owner", "test-repo").await.unwrap();
+        let issues = provider
+            .list_issues("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].number, 10);
@@ -286,8 +307,10 @@ mod github_tests {
             .mount(&server)
             .await;
 
-        let tags_and_releases =
-            provider.get_tags_and_releases("test-owner", "test-repo").await.unwrap();
+        let tags_and_releases = provider
+            .get_tags_and_releases("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(tags_and_releases.tags.len(), 1);
         assert_eq!(tags_and_releases.tags[0].name, "v1.0.0");
@@ -315,7 +338,10 @@ mod github_tests {
             .mount(&server)
             .await;
 
-        let cicd = provider.detect_cicd("test-owner", "test-repo").await.unwrap();
+        let cicd = provider
+            .detect_cicd("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert!(cicd.is_some());
         let cicd_info = cicd.unwrap();
@@ -344,10 +370,7 @@ mod github_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::InvalidCredentials {
-                provider,
-                ..
-            } => {
+            SniffError::InvalidCredentials { provider, .. } => {
                 assert_eq!(provider, "GitHub");
             }
             other => panic!("Expected InvalidCredentials error, got: {:?}", other),
@@ -364,7 +387,9 @@ mod github_tests {
             .mount(&server)
             .await;
 
-        let result = provider.get_repo_metadata("test-owner", "nonexistent-repo").await;
+        let result = provider
+            .get_repo_metadata("test-owner", "nonexistent-repo")
+            .await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -395,10 +420,7 @@ mod github_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RateLimited {
-                provider,
-                ..
-            } => {
+            SniffError::RateLimited { provider, .. } => {
                 assert_eq!(provider, "GitHub");
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
@@ -419,10 +441,7 @@ mod github_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RateLimited {
-                provider,
-                ..
-            } => {
+            SniffError::RateLimited { provider, .. } => {
                 assert_eq!(provider, "GitHub");
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
@@ -543,7 +562,10 @@ mod gitlab_tests {
             .mount(&server)
             .await;
 
-        let metadata = provider.get_repo_metadata("test-owner", "test-repo").await.unwrap();
+        let metadata = provider
+            .get_repo_metadata("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         // GitLab provider returns minimal metadata without GetProject endpoint
         assert_eq!(metadata.name, "test-repo");
@@ -560,11 +582,16 @@ mod gitlab_tests {
             .mount(&server)
             .await;
 
-        let documents = provider.list_documents("test-owner", "test-repo").await.unwrap();
+        let documents = provider
+            .list_documents("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert!(!documents.is_empty());
-        let readme_count =
-            documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
+        let readme_count = documents
+            .iter()
+            .filter(|d| d.category == DocumentCategory::Readme)
+            .count();
         assert!(readme_count >= 1, "Should have at least one README");
     }
 
@@ -578,7 +605,10 @@ mod gitlab_tests {
             .mount(&server)
             .await;
 
-        let mrs = provider.list_pull_requests("test-owner", "test-repo").await.unwrap();
+        let mrs = provider
+            .list_pull_requests("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(mrs.len(), 1);
         assert_eq!(mrs[0].number, 15);
@@ -597,7 +627,10 @@ mod gitlab_tests {
             .mount(&server)
             .await;
 
-        let issues = provider.list_issues("test-owner", "test-repo").await.unwrap();
+        let issues = provider
+            .list_issues("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].number, 25);
@@ -620,8 +653,10 @@ mod gitlab_tests {
             .mount(&server)
             .await;
 
-        let tags_and_releases =
-            provider.get_tags_and_releases("test-owner", "test-repo").await.unwrap();
+        let tags_and_releases = provider
+            .get_tags_and_releases("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(tags_and_releases.tags.len(), 1);
         assert_eq!(tags_and_releases.tags[0].name, "v2.0.0");
@@ -638,7 +673,10 @@ mod gitlab_tests {
             .mount(&server)
             .await;
 
-        let cicd = provider.detect_cicd("test-owner", "test-repo").await.unwrap();
+        let cicd = provider
+            .detect_cicd("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert!(cicd.is_some());
         let cicd_info = cicd.unwrap();
@@ -666,10 +704,7 @@ mod gitlab_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::MissingCredentials {
-                provider,
-                ..
-            } => {
+            SniffError::MissingCredentials { provider, .. } => {
                 assert_eq!(provider, "GitLab");
             }
             other => panic!("Expected MissingCredentials error, got: {:?}", other),
@@ -686,14 +721,14 @@ mod gitlab_tests {
             .mount(&server)
             .await;
 
-        let result = provider.get_repo_metadata("test-owner", "nonexistent").await;
+        let result = provider
+            .get_repo_metadata("test-owner", "nonexistent")
+            .await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
             SniffError::RemoteApi {
-                provider,
-                status,
-                ..
+                provider, status, ..
             } => {
                 assert_eq!(provider, "GitLab");
                 assert_eq!(status, 404);
@@ -716,10 +751,7 @@ mod gitlab_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RateLimited {
-                provider,
-                ..
-            } => {
+            SniffError::RateLimited { provider, .. } => {
                 assert_eq!(provider, "GitLab");
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
@@ -837,11 +869,17 @@ mod gitea_tests {
             .mount(&server)
             .await;
 
-        let metadata = provider.get_repo_metadata("test-owner", "test-repo").await.unwrap();
+        let metadata = provider
+            .get_repo_metadata("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(metadata.name, "test-repo");
         assert_eq!(metadata.full_name, "test-owner/test-repo");
-        assert_eq!(metadata.description, Some("A test repository on Gitea".to_string()));
+        assert_eq!(
+            metadata.description,
+            Some("A test repository on Gitea".to_string())
+        );
         assert!(!metadata.private);
         assert_eq!(metadata.default_branch, "main");
         assert_eq!(metadata.language, Some("Go".to_string()));
@@ -860,16 +898,23 @@ mod gitea_tests {
             .await;
 
         Mock::given(method("GET"))
-            .and(path_regex(r"/api/v1/repos/test-owner/test-repo/git/trees/.*"))
+            .and(path_regex(
+                r"/api/v1/repos/test-owner/test-repo/git/trees/.*",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(gitea_tree_fixture()))
             .mount(&server)
             .await;
 
-        let documents = provider.list_documents("test-owner", "test-repo").await.unwrap();
+        let documents = provider
+            .list_documents("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert!(!documents.is_empty());
-        let readme_count =
-            documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
+        let readme_count = documents
+            .iter()
+            .filter(|d| d.category == DocumentCategory::Readme)
+            .count();
         assert!(readme_count >= 1, "Should have at least one README");
     }
 
@@ -883,7 +928,10 @@ mod gitea_tests {
             .mount(&server)
             .await;
 
-        let prs = provider.list_pull_requests("test-owner", "test-repo").await.unwrap();
+        let prs = provider
+            .list_pull_requests("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(prs.len(), 1);
         assert_eq!(prs[0].number, 8);
@@ -900,7 +948,10 @@ mod gitea_tests {
             .mount(&server)
             .await;
 
-        let issues = provider.list_issues("test-owner", "test-repo").await.unwrap();
+        let issues = provider
+            .list_issues("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].number, 20);
@@ -923,8 +974,10 @@ mod gitea_tests {
             .mount(&server)
             .await;
 
-        let tags_and_releases =
-            provider.get_tags_and_releases("test-owner", "test-repo").await.unwrap();
+        let tags_and_releases = provider
+            .get_tags_and_releases("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(tags_and_releases.tags.len(), 1);
         assert_eq!(tags_and_releases.tags[0].name, "v1.5.0");
@@ -941,12 +994,17 @@ mod gitea_tests {
             .await;
 
         Mock::given(method("GET"))
-            .and(path_regex(r"/api/v1/repos/test-owner/test-repo/git/trees/.*"))
+            .and(path_regex(
+                r"/api/v1/repos/test-owner/test-repo/git/trees/.*",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(gitea_tree_fixture()))
             .mount(&server)
             .await;
 
-        let cicd = provider.detect_cicd("test-owner", "test-repo").await.unwrap();
+        let cicd = provider
+            .detect_cicd("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         assert!(cicd.is_some());
         let cicd_info = cicd.unwrap();
@@ -973,10 +1031,7 @@ mod gitea_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::MissingCredentials {
-                provider,
-                ..
-            } => {
+            SniffError::MissingCredentials { provider, .. } => {
                 assert_eq!(provider, "Gitea");
             }
             other => panic!("Expected MissingCredentials error, got: {:?}", other),
@@ -993,14 +1048,14 @@ mod gitea_tests {
             .mount(&server)
             .await;
 
-        let result = provider.get_repo_metadata("test-owner", "nonexistent").await;
+        let result = provider
+            .get_repo_metadata("test-owner", "nonexistent")
+            .await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
             SniffError::RemoteApi {
-                provider,
-                status,
-                ..
+                provider, status, ..
             } => {
                 assert_eq!(provider, "Gitea");
                 assert_eq!(status, 404);
@@ -1023,10 +1078,7 @@ mod gitea_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RateLimited {
-                provider,
-                ..
-            } => {
+            SniffError::RateLimited { provider, .. } => {
                 assert_eq!(provider, "Gitea");
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
@@ -1170,11 +1222,17 @@ mod bitbucket_tests {
             .mount(&server)
             .await;
 
-        let metadata = provider.get_repo_metadata("test-workspace", "test-repo").await.unwrap();
+        let metadata = provider
+            .get_repo_metadata("test-workspace", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(metadata.name, "test-repo");
         assert_eq!(metadata.full_name, "test-workspace/test-repo");
-        assert_eq!(metadata.description, Some("A test repository on Bitbucket".to_string()));
+        assert_eq!(
+            metadata.description,
+            Some("A test repository on Bitbucket".to_string())
+        );
         assert!(!metadata.private);
         assert_eq!(metadata.default_branch, "main");
         assert_eq!(metadata.language, Some("python".to_string()));
@@ -1196,11 +1254,16 @@ mod bitbucket_tests {
             .mount(&server)
             .await;
 
-        let documents = provider.list_documents("test-workspace", "test-repo").await.unwrap();
+        let documents = provider
+            .list_documents("test-workspace", "test-repo")
+            .await
+            .unwrap();
 
         assert!(!documents.is_empty());
-        let readme_count =
-            documents.iter().filter(|d| d.category == DocumentCategory::Readme).count();
+        let readme_count = documents
+            .iter()
+            .filter(|d| d.category == DocumentCategory::Readme)
+            .count();
         assert!(readme_count >= 1, "Should have at least one README");
     }
 
@@ -1209,14 +1272,19 @@ mod bitbucket_tests {
         let (server, provider) = setup_bitbucket_mock().await;
 
         Mock::given(method("GET"))
-            .and(path_regex(r"/repositories/test-workspace/test-repo/pullrequests.*"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/pullrequests.*",
+            ))
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(bitbucket_pull_requests_fixture()),
             )
             .mount(&server)
             .await;
 
-        let prs = provider.list_pull_requests("test-workspace", "test-repo").await.unwrap();
+        let prs = provider
+            .list_pull_requests("test-workspace", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(prs.len(), 1);
         assert_eq!(prs[0].number, 100);
@@ -1229,12 +1297,17 @@ mod bitbucket_tests {
         let (server, provider) = setup_bitbucket_mock().await;
 
         Mock::given(method("GET"))
-            .and(path_regex(r"/repositories/test-workspace/test-repo/issues.*"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/issues.*",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_issues_fixture()))
             .mount(&server)
             .await;
 
-        let issues = provider.list_issues("test-workspace", "test-repo").await.unwrap();
+        let issues = provider
+            .list_issues("test-workspace", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].number, 30);
@@ -1247,12 +1320,17 @@ mod bitbucket_tests {
         let (server, provider) = setup_bitbucket_mock().await;
 
         Mock::given(method("GET"))
-            .and(path_regex(r"/repositories/test-workspace/test-repo/issues.*"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/issues.*",
+            ))
             .respond_with(ResponseTemplate::new(404).set_body_string("Issue tracker disabled"))
             .mount(&server)
             .await;
 
-        let issues = provider.list_issues("test-workspace", "test-repo").await.unwrap();
+        let issues = provider
+            .list_issues("test-workspace", "test-repo")
+            .await
+            .unwrap();
 
         // Bitbucket returns empty list when issue tracker is disabled (404)
         assert!(issues.is_empty());
@@ -1263,19 +1341,25 @@ mod bitbucket_tests {
         let (server, provider) = setup_bitbucket_mock().await;
 
         Mock::given(method("GET"))
-            .and(path_regex(r"/repositories/test-workspace/test-repo/refs/tags.*"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/refs/tags.*",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_tags_fixture()))
             .mount(&server)
             .await;
 
         Mock::given(method("GET"))
-            .and(path_regex(r"/repositories/test-workspace/test-repo/downloads.*"))
+            .and(path_regex(
+                r"/repositories/test-workspace/test-repo/downloads.*",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(bitbucket_downloads_fixture()))
             .mount(&server)
             .await;
 
-        let tags_and_releases =
-            provider.get_tags_and_releases("test-workspace", "test-repo").await.unwrap();
+        let tags_and_releases = provider
+            .get_tags_and_releases("test-workspace", "test-repo")
+            .await
+            .unwrap();
 
         assert_eq!(tags_and_releases.tags.len(), 1);
         assert_eq!(tags_and_releases.tags[0].name, "v3.0.0");
@@ -1298,12 +1382,18 @@ mod bitbucket_tests {
             .mount(&server)
             .await;
 
-        let cicd = provider.detect_cicd("test-workspace", "test-repo").await.unwrap();
+        let cicd = provider
+            .detect_cicd("test-workspace", "test-repo")
+            .await
+            .unwrap();
 
         assert!(cicd.is_some());
         let cicd_info = cicd.unwrap();
         assert_eq!(cicd_info.provider, "Bitbucket Pipelines");
-        assert_eq!(cicd_info.config_path, Some("bitbucket-pipelines.yml".to_string()));
+        assert_eq!(
+            cicd_info.config_path,
+            Some("bitbucket-pipelines.yml".to_string())
+        );
     }
 
     #[tokio::test]
@@ -1322,14 +1412,13 @@ mod bitbucket_tests {
             .mount(&server)
             .await;
 
-        let result = provider.get_repo_metadata("test-workspace", "test-repo").await;
+        let result = provider
+            .get_repo_metadata("test-workspace", "test-repo")
+            .await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::MissingCredentials {
-                provider,
-                ..
-            } => {
+            SniffError::MissingCredentials { provider, .. } => {
                 assert_eq!(provider, "Bitbucket");
             }
             other => panic!("Expected MissingCredentials error, got: {:?}", other),
@@ -1346,14 +1435,14 @@ mod bitbucket_tests {
             .mount(&server)
             .await;
 
-        let result = provider.get_repo_metadata("test-workspace", "nonexistent").await;
+        let result = provider
+            .get_repo_metadata("test-workspace", "nonexistent")
+            .await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
             SniffError::RemoteApi {
-                provider,
-                status,
-                ..
+                provider, status, ..
             } => {
                 assert_eq!(provider, "Bitbucket");
                 assert_eq!(status, 404);
@@ -1372,14 +1461,13 @@ mod bitbucket_tests {
             .mount(&server)
             .await;
 
-        let result = provider.get_repo_metadata("test-workspace", "test-repo").await;
+        let result = provider
+            .get_repo_metadata("test-workspace", "test-repo")
+            .await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::RateLimited {
-                provider,
-                ..
-            } => {
+            SniffError::RateLimited { provider, .. } => {
                 assert_eq!(provider, "Bitbucket");
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
@@ -1413,8 +1501,7 @@ mod shorthand_tests {
                 assert_eq!(remote.provider(), GitProvider::GitHub);
             }
             Err(SniffError::ShorthandNotFound {
-                providers_tried,
-                ..
+                providers_tried, ..
             }) => {
                 assert!(
                     providers_tried.contains("GitHub"),
@@ -1422,16 +1509,10 @@ mod shorthand_tests {
                     providers_tried
                 );
             }
-            Err(SniffError::InvalidCredentials {
-                provider,
-                ..
-            }) => {
+            Err(SniffError::InvalidCredentials { provider, .. }) => {
                 assert_eq!(provider, "GitHub");
             }
-            Err(SniffError::RateLimited {
-                provider,
-                ..
-            }) => {
+            Err(SniffError::RateLimited { provider, .. }) => {
                 assert_eq!(provider, "GitHub");
             }
             Err(_) => {
