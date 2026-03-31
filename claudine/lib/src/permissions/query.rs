@@ -230,6 +230,35 @@ impl QueryResult {
     pub fn is_unknown(&self) -> bool {
         self.effect.is_none()
     }
+
+    /// Creates an unknown result with a reason.
+    pub fn unknown() -> Self {
+        Self::no_match()
+    }
+
+    /// Creates a synthetic `Deny` result with exact certainty.
+    pub fn denied(reason: &str) -> Self {
+        Self {
+            effect: Some(PolicyEffect::Deny),
+            certainty: PolicyCertainty::Exact,
+            stability: QueryStability::Stable,
+            matched_rules: Vec::new(),
+            explanation: PolicyExplanation::no_match(reason),
+            warnings: Vec::new(),
+        }
+    }
+
+    /// Creates a synthetic `Allow` result with exact certainty.
+    pub fn allowed(reason: &str) -> Self {
+        Self {
+            effect: Some(PolicyEffect::Allow),
+            certainty: PolicyCertainty::Exact,
+            stability: QueryStability::Stable,
+            matched_rules: Vec::new(),
+            explanation: PolicyExplanation::no_match(reason),
+            warnings: Vec::new(),
+        }
+    }
 }
 
 // --- Snapshot types ---
