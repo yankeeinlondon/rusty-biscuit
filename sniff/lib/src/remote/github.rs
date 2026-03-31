@@ -79,16 +79,11 @@ impl Default for GitHubRemote {
 /// - Other HTTP errors -> `RemoteApi`
 fn map_schematic_error(err: SchematicError) -> SniffError {
     match err {
-        SchematicError::MissingCredential {
-            env_vars,
-        } => SniffError::MissingCredentials {
+        SchematicError::MissingCredential { env_vars } => SniffError::MissingCredentials {
             provider: "GitHub".to_string(),
             env_var: env_vars.join(" or "),
         },
-        SchematicError::ApiError {
-            status: 401,
-            body,
-        } => {
+        SchematicError::ApiError { status: 401, body } => {
             let message = serde_json::from_str::<serde_json::Value>(&body)
                 .ok()
                 .and_then(|v| v.get("message")?.as_str().map(String::from))
@@ -98,10 +93,7 @@ fn map_schematic_error(err: SchematicError) -> SniffError {
                 message,
             }
         }
-        SchematicError::ApiError {
-            status: 403,
-            body,
-        } => {
+        SchematicError::ApiError { status: 403, body } => {
             // Check if this is a rate limit error
             if body.to_lowercase().contains("rate limit") {
                 SniffError::RateLimited {
@@ -116,25 +108,16 @@ fn map_schematic_error(err: SchematicError) -> SniffError {
                 }
             }
         }
-        SchematicError::ApiError {
-            status: 429,
-            ..
-        } => SniffError::RateLimited {
+        SchematicError::ApiError { status: 429, .. } => SniffError::RateLimited {
             provider: "GitHub".to_string(),
             retry_after: None,
         },
-        SchematicError::ApiError {
-            status: 404,
-            ..
-        } => SniffError::RemoteApi {
+        SchematicError::ApiError { status: 404, .. } => SniffError::RemoteApi {
             provider: "GitHub".to_string(),
             status: 404,
             message: "Not found".to_string(),
         },
-        SchematicError::ApiError {
-            status,
-            body,
-        } => SniffError::RemoteApi {
+        SchematicError::ApiError { status, body } => SniffError::RemoteApi {
             provider: "GitHub".to_string(),
             status,
             message: body,
@@ -215,8 +198,11 @@ impl RemoteRepoProvider for GitHubRemote {
 
     async fn get_repo_metadata(&self, owner: &str, repo: &str) -> Result<RepoMetadata, SniffError> {
         let request = GetRepositoryRequest::new(owner, repo);
-        let info: RepositoryInfo =
-            self.client.request(request).await.map_err(map_schematic_error)?;
+        let info: RepositoryInfo = self
+            .client
+            .request(request)
+            .await
+            .map_err(map_schematic_error)?;
 
         Ok(RepoMetadata {
             name: info.name,
@@ -261,13 +247,19 @@ impl RemoteRepoProvider for GitHubRemote {
     ) -> Result<Vec<DocumentRef>, SniffError> {
         // First get the repo to find the default branch
         let repo_request = GetRepositoryRequest::new(owner, repo);
-        let info: RepositoryInfo =
-            self.client.request(repo_request).await.map_err(map_schematic_error)?;
+        let info: RepositoryInfo = self
+            .client
+            .request(repo_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Use the default branch as the tree SHA
         let tree_request = GetGitTreeRecursiveRequest::new(owner, repo, &info.default_branch);
-        let tree: GitTreeResponse =
-            self.client.request(tree_request).await.map_err(map_schematic_error)?;
+        let tree: GitTreeResponse = self
+            .client
+            .request(tree_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         let documents: Vec<DocumentRef> = tree
             .tree
@@ -292,7 +284,10 @@ impl RemoteRepoProvider for GitHubRemote {
         path: &str,
     ) -> Result<String, SniffError> {
         let request = GetRepositoryContentRawRequest::new(owner, repo, path);
-        self.client.get_repository_content_raw(request).await.map_err(map_schematic_error)
+        self.client
+            .get_repository_content_raw(request)
+            .await
+            .map_err(map_schematic_error)
     }
 
     async fn list_pull_requests(
@@ -301,8 +296,11 @@ impl RemoteRepoProvider for GitHubRemote {
         repo: &str,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
         let request = ListPullRequestsRequest::new(owner, repo);
-        let prs: Vec<PullRequestSummary> =
-            self.client.request(request).await.map_err(map_schematic_error)?;
+        let prs: Vec<PullRequestSummary> = self
+            .client
+            .request(request)
+            .await
+            .map_err(map_schematic_error)?;
 
         Ok(prs
             .into_iter()
@@ -324,8 +322,11 @@ impl RemoteRepoProvider for GitHubRemote {
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {
         let request = ListIssuesRequest::new(owner, repo);
-        let issues: Vec<IssueSummary> =
-            self.client.request(request).await.map_err(map_schematic_error)?;
+        let issues: Vec<IssueSummary> = self
+            .client
+            .request(request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Filter out pull requests (GitHub issues API includes PRs)
         Ok(issues
@@ -353,13 +354,19 @@ impl RemoteRepoProvider for GitHubRemote {
     ) -> Result<TagsAndReleases, SniffError> {
         // Fetch tags
         let tags_request = ListTagsRequest::new(owner, repo);
-        let tags: Vec<RepoTag> =
-            self.client.request(tags_request).await.map_err(map_schematic_error)?;
+        let tags: Vec<RepoTag> = self
+            .client
+            .request(tags_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Fetch releases
         let releases_request = ListReleasesRequest::new(owner, repo);
-        let releases: Vec<Release> =
-            self.client.request(releases_request).await.map_err(map_schematic_error)?;
+        let releases: Vec<Release> = self
+            .client
+            .request(releases_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Convert tags - we can't easily determine if they're annotated without
         // making additional API calls per tag, so we default to false
@@ -397,13 +404,19 @@ impl RemoteRepoProvider for GitHubRemote {
     async fn detect_cicd(&self, owner: &str, repo: &str) -> Result<Option<CiCdInfo>, SniffError> {
         // First get the repo to find the default branch
         let repo_request = GetRepositoryRequest::new(owner, repo);
-        let info: RepositoryInfo =
-            self.client.request(repo_request).await.map_err(map_schematic_error)?;
+        let info: RepositoryInfo = self
+            .client
+            .request(repo_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Get the tree to look for CI/CD config files
         let tree_request = GetGitTreeRecursiveRequest::new(owner, repo, &info.default_branch);
-        let tree: GitTreeResponse =
-            self.client.request(tree_request).await.map_err(map_schematic_error)?;
+        let tree: GitTreeResponse = self
+            .client
+            .request(tree_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Look for GitHub Actions workflows
         let has_workflows = tree.tree.iter().any(|entry| {
@@ -455,29 +468,56 @@ mod tests {
 
     #[test]
     fn test_categorize_readme() {
-        assert_eq!(categorize_document("README.md"), Some(DocumentCategory::Readme));
-        assert_eq!(categorize_document("readme.txt"), Some(DocumentCategory::Readme));
-        assert_eq!(categorize_document("sub/README.md"), Some(DocumentCategory::Readme));
+        assert_eq!(
+            categorize_document("README.md"),
+            Some(DocumentCategory::Readme)
+        );
+        assert_eq!(
+            categorize_document("readme.txt"),
+            Some(DocumentCategory::Readme)
+        );
+        assert_eq!(
+            categorize_document("sub/README.md"),
+            Some(DocumentCategory::Readme)
+        );
     }
 
     #[test]
     fn test_categorize_docs_folder() {
-        assert_eq!(categorize_document("docs/guide.md"), Some(DocumentCategory::DocsFolder));
-        assert_eq!(categorize_document("doc/api.md"), Some(DocumentCategory::DocsFolder));
+        assert_eq!(
+            categorize_document("docs/guide.md"),
+            Some(DocumentCategory::DocsFolder)
+        );
+        assert_eq!(
+            categorize_document("doc/api.md"),
+            Some(DocumentCategory::DocsFolder)
+        );
     }
 
     #[test]
     fn test_categorize_source_doc() {
-        assert_eq!(categorize_document("src/README.md"), Some(DocumentCategory::SourceDoc));
+        assert_eq!(
+            categorize_document("src/README.md"),
+            Some(DocumentCategory::SourceDoc)
+        );
         // Non-doc files in src/ should be None
         assert_eq!(categorize_document("src/main.rs"), None);
     }
 
     #[test]
     fn test_categorize_other() {
-        assert_eq!(categorize_document("CHANGELOG.md"), Some(DocumentCategory::Other));
-        assert_eq!(categorize_document("LICENSE"), Some(DocumentCategory::Other));
-        assert_eq!(categorize_document("CONTRIBUTING.md"), Some(DocumentCategory::Other));
+        assert_eq!(
+            categorize_document("CHANGELOG.md"),
+            Some(DocumentCategory::Other)
+        );
+        assert_eq!(
+            categorize_document("LICENSE"),
+            Some(DocumentCategory::Other)
+        );
+        assert_eq!(
+            categorize_document("CONTRIBUTING.md"),
+            Some(DocumentCategory::Other)
+        );
     }
 
     #[test]
@@ -492,27 +532,27 @@ mod tests {
         let urls = provider.build_key_urls("rust-lang", "cargo");
 
         assert_eq!(urls.repo, "https://github.com/rust-lang/cargo");
-        assert_eq!(urls.issues, Some("https://github.com/rust-lang/cargo/issues".to_string()));
+        assert_eq!(
+            urls.issues,
+            Some("https://github.com/rust-lang/cargo/issues".to_string())
+        );
         assert_eq!(
             urls.pull_requests,
             Some("https://github.com/rust-lang/cargo/pulls".to_string())
         );
-        assert_eq!(urls.ci_cd, Some("https://github.com/rust-lang/cargo/actions".to_string()));
+        assert_eq!(
+            urls.ci_cd,
+            Some("https://github.com/rust-lang/cargo/actions".to_string())
+        );
     }
 
     #[test]
     fn test_map_schematic_error_missing_credentials() {
         let err = SchematicError::MissingCredential {
-            env_vars: vec![
-                "GITHUB_TOKEN".to_string(),
-                "GH_TOKEN".to_string(),
-            ],
+            env_vars: vec!["GITHUB_TOKEN".to_string(), "GH_TOKEN".to_string()],
         };
         match map_schematic_error(err) {
-            SniffError::MissingCredentials {
-                provider,
-                env_var,
-            } => {
+            SniffError::MissingCredentials { provider, env_var } => {
                 assert_eq!(provider, "GitHub");
                 assert!(env_var.contains("GITHUB_TOKEN"));
             }
@@ -527,10 +567,7 @@ mod tests {
             body: "API rate limit exceeded".to_string(),
         };
         match map_schematic_error(err) {
-            SniffError::RateLimited {
-                provider,
-                ..
-            } => {
+            SniffError::RateLimited { provider, .. } => {
                 assert_eq!(provider, "GitHub");
             }
             _ => panic!("Expected RateLimited error"),

@@ -141,9 +141,15 @@ pub trait RemoteRepoProvider: Send + Sync {
         // All other calls are optional - failures produce empty/None values
         let org_info = self.get_org_info(owner).await.ok();
         let documents = self.list_documents(owner, repo).await.unwrap_or_default();
-        let pull_requests = self.list_pull_requests(owner, repo).await.unwrap_or_default();
+        let pull_requests = self
+            .list_pull_requests(owner, repo)
+            .await
+            .unwrap_or_default();
         let issues = self.list_issues(owner, repo).await.unwrap_or_default();
-        let tags_and_releases = self.get_tags_and_releases(owner, repo).await.unwrap_or_default();
+        let tags_and_releases = self
+            .get_tags_and_releases(owner, repo)
+            .await
+            .unwrap_or_default();
         let cicd = self.detect_cicd(owner, repo).await.unwrap_or(None);
         let org_repos = self.list_org_repos(owner).await.unwrap_or_default();
         let key_urls = self.build_key_urls(owner, repo);

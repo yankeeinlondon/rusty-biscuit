@@ -130,7 +130,10 @@ impl GiteaRemote {
     ///
     /// For example, `https://gitea.example.com/api/v1` becomes `https://gitea.example.com`.
     fn web_url(&self) -> String {
-        self.base_url.trim_end_matches("/api/v1").trim_end_matches("/api/v1/").to_string()
+        self.base_url
+            .trim_end_matches("/api/v1")
+            .trim_end_matches("/api/v1/")
+            .to_string()
     }
 }
 
@@ -156,23 +159,15 @@ fn normalize_base_url(url: &str) -> String {
 /// - Other HTTP errors -> `RemoteApi`
 fn map_schematic_error(err: SchematicError) -> SniffError {
     match err {
-        SchematicError::MissingCredential {
-            env_vars,
-        } => SniffError::MissingCredentials {
+        SchematicError::MissingCredential { env_vars } => SniffError::MissingCredentials {
             provider: "Gitea".to_string(),
             env_var: env_vars.join(" or "),
         },
-        SchematicError::ApiError {
-            status: 401,
-            body,
-        } => SniffError::MissingCredentials {
+        SchematicError::ApiError { status: 401, body } => SniffError::MissingCredentials {
             provider: "Gitea".to_string(),
             env_var: format!("GITEA_TOKEN (API returned 401: {})", body),
         },
-        SchematicError::ApiError {
-            status: 403,
-            body,
-        } => {
+        SchematicError::ApiError { status: 403, body } => {
             // Check if this is a rate limit error
             if body.to_lowercase().contains("rate limit") {
                 SniffError::RateLimited {
@@ -187,25 +182,16 @@ fn map_schematic_error(err: SchematicError) -> SniffError {
                 }
             }
         }
-        SchematicError::ApiError {
-            status: 429,
-            ..
-        } => SniffError::RateLimited {
+        SchematicError::ApiError { status: 429, .. } => SniffError::RateLimited {
             provider: "Gitea".to_string(),
             retry_after: None,
         },
-        SchematicError::ApiError {
-            status: 404,
-            ..
-        } => SniffError::RemoteApi {
+        SchematicError::ApiError { status: 404, .. } => SniffError::RemoteApi {
             provider: "Gitea".to_string(),
             status: 404,
             message: "Not found".to_string(),
         },
-        SchematicError::ApiError {
-            status,
-            body,
-        } => SniffError::RemoteApi {
+        SchematicError::ApiError { status, body } => SniffError::RemoteApi {
             provider: "Gitea".to_string(),
             status,
             message: body,
@@ -286,15 +272,21 @@ impl RemoteRepoProvider for GiteaRemote {
 
     async fn get_repo_metadata(&self, owner: &str, repo: &str) -> Result<RepoMetadata, SniffError> {
         let request = GetRepositoryRequest::new(owner, repo);
-        let info: RepositoryInfo =
-            self.client.request(request).await.map_err(map_schematic_error)?;
+        let info: RepositoryInfo = self
+            .client
+            .request(request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Gitea types are heavily optional - extract with defaults
         let name = info.name.unwrap_or_else(|| repo.to_string());
-        let full_name = info.full_name.unwrap_or_else(|| format!("{}/{}", owner, repo));
+        let full_name = info
+            .full_name
+            .unwrap_or_else(|| format!("{}/{}", owner, repo));
         let default_branch = info.default_branch.unwrap_or_else(|| "main".to_string());
-        let html_url =
-            info.html_url.unwrap_or_else(|| format!("{}/{}/{}", self.web_url(), owner, repo));
+        let html_url = info
+            .html_url
+            .unwrap_or_else(|| format!("{}/{}/{}", self.web_url(), owner, repo));
 
         Ok(RepoMetadata {
             name,
@@ -336,14 +328,20 @@ impl RemoteRepoProvider for GiteaRemote {
     ) -> Result<Vec<DocumentRef>, SniffError> {
         // First get the repo to find the default branch
         let repo_request = GetRepositoryRequest::new(owner, repo);
-        let info: RepositoryInfo =
-            self.client.request(repo_request).await.map_err(map_schematic_error)?;
+        let info: RepositoryInfo = self
+            .client
+            .request(repo_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Use the default branch as the tree SHA
         let default_branch = info.default_branch.unwrap_or_else(|| "main".to_string());
         let tree_request = GetGitTreeRecursiveRequest::new(owner, repo, &default_branch);
-        let tree: GitTreeResponse =
-            self.client.request(tree_request).await.map_err(map_schematic_error)?;
+        let tree: GitTreeResponse = self
+            .client
+            .request(tree_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         let documents: Vec<DocumentRef> = tree
             .tree
@@ -369,7 +367,10 @@ impl RemoteRepoProvider for GiteaRemote {
         path: &str,
     ) -> Result<String, SniffError> {
         let request = GetRepositoryContentRawRequest::new(owner, repo, path);
-        self.client.get_repository_content_raw(request).await.map_err(map_schematic_error)
+        self.client
+            .get_repository_content_raw(request)
+            .await
+            .map_err(map_schematic_error)
     }
 
     async fn list_pull_requests(
@@ -378,8 +379,11 @@ impl RemoteRepoProvider for GiteaRemote {
         repo: &str,
     ) -> Result<Vec<PullRequestInfo>, SniffError> {
         let request = ListPullRequestsRequest::new(owner, repo);
-        let prs: Vec<PullRequestSummary> =
-            self.client.request(request).await.map_err(map_schematic_error)?;
+        let prs: Vec<PullRequestSummary> = self
+            .client
+            .request(request)
+            .await
+            .map_err(map_schematic_error)?;
 
         Ok(prs
             .into_iter()
@@ -414,8 +418,11 @@ impl RemoteRepoProvider for GiteaRemote {
 
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {
         let request = ListIssuesRequest::new(owner, repo);
-        let issues: Vec<IssueSummary> =
-            self.client.request(request).await.map_err(map_schematic_error)?;
+        let issues: Vec<IssueSummary> = self
+            .client
+            .request(request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Gitea's ListIssues with type=issues already filters out PRs
         Ok(issues
@@ -455,13 +462,19 @@ impl RemoteRepoProvider for GiteaRemote {
     ) -> Result<TagsAndReleases, SniffError> {
         // Fetch tags
         let tags_request = ListTagsRequest::new(owner, repo);
-        let tags: Vec<RepoTag> =
-            self.client.request(tags_request).await.map_err(map_schematic_error)?;
+        let tags: Vec<RepoTag> = self
+            .client
+            .request(tags_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Fetch releases
         let releases_request = ListReleasesRequest::new(owner, repo);
-        let releases: Vec<Release> =
-            self.client.request(releases_request).await.map_err(map_schematic_error)?;
+        let releases: Vec<Release> = self
+            .client
+            .request(releases_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Convert tags - we can determine if annotated from the message field
         let tag_infos: Vec<TagInfo> = tags
@@ -508,14 +521,20 @@ impl RemoteRepoProvider for GiteaRemote {
     async fn detect_cicd(&self, owner: &str, repo: &str) -> Result<Option<CiCdInfo>, SniffError> {
         // First get the repo to find the default branch
         let repo_request = GetRepositoryRequest::new(owner, repo);
-        let info: RepositoryInfo =
-            self.client.request(repo_request).await.map_err(map_schematic_error)?;
+        let info: RepositoryInfo = self
+            .client
+            .request(repo_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         // Get the tree to look for CI/CD config files
         let default_branch = info.default_branch.unwrap_or_else(|| "main".to_string());
         let tree_request = GetGitTreeRecursiveRequest::new(owner, repo, &default_branch);
-        let tree: GitTreeResponse =
-            self.client.request(tree_request).await.map_err(map_schematic_error)?;
+        let tree: GitTreeResponse = self
+            .client
+            .request(tree_request)
+            .await
+            .map_err(map_schematic_error)?;
 
         let web_base = self.web_url();
 
@@ -545,8 +564,10 @@ impl RemoteRepoProvider for GiteaRemote {
         }
 
         // Check for Drone CI (common with Gitea)
-        let has_drone =
-            tree.tree.iter().any(|entry| path_equals(entry, ".drone.yml") && is_blob(entry));
+        let has_drone = tree
+            .tree
+            .iter()
+            .any(|entry| path_equals(entry, ".drone.yml") && is_blob(entry));
 
         if has_drone {
             return Ok(Some(CiCdInfo {
@@ -561,8 +582,10 @@ impl RemoteRepoProvider for GiteaRemote {
         }
 
         // Check for Woodpecker CI (Drone fork, common with Gitea/Forgejo)
-        let has_woodpecker =
-            tree.tree.iter().any(|entry| path_equals(entry, ".woodpecker.yml") && is_blob(entry));
+        let has_woodpecker = tree
+            .tree
+            .iter()
+            .any(|entry| path_equals(entry, ".woodpecker.yml") && is_blob(entry));
 
         if has_woodpecker {
             return Ok(Some(CiCdInfo {
@@ -577,8 +600,10 @@ impl RemoteRepoProvider for GiteaRemote {
         }
 
         // Check for Woodpecker CI directory format
-        let has_woodpecker_dir =
-            tree.tree.iter().any(|entry| path_starts_with(entry, ".woodpecker/") && is_blob(entry));
+        let has_woodpecker_dir = tree
+            .tree
+            .iter()
+            .any(|entry| path_starts_with(entry, ".woodpecker/") && is_blob(entry));
 
         if has_woodpecker_dir {
             return Ok(Some(CiCdInfo {
@@ -664,29 +689,56 @@ mod tests {
 
     #[test]
     fn test_categorize_readme() {
-        assert_eq!(categorize_document("README.md"), Some(DocumentCategory::Readme));
-        assert_eq!(categorize_document("readme.txt"), Some(DocumentCategory::Readme));
-        assert_eq!(categorize_document("sub/README.md"), Some(DocumentCategory::Readme));
+        assert_eq!(
+            categorize_document("README.md"),
+            Some(DocumentCategory::Readme)
+        );
+        assert_eq!(
+            categorize_document("readme.txt"),
+            Some(DocumentCategory::Readme)
+        );
+        assert_eq!(
+            categorize_document("sub/README.md"),
+            Some(DocumentCategory::Readme)
+        );
     }
 
     #[test]
     fn test_categorize_docs_folder() {
-        assert_eq!(categorize_document("docs/guide.md"), Some(DocumentCategory::DocsFolder));
-        assert_eq!(categorize_document("doc/api.md"), Some(DocumentCategory::DocsFolder));
+        assert_eq!(
+            categorize_document("docs/guide.md"),
+            Some(DocumentCategory::DocsFolder)
+        );
+        assert_eq!(
+            categorize_document("doc/api.md"),
+            Some(DocumentCategory::DocsFolder)
+        );
     }
 
     #[test]
     fn test_categorize_source_doc() {
-        assert_eq!(categorize_document("src/README.md"), Some(DocumentCategory::SourceDoc));
+        assert_eq!(
+            categorize_document("src/README.md"),
+            Some(DocumentCategory::SourceDoc)
+        );
         // Non-doc files in src/ should be None
         assert_eq!(categorize_document("src/main.rs"), None);
     }
 
     #[test]
     fn test_categorize_other() {
-        assert_eq!(categorize_document("CHANGELOG.md"), Some(DocumentCategory::Other));
-        assert_eq!(categorize_document("LICENSE"), Some(DocumentCategory::Other));
-        assert_eq!(categorize_document("CONTRIBUTING.md"), Some(DocumentCategory::Other));
+        assert_eq!(
+            categorize_document("CHANGELOG.md"),
+            Some(DocumentCategory::Other)
+        );
+        assert_eq!(
+            categorize_document("LICENSE"),
+            Some(DocumentCategory::Other)
+        );
+        assert_eq!(
+            categorize_document("CONTRIBUTING.md"),
+            Some(DocumentCategory::Other)
+        );
     }
 
     #[test]
@@ -701,12 +753,18 @@ mod tests {
         let urls = provider.build_key_urls("owner", "repo");
 
         assert_eq!(urls.repo, "https://gitea.example.com/owner/repo");
-        assert_eq!(urls.issues, Some("https://gitea.example.com/owner/repo/issues".to_string()));
+        assert_eq!(
+            urls.issues,
+            Some("https://gitea.example.com/owner/repo/issues".to_string())
+        );
         assert_eq!(
             urls.pull_requests,
             Some("https://gitea.example.com/owner/repo/pulls".to_string())
         );
-        assert_eq!(urls.ci_cd, Some("https://gitea.example.com/owner/repo/actions".to_string()));
+        assert_eq!(
+            urls.ci_cd,
+            Some("https://gitea.example.com/owner/repo/actions".to_string())
+        );
         assert_eq!(
             urls.releases,
             Some("https://gitea.example.com/owner/repo/releases".to_string())
@@ -721,7 +779,10 @@ mod tests {
         let urls = provider.build_key_urls("forgejo", "forgejo");
 
         assert_eq!(urls.repo, "https://codeberg.org/forgejo/forgejo");
-        assert_eq!(urls.issues, Some("https://codeberg.org/forgejo/forgejo/issues".to_string()));
+        assert_eq!(
+            urls.issues,
+            Some("https://codeberg.org/forgejo/forgejo/issues".to_string())
+        );
     }
 
     #[test]
@@ -730,10 +791,7 @@ mod tests {
             env_vars: vec!["GITEA_TOKEN".to_string()],
         };
         match map_schematic_error(err) {
-            SniffError::MissingCredentials {
-                provider,
-                env_var,
-            } => {
+            SniffError::MissingCredentials { provider, env_var } => {
                 assert_eq!(provider, "Gitea");
                 assert!(env_var.contains("GITEA_TOKEN"));
             }
@@ -748,10 +806,7 @@ mod tests {
             body: "API rate limit exceeded".to_string(),
         };
         match map_schematic_error(err) {
-            SniffError::RateLimited {
-                provider,
-                ..
-            } => {
+            SniffError::RateLimited { provider, .. } => {
                 assert_eq!(provider, "Gitea");
             }
             _ => panic!("Expected RateLimited error"),
