@@ -24,8 +24,4 @@
 
 - Do not second guess the files which were staged; the user intentionally chose which files they were interested in committing.
 
-- When the user lists files as "(created)" in the prompt, those files are untracked (not staged) and must be added with `git add` before they can be committed. Check `git status` to verify the actual state when subagents report files as untracked rather than staged.
-
-- When using subagents to commit files in groups, some subagent types (e.g., `rust-developer`) may cause `ProviderModelNotFoundError`. Use the `general` subagent type to avoid this issue.
-
 - Files can only be committed once. When multiple subagent groups are committing related files, later groups will get "nothing to commit" for files already committed by earlier groups, but can still commit any remaining files assigned to them.
