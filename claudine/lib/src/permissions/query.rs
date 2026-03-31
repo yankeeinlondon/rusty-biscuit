@@ -259,6 +259,18 @@ impl QueryResult {
             warnings: Vec::new(),
         }
     }
+
+    /// Creates a synthetic `Ask` result with exact certainty.
+    pub fn synthetic_ask(reason: &str) -> Self {
+        Self {
+            effect: Some(PolicyEffect::Ask),
+            certainty: PolicyCertainty::Exact,
+            stability: QueryStability::Stable,
+            matched_rules: Vec::new(),
+            explanation: PolicyExplanation::no_match(reason),
+            warnings: Vec::new(),
+        }
+    }
 }
 
 // --- Snapshot types ---

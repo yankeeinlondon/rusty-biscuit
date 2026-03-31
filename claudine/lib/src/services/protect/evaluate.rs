@@ -115,11 +115,19 @@ pub(crate) fn evaluate_request(
     config: &ProtectConfig,
     request: &ProtectRequest,
 ) -> Result<ProtectEvaluation> {
+    let (snapshot, policy_mode) = resolve_snapshot(engine, &request.session);
+    evaluate_with_snapshot(config, request, snapshot, policy_mode)
+}
+
+/// Evaluate with a pre-resolved snapshot (used by service-level caching).
+pub(crate) fn evaluate_with_snapshot(
+    config: &ProtectConfig,
+    request: &ProtectRequest,
+    snapshot: Option<SnapshotBox>,
+    policy_mode: ProtectPolicyMode,
+) -> Result<ProtectEvaluation> {
     // Step 1: Resolve posture
     let posture = resolve_posture(config, &request.session);
-
-    // Step 2: Resolve snapshot
-    let (snapshot, policy_mode) = resolve_snapshot(engine, &request.session);
 
     // Step 3: Query each intent
     let mut findings = Vec::new();
@@ -147,11 +155,12 @@ pub(crate) fn evaluate_request(
                 });
             }
         } else if matches!(intent, ProtectIntent::CompletionOutputScan) {
-            // Completion scan: produce a finding based on secret scan / loop detection
+            // Completion scan: instruction injection, secrets, and command patterns.
+            let (result, severity) = completion_scan(&request.observation, config);
             findings.push(ProtectFinding {
                 intent: intent.clone(),
-                result: completion_scan_result(&request.observation),
-                severity: completion_scan_severity(&request.observation),
+                result,
+                severity,
                 source: ProtectFindingSource::CompletionLoop,
             });
         }
@@ -311,6 +320,79 @@ fn apply_runtime_guards(
             },
             source: ProtectFindingSource::RuntimeGuard,
         });
+    }
+
+    // Collect additional runtime guard findings from existing policy findings.
+    let mut extra_guards = Vec::new();
+
+    // Network write escalation: require ask for commands that reach the network.
+    if config.privilege.require_ask_for_network_writes {
+        for finding in findings.iter() {
+            if finding.source == ProtectFindingSource::PolicyQuery
+                && is_network_command(&finding.intent)
+                && matches!(finding.result.effect, Some(PolicyEffect::Allow) | None)
+            {
+                extra_guards.push(ProtectFinding {
+                    intent: finding.intent.clone(),
+                    result: QueryResult::synthetic_ask("runtime-guard.network-write"),
+                    severity: ProtectSeverity::Medium,
+                    source: ProtectFindingSource::RuntimeGuard,
+                });
+                break;
+            }
+        }
+    }
+
+    // Broad filesystem write escalation: require ask for writes to sensitive paths.
+    if config.privilege.require_ask_for_broad_fs_writes {
+        for finding in findings.iter() {
+            if finding.source == ProtectFindingSource::PolicyQuery
+                && is_broad_fs_write(&finding.intent)
+                && matches!(finding.result.effect, Some(PolicyEffect::Allow) | None)
+            {
+                extra_guards.push(ProtectFinding {
+                    intent: finding.intent.clone(),
+                    result: QueryResult::synthetic_ask("runtime-guard.broad-fs-write"),
+                    severity: ProtectSeverity::Medium,
+                    source: ProtectFindingSource::RuntimeGuard,
+                });
+                break;
+            }
+        }
+    }
+
+    findings.extend(extra_guards);
+}
+
+/// Check if a command intent involves network-touching executables.
+fn is_network_command(intent: &ProtectIntent) -> bool {
+    if let ProtectIntent::ExecuteCommand(cmd) = intent {
+        let exe = cmd.executable.as_deref().unwrap_or("");
+        matches!(
+            exe,
+            "curl" | "wget" | "ssh" | "scp" | "rsync" | "nc" | "ncat"
+                | "netcat" | "socat" | "ftp" | "sftp"
+        )
+    } else {
+        false
+    }
+}
+
+/// Check if a write path targets a broad/sensitive filesystem location.
+fn is_broad_fs_write(intent: &ProtectIntent) -> bool {
+    if let ProtectIntent::WritePath(pq) = intent {
+        let path_str = pq.path.to_string_lossy();
+        // System directories, home dotfiles, and package manager paths
+        path_str.starts_with("/etc/")
+            || path_str.starts_with("/usr/")
+            || path_str.starts_with("/var/")
+            || path_str.starts_with("/opt/")
+            || path_str.starts_with("/System/")
+            || (path_str.contains("/.") && !path_str.contains("/.git/"))
+            || path_str.contains("/node_modules/")
+            || path_str.contains("/target/")
+    } else {
+        false
     }
 }
 
@@ -605,21 +687,68 @@ fn build_redaction_plan(
 // Completion scan helpers
 // ---------------------------------------------------------------------------
 
-fn completion_scan_result(observation: &ProtectObservation) -> QueryResult {
-    // Check for secrets in payload
-    if let Some(ProtectPayload::McpText(text)) = &observation.payload {
-        if contains_instruction_payload(text) {
-            return QueryResult::denied("completion.secret-found");
-        }
-    }
-    QueryResult::allowed("completion.clean")
-}
+/// Completion scan checks: instruction injection, secret patterns, and command patterns.
+///
+/// Returns a tuple of (QueryResult, ProtectSeverity) to avoid duplicating
+/// the scan logic between result and severity functions.
+fn completion_scan(
+    observation: &ProtectObservation,
+    config: &ProtectConfig,
+) -> (QueryResult, ProtectSeverity) {
+    let text = match &observation.payload {
+        Some(ProtectPayload::McpText(text)) => Some(text.as_str()),
+        Some(ProtectPayload::McpJson(_)) => None,
+        None => None,
+    };
 
-fn completion_scan_severity(observation: &ProtectObservation) -> ProtectSeverity {
-    if let Some(ProtectPayload::McpText(text)) = &observation.payload {
+    // 1. Instruction payload detection (always active) — Critical severity
+    if let Some(text) = text {
         if contains_instruction_payload(text) {
-            return ProtectSeverity::High;
+            return (
+                QueryResult::denied("completion.instruction-injection"),
+                ProtectSeverity::Critical,
+            );
         }
     }
-    ProtectSeverity::Info
+
+    // 2. Secret pattern scanning (when enabled) — High severity
+    if config.completion.secret_scan {
+        if let Some(text) = text {
+            for pattern in config
+                .rules
+                .secret_patterns
+                .iter()
+                .chain(config.mcp.redact_patterns.iter())
+            {
+                if let Ok(re) = regex::Regex::new(pattern) {
+                    if re.is_match(text) {
+                        return (
+                            QueryResult::denied("completion.secret-found"),
+                            ProtectSeverity::High,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Command pattern checking (when configured) — High severity
+    if !config.completion.check_commands.is_empty() {
+        for intent in &observation.intents {
+            if let ProtectIntent::ExecuteCommand(cmd) = intent {
+                for pattern in &config.completion.check_commands {
+                    if let Ok(re) = regex::Regex::new(pattern) {
+                        if re.is_match(&cmd.raw) {
+                            return (
+                                QueryResult::denied("completion.suspicious-command"),
+                                ProtectSeverity::High,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (QueryResult::allowed("completion.clean"), ProtectSeverity::Info)
 }

@@ -670,6 +670,258 @@ mod tests {
         assert!(jsonl.contains("desired_outcome"));
     }
 
+    // --- New tests for protect-review fixes ---
+
+    #[test]
+    fn completion_scan_detects_secret_patterns() {
+        let mut service = ProtectService::new(
+            test_engine(),
+            ProtectConfig {
+                completion: CompletionPolicy {
+                    secret_scan: true,
+                    ..CompletionPolicy::default()
+                },
+                rules: ProtectRules {
+                    secret_patterns: vec!["sk-[a-z0-9]+".to_string()],
+                    ..ProtectRules::default()
+                },
+                ..ProtectConfig::default()
+            },
+        );
+
+        let request = ProtectRequest {
+            provider: Provider::Claude,
+            event: AgenticEvent::TurnComplete,
+            phase: ProtectPhase::Completion,
+            session: test_session(Provider::Claude),
+            observation: ProtectObservation {
+                summary: None,
+                intents: vec![ProtectIntent::CompletionOutputScan],
+                runtime: RuntimeFacts::default(),
+                payload: Some(ProtectPayload::McpText(
+                    "output contains sk-secret123 value".to_string(),
+                )),
+            },
+        };
+
+        let eval = service.evaluate_structured(&request).unwrap();
+        let completion_finding = eval
+            .findings
+            .iter()
+            .find(|f| f.source == ProtectFindingSource::CompletionLoop);
+        assert!(completion_finding.is_some());
+        assert!(
+            completion_finding.unwrap().severity >= ProtectSeverity::High,
+            "Secret found in completion should be High severity"
+        );
+    }
+
+    #[test]
+    fn completion_scan_checks_command_patterns() {
+        let mut service = ProtectService::new(
+            test_engine(),
+            ProtectConfig {
+                completion: CompletionPolicy {
+                    check_commands: vec!["rm\\s+-rf".to_string()],
+                    ..CompletionPolicy::default()
+                },
+                ..ProtectConfig::default()
+            },
+        );
+
+        let request = ProtectRequest {
+            provider: Provider::Claude,
+            event: AgenticEvent::TurnComplete,
+            phase: ProtectPhase::Completion,
+            session: test_session(Provider::Claude),
+            observation: ProtectObservation {
+                summary: None,
+                intents: vec![
+                    ProtectIntent::ExecuteCommand(CommandQuery::from_raw("rm -rf /")),
+                    ProtectIntent::CompletionOutputScan,
+                ],
+                runtime: RuntimeFacts::default(),
+                payload: None,
+            },
+        };
+
+        let eval = service.evaluate_structured(&request).unwrap();
+        let completion_finding = eval
+            .findings
+            .iter()
+            .find(|f| f.source == ProtectFindingSource::CompletionLoop);
+        assert!(completion_finding.is_some());
+        assert!(
+            completion_finding.unwrap().severity >= ProtectSeverity::High,
+            "Suspicious command in completion should be High severity"
+        );
+    }
+
+    #[test]
+    fn completion_scan_clean_when_no_secrets() {
+        let mut service = ProtectService::new(
+            test_engine(),
+            ProtectConfig {
+                completion: CompletionPolicy {
+                    secret_scan: true,
+                    ..CompletionPolicy::default()
+                },
+                rules: ProtectRules {
+                    secret_patterns: vec!["sk-[a-z0-9]+".to_string()],
+                    ..ProtectRules::default()
+                },
+                ..ProtectConfig::default()
+            },
+        );
+
+        let request = ProtectRequest {
+            provider: Provider::Claude,
+            event: AgenticEvent::TurnComplete,
+            phase: ProtectPhase::Completion,
+            session: test_session(Provider::Claude),
+            observation: ProtectObservation {
+                summary: None,
+                intents: vec![ProtectIntent::CompletionOutputScan],
+                runtime: RuntimeFacts::default(),
+                payload: Some(ProtectPayload::McpText(
+                    "clean output with no secrets".to_string(),
+                )),
+            },
+        };
+
+        let eval = service.evaluate_structured(&request).unwrap();
+        let completion_finding = eval
+            .findings
+            .iter()
+            .find(|f| f.source == ProtectFindingSource::CompletionLoop);
+        assert!(completion_finding.is_some());
+        assert_eq!(
+            completion_finding.unwrap().severity,
+            ProtectSeverity::Info,
+            "Clean completion should be Info severity"
+        );
+    }
+
+    #[test]
+    fn runtime_guard_network_write_escalation() {
+        let mut service = ProtectService::new(
+            test_engine(),
+            ProtectConfig {
+                posture: ProtectPosture::Balanced,
+                privilege: PrivilegePolicy {
+                    require_ask_for_network_writes: true,
+                    ..PrivilegePolicy::default()
+                },
+                ..ProtectConfig::default()
+            },
+        );
+
+        let request = test_request(
+            Provider::Claude,
+            ProtectPhase::BeforeTool,
+            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw(
+                "curl https://example.com/data -o /tmp/out",
+            ))],
+        );
+
+        let eval = service.evaluate_structured(&request).unwrap();
+        let network_guard = eval
+            .findings
+            .iter()
+            .find(|f| {
+                f.source == ProtectFindingSource::RuntimeGuard
+                    && f.result
+                        .explanation
+                        .summary
+                        .contains("network-write")
+            });
+        assert!(
+            network_guard.is_some(),
+            "Network write guard should fire for curl commands"
+        );
+    }
+
+    #[test]
+    fn runtime_guard_broad_fs_write_escalation() {
+        let mut service = ProtectService::new(
+            test_engine(),
+            ProtectConfig {
+                posture: ProtectPosture::Balanced,
+                privilege: PrivilegePolicy {
+                    require_ask_for_broad_fs_writes: true,
+                    ..PrivilegePolicy::default()
+                },
+                ..ProtectConfig::default()
+            },
+        );
+
+        let request = test_request(
+            Provider::Claude,
+            ProtectPhase::BeforeTool,
+            vec![ProtectIntent::WritePath(PathQuery::file("/etc/hosts"))],
+        );
+
+        let eval = service.evaluate_structured(&request).unwrap();
+        let fs_guard = eval
+            .findings
+            .iter()
+            .find(|f| {
+                f.source == ProtectFindingSource::RuntimeGuard
+                    && f.result
+                        .explanation
+                        .summary
+                        .contains("broad-fs-write")
+            });
+        assert!(
+            fs_guard.is_some(),
+            "Broad FS write guard should fire for /etc/ paths"
+        );
+    }
+
+    #[test]
+    fn deprecation_warnings_surface_for_old_fields() {
+        let config = ProtectConfig {
+            rules: ProtectRules {
+                blocked_command_patterns: vec!["rm".to_string()],
+                ..ProtectRules::default()
+            },
+            mcp: McpPolicy {
+                allowlist: vec!["server1".to_string()],
+                ..McpPolicy::default()
+            },
+            ..ProtectConfig::default()
+        };
+
+        let warnings = config.deprecation_warnings();
+        assert!(warnings.len() >= 2);
+        assert!(warnings.iter().any(|w| w.contains("blocked_command_patterns")));
+        assert!(warnings.iter().any(|w| w.contains("allowlist")));
+    }
+
+    #[test]
+    fn with_capabilities_constructor_works() {
+        let capabilities = ProviderProtectCapabilities {
+            pre_tool_gate: GateCapability::Guarantee,
+            ..ProviderProtectProfiles::defaults().capabilities(Provider::Claude)
+        };
+
+        let mut service = ProtectService::with_capabilities(
+            test_engine(),
+            ProtectConfig::default(),
+            Provider::Claude,
+            capabilities,
+        );
+
+        let request = test_request(
+            Provider::Claude,
+            ProtectPhase::BeforeTool,
+            vec![ProtectIntent::ReadPath(PathQuery::unknown("/tmp/test"))],
+        );
+
+        let eval = service.evaluate_structured(&request).unwrap();
+        assert!(eval.decision.capability.is_some());
+    }
+
     #[test]
     fn no_redaction_plan_when_no_payload() {
         let mut service = ProtectService::new(

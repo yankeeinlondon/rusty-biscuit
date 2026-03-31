@@ -60,6 +60,28 @@ impl ProtectService {
         }
     }
 
+    /// Build a Protect service with a single provider's capabilities.
+    ///
+    /// Preferred over `with_profiles` when only one provider is active,
+    /// which is the common dispatch case. Avoids maintaining a parallel
+    /// capabilities map.
+    pub fn with_capabilities(
+        engine: Arc<PolicyEngine>,
+        config: ProtectConfig,
+        provider: Provider,
+        capabilities: ProviderProtectCapabilities,
+    ) -> Self {
+        let mut profiles = ProviderProtectProfiles::defaults();
+        profiles.insert(provider, capabilities);
+        Self {
+            engine,
+            config,
+            profiles,
+            state: ProtectState::default(),
+            last_evaluation: None,
+        }
+    }
+
     /// Return the active protect configuration.
     pub fn config(&self) -> &ProtectConfig {
         &self.config
@@ -83,6 +105,7 @@ impl ProtectService {
     pub fn engine(&self) -> &PolicyEngine {
         &self.engine
     }
+
 
     /// Full structured evaluation from a pre-built request.
     pub fn evaluate_structured(

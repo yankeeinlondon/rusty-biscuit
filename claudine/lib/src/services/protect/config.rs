@@ -94,6 +94,12 @@ pub struct ProtectConfig {
     pub yolo: YoloPolicy,
 
     /// Generic command/path/secret rules.
+    ///
+    /// **Deprecation notice:** `blocked_command_patterns`, `ask_command_patterns`,
+    /// and `protected_paths` duplicate policy truth that should live in
+    /// PolicyEngine. Only `secret_patterns` is actively consumed by the
+    /// runtime redaction pipeline. The other fields will be removed in a
+    /// future version.
     #[serde(default)]
     pub rules: ProtectRules,
 
@@ -141,6 +147,27 @@ impl Default for ProtectConfig {
 }
 
 impl ProtectConfig {
+    /// Emit deprecation warnings for fields migrating to PolicyEngine.
+    pub fn deprecation_warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        if !self.rules.blocked_command_patterns.is_empty() {
+            warnings.push("settings.protect.rules.blocked_command_patterns is deprecated; migrate to PolicyEngine rules".to_string());
+        }
+        if !self.rules.ask_command_patterns.is_empty() {
+            warnings.push("settings.protect.rules.ask_command_patterns is deprecated; migrate to PolicyEngine rules".to_string());
+        }
+        if !self.rules.protected_paths.is_empty() {
+            warnings.push("settings.protect.rules.protected_paths is deprecated; migrate to PolicyEngine rules".to_string());
+        }
+        if !self.mcp.allowlist.is_empty() {
+            warnings.push("settings.protect.mcp.allowlist is deprecated; use MCP catalog trust instead".to_string());
+        }
+        if !self.mcp.denylist.is_empty() {
+            warnings.push("settings.protect.mcp.denylist is deprecated; use MCP catalog trust instead".to_string());
+        }
+        warnings
+    }
+
     /// Validate semantic constraints and regex configuration.
     pub fn validate(&self) -> Result<()> {
         if self.max_recent_decisions == 0 {
@@ -555,6 +582,11 @@ pub(crate) fn default_completion_max_retries() -> u8 {
 }
 
 /// MCP trust and response handling policy.
+///
+/// **Deprecation notice:** `allowlist` and `denylist` duplicate MCP server
+/// trust that should be managed by the MCP catalog and PolicyEngine.
+/// Only `redact_patterns` and `block_instruction_payloads` are runtime
+/// redaction controls. The list fields will be removed in a future version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McpPolicy {
@@ -594,6 +626,10 @@ pub struct McpPolicyOverride {
 }
 
 /// Subagent defaults used when providers allow subagent-specific controls.
+///
+/// **Deprecation notice:** Subagent permission policy should be managed by
+/// PolicyEngine. This struct will be removed in a future version; retain
+/// only runtime behavior knobs like `tighten_permissions`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SubagentPolicy {
