@@ -145,14 +145,13 @@ impl ProviderAdapter for RooAdapter {
         }
 
         // Roo ModeChanged notification → SwitchMode intent.
-        if matches!(event, AgenticEvent::Notification) {
-            if let Some(Value::String(mode)) = meta.extra.get("required_action") {
-                if mode.contains("mode") {
-                    obs.intents.push(ProtectIntent::SwitchMode {
-                        target: Some(mode.clone()),
-                    });
-                }
-            }
+        if matches!(event, AgenticEvent::Notification)
+            && let Some(Value::String(mode)) = meta.extra.get("required_action")
+            && mode.contains("mode")
+        {
+            obs.intents.push(ProtectIntent::SwitchMode {
+                target: Some(mode.clone()),
+            });
         }
 
         Some(obs)

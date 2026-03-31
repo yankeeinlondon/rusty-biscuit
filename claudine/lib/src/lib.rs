@@ -14,3 +14,4 @@ pub mod permissions;
 pub mod reporting;
 pub mod services;
 pub mod stream;
+pub mod system_prompt;

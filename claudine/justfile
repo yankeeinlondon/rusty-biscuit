@@ -284,7 +284,7 @@ implement topic phase plan="":
     @echo
     @echo -e "{{BOLD}}Phase {{phase}}:{{RESET}} {{DIM}}{{topic}}{{RESET}}"
     @echo
-    @claudine compose @prompts/implement.md --set '{ topic: "{{topic}}", phase: "{{phase}}", plan: "{{plan}}" }'
+    @claudine compose @prompts/implement.md --set '{ topic: "{{topic}}", phase: "{{phase}}", plan: "{{plan}}" }' --yolo
 
 
 git-conflict:

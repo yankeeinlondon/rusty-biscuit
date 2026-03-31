@@ -122,19 +122,19 @@ impl ProviderAdapter for GeminiAdapter {
         }
 
         // Extract MCP server/tool from mcp_context extra.
-        if let Some(mcp) = meta.extra.get("mcp_context") {
-            if let Some(server) = mcp.get("server_id").and_then(Value::as_str) {
-                intents.push(ProtectIntent::UseMcpServer {
+        if let Some(mcp) = meta.extra.get("mcp_context")
+            && let Some(server) = mcp.get("server_id").and_then(Value::as_str)
+        {
+            intents.push(ProtectIntent::UseMcpServer {
+                server: server.to_owned(),
+            });
+            if let Some(tool) = mcp.get("tool_name").and_then(Value::as_str) {
+                intents.push(ProtectIntent::UseMcpTool {
                     server: server.to_owned(),
+                    tool: tool.to_owned(),
                 });
-                if let Some(tool) = mcp.get("tool_name").and_then(Value::as_str) {
-                    intents.push(ProtectIntent::UseMcpTool {
-                        server: server.to_owned(),
-                        tool: tool.to_owned(),
-                    });
-                }
-                replaced = true;
             }
+            replaced = true;
         }
 
         if replaced {

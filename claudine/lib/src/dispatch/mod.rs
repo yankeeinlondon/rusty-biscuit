@@ -314,16 +314,16 @@ fn build_session_context(provider: Provider, meta: &EventMeta) -> ProtectSession
         cli: cli_ctx,
         interactive: std::env::var("INTERACTIVE")
             .ok()
-            .map_or(false, |v| v == "1" || v == "true")
+            .is_some_and(|v| v == "1" || v == "true")
             || std::env::var("CLAUDINE_INTERACTIVE")
                 .ok()
-                .map_or(false, |v| v == "1" || v == "true"),
+                .is_some_and(|v| v == "1" || v == "true"),
         yolo: std::env::var("YOLO")
             .ok()
-            .map_or(false, |v| v == "1" || v == "true")
+            .is_some_and(|v| v == "1" || v == "true")
             || std::env::var("CLAUDINE_YOLO")
                 .ok()
-                .map_or(false, |v| v == "1" || v == "true"),
+                .is_some_and(|v| v == "1" || v == "true"),
         session_id: meta
             .session_id
             .clone()
