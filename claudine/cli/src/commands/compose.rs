@@ -302,11 +302,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
     let source = match composition::resolve_composition_source(&args.file) {
         Ok(source) => {
             if let Some(ref t) = term {
-                claudine::harness::report::report_source_file(
-                    &args.file,
-                    &source.resolved_path,
-                    t,
-                );
+                claudine::harness::report::report_source_file(&args.file, &source.resolved_path, t);
             }
             source
         }
@@ -324,7 +320,12 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
 
     // -- Pre-validation: prompt frontmatter property ------------------------
 
-    let prompt_value = source.markdown.frontmatter().as_map().get("prompt").cloned();
+    let prompt_value = source
+        .markdown
+        .frontmatter()
+        .as_map()
+        .get("prompt")
+        .cloned();
     let has_prompt = prompt_value.is_some();
     let is_non_empty = prompt_value
         .as_ref()
