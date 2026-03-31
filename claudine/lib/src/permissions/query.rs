@@ -112,14 +112,25 @@ pub struct CommandQuery {
 impl CommandQuery {
     /// Creates a command query from a raw command string.
     ///
-    /// Extracts the executable name from the first whitespace-delimited token.
+    /// Performs shell-like tokenization for quotes and escapes, then extracts
+    /// the executable from the first non-assignment token.
     pub fn from_raw(raw: impl Into<String>) -> Self {
         let raw = raw.into();
-        let executable = raw.split_whitespace().next().map(String::from);
+        let argv = tokenize_command_words(&raw);
+        let executable = argv
+            .iter()
+            .find(|token| !looks_like_env_assignment(token))
+            .map(|token| {
+                std::path::Path::new(token)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or(token)
+                    .to_owned()
+            });
         Self {
             raw,
             executable,
-            argv: Vec::new(),
+            argv,
         }
     }
 }
@@ -251,6 +262,13 @@ impl ConfiguredPolicySnapshot {
         self.query(&PolicyQuery::WritePath(PathQuery::unknown(path.as_ref())))
     }
 
+    /// Can the given path be traversed?
+    pub fn can_traverse(&self, path: impl AsRef<Path>) -> QueryResult {
+        self.query(&PolicyQuery::TraversePath(PathQuery::directory(
+            path.as_ref(),
+        )))
+    }
+
     /// Can the given command be executed?
     pub fn can_execute(&self, query: &CommandQuery) -> QueryResult {
         self.query(&PolicyQuery::ExecuteCommand(query.clone()))
@@ -280,6 +298,13 @@ impl ConfiguredPolicySnapshot {
     pub fn can_spawn_subagent(&self, name: Option<&str>) -> QueryResult {
         self.query(&PolicyQuery::SpawnSubagent {
             name: name.map(String::from),
+        })
+    }
+
+    /// Can the provider switch into the given mode?
+    pub fn can_switch_mode(&self, target: Option<&str>) -> QueryResult {
+        self.query(&PolicyQuery::SwitchMode {
+            target: target.map(String::from),
         })
     }
 
@@ -330,6 +355,13 @@ impl EffectivePolicySnapshot {
         self.query(&PolicyQuery::WritePath(PathQuery::unknown(path.as_ref())))
     }
 
+    /// Can the given path be traversed?
+    pub fn can_traverse(&self, path: impl AsRef<Path>) -> QueryResult {
+        self.query(&PolicyQuery::TraversePath(PathQuery::directory(
+            path.as_ref(),
+        )))
+    }
+
     /// Can the given command be executed?
     pub fn can_execute(&self, query: &CommandQuery) -> QueryResult {
         self.query(&PolicyQuery::ExecuteCommand(query.clone()))
@@ -359,6 +391,13 @@ impl EffectivePolicySnapshot {
     pub fn can_spawn_subagent(&self, name: Option<&str>) -> QueryResult {
         self.query(&PolicyQuery::SpawnSubagent {
             name: name.map(String::from),
+        })
+    }
+
+    /// Can the provider switch into the given mode?
+    pub fn can_switch_mode(&self, target: Option<&str>) -> QueryResult {
+        self.query(&PolicyQuery::SwitchMode {
+            target: target.map(String::from),
         })
     }
 
@@ -412,10 +451,7 @@ pub(crate) fn resolve_query(policy: &CanonicalPolicy, query: &PolicyQuery) -> Qu
     }
 }
 
-fn resolve_path_query(
-    rules: &[super::canonical::PathAccessRule],
-    pq: &PathQuery,
-) -> QueryResult {
+fn resolve_path_query(rules: &[super::canonical::PathAccessRule], pq: &PathQuery) -> QueryResult {
     for (i, rule) in rules.iter().enumerate() {
         if matchers::path_matches(&pq.path, &rule.pattern) {
             return build_single_match_result(
@@ -485,7 +521,25 @@ fn resolve_domain_query(
             );
         }
     }
-    QueryResult::no_match()
+
+    match network.enabled {
+        TernaryState::Yes => QueryResult {
+            effect: Some(PolicyEffect::Allow),
+            certainty: PolicyCertainty::BestEffort,
+            stability: QueryStability::Stable,
+            matched_rules: Vec::new(),
+            explanation: PolicyExplanation::new(
+                format!(
+                    "Network access is enabled and no domain-specific rule matched `{}`.",
+                    dq.domain
+                ),
+                Vec::new(),
+            ),
+            warnings: Vec::new(),
+        },
+        TernaryState::Unknown => QueryResult::no_match(),
+        TernaryState::No => unreachable!(),
+    }
 }
 
 fn resolve_mcp_server_query(
@@ -653,5 +707,78 @@ fn build_single_match_result(
             }],
         ),
         warnings: Vec::new(),
+    }
+}
+
+fn tokenize_command_words(raw: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut chars = raw.chars().peekable();
+    let mut in_single = false;
+    let mut in_double = false;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' if !in_double => {
+                in_single = !in_single;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+            }
+            '\\' if !in_single => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        words.push(current);
+    }
+
+    words
+}
+
+fn looks_like_env_assignment(token: &str) -> bool {
+    let Some((name, value)) = token.split_once('=') else {
+        return false;
+    };
+
+    !name.is_empty()
+        && !value.is_empty()
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_query_tokenizes_quotes_and_escapes() {
+        let query = CommandQuery::from_raw(r#"git commit -m "hello world" path\ with\ spaces"#);
+
+        assert_eq!(query.executable.as_deref(), Some("git"));
+        assert_eq!(
+            query.argv,
+            vec!["git", "commit", "-m", "hello world", "path with spaces"],
+        );
+    }
+
+    #[test]
+    fn command_query_skips_env_assignments_for_executable() {
+        let query = CommandQuery::from_raw("FOO=bar BAZ=qux /usr/bin/python script.py");
+
+        assert_eq!(query.executable.as_deref(), Some("python"));
+        assert_eq!(query.argv[0], "FOO=bar");
+        assert_eq!(query.argv[2], "/usr/bin/python");
     }
 }

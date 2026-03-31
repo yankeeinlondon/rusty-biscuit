@@ -148,11 +148,7 @@ pub fn report_handler_engagement(source_display: &str, term: &Terminal) {
 ///
 /// Reports success when `prompt` exists and is a non-empty string,
 /// failure otherwise. The `outcome` describes what was found.
-pub fn report_prompt_property(
-    has_prompt: bool,
-    is_non_empty: bool,
-    term: &Terminal,
-) {
+pub fn report_prompt_property(has_prompt: bool, is_non_empty: bool, term: &Terminal) {
     if has_prompt && is_non_empty {
         emit_status(
             "the <blue-500>prompt</blue-500> frontmatter property is present and non-empty",

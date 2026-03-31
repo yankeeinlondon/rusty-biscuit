@@ -156,7 +156,6 @@ pub enum ClaudineError {
     },
 
     // --- PolicyEngine errors ---
-
     /// Policy engine backend is not registered for this provider.
     #[error("policy engine: no backend for {0}")]
     PolicyBackendUnavailable(crate::events::Provider),

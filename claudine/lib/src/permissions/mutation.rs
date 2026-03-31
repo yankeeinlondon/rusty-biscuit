@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::PathBuf;
 
+use crate::config::atomic::atomic_write;
+use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
 
 use super::canonical::{MappingFidelity, PolicyWarning};
@@ -83,5 +86,109 @@ impl PolicyMutationPlan {
             }],
             supported: false,
         }
+    }
+
+    /// Applies the persistent edits in this plan.
+    ///
+    /// One-shot plans are descriptive only and are not executed here.
+    pub fn apply(&self) -> Result<AppliedMutationReport> {
+        if !self.supported {
+            let path = self
+                .persistent_plan
+                .as_ref()
+                .and_then(|plan| plan.edits.first())
+                .map(|edit| edit.path.clone())
+                .unwrap_or_default();
+            return Err(ClaudineError::PolicyApplyFailed {
+                path,
+                message: "mutation plan is marked unsupported".to_owned(),
+            });
+        }
+
+        let Some(persistent) = &self.persistent_plan else {
+            return Ok(AppliedMutationReport {
+                provider: self.provider,
+                edits_applied: 0,
+                warnings: self.warnings.clone(),
+            });
+        };
+
+        for edit in &persistent.edits {
+            if let Some(parent) = edit.path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            atomic_write(&edit.path, edit.after_preview.as_bytes()).map_err(|source| {
+                ClaudineError::PolicyApplyFailed {
+                    path: edit.path.clone(),
+                    message: source.to_string(),
+                }
+            })?;
+        }
+
+        Ok(AppliedMutationReport {
+            provider: self.provider,
+            edits_applied: persistent.edits.len(),
+            warnings: self.warnings.clone(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_writes_edit_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+
+        let plan = PolicyMutationPlan {
+            provider: Provider::Claude,
+            persistent_plan: Some(PersistentMutationPlan {
+                edits: vec![ConfigEditPlan {
+                    source_id: "user".to_owned(),
+                    path: path.clone(),
+                    description: "write file".to_owned(),
+                    before_preview: None,
+                    after_preview: "{\"ok\":true}\n".to_owned(),
+                }],
+                fidelity: MappingFidelity::Exact,
+            }),
+            one_shot_plan: None,
+            warnings: Vec::new(),
+            supported: true,
+        };
+
+        let report = plan.apply().unwrap();
+
+        assert_eq!(report.edits_applied, 1);
+        assert_eq!(fs::read_to_string(path).unwrap(), "{\"ok\":true}\n");
+    }
+
+    #[test]
+    fn apply_uses_atomic_writer_cleanup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/settings.json");
+
+        let plan = PolicyMutationPlan {
+            provider: Provider::Claude,
+            persistent_plan: Some(PersistentMutationPlan {
+                edits: vec![ConfigEditPlan {
+                    source_id: "user".to_owned(),
+                    path: path.clone(),
+                    description: "write file".to_owned(),
+                    before_preview: None,
+                    after_preview: "{\"ok\":true}\n".to_owned(),
+                }],
+                fidelity: MappingFidelity::Exact,
+            }),
+            one_shot_plan: None,
+            warnings: Vec::new(),
+            supported: true,
+        };
+
+        plan.apply().unwrap();
+
+        assert!(!path.with_extension("tmp").exists());
     }
 }

@@ -3,10 +3,14 @@ use std::collections::HashMap;
 use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
 
-use super::backend::ProviderPolicyBackend;
+use super::backend::{BackendCapabilities, ProviderPolicyBackend};
 use super::change::PolicyChange;
 use super::context::{CliPolicyInput, PolicyContext};
 use super::mutation::PolicyMutationPlan;
+use super::providers::{
+    ClaudePolicyBackend, CodexPolicyBackend, GeminiPolicyBackend, GoosePolicyBackend,
+    KimiPolicyBackend, OpenCodePolicyBackend, QwenPolicyBackend, RooPolicyBackend,
+};
 use super::query::{ConfiguredPolicySnapshot, EffectivePolicySnapshot};
 
 /// Cross-provider permission policy engine.
@@ -32,8 +36,22 @@ pub struct PolicyEngine {
 }
 
 impl PolicyEngine {
-    /// Creates a new engine with no backends registered.
+    /// Creates a new engine with the built-in high-value provider backends.
     pub fn new() -> Self {
+        let mut engine = Self::empty();
+        engine.register(Box::new(ClaudePolicyBackend::default()));
+        engine.register(Box::new(CodexPolicyBackend::default()));
+        engine.register(Box::new(GeminiPolicyBackend::default()));
+        engine.register(Box::new(QwenPolicyBackend::default()));
+        engine.register(Box::new(RooPolicyBackend::default()));
+        engine.register(Box::new(GoosePolicyBackend::default()));
+        engine.register(Box::new(KimiPolicyBackend::default()));
+        engine.register(Box::new(OpenCodePolicyBackend::default()));
+        engine
+    }
+
+    /// Creates a new engine with no backends registered.
+    pub fn empty() -> Self {
         Self {
             backends: HashMap::new(),
         }
@@ -63,6 +81,11 @@ impl PolicyEngine {
     /// Returns the list of providers with registered backends.
     pub fn registered_providers(&self) -> Vec<Provider> {
         self.backends.keys().copied().collect()
+    }
+
+    /// Returns capability metadata for the given provider backend.
+    pub fn capabilities(&self, provider: Provider) -> Result<BackendCapabilities> {
+        Ok(self.backend(provider)?.capabilities())
     }
 
     /// Produces a configured policy snapshot (filesystem-only).
@@ -187,6 +210,11 @@ impl ProviderPolicyHandle<'_> {
     /// Returns the provider this handle is scoped to.
     pub fn provider(&self) -> Provider {
         self.provider
+    }
+
+    /// Returns capability metadata for this provider backend.
+    pub fn capabilities(&self) -> Result<BackendCapabilities> {
+        self.engine.capabilities(self.provider)
     }
 }
 
@@ -336,7 +364,7 @@ mod tests {
 
     #[test]
     fn engine_returns_error_for_missing_backend() {
-        let engine = PolicyEngine::new();
+        let engine = PolicyEngine::empty();
         let ctx = test_ctx();
         let result = engine.configured(Provider::Claude, &ctx);
         assert!(result.is_err());
@@ -347,8 +375,33 @@ mod tests {
     }
 
     #[test]
+    fn new_registers_rollout_backends() {
+        let engine = PolicyEngine::new();
+
+        assert!(engine.has_backend(Provider::Claude));
+        assert!(engine.has_backend(Provider::Codex));
+        assert!(engine.has_backend(Provider::Gemini));
+        assert!(engine.has_backend(Provider::QwenCode));
+        assert!(engine.has_backend(Provider::RooCode));
+        assert!(engine.has_backend(Provider::Goose));
+        assert!(engine.has_backend(Provider::KimiCode));
+        assert!(engine.has_backend(Provider::OpenCode));
+    }
+
+    #[test]
+    fn provider_handle_exposes_capabilities() {
+        let engine = PolicyEngine::new();
+
+        let qwen = engine.provider(Provider::QwenCode).capabilities().unwrap();
+        assert_eq!(qwen.fidelity, BackendFidelity::Medium);
+
+        let goose = engine.provider(Provider::Goose).capabilities().unwrap();
+        assert_eq!(goose.fidelity, BackendFidelity::Partial);
+    }
+
+    #[test]
     fn engine_configured_snapshot_pipeline() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -360,7 +413,7 @@ mod tests {
 
     #[test]
     fn engine_effective_snapshot_pipeline() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -373,7 +426,7 @@ mod tests {
 
     #[test]
     fn snapshot_path_read_query() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -387,7 +440,7 @@ mod tests {
 
     #[test]
     fn snapshot_path_write_deny() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -399,7 +452,7 @@ mod tests {
 
     #[test]
     fn snapshot_command_deny() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -412,7 +465,7 @@ mod tests {
 
     #[test]
     fn snapshot_domain_query() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -427,7 +480,7 @@ mod tests {
 
     #[test]
     fn snapshot_mcp_server_query() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -442,7 +495,7 @@ mod tests {
 
     #[test]
     fn snapshot_subagent_query() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -455,7 +508,7 @@ mod tests {
 
     #[test]
     fn snapshot_no_match_returns_unknown() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -467,7 +520,7 @@ mod tests {
 
     #[test]
     fn provider_handle_convenience() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -479,7 +532,7 @@ mod tests {
 
     #[test]
     fn provider_handle_effective() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -491,7 +544,7 @@ mod tests {
 
     #[test]
     fn mutation_plan_unsupported_for_stub() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -507,7 +560,7 @@ mod tests {
 
     #[test]
     fn registered_providers_list() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
         engine.register(Box::new(StubBackend::new(Provider::Codex)));
 
@@ -520,7 +573,7 @@ mod tests {
 
     #[test]
     fn has_backend_check() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         assert!(engine.has_backend(Provider::Claude));
@@ -529,7 +582,7 @@ mod tests {
 
     #[test]
     fn effective_snapshot_queries_work() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Gemini)));
 
         let ctx = test_ctx();
@@ -546,7 +599,7 @@ mod tests {
 
     #[test]
     fn query_result_has_explanation() {
-        let mut engine = PolicyEngine::new();
+        let mut engine = PolicyEngine::empty();
         engine.register(Box::new(StubBackend::new(Provider::Claude)));
 
         let ctx = test_ctx();
@@ -555,9 +608,6 @@ mod tests {
         let result = snapshot.can_read("/workspace/src/lib.rs");
         assert!(!result.explanation.summary.is_empty());
         assert!(!result.explanation.reasons.is_empty());
-        assert_eq!(
-            result.explanation.reasons[0].source_id,
-            "user-config",
-        );
+        assert_eq!(result.explanation.reasons[0].source_id, "user-config",);
     }
 }

@@ -44,8 +44,7 @@ pub use canonical::{
 
 // Native types
 pub use native::{
-    NativeEffectivePolicy, NativePolicyLayer, PolicySource, PolicySourceKind,
-    ProviderCliOverrides,
+    NativeEffectivePolicy, NativePolicyLayer, PolicySource, PolicySourceKind, ProviderCliOverrides,
 };
 
 // Query types

@@ -11,6 +11,10 @@ pub fn path_matches(path: &Path, pattern: &str) -> bool {
     let path_str = path.to_string_lossy();
     let pattern = pattern.trim();
 
+    if pattern == "*" || pattern == "**" {
+        return true;
+    }
+
     // Exact match
     if path_str == pattern {
         return true;
@@ -47,6 +51,10 @@ pub fn path_matches(path: &Path, pattern: &str) -> bool {
 /// Matches against both the raw command string and the extracted executable.
 pub fn command_matches(raw: &str, executable: Option<&str>, pattern: &str) -> bool {
     let pattern = pattern.trim();
+
+    if pattern == "*" {
+        return true;
+    }
 
     // Exact raw match
     if raw == pattern {
@@ -157,6 +165,8 @@ fn glob_matches(text: &str, pattern: &str) -> bool {
 /// Classification of a path relative to known directories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathClassification {
+    /// Path is part of a provider-owned configuration area.
+    ProviderConfig,
     /// Path is within the workspace (repo root or cwd).
     Workspace,
     /// Path is within the user's home directory but outside workspace.
@@ -175,6 +185,23 @@ pub fn classify_path(
     workspace: Option<&Path>,
     home: Option<&Path>,
 ) -> PathClassification {
+    classify_path_with_config(path, workspace, home, &[])
+}
+
+/// Classifies a path relative to known directories and provider config roots.
+pub fn classify_path_with_config(
+    path: &Path,
+    workspace: Option<&Path>,
+    home: Option<&Path>,
+    provider_config_roots: &[&Path],
+) -> PathClassification {
+    if provider_config_roots
+        .iter()
+        .any(|root| path.starts_with(root))
+    {
+        return PathClassification::ProviderConfig;
+    }
+
     if let Some(ws) = workspace
         && path.starts_with(ws)
     {
@@ -285,12 +312,23 @@ mod tests {
     fn classify_path_workspace() {
         let ws = PathBuf::from("/projects/myapp");
         assert_eq!(
-            classify_path(
-                Path::new("/projects/myapp/src/main.rs"),
-                Some(&ws),
-                None,
-            ),
+            classify_path(Path::new("/projects/myapp/src/main.rs"), Some(&ws), None,),
             PathClassification::Workspace,
+        );
+    }
+
+    #[test]
+    fn classify_path_provider_config() {
+        let home = PathBuf::from("/Users/test");
+        let config_root = home.join(".claude");
+        assert_eq!(
+            classify_path_with_config(
+                Path::new("/Users/test/.claude/settings.json"),
+                None,
+                Some(&home),
+                &[&config_root],
+            ),
+            PathClassification::ProviderConfig,
         );
     }
 
