@@ -134,8 +134,10 @@ impl GitRemote {
                 if let Some(base_url) = parsed.base_url {
                     // GitLab base_url from parser is already the API URL
                     // Extract the host part for with_base_url which expects the root URL
-                    let root_url =
-                        base_url.strip_suffix("/api/v4").unwrap_or(&base_url).to_string();
+                    let root_url = base_url
+                        .strip_suffix("/api/v4")
+                        .unwrap_or(&base_url)
+                        .to_string();
                     Ok(Self::GitLab(GitLabRemote::with_base_url(&root_url)?))
                 } else {
                     Ok(Self::GitLab(GitLabRemote::new()?))
@@ -184,7 +186,9 @@ impl GitRemote {
         let candidates: Vec<RemoteCandidate> = vec![
             ("GitHub", || GitHubRemote::new().map(GitRemote::GitHub)),
             ("GitLab", || GitLabRemote::new().map(GitRemote::GitLab)),
-            ("Bitbucket", || BitbucketRemote::new().map(GitRemote::Bitbucket)),
+            ("Bitbucket", || {
+                BitbucketRemote::new().map(GitRemote::Bitbucket)
+            }),
         ];
 
         let mut tried: Vec<&str> = Vec::new();
@@ -193,9 +197,7 @@ impl GitRemote {
             // Skip providers whose constructor fails (missing credentials)
             let remote = match constructor() {
                 Ok(r) => r,
-                Err(SniffError::MissingCredentials {
-                    ..
-                }) => continue,
+                Err(SniffError::MissingCredentials { .. }) => continue,
                 Err(e) => return Err(e),
             };
 
@@ -203,23 +205,12 @@ impl GitRemote {
 
             match remote.get_repo_metadata(owner, repo).await {
                 Ok(_) => return Ok(remote),
-                Err(SniffError::RemoteApi {
-                    status: 404,
-                    ..
-                }) => {
+                Err(SniffError::RemoteApi { status: 404, .. }) => {
                     // Not found on this provider, try next
                     continue;
                 }
-                Err(
-                    e @ SniffError::InvalidCredentials {
-                        ..
-                    },
-                )
-                | Err(
-                    e @ SniffError::RateLimited {
-                        ..
-                    },
-                ) => {
+                Err(e @ SniffError::InvalidCredentials { .. })
+                | Err(e @ SniffError::RateLimited { .. }) => {
                     return Err(e);
                 }
                 Err(_) => {

@@ -136,7 +136,9 @@ fn try_parse_ssh(url: &str) -> Option<ParsedRemoteUrl> {
 /// - `https://github.com/owner/repo.git`
 /// - `http://github.com/owner/repo` (also supported)
 fn try_parse_https(url: &str) -> Option<ParsedRemoteUrl> {
-    let without_protocol = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let without_protocol = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
 
     // Split host and path
     let slash_pos = without_protocol.find('/')?;
@@ -394,7 +396,10 @@ mod tests {
         assert_eq!(parsed.provider, GitProvider::GitLab);
         assert_eq!(parsed.owner, "team");
         assert_eq!(parsed.repo, "project");
-        assert_eq!(parsed.base_url, Some("https://gitlab.example.com/api/v4".to_string()));
+        assert_eq!(
+            parsed.base_url,
+            Some("https://gitlab.example.com/api/v4".to_string())
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -437,7 +442,10 @@ mod tests {
         assert_eq!(parsed.provider, GitProvider::Gitea);
         assert_eq!(parsed.owner, "org");
         assert_eq!(parsed.repo, "project");
-        assert_eq!(parsed.base_url, Some("https://gitea.example.com/api/v1".to_string()));
+        assert_eq!(
+            parsed.base_url,
+            Some("https://gitea.example.com/api/v1".to_string())
+        );
     }
 
     #[test]
@@ -454,7 +462,10 @@ mod tests {
         assert_eq!(parsed.provider, GitProvider::Gitea);
         assert_eq!(parsed.owner, "forgejo");
         assert_eq!(parsed.repo, "forgejo");
-        assert_eq!(parsed.base_url, Some("https://codeberg.org/api/v1".to_string()));
+        assert_eq!(
+            parsed.base_url,
+            Some("https://codeberg.org/api/v1".to_string())
+        );
     }
 
     #[test]
@@ -471,7 +482,10 @@ mod tests {
         assert_eq!(parsed.provider, GitProvider::Gitea);
         assert_eq!(parsed.owner, "dev");
         assert_eq!(parsed.repo, "app");
-        assert_eq!(parsed.base_url, Some("https://code.mycompany.com/api/v1".to_string()));
+        assert_eq!(
+            parsed.base_url,
+            Some("https://code.mycompany.com/api/v1".to_string())
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
