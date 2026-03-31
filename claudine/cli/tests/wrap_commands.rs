@@ -225,7 +225,10 @@ exit 0
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert!(args.contains(&"--cd"), "codex args should include --cd for project dir");
+    assert!(
+        args.contains(&"--cd"),
+        "codex args should include --cd for project dir"
+    );
     assert_eq!(
         strip_project_dir_flags(&args),
         vec![
@@ -372,7 +375,10 @@ exit 0
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert!(args.contains(&"--cd"), "codex args should include --cd for project dir");
+    assert!(
+        args.contains(&"--cd"),
+        "codex args should include --cd for project dir"
+    );
     assert_eq!(
         strip_project_dir_flags(&args),
         vec!["exec", "--json", "summarize repo"]
