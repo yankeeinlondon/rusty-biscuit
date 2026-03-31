@@ -162,7 +162,12 @@ pub fn collect_changed_paths(
                         false
                     }
                 })
-                .map(|pkg| pkg.path.strip_prefix(&repo_root).unwrap_or(&pkg.path).to_path_buf())
+                .map(|pkg| {
+                    pkg.path
+                        .strip_prefix(&repo_root)
+                        .unwrap_or(&pkg.path)
+                        .to_path_buf()
+                })
                 .collect();
 
             // Validate that the package/area name matched at least one package
@@ -205,10 +210,7 @@ pub fn collect_changed_paths(
     paths.sort();
     paths.dedup();
 
-    Ok(ChangedPathResult {
-        repo_root,
-        paths,
-    })
+    Ok(ChangedPathResult { repo_root, paths })
 }
 
 /// Collect paths from working tree status (Dirty/Staged/Unstaged).
@@ -250,11 +252,17 @@ fn collect_working_tree_paths(repo: &Repository, scope: ChangeScope) -> Result<V
 
 /// Collect paths from the HEAD commit.
 fn collect_last_commit_paths(repo: &Repository) -> Vec<PathBuf> {
-    let head_sha =
-        repo.head().ok().and_then(|h| h.peel_to_commit().ok()).map(|c| c.id().to_string());
+    let head_sha = repo
+        .head()
+        .ok()
+        .and_then(|h| h.peel_to_commit().ok())
+        .map(|c| c.id().to_string());
 
     match head_sha {
-        Some(sha) => get_commit_files(repo, &sha).into_iter().map(|(path, _kind)| path).collect(),
+        Some(sha) => get_commit_files(repo, &sha)
+            .into_iter()
+            .map(|(path, _kind)| path)
+            .collect(),
         None => Vec::new(),
     }
 }
@@ -434,7 +442,11 @@ mod tests {
             .unwrap();
 
             for path in &result.paths {
-                assert!(is_source_code_path(path), "Expected source code path: {:?}", path);
+                assert!(
+                    is_source_code_path(path),
+                    "Expected source code path: {:?}",
+                    path
+                );
             }
         }
 
@@ -454,7 +466,9 @@ mod tests {
 
             for path in &result.paths {
                 assert!(
-                    path.to_string_lossy().to_lowercase().contains("blast_radius"),
+                    path.to_string_lossy()
+                        .to_lowercase()
+                        .contains("blast_radius"),
                     "Expected path to match filter: {:?}",
                     path
                 );
@@ -507,7 +521,8 @@ mod tests {
         let sig = repo.signature().unwrap();
         let tree_id = repo.index().unwrap().write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
 
         let path = dir.path().to_path_buf();
         (dir, path)
@@ -530,7 +545,8 @@ mod tests {
         let tree_id = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "add file", &tree, &[&head]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "add file", &tree, &[&head])
+            .unwrap();
     }
 
     /// Helper: write a file and stage it (but don't commit).
@@ -729,13 +745,7 @@ mod tests {
         fn exact_package_match_filters_paths() {
             let (_dir, path) = create_temp_repo();
             // sniff/lib → package name "sniff-lib", homelab/lib → "homelab-lib"
-            make_workspace(
-                &path,
-                &[
-                    "sniff/lib",
-                    "homelab/lib",
-                ],
-            );
+            make_workspace(&path, &["sniff/lib", "homelab/lib"]);
 
             // Dirty files in both packages
             std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
@@ -767,14 +777,7 @@ mod tests {
         #[test]
         fn exact_package_area_match() {
             let (_dir, path) = create_temp_repo();
-            make_workspace(
-                &path,
-                &[
-                    "sniff/lib",
-                    "sniff/cli",
-                    "homelab/lib",
-                ],
-            );
+            make_workspace(&path, &["sniff/lib", "sniff/cli", "homelab/lib"]);
 
             std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
             std::fs::write(path.join("sniff/cli/src/lib.rs"), "// dirty").unwrap();
@@ -797,7 +800,10 @@ mod tests {
                 "All paths should be in sniff/: {:?}",
                 result.paths
             );
-            assert!(result.paths.len() >= 2, "Should match both sniff/lib and sniff/cli");
+            assert!(
+                result.paths.len() >= 2,
+                "Should match both sniff/lib and sniff/cli"
+            );
         }
 
         #[test]
@@ -805,12 +811,7 @@ mod tests {
             let (_dir, path) = create_temp_repo();
             make_workspace(
                 &path,
-                &[
-                    "apps/web",
-                    "apps/api",
-                    "apps/api/workers",
-                    "libs/core",
-                ],
+                &["apps/web", "apps/api", "apps/api/workers", "libs/core"],
             );
 
             std::fs::write(path.join("apps/web/src/lib.rs"), "// dirty").unwrap();
@@ -844,13 +845,7 @@ mod tests {
         #[test]
         fn unknown_package_returns_error() {
             let (_dir, path) = create_temp_repo();
-            make_workspace(
-                &path,
-                &[
-                    "sniff/lib",
-                    "sniff/cli",
-                ],
-            );
+            make_workspace(&path, &["sniff/lib", "sniff/cli"]);
 
             std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
 
@@ -876,13 +871,7 @@ mod tests {
         #[test]
         fn unknown_package_area_returns_error() {
             let (_dir, path) = create_temp_repo();
-            make_workspace(
-                &path,
-                &[
-                    "sniff/lib",
-                    "sniff/cli",
-                ],
-            );
+            make_workspace(&path, &["sniff/lib", "sniff/cli"]);
 
             std::fs::write(path.join("sniff/lib/src/lib.rs"), "// dirty").unwrap();
 

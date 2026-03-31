@@ -133,11 +133,7 @@ pub fn detect_formatting(root: &Path) -> Result<Option<FormattingConfig>> {
 /// for repository analysis where we want to report only on configs within the
 /// repo, not configs from parent directories outside the repo.
 fn find_editorconfig(root: &Path) -> Option<PathBuf> {
-    let dir = if root.is_file() {
-        root.parent()?
-    } else {
-        root
-    };
+    let dir = if root.is_file() { root.parent()? } else { root };
 
     let config_path = dir.join(".editorconfig");
     if config_path.exists() {
@@ -462,7 +458,10 @@ some_custom_property = custom_value
         let section = &config.sections[0];
 
         assert_eq!(section.indent_style, Some("space".to_string()));
-        assert_eq!(section.extra.get("some_custom_property"), Some(&"custom_value".to_string()));
+        assert_eq!(
+            section.extra.get("some_custom_property"),
+            Some(&"custom_value".to_string())
+        );
     }
 
     #[test]
@@ -552,7 +551,10 @@ indent_style = tab
 
         // When searching from child directory, should NOT find parent's config
         let result = detect_formatting(&child).unwrap();
-        assert!(result.is_none(), "Should not find .editorconfig in parent directory");
+        assert!(
+            result.is_none(),
+            "Should not find .editorconfig in parent directory"
+        );
     }
 
     #[test]

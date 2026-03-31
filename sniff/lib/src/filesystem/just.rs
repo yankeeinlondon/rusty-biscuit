@@ -83,10 +83,17 @@ pub fn detect_justfiles(base_dir: &Path, filters: &[String]) -> Result<Vec<Justf
         .par_iter()
         .filter_map(|path| {
             let content = std::fs::read_to_string(path).ok()?;
-            let relative = path.strip_prefix(&scope_root).unwrap_or(path).display().to_string();
+            let relative = path
+                .strip_prefix(&scope_root)
+                .unwrap_or(path)
+                .display()
+                .to_string();
             let all_recipes = parse_recipes(&content);
             let has_default = all_recipes.iter().any(|r| r.name == "default");
-            let recipes = all_recipes.into_iter().filter(|r| r.name != "default").collect();
+            let recipes = all_recipes
+                .into_iter()
+                .filter(|r| r.name != "default")
+                .collect();
             Some(JustfileInfo {
                 path: path.clone(),
                 relative,
@@ -110,17 +117,20 @@ fn find_scope_root(base_dir: &Path) -> PathBuf {
 /// Walk a directory tree and collect all justfile paths.
 fn find_justfiles(root: &Path) -> Vec<PathBuf> {
     let mut results = Vec::new();
-    let walker = walkdir::WalkDir::new(root).follow_links(false).into_iter().filter_entry(|e| {
-        let name = e.file_name().to_string_lossy();
-        // Skip hidden dirs and common non-source dirs
-        if e.file_type().is_dir() {
-            return !name.starts_with('.')
-                && name != "node_modules"
-                && name != "target"
-                && name != "vendor";
-        }
-        true
-    });
+    let walker = walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            // Skip hidden dirs and common non-source dirs
+            if e.file_type().is_dir() {
+                return !name.starts_with('.')
+                    && name != "node_modules"
+                    && name != "target"
+                    && name != "vendor";
+            }
+            true
+        });
 
     for entry in walker.flatten() {
         let name = entry.file_name().to_string_lossy();
@@ -328,7 +338,9 @@ fn is_valid_recipe_name(name: &str) -> bool {
         return false;
     };
     (first.is_alphabetic() || first == '_' || first == '-')
-        && name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
 }
 
 #[cfg(test)]
@@ -446,7 +458,10 @@ set shell := [\"bash\"]\n\nFOO := \"bar\"\n\nbuild:\n    echo $FOO\n";
         let content = "default:\n    just --list\n\nbuild:\n    cargo build\n";
         let all_recipes = parse_recipes(content);
         let has_default = all_recipes.iter().any(|r| r.name == "default");
-        let recipes: Vec<_> = all_recipes.into_iter().filter(|r| r.name != "default").collect();
+        let recipes: Vec<_> = all_recipes
+            .into_iter()
+            .filter(|r| r.name != "default")
+            .collect();
         assert!(has_default);
         assert_eq!(recipes.len(), 1);
         assert_eq!(recipes[0].name, "build");
@@ -547,10 +562,18 @@ set shell := [\"bash\"]\n\nFOO := \"bar\"\n\nbuild:\n    echo $FOO\n";
         let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let result = detect_justfiles(&base, &[]).unwrap();
         // Should find at least the root justfile plus some package area justfiles
-        assert!(result.len() > 1, "Expected multiple justfiles, found {}", result.len());
+        assert!(
+            result.len() > 1,
+            "Expected multiple justfiles, found {}",
+            result.len()
+        );
         // All should have at least one recipe
         for jf in &result {
-            assert!(!jf.recipes.is_empty(), "Justfile {} has no recipes", jf.relative);
+            assert!(
+                !jf.recipes.is_empty(),
+                "Justfile {} has no recipes",
+                jf.relative
+            );
         }
     }
 
@@ -558,11 +581,19 @@ set shell := [\"bash\"]\n\nFOO := \"bar\"\n\nbuild:\n    echo $FOO\n";
     fn detect_justfiles_with_filter() {
         let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let result = detect_justfiles(&base, &["sniff".to_string()]).unwrap();
-        assert!(!result.is_empty(), "Should find at least one justfile matching 'sniff'");
+        assert!(
+            !result.is_empty(),
+            "Should find at least one justfile matching 'sniff'"
+        );
         for jf in &result {
             assert!(
                 jf.relative.to_lowercase().contains("sniff")
-                    || jf.path.display().to_string().to_lowercase().contains("sniff"),
+                    || jf
+                        .path
+                        .display()
+                        .to_string()
+                        .to_lowercase()
+                        .contains("sniff"),
                 "Justfile {} should match filter 'sniff'",
                 jf.relative
             );
@@ -575,7 +606,10 @@ set shell := [\"bash\"]\n\nFOO := \"bar\"\n\nbuild:\n    echo $FOO\n";
         let result = detect_justfiles(&base, &[]).unwrap();
         // At least some justfiles should have a default recipe
         let any_has_default = result.iter().any(|jf| jf.has_default);
-        assert!(any_has_default, "Expected at least one justfile with a default recipe");
+        assert!(
+            any_has_default,
+            "Expected at least one justfile with a default recipe"
+        );
         // The default recipe should NOT appear in the recipes list
         for jf in &result {
             assert!(

@@ -95,7 +95,10 @@ pub fn lookup_exact_filename(file_name: &str) -> Option<FileTypeDescriptor> {
     ) {
         return Some(text_descriptor(FileAssociation::Documentation));
     }
-    if matches!(lower.as_str(), "justfile" | "makefile" | "rakefile" | "brewfile" | "procfile") {
+    if matches!(
+        lower.as_str(),
+        "justfile" | "makefile" | "rakefile" | "brewfile" | "procfile"
+    ) {
         return Some(text_descriptor(FileAssociation::Configuration));
     }
 

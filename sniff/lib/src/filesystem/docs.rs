@@ -98,8 +98,11 @@ impl RepoDocuments {
             .map(|pkgs| {
                 pkgs.into_iter()
                     .map(|p| {
-                        let rel_path =
-                            p.path.strip_prefix(&repo_root).unwrap_or(&p.path).to_path_buf();
+                        let rel_path = p
+                            .path
+                            .strip_prefix(&repo_root)
+                            .unwrap_or(&p.path)
+                            .to_path_buf();
                         (p.name, rel_path)
                     })
                     .collect::<Vec<_>>()
@@ -119,7 +122,10 @@ impl RepoDocuments {
 
     /// Returns metadata for markdown documents that have a "prompt" property set.
     pub fn prompt_docs(&self) -> Vec<MarkdownMeta> {
-        self.documents().into_iter().filter(|doc| doc.prompt.is_some()).collect()
+        self.documents()
+            .into_iter()
+            .filter(|doc| doc.prompt.is_some())
+            .collect()
     }
 }
 
@@ -130,11 +136,7 @@ impl RepoDocuments {
 pub fn detect_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
     let repo_docs = RepoDocuments::new(root).ok()?;
     let docs = repo_docs.documents();
-    if docs.is_empty() {
-        None
-    } else {
-        Some(docs)
-    }
+    if docs.is_empty() { None } else { Some(docs) }
 }
 
 /// Detect markdown documents using pre-computed package info.
@@ -146,11 +148,7 @@ pub fn detect_docs_with_packages(
     packages: &[(String, PathBuf)],
 ) -> Option<Vec<MarkdownMeta>> {
     let docs = collect_markdown_files(repo_root, packages);
-    if docs.is_empty() {
-        None
-    } else {
-        Some(docs)
-    }
+    if docs.is_empty() { None } else { Some(docs) }
 }
 
 /// Collect all markdown files from repo root using .gitignore-aware walking.
@@ -166,7 +164,10 @@ fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> V
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
             entry.file_type().is_some_and(|ft| ft.is_file())
-                && entry.path().extension().is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
         })
         .filter_map(|entry| parse_markdown_meta(entry.path(), repo_root, packages))
         .collect();
@@ -184,7 +185,11 @@ fn parse_markdown_meta(
     let content = fs::read_to_string(path).ok()?;
     let (frontmatter, body) = extract_frontmatter(&content);
 
-    let relative = path.strip_prefix(repo_root).ok()?.to_string_lossy().to_string();
+    let relative = path
+        .strip_prefix(repo_root)
+        .ok()?
+        .to_string_lossy()
+        .to_string();
 
     let relative_path = Path::new(&relative);
     let package = determine_package(relative_path, packages);
@@ -325,7 +330,9 @@ fn normalize_blast_radius_path(raw: &str, repo_root: &Path) -> PathBuf {
 /// Remove `.` and `./` components from a relative path, and strip leading `./`.
 fn normalize_relative_components(p: &Path) -> PathBuf {
     use std::path::Component;
-    p.components().filter(|c| !matches!(c, Component::CurDir)).collect()
+    p.components()
+        .filter(|c| !matches!(c, Component::CurDir))
+        .collect()
 }
 
 /// Extract the document title using priority:
@@ -391,10 +398,7 @@ fn resolve_last_updated(
     path: &Path,
 ) -> (DateTime<Utc>, UpdatedSource) {
     // Try frontmatter fields in priority order
-    for key in &[
-        "last_updated",
-        "updated_at",
-    ] {
+    for key in &["last_updated", "updated_at"] {
         if let Some(dt) = frontmatter.get(*key).and_then(parse_datetime_value) {
             return (dt, UpdatedSource::UpdatedProperty);
         }
@@ -417,11 +421,7 @@ fn parse_datetime_value(value: &serde_yaml_ng::Value) -> Option<DateTime<Utc>> {
     }
 
     // Try common datetime formats
-    let datetime_formats = [
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M",
-    ];
+    let datetime_formats = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"];
     for fmt in &datetime_formats {
         if let Ok(ndt) = NaiveDateTime::parse_from_str(s, fmt) {
             return Some(ndt.and_utc());
@@ -429,9 +429,7 @@ fn parse_datetime_value(value: &serde_yaml_ng::Value) -> Option<DateTime<Utc>> {
     }
 
     // Try date-only formats (midnight UTC)
-    let date_formats = [
-        "%Y-%m-%d", "%Y/%m/%d",
-    ];
+    let date_formats = ["%Y-%m-%d", "%Y/%m/%d"];
     for fmt in &date_formats {
         if let Ok(nd) = NaiveDate::parse_from_str(s, fmt) {
             return nd.and_hms_opt(0, 0, 0).map(|ndt| ndt.and_utc());
@@ -507,7 +505,10 @@ mod tests {
         fn handles_frontmatter_with_prompt() {
             let content = "---\ntitle: Test\nprompt: Generate a summary\n---\nBody text";
             let (fm, body) = extract_frontmatter(content);
-            assert_eq!(fm.get("prompt").and_then(|v| v.as_str()), Some("Generate a summary"));
+            assert_eq!(
+                fm.get("prompt").and_then(|v| v.as_str()),
+                Some("Generate a summary")
+            );
             assert_eq!(body, "Body text");
         }
     }
@@ -518,7 +519,10 @@ mod tests {
         #[test]
         fn prefers_frontmatter_title() {
             let mut fm = HashMap::new();
-            fm.insert("title".to_string(), serde_yaml_ng::Value::String("FM Title".to_string()));
+            fm.insert(
+                "title".to_string(),
+                serde_yaml_ng::Value::String("FM Title".to_string()),
+            );
             let (title, source) = extract_title(&fm, "# Heading Title");
             assert_eq!(title, "FM Title");
             assert_eq!(source, TitleSource::FrontmatterTitle);
@@ -573,21 +577,30 @@ mod tests {
         fn parses_iso_date() {
             let val = serde_yaml_ng::Value::String("2025-06-15".to_string());
             let dt = parse_datetime_value(&val).unwrap();
-            assert_eq!(dt.date_naive(), NaiveDate::from_ymd_opt(2025, 6, 15).unwrap());
+            assert_eq!(
+                dt.date_naive(),
+                NaiveDate::from_ymd_opt(2025, 6, 15).unwrap()
+            );
         }
 
         #[test]
         fn parses_iso_datetime() {
             let val = serde_yaml_ng::Value::String("2025-06-15T10:30:00Z".to_string());
             let dt = parse_datetime_value(&val).unwrap();
-            assert_eq!(dt.date_naive(), NaiveDate::from_ymd_opt(2025, 6, 15).unwrap());
+            assert_eq!(
+                dt.date_naive(),
+                NaiveDate::from_ymd_opt(2025, 6, 15).unwrap()
+            );
         }
 
         #[test]
         fn parses_datetime_without_timezone() {
             let val = serde_yaml_ng::Value::String("2025-06-15 10:30:00".to_string());
             let dt = parse_datetime_value(&val).unwrap();
-            assert_eq!(dt.date_naive(), NaiveDate::from_ymd_opt(2025, 6, 15).unwrap());
+            assert_eq!(
+                dt.date_naive(),
+                NaiveDate::from_ymd_opt(2025, 6, 15).unwrap()
+            );
         }
 
         #[test]
@@ -615,7 +628,10 @@ mod tests {
                 ("sniff".to_string(), PathBuf::from("sniff/lib")),
             ];
             let path = Path::new("research/lib/docs/architecture.md");
-            assert_eq!(determine_package(path, &packages), Some("research-lib".to_string()));
+            assert_eq!(
+                determine_package(path, &packages),
+                Some("research-lib".to_string())
+            );
         }
 
         #[test]
@@ -632,7 +648,10 @@ mod tests {
                 ("sniff-cli".to_string(), PathBuf::from("sniff/cli")),
             ];
             let path = Path::new("sniff/lib/docs/design.md");
-            assert_eq!(determine_package(path, &packages), Some("sniff".to_string()));
+            assert_eq!(
+                determine_package(path, &packages),
+                Some("sniff".to_string())
+            );
         }
 
         #[test]
@@ -687,10 +706,7 @@ mod tests {
             let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
             assert_eq!(
                 paths,
-                vec![
-                    PathBuf::from("src/main.rs"),
-                    PathBuf::from("src/lib.rs")
-                ]
+                vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")]
             );
         }
 
@@ -718,10 +734,7 @@ mod tests {
             let paths = parse_blast_radius(&fm, &dummy_root()).unwrap();
             assert_eq!(
                 paths,
-                vec![
-                    PathBuf::from("src/main.rs"),
-                    PathBuf::from("src/lib.rs")
-                ]
+                vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")]
             );
         }
 
@@ -766,12 +779,7 @@ mod tests {
             let (fm, _body) = extract_frontmatter(content);
             let mut keys: Vec<String> = fm.keys().cloned().collect();
             keys.sort();
-            assert_eq!(
-                keys,
-                vec![
-                    "model", "prompt", "title"
-                ]
-            );
+            assert_eq!(keys, vec!["model", "prompt", "title"]);
         }
 
         #[test]
@@ -834,8 +842,10 @@ mod tests {
             let docs = repo.documents();
 
             // Files inside a specific package member should be assigned
-            let sniff_lib_docs: Vec<_> =
-                docs.iter().filter(|d| d.relative.starts_with("sniff/lib/")).collect();
+            let sniff_lib_docs: Vec<_> = docs
+                .iter()
+                .filter(|d| d.relative.starts_with("sniff/lib/"))
+                .collect();
             for doc in &sniff_lib_docs {
                 assert!(
                     doc.package.is_some(),
@@ -846,7 +856,10 @@ mod tests {
 
             // Verify some docs are assigned to packages (not all root)
             let with_package = docs.iter().filter(|d| d.package.is_some()).count();
-            assert!(with_package > 0, "At least some documents should have package assignments");
+            assert!(
+                with_package > 0,
+                "At least some documents should have package assignments"
+            );
         }
 
         #[test]
@@ -886,7 +899,10 @@ mod tests {
         #[test]
         fn detect_docs_returns_some_in_repo() {
             let docs = detect_docs(Path::new("."));
-            assert!(docs.is_some(), "detect_docs should return Some in a git repo");
+            assert!(
+                docs.is_some(),
+                "detect_docs should return Some in a git repo"
+            );
         }
     }
 }

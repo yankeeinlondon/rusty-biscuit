@@ -10,7 +10,11 @@ fn file_contains_any(content: &str, needles: &[&str]) -> bool {
 pub fn related_languages(
     framework: FrameworkKind,
     path: &Path,
-) -> (Vec<ProgrammingLanguage>, ClassificationConfidence, ClassificationSource) {
+) -> (
+    Vec<ProgrammingLanguage>,
+    ClassificationConfidence,
+    ClassificationSource,
+) {
     let content = std::fs::read_to_string(path).unwrap_or_default();
 
     let explicit_ts = file_contains_any(
