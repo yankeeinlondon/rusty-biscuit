@@ -154,6 +154,65 @@ pub enum ClaudineError {
         /// Why the operation is not supported.
         reason: String,
     },
+
+    // --- PolicyEngine errors ---
+
+    /// Policy engine backend is not registered for this provider.
+    #[error("policy engine: no backend for {0}")]
+    PolicyBackendUnavailable(crate::events::Provider),
+
+    /// Policy engine source discovery failed.
+    #[error("policy engine source discovery: {0}")]
+    PolicySourceDiscovery(String),
+
+    /// Policy engine native config parse failure.
+    #[error("policy engine native parse for source `{source_id}`: {message}")]
+    PolicyNativeParse {
+        /// Source identifier.
+        source_id: String,
+        /// Parse error message.
+        message: String,
+    },
+
+    /// Policy engine CLI override parse failure.
+    #[error("policy engine CLI parse for {provider}: {message}")]
+    PolicyCliParse {
+        /// Provider.
+        provider: crate::events::Provider,
+        /// Parse error message.
+        message: String,
+    },
+
+    /// Policy engine query is unsupported by the provider backend.
+    #[error("policy engine unsupported query for {provider}: {query}")]
+    PolicyUnsupportedQuery {
+        /// Provider.
+        provider: crate::events::Provider,
+        /// Query description.
+        query: String,
+    },
+
+    /// Policy engine mutation is unsupported by the provider backend.
+    #[error("policy engine unsupported mutation for {provider}: {op}")]
+    PolicyUnsupportedMutation {
+        /// Provider.
+        provider: crate::events::Provider,
+        /// Operation description.
+        op: String,
+    },
+
+    /// Policy engine mutation apply failed.
+    #[error("policy engine apply failed at {path}: {message}")]
+    PolicyApplyFailed {
+        /// File path.
+        path: PathBuf,
+        /// Error message.
+        message: String,
+    },
+
+    /// Policy engine context is ambiguous.
+    #[error("policy engine ambiguous context: {0}")]
+    PolicyAmbiguousContext(String),
 }
 
 /// Convenience type alias for Claudine results.
