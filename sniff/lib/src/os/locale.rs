@@ -140,11 +140,7 @@ pub fn extract_language_code(locale: &str) -> Option<String> {
     }
 
     // Extract language before any separator (_, ., @)
-    let language = locale
-        .split([
-            '_', '.', '@',
-        ])
-        .next()?;
+    let language = locale.split(['_', '.', '@']).next()?;
 
     if language.is_empty() {
         None
@@ -229,7 +225,10 @@ mod tests {
 
         #[test]
         fn test_full_locale_with_modifier() {
-            assert_eq!(extract_language_code("zh_CN.GB18030@stroke"), Some("zh".to_string()));
+            assert_eq!(
+                extract_language_code("zh_CN.GB18030@stroke"),
+                Some("zh".to_string())
+            );
         }
 
         #[test]
@@ -249,7 +248,10 @@ mod tests {
 
         #[test]
         fn test_iso_encoding() {
-            assert_eq!(extract_language_code("de_DE.ISO-8859-1"), Some("de".to_string()));
+            assert_eq!(
+                extract_language_code("de_DE.ISO-8859-1"),
+                Some("de".to_string())
+            );
         }
     }
 
@@ -263,17 +265,26 @@ mod tests {
 
         #[test]
         fn test_iso_encoding() {
-            assert_eq!(extract_encoding("de_DE.ISO-8859-1"), Some("ISO-8859-1".to_string()));
+            assert_eq!(
+                extract_encoding("de_DE.ISO-8859-1"),
+                Some("ISO-8859-1".to_string())
+            );
         }
 
         #[test]
         fn test_gb18030_encoding() {
-            assert_eq!(extract_encoding("zh_CN.GB18030"), Some("GB18030".to_string()));
+            assert_eq!(
+                extract_encoding("zh_CN.GB18030"),
+                Some("GB18030".to_string())
+            );
         }
 
         #[test]
         fn test_encoding_with_modifier() {
-            assert_eq!(extract_encoding("zh_CN.GB18030@stroke"), Some("GB18030".to_string()));
+            assert_eq!(
+                extract_encoding("zh_CN.GB18030@stroke"),
+                Some("GB18030".to_string())
+            );
         }
 
         #[test]
@@ -320,9 +331,7 @@ mod tests {
 
         impl ScopedEnv {
             fn new() -> Self {
-                Self {
-                    vars: Vec::new(),
-                }
+                Self { vars: Vec::new() }
             }
 
             fn set(&mut self, key: &str, value: &str) -> &mut Self {
@@ -362,7 +371,9 @@ mod tests {
         fn test_detect_locale_reads_lang() {
             let _lock = ENV_MUTEX.lock().unwrap();
             let mut env = ScopedEnv::new();
-            env.set("LANG", "en_US.UTF-8").remove("LC_ALL").remove("LC_MESSAGES");
+            env.set("LANG", "en_US.UTF-8")
+                .remove("LC_ALL")
+                .remove("LC_MESSAGES");
 
             let locale = detect_locale();
 
@@ -375,7 +386,9 @@ mod tests {
         fn test_lc_all_takes_priority_over_lang() {
             let _lock = ENV_MUTEX.lock().unwrap();
             let mut env = ScopedEnv::new();
-            env.set("LANG", "en_US.UTF-8").set("LC_ALL", "de_DE.ISO-8859-1").remove("LC_MESSAGES");
+            env.set("LANG", "en_US.UTF-8")
+                .set("LC_ALL", "de_DE.ISO-8859-1")
+                .remove("LC_MESSAGES");
 
             let locale = detect_locale();
 
@@ -387,7 +400,9 @@ mod tests {
         fn test_lc_messages_takes_priority_over_lang() {
             let _lock = ENV_MUTEX.lock().unwrap();
             let mut env = ScopedEnv::new();
-            env.set("LANG", "en_US.UTF-8").set("LC_MESSAGES", "fr_FR.UTF-8").remove("LC_ALL");
+            env.set("LANG", "en_US.UTF-8")
+                .set("LC_MESSAGES", "fr_FR.UTF-8")
+                .remove("LC_ALL");
 
             let locale = detect_locale();
 
@@ -411,7 +426,9 @@ mod tests {
         fn test_c_locale_is_skipped_in_priority() {
             let _lock = ENV_MUTEX.lock().unwrap();
             let mut env = ScopedEnv::new();
-            env.set("LANG", "en_US.UTF-8").set("LC_ALL", "C").remove("LC_MESSAGES");
+            env.set("LANG", "en_US.UTF-8")
+                .set("LC_ALL", "C")
+                .remove("LC_MESSAGES");
 
             let locale = detect_locale();
 
@@ -424,7 +441,9 @@ mod tests {
         fn test_posix_locale_is_skipped_in_priority() {
             let _lock = ENV_MUTEX.lock().unwrap();
             let mut env = ScopedEnv::new();
-            env.set("LANG", "de_DE.UTF-8").set("LC_ALL", "POSIX").remove("LC_MESSAGES");
+            env.set("LANG", "de_DE.UTF-8")
+                .set("LC_ALL", "POSIX")
+                .remove("LC_MESSAGES");
 
             let locale = detect_locale();
 

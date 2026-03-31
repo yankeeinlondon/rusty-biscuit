@@ -176,11 +176,7 @@ pub struct OsInfo {
 pub fn detect_os() -> Result<OsInfo> {
     // Helper to convert empty strings to None
     let non_empty = |s: String| {
-        if s.is_empty() {
-            None
-        } else {
-            Some(s)
-        }
+        if s.is_empty() { None } else { Some(s) }
     };
 
     let os_type = detect_os_type();

@@ -426,9 +426,7 @@ fn command_exists_in_path_unix(cmd: &str, path_dirs: &[PathBuf]) -> Option<PathB
 #[cfg(target_os = "windows")]
 fn command_exists_in_path_windows(cmd: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
     // Windows executable extensions in priority order
-    const EXTENSIONS: &[&str] = &[
-        ".exe", ".cmd", ".bat", ".com", "",
-    ];
+    const EXTENSIONS: &[&str] = &[".exe", ".cmd", ".bat", ".com", ""];
 
     for dir in path_dirs {
         for ext in EXTENSIONS {
@@ -967,7 +965,10 @@ pub(crate) fn determine_linux_primary(
         SystemPackageManager::NixEnv,
     ];
 
-    PRIORITY_ORDER.iter().copied().find(|&mgr| has(mgr) && !AUR_HELPERS.contains(&mgr))
+    PRIORITY_ORDER
+        .iter()
+        .copied()
+        .find(|&mgr| has(mgr) && !AUR_HELPERS.contains(&mgr))
 }
 
 // ============================================================================
@@ -1083,10 +1084,7 @@ pub fn detect_macos_package_managers() -> SystemPackageManagers {
         }
     }
 
-    SystemPackageManagers {
-        managers,
-        primary,
-    }
+    SystemPackageManagers { managers, primary }
 }
 
 // ============================================================================
@@ -1211,10 +1209,7 @@ pub fn detect_windows_package_managers() -> SystemPackageManagers {
         }
     }
 
-    SystemPackageManagers {
-        managers,
-        primary,
-    }
+    SystemPackageManagers { managers, primary }
 }
 
 // ============================================================================
@@ -1345,10 +1340,7 @@ pub fn detect_bsd_package_managers(os_type: OsType) -> SystemPackageManagers {
         _ => {}
     }
 
-    SystemPackageManagers {
-        managers,
-        primary,
-    }
+    SystemPackageManagers { managers, primary }
 }
 
 #[cfg(test)]
@@ -1370,7 +1362,10 @@ mod tests {
             assert_eq!(SystemPackageManager::Pacman.to_string(), "pacman");
             assert_eq!(SystemPackageManager::Portage.to_string(), "emerge");
             assert_eq!(SystemPackageManager::Winget.to_string(), "winget");
-            assert_eq!(SystemPackageManager::Msys2Pacman.to_string(), "pacman (MSYS2)");
+            assert_eq!(
+                SystemPackageManager::Msys2Pacman.to_string(),
+                "pacman (MSYS2)"
+            );
         }
 
         #[test]
@@ -1379,7 +1374,10 @@ mod tests {
             assert_eq!(SystemPackageManager::Homebrew.executable_name(), "brew");
             assert_eq!(SystemPackageManager::Portage.executable_name(), "emerge");
             assert_eq!(SystemPackageManager::Pacman.executable_name(), "pacman");
-            assert_eq!(SystemPackageManager::Msys2Pacman.executable_name(), "pacman");
+            assert_eq!(
+                SystemPackageManager::Msys2Pacman.executable_name(),
+                "pacman"
+            );
             assert_eq!(SystemPackageManager::Ports.executable_name(), "make");
         }
 
@@ -1541,7 +1539,11 @@ mod tests {
                     || cmds.update.is_some()
                     || cmds.upgrade.is_some()
                     || cmds.search.is_some();
-                assert!(has_at_least_one, "{:?} should have at least one command", manager);
+                assert!(
+                    has_at_least_one,
+                    "{:?} should have at least one command",
+                    manager
+                );
             }
         }
     }
@@ -1561,9 +1563,7 @@ mod tests {
 
         impl ScopedEnv {
             fn new() -> Self {
-                Self {
-                    vars: Vec::new(),
-                }
+                Self { vars: Vec::new() }
             }
 
             fn set(&mut self, key: &str, value: &str) -> &mut Self {
@@ -1730,10 +1730,7 @@ mod tests {
             }
 
             // dir1 comes first, so exe1 should be found
-            let path_dirs = vec![
-                dir1.clone(),
-                dir2.clone(),
-            ];
+            let path_dirs = vec![dir1.clone(), dir2.clone()];
             let result = command_exists_in_path("mycmd", &path_dirs);
 
             assert!(result.is_some());
@@ -1765,7 +1762,10 @@ mod tests {
             assert_eq!(deserialized.manager, SystemPackageManager::Apt);
             assert_eq!(deserialized.path, "/usr/bin/apt");
             assert!(deserialized.is_primary);
-            assert_eq!(deserialized.commands.list, Some("apt list --installed".to_string()));
+            assert_eq!(
+                deserialized.commands.list,
+                Some("apt list --installed".to_string())
+            );
         }
 
         #[test]
@@ -1826,7 +1826,11 @@ mod tests {
                     || cmds.search.is_some();
                 // All managers except makepkg should have at least one command
                 if mgr.manager != SystemPackageManager::Makepkg {
-                    assert!(has_cmd, "{:?} should have at least one command", mgr.manager);
+                    assert!(
+                        has_cmd,
+                        "{:?} should have at least one command",
+                        mgr.manager
+                    );
                 }
             }
         }
@@ -1850,7 +1854,10 @@ mod tests {
 
             // Only one manager should be marked as primary
             let primary_count = result.managers.iter().filter(|m| m.is_primary).count();
-            assert!(primary_count <= 1, "At most one manager should be marked primary");
+            assert!(
+                primary_count <= 1,
+                "At most one manager should be marked primary"
+            );
         }
 
         #[test]
@@ -1884,14 +1891,12 @@ mod tests {
         #[test]
         fn test_determine_linux_primary_debian_fallback_to_dpkg() {
             // Only dpkg available
-            let detected = vec![
-                DetectedPackageManager {
-                    manager: SystemPackageManager::Dpkg,
-                    path: "/usr/bin/dpkg".to_string(),
-                    is_primary: false,
-                    commands: PackageManagerCommands::default(),
-                },
-            ];
+            let detected = vec![DetectedPackageManager {
+                manager: SystemPackageManager::Dpkg,
+                path: "/usr/bin/dpkg".to_string(),
+                is_primary: false,
+                commands: PackageManagerCommands::default(),
+            }];
 
             let primary = determine_linux_primary(&detected, Some(LinuxFamily::Debian));
             assert_eq!(primary, Some(SystemPackageManager::Dpkg));
@@ -1920,14 +1925,12 @@ mod tests {
 
         #[test]
         fn test_determine_linux_primary_redhat_fallback_to_yum() {
-            let detected = vec![
-                DetectedPackageManager {
-                    manager: SystemPackageManager::Yum,
-                    path: "/usr/bin/yum".to_string(),
-                    is_primary: false,
-                    commands: PackageManagerCommands::default(),
-                },
-            ];
+            let detected = vec![DetectedPackageManager {
+                manager: SystemPackageManager::Yum,
+                path: "/usr/bin/yum".to_string(),
+                is_primary: false,
+                commands: PackageManagerCommands::default(),
+            }];
 
             let primary = determine_linux_primary(&detected, Some(LinuxFamily::RedHat));
             assert_eq!(primary, Some(SystemPackageManager::Yum));
@@ -2047,14 +2050,12 @@ mod tests {
             ];
 
             for (family, expected_manager) in test_cases {
-                let detected = vec![
-                    DetectedPackageManager {
-                        manager: expected_manager,
-                        path: format!("/usr/bin/{}", expected_manager),
-                        is_primary: false,
-                        commands: PackageManagerCommands::default(),
-                    },
-                ];
+                let detected = vec![DetectedPackageManager {
+                    manager: expected_manager,
+                    path: format!("/usr/bin/{}", expected_manager),
+                    is_primary: false,
+                    commands: PackageManagerCommands::default(),
+                }];
 
                 let primary = determine_linux_primary(&detected, Some(family));
                 assert_eq!(
@@ -2098,7 +2099,9 @@ mod tests {
             ];
 
             for expected in expected_managers {
-                let found = LINUX_PACKAGE_MANAGERS.iter().any(|(mgr, _)| *mgr == expected);
+                let found = LINUX_PACKAGE_MANAGERS
+                    .iter()
+                    .any(|(mgr, _)| *mgr == expected);
                 assert!(found, "{:?} should be in LINUX_PACKAGE_MANAGERS", expected);
             }
         }
@@ -2129,13 +2132,20 @@ mod tests {
             let result = detect_macos_package_managers();
 
             // softwareupdate should always be present
-            let has_softwareupdate =
-                result.managers.iter().any(|m| m.manager == SystemPackageManager::Softwareupdate);
-            assert!(has_softwareupdate, "softwareupdate should always be detected on macOS");
+            let has_softwareupdate = result
+                .managers
+                .iter()
+                .any(|m| m.manager == SystemPackageManager::Softwareupdate);
+            assert!(
+                has_softwareupdate,
+                "softwareupdate should always be detected on macOS"
+            );
 
             // softwareupdate path should be /usr/sbin/softwareupdate
-            let softwareupdate =
-                result.managers.iter().find(|m| m.manager == SystemPackageManager::Softwareupdate);
+            let softwareupdate = result
+                .managers
+                .iter()
+                .find(|m| m.manager == SystemPackageManager::Softwareupdate);
             assert!(softwareupdate.is_some());
             assert_eq!(softwareupdate.unwrap().path, "/usr/sbin/softwareupdate");
         }
@@ -2170,7 +2180,10 @@ mod tests {
 
             // Only one manager should be marked as primary
             let primary_count = result.managers.iter().filter(|m| m.is_primary).count();
-            assert_eq!(primary_count, 1, "Exactly one manager should be marked primary");
+            assert_eq!(
+                primary_count, 1,
+                "Exactly one manager should be marked primary"
+            );
         }
 
         #[test]
@@ -2187,7 +2200,11 @@ mod tests {
                     || cmds.update.is_some()
                     || cmds.upgrade.is_some()
                     || cmds.search.is_some();
-                assert!(has_cmd, "{:?} should have at least one command", mgr.manager);
+                assert!(
+                    has_cmd,
+                    "{:?} should have at least one command",
+                    mgr.manager
+                );
             }
         }
 
@@ -2205,8 +2222,10 @@ mod tests {
             let result = detect_macos_package_managers();
 
             // On actual macOS, we expect softwareupdate to exist at its path
-            let softwareupdate =
-                result.managers.iter().find(|m| m.manager == SystemPackageManager::Softwareupdate);
+            let softwareupdate = result
+                .managers
+                .iter()
+                .find(|m| m.manager == SystemPackageManager::Softwareupdate);
             assert!(softwareupdate.is_some());
 
             // The path should point to an actual file on macOS
@@ -2214,8 +2233,10 @@ mod tests {
             assert!(path.exists(), "softwareupdate should exist on macOS");
 
             // If Homebrew is detected, verify its path exists
-            if let Some(brew) =
-                result.managers.iter().find(|m| m.manager == SystemPackageManager::Homebrew)
+            if let Some(brew) = result
+                .managers
+                .iter()
+                .find(|m| m.manager == SystemPackageManager::Homebrew)
             {
                 let brew_path = std::path::Path::new(&brew.path);
                 assert!(brew_path.exists(), "Detected Homebrew path should exist");
@@ -2265,7 +2286,10 @@ mod tests {
             // If a primary is set, exactly one manager should have is_primary = true
             if let Some(primary) = result.primary {
                 let primary_count = result.managers.iter().filter(|m| m.is_primary).count();
-                assert_eq!(primary_count, 1, "Exactly one manager should be marked as primary");
+                assert_eq!(
+                    primary_count, 1,
+                    "Exactly one manager should be marked as primary"
+                );
 
                 // The primary flag should match the primary field
                 let primary_manager = result
@@ -2280,7 +2304,10 @@ mod tests {
             } else {
                 // If no primary, no manager should have is_primary = true
                 let primary_count = result.managers.iter().filter(|m| m.is_primary).count();
-                assert_eq!(primary_count, 0, "No manager should be primary when primary is None");
+                assert_eq!(
+                    primary_count, 0,
+                    "No manager should be primary when primary is None"
+                );
             }
         }
 
@@ -2314,8 +2341,10 @@ mod tests {
             // On actual Windows, we expect to find at least DISM (system utility)
             // Note: DISM might not be found if the test runs in a non-standard environment
             // but if it's found, it should have the correct path format
-            if let Some(dism) =
-                result.managers.iter().find(|m| m.manager == SystemPackageManager::Dism)
+            if let Some(dism) = result
+                .managers
+                .iter()
+                .find(|m| m.manager == SystemPackageManager::Dism)
             {
                 // DISM path should end with dism.exe
                 assert!(
@@ -2338,10 +2367,7 @@ mod tests {
             let result = detect_bsd_package_managers(OsType::FreeBSD);
 
             // Verify that if any managers are detected, they're FreeBSD-appropriate
-            let valid_freebsd_managers = [
-                SystemPackageManager::Pkg,
-                SystemPackageManager::Ports,
-            ];
+            let valid_freebsd_managers = [SystemPackageManager::Pkg, SystemPackageManager::Ports];
 
             for detected in &result.managers {
                 assert!(
@@ -2352,8 +2378,10 @@ mod tests {
             }
 
             // If pkg is detected, it should be primary
-            if let Some(pkg) =
-                result.managers.iter().find(|m| m.manager == SystemPackageManager::Pkg)
+            if let Some(pkg) = result
+                .managers
+                .iter()
+                .find(|m| m.manager == SystemPackageManager::Pkg)
             {
                 assert!(pkg.is_primary, "pkg should be primary on FreeBSD");
                 assert_eq!(result.primary, Some(SystemPackageManager::Pkg));
@@ -2376,8 +2404,10 @@ mod tests {
             }
 
             // If pkg_add is detected, it should be primary
-            if let Some(pkg_add) =
-                result.managers.iter().find(|m| m.manager == SystemPackageManager::PkgAdd)
+            if let Some(pkg_add) = result
+                .managers
+                .iter()
+                .find(|m| m.manager == SystemPackageManager::PkgAdd)
             {
                 assert!(pkg_add.is_primary, "pkg_add should be primary on OpenBSD");
                 assert_eq!(result.primary, Some(SystemPackageManager::PkgAdd));
@@ -2389,10 +2419,7 @@ mod tests {
             let result = detect_bsd_package_managers(OsType::NetBSD);
 
             // Verify that if any managers are detected, they're NetBSD-appropriate
-            let valid_netbsd_managers = [
-                SystemPackageManager::Pkgin,
-                SystemPackageManager::PkgAdd,
-            ];
+            let valid_netbsd_managers = [SystemPackageManager::Pkgin, SystemPackageManager::PkgAdd];
 
             for detected in &result.managers {
                 assert!(
@@ -2403,8 +2430,10 @@ mod tests {
             }
 
             // If pkgin is detected, it should be primary
-            if let Some(pkgin) =
-                result.managers.iter().find(|m| m.manager == SystemPackageManager::Pkgin)
+            if let Some(pkgin) = result
+                .managers
+                .iter()
+                .find(|m| m.manager == SystemPackageManager::Pkgin)
             {
                 assert!(pkgin.is_primary, "pkgin should be primary on NetBSD");
                 assert_eq!(result.primary, Some(SystemPackageManager::Pkgin));
@@ -2414,12 +2443,7 @@ mod tests {
         #[test]
         fn test_detect_bsd_package_managers_non_bsd_returns_empty() {
             // Non-BSD OS types should return empty results
-            let non_bsd_types = [
-                OsType::Linux,
-                OsType::MacOS,
-                OsType::Windows,
-                OsType::Other,
-            ];
+            let non_bsd_types = [OsType::Linux, OsType::MacOS, OsType::Windows, OsType::Other];
 
             for os_type in non_bsd_types {
                 let result = detect_bsd_package_managers(os_type);
@@ -2438,11 +2462,7 @@ mod tests {
 
         #[test]
         fn test_detect_bsd_package_managers_primary_consistency() {
-            for os_type in [
-                OsType::FreeBSD,
-                OsType::OpenBSD,
-                OsType::NetBSD,
-            ] {
+            for os_type in [OsType::FreeBSD, OsType::OpenBSD, OsType::NetBSD] {
                 let result = detect_bsd_package_managers(os_type);
 
                 // If a primary is set, exactly one manager should have is_primary = true
@@ -2479,11 +2499,7 @@ mod tests {
 
         #[test]
         fn test_detect_bsd_package_managers_commands_populated() {
-            for os_type in [
-                OsType::FreeBSD,
-                OsType::OpenBSD,
-                OsType::NetBSD,
-            ] {
+            for os_type in [OsType::FreeBSD, OsType::OpenBSD, OsType::NetBSD] {
                 let result = detect_bsd_package_managers(os_type);
 
                 for manager in &result.managers {
