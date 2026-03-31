@@ -5,6 +5,9 @@ use serde_json::{Map, Value, json};
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::permissions::query::{CommandQuery, PathQuery};
+use crate::services::protect::intent::ProtectIntent;
+use crate::services::protect::observe::default_observe_protect;
 
 use super::{AdapterError, ProviderAdapter};
 
@@ -76,6 +79,77 @@ impl ProviderAdapter for ClaudeAdapter {
         }
 
         Ok((event, meta))
+    }
+
+    fn observe_protect(
+        &self,
+        event: &AgenticEvent,
+        meta: &EventMeta,
+    ) -> Option<crate::services::ProtectObservation> {
+        // Start with default observation, then refine for Claude-specific tools.
+        let mut obs = default_observe_protect(event, meta)?;
+
+        // Claude-specific tool intent extraction
+        if let Some(tool_name) = meta.tool_name.as_deref() {
+            let lowered = tool_name.to_ascii_lowercase();
+
+            // Clear default intents and rebuild with Claude-specific knowledge.
+            let mut intents = Vec::new();
+
+            match lowered.as_str() {
+                "write" | "write_file" => {
+                    if let Some(path) = tool_input_path(meta) {
+                        intents.push(ProtectIntent::WritePath(PathQuery::file(path)));
+                    }
+                }
+                "edit" | "edit_file" => {
+                    if let Some(path) = tool_input_path(meta) {
+                        intents.push(ProtectIntent::WritePath(PathQuery::file(path)));
+                    }
+                }
+                "read" | "read_file" | "read_directory" => {
+                    if let Some(path) = tool_input_path(meta) {
+                        intents.push(ProtectIntent::ReadPath(PathQuery::unknown(path)));
+                    }
+                }
+                "bash" | "execute_command" => {
+                    if let Some(cmd) = extract_claude_command(meta) {
+                        intents.push(ProtectIntent::ExecuteCommand(
+                            CommandQuery::from_raw(cmd),
+                        ));
+                    }
+                }
+                name if name.starts_with("mcp__") => {
+                    // Claude MCP tool names: mcp__<server>__<tool>
+                    let parts: Vec<&str> = name.splitn(3, "__").collect();
+                    if parts.len() >= 2 {
+                        let server = parts[1].to_owned();
+                        intents.push(ProtectIntent::UseMcpServer {
+                            server: server.clone(),
+                        });
+                        if parts.len() == 3 {
+                            intents.push(ProtectIntent::UseMcpTool {
+                                server,
+                                tool: parts[2].to_owned(),
+                            });
+                        }
+                    }
+                }
+                _ => {
+                    // Keep default intents for unknown tools.
+                    return Some(obs);
+                }
+            }
+
+            // Preserve completion scan intent if present.
+            if obs.intents.iter().any(|i| matches!(i, ProtectIntent::CompletionOutputScan)) {
+                intents.push(ProtectIntent::CompletionOutputScan);
+            }
+
+            obs.intents = intents;
+        }
+
+        Some(obs)
     }
 
     fn can_block(&self, event: &AgenticEvent) -> bool {
@@ -153,6 +227,30 @@ fn map_event(event_name: &str) -> Result<AgenticEvent, AdapterError> {
 
 fn str_field(raw: &Value, key: &str) -> Option<String> {
     raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
+}
+
+fn tool_input_path(meta: &EventMeta) -> Option<String> {
+    meta.tool_input
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .and_then(|map| {
+            map.get("file_path")
+                .or_else(|| map.get("path"))
+                .or_else(|| map.get("file"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+}
+
+fn extract_claude_command(meta: &EventMeta) -> Option<String> {
+    meta.tool_input
+        .as_ref()
+        .and_then(|v| {
+            v.get("command")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+                .or_else(|| v.as_str().map(ToOwned::to_owned))
+        })
 }
 
 fn decision_to_permission(decision: Option<HookDecision>) -> &'static str {

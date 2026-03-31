@@ -12,8 +12,10 @@ use serde_json::Value;
 use crate::actions::HookResponse;
 use crate::events::{AgenticEvent, EventMeta, Provider};
 use crate::services::{
-    ProtectDecision, ProtectOutcome, ProviderProtectCapabilities, ProviderProtectProfiles,
+    ProtectDecision, ProtectObservation, ProtectOutcome, ProviderProtectCapabilities,
+    ProviderProtectProfiles,
 };
+use crate::services::protect::observe::default_observe_protect;
 
 /// Adapter-level parse/format errors.
 #[derive(Debug, thiserror::Error)]
@@ -85,6 +87,19 @@ pub trait ProviderAdapter: Send + Sync {
 
     /// Exit code to use for shell-driven providers.
     fn exit_code(&self, event: &AgenticEvent, response: &HookResponse) -> Option<i32>;
+
+    /// Extract a protect observation from an event.
+    ///
+    /// The default implementation mirrors the legacy `ProtectInput::from_event_meta()`
+    /// logic but produces `ProtectObservation` with `ProtectIntent` variants.
+    /// Provider-specific adapters can override for more precise intent extraction.
+    fn observe_protect(
+        &self,
+        event: &AgenticEvent,
+        meta: &EventMeta,
+    ) -> Option<ProtectObservation> {
+        default_observe_protect(event, meta)
+    }
 
     /// Provider protect capability handshake.
     fn protect_capabilities(&self) -> ProviderProtectCapabilities {

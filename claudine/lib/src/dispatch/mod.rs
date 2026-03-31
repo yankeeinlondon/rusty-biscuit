@@ -1,9 +1,12 @@
+#![allow(deprecated)] // ProtectInput is deprecated but dispatch still uses the legacy path.
+
 pub mod loader;
 mod matcher;
 mod runner;
 pub mod template;
 
 use std::path::Path;
+use std::sync::Arc;
 
 use serde_json::Value;
 use tracing::{debug, info};
@@ -12,6 +15,8 @@ use crate::actions::HookResponse;
 use crate::adapters::{self, AdapterError};
 use crate::error::{ClaudineError, Result};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook};
+use crate::permissions::PolicyEngine;
+#[allow(deprecated)]
 use crate::services::{
     ProtectDecision, ProtectInput, ProtectOutcome, ProtectService, ProviderProtectProfiles,
 };
@@ -149,10 +154,11 @@ async fn dispatch_preparsed(
         can_block: adapter.can_block(&event),
     };
 
+    let engine = Arc::new(PolicyEngine::new());
     let mut protect_service = config.settings().protect.clone().map(|protect| {
         let mut profiles = ProviderProtectProfiles::defaults();
         profiles.insert(provider, adapter.protect_capabilities());
-        ProtectService::with_profiles(protect, profiles)
+        ProtectService::with_profiles(engine.clone(), protect, profiles)
     });
 
     let protect_pre = protect_service.as_mut().and_then(|service| {
