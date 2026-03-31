@@ -7,6 +7,8 @@ prompt: |-
     - Can Agents or Subagents have their own system prompt which is distinct from an orchestrator?
     - what quirks and workarounds do developers talk about with regard to Gemini CLI and system prompts?
     - have there been any recent changes to how system prompts can be manipulated? If so, when?
+    - what format works best when appending to the system prompt? what format works best when replacing the system prompt?
+        - pure markdown? XML wrapper of markdown? Other?
 
     All research and observations should be written to the body of this Markdown document while preserving the Frontmatter data. The Markdown should all be standards based and isomorphic. Tables should be Markdown tables. Links should be Markdown links.
 
