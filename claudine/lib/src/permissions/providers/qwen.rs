@@ -1163,11 +1163,8 @@ mod tests {
         let layers = backend.load_native_layers(&ctx, &sources).unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
         let canonical = backend.canonicalize(&ctx, &native).unwrap();
-        let snapshot = ConfiguredPolicySnapshot {
-            provider: Provider::QwenCode,
-            native,
-            canonical,
-        };
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::QwenCode, native, canonical, &ctx);
 
         assert!(
             snapshot
@@ -1211,11 +1208,8 @@ mod tests {
             )
             .unwrap();
         let canonical = backend.canonicalize(&ctx, &native).unwrap();
-        let snapshot = ConfiguredPolicySnapshot {
-            provider: Provider::QwenCode,
-            native,
-            canonical,
-        };
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::QwenCode, native, canonical, &ctx);
 
         assert!(snapshot.can_use_mcp_server("filesystem").is_allowed());
         assert!(snapshot.can_use_mcp_server("github").is_denied());

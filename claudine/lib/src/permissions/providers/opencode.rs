@@ -686,11 +686,8 @@ mod tests {
         let layers = backend.load_native_layers(&ctx, &sources).unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
         let canonical = backend.canonicalize(&ctx, &native).unwrap();
-        let snapshot = ConfiguredPolicySnapshot {
-            provider: Provider::OpenCode,
-            native,
-            canonical,
-        };
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::OpenCode, native, canonical, &ctx);
 
         assert!(snapshot.can_read("/tmp/file.txt").is_allowed());
         assert!(

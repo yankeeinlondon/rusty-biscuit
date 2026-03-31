@@ -320,8 +320,10 @@ impl ProviderPolicyBackend for ClaudePolicyBackend {
             }
         }
 
+        let workspace_root = ctx.repo_root.as_deref().unwrap_or(&ctx.cwd);
+
         for (source, config) in &state.layers {
-            push_claude_rules(&mut policy, source, config);
+            push_claude_rules(&mut policy, source, config, workspace_root);
         }
 
         if let Some(settings) = &state.cli.settings_override {
@@ -332,7 +334,7 @@ impl ProviderPolicyBackend for ClaudePolicyBackend {
                 precedence: 5,
                 writable: false,
             };
-            push_claude_rules(&mut policy, &source, settings);
+            push_claude_rules(&mut policy, &source, settings, workspace_root);
         }
 
         for rule in &state.cli.deny {
@@ -506,10 +508,15 @@ fn parse_claude_config(value: &Value) -> ClaudeConfig {
     }
 }
 
-fn push_claude_rules(policy: &mut CanonicalPolicy, source: &PolicySource, config: &ClaudeConfig) {
+fn push_claude_rules(
+    policy: &mut CanonicalPolicy,
+    source: &PolicySource,
+    config: &ClaudeConfig,
+    workspace_root: &std::path::Path,
+) {
     for pattern in &config.deny_read {
         policy.axes.filesystem.read_rules.push(PathAccessRule {
-            pattern: normalize_relative_pattern(pattern),
+            pattern: normalize_relative_pattern(pattern, workspace_root),
             effect: PolicyEffect::Deny,
             provenance: CanonicalRuleProvenance::exact(
                 source.id.clone(),
@@ -519,7 +526,7 @@ fn push_claude_rules(policy: &mut CanonicalPolicy, source: &PolicySource, config
     }
     for pattern in &config.allow_read {
         policy.axes.filesystem.read_rules.push(PathAccessRule {
-            pattern: normalize_relative_pattern(pattern),
+            pattern: normalize_relative_pattern(pattern, workspace_root),
             effect: PolicyEffect::Allow,
             provenance: CanonicalRuleProvenance::exact(
                 source.id.clone(),
@@ -529,7 +536,7 @@ fn push_claude_rules(policy: &mut CanonicalPolicy, source: &PolicySource, config
     }
     for pattern in &config.deny_write {
         policy.axes.filesystem.write_rules.push(PathAccessRule {
-            pattern: normalize_relative_pattern(pattern),
+            pattern: normalize_relative_pattern(pattern, workspace_root),
             effect: PolicyEffect::Deny,
             provenance: CanonicalRuleProvenance::exact(
                 source.id.clone(),
@@ -539,7 +546,7 @@ fn push_claude_rules(policy: &mut CanonicalPolicy, source: &PolicySource, config
     }
     for pattern in &config.allow_write {
         policy.axes.filesystem.write_rules.push(PathAccessRule {
-            pattern: normalize_relative_pattern(pattern),
+            pattern: normalize_relative_pattern(pattern, workspace_root),
             effect: PolicyEffect::Allow,
             provenance: CanonicalRuleProvenance::exact(
                 source.id.clone(),
@@ -548,7 +555,7 @@ fn push_claude_rules(policy: &mut CanonicalPolicy, source: &PolicySource, config
         });
     }
     for pattern in &config.additional_directories {
-        let normalized = normalize_relative_pattern(pattern);
+        let normalized = normalize_relative_pattern(pattern, workspace_root);
         let provenance = CanonicalRuleProvenance::approximate(
             source.id.clone(),
             "permissions.additionalDirectories",
@@ -725,6 +732,10 @@ fn choose_target_path(
         .repo_root
         .as_ref()
         .map(|root| root.join(".claude/settings.json"));
+    let repo_local_path = ctx
+        .repo_root
+        .as_ref()
+        .map(|root| root.join(".claude/settings.local.json"));
     let user_path = ctx
         .home_dir
         .as_ref()
@@ -737,11 +748,18 @@ fn choose_target_path(
                     "Claude user config path is unavailable".to_owned(),
                 )
             }),
-        PolicyChangeTarget::RepoConfig | PolicyChangeTarget::LocalOverride => repo_path
+        PolicyChangeTarget::RepoConfig => repo_path
             .map(|path| ("claude-repo".to_owned(), path))
             .ok_or_else(|| {
                 ClaudineError::PolicyAmbiguousContext(
                     "Claude repo config path is unavailable".to_owned(),
+                )
+            }),
+        PolicyChangeTarget::LocalOverride => repo_local_path
+            .map(|path| ("claude-repo-local".to_owned(), path))
+            .ok_or_else(|| {
+                ClaudineError::PolicyAmbiguousContext(
+                    "Claude local override path is unavailable".to_owned(),
                 )
             }),
         PolicyChangeTarget::Auto => {
@@ -929,12 +947,38 @@ fn string_array(value: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn normalize_relative_pattern(pattern: &str) -> String {
-    if pattern == "." {
-        "*".to_owned()
-    } else {
-        pattern.to_owned()
+fn normalize_relative_pattern(pattern: &str, workspace_root: &std::path::Path) -> String {
+    let pattern = pattern.trim();
+    if pattern == "*" || pattern == "**" {
+        return pattern.to_owned();
     }
+    if std::path::Path::new(pattern).is_absolute() {
+        return normalize_path_like_pattern(pattern);
+    }
+
+    normalize_path_like_pattern(
+        &workspace_root
+            .join(pattern)
+            .to_string_lossy()
+            .into_owned(),
+    )
+}
+
+fn normalize_path_like_pattern(pattern: &str) -> String {
+    let mut normalized = PathBuf::new();
+    for component in std::path::Path::new(pattern).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                normalized.push(component.as_os_str())
+            }
+            std::path::Component::Normal(segment) => normalized.push(segment),
+        }
+    }
+    normalized.to_string_lossy().into_owned()
 }
 
 fn map_approval_mode_to_claude(mode: CanonicalApprovalMode) -> &'static str {
@@ -1012,17 +1056,23 @@ mod tests {
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
         let canonical = backend.canonicalize(&ctx, &native).unwrap();
 
-        let snapshot = crate::permissions::ConfiguredPolicySnapshot {
-            provider: Provider::Claude,
+        let snapshot = crate::permissions::ConfiguredPolicySnapshot::from_parts(
+            Provider::Claude,
             native,
             canonical,
-        };
+            &ctx,
+        );
 
         assert!(
             snapshot
                 .can_read(ctx.repo_root.as_ref().unwrap().join("README.md"))
                 .is_allowed()
         );
+        assert!(snapshot.can_write("src/main.rs").is_allowed());
+        assert!(snapshot.can_write("./src/main.rs").is_allowed());
+        let normalized = snapshot.can_write("src/../src/main.rs");
+        assert!(normalized.is_allowed());
+        assert!(normalized.explanation.summary.contains("workspace"));
         assert!(snapshot.can_write("/etc/hosts").is_denied());
         assert!(
             snapshot
@@ -1062,5 +1112,74 @@ mod tests {
                 .argv
                 .contains(&"--settings".to_owned())
         );
+    }
+
+    #[test]
+    fn claude_local_override_target_uses_settings_local() {
+        let (_dir, ctx) = setup_ctx();
+        let backend = ClaudePolicyBackend;
+        let current = NativeEffectivePolicy::new(
+            Provider::Claude,
+            Vec::new(),
+            ClaudeState {
+                layers: Vec::new(),
+                cli: ClaudeCliOverrides::default(),
+            },
+        );
+        let change = PolicyChange {
+            operations: vec![PolicyChangeOp::GrantWrite(PathBuf::from("/tmp/build"))],
+            target: crate::permissions::PolicyChangeTarget::LocalOverride,
+            persistence: crate::permissions::PolicyPersistence::Persistent,
+        };
+
+        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let edit = &plan.persistent_plan.as_ref().unwrap().edits[0];
+
+        assert_eq!(edit.source_id, "claude-repo-local");
+        assert!(edit.path.ends_with(".claude/settings.local.json"));
+    }
+
+    #[test]
+    fn claude_local_override_round_trip_changes_query_result() {
+        let (_dir, ctx) = setup_ctx();
+        let backend = ClaudePolicyBackend;
+        let current = NativeEffectivePolicy::new(
+            Provider::Claude,
+            Vec::new(),
+            ClaudeState {
+                layers: Vec::new(),
+                cli: ClaudeCliOverrides::default(),
+            },
+        );
+        let change = PolicyChange {
+            operations: vec![PolicyChangeOp::GrantWrite(PathBuf::from(
+                ctx.repo_root.as_ref().unwrap().join("src"),
+            ))],
+            target: crate::permissions::PolicyChangeTarget::LocalOverride,
+            persistence: crate::permissions::PolicyPersistence::Persistent,
+        };
+
+        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let edit = &plan.persistent_plan.as_ref().unwrap().edits[0];
+        fs::create_dir_all(edit.path.parent().unwrap()).unwrap();
+        fs::write(&edit.path, edit.after_preview.as_bytes()).unwrap();
+
+        let sources = backend.discover_sources(&ctx).unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let snapshot = crate::permissions::ConfiguredPolicySnapshot::from_parts(
+            Provider::Claude,
+            native,
+            canonical,
+            &ctx,
+        );
+
+        assert!(
+            snapshot
+                .can_write(ctx.repo_root.as_ref().unwrap().join("src/main.rs"))
+                .is_allowed()
+        );
+        assert!(edit.path.ends_with(".claude/settings.local.json"));
     }
 }

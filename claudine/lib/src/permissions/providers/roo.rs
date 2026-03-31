@@ -1026,11 +1026,8 @@ customModes:
         let layers = backend.load_native_layers(&ctx, &sources).unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
         let canonical = backend.canonicalize(&ctx, &native).unwrap();
-        let snapshot = ConfiguredPolicySnapshot {
-            provider: Provider::RooCode,
-            native,
-            canonical,
-        };
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::RooCode, native, canonical, &ctx);
 
         assert!(
             snapshot
@@ -1085,11 +1082,8 @@ customModes:
             )
             .unwrap();
         let canonical = backend.canonicalize(&ctx, &native).unwrap();
-        let snapshot = ConfiguredPolicySnapshot {
-            provider: Provider::RooCode,
-            native,
-            canonical,
-        };
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::RooCode, native, canonical, &ctx);
 
         assert!(snapshot.can_read(ctx.cwd.join("README.md")).is_ask());
         assert!(snapshot.can_write(ctx.cwd.join("README.md")).is_denied());

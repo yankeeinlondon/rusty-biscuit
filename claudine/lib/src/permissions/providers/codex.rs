@@ -9,8 +9,8 @@ use crate::events::Provider;
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CanonicalSandboxMode,
-    CommandAccessRule, DomainAccessRule, MappingFidelity, PathAccessRule, PathProtectionRule,
-    PolicyEffect, PolicyMode, PolicyWarning, TernaryState,
+    CommandAccessRule, DomainAccessRule, MappingFidelity, McpServerRule, McpToolRule,
+    PathAccessRule, PathProtectionRule, PolicyEffect, PolicyMode, PolicyWarning, TernaryState,
 };
 use crate::permissions::change::{
     CommandPattern, PolicyChange, PolicyChangeOp, PolicyChangeTarget, PolicyPersistence,
@@ -31,6 +31,13 @@ struct CodexProfile {
 }
 
 #[derive(Debug, Clone, Default)]
+struct CodexMcpServer {
+    enabled: Option<bool>,
+    enabled_tools: Vec<String>,
+    disabled_tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
 struct CodexConfig {
     sandbox_mode: Option<String>,
     approval_policy: Option<String>,
@@ -38,6 +45,7 @@ struct CodexConfig {
     network_access: Option<bool>,
     default_permissions: Option<String>,
     permissions_profiles: BTreeMap<String, CodexProfile>,
+    mcp_servers: BTreeMap<String, CodexMcpServer>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -68,7 +76,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
             filesystem_queries: true,
             command_queries: true,
             network_queries: true,
-            mcp_queries: false,
+            mcp_queries: true,
             agent_queries: false,
             persistent_mutations: true,
             one_shot_mutations: true,
@@ -91,7 +99,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
             }
         }
 
-        if ctx.trust.is_trusted != Some(false)
+        if ctx.trust.is_trusted == Some(true)
             && let Some(repo_root) = &ctx.repo_root
         {
             let path = repo_root.join(".codex/config.toml");
@@ -306,6 +314,7 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
         } else {
             TernaryState::No
         };
+        policy.axes.runtime.project_trust_required = TernaryState::Yes;
 
         policy.axes.filesystem.read_rules.push(PathAccessRule {
             pattern: "*".to_owned(),
@@ -465,7 +474,75 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
             };
         }
 
-        if ctx.trust.is_trusted.is_none() && ctx.repo_root.is_some() {
+        for (source, config) in &state.layers {
+            for (server, server_config) in &config.mcp_servers {
+                let server_enabled = server_config.enabled.unwrap_or(true);
+                policy.axes.mcp.server_rules.push(McpServerRule {
+                    server_id: server.clone(),
+                    effect: if server_enabled {
+                        PolicyEffect::Allow
+                    } else {
+                        PolicyEffect::Deny
+                    },
+                    provenance: CanonicalRuleProvenance::exact(
+                        source.id.clone(),
+                        format!("mcp_servers.{server}.enabled"),
+                    ),
+                });
+
+                if !server_enabled {
+                    policy.axes.mcp.tool_rules.push(McpToolRule {
+                        server_id: server.clone(),
+                        tool_name: "*".to_owned(),
+                        effect: PolicyEffect::Deny,
+                        provenance: CanonicalRuleProvenance::exact(
+                            source.id.clone(),
+                            format!("mcp_servers.{server}.enabled"),
+                        ),
+                    });
+                    continue;
+                }
+
+                for tool in &server_config.disabled_tools {
+                    policy.axes.mcp.tool_rules.push(McpToolRule {
+                        server_id: server.clone(),
+                        tool_name: tool.clone(),
+                        effect: PolicyEffect::Deny,
+                        provenance: CanonicalRuleProvenance::exact(
+                            source.id.clone(),
+                            format!("mcp_servers.{server}.disabled_tools"),
+                        ),
+                    });
+                }
+                for tool in &server_config.enabled_tools {
+                    policy.axes.mcp.tool_rules.push(McpToolRule {
+                        server_id: server.clone(),
+                        tool_name: tool.clone(),
+                        effect: PolicyEffect::Allow,
+                        provenance: CanonicalRuleProvenance::exact(
+                            source.id.clone(),
+                            format!("mcp_servers.{server}.enabled_tools"),
+                        ),
+                    });
+                }
+                policy.axes.mcp.tool_rules.push(McpToolRule {
+                    server_id: server.clone(),
+                    tool_name: "*".to_owned(),
+                    effect: if server_config.enabled_tools.is_empty() {
+                        PolicyEffect::Allow
+                    } else {
+                        PolicyEffect::Deny
+                    },
+                    provenance: CanonicalRuleProvenance::approximate(
+                        source.id.clone(),
+                        format!("mcp_servers.{server}"),
+                        "Codex server-level MCP policy is modeled from enabled state and tool filters.",
+                    ),
+                });
+            }
+        }
+
+        if ctx.trust.is_trusted.is_none() && repo_config_exists(ctx) {
             policy.warnings.push(PolicyWarning {
                 code: "codex.trust_unknown".to_owned(),
                 message: "Repo-scoped Codex config is trust-gated and trust was not supplied."
@@ -507,6 +584,40 @@ impl ProviderPolicyBackend for CodexPolicyBackend {
                 }
                 PolicyChangeOp::SetSandboxMode(mode) => {
                     doc["sandbox_mode"] = value(map_sandbox_mode(mode));
+                }
+                PolicyChangeOp::AllowMcpServer(server) => {
+                    set_toml_bool(&mut doc, &format!("mcp_servers.{server}"), "enabled", true);
+                }
+                PolicyChangeOp::DenyMcpServer(server) => {
+                    set_toml_bool(&mut doc, &format!("mcp_servers.{server}"), "enabled", false);
+                }
+                PolicyChangeOp::AllowMcpTool { server, tool } => {
+                    push_toml_array_string(
+                        &mut doc,
+                        &format!("mcp_servers.{server}"),
+                        "enabled_tools",
+                        tool,
+                    );
+                    remove_toml_array_string(
+                        &mut doc,
+                        &format!("mcp_servers.{server}"),
+                        "disabled_tools",
+                        tool,
+                    );
+                }
+                PolicyChangeOp::DenyMcpTool { server, tool } => {
+                    push_toml_array_string(
+                        &mut doc,
+                        &format!("mcp_servers.{server}"),
+                        "disabled_tools",
+                        tool,
+                    );
+                    remove_toml_array_string(
+                        &mut doc,
+                        &format!("mcp_servers.{server}"),
+                        "enabled_tools",
+                        tool,
+                    );
                 }
                 PolicyChangeOp::AllowCommand(CommandPattern { raw })
                 | PolicyChangeOp::RequireApprovalForCommand(CommandPattern { raw })
@@ -602,6 +713,7 @@ fn parse_codex_config(doc: &DocumentMut) -> CodexConfig {
             .and_then(Item::as_str)
             .map(str::to_owned),
         permissions_profiles: BTreeMap::new(),
+        mcp_servers: BTreeMap::new(),
     };
 
     if let Some(permissions) = doc.get("permissions").and_then(Item::as_table_like) {
@@ -620,6 +732,21 @@ fn parse_codex_config(doc: &DocumentMut) -> CodexConfig {
                     ),
                 };
                 config.permissions_profiles.insert(name.to_owned(), profile);
+            }
+        }
+    }
+
+    if let Some(mcp_servers) = doc.get("mcp_servers").and_then(Item::as_table_like) {
+        for (name, item) in mcp_servers.iter() {
+            if let Some(table) = item.as_table_like() {
+                config.mcp_servers.insert(
+                    name.to_owned(),
+                    CodexMcpServer {
+                        enabled: table.get("enabled").and_then(Item::as_bool),
+                        enabled_tools: string_array(table.get("enabled_tools")),
+                        disabled_tools: string_array(table.get("disabled_tools")),
+                    },
+                );
             }
         }
     }
@@ -771,6 +898,14 @@ fn build_one_shot_plan(change: &PolicyChange) -> Option<OneShotMutationPlan> {
                 argv.push("--sandbox".to_owned());
                 argv.push(map_sandbox_mode(mode).to_owned());
             }
+            PolicyChangeOp::AllowMcpServer(server) => {
+                argv.push("-c".to_owned());
+                argv.push(format!("mcp_servers.{server}.enabled=true"));
+            }
+            PolicyChangeOp::DenyMcpServer(server) => {
+                argv.push("-c".to_owned());
+                argv.push(format!("mcp_servers.{server}.enabled=false"));
+            }
             _ => {}
         }
     }
@@ -806,10 +941,7 @@ fn push_toml_array_string(
     array_key: &str,
     value_to_add: &str,
 ) {
-    if doc.get(table_key).is_none() || !doc[table_key].is_table() {
-        doc[table_key] = Item::Table(Default::default());
-    }
-    let table = doc[table_key].as_table_mut().expect("table");
+    let table = ensure_toml_table_path(doc, table_key);
     if table.get(array_key).is_none() || !table[array_key].is_array() {
         table[array_key] = value(Array::default());
     }
@@ -820,6 +952,54 @@ fn push_toml_array_string(
     {
         array.push(value_to_add);
     }
+}
+
+fn remove_toml_array_string(
+    doc: &mut DocumentMut,
+    table_key: &str,
+    array_key: &str,
+    value_to_remove: &str,
+) {
+    let table = ensure_toml_table_path(doc, table_key);
+    if let Some(array) = table.get_mut(array_key).and_then(Item::as_array_mut) {
+        let retained = array
+            .iter()
+            .filter_map(|entry| entry.as_str())
+            .filter(|entry| *entry != value_to_remove)
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let mut next = Array::default();
+        for entry in retained {
+            next.push(entry);
+        }
+        table[array_key] = value(next);
+    }
+}
+
+fn set_toml_bool(doc: &mut DocumentMut, table_key: &str, value_key: &str, enabled: bool) {
+    let table = ensure_toml_table_path(doc, table_key);
+    table[value_key] = value(enabled);
+}
+
+fn ensure_toml_table_path<'a>(
+    doc: &'a mut DocumentMut,
+    table_key: &str,
+) -> &'a mut toml_edit::Table {
+    let mut current = doc.as_table_mut();
+    for segment in table_key.split('.') {
+        if current.get(segment).is_none() || !current[segment].is_table() {
+            current[segment] = Item::Table(Default::default());
+        }
+        current = current[segment].as_table_mut().expect("table");
+    }
+    current
+}
+
+fn repo_config_exists(ctx: &PolicyContext) -> bool {
+    ctx.repo_root
+        .as_ref()
+        .map(|root| root.join(".codex/config.toml").exists())
+        .unwrap_or(false)
 }
 
 fn first_source_id(native: &NativeEffectivePolicy) -> String {
@@ -882,11 +1062,8 @@ network_access = false
         let layers = backend.load_native_layers(&ctx, &sources).unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
         let canonical = backend.canonicalize(&ctx, &native).unwrap();
-        let snapshot = ConfiguredPolicySnapshot {
-            provider: Provider::Codex,
-            native,
-            canonical,
-        };
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
 
         assert!(
             snapshot
@@ -947,11 +1124,8 @@ network_access = false
             .compose_native_policy(&ctx, &layers, Some(&cli))
             .unwrap();
         let canonical = backend.canonicalize(&ctx, &native).unwrap();
-        let snapshot = ConfiguredPolicySnapshot {
-            provider: Provider::Codex,
-            native,
-            canonical,
-        };
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
 
         assert_eq!(
             snapshot.canonical.axes.runtime.sandbox_mode,
@@ -967,5 +1141,127 @@ network_access = false
                 .is_allowed()
         );
         assert!(snapshot.can_write("/etc/hosts").is_ask());
+    }
+
+    #[test]
+    fn codex_unknown_trust_skips_repo_config_and_degrades_query_answers() {
+        let (_dir, mut ctx) = setup_ctx();
+        ctx.trust.is_trusted = None;
+        ctx.trust.source = crate::permissions::TrustSource::Unknown;
+
+        fs::write(
+            ctx.repo_root
+                .as_ref()
+                .unwrap()
+                .join(".codex/config.toml"),
+            r#"
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            ctx.home_dir
+                .as_ref()
+                .unwrap()
+                .join(".codex/config.toml"),
+            r#"
+sandbox_mode = "read-only"
+approval_policy = "on-request"
+"#,
+        )
+        .unwrap();
+
+        let backend = CodexPolicyBackend;
+        let sources = backend.discover_sources(&ctx).unwrap();
+
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].id, "codex-user");
+
+        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
+        let result = snapshot.can_write("src/main.rs");
+
+        assert!(result.is_unknown());
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.code == "codex.trust_unknown")
+        );
+    }
+
+    #[test]
+    fn codex_backend_queries_mcp_controls() {
+        let (_dir, ctx) = setup_ctx();
+        fs::write(
+            ctx.repo_root.as_ref().unwrap().join(".codex/config.toml"),
+            r#"
+[mcp_servers.filesystem]
+enabled = true
+disabled_tools = ["delete_file"]
+
+[mcp_servers.github]
+enabled = false
+
+[mcp_servers.browser]
+enabled = true
+enabled_tools = ["navigate"]
+"#,
+        )
+        .unwrap();
+
+        let backend = CodexPolicyBackend;
+        let sources = backend.discover_sources(&ctx).unwrap();
+        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::Codex, native, canonical, &ctx);
+
+        assert!(snapshot.can_use_mcp_server("filesystem").is_allowed());
+        assert!(snapshot.can_use_mcp_tool("filesystem", "read_file").is_allowed());
+        assert!(snapshot.can_use_mcp_tool("filesystem", "delete_file").is_denied());
+        assert!(snapshot.can_use_mcp_server("github").is_denied());
+        assert!(snapshot.can_use_mcp_tool("browser", "navigate").is_allowed());
+        assert!(snapshot.can_use_mcp_tool("browser", "click").is_denied());
+    }
+
+    #[test]
+    fn codex_mcp_mutation_plan_updates_config_and_one_shot_args() {
+        let (_dir, ctx) = setup_ctx();
+        let backend = CodexPolicyBackend;
+        let current = NativeEffectivePolicy::new(
+            Provider::Codex,
+            Vec::new(),
+            CodexState {
+                layers: Vec::new(),
+                cli: CodexCliOverrides::default(),
+            },
+        );
+        let change = PolicyChange::persistent(vec![
+            PolicyChangeOp::DenyMcpServer("github".to_owned()),
+            PolicyChangeOp::AllowMcpTool {
+                server: "filesystem".to_owned(),
+                tool: "read_file".to_owned(),
+            },
+        ]);
+
+        let plan = backend.plan_change(&ctx, &current, &change).unwrap();
+        let edit = &plan.persistent_plan.as_ref().unwrap().edits[0];
+
+        assert!(edit.after_preview.contains("github"));
+        assert!(edit.after_preview.contains("enabled = false"));
+        assert!(edit.after_preview.contains("read_file"));
+        assert!(
+            plan.one_shot_plan
+                .as_ref()
+                .unwrap()
+                .argv
+                .contains(&"mcp_servers.github.enabled=false".to_owned())
+        );
     }
 }

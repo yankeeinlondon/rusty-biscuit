@@ -145,7 +145,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
             }
         }
 
-        if ctx.trust.is_trusted != Some(false)
+        if ctx.trust.is_trusted == Some(true)
             && let Some(repo_root) = &ctx.repo_root
         {
             let settings = repo_root.join(".gemini/settings.json");
@@ -398,6 +398,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
         } else {
             TernaryState::No
         };
+        policy.axes.runtime.project_trust_required = TernaryState::Yes;
 
         for (source, layer) in &state.layers {
             if let Some(settings) = &layer.settings {
@@ -508,7 +509,7 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
             ),
         });
 
-        if ctx.trust.is_trusted.is_none() && ctx.repo_root.is_some() {
+        if ctx.trust.is_trusted.is_none() && repo_policy_exists(ctx) {
             policy.warnings.push(PolicyWarning {
                 code: "gemini.trust_unknown".to_owned(),
                 message: "Gemini repo settings are trust-gated and trust was not supplied."
@@ -859,6 +860,27 @@ fn has_cli(cli: &GeminiCliOverrides) -> bool {
     cli.approval_mode.is_some() || cli.sandbox.is_some() || !cli.allowed_tools.is_empty()
 }
 
+fn repo_policy_exists(ctx: &PolicyContext) -> bool {
+    let Some(repo_root) = &ctx.repo_root else {
+        return false;
+    };
+
+    let settings = repo_root.join(".gemini/settings.json");
+    if settings.exists() {
+        return true;
+    }
+
+    let policy_dir = repo_root.join(".gemini/policies");
+    policy_dir.exists()
+        && fs::read_dir(policy_dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .any(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("toml"))
+            })
+            .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -923,11 +945,8 @@ priority = 100
         let layers = backend.load_native_layers(&ctx, &sources).unwrap();
         let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
         let canonical = backend.canonicalize(&ctx, &native).unwrap();
-        let snapshot = ConfiguredPolicySnapshot {
-            provider: Provider::Gemini,
-            native,
-            canonical,
-        };
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
 
         assert!(
             snapshot
@@ -964,6 +983,57 @@ priority = 100
                 .unwrap()
                 .argv
                 .contains(&"--approval-mode".to_owned())
+        );
+    }
+
+    #[test]
+    fn gemini_unknown_trust_skips_repo_sources_and_queries_are_unknown() {
+        let (_dir, mut ctx) = setup_ctx();
+        ctx.trust.is_trusted = None;
+        ctx.trust.source = crate::permissions::TrustSource::Unknown;
+
+        fs::write(
+            ctx.repo_root
+                .as_ref()
+                .unwrap()
+                .join(".gemini/settings.json"),
+            serde_json::to_string_pretty(&json!({
+                "general": { "defaultApprovalMode": "yolo" }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            ctx.home_dir
+                .as_ref()
+                .unwrap()
+                .join(".gemini/settings.json"),
+            serde_json::to_string_pretty(&json!({
+                "general": { "defaultApprovalMode": "default" }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let backend = GeminiPolicyBackend;
+        let sources = backend.discover_sources(&ctx).unwrap();
+
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].id, "gemini-user-settings");
+
+        let layers = backend.load_native_layers(&ctx, &sources).unwrap();
+        let native = backend.compose_native_policy(&ctx, &layers, None).unwrap();
+        let canonical = backend.canonicalize(&ctx, &native).unwrap();
+        let snapshot =
+            ConfiguredPolicySnapshot::from_parts(Provider::Gemini, native, canonical, &ctx);
+        let result = snapshot.can_write("src/main.rs");
+
+        assert!(result.is_unknown());
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.code == "gemini.trust_unknown")
         );
     }
 }
