@@ -5,7 +5,9 @@
 //! returns the rewritten string. Supports both markdown-aware scanning
 //! (skipping code regions) and plain-text scanning.
 
-use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, InterpolationLookup, parse};
+use super::{
+    EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, InterpolationLookup, parse,
+};
 use crate::markdown::compose::types::ComposeWarning;
 use crate::markdown::types::MarkdownError;
 
@@ -69,10 +71,8 @@ pub(crate) fn interpolate_text<L: InterpolationLookup>(
                 EvalResult::Value(replacement) => {
                     // Inherit line indentation for multiline replacements
                     let replacement = if replacement.contains('\n') {
-                        let line_start = output[..loc.start]
-                            .rfind('\n')
-                            .map(|i| i + 1)
-                            .unwrap_or(0);
+                        let line_start =
+                            output[..loc.start].rfind('\n').map(|i| i + 1).unwrap_or(0);
                         let indent: String = output[line_start..loc.start]
                             .chars()
                             .take_while(|c| c.is_whitespace())
@@ -148,8 +148,7 @@ mod tests {
         let state = make_state(json!({"name": "Alice"}));
         let evaluator = Evaluator::new(&state);
         let result =
-            interpolate_text("`{{ name }}`", &evaluator, ScanMode::Plain, false, "test")
-                .unwrap();
+            interpolate_text("`{{ name }}`", &evaluator, ScanMode::Plain, false, "test").unwrap();
         assert_eq!(result.output, "`Alice`");
         assert_eq!(result.replacements, 1);
     }
@@ -191,13 +190,7 @@ mod tests {
         let state = make_state(json!({}));
         let evaluator = Evaluator::new(&state);
         // An unparseable expression
-        let result = interpolate_text(
-            "{{ > invalid }}",
-            &evaluator,
-            ScanMode::Plain,
-            true,
-            "test",
-        );
+        let result = interpolate_text("{{ > invalid }}", &evaluator, ScanMode::Plain, true, "test");
         assert!(result.is_err());
     }
 
@@ -223,9 +216,14 @@ mod tests {
     fn no_expressions_returns_input_unchanged() {
         let state = make_state(json!({}));
         let evaluator = Evaluator::new(&state);
-        let result =
-            interpolate_text("no expressions here", &evaluator, ScanMode::Plain, false, "test")
-                .unwrap();
+        let result = interpolate_text(
+            "no expressions here",
+            &evaluator,
+            ScanMode::Plain,
+            false,
+            "test",
+        )
+        .unwrap();
         assert_eq!(result.output, "no expressions here");
         assert_eq!(result.replacements, 0);
         assert!(result.warnings.is_empty());

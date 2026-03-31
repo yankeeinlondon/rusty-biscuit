@@ -299,9 +299,8 @@ impl Markdown {
             // just top-level keys. Frontmatter values take precedence.
             if let Some(external) = options.external_state.as_ref() {
                 let fm = self.frontmatter_mut().as_map_mut();
-                let current = Value::Object(
-                    fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
-                );
+                let current =
+                    Value::Object(fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
                 let merged = state::deep_merge(external, &current);
                 if let Value::Object(map) = merged {
                     *fm = map.into_iter().collect();
@@ -3336,27 +3335,28 @@ Rounded: {{ round(pi) }}"#;
         let content = "---\nbase: /path/to/something\nspec: \"{{base}}/spec.md\"\nplan: \"{{base}}/plan.md\"\n---\nThe spec is located at: {{spec}}\nThe plan is located at: {{plan}}";
         let md: Markdown = content.into();
         let (composed, report) = md
-            .compose_with(
-                ComposeOptions::new().only(&[
-                    ComposeOperation::FrontmatterInterpolation,
-                    ComposeOperation::Interpolation,
-                ]),
-            )
+            .compose_with(ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]))
             .unwrap();
 
         assert_eq!(report.frontmatter_interpolations_applied, 2);
-        assert!(composed
-            .content()
-            .contains("The spec is located at: /path/to/something/spec.md"));
-        assert!(composed
-            .content()
-            .contains("The plan is located at: /path/to/something/plan.md"));
+        assert!(
+            composed
+                .content()
+                .contains("The spec is located at: /path/to/something/spec.md")
+        );
+        assert!(
+            composed
+                .content()
+                .contains("The plan is located at: /path/to/something/plan.md")
+        );
     }
 
     #[test]
     fn test_frontmatter_interpolation_with_set_overrides() {
-        let content =
-            "---\nbase: /original\nspec: \"{{base}}/spec.md\"\n---\nSpec: {{spec}}";
+        let content = "---\nbase: /original\nspec: \"{{base}}/spec.md\"\n---\nSpec: {{spec}}";
         let md: Markdown = content.into();
         let (composed, report) = md
             .compose_with(
@@ -3378,10 +3378,7 @@ Rounded: {{ round(pi) }}"#;
         let content = "---\nbase: /root\npaths:\n  - \"{{base}}/a\"\n  - \"{{base}}/b\"\nmeta:\n  home: \"{{base}}/home\"\n---\n";
         let md: Markdown = content.into();
         let (_, report) = md
-            .compose_with(
-                ComposeOptions::new()
-                    .only(&[ComposeOperation::FrontmatterInterpolation]),
-            )
+            .compose_with(ComposeOptions::new().only(&[ComposeOperation::FrontmatterInterpolation]))
             .unwrap();
 
         assert!(report.frontmatter_interpolations_applied >= 3);
@@ -3406,16 +3403,13 @@ Rounded: {{ round(pi) }}"#;
 
     #[test]
     fn test_frontmatter_interpolation_body_still_skips_code() {
-        let content =
-            "---\nname: World\n---\nHello {{ name }}! Code: `{{ name }}`";
+        let content = "---\nname: World\n---\nHello {{ name }}! Code: `{{ name }}`";
         let md: Markdown = content.into();
         let (composed, _) = md
-            .compose_with(
-                ComposeOptions::new().only(&[
-                    ComposeOperation::FrontmatterInterpolation,
-                    ComposeOperation::Interpolation,
-                ]),
-            )
+            .compose_with(ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]))
             .unwrap();
 
         assert!(composed.content().contains("Hello World!"));
@@ -3427,12 +3421,10 @@ Rounded: {{ round(pi) }}"#;
         let content = "---\nbase: /path\nspec: \"{{base}}/spec.md\"\n---\nHello {{ spec }}!";
         let md: Markdown = content.into();
         let (_, report) = md
-            .compose_with(
-                ComposeOptions::new().only(&[
-                    ComposeOperation::FrontmatterInterpolation,
-                    ComposeOperation::Interpolation,
-                ]),
-            )
+            .compose_with(ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]))
             .unwrap();
 
         assert_eq!(report.frontmatter_interpolations_applied, 1);
@@ -3485,7 +3477,11 @@ Rounded: {{ round(pi) }}"#;
         );
         // frontmatter author should win over external
         assert_eq!(
-            composed.frontmatter().as_map().get("meta").and_then(|v| v.get("author")),
+            composed
+                .frontmatter()
+                .as_map()
+                .get("meta")
+                .and_then(|v| v.get("author")),
             Some(&serde_json::json!("Local"))
         );
         assert!(report.frontmatter_interpolations_applied >= 1);
@@ -3494,7 +3490,8 @@ Rounded: {{ round(pi) }}"#;
     #[test]
     fn test_external_state_deep_merge_preserves_frontmatter_values() {
         // Both frontmatter and external have nested objects; frontmatter wins on conflict.
-        let content = "---\nconfig:\n  theme: dark\n---\ntheme={{config.theme}} lang={{config.lang}}";
+        let content =
+            "---\nconfig:\n  theme: dark\n---\ntheme={{config.theme}} lang={{config.lang}}";
         let md: Markdown = content.into();
         let (composed, _) = md
             .compose_with(
@@ -3526,11 +3523,7 @@ Rounded: {{ round(pi) }}"#;
         let root = dir.path().join("root.md");
         let child = dir.path().join("child.md");
 
-        std::fs::write(
-            &root,
-            "---\nbase: /docs\n---\n::file ./child.md",
-        )
-        .unwrap();
+        std::fs::write(&root, "---\nbase: /docs\n---\n::file ./child.md").unwrap();
         std::fs::write(
             &child,
             "---\nspec: \"{{base}}/spec.md\"\n---\nSpec: {{spec}}",

@@ -201,8 +201,7 @@ pub(crate) fn interpolate_frontmatter(
     let fm_mut = frontmatter.as_map_mut();
     for key in &templated_keys {
         if let Some(value) = fm_mut.get(key).cloned() {
-            let (new_value, count, mut warnings) =
-                rewrite_value(&value, &evaluator, fail_fast)?;
+            let (new_value, count, mut warnings) = rewrite_value(&value, &evaluator, fail_fast)?;
 
             // Add key context to warnings
             for w in &mut warnings {
@@ -358,8 +357,7 @@ mod tests {
                 "spec": "{{base}}/spec.md",
                 "plan": "{{base}}/plan.md"
             }));
-            let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
             assert_eq!(report.replacements, 2);
             assert_eq!(
                 fm.as_map().get("spec"),
@@ -370,10 +368,7 @@ mod tests {
                 Some(&json!("/path/to/something/plan.md"))
             );
             // base is unchanged
-            assert_eq!(
-                fm.as_map().get("base"),
-                Some(&json!("/path/to/something"))
-            );
+            assert_eq!(fm.as_map().get("base"), Some(&json!("/path/to/something")));
         }
 
         #[test]
@@ -382,8 +377,7 @@ mod tests {
                 "title": "Hello",
                 "count": 42
             }));
-            let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
             assert_eq!(report.replacements, 0);
         }
 
@@ -396,8 +390,7 @@ mod tests {
                     "owner": "Alice"
                 }
             }));
-            let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
             assert_eq!(report.replacements, 1);
             let meta = fm.as_map().get("metadata").unwrap();
             assert_eq!(meta.get("home"), Some(&json!("/docs/home")));
@@ -410,8 +403,7 @@ mod tests {
                 "base": "/root",
                 "paths": ["{{base}}/a", "{{base}}/b"]
             }));
-            let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
             assert_eq!(report.replacements, 2);
             let paths = fm.as_map().get("paths").unwrap().as_array().unwrap();
             assert_eq!(paths[0], json!("/root/a"));
@@ -423,8 +415,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "spec": "{{missing}}/spec.md"
             }));
-            let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
             assert_eq!(report.replacements, 1);
             assert_eq!(fm.as_map().get("spec"), Some(&json!("/spec.md")));
         }
@@ -434,8 +425,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "date": "{{ctx.today}}"
             }));
-            let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
             assert_eq!(report.replacements, 1);
             assert_eq!(fm.as_map().get("date"), Some(&json!("2024-06-15")));
         }
@@ -449,13 +439,9 @@ mod tests {
                 "spec": "{{base}}/spec.md",
                 "plan": "{{spec}}.plan.md"
             }));
-            let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
             // base resolved in spec and plan, but spec itself is not available as seed
-            assert_eq!(
-                fm.as_map().get("spec"),
-                Some(&json!("/root/spec.md"))
-            );
+            assert_eq!(fm.as_map().get("spec"), Some(&json!("/root/spec.md")));
             // plan resolves {{spec}} to empty string since spec is templated
             assert_eq!(fm.as_map().get("plan"), Some(&json!(".plan.md")));
             assert!(report.replacements >= 2);
@@ -475,8 +461,7 @@ mod tests {
             let mut fm = fm_from_json(json!({
                 "bad": "{{ > invalid }}"
             }));
-            let report =
-                interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
+            let report = interpolate_frontmatter(&mut fm, &test_context(), false).unwrap();
             assert!(!report.warnings.is_empty());
         }
     }
