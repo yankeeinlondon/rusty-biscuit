@@ -495,15 +495,16 @@ pub(crate) fn execute_composition_request(
     let env_detect_root = effective_repo_root.unwrap_or(&cwd);
     let env_context = claudine::events::detect_environment_fast(env_detect_root);
 
-    if !silent {
-        // Env details: suppressed by --quiet; for non-interactive compose
-        // only shown with --verbose.
-        if !quiet && (request.session_interactive || verbose_requested) {
+    if !silent && !quiet {
+        // Env details (consistent with direct-wrap: shown unless --quiet)
+        if request.session_interactive || verbose_requested {
             crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
-        // Composed prompt block: always shown unless --silent.
         crate::output::log_compose_prompt(&request.prepared.prompt, verbose_requested, &term);
+
+        // Blank line to separate preamble from execution output
+        crate::log::message("");
     }
 
     // -- Execution --------------------------------------------------------
