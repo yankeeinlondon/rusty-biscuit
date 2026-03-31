@@ -12,7 +12,7 @@
 
 - When committing agent/skill files in `.claude/`, use `docs(<area>)` as the prefix for documentation restructuring changes
 
-- Subagents may see a different set of staged files than what the user specifies in the prompt (due to concurrent work or a filtered list). When this happens, simply stage only the files assigned without resetting or unstaging anything. Never use `git reset *` and never try to "fix" staged files by unstaging and restaging groups
+- Subagents may see a different set of staged files than what the user specifies in the prompt (due to concurrent work or a filtered list). When this happens, verify with `git status` and if more files are staged than assigned, use `git reset HEAD` to unstage everything, then `git add` only the assigned files. This is the only way to commit only specific files when other unrelated files are also staged. Never use `git reset *` (with a glob) as that can corrupt staged state.
 
 - When multiple related files are staged together (e.g., a directory rename like `transform/` → `compose/`), git commits them as an atomic unit. In such cases, subagents will not be able to split them into separate granular commits even if semantically distinct groups were planned - the files must be committed together as they were staged
 
