@@ -188,11 +188,7 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                 (&raw mut device_id).cast(),
             );
 
-            if status != 0 {
-                0
-            } else {
-                device_id
-            }
+            if status != 0 { 0 } else { device_id }
         }
     };
 
@@ -339,11 +335,7 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                 (&raw mut rate).cast(),
             );
 
-            if status != 0 {
-                0.0
-            } else {
-                rate
-            }
+            if status != 0 { 0.0 } else { rate }
         }
     };
 
@@ -396,9 +388,7 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                     if (r.mMinimum - r.mMaximum).abs() < 0.01 {
                         vec![r.mMinimum]
                     } else {
-                        vec![
-                            r.mMinimum, r.mMaximum,
-                        ]
+                        vec![r.mMinimum, r.mMaximum]
                     }
                 })
                 .collect();
@@ -528,9 +518,7 @@ mod tests {
             is_default_input: false,
             is_default_output: true,
             sample_rate: 48000.0,
-            available_sample_rates: vec![
-                44100.0, 48000.0, 96000.0,
-            ],
+            available_sample_rates: vec![44100.0, 48000.0, 96000.0],
             input_channels: 0,
             output_channels: 2,
         };
@@ -547,9 +535,7 @@ mod tests {
         assert_eq!(deserialized.sample_rate, 48000.0);
         assert_eq!(
             deserialized.available_sample_rates,
-            vec![
-                44100.0, 48000.0, 96000.0
-            ]
+            vec![44100.0, 48000.0, 96000.0]
         );
         assert_eq!(deserialized.input_channels, 0);
         assert_eq!(deserialized.output_channels, 2);
@@ -578,6 +564,9 @@ mod tests {
         }
 
         let has_default_output = devices.iter().any(|d| d.is_default_output);
-        assert!(has_default_output, "Expected a default output device on macOS");
+        assert!(
+            has_default_output,
+            "Expected a default output device on macOS"
+        );
     }
 }

@@ -355,9 +355,18 @@ mod tests {
         assert_eq!(infer_vendor("Apple M1 Pro"), Some("Apple".to_string()));
         assert_eq!(infer_vendor("M2 Max"), Some("Apple".to_string()));
         assert_eq!(infer_vendor("M4 Max"), Some("Apple".to_string()));
-        assert_eq!(infer_vendor("NVIDIA GeForce RTX 3080"), Some("NVIDIA".to_string()));
-        assert_eq!(infer_vendor("AMD Radeon Pro 5500M"), Some("AMD".to_string()));
-        assert_eq!(infer_vendor("Intel UHD Graphics 630"), Some("Intel".to_string()));
+        assert_eq!(
+            infer_vendor("NVIDIA GeForce RTX 3080"),
+            Some("NVIDIA".to_string())
+        );
+        assert_eq!(
+            infer_vendor("AMD Radeon Pro 5500M"),
+            Some("AMD".to_string())
+        );
+        assert_eq!(
+            infer_vendor("Intel UHD Graphics 630"),
+            Some("Intel".to_string())
+        );
         assert_eq!(infer_vendor("Unknown GPU"), None);
     }
 
