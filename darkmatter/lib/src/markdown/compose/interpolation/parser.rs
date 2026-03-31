@@ -446,6 +446,19 @@ mod tests {
                 _ => panic!("Expected Fallback"),
             }
         }
+
+        #[test]
+        fn parses_double_pipe_as_fallback() {
+            // || is treated as equivalent to | (fallback operator)
+            let expr = parse(r#"plan || "plan.md""#).unwrap();
+            match expr {
+                Expr::Fallback { primary, fallback } => {
+                    assert!(matches!(*primary, Expr::Variable(ref n) if n == "plan"));
+                    assert!(matches!(*fallback, Expr::StringLiteral(ref s) if s == "plan.md"));
+                }
+                _ => panic!("Expected Fallback"),
+            }
+        }
     }
 
     mod ternary_expressions {
