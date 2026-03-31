@@ -96,6 +96,8 @@ pub(crate) enum HarnessPromptMode {
 pub(crate) struct HarnessPromptState {
     pub(crate) mode: HarnessPromptMode,
     pub(crate) source_path: PathBuf,
+    /// The original file reference string (for reporting).
+    pub(crate) original_ref: String,
     pub(crate) base_prompt: Option<String>,
     pub(crate) overlay: indexmap::IndexMap<String, serde_json::Value>,
     pub(crate) prompt_tail: Vec<String>,
@@ -1010,6 +1012,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
     let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
 
+    profile.apply_project_dir(&mut child_args, child_cwd);
+
     // --dry-run: print what would be executed and exit
     if args.dry_run {
         crate::output::log_dry_run(
@@ -1147,6 +1151,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     {
         let mut prompt_state = HarnessPromptState {
             mode: HarnessPromptMode::Passthrough,
+            original_ref: source_path.display().to_string(),
             source_path,
             base_prompt: Some(base_prompt),
             overlay: indexmap::IndexMap::new(),
@@ -1910,6 +1915,9 @@ fn apply_next_attempt_plan(state: &mut HarnessPromptState, plan: &NextAttemptPla
     }
     if let Some(ref path) = plan.redirect_source {
         state.source_path = path.clone();
+        // Update the reporting reference so status output reflects the
+        // redirected file rather than the original.
+        state.original_ref = path.display().to_string();
     }
     if let Some(ref overlay) = plan.set_overlay {
         merge_frontmatter_overlay(&mut state.overlay, overlay);
@@ -1921,6 +1929,62 @@ fn apply_next_attempt_plan(state: &mut HarnessPromptState, plan: &NextAttemptPla
         state.next_prompt_override = Some(prompt.clone());
     }
     state.next_resume_session_id = plan.resume_session_id.clone();
+}
+
+/// Try to resolve a handler for each failure context and build a recovery
+/// plan. Returns `Some(plan)` on the first successful resolution, or `None`
+/// if no handler produced an actionable plan.
+///
+/// The handler-engagement banner is emitted exactly once, only after a
+/// concrete `NextAttemptPlan` has been produced.
+#[allow(clippy::too_many_arguments)]
+fn try_resolve_handler(
+    contexts: &[claudine::harness::FailureContext],
+    plan: &claudine::harness::HarnessPlan,
+    attempt: u32,
+    default_max_retries: u32,
+    profile: &dyn WrapperProfile,
+    session_id: Option<&str>,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    show_checks: bool,
+    term: &Terminal,
+) -> Result<Option<NextAttemptPlan>> {
+    for failure_ctx in contexts {
+        match claudine::harness::resolve_handler(
+            failure_ctx,
+            &plan.handlers,
+            plan.programmatic_handler.as_ref(),
+        ) {
+            Ok(Some(action)) => {
+                if let Some(next_plan) = build_next_attempt_plan(
+                    &action,
+                    attempt,
+                    default_max_retries,
+                    &failure_ctx.message,
+                    profile,
+                    session_id,
+                    source_path,
+                    repo_root,
+                    failure_ctx,
+                    term,
+                )? {
+                    // Emit the engagement banner exactly once, only when
+                    // a concrete recovery plan has been produced.
+                    if show_checks {
+                        claudine::harness::report::report_handler_engagement(
+                            &source_path.display().to_string(),
+                            term,
+                        );
+                    }
+                    return Ok(Some(next_plan));
+                }
+            }
+            Ok(None) => {}
+            Err(e) => return Err(eyre!("{e}")),
+        }
+    }
+    Ok(None)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2127,6 +2191,27 @@ pub(crate) fn run_harness_loop(
             Some(harness_context.shell_options()),
         )?;
 
+        // Source-file existence reporting
+        if show_checks {
+            claudine::harness::report::report_source_file(
+                &prompt_state.original_ref,
+                &prompt_state.source_path,
+                term,
+            );
+        }
+        if !prompt_state.source_path.exists() {
+            if show_checks {
+                claudine::harness::report::report_unhandled_failure(
+                    "source file does not exist — cannot proceed",
+                    term,
+                );
+            }
+            return Err(eyre!(
+                "source file does not exist: {}",
+                prompt_state.source_path.display()
+            ));
+        }
+
         // For inline composition, prepend a system-owned writability
         // pre-check so handler recovery paths can respond to permission
         // failures.
@@ -2137,61 +2222,128 @@ pub(crate) fn run_harness_loop(
             );
         }
 
-        match claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe), term) {
-            Ok(()) => {}
-            Err(claudine::harness::HarnessError::PreCheckFailed { ref failures }) => {
-                let contexts = claudine::harness::build_validation_failure_context(
-                    failures,
+        // Shell audit preflight
+        let source_text = std::fs::read_to_string(&prompt_state.source_path).ok();
+        let auditable =
+            claudine::harness::collect_auditable_commands(&plan, source_text.as_deref())?;
+
+        let audit_report =
+            claudine::harness::audit_shell_commands(&auditable, harness_context.shell_options());
+
+        if show_checks {
+            claudine::harness::report::report_shell_audit_header(audit_report.outcomes.len(), term);
+            claudine::harness::report::report_shell_audit_outcomes(&audit_report, term);
+        }
+
+        if !audit_report.all_passed() {
+            let failed = audit_report.failures();
+            let (source_failures, harness_failures): (Vec<_>, Vec<_>) =
+                failed.into_iter().partition(|o| {
+                    matches!(
+                        o.command.source,
+                        claudine::harness::AuditedCommandSource::ComposeSourceLine { .. }
+                    )
+                });
+
+            // Source-page ::shell failures are terminal in v1 — no recovery.
+            if !source_failures.is_empty() {
+                if show_checks {
+                    claudine::harness::report::report_unhandled_failure(
+                        "shell audit failed for source-page directives — cannot proceed",
+                        term,
+                    );
+                }
+                return Err(eyre!(
+                    "shell audit failed: {} denied directive(s) in source page",
+                    source_failures.len()
+                ));
+            }
+
+            // Non-source failures flow through handler resolution.
+            if !harness_failures.is_empty() {
+                let contexts = claudine::harness::build_audit_failure_context(
+                    &harness_failures,
                     provider.as_slug(),
                     plan.source_path.as_path(),
                     attempt,
-                    None,
-                    None,
                 );
-                let mut next_plan = None;
-                for failure_ctx in &contexts {
-                    match claudine::harness::resolve_handler(
-                        failure_ctx,
-                        &plan.handlers,
-                        plan.programmatic_handler.as_ref(),
-                    ) {
-                        Ok(Some(action)) => {
-                            next_plan = build_next_attempt_plan(
-                                &action,
-                                attempt,
-                                DEFAULT_MAX_RETRIES,
-                                &failure_ctx.message,
-                                profile,
-                                None,
-                                &prompt_state.source_path,
-                                repo_root,
-                                failure_ctx,
-                                term,
-                            )?;
-                            if next_plan.is_some() {
-                                break;
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(e) => return Err(eyre!("{e}")),
-                    }
-                }
-                if let Some(plan) = next_plan {
-                    attempt = plan.next_attempt;
-                    apply_next_attempt_plan(prompt_state, &plan);
+                if let Some(next_plan) = try_resolve_handler(
+                    &contexts,
+                    &plan,
+                    attempt,
+                    DEFAULT_MAX_RETRIES,
+                    profile,
+                    None,
+                    &prompt_state.source_path,
+                    repo_root,
+                    show_checks,
+                    term,
+                )? {
+                    attempt = next_plan.next_attempt;
+                    apply_next_attempt_plan(prompt_state, &next_plan);
                     continue;
                 }
-                return Err(eyre!(
-                    "pre-check validation failed ({} {})",
-                    failures.len(),
-                    if failures.len() == 1 {
-                        "failure"
-                    } else {
-                        "failures"
-                    }
-                ));
+                let msg = format!(
+                    "shell audit failed: {} denied command(s)",
+                    harness_failures.len()
+                );
+                if show_checks {
+                    claudine::harness::report::report_unhandled_failure(&msg, term);
+                }
+                return Err(eyre!("shell audit failed"));
             }
-            Err(e) => return Err(eyre!("{e}")),
+        }
+
+        let pre_report = claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe));
+
+        if show_checks {
+            claudine::harness::report::report_phase_discovery(
+                claudine::harness::FailurePhase::PreCheck,
+                pre_report.count(),
+                term,
+            );
+            claudine::harness::report::report_check_outcomes(&pre_report, term);
+        }
+
+        if !pre_report.all_passed() {
+            let failures = pre_report.failures();
+            let contexts = claudine::harness::build_validation_failure_context(
+                &failures,
+                provider.as_slug(),
+                plan.source_path.as_path(),
+                attempt,
+                None,
+                None,
+            );
+            if let Some(next_plan) = try_resolve_handler(
+                &contexts,
+                &plan,
+                attempt,
+                DEFAULT_MAX_RETRIES,
+                profile,
+                None,
+                &prompt_state.source_path,
+                repo_root,
+                show_checks,
+                term,
+            )? {
+                attempt = next_plan.next_attempt;
+                apply_next_attempt_plan(prompt_state, &next_plan);
+                continue;
+            }
+            let fail_msg = format!(
+                "pre-check validation failed ({} {})",
+                failures.len(),
+                if failures.len() == 1 {
+                    "failure"
+                } else {
+                    "failures"
+                }
+            );
+            if show_checks {
+                claudine::harness::report::report_unhandled_failure(&fail_msg, term);
+            }
+            return Err(eyre!("{fail_msg}"));
         }
 
         let snapshot = claudine::harness::capture_pre_run_snapshot(&plan)
@@ -2257,33 +2409,26 @@ pub(crate) fn run_harness_loop(
                 outcome.session_id.clone(),
                 Some(outcome.clone()),
             );
-            match claudine::harness::resolve_handler(
-                &ctx,
-                &plan.handlers,
-                plan.programmatic_handler.as_ref(),
-            ) {
-                Ok(Some(action)) => {
-                    if let Some(next_plan) = build_next_attempt_plan(
-                        &action,
-                        attempt,
-                        DEFAULT_MAX_RETRIES,
-                        &ctx.message,
-                        profile,
-                        outcome.session_id.as_deref(),
-                        &prompt_state.source_path,
-                        repo_root,
-                        &ctx,
-                        term,
-                    )? {
-                        attempt = next_plan.next_attempt;
-                        apply_next_attempt_plan(prompt_state, &next_plan);
-                        continue;
-                    }
-                    return Err(eyre!("{message}"));
-                }
-                Ok(None) => return Err(eyre!("{message}")),
-                Err(e) => return Err(eyre!("{e}")),
+            if let Some(next_plan) = try_resolve_handler(
+                &[ctx],
+                &plan,
+                attempt,
+                DEFAULT_MAX_RETRIES,
+                profile,
+                outcome.session_id.as_deref(),
+                &prompt_state.source_path,
+                repo_root,
+                show_checks,
+                term,
+            )? {
+                attempt = next_plan.next_attempt;
+                apply_next_attempt_plan(prompt_state, &next_plan);
+                continue;
             }
+            if show_checks {
+                claudine::harness::report::report_unhandled_failure(&message, term);
+            }
+            return Err(eyre!("{message}"));
         }
 
         // For inline mode, apply closure BEFORE post-checks so that
@@ -2309,43 +2454,23 @@ pub(crate) fn run_harness_loop(
                 outcome.session_id.clone(),
                 Some(outcome.clone()),
             );
-
-            let mut next_plan = None;
-            for failure_ctx in &contexts {
-                match claudine::harness::resolve_handler(
-                    failure_ctx,
-                    &plan.handlers,
-                    plan.programmatic_handler.as_ref(),
-                ) {
-                    Ok(Some(action)) => {
-                        next_plan = build_next_attempt_plan(
-                            &action,
-                            attempt,
-                            DEFAULT_MAX_RETRIES,
-                            &failure_ctx.message,
-                            profile,
-                            outcome.session_id.as_deref(),
-                            &prompt_state.source_path,
-                            repo_root,
-                            failure_ctx,
-                            term,
-                        )?;
-                        if next_plan.is_some() {
-                            break;
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(e) => return Err(eyre!("{e}")),
-                }
-            }
-
-            if let Some(plan) = next_plan {
-                attempt = plan.next_attempt;
-                apply_next_attempt_plan(prompt_state, &plan);
+            if let Some(next_plan) = try_resolve_handler(
+                &contexts,
+                &plan,
+                attempt,
+                DEFAULT_MAX_RETRIES,
+                profile,
+                outcome.session_id.as_deref(),
+                &prompt_state.source_path,
+                repo_root,
+                show_checks,
+                term,
+            )? {
+                attempt = next_plan.next_attempt;
+                apply_next_attempt_plan(prompt_state, &next_plan);
                 continue;
             }
-
-            return Err(eyre!(
+            let fail_msg = format!(
                 "inline closure validation failed ({} {})",
                 failures.len(),
                 if failures.len() == 1 {
@@ -2353,86 +2478,76 @@ pub(crate) fn run_harness_loop(
                 } else {
                     "failures"
                 }
-            ));
+            );
+            if show_checks {
+                claudine::harness::report::report_unhandled_failure(&fail_msg, term);
+            }
+            return Err(eyre!("{fail_msg}"));
         }
 
         // Evaluate post-checks. In inline mode this now runs against the
         // post-closure document so file-state checks see the final artifact.
-        match claudine::harness::evaluate_post_checks(
+        let post_report = claudine::harness::evaluate_post_checks(
             &plan,
             &snapshot,
             &outcome,
             Some(&permission_probe),
-            term,
-        ) {
-            Ok(()) => {
-                return Ok(outcome.exit_code);
-            }
-            Err(claudine::harness::HarnessError::PostCheckFailed { ref failures }) => {
-                let contexts = claudine::harness::build_validation_failure_context(
-                    failures,
-                    provider.as_slug(),
-                    plan.source_path.as_path(),
-                    attempt,
-                    outcome.session_id.clone(),
-                    Some(outcome.clone()),
-                );
+        );
 
-                let mut next_plan = None;
-                for failure_ctx in &contexts {
-                    match claudine::harness::resolve_handler(
-                        failure_ctx,
-                        &plan.handlers,
-                        plan.programmatic_handler.as_ref(),
-                    ) {
-                        Ok(Some(action)) => {
-                            next_plan = build_next_attempt_plan(
-                                &action,
-                                attempt,
-                                DEFAULT_MAX_RETRIES,
-                                &failure_ctx.message,
-                                profile,
-                                outcome.session_id.as_deref(),
-                                &prompt_state.source_path,
-                                repo_root,
-                                failure_ctx,
-                                term,
-                            )?;
-                            if next_plan.is_some() {
-                                break;
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(e) => return Err(eyre!("{e}")),
-                    }
-                }
-
-                if let Some(plan) = next_plan {
-                    attempt = plan.next_attempt;
-                    apply_next_attempt_plan(prompt_state, &plan);
-                    continue;
-                }
-
-                return Err(eyre!(
-                    "post-check validation failed ({} {})",
-                    failures.len(),
-                    if failures.len() == 1 {
-                        "failure"
-                    } else {
-                        "failures"
-                    }
-                ));
-            }
-            Err(e) => return Err(eyre!("{e}")),
+        if show_checks {
+            claudine::harness::report::report_phase_discovery(
+                claudine::harness::FailurePhase::PostCheck,
+                post_report.count(),
+                term,
+            );
+            claudine::harness::report::report_check_outcomes(&post_report, term);
         }
+
+        if post_report.all_passed() {
+            return Ok(outcome.exit_code);
+        }
+
+        let failures = post_report.failures();
+        let contexts = claudine::harness::build_validation_failure_context(
+            &failures,
+            provider.as_slug(),
+            plan.source_path.as_path(),
+            attempt,
+            outcome.session_id.clone(),
+            Some(outcome.clone()),
+        );
+        if let Some(next_plan) = try_resolve_handler(
+            &contexts,
+            &plan,
+            attempt,
+            DEFAULT_MAX_RETRIES,
+            profile,
+            outcome.session_id.as_deref(),
+            &prompt_state.source_path,
+            repo_root,
+            show_checks,
+            term,
+        )? {
+            attempt = next_plan.next_attempt;
+            apply_next_attempt_plan(prompt_state, &next_plan);
+            continue;
+        }
+        let fail_msg = format!(
+            "post-check validation failed ({} {})",
+            failures.len(),
+            if failures.len() == 1 {
+                "failure"
+            } else {
+                "failures"
+            }
+        );
+        if show_checks {
+            claudine::harness::report::report_unhandled_failure(&fail_msg, term);
+        }
+        return Err(eyre!("{fail_msg}"));
     }
 }
 
-/// Apply a resolved handler action and return the next attempt number if the
-/// loop should continue, or `None` if the action cannot be applied (e.g.,
-/// retry ceiling reached, resume unsupported).
-///
-/// Returns `Ok(Some(next_attempt))` to continue the harness loop, or
 pub(crate) fn resolve_binary_path(
     profile: &dyn WrapperProfile,
     clients: &InstalledAiClients,

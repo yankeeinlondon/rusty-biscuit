@@ -1,0 +1,373 @@
+//! Shell-command discovery and policy preflight.
+//!
+//! Collects all auditable commands from a `HarnessPlan` and optional source
+//! page text, then runs each through shell policy without executing it.
+
+use crate::harness::error::HarnessError;
+use crate::harness::model::{
+    AuditedCommand, AuditedCommandSource, HandlerAction, HarnessPlan, ShellAuditOutcome,
+    ShellAuditReport, ValidationKind,
+};
+use crate::harness::report::prose_escape;
+use crate::harness::shell::ShellApprovalOptions;
+
+/// Collect all shell commands that must pass audit before the run proceeds.
+pub fn collect_auditable_commands(
+    plan: &HarnessPlan,
+    source_text: Option<&str>,
+) -> Result<Vec<AuditedCommand>, HarnessError> {
+    let mut commands = Vec::new();
+
+    // 1. Pre-checks — ShellCommand variants
+    for rule in &plan.pre_checks {
+        if let ValidationKind::ShellCommand { command, .. } = &rule.kind {
+            commands.push(AuditedCommand {
+                source: AuditedCommandSource::PreCheck(rule.id),
+                raw: command.raw.clone(),
+                executable: command.executable.clone(),
+                args: command.args.clone(),
+            });
+        }
+    }
+
+    // 2. Post-checks — ShellCommand variants
+    for rule in &plan.post_checks {
+        if let ValidationKind::ShellCommand { command, .. } = &rule.kind {
+            commands.push(AuditedCommand {
+                source: AuditedCommandSource::PostCheck(rule.id),
+                raw: command.raw.clone(),
+                executable: command.executable.clone(),
+                args: command.args.clone(),
+            });
+        }
+    }
+
+    // 3. Programmatic handle
+    if let Some(cmd) = &plan.programmatic_handler {
+        commands.push(AuditedCommand {
+            source: AuditedCommandSource::ProgrammaticHandle,
+            raw: cmd.raw.clone(),
+            executable: cmd.executable.clone(),
+            args: cmd.args.clone(),
+        });
+    }
+
+    // 4. Declarative deviate handlers
+    for rule in plan
+        .handlers
+        .exact
+        .iter()
+        .chain(plan.handlers.generic.iter())
+    {
+        if let HandlerAction::Deviate { command, .. } = &rule.action {
+            commands.push(AuditedCommand {
+                source: AuditedCommandSource::DeclarativeHandler {
+                    event: rule.event.clone(),
+                    subject_key: rule.subject_key.clone(),
+                },
+                raw: command.raw.clone(),
+                executable: command.executable.clone(),
+                args: command.args.clone(),
+            });
+        }
+    }
+
+    // 5. Source page ::shell directives
+    if let Some(text) = source_text {
+        let directives = darkmatter::markdown::compose::shell_expansion::parse_directives(text)
+            .map_err(|e| HarnessError::ShellAuditParseError {
+                detail: e.to_string(),
+            })?;
+        for directive in directives {
+            commands.push(AuditedCommand {
+                source: AuditedCommandSource::ComposeSourceLine {
+                    line: directive.line,
+                },
+                raw: directive.raw_command.clone(),
+                executable: directive.executable.clone(),
+                args: directive.args.clone(),
+            });
+        }
+    }
+
+    Ok(commands)
+}
+
+/// Audit all collected commands against shell policy.
+///
+/// Reuses `validate_and_approve_command_parts` for each command.
+/// Does not execute any commands.
+pub fn audit_shell_commands(
+    commands: &[AuditedCommand],
+    options: &ShellApprovalOptions,
+) -> ShellAuditReport {
+    let outcomes = commands
+        .iter()
+        .map(|cmd| {
+            let parts: Vec<String> = std::iter::once(cmd.executable.clone())
+                .chain(cmd.args.iter().cloned())
+                .collect();
+
+            let result = crate::harness::shell::validate_and_approve_command_parts(&parts, options);
+
+            match result {
+                Ok(_) => ShellAuditOutcome {
+                    command: cmd.clone(),
+                    passed: true,
+                    message: format!("<green-500>{}</green-500> approved", prose_escape(&cmd.raw)),
+                },
+                Err(HarnessError::ShellCommandDenied { .. }) => ShellAuditOutcome {
+                    command: cmd.clone(),
+                    passed: false,
+                    message: format!(
+                        "<red-500>{}</red-500> denied by policy",
+                        prose_escape(&cmd.raw)
+                    ),
+                },
+                Err(HarnessError::ShellCommandBlacklisted { reason, .. }) => ShellAuditOutcome {
+                    command: cmd.clone(),
+                    passed: false,
+                    message: format!(
+                        "<red-500>{}</red-500> blacklisted: {}",
+                        prose_escape(&cmd.raw),
+                        prose_escape(&reason),
+                    ),
+                },
+                Err(e) => ShellAuditOutcome {
+                    command: cmd.clone(),
+                    passed: false,
+                    message: format!(
+                        "<red-500>{}</red-500> audit error: {}",
+                        prose_escape(&cmd.raw),
+                        prose_escape(&e.to_string()),
+                    ),
+                },
+            }
+        })
+        .collect();
+
+    ShellAuditReport { outcomes }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::harness::model::{
+        ApprovedRuntimeCommand, HandlerRule, HandlerTable, ValidationEvent, ValidationPhase,
+        ValidationRule, ValidationRuleId,
+    };
+
+    fn make_shell_rule(id: u32, phase_checks: &str) -> (ValidationRule, bool) {
+        let cmd = ApprovedRuntimeCommand {
+            raw: "echo hello".to_string(),
+            executable: "echo".to_string(),
+            args: vec!["hello".to_string()],
+        };
+        let rule = ValidationRule {
+            id: ValidationRuleId(id),
+            event: ValidationEvent::ShellCommand,
+            phase: ValidationPhase::Both,
+            kind: ValidationKind::ShellCommand {
+                command: cmd,
+                show_stdout: false,
+                show_stderr: false,
+            },
+            message_template: None,
+            subject_key: None,
+        };
+        (rule, phase_checks == "pre")
+    }
+
+    fn empty_plan() -> HarnessPlan {
+        HarnessPlan {
+            source_path: std::path::PathBuf::from("/tmp/source.md"),
+            timeout: None,
+            pre_checks: Vec::new(),
+            post_checks: Vec::new(),
+            handlers: HandlerTable::default(),
+            programmatic_handler: None,
+        }
+    }
+
+    #[test]
+    fn empty_plan_returns_empty_vec() {
+        let plan = empty_plan();
+        let commands = collect_auditable_commands(&plan, None).unwrap();
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn collects_pre_check_shell_commands() {
+        let mut plan = empty_plan();
+        let (rule, _) = make_shell_rule(0, "pre");
+        plan.pre_checks.push(rule);
+
+        let commands = collect_auditable_commands(&plan, None).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            commands[0].source,
+            AuditedCommandSource::PreCheck(_)
+        ));
+    }
+
+    #[test]
+    fn collects_post_check_shell_commands() {
+        let mut plan = empty_plan();
+        let (rule, _) = make_shell_rule(0, "post");
+        plan.post_checks.push(rule);
+
+        let commands = collect_auditable_commands(&plan, None).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            commands[0].source,
+            AuditedCommandSource::PostCheck(_)
+        ));
+    }
+
+    #[test]
+    fn collects_programmatic_handler() {
+        let mut plan = empty_plan();
+        plan.programmatic_handler = Some(ApprovedRuntimeCommand {
+            raw: "my-handler".to_string(),
+            executable: "my-handler".to_string(),
+            args: vec![],
+        });
+
+        let commands = collect_auditable_commands(&plan, None).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            commands[0].source,
+            AuditedCommandSource::ProgrammaticHandle
+        ));
+    }
+
+    #[test]
+    fn collects_deviate_handlers() {
+        let mut plan = empty_plan();
+        plan.handlers.generic.push(HandlerRule {
+            event: crate::harness::model::FailureEvent::AgentFailure,
+            subject_key: None,
+            action: HandlerAction::Deviate {
+                command: ApprovedRuntimeCommand {
+                    raw: "fix-it".to_string(),
+                    executable: "fix-it".to_string(),
+                    args: vec![],
+                },
+                set: None,
+                msg: None,
+                say: None,
+            },
+        });
+
+        let commands = collect_auditable_commands(&plan, None).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            commands[0].source,
+            AuditedCommandSource::DeclarativeHandler { .. }
+        ));
+    }
+
+    #[test]
+    fn ignores_non_deviate_handlers() {
+        let mut plan = empty_plan();
+        plan.handlers.generic.push(HandlerRule {
+            event: crate::harness::model::FailureEvent::AgentFailure,
+            subject_key: None,
+            action: HandlerAction::Retry {
+                prompt_suffix: None,
+                set: None,
+                msg: None,
+                say: None,
+                retries: None,
+            },
+        });
+
+        let commands = collect_auditable_commands(&plan, None).unwrap();
+        assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn collects_source_page_shell_directives() {
+        let source = "# Test\n::shell echo hello world\nSome text\n";
+        let plan = empty_plan();
+        let commands = collect_auditable_commands(&plan, Some(source)).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(
+            commands[0].source,
+            AuditedCommandSource::ComposeSourceLine { .. }
+        ));
+        assert_eq!(commands[0].executable, "echo");
+    }
+
+    // -- audit_shell_commands tests --
+
+    fn make_audited_command(executable: &str, args: &[&str]) -> AuditedCommand {
+        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let raw = std::iter::once(executable.to_string())
+            .chain(args.iter().cloned())
+            .collect::<Vec<_>>()
+            .join(" ");
+        AuditedCommand {
+            source: AuditedCommandSource::PreCheck(ValidationRuleId(0)),
+            raw,
+            executable: executable.to_string(),
+            args,
+        }
+    }
+
+    fn permissive_options() -> ShellApprovalOptions {
+        // No policy root, no approval handler → commands on PATH are approved
+        ShellApprovalOptions::default()
+    }
+
+    #[test]
+    fn audit_approved_command() {
+        let cmd = make_audited_command("echo", &["hello"]);
+        let report = audit_shell_commands(&[cmd], &permissive_options());
+        assert_eq!(report.outcomes.len(), 1);
+        assert!(report.outcomes[0].passed);
+        assert!(report.outcomes[0].message.contains("approved"));
+        assert!(report.all_passed());
+        assert!(report.failures().is_empty());
+    }
+
+    #[test]
+    fn audit_blacklisted_command() {
+        let cmd = make_audited_command("rm", &["-rf", "/"]);
+        let report = audit_shell_commands(&[cmd], &permissive_options());
+        assert_eq!(report.outcomes.len(), 1);
+        assert!(!report.outcomes[0].passed);
+        assert!(report.outcomes[0].message.contains("blacklisted"));
+        assert!(!report.all_passed());
+        assert_eq!(report.failures().len(), 1);
+    }
+
+    #[test]
+    fn audit_empty_commands_returns_empty_report() {
+        let report = audit_shell_commands(&[], &permissive_options());
+        assert!(report.outcomes.is_empty());
+        assert!(report.all_passed());
+        assert!(report.failures().is_empty());
+    }
+
+    #[test]
+    fn audit_mixed_commands() {
+        let good = make_audited_command("echo", &["ok"]);
+        let bad = make_audited_command("rm", &["-rf", "/"]);
+        let report = audit_shell_commands(&[good, bad], &permissive_options());
+        assert_eq!(report.outcomes.len(), 2);
+        assert!(report.outcomes[0].passed);
+        assert!(!report.outcomes[1].passed);
+        assert!(!report.all_passed());
+        assert_eq!(report.failures().len(), 1);
+    }
+
+    #[test]
+    fn audit_message_escapes_command_text() {
+        // Command with markup characters should be escaped in the message
+        let cmd = make_audited_command("echo", &["<b>bold</b>"]);
+        let report = audit_shell_commands(&[cmd], &permissive_options());
+        // The raw text should be escaped (no unescaped <b>)
+        assert!(!report.outcomes[0].message.contains("<b>bold</b>"));
+    }
+}

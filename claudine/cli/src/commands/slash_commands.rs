@@ -408,6 +408,16 @@ fn render_exceptions(
                                 detail_list.add(Prose::new(label));
                             }
                         }
+                        CommandExceptionType::YamlTabs => {
+                            for e in entries {
+                                let label = format!(
+                                    r#"<b><a href="{}">{}</a></b> (<i>contains tab characters in YAML indentation</i>)"#,
+                                    e.command_file_path.display(),
+                                    e.name
+                                );
+                                detail_list.add(Prose::new(label));
+                            }
+                        }
                         CommandExceptionType::ModelPropertyNotShareable => {
                             for e in entries {
                                 let model_info = e
@@ -456,6 +466,7 @@ fn render_fix_summary(term: &Terminal, summary: &CommandFixSummary) {
         format!("already_linked={}", summary.already_linked),
         format!("skipped={}", summary.skipped),
         format!("format_incompatible={}", summary.format_incompatible),
+        format!("yaml_tabs_fixed={}", summary.yaml_tabs_fixed),
         format!("not_shareable={}", summary.not_shareable),
     ];
     let detail = Prose::new(format!("<dim>{}</dim>", parts.join(", ")));

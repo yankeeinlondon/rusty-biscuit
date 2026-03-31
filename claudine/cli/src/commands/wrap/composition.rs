@@ -394,6 +394,8 @@ pub(crate) fn execute_composition_request(
     let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
     let child_cwd = effective_repo_root.unwrap_or(&cwd);
 
+    profile.apply_project_dir(&mut child_args, child_cwd);
+
     profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
 
     // --dry-run: print what would be executed and exit
@@ -503,11 +505,7 @@ pub(crate) fn execute_composition_request(
         }
 
         // Composed prompt block: always shown unless --silent.
-        crate::output::log_compose_prompt(
-            &request.prepared.prompt,
-            verbose_requested,
-            &term,
-        );
+        crate::output::log_compose_prompt(&request.prepared.prompt, verbose_requested, &term);
     }
 
     // -- Execution --------------------------------------------------------
@@ -524,6 +522,7 @@ pub(crate) fn execute_composition_request(
         let mut prompt_state = HarnessPromptState {
             mode: harness_mode,
             source_path: request.prepared.resolved_path.clone(),
+            original_ref: request.file_ref.clone(),
             base_prompt: None,
             overlay: indexmap::IndexMap::new(),
             prompt_tail: Vec::new(),
@@ -748,6 +747,30 @@ fn execute_inline_without_harness(
                             "Preserved original frontmatter and updated <bold>last_updated</bold>",
                             term,
                         ));
+                    }
+
+                    // Post-processing: run Darkmatter cleanup on the
+                    // generated markdown for higher-quality output.
+                    match cleanup_inline_output(resolved_path) {
+                        Ok(true) => {
+                            if show_checks {
+                                log::message(&crate::output::fm_check_ok(
+                                    "Cleaned up generated markdown formatting",
+                                    term,
+                                ));
+                            }
+                        }
+                        Ok(false) => {} // no changes needed
+                        Err(error) => {
+                            if show_checks {
+                                log::message(&crate::output::fm_check_fail(
+                                    &format!("markdown cleanup failed: {error}"),
+                                    term,
+                                ));
+                            }
+                            // Non-fatal: the document was already written
+                            // successfully, cleanup is a quality pass.
+                        }
                     }
                 }
                 Err(error) => {
@@ -982,6 +1005,31 @@ fn report_interruption(
             eprintln!("  {line}");
         }
     }
+}
+
+// -- Post-processing: Darkmatter cleanup ----------------------------------
+
+/// Run Darkmatter's cleanup pass over a written inline composition file.
+///
+/// Reads the file, applies `cleanup_content` to the body (preserving
+/// frontmatter), and writes back only if the content changed.
+///
+/// Returns `Ok(true)` when the file was updated, `Ok(false)` when no
+/// changes were needed.
+fn cleanup_inline_output(path: &std::path::Path) -> Result<bool> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| eyre!("failed to read {}: {e}", path.display()))?;
+
+    let cleaned = darkmatter::markdown::cleanup::cleanup_content(&text);
+
+    if cleaned == text {
+        return Ok(false);
+    }
+
+    std::fs::write(path, cleaned.as_bytes())
+        .map_err(|e| eyre!("failed to write cleaned output to {}: {e}", path.display()))?;
+
+    Ok(true)
 }
 
 // -- Direct execution (non-harness) ---------------------------------------
