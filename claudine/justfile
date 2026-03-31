@@ -280,9 +280,11 @@ gem *args="":
     @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
 
 
-implement plan:
-    @echo -e "{{BOLD}}Phase 1:{{RESET}} {{BLUE}}{{plan}}{{RESET}}"
-    @md compose @prompts/implement.md --set '{ plan: "{{plan}}", phase: 1  }'
+implement topic phase plan="":
+    @echo
+    @echo -e "{{BOLD}}Phase {{phase}}:{{RESET}} {{DIM}}{{topic}}{{RESET}}"
+    @echo
+    @claudine compose @prompts/implement.md --set '{ topic: "{{topic}}", phase: "{{phase}}", plan: "{{plan}}" }'
 
 
 git-conflict:
