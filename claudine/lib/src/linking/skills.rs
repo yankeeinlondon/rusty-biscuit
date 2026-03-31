@@ -9,7 +9,10 @@ use crate::error::Result;
 use crate::events::Provider;
 
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, capabilities_for};
-use super::compatibility::{has_claude_specific_properties, parse_markdown_document};
+use super::compatibility::{
+    fix_frontmatter_indentation_tabs, frontmatter_has_indentation_tabs,
+    has_claude_specific_properties, parse_markdown_document,
+};
 use super::filter::ResourceFilter;
 use super::paths::{ProviderSkillPaths, ResourceScope};
 use super::symlink::{LinkResult, create_skill_link};
@@ -48,6 +51,8 @@ pub enum ExceptionType {
     Missing,
     /// SKILL.md missing required `description` frontmatter.
     Invalid,
+    /// SKILL.md frontmatter uses tab indentation that strict YAML parsers reject.
+    YamlTabs,
     /// SKILL.md contains a broken relative link.
     BrokenLink,
     /// SKILL.md body is long but contains no markdown links.
@@ -59,6 +64,7 @@ impl std::fmt::Display for ExceptionType {
         match self {
             ExceptionType::Missing => write!(f, "missing"),
             ExceptionType::Invalid => write!(f, "invalid"),
+            ExceptionType::YamlTabs => write!(f, "yaml-tabs"),
             ExceptionType::BrokenLink => write!(f, "broken-link"),
             ExceptionType::NoLinks => write!(f, "no-links"),
         }
@@ -117,6 +123,8 @@ pub struct SkillFixSummary {
     pub skipped: usize,
     /// SKILL.md files that had a missing `name` property auto-inserted.
     pub names_inserted: usize,
+    /// SKILL.md files whose YAML indentation tabs were normalized to spaces.
+    pub yaml_tabs_fixed: usize,
     /// Skills skipped because they have Claude-specific frontmatter (not shareable).
     pub not_shareable: usize,
 }
@@ -151,6 +159,9 @@ pub fn fix_missing_skills(paths: &ProviderSkillPaths) -> Result<SkillFixSummary>
     // Fix missing `name` property in canonical Claude skills
     for (name, path) in user_skills.iter().chain(repo_skills.iter()) {
         let skill_md = path.join("SKILL.md");
+        if fix_frontmatter_indentation_tabs(&skill_md)? {
+            summary.yaml_tabs_fixed += 1;
+        }
         if fix_missing_name(name, &skill_md)? {
             summary.names_inserted += 1;
         }
@@ -393,6 +404,7 @@ fn gather_exceptions(
     // Check canonical skills for invalid (missing description) and broken links
     for (name, path) in &canonical {
         let skill_md = path.join("SKILL.md");
+        check_yaml_tabs(&mut exceptions, name, &skill_md);
         check_invalid(&mut exceptions, name, &skill_md);
         check_broken_links(&mut exceptions, name, &skill_md);
         check_no_links(&mut exceptions, name, &skill_md);
@@ -506,6 +518,30 @@ fn check_scope_missing(
                 link_target: None,
             });
         }
+    }
+}
+
+fn check_yaml_tabs(exceptions: &mut Vec<SkillException>, name: &str, skill_md: &PathBuf) {
+    let content = match fs::read_to_string(skill_md) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let has_tabs = match frontmatter_has_indentation_tabs(&content) {
+        Ok(has_tabs) => has_tabs,
+        Err(_) => return,
+    };
+
+    if has_tabs {
+        exceptions.push(SkillException {
+            provider: Provider::Claude,
+            exception_type: ExceptionType::YamlTabs,
+            topic: name.to_string(),
+            skill_md_path: skill_md.clone(),
+            missing_properties: Vec::new(),
+            link_text: None,
+            link_target: None,
+        });
     }
 }
 
@@ -825,6 +861,35 @@ mod tests {
             .collect();
         assert_eq!(invalid.len(), 1);
         assert_eq!(invalid[0].topic, "no-desc");
+    }
+
+    #[test]
+    fn detects_and_fixes_yaml_tabs() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths(tmp.path());
+        let user_dir = tmp.path().join("user/skills");
+        let skill_dir = user_dir.join("tabbed");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: tabbed\ndescription: Has tabbed yaml\nprompt: |-\n\tline one\n\t\tline two\n---\n# Body\n",
+        )
+        .unwrap();
+
+        let report = list_skills(&paths, &[]).unwrap();
+        let yaml_tabs: Vec<_> = report
+            .exceptions
+            .iter()
+            .filter(|e| e.exception_type == ExceptionType::YamlTabs)
+            .collect();
+        assert_eq!(yaml_tabs.len(), 1);
+        assert_eq!(yaml_tabs[0].topic, "tabbed");
+
+        let summary = fix_missing_skills(&paths).unwrap();
+        assert_eq!(summary.yaml_tabs_fixed, 1);
+
+        let content = fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
+        assert!(!frontmatter_has_indentation_tabs(&content).unwrap());
     }
 
     #[test]

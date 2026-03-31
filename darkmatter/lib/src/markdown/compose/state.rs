@@ -205,7 +205,10 @@ impl EffectiveState {
 
     /// Gets an environment variable value.
     fn get_env_value(&self, key: &str) -> Option<Value> {
-        self.context.env().get(key).map(|v| Value::String(v.clone()))
+        self.context
+            .env()
+            .get(key)
+            .map(|v| Value::String(v.clone()))
     }
 
     /// Gets a value from nested data using dot notation.
@@ -228,6 +231,16 @@ impl EffectiveState {
         }
 
         Some(current)
+    }
+}
+
+impl super::interpolation::InterpolationLookup for EffectiveState {
+    fn get(&self, path: &str) -> Option<Value> {
+        self.get(path)
+    }
+
+    fn get_string(&self, path: &str) -> String {
+        self.get_string(path)
     }
 }
 
@@ -429,8 +442,10 @@ mod tests {
     #[test]
     fn test_effective_state_env_lookup() {
         let mut ctx = test_context();
-        ctx.env_mut().insert("HOME".to_string(), "/home/user".to_string());
-        ctx.env_mut().insert("USER".to_string(), "alice".to_string());
+        ctx.env_mut()
+            .insert("HOME".to_string(), "/home/user".to_string());
+        ctx.env_mut()
+            .insert("USER".to_string(), "alice".to_string());
 
         let fm = HashMap::new();
         let state = EffectiveState::new(&fm, None, ctx);
@@ -654,7 +669,8 @@ mod tests {
     #[test]
     fn test_env_lookup_still_works() {
         let mut ctx = test_context();
-        ctx.env_mut().insert("HOME".to_string(), "/home/user".to_string());
+        ctx.env_mut()
+            .insert("HOME".to_string(), "/home/user".to_string());
 
         let state = EffectiveStateBuilder::new()
             .with_context(ctx)

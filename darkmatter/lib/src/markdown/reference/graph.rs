@@ -780,9 +780,7 @@ fn resolve_local_target(
                 if let Ok(Some(resolved)) = file_ref.resolve_relative(base_dir) {
                     // resolve_relative() returns a path relative to base_dir;
                     // join it back so canonicalize() doesn't resolve against CWD.
-                    let abs = base_dir
-                        .map(|bd| bd.join(&resolved))
-                        .unwrap_or(resolved);
+                    let abs = base_dir.map(|bd| bd.join(&resolved)).unwrap_or(resolved);
                     return Some(abs.canonicalize().unwrap_or(abs));
                 }
             }

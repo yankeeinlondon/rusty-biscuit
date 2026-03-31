@@ -64,8 +64,10 @@ mod ast;
 mod evaluator;
 mod lexer;
 mod parser;
+pub(crate) mod rewrite;
 
 pub use ast::Expr;
-pub use evaluator::{EvalResult, EvalValue, Evaluator};
+pub use evaluator::{EvalResult, EvalValue, Evaluator, InterpolationLookup};
 pub use lexer::{ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, Token};
 pub use parser::{ParseError, Parser, parse};
+pub(crate) use rewrite::{ScanMode, interpolate_text};

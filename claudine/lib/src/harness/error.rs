@@ -85,4 +85,9 @@ pub enum HarnessError {
     /// Path resolution failed for another reason.
     #[error("path resolution failed for \"{raw}\": {detail}")]
     PathResolutionFailed { raw: String, detail: String },
+
+    // --- Shell audit ---
+    /// Failed to parse shell directives from source page during audit.
+    #[error("shell audit parse error: {detail}")]
+    ShellAuditParseError { detail: String },
 }

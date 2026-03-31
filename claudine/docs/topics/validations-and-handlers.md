@@ -1,8 +1,6 @@
 # Validations and Handlers
 
-When Claudine runs a Markdown-backed prompt in non-interactive mode, it can do more than simply forward a prompt to a provider and hope for the best. It can act like a small, typed job harness.
-
-That is what validations and handlers are for.
+When Claudine runs a Markdown-backed prompt in non-interactive mode, it can do more than simply forward a prompt to a provider and hope for the best. It can act like a small, typed job harness. That is what validations and handlers are for.
 
 They let a Markdown document describe:
 

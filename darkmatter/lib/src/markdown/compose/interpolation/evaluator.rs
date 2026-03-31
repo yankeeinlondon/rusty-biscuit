@@ -67,10 +67,25 @@
 //! }
 //! ```
 
-use super::super::state::EffectiveState;
 use super::ComparisonOp;
 use super::ast::Expr;
 use serde_json::Value;
+
+/// Trait for types that can resolve interpolation variable lookups.
+///
+/// Implementors provide path-based access to a key-value store
+/// (frontmatter, context, environment variables, etc.).
+pub trait InterpolationLookup {
+    /// Looks up a value by dotted path.
+    ///
+    /// Returns `None` if the path does not resolve to a value.
+    fn get(&self, path: &str) -> Option<Value>;
+
+    /// Looks up a value by path, coercing to a string.
+    ///
+    /// Returns an empty string if the path does not resolve.
+    fn get_string(&self, path: &str) -> String;
+}
 
 /// Result of evaluating an expression.
 #[derive(Debug, Clone, PartialEq)]
@@ -198,14 +213,14 @@ impl EvalValue {
 /// Evaluator for interpolation expressions.
 ///
 /// The evaluator takes parsed AST expressions and evaluates them against
-/// an `EffectiveState` to produce string output.
-pub struct Evaluator<'a> {
-    state: &'a EffectiveState,
+/// an [`InterpolationLookup`] implementation to produce string output.
+pub struct Evaluator<'a, L: InterpolationLookup> {
+    state: &'a L,
 }
 
-impl<'a> Evaluator<'a> {
-    /// Creates a new evaluator with the given state.
-    pub fn new(state: &'a EffectiveState) -> Self {
+impl<'a, L: InterpolationLookup> Evaluator<'a, L> {
+    /// Creates a new evaluator with the given lookup state.
+    pub fn new(state: &'a L) -> Self {
         Self { state }
     }
 
@@ -595,6 +610,7 @@ impl<'a> Evaluator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::compose::EffectiveState;
     use crate::markdown::compose::interpolation::parse;
     use crate::markdown::compose::state::EffectiveStateBuilder;
     use crate::markdown::compose::types::ComposeContext;
@@ -912,7 +928,8 @@ mod tests {
         #[test]
         fn resolves_env_variable() {
             let mut ctx = test_context();
-            ctx.env_mut().insert("HOME".to_string(), "/home/user".to_string());
+            ctx.env_mut()
+                .insert("HOME".to_string(), "/home/user".to_string());
 
             let fm = HashMap::new();
             let state = EffectiveStateBuilder::new()

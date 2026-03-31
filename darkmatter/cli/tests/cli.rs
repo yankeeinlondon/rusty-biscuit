@@ -536,6 +536,49 @@ fn test_compose_set_requires_json_object() {
 }
 
 // =============================================================================
+//                  FRONTMATTER INTERPOLATION TESTS
+// =============================================================================
+
+#[test]
+fn test_compose_frontmatter_interpolation_basic() {
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin("---\nbase: /docs\nspec: \"{{base}}/spec.md\"\n---\nSpec: {{spec}}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Spec: /docs/spec.md"));
+}
+
+#[test]
+fn test_compose_frontmatter_interpolation_nested_state() {
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--state",
+            r#"{"meta":{"base":"/root","author":"Parent"}}"#,
+        ])
+        .write_stdin(
+            "---\nmeta:\n  author: Local\nspec: \"{{meta.base}}/spec.md\"\n---\n{{spec}}",
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("/root/spec.md"));
+}
+
+#[test]
+fn test_compose_frontmatter_interpolation_ctx_in_frontmatter_only() {
+    // ctx.today referenced only in frontmatter — must still resolve
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin("---\nstamp: \"{{ctx.today}}\"\n---\nDate: {{stamp}}")
+        .assert()
+        .success()
+        // The date should not be empty
+        .stdout(predicate::str::contains("Date: ").and(predicate::str::contains("Date: \n").not()));
+}
+
+// =============================================================================
 //                      CTX OVERRIDE BEHAVIOR TESTS
 // =============================================================================
 
@@ -558,9 +601,7 @@ fn test_compose_scalar_ctx_with_allow_override_succeeds() {
         .write_stdin("---\nctx: hello\n---\n# Test")
         .assert()
         .success()
-        .stderr(predicate::str::contains(
-            "Document ctx was not an object",
-        ));
+        .stderr(predicate::str::contains("Document ctx was not an object"));
 }
 
 #[test]
@@ -572,7 +613,9 @@ fn test_compose_object_ctx_collision_emits_warning() {
         .write_stdin("---\nctx:\n  today: custom-value\n---\n# Test")
         .assert()
         .success()
-        .stderr(predicate::str::contains("conflict with those provided by Darkmatter"));
+        .stderr(predicate::str::contains(
+            "conflict with those provided by Darkmatter",
+        ));
 }
 
 // =============================================================================

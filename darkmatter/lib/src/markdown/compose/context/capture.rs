@@ -16,7 +16,11 @@ use super::diagnostics::ContextMergeDiagnostic;
 use super::format;
 
 /// Result of a context capture pass: merged values, any diagnostics, and per-group timings.
-type CaptureResult = (Map<String, Value>, Vec<ContextMergeDiagnostic>, Vec<(String, Duration)>);
+type CaptureResult = (
+    Map<String, Value>,
+    Vec<ContextMergeDiagnostic>,
+    Vec<(String, Duration)>,
+);
 
 // ── Context groups for demand-driven capture ─────────────────────
 
@@ -65,50 +69,94 @@ impl ContextGroup {
     fn for_key(key: &str) -> Option<ContextGroup> {
         match key {
             // DateTime
-            "now" | "now_utc" | "today" | "yesterday" | "tomorrow"
-            | "today_utc" | "yesterday_utc" | "tomorrow_utc"
-            | "day" | "day_abbr" | "day_utc" | "day_abbr_utc"
-            | "year" | "year_utc" | "month" | "month_name" | "month_name_abbr"
-            | "day_of_month" | "day_of_month_suffixed"
-            | "time" | "time_military" | "timezone" | "timezone_offset" | "timezone_iana"
-            | "start_of_week_sun" | "end_of_week_sun"
-            | "start_of_week_mon" | "end_of_week_mon"
-            | "start_of_week_sun_utc" | "end_of_week_sun_utc"
-            | "start_of_week_mon_utc" | "end_of_week_mon_utc"
-            | "season" | "timestamp" | "timestamp_ms" => Some(Self::DateTime),
+            "now"
+            | "now_utc"
+            | "today"
+            | "yesterday"
+            | "tomorrow"
+            | "today_utc"
+            | "yesterday_utc"
+            | "tomorrow_utc"
+            | "day"
+            | "day_abbr"
+            | "day_utc"
+            | "day_abbr_utc"
+            | "year"
+            | "year_utc"
+            | "month"
+            | "month_name"
+            | "month_name_abbr"
+            | "day_of_month"
+            | "day_of_month_suffixed"
+            | "time"
+            | "time_military"
+            | "timezone"
+            | "timezone_offset"
+            | "timezone_iana"
+            | "start_of_week_sun"
+            | "end_of_week_sun"
+            | "start_of_week_mon"
+            | "end_of_week_mon"
+            | "start_of_week_sun_utc"
+            | "end_of_week_sun_utc"
+            | "start_of_week_mon_utc"
+            | "end_of_week_mon_utc"
+            | "season"
+            | "timestamp"
+            | "timestamp_ms" => Some(Self::DateTime),
 
             // Repo
-            "repo" | "repo_root" | "is_monorepo"
-            | "package_root" | "package_area_root"
-            | "packages" | "packages_list"
-            | "package_areas" | "package_areas_list"
-            | "current_package" | "current_package_area" => Some(Self::Repo),
+            "repo"
+            | "repo_root"
+            | "is_monorepo"
+            | "package_root"
+            | "package_area_root"
+            | "packages"
+            | "packages_list"
+            | "package_areas"
+            | "package_areas_list"
+            | "current_package"
+            | "current_package_area" => Some(Self::Repo),
 
             // FileChanges
-            "dirty_files" | "dirty_files_list"
-            | "dirty_source_code_files" | "dirty_source_code_files_list"
-            | "staged_files" | "staged_files_list"
-            | "untracked_files" | "untracked_files_list"
-            | "dirty_packages" | "dirty_packages_list"
-            | "dirty_package_areas" | "dirty_package_areas_list"
-            | "staged_packages" | "staged_packages_list"
-            | "staged_package_areas" | "staged_package_areas_list"
-            | "current_package_has_staged_files" | "current_package_area_has_staged_files"
-            | "current_package_has_dirty_files" | "current_package_area_has_dirty_files" => Some(Self::FileChanges),
+            "dirty_files"
+            | "dirty_files_list"
+            | "dirty_source_code_files"
+            | "dirty_source_code_files_list"
+            | "staged_files"
+            | "staged_files_list"
+            | "untracked_files"
+            | "untracked_files_list"
+            | "dirty_packages"
+            | "dirty_packages_list"
+            | "dirty_package_areas"
+            | "dirty_package_areas_list"
+            | "staged_packages"
+            | "staged_packages_list"
+            | "staged_package_areas"
+            | "staged_package_areas_list"
+            | "current_package_has_staged_files"
+            | "current_package_area_has_staged_files"
+            | "current_package_has_dirty_files"
+            | "current_package_area_has_dirty_files" => Some(Self::FileChanges),
 
             // Languages
-            "programming_languages_in_repo"
-            | "programming_language" | "package_manager" => Some(Self::Languages),
+            "programming_languages_in_repo" | "programming_language" | "package_manager" => {
+                Some(Self::Languages)
+            }
 
             // Documents
-            "docs_readme" | "docs_blast_radius" | "docs_drift" | "docs_skill" => Some(Self::Documents),
+            "docs_readme" | "docs_blast_radius" | "docs_drift" | "docs_skill" => {
+                Some(Self::Documents)
+            }
 
             // OS
             "os" | "os_distro" | "os_package_manager" | "os_version" => Some(Self::Os),
 
             // Hardware (CPU + memory — no subprocess)
-            "memory_total" | "memory_used" | "memory_avail"
-            | "cpu_cores" | "cpu_arch" => Some(Self::Hardware),
+            "memory_total" | "memory_used" | "memory_avail" | "cpu_cores" | "cpu_arch" => {
+                Some(Self::Hardware)
+            }
 
             // GPU (requires ioreg subprocess on macOS)
             "gpu" => Some(Self::Gpu),
@@ -199,13 +247,25 @@ impl ContextCapture {
         let mut diagnostics = Vec::new();
         let mut timings = Vec::new();
 
-        let need_git = groups.iter().any(|g| matches!(g,
-            ContextGroup::Repo | ContextGroup::FileChanges | ContextGroup::Languages | ContextGroup::Documents
-        ));
+        let need_git = groups.iter().any(|g| {
+            matches!(
+                g,
+                ContextGroup::Repo
+                    | ContextGroup::FileChanges
+                    | ContextGroup::Languages
+                    | ContextGroup::Documents
+            )
+        });
         let need_file_changes = groups.contains(&ContextGroup::FileChanges);
-        let need_repo = groups.iter().any(|g| matches!(g,
-            ContextGroup::Repo | ContextGroup::FileChanges | ContextGroup::Languages | ContextGroup::Documents
-        ));
+        let need_repo = groups.iter().any(|g| {
+            matches!(
+                g,
+                ContextGroup::Repo
+                    | ContextGroup::FileChanges
+                    | ContextGroup::Languages
+                    | ContextGroup::Documents
+            )
+        });
         let need_docs = groups.contains(&ContextGroup::Documents);
         let need_os = groups.contains(&ContextGroup::Os);
         let need_hw = groups.contains(&ContextGroup::Hardware);
@@ -233,7 +293,9 @@ impl ContextCapture {
             .as_ref()
             .map(|h| h.org_and_repo())
             .unwrap_or((None, None));
-        if need_git { timings.push(("git".into(), t.elapsed())); }
+        if need_git {
+            timings.push(("git".into(), t.elapsed()));
+        }
 
         // ── All remaining probes run in parallel ─────────────────────
         let (file_changes, repo_info, docs, os_info, hardware_info, gpu_names) =
@@ -256,7 +318,9 @@ impl ContextCapture {
                     let rr = &repo_root;
                     Some(s.spawn(move || {
                         let t = Instant::now();
-                        let result = rr.as_ref().and_then(|root| repo::detect_repo_structure(root).ok().flatten());
+                        let result = rr
+                            .as_ref()
+                            .and_then(|root| repo::detect_repo_structure(root).ok().flatten());
                         (result, t.elapsed())
                     }))
                 } else {
@@ -290,7 +354,12 @@ impl ContextCapture {
                         let names = if gpus.is_empty() {
                             None
                         } else {
-                            Some(gpus.iter().map(|g| g.name.as_str()).collect::<Vec<_>>().join(", "))
+                            Some(
+                                gpus.iter()
+                                    .map(|g| g.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                            )
                         };
                         (names, t.elapsed())
                     }))
@@ -314,28 +383,35 @@ impl ContextCapture {
                         .map(|pkgs| {
                             pkgs.iter()
                                 .map(|p| {
-                                    let rel_path = p.path.strip_prefix(&repo_info.as_ref().unwrap().root)
-                                        .unwrap_or(&p.path).to_path_buf();
+                                    let rel_path = p
+                                        .path
+                                        .strip_prefix(&repo_info.as_ref().unwrap().root)
+                                        .unwrap_or(&p.path)
+                                        .to_path_buf();
                                     (p.name.clone(), rel_path)
                                 })
                                 .collect()
                         })
                         .unwrap_or_default();
-                    let result = repo_root.as_ref().and_then(|root| {
-                        docs::detect_docs_with_packages(root, &package_list)
-                    });
+                    let result = repo_root
+                        .as_ref()
+                        .and_then(|root| docs::detect_docs_with_packages(root, &package_list));
                     timings.push(("docs".into(), t.elapsed()));
                     result
                 } else {
                     None
                 };
 
-                if need_repo { timings.push(("repo".into(), repo_elapsed)); }
+                if need_repo {
+                    timings.push(("repo".into(), repo_elapsed));
+                }
 
                 let (file_changes, fc_elapsed) = fc_handle
                     .map(|h| h.join().unwrap_or((Vec::new(), Duration::ZERO)))
                     .unwrap_or((Vec::new(), Duration::ZERO));
-                if need_file_changes { timings.push(("file_changes".into(), fc_elapsed)); }
+                if need_file_changes {
+                    timings.push(("file_changes".into(), fc_elapsed));
+                }
 
                 let os_info = os_handle.map(|h| match h.join() {
                     Ok((result, elapsed)) => {
@@ -359,16 +435,21 @@ impl ContextCapture {
                     names
                 });
 
-                (file_changes, repo_info, docs, os_info, hardware_info, gpu_names)
+                (
+                    file_changes,
+                    repo_info,
+                    docs,
+                    os_info,
+                    hardware_info,
+                    gpu_names,
+                )
             });
 
         let os_info = match os_info {
             Some(Ok(info)) => Some(info),
             Some(Err(detail)) => {
-                diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
-                    area: "os",
-                    detail,
-                });
+                diagnostics
+                    .push(ContextMergeDiagnostic::PartialRuntimeCapture { area: "os", detail });
                 None
             }
             None => None,
@@ -387,35 +468,45 @@ impl ContextCapture {
         };
 
         // ── Derived fields from git/repo ──────────────────────────────
-        let (current_package, current_package_area) =
-            if let Some(ref ri) = repo_info {
-                if ri.is_monorepo {
-                    let pkg = ri.packages.as_ref().and_then(|packages| {
-                        packages.iter().find(|p| base_dir.starts_with(&p.path)).cloned()
-                    });
-                    let area = pkg.as_ref().map(|p| p.package_area.clone()).or_else(|| {
-                        ri.packages.as_ref().and_then(|packages| {
-                            let areas: Vec<_> = packages
-                                .iter()
-                                .filter(|p| {
-                                    let area_path = ri.root.join(&p.package_area);
-                                    base_dir.starts_with(&area_path)
-                                })
-                                .collect();
-                            areas.first().map(|p| p.package_area.clone())
-                        })
-                    });
-                    (pkg, area)
-                } else {
-                    (None, None)
-                }
+        let (current_package, current_package_area) = if let Some(ref ri) = repo_info {
+            if ri.is_monorepo {
+                let pkg = ri.packages.as_ref().and_then(|packages| {
+                    packages
+                        .iter()
+                        .find(|p| base_dir.starts_with(&p.path))
+                        .cloned()
+                });
+                let area = pkg.as_ref().map(|p| p.package_area.clone()).or_else(|| {
+                    ri.packages.as_ref().and_then(|packages| {
+                        let areas: Vec<_> = packages
+                            .iter()
+                            .filter(|p| {
+                                let area_path = ri.root.join(&p.package_area);
+                                base_dir.starts_with(&area_path)
+                            })
+                            .collect();
+                        areas.first().map(|p| p.package_area.clone())
+                    })
+                });
+                (pkg, area)
             } else {
                 (None, None)
-            };
+            }
+        } else {
+            (None, None)
+        };
 
         let dirty_paths = file_changes
             .iter()
-            .filter(|fc| matches!(fc.status, FileStatus::Modified | FileStatus::Both | FileStatus::Staged | FileStatus::Untracked))
+            .filter(|fc| {
+                matches!(
+                    fc.status,
+                    FileStatus::Modified
+                        | FileStatus::Both
+                        | FileStatus::Staged
+                        | FileStatus::Untracked
+                )
+            })
             .map(|fc| fc.path.clone())
             .collect();
 
@@ -452,9 +543,7 @@ impl ContextCapture {
 }
 
 /// Capture all runtime context variables for the given base directory.
-pub(crate) fn capture_runtime_context(
-    base_dir: &Path,
-) -> CaptureResult {
+pub(crate) fn capture_runtime_context(base_dir: &Path) -> CaptureResult {
     capture_runtime_context_for_groups(base_dir, &ContextGroup::all())
 }
 
@@ -463,10 +552,7 @@ pub(crate) fn capture_runtime_context(
 /// Scans `content` for `ctx.*` references and only captures the required
 /// groups. If no `ctx.*` references are found, only populates datetime
 /// (which is purely local computation with no I/O).
-pub(crate) fn capture_runtime_context_for_content(
-    base_dir: &Path,
-    content: &str,
-) -> CaptureResult {
+pub(crate) fn capture_runtime_context_for_content(base_dir: &Path, content: &str) -> CaptureResult {
     let groups = scan_needed_groups(content);
     // DateTime is always included (zero-cost local computation)
     let mut groups = groups;
@@ -550,13 +636,28 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
     values.insert("tomorrow".into(), Value::String(tomorrow_str));
 
     // UTC date variants
-    values.insert("today_utc".into(), Value::String(today_utc.format("%Y-%m-%d").to_string()));
-    values.insert("yesterday_utc".into(), Value::String(yesterday_utc.format("%Y-%m-%d").to_string()));
-    values.insert("tomorrow_utc".into(), Value::String(tomorrow_utc.format("%Y-%m-%d").to_string()));
+    values.insert(
+        "today_utc".into(),
+        Value::String(today_utc.format("%Y-%m-%d").to_string()),
+    );
+    values.insert(
+        "yesterday_utc".into(),
+        Value::String(yesterday_utc.format("%Y-%m-%d").to_string()),
+    );
+    values.insert(
+        "tomorrow_utc".into(),
+        Value::String(tomorrow_utc.format("%Y-%m-%d").to_string()),
+    );
 
     // Day of week
-    values.insert("day".into(), Value::String(now_local.format("%A").to_string()));
-    values.insert("day_abbr".into(), Value::String(now_local.format("%a").to_string()));
+    values.insert(
+        "day".into(),
+        Value::String(now_local.format("%A").to_string()),
+    );
+    values.insert(
+        "day_abbr".into(),
+        Value::String(now_local.format("%a").to_string()),
+    );
 
     // UTC day of week
     let dow_utc_str = now_utc.format("%A").to_string();
@@ -566,56 +667,105 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
 
     // Year/month
     values.insert("year".into(), Value::String(year_str));
-    values.insert("year_utc".into(), Value::String(now_utc.format("%Y").to_string()));
+    values.insert(
+        "year_utc".into(),
+        Value::String(now_utc.format("%Y").to_string()),
+    );
     values.insert("month".into(), Value::String(month_str));
     values.insert("month_name".into(), Value::String(month_name_str));
     values.insert("month_name_abbr".into(), Value::String(month_name_abbr_str));
 
     // Day of month
     let day_of_month = today.day();
-    values.insert("day_of_month".into(), Value::String(day_of_month.to_string()));
+    values.insert(
+        "day_of_month".into(),
+        Value::String(day_of_month.to_string()),
+    );
     values.insert(
         "day_of_month_suffixed".into(),
-        Value::String(format!("{}{}", day_of_month, format::ordinal_suffix(day_of_month))),
+        Value::String(format!(
+            "{}{}",
+            day_of_month,
+            format::ordinal_suffix(day_of_month)
+        )),
     );
 
     // Time fields
-    values.insert("time".into(), Value::String(now_local.format("%I:%M %p").to_string()));
-    values.insert("time_military".into(), Value::String(now_local.format("%H:%M").to_string()));
+    values.insert(
+        "time".into(),
+        Value::String(now_local.format("%I:%M %p").to_string()),
+    );
+    values.insert(
+        "time_military".into(),
+        Value::String(now_local.format("%H:%M").to_string()),
+    );
 
     // Timezone: sniff owns abbreviation derivation (handles chrono's
     // %Z offset fallback on macOS via IANA-to-abbreviation mapping).
     let tz_info = sniff::os::detect_timezone();
-    values.insert("timezone".into(), tz_info.timezone_abbr.map_or(Value::Null, Value::String));
-    values.insert("timezone_offset".into(), Value::String(now_local.format("%z").to_string()));
-    values.insert("timezone_iana".into(), tz_info.timezone.map_or(Value::Null, Value::String));
+    values.insert(
+        "timezone".into(),
+        tz_info.timezone_abbr.map_or(Value::Null, Value::String),
+    );
+    values.insert(
+        "timezone_offset".into(),
+        Value::String(now_local.format("%z").to_string()),
+    );
+    values.insert(
+        "timezone_iana".into(),
+        tz_info.timezone.map_or(Value::Null, Value::String),
+    );
 
     // Week boundaries (Sunday start)
     let weekday_num = today.weekday().num_days_from_sunday();
     let start_of_week_sun = today - chrono::Duration::days(weekday_num as i64);
     let end_of_week_sun = start_of_week_sun + chrono::Duration::days(6);
-    values.insert("start_of_week_sun".into(), Value::String(start_of_week_sun.format("%Y-%m-%d").to_string()));
-    values.insert("end_of_week_sun".into(), Value::String(end_of_week_sun.format("%Y-%m-%d").to_string()));
+    values.insert(
+        "start_of_week_sun".into(),
+        Value::String(start_of_week_sun.format("%Y-%m-%d").to_string()),
+    );
+    values.insert(
+        "end_of_week_sun".into(),
+        Value::String(end_of_week_sun.format("%Y-%m-%d").to_string()),
+    );
 
     // Week boundaries (Monday start)
     let weekday_mon = today.weekday().num_days_from_monday();
     let start_of_week_mon = today - chrono::Duration::days(weekday_mon as i64);
     let end_of_week_mon = start_of_week_mon + chrono::Duration::days(6);
-    values.insert("start_of_week_mon".into(), Value::String(start_of_week_mon.format("%Y-%m-%d").to_string()));
-    values.insert("end_of_week_mon".into(), Value::String(end_of_week_mon.format("%Y-%m-%d").to_string()));
+    values.insert(
+        "start_of_week_mon".into(),
+        Value::String(start_of_week_mon.format("%Y-%m-%d").to_string()),
+    );
+    values.insert(
+        "end_of_week_mon".into(),
+        Value::String(end_of_week_mon.format("%Y-%m-%d").to_string()),
+    );
 
     // UTC week boundaries
     let weekday_utc_sun = today_utc.weekday().num_days_from_sunday();
     let start_utc_sun = today_utc - chrono::Duration::days(weekday_utc_sun as i64);
     let end_utc_sun = start_utc_sun + chrono::Duration::days(6);
-    values.insert("start_of_week_sun_utc".into(), Value::String(start_utc_sun.format("%Y-%m-%d").to_string()));
-    values.insert("end_of_week_sun_utc".into(), Value::String(end_utc_sun.format("%Y-%m-%d").to_string()));
+    values.insert(
+        "start_of_week_sun_utc".into(),
+        Value::String(start_utc_sun.format("%Y-%m-%d").to_string()),
+    );
+    values.insert(
+        "end_of_week_sun_utc".into(),
+        Value::String(end_utc_sun.format("%Y-%m-%d").to_string()),
+    );
 
     let weekday_utc_mon = today_utc.weekday().num_days_from_monday();
     let start_utc_mon = today_utc - chrono::Duration::days(weekday_utc_mon as i64);
     let end_utc_mon = start_utc_mon + chrono::Duration::days(6);
-    values.insert("start_of_week_mon_utc".into(), Value::String(start_utc_mon.format("%Y-%m-%d").to_string()));
-    values.insert("end_of_week_mon_utc".into(), Value::String(end_utc_mon.format("%Y-%m-%d").to_string()));
+    values.insert(
+        "start_of_week_mon_utc".into(),
+        Value::String(start_utc_mon.format("%Y-%m-%d").to_string()),
+    );
+    values.insert(
+        "end_of_week_mon_utc".into(),
+        Value::String(end_utc_mon.format("%Y-%m-%d").to_string()),
+    );
 
     // Season
     values.insert(
@@ -624,8 +774,14 @@ pub(crate) fn populate_datetime(values: &mut Map<String, Value>) {
     );
 
     // Timestamps
-    values.insert("timestamp".into(), Value::Number(now_utc.timestamp().into()));
-    values.insert("timestamp_ms".into(), Value::Number(now_utc.timestamp_millis().into()));
+    values.insert(
+        "timestamp".into(),
+        Value::Number(now_utc.timestamp().into()),
+    );
+    values.insert(
+        "timestamp_ms".into(),
+        Value::Number(now_utc.timestamp_millis().into()),
+    );
 }
 
 // ── Repo context ──────────────────────────────────────────────────
@@ -634,39 +790,57 @@ fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
     let repo = cap.repo_info.as_ref();
 
     // repo and repo_root
-    values.insert("repo".into(), cap.repo_name.as_ref().map_or(Value::Null, |r| Value::String(r.clone())));
+    values.insert(
+        "repo".into(),
+        cap.repo_name
+            .as_ref()
+            .map_or(Value::Null, |r| Value::String(r.clone())),
+    );
     values.insert(
         "repo_root".into(),
-        cap.repo_root.as_ref().map_or(Value::Null, |r| Value::String(r.to_string_lossy().to_string())),
+        cap.repo_root.as_ref().map_or(Value::Null, |r| {
+            Value::String(r.to_string_lossy().to_string())
+        }),
     );
 
     // is_monorepo
-    values.insert("is_monorepo".into(), Value::Bool(repo.is_some_and(|r| r.is_monorepo)));
+    values.insert(
+        "is_monorepo".into(),
+        Value::Bool(repo.is_some_and(|r| r.is_monorepo)),
+    );
 
     // Package fields (null if not monorepo)
     let is_mono = repo.is_some_and(|r| r.is_monorepo);
     if is_mono {
         values.insert(
             "package_root".into(),
-            cap.current_package
-                .as_ref()
-                .map_or(Value::Null, |p| Value::String(p.path.to_string_lossy().to_string())),
+            cap.current_package.as_ref().map_or(Value::Null, |p| {
+                Value::String(p.path.to_string_lossy().to_string())
+            }),
         );
 
         values.insert(
             "package_area_root".into(),
-            cap.current_package_area.as_ref().map_or(Value::Null, |area| {
-                let root = repo.unwrap().root.join(area);
-                Value::String(root.to_string_lossy().to_string())
-            }),
+            cap.current_package_area
+                .as_ref()
+                .map_or(Value::Null, |area| {
+                    let root = repo.unwrap().root.join(area);
+                    Value::String(root.to_string_lossy().to_string())
+                }),
         );
 
         let packages: Vec<String> = repo
             .and_then(|r| r.packages.as_ref())
             .map(|pkgs| pkgs.iter().map(|p| p.name.clone()).collect())
             .unwrap_or_default();
-        values.insert("packages".into(), Value::String(format::format_csv(&packages)));
-        values.insert("packages_list".into(), Value::String(format::format_md_list(&packages)));
+        values.insert(
+            "packages".into(),
+            Value::String(format::format_csv(&packages)),
+        );
+        values.insert(
+            "packages_list".into(),
+            Value::String(format::format_md_list(&packages)),
+        );
 
         let areas: Vec<String> = repo
             .and_then(|r| r.packages.as_ref())
@@ -677,8 +851,14 @@ fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
                 areas
             })
             .unwrap_or_default();
-        values.insert("package_areas".into(), Value::String(format::format_csv(&areas)));
-        values.insert("package_areas_list".into(), Value::String(format::format_md_list(&areas)));
+        values.insert(
+            "package_areas".into(),
+            Value::String(format::format_csv(&areas)),
+        );
+        values.insert(
+            "package_areas_list".into(),
+            Value::String(format::format_md_list(&areas)),
+        );
 
         values.insert(
             "current_package".into(),
@@ -708,10 +888,20 @@ fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
 
 fn populate_file_changes(cap: &ContextCapture, values: &mut Map<String, Value>) {
     // Dirty files
-    let mut dirty: Vec<String> = cap.dirty_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    let mut dirty: Vec<String> = cap
+        .dirty_paths
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
     dirty.sort();
-    values.insert("dirty_files".into(), Value::String(format::format_csv(&dirty)));
-    values.insert("dirty_files_list".into(), Value::String(format::format_md_list(&dirty)));
+    values.insert(
+        "dirty_files".into(),
+        Value::String(format::format_csv(&dirty)),
+    );
+    values.insert(
+        "dirty_files_list".into(),
+        Value::String(format::format_md_list(&dirty)),
+    );
 
     // Dirty source code files
     let dirty_source: Vec<String> = dirty
@@ -719,20 +909,46 @@ fn populate_file_changes(cap: &ContextCapture, values: &mut Map<String, Value>) 
         .filter(|p| blast_radius::is_source_code_path(Path::new(p.as_str())))
         .cloned()
         .collect();
-    values.insert("dirty_source_code_files".into(), Value::String(format::format_csv(&dirty_source)));
-    values.insert("dirty_source_code_files_list".into(), Value::String(format::format_md_list(&dirty_source)));
+    values.insert(
+        "dirty_source_code_files".into(),
+        Value::String(format::format_csv(&dirty_source)),
+    );
+    values.insert(
+        "dirty_source_code_files_list".into(),
+        Value::String(format::format_md_list(&dirty_source)),
+    );
 
     // Staged files
-    let mut staged: Vec<String> = cap.staged_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    let mut staged: Vec<String> = cap
+        .staged_paths
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
     staged.sort();
-    values.insert("staged_files".into(), Value::String(format::format_csv(&staged)));
-    values.insert("staged_files_list".into(), Value::String(format::format_md_list(&staged)));
+    values.insert(
+        "staged_files".into(),
+        Value::String(format::format_csv(&staged)),
+    );
+    values.insert(
+        "staged_files_list".into(),
+        Value::String(format::format_md_list(&staged)),
+    );
 
     // Untracked files
-    let mut untracked: Vec<String> = cap.untracked_paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    let mut untracked: Vec<String> = cap
+        .untracked_paths
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
     untracked.sort();
-    values.insert("untracked_files".into(), Value::String(format::format_csv(&untracked)));
-    values.insert("untracked_files_list".into(), Value::String(format::format_md_list(&untracked)));
+    values.insert(
+        "untracked_files".into(),
+        Value::String(format::format_csv(&untracked)),
+    );
+    values.insert(
+        "untracked_files_list".into(),
+        Value::String(format::format_md_list(&untracked)),
+    );
 }
 
 // ── Package/area dirty/staged context ─────────────────────────────
@@ -747,15 +963,30 @@ fn populate_package_changes(cap: &ContextCapture, values: &mut Map<String, Value
         values.insert("dirty_packages".into(), Value::String(String::new()));
         values.insert("dirty_packages_list".into(), Value::String(String::new()));
         values.insert("dirty_package_areas".into(), Value::String(String::new()));
-        values.insert("dirty_package_areas_list".into(), Value::String(String::new()));
+        values.insert(
+            "dirty_package_areas_list".into(),
+            Value::String(String::new()),
+        );
         values.insert("staged_packages".into(), Value::String(String::new()));
         values.insert("staged_packages_list".into(), Value::String(String::new()));
         values.insert("staged_package_areas".into(), Value::String(String::new()));
-        values.insert("staged_package_areas_list".into(), Value::String(String::new()));
-        values.insert("current_package_has_staged_files".into(), Value::Bool(false));
-        values.insert("current_package_area_has_staged_files".into(), Value::Bool(false));
+        values.insert(
+            "staged_package_areas_list".into(),
+            Value::String(String::new()),
+        );
+        values.insert(
+            "current_package_has_staged_files".into(),
+            Value::Bool(false),
+        );
+        values.insert(
+            "current_package_area_has_staged_files".into(),
+            Value::Bool(false),
+        );
         values.insert("current_package_has_dirty_files".into(), Value::Bool(false));
-        values.insert("current_package_area_has_dirty_files".into(), Value::Bool(false));
+        values.insert(
+            "current_package_area_has_dirty_files".into(),
+            Value::Bool(false),
+        );
         return;
     }
 
@@ -785,10 +1016,22 @@ fn populate_package_changes(cap: &ContextCapture, values: &mut Map<String, Value
     dirty_area_names.sort();
     dirty_area_names.dedup();
 
-    values.insert("dirty_packages".into(), Value::String(format::format_csv(&dirty_pkg_names)));
-    values.insert("dirty_packages_list".into(), Value::String(format::format_md_list(&dirty_pkg_names)));
-    values.insert("dirty_package_areas".into(), Value::String(format::format_csv(&dirty_area_names)));
-    values.insert("dirty_package_areas_list".into(), Value::String(format::format_md_list(&dirty_area_names)));
+    values.insert(
+        "dirty_packages".into(),
+        Value::String(format::format_csv(&dirty_pkg_names)),
+    );
+    values.insert(
+        "dirty_packages_list".into(),
+        Value::String(format::format_md_list(&dirty_pkg_names)),
+    );
+    values.insert(
+        "dirty_package_areas".into(),
+        Value::String(format::format_csv(&dirty_area_names)),
+    );
+    values.insert(
+        "dirty_package_areas_list".into(),
+        Value::String(format::format_md_list(&dirty_area_names)),
+    );
 
     // Staged packages
     let mut staged_pkg_names: Vec<String> = pkgs
@@ -807,10 +1050,22 @@ fn populate_package_changes(cap: &ContextCapture, values: &mut Map<String, Value
     staged_area_names.sort();
     staged_area_names.dedup();
 
-    values.insert("staged_packages".into(), Value::String(format::format_csv(&staged_pkg_names)));
-    values.insert("staged_packages_list".into(), Value::String(format::format_md_list(&staged_pkg_names)));
-    values.insert("staged_package_areas".into(), Value::String(format::format_csv(&staged_area_names)));
-    values.insert("staged_package_areas_list".into(), Value::String(format::format_md_list(&staged_area_names)));
+    values.insert(
+        "staged_packages".into(),
+        Value::String(format::format_csv(&staged_pkg_names)),
+    );
+    values.insert(
+        "staged_packages_list".into(),
+        Value::String(format::format_md_list(&staged_pkg_names)),
+    );
+    values.insert(
+        "staged_package_areas".into(),
+        Value::String(format::format_csv(&staged_area_names)),
+    );
+    values.insert(
+        "staged_package_areas_list".into(),
+        Value::String(format::format_md_list(&staged_area_names)),
+    );
 
     // Current package/area boolean flags
     let cur_pkg_name = cap.current_package.as_ref().map(|p| &p.name);
@@ -948,7 +1203,10 @@ fn populate_languages(cap: &ContextCapture, values: &mut Map<String, Value>) {
             }
         }
     } else {
-        packages.and_then(|pkgs| pkgs.first().and_then(|p| p.package_managers.first().cloned()))
+        packages.and_then(|pkgs| {
+            pkgs.first()
+                .and_then(|p| p.package_managers.first().cloned())
+        })
     };
     values.insert(
         "package_manager".into(),
@@ -1002,7 +1260,10 @@ fn populate_docs(cap: &ContextCapture, values: &mut Map<String, Value>) {
                 .collect()
         })
         .unwrap_or_default();
-    values.insert("docs_readme".into(), Value::String(format::format_csv(&readmes)));
+    values.insert(
+        "docs_readme".into(),
+        Value::String(format::format_csv(&readmes)),
+    );
 
     // docs_blast_radius: docs with blast_radius frontmatter
     let blast_radius_docs: Vec<String> = docs
@@ -1015,7 +1276,10 @@ fn populate_docs(cap: &ContextCapture, values: &mut Map<String, Value>) {
                 .collect()
         })
         .unwrap_or_default();
-    values.insert("docs_blast_radius".into(), Value::String(format::format_csv(&blast_radius_docs)));
+    values.insert(
+        "docs_blast_radius".into(),
+        Value::String(format::format_csv(&blast_radius_docs)),
+    );
 
     // docs_drift: docs whose blast_radius intersects dirty source set.
     // Uses normalized PathBuf comparison consistent with sniff's
@@ -1043,7 +1307,10 @@ fn populate_docs(cap: &ContextCapture, values: &mut Map<String, Value>) {
                 .collect()
         })
         .unwrap_or_default();
-    values.insert("docs_drift".into(), Value::String(format::format_csv(&drift_docs)));
+    values.insert(
+        "docs_drift".into(),
+        Value::String(format::format_csv(&drift_docs)),
+    );
 }
 
 // ── Skill context ─────────────────────────────────────────────────
@@ -1052,7 +1319,11 @@ fn populate_skills(cap: &ContextCapture, values: &mut Map<String, Value>) {
     let repo_root = cap.repo_root.as_ref();
 
     let skill = repo_root.and_then(|root| {
-        find_best_skill(root, cap.current_package.as_ref(), cap.current_package_area.as_deref())
+        find_best_skill(
+            root,
+            cap.current_package.as_ref(),
+            cap.current_package_area.as_deref(),
+        )
     });
 
     values.insert(
@@ -1194,21 +1465,19 @@ fn populate_hardware(cap: &ContextCapture, values: &mut Map<String, Value>) {
 
     values.insert(
         "cpu_cores".into(),
-        hw.map_or(Value::Null, |h| {
-            Value::Number(h.cpu.logical_cores.into())
-        }),
+        hw.map_or(Value::Null, |h| Value::Number(h.cpu.logical_cores.into())),
     );
 
     values.insert(
         "cpu_arch".into(),
-        hw.map_or(Value::Null, |h| {
-            Value::String(h.cpu.arch.clone())
-        }),
+        hw.map_or(Value::Null, |h| Value::String(h.cpu.arch.clone())),
     );
 
     values.insert(
         "gpu".into(),
-        cap.gpu_names.as_ref().map_or(Value::Null, |n| Value::String(n.clone())),
+        cap.gpu_names
+            .as_ref()
+            .map_or(Value::Null, |n| Value::String(n.clone())),
     );
 }
 

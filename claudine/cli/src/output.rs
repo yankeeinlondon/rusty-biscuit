@@ -1,10 +1,10 @@
+use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
-use biscuit_terminal::components::block_quote::BlockQuote;
 use claudine::badges::{COMPOSE, INLINE_COMPOSE, INTERACTIVE, REPO_FLAG, VERBOSE, YOLO};
 use claudine::events::Provider;
 use std::path::Path;
@@ -135,7 +135,12 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
         prompt.to_string()
     } else {
         let lines: Vec<&str> = prompt.lines().collect();
-        lines.iter().take(10).copied().collect::<Vec<_>>().join("\n")
+        lines
+            .iter()
+            .take(10)
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n")
     };
 
     // Render prompt as Markdown through Darkmatter, constraining width to
@@ -157,11 +162,16 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
 
     // Wrap in a BlockQuote with green border, left margin, and no additional
     // word wrapping (Darkmatter already wrapped to the correct width).
-    let mut block = BlockQuote::new(RenderableContent::from(rendered.trim_end().to_string()), None::<&str>)
-        .with_left_block_color(Color::Tailwind(Tailwind::Green700))
-        .with_border("▌ ");
-    block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(left_margin as u32);
-    block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
+    let mut block = BlockQuote::new(
+        RenderableContent::from(rendered.trim_end().to_string()),
+        None::<&str>,
+    )
+    .with_left_block_color(Color::Tailwind(Tailwind::Green700))
+    .with_border("▌ ");
+    block.layout_mut().left_margin =
+        biscuit_terminal::utils::layout::Margin::Chars(left_margin as u32);
+    block.layout_mut().right_margin =
+        biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
     log::message(&block.render(term));
 
     if !verbose && prompt.lines().count() > 10 {

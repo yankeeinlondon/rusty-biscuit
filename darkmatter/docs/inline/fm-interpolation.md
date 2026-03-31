@@ -1,0 +1,250 @@
+---
+blast_radius:
+  - darkmatter/features/2026-03-30-fm-interpolation/spec.md
+  - darkmatter/features/2026-03-30-fm-interpolation/tech-design.md
+  - darkmatter/lib/src/markdown/compose/mod.rs
+  - darkmatter/lib/src/markdown/compose/types.rs
+  - darkmatter/lib/src/markdown/compose/state.rs
+  - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+  - darkmatter/lib/src/markdown/compose/interpolation/lexer.rs
+  - darkmatter/lib/src/markdown/compose/context/capture.rs
+  - darkmatter/cli/src/commands.rs
+---
+
+# Frontmatter Interpolation
+
+Frontmatter interpolation resolves `{{ ... }}` expressions inside frontmatter values before the final compose-time state is built. This allows computed frontmatter values to participate in later stages such as:
+
+- body interpolation
+- frontmatter transclusion targets like `prologue` and `epilogue`
+- page-block conditions
+- inherited state passed into child transclusions
+
+## Why It Exists
+
+Darkmatter has long supported interpolation in the markdown body:
+
+```md
+The spec is at {{ spec }}.
+```
+
+But frontmatter can also contain compose-time configuration:
+
+```yaml
+---
+base: /tmp/project
+spec: "{{base}}/spec.md"
+prologue: "{{base}}/intro.md"
+---
+```
+
+Without frontmatter interpolation, `spec` and `prologue` remain literal strings and downstream pipeline stages cannot use the resolved values.
+
+## Pipeline Position
+
+`FrontmatterInterpolation` is the first Inline Pre operation.
+
+It runs:
+
+1. After external-state defaults are applied
+2. After `--set` overrides are applied
+3. Before the final `EffectiveState` is built
+
+That ordering matters because frontmatter interpolation shapes the state that later stages consume.
+
+## Core Rule: Seed-Only Semantics
+
+Frontmatter interpolation is a single-pass transform over top-level frontmatter keys.
+
+Each top-level key is classified as one of:
+
+- **Seed value**: the value tree contains no interpolation expressions anywhere
+- **Templated value**: the value tree contains at least one interpolation expression somewhere
+
+Only seed values participate in lookup for the frontmatter interpolation pass.
+
+### What Counts As Templated
+
+Classification happens at the top-level key, not at the individual leaf:
+
+```yaml
+---
+base: /tmp/project
+author: Alice
+spec: "{{base}}/spec.md"
+metadata:
+  home: "{{base}}/docs"
+  owner: Alice
+---
+```
+
+In this example:
+
+- `base` is a seed value
+- `author` is a seed value
+- `spec` is templated
+- `metadata` is templated because one nested string contains `{{ ... }}`
+
+## Available Variables
+
+Frontmatter interpolation resolves against three sources:
+
+| Prefix | Source | Example |
+|---|---|---|
+| *(none)* | Non-templated frontmatter seed values | `{{ base }}` |
+| `ctx.` | Runtime context | `{{ ctx.today }}` |
+| `env.` | Environment variables | `{{ env.HOME }}` |
+
+Dotted access into nested seed values is supported:
+
+```yaml
+---
+meta:
+  owner:
+    name: Alice
+path: "{{meta.owner.name}}"
+---
+```
+
+## Supported Value Shapes
+
+Frontmatter interpolation walks the full JSON/YAML value tree for each templated top-level key:
+
+- `String`: rewritten if it contains interpolation expressions
+- `Array`: each element is visited recursively
+- `Object`: each field value is visited recursively
+- `Number`, `Bool`, `Null`: preserved unchanged
+
+Only string leaves are rewritten. The surrounding structure is preserved.
+
+## Example
+
+```yaml
+---
+base: /path/to/something
+spec: "{{base}}/spec.md"
+plan: "{{base}}/plan.md"
+---
+# My Document
+
+The spec is located at: {{spec}}
+The plan is located at: {{plan}}
+```
+
+After frontmatter interpolation, the frontmatter becomes:
+
+```yaml
+---
+base: /path/to/something
+spec: /path/to/something/spec.md
+plan: /path/to/something/plan.md
+---
+```
+
+Later, the normal body interpolation stage sees those resolved values and produces:
+
+```md
+# My Document
+
+The spec is located at: /path/to/something/spec.md
+The plan is located at: /path/to/something/plan.md
+```
+
+## Interaction With `--state` And `--set`
+
+Because frontmatter interpolation runs after frontmatter has been initialized, both of these can influence the result:
+
+- `--state` can fill missing or null frontmatter values before interpolation runs
+- `--set` can override frontmatter values before interpolation runs
+
+That means patterns like this are supported:
+
+```yaml
+---
+spec: "{{base}}/spec.md"
+---
+```
+
+```bash
+md compose doc.md --set '{base: "/tmp/project"}'
+```
+
+The resulting `spec` value becomes `/tmp/project/spec.md`.
+
+## Missing Variables And Errors
+
+Frontmatter interpolation uses the same expression grammar and evaluator as body interpolation.
+
+That means:
+
+- missing variables resolve to the empty string
+- fallbacks work: `{{ color | "unknown" }}`
+- ternaries work: `{{ enabled ? "yes" : "no" }}`
+- helper functions work: `{{ length(items) }}`
+
+When `fail_fast` is enabled, parse or evaluation failures stop the compose run.
+When `fail_fast` is disabled, the original string is preserved and a warning is recorded.
+
+## Important Limitation
+
+Chained references between templated top-level keys are intentionally not supported in v1.
+
+```yaml
+---
+base: /root
+spec: "{{base}}/spec.md"
+plan: "{{spec}}.plan.md"
+---
+```
+
+Here:
+
+- `spec` is templated, so it is excluded from the seed state
+- `plan` cannot use the resolved value of `spec` during the same pass
+- `{{spec}}` therefore resolves as missing and becomes an empty string
+
+Result:
+
+```yaml
+plan: ".plan.md"
+```
+
+This constraint keeps the behavior deterministic and avoids source-order-dependent chaining rules.
+
+## Downstream Effects
+
+Once frontmatter interpolation has run, later compose stages see the rewritten frontmatter values.
+
+That means it directly affects:
+
+- body `{{ ... }}` interpolation
+- `prologue` and `epilogue` references
+- page-block `when="..."`
+- child-document inherited state during transclusion
+
+## Compose Reporting
+
+The compose report tracks frontmatter interpolation separately from body interpolation.
+
+- `ComposeOperation` variant: `FrontmatterInterpolation`
+- Phase: `InlinePre`
+- Report field: `frontmatter_interpolations_applied`
+- Perf metric name: `frontmatter interpolation`
+
+## Drift Detection
+
+This document may need review when any of these files change:
+
+- `darkmatter/features/2026-03-30-fm-interpolation/spec.md`
+- `darkmatter/features/2026-03-30-fm-interpolation/tech-design.md`
+- `darkmatter/lib/src/markdown/compose/mod.rs`
+- `darkmatter/lib/src/markdown/compose/types.rs`
+- `darkmatter/lib/src/markdown/compose/state.rs`
+- `darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs`
+- `darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs`
+- `darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs`
+- `darkmatter/lib/src/markdown/compose/interpolation/lexer.rs`
+- `darkmatter/lib/src/markdown/compose/context/capture.rs`
+- `darkmatter/cli/src/commands.rs`

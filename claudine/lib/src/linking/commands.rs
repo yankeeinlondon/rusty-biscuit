@@ -8,7 +8,10 @@ use crate::error::Result;
 use crate::events::Provider;
 
 use super::capabilities::{ALL_PROVIDERS, LinkableResource, ResourceFormat, capabilities_for};
-use super::compatibility::{has_claude_specific_properties, parse_markdown_document};
+use super::compatibility::{
+    fix_frontmatter_indentation_tabs, frontmatter_has_indentation_tabs,
+    has_claude_specific_properties, parse_markdown_document,
+};
 use super::filter::ResourceFilter;
 use super::paths::{ProviderSkillPaths, ResourceScope};
 use super::symlink::{LinkResult, create_resource_link};
@@ -57,6 +60,8 @@ pub enum CommandExceptionType {
     Missing,
     /// Command file missing required frontmatter properties.
     Invalid,
+    /// Command frontmatter uses tab indentation that strict YAML parsers reject.
+    YamlTabs,
     /// No links in command body.
     NoLinks,
     /// Command specifies a `model` property that limits cross-provider shareability.
@@ -70,6 +75,7 @@ impl std::fmt::Display for CommandExceptionType {
         match self {
             CommandExceptionType::Missing => write!(f, "missing"),
             CommandExceptionType::Invalid => write!(f, "invalid"),
+            CommandExceptionType::YamlTabs => write!(f, "yaml-tabs"),
             CommandExceptionType::NoLinks => write!(f, "no-links"),
             CommandExceptionType::ModelPropertyNotShareable => write!(f, "model-not-shareable"),
             CommandExceptionType::FormatIncompatible => write!(f, "format-incompatible"),
@@ -131,6 +137,8 @@ pub struct CommandFixSummary {
     pub skipped: usize,
     /// Commands where format is incompatible with target provider.
     pub format_incompatible: usize,
+    /// Command files whose YAML indentation tabs were normalized to spaces.
+    pub yaml_tabs_fixed: usize,
     /// Commands skipped because they have Claude-specific frontmatter (not shareable).
     pub not_shareable: usize,
 }
@@ -157,6 +165,12 @@ pub fn fix_missing_commands(paths: &ProviderSkillPaths) -> Result<CommandFixSumm
     let (user_commands, user_skipped) = filter_unshareable_commands(all_user_commands);
     let (repo_commands, repo_skipped) = filter_unshareable_commands(all_repo_commands);
     summary.not_shareable = user_skipped + repo_skipped;
+
+    for command in user_commands.iter().chain(repo_commands.iter()) {
+        if fix_frontmatter_indentation_tabs(&command.path)? {
+            summary.yaml_tabs_fixed += 1;
+        }
+    }
 
     for provider in ALL_PROVIDERS {
         if provider == Provider::Claude {
@@ -475,6 +489,7 @@ fn gather_exceptions(
 
     // Check canonical commands for model property
     for (name, command) in &canonical {
+        check_yaml_tabs(&mut exceptions, name, &command.path);
         check_model_property(&mut exceptions, name, &command.path);
     }
 
@@ -550,6 +565,31 @@ fn gather_exceptions(
     });
 
     Ok((exceptions, diagnostics))
+}
+
+fn check_yaml_tabs(exceptions: &mut Vec<CommandException>, name: &str, command_file: &Path) {
+    let content = match fs::read_to_string(command_file) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let has_tabs = match frontmatter_has_indentation_tabs(&content) {
+        Ok(has_tabs) => has_tabs,
+        Err(_) => return,
+    };
+
+    if has_tabs {
+        exceptions.push(CommandException {
+            provider: Provider::Claude,
+            exception_type: CommandExceptionType::YamlTabs,
+            name: name.to_string(),
+            command_file_path: command_file.to_path_buf(),
+            missing_properties: Vec::new(),
+            source_format: None,
+            target_format: None,
+            model_value: None,
+        });
+    }
 }
 
 /// Check a single provider scope for missing commands or missing directories.
@@ -733,6 +773,41 @@ mod tests {
             .collect();
         assert_eq!(model_exceptions.len(), 1);
         assert_eq!(model_exceptions[0].model_value.as_deref(), Some("opus"));
+    }
+
+    #[test]
+    fn detects_and_fixes_yaml_tabs() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_command_paths(tmp.path());
+        let user_dir = paths
+            .target_dir(
+                Provider::Claude,
+                LinkableResource::Command,
+                ResourceScope::User,
+            )
+            .unwrap();
+        fs::create_dir_all(&user_dir).unwrap();
+        let command_file = user_dir.join("tabbed.md");
+        fs::write(
+            &command_file,
+            "---\ndescription: Has tabbed yaml\nprompt: |-\n\tline one\n\t\tline two\n---\nCommand prompt here.\n",
+        )
+        .unwrap();
+
+        let report = list_commands(&paths, &[]).unwrap();
+        let yaml_tabs: Vec<_> = report
+            .exceptions
+            .iter()
+            .filter(|e| e.exception_type == CommandExceptionType::YamlTabs)
+            .collect();
+        assert_eq!(yaml_tabs.len(), 1);
+        assert_eq!(yaml_tabs[0].name, "tabbed");
+
+        let summary = fix_missing_commands(&paths).unwrap();
+        assert_eq!(summary.yaml_tabs_fixed, 1);
+
+        let content = fs::read_to_string(&command_file).unwrap();
+        assert!(!frontmatter_has_indentation_tabs(&content).unwrap());
     }
 
     #[cfg(unix)]

@@ -368,7 +368,10 @@ mod tests {
             Some("Shakespeare"),
         );
         let result = quote.render_optimistic(None);
-        assert_eq!(strip_ansi(&result), "│ To be or not to be\n│\n│ — Shakespeare");
+        assert_eq!(
+            strip_ansi(&result),
+            "│ To be or not to be\n│\n│ — Shakespeare"
+        );
     }
 
     #[test]

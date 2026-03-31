@@ -453,8 +453,8 @@ mod tests {
     #[serial]
     fn test_inverted_for_terminal_uses_opaque_opposite_theme_surface_color() {
         let dark_mode = ScopedEnv::set("DARK_MODE", "1");
-        let graph = GraphExpression::inverted_for_terminal("a -> b", GraphInputSyntax::Auto)
-            .unwrap();
+        let graph =
+            GraphExpression::inverted_for_terminal("a -> b", GraphInputSyntax::Auto).unwrap();
         assert!(!graph.transparent_background);
 
         let artifact = graph
@@ -475,8 +475,8 @@ mod tests {
         drop(dark_mode);
 
         let light_mode = ScopedEnv::set("DARK_MODE", "0");
-        let graph = GraphExpression::inverted_for_terminal("a -> b", GraphInputSyntax::Auto)
-            .unwrap();
+        let graph =
+            GraphExpression::inverted_for_terminal("a -> b", GraphInputSyntax::Auto).unwrap();
         assert!(!graph.transparent_background);
 
         let artifact = graph

@@ -238,6 +238,11 @@ commit:
 # Install the CLI
 install *args="":
     @echo
+    @echo -e "Building {{BOLD}}biscuit-terminal{{RESET}} Library"
+    @cargo build -p biscuit-terminal --release || ( playa effect error-2 2>/dev/null && exit 1 )
+    @echo -e "Building {{BOLD}}darkmatter{{RESET}} Library"
+    @cargo build -p darkmatter --release || ( playa effect error-2 2>/dev/null && exit 1 )
+    @echo
     @echo -e "{{BOLD}}Building {{LIB_NAME}}{{RESET}}"
     @echo
     @cargo build -p {{LIBRARY}} --release  || ( playa effect error-2 2>/dev/null && exit 1 )

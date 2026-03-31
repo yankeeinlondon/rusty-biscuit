@@ -22,6 +22,11 @@ use url::Url;
 /// - **Inline Post**: serial, runs after transclusion
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComposeOperation {
+    /// Resolves `{{ variable }}` expressions inside frontmatter values
+    /// using non-templated frontmatter values, `ctx`, and `env` as inputs.
+    /// Runs before the final effective state is built.
+    FrontmatterInterpolation,
+
     /// Applies the frontmatter `replace` map to substitute text
     /// patterns throughout the document body.
     TextReplacement,
@@ -141,28 +146,30 @@ pub enum ComposePhase {
 
 impl ComposeOperation {
     /// Total number of compose operations.
-    pub const COUNT: usize = 10;
+    pub const COUNT: usize = 11;
 
     /// Stable discriminant index for fixed-size operation sets.
     pub const fn index(self) -> usize {
         match self {
-            Self::TextReplacement => 0,
-            Self::PageBlocks => 1,
-            Self::Interpolation => 2,
-            Self::ShellExpansion => 3,
-            Self::BlockTransclusion => 4,
-            Self::FrontmatterTransclusion => 5,
-            Self::CodeTransclusion => 6,
-            Self::TocLinking => 7,
-            Self::Cleanup => 8,
-            Self::Normalization => 9,
+            Self::FrontmatterInterpolation => 0,
+            Self::TextReplacement => 1,
+            Self::PageBlocks => 2,
+            Self::Interpolation => 3,
+            Self::ShellExpansion => 4,
+            Self::BlockTransclusion => 5,
+            Self::FrontmatterTransclusion => 6,
+            Self::CodeTransclusion => 7,
+            Self::TocLinking => 8,
+            Self::Cleanup => 9,
+            Self::Normalization => 10,
         }
     }
 
     /// Returns the default phase this operation belongs to.
     pub fn phase(&self) -> ComposePhase {
         match self {
-            Self::TextReplacement
+            Self::FrontmatterInterpolation
+            | Self::TextReplacement
             | Self::PageBlocks
             | Self::Interpolation
             | Self::ShellExpansion => ComposePhase::InlinePre,
@@ -180,6 +187,7 @@ impl ComposeOperation {
     pub fn default_order() -> &'static [ComposeOperation] {
         &[
             // Inline Pre (serial)
+            Self::FrontmatterInterpolation,
             Self::TextReplacement,
             Self::PageBlocks,
             Self::Interpolation,
@@ -872,8 +880,7 @@ struct ComposeContextInner {
 impl PartialEq for ComposeContext {
     fn eq(&self, other: &Self) -> bool {
         // Same Arc instance = equal; otherwise compare values
-        std::sync::Arc::ptr_eq(&self.inner, &other.inner)
-            || self.inner.values == other.inner.values
+        std::sync::Arc::ptr_eq(&self.inner, &other.inner) || self.inner.values == other.inner.values
     }
 }
 
@@ -882,33 +889,58 @@ impl Eq for ComposeContext {}
 // Legacy public field accessors (backward compatible)
 impl ComposeContext {
     /// ISO 8601 local datetime.
-    pub fn now(&self) -> &str { &self.inner.now }
+    pub fn now(&self) -> &str {
+        &self.inner.now
+    }
     /// ISO 8601 UTC datetime.
-    pub fn now_utc(&self) -> &str { &self.inner.now_utc }
+    pub fn now_utc(&self) -> &str {
+        &self.inner.now_utc
+    }
     /// Local date YYYY-MM-DD.
-    pub fn today(&self) -> &str { &self.inner.today }
+    pub fn today(&self) -> &str {
+        &self.inner.today
+    }
     /// Yesterday YYYY-MM-DD.
-    pub fn yesterday(&self) -> &str { &self.inner.yesterday }
+    pub fn yesterday(&self) -> &str {
+        &self.inner.yesterday
+    }
     /// Tomorrow YYYY-MM-DD.
-    pub fn tomorrow(&self) -> &str { &self.inner.tomorrow }
+    pub fn tomorrow(&self) -> &str {
+        &self.inner.tomorrow
+    }
     /// Full day of week name.
-    pub fn day(&self) -> &str { &self.inner.day }
+    pub fn day(&self) -> &str {
+        &self.inner.day
+    }
     /// Abbreviated day of week.
-    pub fn day_abbr(&self) -> &str { &self.inner.day_abbr }
+    pub fn day_abbr(&self) -> &str {
+        &self.inner.day_abbr
+    }
     /// Four-digit year.
-    pub fn year(&self) -> &str { &self.inner.year }
+    pub fn year(&self) -> &str {
+        &self.inner.year
+    }
     /// Two-digit month (01-12).
-    pub fn month(&self) -> &str { &self.inner.month }
+    pub fn month(&self) -> &str {
+        &self.inner.month
+    }
     /// Full month name.
-    pub fn month_name(&self) -> &str { &self.inner.month_name }
+    pub fn month_name(&self) -> &str {
+        &self.inner.month_name
+    }
     /// Abbreviated month name.
-    pub fn month_name_abbr(&self) -> &str { &self.inner.month_name_abbr }
+    pub fn month_name_abbr(&self) -> &str {
+        &self.inner.month_name_abbr
+    }
     /// Environment variables snapshot.
-    pub fn env(&self) -> &HashMap<String, String> { &self.inner.env }
+    pub fn env(&self) -> &HashMap<String, String> {
+        &self.inner.env
+    }
     /// Access the values map (crate-internal).
-    pub(crate) fn values(&self) -> &serde_json::Map<String, serde_json::Value> { &self.inner.values }
+    pub(crate) fn values(&self) -> &serde_json::Map<String, serde_json::Value> {
+        &self.inner.values
+    }
 }
-
 
 impl ComposeContext {
     /// Captures the current runtime context using CWD as the base directory.
@@ -928,10 +960,12 @@ impl ComposeContext {
                 // sniff-derived fields null, and record the failure.
                 let (mut values, diagnostics) = (
                     serde_json::Map::new(),
-                    vec![super::context::ContextMergeDiagnostic::PartialRuntimeCapture {
-                        area: "cwd",
-                        detail: format!("current_dir() failed: {e}"),
-                    }],
+                    vec![
+                        super::context::ContextMergeDiagnostic::PartialRuntimeCapture {
+                            area: "cwd",
+                            detail: format!("current_dir() failed: {e}"),
+                        },
+                    ],
                 );
                 super::context::capture::populate_datetime(&mut values);
                 Self::from_values(values, diagnostics, Vec::new())
@@ -952,10 +986,29 @@ impl ComposeContext {
     /// If the document uses no `ctx.*` variables, only date/time (zero I/O)
     /// is captured. This avoids git, repo, docs, OS, and hardware detection
     /// for documents that don't need them.
+    ///
+    /// **Note:** This scans only the provided string. If the document has
+    /// frontmatter values containing `ctx.*` references, use
+    /// [`capture_for_document`](Self::capture_for_document) instead.
     pub fn capture_for_content(base_dir: &std::path::Path, content: &str) -> Self {
         let (values, capture_diagnostics, timings) =
             super::context::capture::capture_runtime_context_for_content(base_dir, content);
         Self::from_values(values, capture_diagnostics, timings)
+    }
+
+    /// Demand-driven capture that scans both frontmatter values and body
+    /// content for `ctx.*` references.
+    ///
+    /// This is the correct method when composing a full document, since
+    /// frontmatter values may contain `ctx.*` references that are absent
+    /// from the body.
+    pub fn capture_for_document(
+        base_dir: &std::path::Path,
+        doc: &crate::markdown::Markdown,
+    ) -> Self {
+        let fm_json = serde_json::to_string(doc.frontmatter().as_map()).unwrap_or_default();
+        let combined = format!("{}\n{}", fm_json, doc.content());
+        Self::capture_for_content(base_dir, &combined)
     }
 
     /// Build a `ComposeContext` from pre-computed values.
@@ -1120,7 +1173,11 @@ impl ComposePerfReport {
         self.total += other.total;
 
         for other_metric in &other.metrics {
-            if let Some(existing) = self.metrics.iter_mut().find(|m| m.name == other_metric.name) {
+            if let Some(existing) = self
+                .metrics
+                .iter_mut()
+                .find(|m| m.name == other_metric.name)
+            {
                 existing.elapsed += other_metric.elapsed;
                 existing.calls += other_metric.calls;
             } else {
@@ -1142,6 +1199,9 @@ impl Default for ComposePerfReport {
 /// generated during processing.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ComposeReport {
+    /// Number of frontmatter interpolation expressions resolved.
+    pub frontmatter_interpolations_applied: usize,
+
     /// Number of text replacements applied.
     pub replacements_applied: usize,
 
@@ -1196,7 +1256,8 @@ impl ComposeReport {
 
     /// Returns true if any changes were made by any stage.
     pub fn has_changes(&self) -> bool {
-        self.replacements_applied > 0
+        self.frontmatter_interpolations_applied > 0
+            || self.replacements_applied > 0
             || self.interpolations_applied > 0
             || self.toc_links_generated > 0
             || self.shell_expansions_applied > 0
@@ -1216,6 +1277,13 @@ impl ComposeReport {
         }
 
         let mut parts = Vec::new();
+
+        if self.frontmatter_interpolations_applied > 0 {
+            parts.push(format!(
+                "{} frontmatter interpolation(s)",
+                self.frontmatter_interpolations_applied
+            ));
+        }
 
         if self.replacements_applied > 0 {
             parts.push(format!("{} replacement(s)", self.replacements_applied));
@@ -1294,6 +1362,7 @@ impl ComposeReport {
 
     /// Merges another report into this one.
     pub fn merge(&mut self, mut other: ComposeReport) {
+        self.frontmatter_interpolations_applied += other.frontmatter_interpolations_applied;
         self.replacements_applied += other.replacements_applied;
         self.interpolations_applied += other.interpolations_applied;
         self.toc_links_generated += other.toc_links_generated;
@@ -1383,6 +1452,7 @@ mod tests {
     fn test_compose_options_default_stages() {
         let options = ComposeOptions::new();
 
+        assert!(options.is_enabled(ComposeOperation::FrontmatterInterpolation));
         assert!(options.is_enabled(ComposeOperation::TextReplacement));
         assert!(options.is_enabled(ComposeOperation::Interpolation));
         assert!(options.is_enabled(ComposeOperation::Cleanup));
@@ -1448,6 +1518,7 @@ mod tests {
         assert_eq!(
             ComposeOperation::default_order(),
             &[
+                ComposeOperation::FrontmatterInterpolation,
                 ComposeOperation::TextReplacement,
                 ComposeOperation::PageBlocks,
                 ComposeOperation::Interpolation,
@@ -1465,6 +1536,10 @@ mod tests {
     #[test]
     fn test_compose_operation_phase_mapping_is_complete() {
         let expectations = [
+            (
+                ComposeOperation::FrontmatterInterpolation,
+                ComposePhase::InlinePre,
+            ),
             (ComposeOperation::TextReplacement, ComposePhase::InlinePre),
             (ComposeOperation::PageBlocks, ComposePhase::InlinePre),
             (ComposeOperation::Interpolation, ComposePhase::InlinePre),
@@ -1796,7 +1871,10 @@ mod tests {
 
         report_a.merge(report_b);
         assert!(report_a.perf.is_some());
-        assert_eq!(report_a.perf.as_ref().unwrap().total, Duration::from_millis(5));
+        assert_eq!(
+            report_a.perf.as_ref().unwrap().total,
+            Duration::from_millis(5)
+        );
     }
 
     #[test]

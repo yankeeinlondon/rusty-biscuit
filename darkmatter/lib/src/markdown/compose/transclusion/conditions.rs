@@ -127,7 +127,8 @@ mod tests {
     #[test]
     fn env_equality_with_string_literal() {
         let mut ctx = ComposeContext::fixed_for_testing();
-        ctx.env_mut().insert("AGENT".to_string(), "claude".to_string());
+        ctx.env_mut()
+            .insert("AGENT".to_string(), "claude".to_string());
 
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(HashMap::new())
@@ -148,7 +149,8 @@ mod tests {
     #[test]
     fn mutual_exclusion_pattern() {
         let mut ctx = ComposeContext::fixed_for_testing();
-        ctx.env_mut().insert("AGENT".to_string(), "claude".to_string());
+        ctx.env_mut()
+            .insert("AGENT".to_string(), "claude".to_string());
         let state = EffectiveStateBuilder::new()
             .with_frontmatter(HashMap::new())
             .with_context(ctx)
