@@ -20,6 +20,8 @@ pub use network::NetworkInfo;
 pub use programs::{ProgramMetadata, ProgramsInfo};
 pub use request::DetectionPlan;
 
+use request::{FilesystemRequest, GitRequest, HardwareRequest, NetworkRequest, OsRequest};
+
 // Re-export key OS types from the os module for convenience.
 // The canonical path is `sniff::os::*`.
 pub use os::OsInfo;
@@ -136,6 +138,40 @@ impl SniffConfig {
     }
 }
 
+impl From<SniffConfig> for DetectionPlan {
+    fn from(config: SniffConfig) -> Self {
+        let git_request = if config.deep {
+            GitRequest::deep().commit_count(config.commit_count)
+        } else {
+            GitRequest::full().commit_count(config.commit_count)
+        };
+
+        DetectionPlan {
+            base_dir: config.base_dir,
+            os: if config.skip_os {
+                None
+            } else {
+                Some(OsRequest::full())
+            },
+            hardware: if config.skip_hardware {
+                None
+            } else {
+                Some(HardwareRequest::full())
+            },
+            network: if config.skip_network {
+                None
+            } else {
+                Some(NetworkRequest::full())
+            },
+            filesystem: if config.skip_filesystem {
+                None
+            } else {
+                Some(FilesystemRequest::new().git(git_request))
+            },
+        }
+    }
+}
+
 /// Detect system information with default configuration.
 ///
 /// This is a convenience function that calls `detect_with_config`
@@ -170,35 +206,58 @@ pub fn detect() -> Result<SniffResult> {
 /// let result = detect_with_config(config).unwrap();
 /// ```
 pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
-    let os = if config.skip_os {
-        None
-    } else {
-        Some(os::detect_os()?)
+    detect_with_plan(DetectionPlan::from(config))
+}
+
+/// Detect system information according to a detailed plan.
+///
+/// This is the primary API for callers who need fine-grained control over
+/// what gets detected. Use `detect()` for sensible defaults, or module-level
+/// functions for expert manual composition.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use sniff::{detect_with_plan, request::*};
+///
+/// let plan = DetectionPlan::new()
+///     .os(OsRequest::summary())
+///     .hardware(HardwareRequest::summary())
+///     .without_network()
+///     .filesystem(
+///         FilesystemRequest::new()
+///             .git(GitRequest::summary())
+///             .repo(RepoRequest::structure())
+///             .without_docs()
+///     );
+///
+/// let result = detect_with_plan(plan).unwrap();
+/// ```
+pub fn detect_with_plan(plan: DetectionPlan) -> Result<SniffResult> {
+    let os = match plan.os {
+        Some(ref request) => Some(os::detect_os_with_request(request)?),
+        None => None,
     };
 
-    let hardware = if config.skip_hardware {
-        None
-    } else {
-        Some(hardware::detect_hardware()?)
+    let hardware = match plan.hardware {
+        Some(ref request) => Some(hardware::detect_hardware_with_request(request)?),
+        None => None,
     };
 
-    let network = if config.skip_network {
-        None
-    } else {
-        Some(network::detect_network()?)
+    let network = match plan.network {
+        Some(ref request) => Some(network::detect_network_with_request(request)?),
+        None => None,
     };
 
-    let filesystem = if config.skip_filesystem {
-        None
-    } else {
-        let base = config
-            .base_dir
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        Some(filesystem::detect_filesystem(
-            &base,
-            config.deep,
-            config.commit_count,
-        )?)
+    let filesystem = match plan.filesystem {
+        Some(ref request) => {
+            let base = plan
+                .base_dir
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            Some(filesystem::detect_filesystem_with_request(&base, request)?)
+        }
+        None => None,
     };
 
     Ok(SniffResult {
@@ -309,5 +368,36 @@ mod tests {
         assert!(result.hardware.is_none());
         assert!(result.network.is_none());
         assert!(result.filesystem.is_none());
+    }
+
+    #[test]
+    fn test_detect_with_plan_skips_sections() {
+        let plan = DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_network()
+            .without_filesystem();
+        let result = detect_with_plan(plan).unwrap();
+        assert!(result.os.is_none());
+        assert!(result.hardware.is_none());
+        assert!(result.network.is_none());
+        assert!(result.filesystem.is_none());
+    }
+
+    #[test]
+    fn test_sniff_config_to_detection_plan() {
+        let config = SniffConfig::new()
+            .skip_os()
+            .skip_network()
+            .deep(true)
+            .commit_count(5);
+        let plan = DetectionPlan::from(config);
+        assert!(plan.os.is_none());
+        assert!(plan.hardware.is_some());
+        assert!(plan.network.is_none());
+        let fs = plan.filesystem.unwrap();
+        let git = fs.git.unwrap();
+        assert_eq!(git.commit_count, 5);
+        assert!(git.refresh_remote_tracking);
     }
 }
