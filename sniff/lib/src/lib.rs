@@ -10,6 +10,7 @@ pub mod package;
 pub mod programs;
 #[cfg(feature = "remote")]
 pub mod remote;
+pub mod request;
 pub mod services;
 
 pub use error::{Result, SniffError};
@@ -17,6 +18,7 @@ pub use filesystem::FilesystemInfo;
 pub use hardware::HardwareInfo;
 pub use network::NetworkInfo;
 pub use programs::{ProgramMetadata, ProgramsInfo};
+pub use request::DetectionPlan;
 
 // Re-export key OS types from the os module for convenience.
 // The canonical path is `sniff::os::*`.

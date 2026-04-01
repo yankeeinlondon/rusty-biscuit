@@ -1,0 +1,525 @@
+//! Per-domain request types for controlling detection detail levels.
+//!
+//! These types let callers express exactly which detection subsections
+//! they need, avoiding the cost of expensive operations they don't use.
+//!
+//! ## Examples
+//!
+//! ```
+//! use sniff::request::*;
+//!
+//! // Fast context: OS summary + hardware summary, skip network/filesystem
+//! let plan = DetectionPlan::new()
+//!     .os(OsRequest::summary())
+//!     .hardware(HardwareRequest::summary())
+//!     .without_network()
+//!     .without_filesystem();
+//!
+//! // Full audit with deep git
+//! let plan = DetectionPlan::new()
+//!     .filesystem(FilesystemRequest::new().git(GitRequest::deep()));
+//! ```
+
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+/// Top-level detection plan controlling which domains are collected
+/// and at what detail level.
+///
+/// By default, all domains are included at full detail. Use builder
+/// methods or `without_*` to exclude domains, and pass domain-specific
+/// request types to control detail within each domain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectionPlan {
+    /// Base directory for filesystem analysis. Falls back to cwd if None.
+    pub base_dir: Option<PathBuf>,
+    /// OS detection request. None skips OS detection entirely.
+    pub os: Option<OsRequest>,
+    /// Hardware detection request. None skips hardware detection entirely.
+    pub hardware: Option<HardwareRequest>,
+    /// Network detection request. None skips network detection entirely.
+    pub network: Option<NetworkRequest>,
+    /// Filesystem detection request. None skips filesystem detection entirely.
+    pub filesystem: Option<FilesystemRequest>,
+}
+
+impl Default for DetectionPlan {
+    fn default() -> Self {
+        Self {
+            base_dir: None,
+            os: Some(OsRequest::full()),
+            hardware: Some(HardwareRequest::full()),
+            network: Some(NetworkRequest::full()),
+            filesystem: Some(FilesystemRequest::default()),
+        }
+    }
+}
+
+impl DetectionPlan {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn base_dir(mut self, path: PathBuf) -> Self {
+        self.base_dir = Some(path);
+        self
+    }
+
+    pub fn os(mut self, request: OsRequest) -> Self {
+        self.os = Some(request);
+        self
+    }
+
+    pub fn hardware(mut self, request: HardwareRequest) -> Self {
+        self.hardware = Some(request);
+        self
+    }
+
+    pub fn network(mut self, request: NetworkRequest) -> Self {
+        self.network = Some(request);
+        self
+    }
+
+    pub fn filesystem(mut self, request: FilesystemRequest) -> Self {
+        self.filesystem = Some(request);
+        self
+    }
+
+    pub fn without_os(mut self) -> Self {
+        self.os = None;
+        self
+    }
+
+    pub fn without_hardware(mut self) -> Self {
+        self.hardware = None;
+        self
+    }
+
+    pub fn without_network(mut self) -> Self {
+        self.network = None;
+        self
+    }
+
+    pub fn without_filesystem(mut self) -> Self {
+        self.filesystem = None;
+        self
+    }
+}
+
+/// Controls which OS subsections are collected.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OsRequest {
+    /// Include system package manager detection (can be slow on Linux)
+    pub include_package_managers: bool,
+    /// Include locale detection
+    pub include_locale: bool,
+    /// Include timezone and NTP status (NTP can take up to 10s on Linux)
+    pub include_time: bool,
+}
+
+impl OsRequest {
+    /// Core identity only: OS type, name, version, kernel, hostname.
+    pub fn summary() -> Self {
+        Self {
+            include_package_managers: false,
+            include_locale: false,
+            include_time: false,
+        }
+    }
+
+    /// Everything including package managers, locale, and timezone/NTP.
+    pub fn full() -> Self {
+        Self {
+            include_package_managers: true,
+            include_locale: true,
+            include_time: true,
+        }
+    }
+
+    pub fn include_package_managers(mut self, include: bool) -> Self {
+        self.include_package_managers = include;
+        self
+    }
+
+    pub fn include_locale(mut self, include: bool) -> Self {
+        self.include_locale = include;
+        self
+    }
+
+    pub fn include_time(mut self, include: bool) -> Self {
+        self.include_time = include;
+        self
+    }
+}
+
+/// Controls which hardware subsections are collected.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HardwareRequest {
+    /// Include storage device inventory
+    pub include_storage: bool,
+    /// Include GPU detection
+    pub include_gpu: bool,
+    /// Include audio device enumeration (~1.5s on macOS)
+    pub include_audio: bool,
+}
+
+impl HardwareRequest {
+    /// CPU and memory only. Skips storage, GPU, and audio (~1.5s savings on macOS).
+    pub fn summary() -> Self {
+        Self {
+            include_storage: false,
+            include_gpu: false,
+            include_audio: false,
+        }
+    }
+
+    /// Full hardware detection including storage, GPU, and audio devices.
+    pub fn full() -> Self {
+        Self {
+            include_storage: true,
+            include_gpu: true,
+            include_audio: true,
+        }
+    }
+
+    pub fn include_storage(mut self, include: bool) -> Self {
+        self.include_storage = include;
+        self
+    }
+
+    pub fn include_gpu(mut self, include: bool) -> Self {
+        self.include_gpu = include;
+        self
+    }
+
+    pub fn include_audio(mut self, include: bool) -> Self {
+        self.include_audio = include;
+        self
+    }
+}
+
+/// Controls which network subsections are collected.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkRequest {
+    /// Include WAN IP lookup (HTTP call to external service)
+    pub include_wan_ip: bool,
+}
+
+impl NetworkRequest {
+    /// Local interfaces only. No external HTTP call.
+    pub fn interfaces_only() -> Self {
+        Self {
+            include_wan_ip: false,
+        }
+    }
+
+    /// Full network detection including WAN IP lookup.
+    pub fn full() -> Self {
+        Self {
+            include_wan_ip: true,
+        }
+    }
+
+    pub fn include_wan_ip(mut self, include: bool) -> Self {
+        self.include_wan_ip = include;
+        self
+    }
+}
+
+/// Controls git repository detection detail level.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitRequest {
+    /// Number of recent commits to retrieve (0 = skip commit history)
+    pub commit_count: usize,
+    /// Include per-file change details (status, line counts, diffs)
+    pub include_file_changes: bool,
+    /// Include worktree enumeration and status
+    pub include_worktrees: bool,
+    /// Fetch remote tracking refs (requires network)
+    pub refresh_remote_tracking: bool,
+    /// Include remote branch details (requires refresh_remote_tracking)
+    pub include_remote_branch_details: bool,
+    /// Check which remotes contain recent commits (requires refresh_remote_tracking)
+    pub include_commit_remote_containment: bool,
+}
+
+impl GitRequest {
+    /// Minimal: repo root, current branch, dirty status counts.
+    /// No commits, no file details, no worktrees.
+    pub fn summary() -> Self {
+        Self {
+            commit_count: 0,
+            include_file_changes: false,
+            include_worktrees: false,
+            refresh_remote_tracking: false,
+            include_remote_branch_details: false,
+            include_commit_remote_containment: false,
+        }
+    }
+
+    /// Standard detection with 10 commits, file changes, worktrees,
+    /// but no remote refresh.
+    pub fn full() -> Self {
+        Self {
+            commit_count: 10,
+            include_file_changes: true,
+            include_worktrees: true,
+            refresh_remote_tracking: false,
+            include_remote_branch_details: false,
+            include_commit_remote_containment: false,
+        }
+    }
+
+    /// Deep detection: refreshes remote tracking refs and populates
+    /// remote info on commits. Equivalent to the old `deep: true` flag.
+    pub fn deep() -> Self {
+        Self {
+            commit_count: 10,
+            include_file_changes: true,
+            include_worktrees: true,
+            refresh_remote_tracking: true,
+            include_remote_branch_details: true,
+            include_commit_remote_containment: true,
+        }
+    }
+
+    pub fn commit_count(mut self, count: usize) -> Self {
+        self.commit_count = count;
+        self
+    }
+
+    pub fn include_file_changes(mut self, include: bool) -> Self {
+        self.include_file_changes = include;
+        self
+    }
+
+    pub fn include_worktrees(mut self, include: bool) -> Self {
+        self.include_worktrees = include;
+        self
+    }
+
+    pub fn refresh_remote_tracking(mut self, include: bool) -> Self {
+        self.refresh_remote_tracking = include;
+        self
+    }
+}
+
+/// Controls repo/monorepo detection detail level.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoRequest {
+    /// When true, only detect workspace structure (tools, package names/paths).
+    /// When false, also scan per-package languages, frameworks, and file associations.
+    pub structure_only: bool,
+}
+
+impl RepoRequest {
+    /// Structure only: workspace tools and package list. 10-50x faster than full.
+    pub fn structure() -> Self {
+        Self {
+            structure_only: true,
+        }
+    }
+
+    /// Full repo detection with per-package language and framework scanning.
+    pub fn full() -> Self {
+        Self {
+            structure_only: false,
+        }
+    }
+}
+
+/// Controls filesystem detection composition.
+///
+/// Composes sub-requests for git, repo, file inventory, formatting, and docs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilesystemRequest {
+    /// Git detection request. None skips git entirely.
+    pub git: Option<GitRequest>,
+    /// Repo/monorepo detection request. None skips repo detection.
+    pub repo: Option<RepoRequest>,
+    /// Include file inventory and language breakdown
+    pub include_file_inventory: bool,
+    /// Include EditorConfig formatting detection
+    pub include_formatting: bool,
+    /// Include markdown document discovery
+    pub include_docs: bool,
+}
+
+impl Default for FilesystemRequest {
+    fn default() -> Self {
+        Self {
+            git: Some(GitRequest::full()),
+            repo: Some(RepoRequest::full()),
+            include_file_inventory: true,
+            include_formatting: true,
+            include_docs: true,
+        }
+    }
+}
+
+impl FilesystemRequest {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn git(mut self, request: GitRequest) -> Self {
+        self.git = Some(request);
+        self
+    }
+
+    pub fn repo(mut self, request: RepoRequest) -> Self {
+        self.repo = Some(request);
+        self
+    }
+
+    pub fn without_git(mut self) -> Self {
+        self.git = None;
+        self
+    }
+
+    pub fn without_repo(mut self) -> Self {
+        self.repo = None;
+        self
+    }
+
+    pub fn without_docs(mut self) -> Self {
+        self.include_docs = false;
+        self
+    }
+
+    pub fn without_formatting(mut self) -> Self {
+        self.include_formatting = false;
+        self
+    }
+
+    pub fn without_file_inventory(mut self) -> Self {
+        self.include_file_inventory = false;
+        self
+    }
+
+    pub fn include_docs(mut self, include: bool) -> Self {
+        self.include_docs = include;
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detection_plan_defaults_to_all_full() {
+        let plan = DetectionPlan::default();
+        assert!(plan.os.is_some());
+        assert!(plan.hardware.is_some());
+        assert!(plan.network.is_some());
+        assert!(plan.filesystem.is_some());
+    }
+
+    #[test]
+    fn detection_plan_skip_sections() {
+        let plan = DetectionPlan::new()
+            .without_os()
+            .without_hardware();
+        assert!(plan.os.is_none());
+        assert!(plan.hardware.is_none());
+        assert!(plan.network.is_some());
+        assert!(plan.filesystem.is_some());
+    }
+
+    #[test]
+    fn os_request_summary_vs_full() {
+        let summary = OsRequest::summary();
+        assert!(!summary.include_package_managers);
+        assert!(!summary.include_locale);
+        assert!(!summary.include_time);
+
+        let full = OsRequest::full();
+        assert!(full.include_package_managers);
+        assert!(full.include_locale);
+        assert!(full.include_time);
+    }
+
+    #[test]
+    fn hardware_request_detail_levels() {
+        let summary = HardwareRequest::summary();
+        assert!(!summary.include_storage);
+        assert!(!summary.include_gpu);
+        assert!(!summary.include_audio);
+
+        let full = HardwareRequest::full();
+        assert!(full.include_storage);
+        assert!(full.include_gpu);
+        assert!(full.include_audio);
+    }
+
+    #[test]
+    fn network_request_interfaces_only() {
+        let req = NetworkRequest::interfaces_only();
+        assert!(!req.include_wan_ip);
+
+        let full = NetworkRequest::full();
+        assert!(full.include_wan_ip);
+    }
+
+    #[test]
+    fn git_request_detail_levels() {
+        let summary = GitRequest::summary();
+        assert_eq!(summary.commit_count, 0);
+        assert!(!summary.include_file_changes);
+        assert!(!summary.include_worktrees);
+        assert!(!summary.refresh_remote_tracking);
+
+        let full = GitRequest::full();
+        assert_eq!(full.commit_count, 10);
+        assert!(full.include_file_changes);
+        assert!(full.include_worktrees);
+        assert!(!full.refresh_remote_tracking);
+
+        let deep = GitRequest::deep();
+        assert!(deep.refresh_remote_tracking);
+        assert!(deep.include_remote_branch_details);
+        assert!(deep.include_commit_remote_containment);
+    }
+
+    #[test]
+    fn filesystem_request_composition() {
+        let req = FilesystemRequest::new()
+            .git(GitRequest::summary())
+            .without_docs()
+            .without_repo();
+        assert!(req.git.is_some());
+        assert!(req.repo.is_none());
+        assert!(!req.include_docs);
+    }
+
+    #[test]
+    fn repo_request_structure_vs_full() {
+        let structure = RepoRequest::structure();
+        assert!(structure.structure_only);
+
+        let full = RepoRequest::full();
+        assert!(!full.structure_only);
+    }
+
+    #[test]
+    fn detection_plan_serialization_roundtrip() {
+        let plan = DetectionPlan::new()
+            .os(OsRequest::summary())
+            .without_network()
+            .filesystem(
+                FilesystemRequest::new()
+                    .git(GitRequest::deep().commit_count(5))
+                    .repo(RepoRequest::structure())
+            );
+
+        let json = serde_json::to_string(&plan).unwrap();
+        let parsed: DetectionPlan = serde_json::from_str(&json).unwrap();
+
+        assert!(parsed.os.is_some());
+        assert!(parsed.network.is_none());
+        let fs = parsed.filesystem.unwrap();
+        assert_eq!(fs.git.unwrap().commit_count, 5);
+        assert!(fs.repo.unwrap().structure_only);
+    }
+}
