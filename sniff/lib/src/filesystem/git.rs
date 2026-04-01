@@ -576,13 +576,13 @@ impl GitRepo {
 
     /// File-level working tree status (staged, modified, untracked).
     pub fn file_changes(&self) -> Result<Vec<FileChange>> {
-        let (_status, changes) = get_repo_status_with_changes(&self.repo)?;
+        let (_status, changes) = get_repo_status_with_changes(&self.repo, false)?;
         Ok(changes)
     }
 
     /// Aggregated working tree status.
     pub fn repo_status(&self) -> Result<RepoStatus> {
-        let (status, _changes) = get_repo_status_with_changes(&self.repo)?;
+        let (status, _changes) = get_repo_status_with_changes(&self.repo, false)?;
         Ok(status)
     }
 
@@ -620,11 +620,22 @@ impl GitRepo {
 
     /// Full detection — equivalent to `detect_git()` but reuses
     /// the already-opened repository handle.
+    ///
+    /// ## Notes
+    ///
+    /// Both `deep=false` and `deep=true` include full unified diff payloads to
+    /// preserve backward compatibility. New callers that want file stats without
+    /// diffs should use [`detect_with_request`] with [`GitRequest::full()`] directly.
     pub fn detect_full(&self, deep: bool, commit_count: usize) -> Result<GitInfo> {
         let request = if deep {
             GitRequest::deep().commit_count(commit_count)
         } else {
-            GitRequest::full().commit_count(commit_count)
+            // Preserve backward compat: detect_full always included full diffs.
+            // New callers should use detect_with_request(GitRequest::full()) to
+            // get the cheaper stats-only path.
+            GitRequest::full()
+                .include_file_diffs(true)
+                .commit_count(commit_count)
         };
         self.detect_with_request(&request)
     }
@@ -650,7 +661,7 @@ impl GitRepo {
         };
 
         let (mut status, file_changes) = if request.include_file_changes {
-            get_repo_status_with_changes(&self.repo)?
+            get_repo_status_with_changes(&self.repo, request.include_file_diffs)?
         } else {
             let (is_dirty, staged, unstaged, untracked) =
                 get_repo_status_counts_detailed(&self.repo);
@@ -1260,7 +1271,15 @@ fn get_recent_commits(repo: &Repository, count: usize) -> Vec<CommitInfo> {
 
 /// Gathers repository status including staged, unstaged, and untracked changes.
 /// Also returns file changes with their status for rich output.
-fn get_repo_status_with_changes(repo: &Repository) -> Result<(RepoStatus, Vec<FileChange>)> {
+///
+/// When `include_diffs` is true, `RepoStatus.dirty` and `RepoStatus.untracked` are
+/// populated with full unified diff payloads via [`build_dirty_files`] and
+/// [`build_untracked_files`]. When false, those fields are empty `Vec`s and only
+/// the cheaper per-file stats (paths, status, line counts) are computed.
+fn get_repo_status_with_changes(
+    repo: &Repository,
+    include_diffs: bool,
+) -> Result<(RepoStatus, Vec<FileChange>)> {
     let mut opts = StatusOptions::new();
     opts.include_untracked(true);
     // Recurse into untracked directories to get individual file paths
@@ -1375,11 +1394,19 @@ fn get_repo_status_with_changes(repo: &Repository) -> Result<(RepoStatus, Vec<Fi
     // Get repository root for absolute paths
     let repo_root = repo.workdir().map(Path::to_path_buf);
 
-    // Build dirty file details with diffs
-    let dirty = build_dirty_files(repo, &dirty_paths, &head_sha, &origin_commit, &repo_root)?;
+    // Build dirty file details with diffs (only when requested)
+    let dirty = if include_diffs {
+        build_dirty_files(repo, &dirty_paths, &head_sha, &origin_commit, &repo_root)?
+    } else {
+        Vec::new()
+    };
 
-    // Build untracked file details
-    let untracked = build_untracked_files(&untracked_paths, &repo_root);
+    // Build untracked file details (only when requested)
+    let untracked = if include_diffs {
+        build_untracked_files(&untracked_paths, &repo_root)
+    } else {
+        Vec::new()
+    };
 
     let repo_status = RepoStatus {
         is_dirty: staged > 0 || unstaged > 0 || untracked_count > 0,
@@ -2554,7 +2581,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let repo = Repository::init(dir.path()).unwrap();
 
-        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo, true).unwrap();
         assert!(!status.is_dirty);
         assert_eq!(status.staged_count, 0);
         assert_eq!(status.unstaged_count, 0);
@@ -2571,7 +2598,7 @@ mod tests {
         // Create an untracked file
         std::fs::write(dir.path().join("test.txt"), "content").unwrap();
 
-        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo, true).unwrap();
         assert!(status.is_dirty);
         assert_eq!(status.untracked_count, 1);
         assert_eq!(status.untracked.len(), 1);
@@ -2604,7 +2631,7 @@ mod tests {
         // Modify the file (unstaged change)
         std::fs::write(&file_path, "modified content").unwrap();
 
-        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo, true).unwrap();
         assert!(status.is_dirty);
         assert_eq!(status.unstaged_count, 1);
         assert_eq!(status.dirty.len(), 1);
@@ -2644,7 +2671,7 @@ mod tests {
             index.write().unwrap();
         }
 
-        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo, true).unwrap();
         assert!(status.is_dirty);
         assert_eq!(status.staged_count, 1);
         assert_eq!(status.dirty.len(), 1);
@@ -2679,7 +2706,7 @@ mod tests {
             index.write().unwrap();
         }
 
-        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo, true).unwrap();
         assert!(status.is_dirty);
         assert_eq!(status.staged_count, 1);
         assert_eq!(status.dirty.len(), 1);
@@ -2713,7 +2740,7 @@ mod tests {
         // Modify the nested file
         std::fs::write(&nested_file, "modified").unwrap();
 
-        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo, true).unwrap();
         assert_eq!(status.dirty.len(), 1);
 
         let dirty = &status.dirty[0];
@@ -2732,7 +2759,7 @@ mod tests {
         // Create untracked file at root level (simpler case, avoids directory folding)
         std::fs::write(dir.path().join("untracked.txt"), "content").unwrap();
 
-        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo, true).unwrap();
         assert_eq!(status.untracked.len(), 1);
 
         let untracked = &status.untracked[0];
@@ -2797,7 +2824,7 @@ mod tests {
         // Modify the file
         std::fs::write(&file_path, "line1\nmodified\nline3\n").unwrap();
 
-        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo, true).unwrap();
         assert_eq!(status.dirty.len(), 1);
 
         let diff = &status.dirty[0].diff;

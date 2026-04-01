@@ -231,8 +231,11 @@ impl NetworkRequest {
 pub struct GitRequest {
     /// Number of recent commits to retrieve (0 = skip commit history)
     pub commit_count: usize,
-    /// Include per-file change details (status, line counts, diffs)
+    /// Include per-file change details (paths, status, line counts)
     pub include_file_changes: bool,
+    /// Include full unified diff payloads in `RepoStatus.dirty` and `RepoStatus.untracked`.
+    /// Only effective when `include_file_changes` is also true.
+    pub include_file_diffs: bool,
     /// Include worktree enumeration and status
     pub include_worktrees: bool,
     /// Fetch remote tracking refs (requires network)
@@ -250,6 +253,7 @@ impl GitRequest {
         Self {
             commit_count: 0,
             include_file_changes: false,
+            include_file_diffs: false,
             include_worktrees: false,
             refresh_remote_tracking: false,
             include_remote_branch_details: false,
@@ -257,12 +261,13 @@ impl GitRequest {
         }
     }
 
-    /// Standard detection with 10 commits, file changes, worktrees,
-    /// but no remote refresh.
+    /// Standard detection with 10 commits, file change stats (paths and line counts),
+    /// worktrees, but no unified diff payloads and no remote refresh.
     pub fn full() -> Self {
         Self {
             commit_count: 10,
             include_file_changes: true,
+            include_file_diffs: false,
             include_worktrees: true,
             refresh_remote_tracking: false,
             include_remote_branch_details: false,
@@ -270,12 +275,13 @@ impl GitRequest {
         }
     }
 
-    /// Deep detection: refreshes remote tracking refs and populates
-    /// remote info on commits. Equivalent to the old `deep: true` flag.
+    /// Deep detection: refreshes remote tracking refs, populates remote info on
+    /// commits, and includes full unified diff payloads for dirty and untracked files.
     pub fn deep() -> Self {
         Self {
             commit_count: 10,
             include_file_changes: true,
+            include_file_diffs: true,
             include_worktrees: true,
             refresh_remote_tracking: true,
             include_remote_branch_details: true,
@@ -290,6 +296,11 @@ impl GitRequest {
 
     pub fn include_file_changes(mut self, include: bool) -> Self {
         self.include_file_changes = include;
+        self
+    }
+
+    pub fn include_file_diffs(mut self, include: bool) -> Self {
+        self.include_file_diffs = include;
         self
     }
 
@@ -467,16 +478,20 @@ mod tests {
         let summary = GitRequest::summary();
         assert_eq!(summary.commit_count, 0);
         assert!(!summary.include_file_changes);
+        assert!(!summary.include_file_diffs);
         assert!(!summary.include_worktrees);
         assert!(!summary.refresh_remote_tracking);
 
         let full = GitRequest::full();
         assert_eq!(full.commit_count, 10);
         assert!(full.include_file_changes);
+        assert!(!full.include_file_diffs);
         assert!(full.include_worktrees);
         assert!(!full.refresh_remote_tracking);
 
         let deep = GitRequest::deep();
+        assert!(deep.include_file_changes);
+        assert!(deep.include_file_diffs);
         assert!(deep.refresh_remote_tracking);
         assert!(deep.include_remote_branch_details);
         assert!(deep.include_commit_remote_containment);
