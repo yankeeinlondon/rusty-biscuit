@@ -1,6 +1,7 @@
+use crate::request::{FilesystemRequest, GitRequest};
 use crate::Result;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub mod blast_radius;
 pub mod docs;
@@ -20,7 +21,8 @@ pub use file_types::{
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
     BehindStatus, CommitInfo, DeltaKind, GitHostingProvider, GitInfo, GitRepo, LocalBranchInfo,
-    RemoteInfo, RepoStatus, detect_git, get_commit_by_sha, get_commit_files, get_commits_for_path,
+    RemoteInfo, RepoStatus, detect_git, detect_git_with_request, get_commit_by_sha,
+    get_commit_files, get_commits_for_path,
 };
 pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
@@ -51,44 +53,87 @@ pub struct FilesystemInfo {
     pub docs: Option<Vec<MarkdownMeta>>,
 }
 
-/// Detect all filesystem information for a directory.
+/// Detect filesystem information according to the given request.
 ///
-/// ## Arguments
-///
-/// * `root` - The root directory to analyze
-/// * `deep` - Enable network operations for enhanced git info
-/// * `commit_count` - Number of recent commits to retrieve
-pub fn detect_filesystem(root: &Path, deep: bool, commit_count: usize) -> Result<FilesystemInfo> {
-    let git = detect_git(root, deep, commit_count)?;
-
-    // Use git repo root (if available) for repo detection so that running
-    // from a subdirectory still finds workspace markers at the repo root.
-    let repo_root_path = git.as_ref().map(|g| g.repo_root.as_path()).unwrap_or(root);
-    let repo = detect_repo(repo_root_path)?;
-    let inventory = match repo.as_ref().and_then(|repo| repo.package_for_dir(root)) {
-        Some(package) => {
-            let exclude_roots = repo
-                .as_ref()
-                .and_then(|repo| repo.packages.as_ref())
-                .map(|packages| {
-                    packages
-                        .iter()
-                        .filter(|candidate| candidate.path != package.path)
-                        .filter(|candidate| candidate.path.starts_with(&package.path))
-                        .map(|candidate| candidate.path.clone())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-
-            file_types::scan_file_inventory_with_exclusions(&package.path, &exclude_roots).ok()
-        }
-        None => file_types::scan_file_inventory(root).ok(),
+/// Controls which subsections are collected: git, repo, file inventory,
+/// formatting, and document discovery.
+pub fn detect_filesystem_with_request(
+    root: &Path,
+    request: &FilesystemRequest,
+) -> Result<FilesystemInfo> {
+    // Stage 1: Git detection
+    let git = match &request.git {
+        Some(git_request) => git::detect_git_with_request(root, git_request)?,
+        None => None,
     };
-    let languages = inventory.as_ref().map(file_types::summarize_languages);
-    let files = inventory.as_ref().map(file_types::summarize_file_inventory);
 
-    let formatting = detect_formatting(root).ok().flatten();
-    let docs = detect_docs(root);
+    // Stage 2: Repo detection
+    let repo_root_path = git.as_ref().map(|g| g.repo_root.as_path()).unwrap_or(root);
+    let repo = match &request.repo {
+        Some(repo_request) => {
+            if repo_request.structure_only {
+                detect_repo_structure(repo_root_path)?
+            } else {
+                detect_repo(repo_root_path)?
+            }
+        }
+        None => None,
+    };
+
+    // Stage 3: File inventory and language breakdown
+    let (files, languages) = if request.include_file_inventory {
+        let inventory = match repo.as_ref().and_then(|r| r.package_for_dir(root)) {
+            Some(package) => {
+                let exclude_roots = repo
+                    .as_ref()
+                    .and_then(|r| r.packages.as_ref())
+                    .map(|packages| {
+                        packages
+                            .iter()
+                            .filter(|c| c.path != package.path)
+                            .filter(|c| c.path.starts_with(&package.path))
+                            .map(|c| c.path.clone())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                file_types::scan_file_inventory_with_exclusions(&package.path, &exclude_roots).ok()
+            }
+            None => file_types::scan_file_inventory(root).ok(),
+        };
+
+        match inventory {
+            Some(inv) => {
+                let (fab, lang_summary) = file_types::summarize_file_inventory(&inv);
+                (Some(fab), Some(lang_summary))
+            }
+            None => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+
+    // Stage 4: Formatting
+    let formatting = if request.include_formatting {
+        detect_formatting(root).ok().flatten()
+    } else {
+        None
+    };
+
+    // Stage 5: Docs
+    let docs = if request.include_docs {
+        match (git.as_ref(), repo.as_ref().and_then(|r| r.packages.as_ref())) {
+            (Some(git_info), Some(packages)) => {
+                let pkg_tuples: Vec<(String, PathBuf)> = packages
+                    .iter()
+                    .map(|p| (p.name.clone(), PathBuf::from(&p.relative)))
+                    .collect();
+                docs::detect_docs_with_packages(&git_info.repo_root, &pkg_tuples)
+            }
+            _ => detect_docs(root),
+        }
+    } else {
+        None
+    };
 
     Ok(FilesystemInfo {
         languages,
@@ -98,4 +143,20 @@ pub fn detect_filesystem(root: &Path, deep: bool, commit_count: usize) -> Result
         formatting,
         docs,
     })
+}
+
+/// Detect all filesystem information for a directory.
+///
+/// ## Arguments
+///
+/// * `root` - The root directory to analyze
+/// * `deep` - Enable network operations for enhanced git info
+/// * `commit_count` - Number of recent commits to retrieve
+pub fn detect_filesystem(root: &Path, deep: bool, commit_count: usize) -> Result<FilesystemInfo> {
+    let git_request = if deep {
+        GitRequest::deep().commit_count(commit_count)
+    } else {
+        GitRequest::full().commit_count(commit_count)
+    };
+    detect_filesystem_with_request(root, &FilesystemRequest::new().git(git_request))
 }

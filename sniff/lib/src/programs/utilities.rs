@@ -6,7 +6,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::Utility;
-use crate::programs::find_program::find_programs_with_source_parallel;
+use crate::programs::find_program::{
+    ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
+};
 use crate::programs::installer::{
     InstallOptions, execute_install, execute_versioned_install, method_available,
     select_best_method,
@@ -136,6 +138,95 @@ impl InstalledUtilities {
         ];
 
         let results = find_programs_with_source_parallel(&programs);
+
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
+
+        Self {
+            exa: get("exa"),
+            eza: get("eza"),
+            ripgrep: get_any(&["rg", "ripgrep"]),
+            dust: get("dust"),
+            bat: get_any(&["bat", "batcat"]),
+            fd: get_any(&["fd", "fdfind"]),
+            procs: get("procs"),
+            bottom: get_any(&["btm", "bottom"]),
+            fzf: get("fzf"),
+            zoxide: get("zoxide"),
+            starship: get("starship"),
+            direnv: get("direnv"),
+            jq: get("jq"),
+            delta: get("delta"),
+            tealdeer: get_any(&["tldr", "tealdeer"]),
+            lazygit: get("lazygit"),
+            gh: get("gh"),
+            htop: get("htop"),
+            btop: get("btop"),
+            tmux: get("tmux"),
+            zellij: get("zellij"),
+            httpie: get_any(&["http", "https", "httpie"]),
+            curlie: get("curlie"),
+            mise: get("mise"),
+            hyperfine: get("hyperfine"),
+            tokei: get("tokei"),
+            xh: get_any(&["xh", "xhs"]),
+            curl: get("curl"),
+            wget: get("wget"),
+            iperf3: get("iperf3"),
+        }
+    }
+
+    /// Detect which popular utilities are installed using a pre-built executable index.
+    pub fn new_with_index(index: &ExecutableIndex) -> Self {
+        let programs = [
+            "exa",
+            "eza",
+            "rg",
+            "ripgrep",
+            "dust",
+            "bat",
+            "batcat",
+            "fd",
+            "fdfind",
+            "procs",
+            "btm",
+            "bottom",
+            "fzf",
+            "zoxide",
+            "starship",
+            "direnv",
+            "jq",
+            "delta",
+            "tldr",
+            "tealdeer",
+            "lazygit",
+            "gh",
+            "htop",
+            "btop",
+            "tmux",
+            "zellij",
+            "http",
+            "https",
+            "httpie",
+            "curlie",
+            "mise",
+            "hyperfine",
+            "tokei",
+            "xh",
+            "xhs",
+            "curl",
+            "wget",
+            "iperf3",
+        ];
+
+        let results = find_programs_with_source_from_index(index, &programs);
 
         let get = |name: &str| results.get(name).and_then(|r| r.clone());
         let get_any = |names: &[&str]| {

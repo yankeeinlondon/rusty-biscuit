@@ -26,13 +26,17 @@ struct FrameworkAccumulator {
     related_languages: BTreeSet<ProgrammingLanguage>,
 }
 
-pub fn summarize_file_inventory(inventory: &FileInventory) -> FileAssociationBreakdown {
-    FileAssociationBreakdown {
+pub fn summarize_file_inventory(
+    inventory: &FileInventory,
+) -> (FileAssociationBreakdown, LanguageSummary) {
+    let lang_summary = summarize_languages(inventory);
+    let breakdown = FileAssociationBreakdown {
         total_files: inventory.total_files_scanned,
         by_association: summarize_associations(inventory),
-        by_language: summarize_languages(inventory).languages,
-        by_framework: summarize_languages(inventory).frameworks,
-    }
+        by_language: lang_summary.languages.clone(),
+        by_framework: lang_summary.frameworks.clone(),
+    };
+    (breakdown, lang_summary)
 }
 
 pub fn summarize_languages(inventory: &FileInventory) -> LanguageSummary {
@@ -234,5 +238,44 @@ mod tests {
         assert_eq!(summary.primary, Some(ProgrammingLanguage::JavaScript));
         assert_eq!(summary.languages[0].framework_file_count, 1);
         assert_eq!(summary.frameworks[0].framework, FrameworkKind::Vue);
+    }
+
+    #[test]
+    fn summarize_file_inventory_language_data_matches_summarize_languages() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("lib.rs"), "pub fn hi() {}").unwrap();
+        fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        fs::write(
+            dir.path().join("Component.vue"),
+            "<template><div>Hello</div></template>",
+        )
+        .unwrap();
+
+        let inventory = scan_file_inventory(dir.path()).unwrap();
+        let lang_summary = summarize_languages(&inventory);
+        let (breakdown, returned_lang_summary) = summarize_file_inventory(&inventory);
+
+        // Language data in the breakdown must match the standalone summarize_languages output
+        assert_eq!(breakdown.by_language.len(), lang_summary.languages.len());
+        assert_eq!(breakdown.by_framework.len(), lang_summary.frameworks.len());
+        for (breakdown_lang, lang) in breakdown.by_language.iter().zip(&lang_summary.languages) {
+            assert_eq!(breakdown_lang.language, lang.language);
+            assert_eq!(breakdown_lang.total_file_count, lang.total_file_count);
+        }
+
+        // The returned LanguageSummary must be identical to the standalone result
+        assert_eq!(returned_lang_summary.primary, lang_summary.primary);
+        assert_eq!(
+            returned_lang_summary.total_language_files,
+            lang_summary.total_language_files
+        );
+        assert_eq!(
+            returned_lang_summary.languages.len(),
+            lang_summary.languages.len()
+        );
+        assert_eq!(
+            returned_lang_summary.frameworks.len(),
+            lang_summary.frameworks.len()
+        );
     }
 }

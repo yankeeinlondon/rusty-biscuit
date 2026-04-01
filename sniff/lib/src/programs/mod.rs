@@ -116,8 +116,8 @@ pub use enums::{
     Utility,
 };
 pub use find_program::{
-    find_program, find_program_with_source, find_programs_parallel,
-    find_programs_with_source_parallel,
+    ExecutableIndex, find_program, find_program_with_source, find_programs_parallel,
+    find_programs_with_source_from_index, find_programs_with_source_parallel,
 };
 pub use headless_audio::InstalledHeadlessAudio;
 pub use installer::{
@@ -168,17 +168,52 @@ pub struct ProgramsInfo {
 impl ProgramsInfo {
     /// Detect all installed programs across all categories.
     ///
-    /// This runs detection in parallel for all program categories.
+    /// Builds a shared executable index once (scanning all PATH dirs and macOS app bundles),
+    /// then detects all 8 categories in parallel using Rayon's `join` API. Each category
+    /// uses the shared index for O(1) lookups instead of repeated filesystem traversal.
+    ///
+    /// ## Performance
+    ///
+    /// The shared index eliminates redundant filesystem scans:
+    /// - PATH scan: once (instead of 8x per category)
+    /// - macOS bundle check: once (instead of 8x per category)
+    /// - Subsequent lookups: O(1) HashMap access
     pub fn detect() -> Self {
+        use std::sync::Arc;
+
+        // Build the shared executable index once
+        let index = Arc::new(ExecutableIndex::build());
+
+        // Parallelize category detection in pairs using rayon::join
+        let (editors, utilities) = rayon::join(
+            || InstalledEditors::new_with_index(&index),
+            || InstalledUtilities::new_with_index(&index),
+        );
+
+        let (language_package_managers, os_package_managers) = rayon::join(
+            || InstalledLanguagePackageManagers::new_with_index(&index),
+            || InstalledOsPackageManagers::new_with_index(&index),
+        );
+
+        let (tts_clients, terminal_apps) = rayon::join(
+            || InstalledTtsClients::new_with_index(&index),
+            || InstalledTerminalApps::new_with_index(&index),
+        );
+
+        let (headless_audio, ai_clients) = rayon::join(
+            || InstalledHeadlessAudio::new_with_index(&index),
+            || InstalledAiClients::new_with_index(&index),
+        );
+
         Self {
-            editors: InstalledEditors::new(),
-            utilities: InstalledUtilities::new(),
-            language_package_managers: InstalledLanguagePackageManagers::new(),
-            os_package_managers: InstalledOsPackageManagers::new(),
-            tts_clients: InstalledTtsClients::new(),
-            terminal_apps: InstalledTerminalApps::new(),
-            headless_audio: InstalledHeadlessAudio::new(),
-            ai_clients: InstalledAiClients::new(),
+            editors,
+            utilities,
+            language_package_managers,
+            os_package_managers,
+            tts_clients,
+            terminal_apps,
+            headless_audio,
+            ai_clients,
         }
     }
 

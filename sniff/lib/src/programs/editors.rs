@@ -6,7 +6,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::Editor;
-use crate::programs::find_program::find_programs_with_source_parallel;
+use crate::programs::find_program::{
+    ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
+};
 use crate::programs::installer::{
     InstallOptions, execute_install, execute_versioned_install, method_available,
     select_best_method,
@@ -93,6 +95,52 @@ impl InstalledEditors {
         ];
 
         let results = find_programs_with_source_parallel(&programs);
+
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+
+        Self {
+            vi: get("vi"),
+            vim: get("vim"),
+            neovim: get("nvim"),
+            emacs: get("emacs"),
+            xemacs: get("xemacs"),
+            nano: get("nano"),
+            helix: get("hx"),
+            vscode: get("code"),
+            vscodium: get("codium"),
+            sublime: get("subl"),
+            zed: get("zed"),
+            micro: get("micro"),
+            kakoune: get("kak"),
+            amp: get("amp"),
+            lapce: get("lapce"),
+            phpstorm: get("phpstorm"),
+            intellij_idea: get("idea"),
+            pycharm: get("pycharm"),
+            webstorm: get("webstorm"),
+            clion: get("clion"),
+            goland: get("goland"),
+            rider: get("rider"),
+            textmate: get("mate"),
+            bbedit: get("bbedit"),
+            geany: get("geany"),
+            kate: get("kate"),
+        }
+    }
+
+    /// Detect which popular editors are installed using a pre-built executable index.
+    ///
+    /// Uses the shared `ExecutableIndex` for O(1) lookups instead of filesystem
+    /// traversal. Significantly faster than `new()` when called as part of a larger
+    /// detection operation that builds the index once.
+    pub fn new_with_index(index: &ExecutableIndex) -> Self {
+        let programs = [
+            "vi", "vim", "nvim", "emacs", "xemacs", "nano", "hx", "code", "codium", "subl", "zed",
+            "micro", "kak", "amp", "lapce", "phpstorm", "idea", "pycharm", "webstorm", "clion",
+            "goland", "rider", "mate", "bbedit", "geany", "kate",
+        ];
+
+        let results = find_programs_with_source_from_index(index, &programs);
 
         let get = |name: &str| results.get(name).and_then(|r| r.clone());
 

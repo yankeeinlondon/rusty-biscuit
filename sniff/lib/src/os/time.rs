@@ -334,26 +334,33 @@ pub fn detect_ntp_status() -> NtpStatus {
     NtpStatus::Unknown
 }
 
-/// Detects timezone and time-related system information.
+/// Detects timezone and time-related system information, with optional NTP probing.
 ///
-/// Gathers timezone name, UTC offset, DST status, and NTP synchronization state.
+/// When `probe_ntp` is `false`, the `ntp_status` field is set to
+/// [`NtpStatus::Unknown`] without invoking any external commands, keeping
+/// this function fast and purely local.  When `probe_ntp` is `true`,
+/// [`detect_ntp_status`] is called, which can take up to 10 seconds on Linux.
 ///
 /// ## Examples
 ///
 /// ```
-/// use sniff::os::detect_timezone;
+/// use sniff::os::detect_timezone_with_options;
 ///
-/// let time_info = detect_timezone();
+/// // Cheap: timezone data only
+/// let time_info = detect_timezone_with_options(false);
 /// println!("Timezone: {:?}", time_info.timezone);
 /// println!("UTC offset: {} seconds", time_info.utc_offset_seconds);
-/// println!("DST active: {}", time_info.is_dst);
+///
+/// // Full: includes NTP probe
+/// let time_info = detect_timezone_with_options(true);
+/// println!("NTP status: {:?}", time_info.ntp_status);
 /// ```
 ///
 /// ## Returns
 ///
-/// A `TimeInfo` struct containing all detected time information.
+/// A [`TimeInfo`] struct containing all detected time information.
 /// Fields that cannot be detected will have sensible defaults.
-pub fn detect_timezone() -> TimeInfo {
+pub fn detect_timezone_with_options(probe_ntp: bool) -> TimeInfo {
     use chrono::{Datelike, Local, Offset, TimeZone};
 
     let now = Local::now();
@@ -389,8 +396,11 @@ pub fn detect_timezone() -> TimeInfo {
             .or(Some(chrono_tz))
     };
 
-    // Detect NTP status
-    let ntp_status = detect_ntp_status();
+    let ntp_status = if probe_ntp {
+        detect_ntp_status()
+    } else {
+        NtpStatus::Unknown
+    };
 
     TimeInfo {
         timezone,
@@ -402,6 +412,30 @@ pub fn detect_timezone() -> TimeInfo {
         // (Rust's std::time::Instant uses it internally)
         monotonic_available: true,
     }
+}
+
+/// Detects timezone and time-related system information.
+///
+/// Gathers timezone name, UTC offset, DST status, and NTP synchronization state.
+/// This is equivalent to calling [`detect_timezone_with_options(true)`].
+///
+/// ## Examples
+///
+/// ```
+/// use sniff::os::detect_timezone;
+///
+/// let time_info = detect_timezone();
+/// println!("Timezone: {:?}", time_info.timezone);
+/// println!("UTC offset: {} seconds", time_info.utc_offset_seconds);
+/// println!("DST active: {}", time_info.is_dst);
+/// ```
+///
+/// ## Returns
+///
+/// A [`TimeInfo`] struct containing all detected time information.
+/// Fields that cannot be detected will have sensible defaults.
+pub fn detect_timezone() -> TimeInfo {
+    detect_timezone_with_options(true)
 }
 
 #[cfg(test)]

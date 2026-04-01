@@ -357,6 +357,104 @@ impl CargoLockVersions {
     }
 }
 
+/// Manifest file type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ManifestKind {
+    Cargo,
+    Node,
+    Python,
+    Go,
+}
+
+/// Index of all manifest files in a directory tree.
+///
+/// Performs a single directory walk and caches manifest locations,
+/// avoiding redundant filesystem traversals during package discovery.
+struct ManifestIndex {
+    /// Map from parent directory to set of manifest kinds found there
+    manifests: HashMap<PathBuf, HashSet<ManifestKind>>,
+}
+
+impl ManifestIndex {
+    /// Build manifest index by walking the directory tree once.
+    fn build(root: &Path) -> Self {
+        let mut manifests: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
+
+        let walker = walkdir::WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|entry| {
+                if !entry.file_type().is_dir() {
+                    return true;
+                }
+
+                let name = entry.file_name().to_string_lossy();
+                name != ".git"
+                    && name != "node_modules"
+                    && name != "target"
+                    && name != ".turbo"
+                    && name != "dist"
+                    && name != "build"
+            });
+
+        for entry in walker.filter_map(|e| e.ok()) {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            let file_name = entry.file_name().to_string_lossy();
+            let kind = match file_name.as_ref() {
+                "Cargo.toml" => ManifestKind::Cargo,
+                "package.json" => ManifestKind::Node,
+                "pyproject.toml" => ManifestKind::Python,
+                "go.mod" => ManifestKind::Go,
+                _ => continue,
+            };
+
+            if is_generated_manifest(entry.path()) {
+                continue;
+            }
+            if is_fixture_manifest(entry.path()) {
+                continue;
+            }
+
+            let Some(parent) = entry.path().parent() else {
+                continue;
+            };
+
+            manifests
+                .entry(parent.to_path_buf())
+                .or_default()
+                .insert(kind);
+        }
+
+        Self { manifests }
+    }
+
+    /// Get directories containing manifests within a specific subtree.
+    fn package_dirs_in_tree(&self, search_root: &Path, root: &Path) -> Vec<&Path> {
+        let search_root_canonical = canonicalize_path(search_root);
+        let root_canonical = canonicalize_path(root);
+
+        let mut dirs: Vec<&Path> = self
+            .manifests
+            .keys()
+            .filter_map(|path| {
+                let canonical = canonicalize_path(path);
+                // Must be within search_root but not equal to root
+                if canonical.starts_with(&search_root_canonical) && canonical != root_canonical {
+                    Some(path.as_path())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        dirs.sort();
+        dirs
+    }
+}
+
 /// Detect repository configuration in the given directory.
 ///
 /// ## Examples
@@ -395,6 +493,13 @@ pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
 }
 
 fn detect_repo_inner(root: &Path, structure_only: bool) -> Result<Option<RepoInfo>> {
+    // Build manifest index once for the entire tree
+    let manifest_index = if structure_only {
+        None
+    } else {
+        Some(ManifestIndex::build(root))
+    };
+
     let mut workspace_tools = Vec::new();
     let mut packages = Vec::new();
 
@@ -403,8 +508,16 @@ fn detect_repo_inner(root: &Path, structure_only: bool) -> Result<Option<RepoInf
         &mut workspace_tools,
         &mut packages,
     );
-    collect_repo_info(detect_nx(root)?, &mut workspace_tools, &mut packages);
-    collect_repo_info(detect_turborepo(root)?, &mut workspace_tools, &mut packages);
+    collect_repo_info(
+        detect_nx(root, manifest_index.as_ref())?,
+        &mut workspace_tools,
+        &mut packages,
+    );
+    collect_repo_info(
+        detect_turborepo(root, manifest_index.as_ref())?,
+        &mut workspace_tools,
+        &mut packages,
+    );
     collect_repo_info(
         detect_pnpm_workspace(root)?,
         &mut workspace_tools,
@@ -420,31 +533,38 @@ fn detect_repo_inner(root: &Path, structure_only: bool) -> Result<Option<RepoInf
         &mut workspace_tools,
         &mut packages,
     );
-    collect_repo_info(detect_lerna(root)?, &mut workspace_tools, &mut packages);
+    collect_repo_info(
+        detect_lerna(root, manifest_index.as_ref())?,
+        &mut workspace_tools,
+        &mut packages,
+    );
 
     if workspace_tools.is_empty() {
         return Ok(None);
     }
 
     if !structure_only {
-        // Full mode: discover nested packages by walking the filesystem
-        // and scan each package for language/framework metadata.
+        // Full mode: discover nested packages using the manifest index
         let lock_versions = CargoLockVersions::parse(&root.join("Cargo.lock"));
         let workspace_packages = packages.clone();
+        let index = manifest_index.as_ref().unwrap();
         for package in &workspace_packages {
-            packages.extend(discover_packages_from_manifests_in_tree(
+            packages.extend(discover_packages_from_index(
                 &package.path,
                 root,
                 MonorepoTool::Unknown,
                 &lock_versions,
                 PackageDiscoverySource::ManifestScan,
+                index,
             ));
         }
     }
 
     let mut packages = merge_packages(packages);
     if !structure_only {
-        refresh_package_boundaries(&mut packages);
+        // Build shared repo-level file inventory once for all packages
+        let repo_inventory = super::file_types::scan_file_inventory(root).ok();
+        refresh_package_boundaries(&mut packages, repo_inventory.as_ref());
     }
     resolve_internal_deps(&mut packages);
 
@@ -1074,7 +1194,7 @@ fn detect_yarn_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     }))
 }
 
-fn detect_nx(root: &Path) -> Result<Option<RepoInfo>> {
+fn detect_nx(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<RepoInfo>> {
     let nx_json = root.join("nx.json");
     if !nx_json.exists() {
         return Ok(None);
@@ -1086,21 +1206,23 @@ fn detect_nx(root: &Path) -> Result<Option<RepoInfo>> {
 
     let lock_versions = None;
     let mut packages = if patterns.is_empty() {
-        discover_packages_from_manifests(
+        discover_packages_with_optional_index(
             root,
             MonorepoTool::Nx,
             &lock_versions,
             PackageDiscoverySource::Nx,
+            index,
         )
     } else {
         expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Nx, &lock_versions)
     };
     if packages.is_empty() {
-        packages = discover_packages_from_manifests(
+        packages = discover_packages_with_optional_index(
             root,
             MonorepoTool::Nx,
             &lock_versions,
             PackageDiscoverySource::Nx,
+            index,
         );
     }
     packages = dedupe_packages(packages);
@@ -1119,7 +1241,7 @@ fn detect_nx(root: &Path) -> Result<Option<RepoInfo>> {
     }))
 }
 
-fn detect_turborepo(root: &Path) -> Result<Option<RepoInfo>> {
+fn detect_turborepo(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<RepoInfo>> {
     let turbo_json = root.join("turbo.json");
     if !turbo_json.exists() {
         return Ok(None);
@@ -1128,21 +1250,23 @@ fn detect_turborepo(root: &Path) -> Result<Option<RepoInfo>> {
     let patterns = collect_default_workspace_patterns(root);
     let lock_versions = None;
     let mut packages = if patterns.is_empty() {
-        discover_packages_from_manifests(
+        discover_packages_with_optional_index(
             root,
             MonorepoTool::Turborepo,
             &lock_versions,
             PackageDiscoverySource::Turborepo,
+            index,
         )
     } else {
         expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Turborepo, &lock_versions)
     };
     if packages.is_empty() {
-        packages = discover_packages_from_manifests(
+        packages = discover_packages_with_optional_index(
             root,
             MonorepoTool::Turborepo,
             &lock_versions,
             PackageDiscoverySource::Turborepo,
+            index,
         );
     }
     packages = dedupe_packages(packages);
@@ -1161,7 +1285,7 @@ fn detect_turborepo(root: &Path) -> Result<Option<RepoInfo>> {
     }))
 }
 
-fn detect_lerna(root: &Path) -> Result<Option<RepoInfo>> {
+fn detect_lerna(root: &Path, index: Option<&ManifestIndex>) -> Result<Option<RepoInfo>> {
     let lerna_json = root.join("lerna.json");
     if !lerna_json.exists() {
         return Ok(None);
@@ -1173,21 +1297,23 @@ fn detect_lerna(root: &Path) -> Result<Option<RepoInfo>> {
 
     let lock_versions = None;
     let mut packages = if patterns.is_empty() {
-        discover_packages_from_manifests(
+        discover_packages_with_optional_index(
             root,
             MonorepoTool::Lerna,
             &lock_versions,
             PackageDiscoverySource::Lerna,
+            index,
         )
     } else {
         expand_glob_patterns_with_deps(root, &patterns, MonorepoTool::Lerna, &lock_versions)
     };
     if packages.is_empty() {
-        packages = discover_packages_from_manifests(
+        packages = discover_packages_with_optional_index(
             root,
             MonorepoTool::Lerna,
             &lock_versions,
             PackageDiscoverySource::Lerna,
+            index,
         );
     }
     packages = dedupe_packages(packages);
@@ -1632,15 +1758,24 @@ fn detect_package_languages(
     package_relative: &str,
     path: &Path,
     exclude_roots: &[PathBuf],
+    repo_inventory: Option<&FileInventory>,
 ) -> PackageScanResult {
-    let Ok(inventory) = super::file_types::scan_file_inventory_with_exclusions(path, exclude_roots)
-    else {
-        return PackageScanResult::default();
+    let inventory = if let Some(repo_inv) = repo_inventory {
+        // Use shared repo inventory and project to this package
+        super::file_types::project_package_inventory(repo_inv, path, exclude_roots)
+    } else {
+        // Fall back to per-package scanning
+        match super::file_types::scan_file_inventory_with_exclusions(path, exclude_roots) {
+            Ok(inv) => inv,
+            Err(_) => return PackageScanResult::default(),
+        }
     };
 
+    let (file_breakdown, language_breakdown) =
+        super::file_types::summarize_file_inventory(&inventory);
     PackageScanResult {
-        language_breakdown: super::file_types::summarize_languages(&inventory),
-        file_breakdown: super::file_types::summarize_file_inventory(&inventory),
+        language_breakdown,
+        file_breakdown,
         compatibility: detect_package_files(package_relative, &inventory),
     }
 }
@@ -1854,7 +1989,10 @@ fn merge_path_lists(existing: &[PathBuf], incoming: &[PathBuf]) -> Vec<PathBuf> 
     merged
 }
 
-fn refresh_package_boundaries(packages: &mut [Package]) {
+fn refresh_package_boundaries(
+    packages: &mut [Package],
+    repo_inventory: Option<&FileInventory>,
+) {
     let package_paths: Vec<PathBuf> = packages.iter().map(|pkg| pkg.path.clone()).collect();
     let package_roots: Vec<PathBuf> = packages
         .iter()
@@ -1881,7 +2019,12 @@ fn refresh_package_boundaries(packages: &mut [Package]) {
         nested_roots.sort();
         nested_packages.sort();
 
-        let scan = detect_package_languages(&package.relative, &package.path, &nested_roots);
+        let scan = detect_package_languages(
+            &package.relative,
+            &package.path,
+            &nested_roots,
+            repo_inventory,
+        );
         package.primary_language = scan.language_breakdown.primary;
         package.secondary_languages = scan.language_breakdown.secondary;
         package.languages = scan.language_breakdown.languages;
@@ -1902,6 +2045,26 @@ fn discover_packages_from_manifests(
     discovery_source: PackageDiscoverySource,
 ) -> Vec<Package> {
     discover_packages_from_manifests_in_tree(root, root, tool, lock_versions, discovery_source)
+}
+
+/// Discover packages using manifest index if available, otherwise walk filesystem.
+fn discover_packages_with_optional_index(
+    root: &Path,
+    tool: MonorepoTool,
+    lock_versions: &Option<CargoLockVersions>,
+    discovery_source: PackageDiscoverySource,
+    index: Option<&ManifestIndex>,
+) -> Vec<Package> {
+    if let Some(idx) = index {
+        // Use package_dirs_in_tree to exclude root itself (matches original
+        // discover_packages_from_manifests_in_tree which skips search_root)
+        idx.package_dirs_in_tree(root, root)
+            .iter()
+            .map(|path| create_package(path, root, tool, lock_versions, discovery_source))
+            .collect()
+    } else {
+        discover_packages_from_manifests(root, tool, lock_versions, discovery_source)
+    }
 }
 
 fn discover_packages_from_manifests_in_tree(
@@ -1961,6 +2124,24 @@ fn discover_packages_from_manifests_in_tree(
 
     let mut dirs: Vec<PathBuf> = discovered_dirs.into_iter().collect();
     dirs.sort();
+
+    dirs.iter()
+        .map(|path| create_package(path, repo_root, tool, lock_versions, discovery_source))
+        .collect()
+}
+
+/// Discover packages from manifest index (optimized path).
+///
+/// Uses pre-built manifest index instead of walking the filesystem.
+fn discover_packages_from_index(
+    search_root: &Path,
+    repo_root: &Path,
+    tool: MonorepoTool,
+    lock_versions: &Option<CargoLockVersions>,
+    discovery_source: PackageDiscoverySource,
+    index: &ManifestIndex,
+) -> Vec<Package> {
+    let dirs = index.package_dirs_in_tree(search_root, repo_root);
 
     dirs.iter()
         .map(|path| create_package(path, repo_root, tool, lock_versions, discovery_source))
@@ -2612,7 +2793,7 @@ mod tests {
         fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
         fs::write(dir.path().join("lib.rs"), "pub fn foo() {}").unwrap();
 
-        let scan = detect_package_languages("", dir.path(), &[]);
+        let scan = detect_package_languages("", dir.path(), &[], None);
         assert_eq!(
             scan.language_breakdown.primary,
             Some(ProgrammingLanguage::Rust)
@@ -2630,7 +2811,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("index.js"), "console.log('hello')").unwrap();
 
-        let scan = detect_package_languages("", dir.path(), &[]);
+        let scan = detect_package_languages("", dir.path(), &[], None);
         assert_eq!(
             scan.language_breakdown.primary,
             Some(ProgrammingLanguage::JavaScript)
@@ -2647,7 +2828,7 @@ mod tests {
     fn test_detect_package_languages_empty() {
         let dir = TempDir::new().unwrap();
 
-        let scan = detect_package_languages("", dir.path(), &[]);
+        let scan = detect_package_languages("", dir.path(), &[], None);
         assert!(scan.language_breakdown.primary.is_none());
         assert!(scan.language_breakdown.languages.is_empty());
     }

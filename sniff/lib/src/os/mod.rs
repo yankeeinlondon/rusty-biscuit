@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
 use crate::Result;
+use crate::request::OsRequest;
 
 // Submodules
 mod distro;
@@ -34,7 +35,7 @@ pub use package_manager::{
     detect_macos_package_managers, detect_windows_package_managers, get_commands_for_manager,
     get_path_dirs,
 };
-pub use time::{NtpStatus, TimeInfo, detect_ntp_status, detect_timezone};
+pub use time::{NtpStatus, TimeInfo, detect_ntp_status, detect_timezone, detect_timezone_with_options};
 
 // ============================================================================
 // OS Type Detection
@@ -174,32 +175,64 @@ pub struct OsInfo {
 /// Currently returns `Ok` in all cases, but future versions may return
 /// errors for system information gathering failures.
 pub fn detect_os() -> Result<OsInfo> {
-    // Helper to convert empty strings to None
+    detect_os_with_request(&OsRequest::full())
+}
+
+/// Detect OS information according to the given request.
+///
+/// Use `OsRequest::summary()` for just core identity (fast),
+/// or `OsRequest::full()` for everything including package managers
+/// and timezone/NTP.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use sniff::os::detect_os_with_request;
+/// use sniff::request::OsRequest;
+///
+/// let info = detect_os_with_request(&OsRequest::summary()).unwrap();
+/// println!("OS: {} {}", info.name, info.version);
+/// assert!(info.system_package_managers.is_none());
+/// ```
+///
+/// ## Errors
+///
+/// Currently returns `Ok` in all cases, but future versions may return
+/// errors for system information gathering failures.
+pub fn detect_os_with_request(request: &OsRequest) -> Result<OsInfo> {
     let non_empty = |s: String| {
         if s.is_empty() { None } else { Some(s) }
     };
 
     let os_type = detect_os_type();
     let linux_distro = detect_linux_distro();
-    // Extract linux family before moving linux_distro into OsInfo
     let linux_family = linux_distro.as_ref().map(|d| d.family);
 
-    // Detect system package managers based on OS type
-    let system_package_managers = match os_type {
-        OsType::Linux => Some(detect_linux_package_managers(linux_family)),
-        OsType::MacOS => Some(detect_macos_package_managers()),
-        OsType::Windows => Some(detect_windows_package_managers()),
-        OsType::FreeBSD | OsType::OpenBSD | OsType::NetBSD => {
-            Some(detect_bsd_package_managers(os_type))
+    let system_package_managers = if request.include_package_managers {
+        match os_type {
+            OsType::Linux => Some(detect_linux_package_managers(linux_family)),
+            OsType::MacOS => Some(detect_macos_package_managers()),
+            OsType::Windows => Some(detect_windows_package_managers()),
+            OsType::FreeBSD | OsType::OpenBSD | OsType::NetBSD => {
+                Some(detect_bsd_package_managers(os_type))
+            }
+            OsType::IOS | OsType::Android | OsType::Other => None,
         }
-        OsType::IOS | OsType::Android | OsType::Other => None,
+    } else {
+        None
     };
 
-    // Detect locale settings
-    let locale = Some(detect_locale());
+    let locale = if request.include_locale {
+        Some(detect_locale())
+    } else {
+        None
+    };
 
-    // Detect timezone and time information
-    let time = Some(detect_timezone());
+    let time = if request.include_timezone || request.include_ntp_status {
+        Some(detect_timezone_with_options(request.include_ntp_status))
+    } else {
+        None
+    };
 
     Ok(OsInfo {
         os_type,
@@ -316,5 +349,14 @@ mod tests {
         let distro = deserialized.linux_distro.as_ref().unwrap();
         assert_eq!(distro.id, "ubuntu");
         assert_eq!(distro.family, LinuxFamily::Debian);
+    }
+
+    #[test]
+    fn test_detect_os_summary_skips_expensive_fields() {
+        let info = detect_os_with_request(&OsRequest::summary()).unwrap();
+        assert!(!info.name.is_empty());
+        assert!(info.system_package_managers.is_none());
+        assert!(info.locale.is_none());
+        assert!(info.time.is_none());
     }
 }

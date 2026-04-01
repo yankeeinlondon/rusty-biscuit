@@ -6,7 +6,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::TtsClient;
-use crate::programs::find_program::find_programs_with_source_parallel;
+use crate::programs::find_program::{
+    ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
+};
 use crate::programs::installer::{
     InstallOptions, execute_install, execute_versioned_install, method_available,
     select_best_method,
@@ -83,6 +85,61 @@ impl InstalledTtsClients {
         ];
 
         let results = find_programs_with_source_parallel(&programs);
+
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
+
+        Self {
+            say: get("say"),
+            espeak: get("espeak"),
+            espeak_ng: get("espeak-ng"),
+            festival: get("festival"),
+            mimic: get("mimic"),
+            mimic3: get("mimic3"),
+            piper: get("piper"),
+            echogarden: get("echogarden"),
+            balcon: get("balcon"),
+            windows_sapi: if cfg!(target_os = "windows") {
+                Some((PathBuf::from("sapi"), ExecutableSource::Path))
+            } else {
+                None
+            },
+            gtts_cli: get("gtts-cli"),
+            coqui_tts: get("tts"),
+            sherpa_onnx: get_any(&["sherpa-onnx-offline-tts", "sherpa-onnx-tts"]),
+            kokoro_tts: get("kokoro-tts"),
+            pico2wave: get("pico2wave"),
+        }
+    }
+
+    /// Detect which popular TTS clients are installed using a pre-built executable index.
+    pub fn new_with_index(index: &ExecutableIndex) -> Self {
+        let programs = [
+            "say",
+            "espeak",
+            "espeak-ng",
+            "festival",
+            "mimic",
+            "mimic3",
+            "piper",
+            "echogarden",
+            "balcon",
+            "gtts-cli",
+            "tts",
+            "sherpa-onnx-offline-tts",
+            "sherpa-onnx-tts",
+            "pico2wave",
+            "kokoro-tts",
+        ];
+
+        let results = find_programs_with_source_from_index(index, &programs);
 
         let get = |name: &str| results.get(name).and_then(|r| r.clone());
         let get_any = |names: &[&str]| {

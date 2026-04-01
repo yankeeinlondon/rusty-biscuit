@@ -1,6 +1,6 @@
 # Sniff Library
 
-**sniff-lib** is a comprehensive cross-platform system and repository detection library for Rust. It provides structured, type-safe access to operating system information, hardware capabilities, network interfaces, and filesystem metadata including Git repositories and monorepo detection.
+**sniff** is a comprehensive cross-platform system and repository detection library for Rust. It provides structured, type-safe access to operating system information, hardware capabilities, network interfaces, and filesystem metadata including Git repositories and monorepo detection.
 
 ## Features
 
@@ -21,78 +21,78 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-sniff-lib = { path = "../sniff/lib" }
+sniff = { path = "../sniff/lib" }
 
 # Optional: Enable network features for dependency enrichment
-sniff-lib = { path = "../sniff/lib", features = ["network"] }
+sniff = { path = "../sniff/lib", features = ["network"] }
 ```
 
 ## Quick Start
 
-### Basic System Detection
+### Simple Detection
 
 ```rust
-use sniff_lib::{detect, SniffConfig};
+use sniff::detect;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Detect everything with defaults
     let result = detect()?;
 
-    // OS information
     if let Some(os) = result.os {
         println!("OS: {} {}", os.name, os.version);
-        println!("Kernel: {}", os.kernel);
-        println!("Architecture: {}", os.arch);
     }
-
-    // Hardware information
     if let Some(hw) = result.hardware {
-        println!("CPU: {} ({} cores)", hw.cpu.brand, hw.cpu.logical_cores);
+        println!("CPU: {} ({})", hw.cpu.brand, hw.cpu.arch);
         println!("Memory: {} GB", hw.memory.total_bytes / (1024 * 1024 * 1024));
-        println!("GPUs: {}", hw.gpu.len());
-    }
-
-    // Network information
-    if let Some(net) = result.network {
-        println!("Primary interface: {:?}", net.primary_interface);
-        println!("WAN IP: {:?}", net.wan_ip_address);
-        println!("Interfaces: {}", net.interfaces.len());
-    }
-
-    // Filesystem information
-    if let Some(fs) = result.filesystem {
-        if let Some(git) = fs.git {
-            println!("Git repo: {:?}", git.repo_root);
-            println!("Branch: {:?}", git.current_branch);
-        }
-        if let Some(files) = fs.files {
-            println!("File groups detected: {}", files.by_association.len());
-        }
     }
 
     Ok(())
 }
 ```
 
-### Configuration Builder
+### Plan-Based Detection (DetectionPlan)
+
+`DetectionPlan` is the primary API for callers who need cost control. Each domain
+(OS, hardware, network, filesystem) can be included at a chosen detail level or
+excluded entirely, and filesystem sub-sections (git, repo, docs, etc.) compose
+independently.
 
 ```rust
-use sniff_lib::SniffConfig;
+use sniff::{detect_with_plan, request::*};
+
+let plan = DetectionPlan::new()
+    .os(OsRequest::summary())
+    .hardware(HardwareRequest::summary())
+    .without_network()
+    .filesystem(FilesystemRequest::new()
+        .git(GitRequest::summary())
+        .repo(RepoRequest::structure())
+        .without_docs());
+
+let result = detect_with_plan(plan)?;
+```
+
+### Legacy SniffConfig
+
+`SniffConfig` predates `DetectionPlan` and offers coarser boolean toggles. It
+remains supported but cannot express per-subsection detail levels.
+
+```rust
+use sniff::{detect_with_config, SniffConfig};
 use std::path::PathBuf;
 
 let config = SniffConfig::new()
     .base_dir(PathBuf::from("."))
-    .deep(true)              // Enable deep git inspection
-    .commit_count(20)        // Retrieve 20 recent commits (default: 10)
-    .skip_network();         // Skip network detection
+    .deep(true)
+    .commit_count(20)
+    .skip_network();
 
-let result = sniff_lib::detect_with_config(config)?;
+let result = detect_with_config(config)?;
 ```
 
-### Selective Detection
+### Module-Level Detection
 
 ```rust
-use sniff_lib::{
+use sniff::{
     hardware::detect_hardware,
     network::detect_network,
     os::detect_os,
@@ -100,7 +100,7 @@ use sniff_lib::{
 
 // Detect only hardware
 let hw = detect_hardware()?;
-println!("CPU: {}", hw.cpu.brand);
+println!("CPU: {} ({})", hw.cpu.brand, hw.cpu.arch);
 
 // Detect only network
 let net = detect_network()?;
@@ -118,7 +118,7 @@ println!("OS: {} {}", os.name, os.version);
 ### Module Organization
 
 ```
-sniff-lib/
+sniff/
 ├── os              # Operating system detection
 ├── hardware        # CPU, GPU, memory, storage
 ├── network         # Network interfaces
@@ -144,14 +144,27 @@ pub struct SniffResult {
 }
 ```
 
+#### `DetectionPlan`
+
+Fine-grained request controlling which domains are collected and at what detail level. Each domain accepts a typed request (`OsRequest`, `HardwareRequest`, etc.) or can be excluded with `without_*()`. See `sniff::request` for all request types.
+
+```rust
+pub struct DetectionPlan {
+    pub base_dir: Option<PathBuf>,
+    pub os: Option<OsRequest>,
+    pub hardware: Option<HardwareRequest>,
+    pub network: Option<NetworkRequest>,
+    pub filesystem: Option<FilesystemRequest>,
+}
+```
+
 #### `SniffConfig`
 
-Builder for configuring detection behavior:
+Legacy builder with coarser boolean toggles:
 
 ```rust
 pub struct SniffConfig {
     pub base_dir: Option<PathBuf>,
-    pub include_cpu_usage: bool,
     pub deep: bool,               // Enable deep git inspection
     pub commit_count: usize,      // Recent commits to retrieve (default: 10)
     pub skip_os: bool,
@@ -188,11 +201,11 @@ Detects operating system information across Windows, macOS, Linux, and BSD syste
 **Example:**
 
 ```rust
-use sniff_lib::os::{detect_os, detect_linux_distro};
+use sniff::os::{detect_os, detect_linux_distro};
 
 let os = detect_os()?;
 println!("OS: {} {}", os.name, os.version);
-println!("Architecture: {}", os.arch);
+println!("Kernel: {}", os.kernel);
 
 if let Some(pkg_mgrs) = os.system_package_managers {
     println!("Primary package manager: {:?}", pkg_mgrs.primary);
@@ -236,7 +249,7 @@ Uses architecture-specific intrinsics:
 **Example:**
 
 ```rust
-use sniff_lib::hardware::{detect_hardware, SimdCapabilities};
+use sniff::hardware::{detect_hardware, SimdCapabilities};
 
 let hw = detect_hardware()?;
 
@@ -291,7 +304,7 @@ Network interface enumeration using `getifaddrs` system call.
 **Example:**
 
 ```rust
-use sniff_lib::network::{detect_network, detect_network_filtered};
+use sniff::network::{detect_network, detect_network_filtered};
 
 // All interfaces
 let net = detect_network()?;
@@ -345,7 +358,7 @@ Uses `libgit2` (via `git2` crate) for repository inspection.
 **Example:**
 
 ```rust
-use sniff_lib::filesystem::git::detect_git;
+use sniff::filesystem::git::detect_git;
 use std::path::Path;
 
 // Standard mode (no network)
@@ -374,10 +387,10 @@ if let Some(info) = git_deep {
     // Check if behind
     if let Some(ref behind) = info.status.is_behind {
         match behind {
-            sniff_lib::filesystem::git::BehindStatus::NotBehind => {
+            sniff::filesystem::git::BehindStatus::NotBehind => {
                 println!("Up to date with remotes");
             }
-            sniff_lib::filesystem::git::BehindStatus::Behind(remotes) => {
+            sniff::filesystem::git::BehindStatus::Behind(remotes) => {
                 println!("Behind: {}", remotes.join(", "));
             }
         }
@@ -409,7 +422,7 @@ Detects monorepo tools and package structure.
 **Example:**
 
 ```rust
-use sniff_lib::filesystem::repo::detect_repo;
+use sniff::filesystem::repo::detect_repo;
 use std::path::Path;
 
 let repo = detect_repo(Path::new("."))?;
@@ -447,7 +460,7 @@ File extension-based language detection.
 **Example:**
 
 ```rust
-use sniff_lib::filesystem::languages::detect_languages;
+use sniff::filesystem::languages::detect_languages;
 use std::path::Path;
 
 let langs = detect_languages(Path::new("."))?;
@@ -486,7 +499,7 @@ When the `network` feature is enabled, provides async registry queries:
 **Example:**
 
 ```rust
-use sniff_lib::package::{
+use sniff::package::{
     OsPackageManager, LanguagePackageManager, PackageManager,
     get_package_manager, is_registered,
 };
@@ -513,7 +526,7 @@ if is_registered(LanguagePackageManager::Cargo.executable_name()) {
 **Network Enrichment** (requires `network` feature):
 
 ```rust
-use sniff_lib::package::{enrich_dependencies, DependencyEntry, DependencyKind};
+use sniff::package::{enrich_dependencies, DependencyEntry, DependencyKind};
 
 let mut deps = vec![
     DependencyEntry {
@@ -562,7 +575,7 @@ Detects installed programs across 8 categories with parallel execution and macOS
 **Example:**
 
 ```rust
-use sniff_lib::programs::ProgramsInfo;
+use sniff::programs::ProgramsInfo;
 
 // Detect all installed programs (parallel)
 let programs = ProgramsInfo::detect();
@@ -580,7 +593,7 @@ for editor in &programs.editors {
 **macOS App Bundle Detection:**
 
 ```rust
-use sniff_lib::programs::find_program_with_source;
+use sniff::programs::find_program_with_source;
 
 // Returns (Option<PathBuf>, ExecutableSource)
 let (path, source) = find_program_with_source("code");
@@ -615,7 +628,7 @@ Detects system services across multiple init systems.
 **Example:**
 
 ```rust
-use sniff_lib::services::{detect_services, ServiceState};
+use sniff::services::{detect_services, ServiceState};
 
 let services = detect_services();
 
@@ -773,16 +786,16 @@ The library includes comprehensive unit tests for all modules:
 
 ```bash
 # Run all tests
-cargo test -p sniff-lib
+cargo test -p sniff
 
 # Test specific modules
-cargo test -p sniff-lib os::
-cargo test -p sniff-lib hardware::
-cargo test -p sniff-lib network::
-cargo test -p sniff-lib filesystem::
+cargo test -p sniff os::
+cargo test -p sniff hardware::
+cargo test -p sniff network::
+cargo test -p sniff filesystem::
 
 # Test with network feature
-cargo test -p sniff-lib --features network
+cargo test -p sniff --features network
 ```
 
 **Test Coverage:**
@@ -815,7 +828,7 @@ std::fs::write("build-context.json", json)?;
 ### Dependency Auditing
 
 ```rust
-use sniff_lib::{filesystem::repo::detect_repo, package::enrich_dependencies};
+use sniff::{filesystem::repo::detect_repo, package::enrich_dependencies};
 
 let repo = detect_repo(Path::new("."))?;
 if let Some(info) = repo {
