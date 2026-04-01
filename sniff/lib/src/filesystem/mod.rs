@@ -84,8 +84,13 @@ pub fn detect_filesystem(root: &Path, deep: bool, commit_count: usize) -> Result
         }
         None => file_types::scan_file_inventory(root).ok(),
     };
-    let languages = inventory.as_ref().map(file_types::summarize_languages);
-    let files = inventory.as_ref().map(file_types::summarize_file_inventory);
+    let (files, languages) = match inventory.as_ref() {
+        Some(inv) => {
+            let (breakdown, lang_summary) = file_types::summarize_file_inventory(inv);
+            (Some(breakdown), Some(lang_summary))
+        }
+        None => (None, None),
+    };
 
     let formatting = detect_formatting(root).ok().flatten();
     let docs = detect_docs(root);

@@ -1638,9 +1638,11 @@ fn detect_package_languages(
         return PackageScanResult::default();
     };
 
+    let (file_breakdown, language_breakdown) =
+        super::file_types::summarize_file_inventory(&inventory);
     PackageScanResult {
-        language_breakdown: super::file_types::summarize_languages(&inventory),
-        file_breakdown: super::file_types::summarize_file_inventory(&inventory),
+        language_breakdown,
+        file_breakdown,
         compatibility: detect_package_files(package_relative, &inventory),
     }
 }
