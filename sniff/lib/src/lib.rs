@@ -234,37 +234,43 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
 /// let result = detect_with_plan(plan).unwrap();
 /// ```
 pub fn detect_with_plan(plan: DetectionPlan) -> Result<SniffResult> {
-    let os = match plan.os {
-        Some(ref request) => Some(os::detect_os_with_request(request)?),
-        None => None,
-    };
+    let base = plan
+        .base_dir
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    let hardware = match plan.hardware {
-        Some(ref request) => Some(hardware::detect_hardware_with_request(request)?),
-        None => None,
-    };
+    // Run all four domains concurrently using scoped threads.
+    // Each domain is independent, so there is no ordering constraint.
+    let (os, hardware, network, filesystem) = std::thread::scope(|s| {
+        let os_handle = plan.os.as_ref().map(|req| {
+            s.spawn(move || os::detect_os_with_request(req))
+        });
 
-    let network = match plan.network {
-        Some(ref request) => Some(network::detect_network_with_request(request)?),
-        None => None,
-    };
+        let hw_handle = plan.hardware.as_ref().map(|req| {
+            s.spawn(move || hardware::detect_hardware_with_request(req))
+        });
 
-    let filesystem = match plan.filesystem {
-        Some(ref request) => {
-            let base = plan
-                .base_dir
-                .clone()
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-            Some(filesystem::detect_filesystem_with_request(&base, request)?)
-        }
-        None => None,
-    };
+        let net_handle = plan.network.as_ref().map(|req| {
+            s.spawn(move || network::detect_network_with_request(req))
+        });
+
+        let fs_handle = plan.filesystem.as_ref().map(|req| {
+            s.spawn(move || filesystem::detect_filesystem_with_request(&base, req))
+        });
+
+        let os = os_handle.map(|h| h.join().unwrap()).transpose();
+        let hardware = hw_handle.map(|h| h.join().unwrap()).transpose();
+        let network = net_handle.map(|h| h.join().unwrap()).transpose();
+        let filesystem = fs_handle.map(|h| h.join().unwrap()).transpose();
+
+        (os, hardware, network, filesystem)
+    });
 
     Ok(SniffResult {
-        os,
-        hardware,
-        network,
-        filesystem,
+        os: os?,
+        hardware: hardware?,
+        network: network?,
+        filesystem: filesystem?,
     })
 }
 
