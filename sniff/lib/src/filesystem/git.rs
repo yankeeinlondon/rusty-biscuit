@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::request::GitRequest;
 use crate::{Result, SniffError};
 
 /// Git user configuration.
@@ -620,23 +621,68 @@ impl GitRepo {
     /// Full detection — equivalent to `detect_git()` but reuses
     /// the already-opened repository handle.
     pub fn detect_full(&self, deep: bool, commit_count: usize) -> Result<GitInfo> {
+        let request = if deep {
+            GitRequest::deep().commit_count(commit_count)
+        } else {
+            GitRequest::full().commit_count(commit_count)
+        };
+        self.detect_with_request(&request)
+    }
+
+    /// Detect git information according to the given request.
+    ///
+    /// Controls which expensive operations are performed:
+    /// - `commit_count`: 0 skips commit history
+    /// - `include_file_changes`: false skips per-file diff stats
+    /// - `include_worktrees`: false skips worktree enumeration
+    /// - `refresh_remote_tracking`: true fetches remote refs (network)
+    pub fn detect_with_request(&self, request: &GitRequest) -> Result<GitInfo> {
         let current_branch = self.current_branch();
 
-        if deep {
+        if request.refresh_remote_tracking {
             refresh_remote_tracking_refs(&self.repo);
         }
 
-        let mut recent = get_recent_commits(&self.repo, commit_count);
-        let (mut status, file_changes) = get_repo_status_with_changes(&self.repo)?;
-        let remotes = get_remotes(&self.repo, deep);
-        let worktrees = get_worktrees(&self.repo);
+        let mut recent = if request.commit_count > 0 {
+            get_recent_commits(&self.repo, request.commit_count)
+        } else {
+            Vec::new()
+        };
+
+        let (mut status, file_changes) = if request.include_file_changes {
+            get_repo_status_with_changes(&self.repo)?
+        } else {
+            let (is_dirty, staged, unstaged, untracked) =
+                get_repo_status_counts_detailed(&self.repo);
+            let status = RepoStatus {
+                is_dirty,
+                staged_count: staged,
+                unstaged_count: unstaged,
+                untracked_count: untracked,
+                dirty: Vec::new(),
+                untracked: Vec::new(),
+                is_behind: None,
+            };
+            (status, Vec::new())
+        };
+
+        let remotes = get_remotes(&self.repo, request.include_remote_branch_details);
+
+        let worktrees = if request.include_worktrees {
+            get_worktrees(&self.repo)
+        } else {
+            HashMap::new()
+        };
+
         let config = get_git_config(&self.repo);
         let branches = get_local_branches(&self.repo, current_branch.as_deref());
         let tracking = get_tracking_status(&self.repo, current_branch.as_deref());
 
-        if deep {
+        if request.refresh_remote_tracking {
             status.is_behind = summarize_behind_status(&tracking);
-            populate_recent_commit_remotes(&self.repo, &mut recent);
+            if request.include_commit_remote_containment {
+                populate_recent_commit_remotes(&self.repo, &mut recent);
+            }
         }
 
         let (org, repo) = preferred_remote(&remotes)
@@ -1082,6 +1128,14 @@ fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
 pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option<GitInfo>> {
     match GitRepo::discover(path)? {
         Some(handle) => handle.detect_full(deep, commit_count).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Detect git information for a path according to the given request.
+pub fn detect_git_with_request(path: &Path, request: &GitRequest) -> Result<Option<GitInfo>> {
+    match GitRepo::discover(path)? {
+        Some(git) => Ok(Some(git.detect_with_request(request)?)),
         None => Ok(None),
     }
 }
@@ -1864,6 +1918,38 @@ fn get_repo_status_counts(repo: &Repository) -> (bool, usize) {
 
     let total = staged + unstaged + untracked;
     (total > 0, total)
+}
+
+/// Lightweight status check returning individual category counts.
+fn get_repo_status_counts_detailed(repo: &Repository) -> (bool, usize, usize, usize) {
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true);
+    opts.recurse_untracked_dirs(true);
+
+    let statuses = match repo.statuses(Some(&mut opts)) {
+        Ok(s) => s,
+        Err(_) => return (false, 0, 0, 0),
+    };
+
+    let mut staged = 0usize;
+    let mut unstaged = 0usize;
+    let mut untracked = 0usize;
+
+    for entry in statuses.iter() {
+        let status = entry.status();
+        if status.is_index_new() || status.is_index_modified() || status.is_index_deleted() {
+            staged += 1;
+        }
+        if status.is_wt_modified() || status.is_wt_deleted() {
+            unstaged += 1;
+        }
+        if status.is_wt_new() {
+            untracked += 1;
+        }
+    }
+
+    let is_dirty = staged > 0 || unstaged > 0 || untracked > 0;
+    (is_dirty, staged, unstaged, untracked)
 }
 
 /// Retrieves all linked worktrees for the repository.
