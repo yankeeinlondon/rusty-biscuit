@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 use crate::Result;
+use crate::request::HardwareRequest;
 
 mod audio;
 mod cpu;
@@ -48,6 +49,69 @@ pub struct HardwareInfo {
     pub audio_devices: Vec<AudioDeviceInfo>,
 }
 
+/// Detect hardware information according to the given request.
+///
+/// Use `HardwareRequest::summary()` for CPU and memory only (fast),
+/// or `HardwareRequest::full()` for everything including storage,
+/// GPU, and audio devices.
+pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<HardwareInfo> {
+    // Audio must be detected first. On macOS, linking against extra
+    // CoreAudio sub-frameworks (AudioUnit, OpenAL, CoreMIDI) caused
+    // a ~10s init delay. With only the `core_audio` feature enabled
+    // on `coreaudio-sys`, init is ~1.5s. Detecting audio before GPU
+    // avoids any potential Metal framework interference.
+    let audio_devices = if request.include_audio {
+        detect_audio_devices()
+    } else {
+        Vec::new()
+    };
+
+    let sys = System::new_with_specifics(
+        RefreshKind::nothing()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything()),
+    );
+
+    let cpu = CpuInfo {
+        brand: sys.cpus().first().map(|c| c.brand().to_string()).unwrap_or_default(),
+        arch: {
+            let arch = System::cpu_arch();
+            if arch.is_empty() { std::env::consts::ARCH.to_string() } else { arch }
+        },
+        logical_cores: sys.cpus().len(),
+        physical_cores: System::physical_core_count(),
+        simd: detect_simd(),
+    };
+
+    // On macOS (and possibly other platforms), available_memory() may return 0.
+    // In this case, fall back to free_memory() which provides usable memory info.
+    let available = sys.available_memory();
+    let available_bytes = if available == 0 { sys.free_memory() } else { available };
+
+    let memory = MemoryInfo {
+        total_bytes: sys.total_memory(),
+        available_bytes,
+        used_bytes: sys.used_memory(),
+        total_swap: sys.total_swap(),
+        free_swap: sys.free_swap(),
+        used_swap: sys.used_swap(),
+    };
+
+    let storage = if request.include_storage {
+        storage::detect_storage()
+    } else {
+        Vec::new()
+    };
+
+    let gpu = if request.include_gpu {
+        detect_gpus()
+    } else {
+        Vec::new()
+    };
+
+    Ok(HardwareInfo { cpu, memory, storage, gpu, audio_devices })
+}
+
 /// Detects hardware information from the current system.
 ///
 /// This function gathers CPU specifications, memory statistics,
@@ -70,66 +134,7 @@ pub struct HardwareInfo {
 /// Currently returns `Ok` in all cases, but future versions may return
 /// errors for system information gathering failures.
 pub fn detect_hardware() -> Result<HardwareInfo> {
-    // Audio must be detected first. On macOS, linking against extra
-    // CoreAudio sub-frameworks (AudioUnit, OpenAL, CoreMIDI) caused
-    // a ~10s init delay. With only the `core_audio` feature enabled
-    // on `coreaudio-sys`, init is ~1.5s. Detecting audio before GPU
-    // avoids any potential Metal framework interference.
-    let audio_devices = detect_audio_devices();
-
-    let sys = System::new_with_specifics(
-        RefreshKind::nothing()
-            .with_cpu(CpuRefreshKind::everything())
-            .with_memory(MemoryRefreshKind::everything()),
-    );
-
-    let cpu = CpuInfo {
-        brand: sys
-            .cpus()
-            .first()
-            .map(|c| c.brand().to_string())
-            .unwrap_or_default(),
-        arch: {
-            let arch = System::cpu_arch();
-            if arch.is_empty() {
-                std::env::consts::ARCH.to_string()
-            } else {
-                arch
-            }
-        },
-        logical_cores: sys.cpus().len(),
-        physical_cores: System::physical_core_count(),
-        simd: detect_simd(),
-    };
-
-    // On macOS (and possibly other platforms), available_memory() may return 0.
-    // In this case, fall back to free_memory() which provides usable memory info.
-    let available = sys.available_memory();
-    let available_bytes = if available == 0 {
-        sys.free_memory()
-    } else {
-        available
-    };
-
-    let memory = MemoryInfo {
-        total_bytes: sys.total_memory(),
-        available_bytes,
-        used_bytes: sys.used_memory(),
-        total_swap: sys.total_swap(),
-        free_swap: sys.free_swap(),
-        used_swap: sys.used_swap(),
-    };
-
-    let storage = storage::detect_storage();
-    let gpu = detect_gpus();
-
-    Ok(HardwareInfo {
-        cpu,
-        memory,
-        storage,
-        gpu,
-        audio_devices,
-    })
+    detect_hardware_with_request(&HardwareRequest::full())
 }
 
 /// Lightweight hardware summary for compose context.
@@ -138,54 +143,7 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
 /// Skips audio device enumeration (~1.5s on macOS), storage inventory,
 /// and GPU detection.
 pub fn detect_hardware_summary() -> Result<HardwareInfo> {
-    let sys = System::new_with_specifics(
-        RefreshKind::nothing()
-            .with_cpu(CpuRefreshKind::everything())
-            .with_memory(MemoryRefreshKind::everything()),
-    );
-
-    let cpu = CpuInfo {
-        brand: sys
-            .cpus()
-            .first()
-            .map(|c| c.brand().to_string())
-            .unwrap_or_default(),
-        arch: {
-            let arch = System::cpu_arch();
-            if arch.is_empty() {
-                std::env::consts::ARCH.to_string()
-            } else {
-                arch
-            }
-        },
-        logical_cores: sys.cpus().len(),
-        physical_cores: System::physical_core_count(),
-        simd: detect_simd(),
-    };
-
-    let available = sys.available_memory();
-    let available_bytes = if available == 0 {
-        sys.free_memory()
-    } else {
-        available
-    };
-
-    let memory = MemoryInfo {
-        total_bytes: sys.total_memory(),
-        available_bytes,
-        used_bytes: sys.used_memory(),
-        total_swap: sys.total_swap(),
-        free_swap: sys.free_swap(),
-        used_swap: sys.used_swap(),
-    };
-
-    Ok(HardwareInfo {
-        cpu,
-        memory,
-        storage: Vec::new(),
-        gpu: Vec::new(),
-        audio_devices: Vec::new(),
-    })
+    detect_hardware_with_request(&HardwareRequest::summary())
 }
 
 #[cfg(test)]
@@ -281,5 +239,15 @@ mod tests {
         let hw = detect_hardware().unwrap();
         // CPU architecture should be known
         assert!(!hw.cpu.arch.is_empty());
+    }
+
+    #[test]
+    fn test_detect_hardware_summary_skips_expensive() {
+        let info = detect_hardware_with_request(&HardwareRequest::summary()).unwrap();
+        assert!(info.cpu.logical_cores > 0);
+        assert!(info.memory.total_bytes > 0);
+        assert!(info.storage.is_empty());
+        assert!(info.gpu.is_empty());
+        assert!(info.audio_devices.is_empty());
     }
 }
