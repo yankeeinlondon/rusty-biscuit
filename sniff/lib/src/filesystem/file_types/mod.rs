@@ -5,7 +5,9 @@ mod model;
 mod registry;
 
 pub use aggregate::{summarize_file_inventory, summarize_languages};
-pub use classify::{scan_file_inventory, scan_file_inventory_with_exclusions};
+pub use classify::{
+    project_package_inventory, scan_file_inventory, scan_file_inventory_with_exclusions,
+};
 pub use model::{
     ClassificationConfidence, ClassificationSource, FileAssociation, FileAssociationBreakdown,
     FileAssociationStats, FileClassification, FileInventory, FileScanScope, FileTypeDescriptor,

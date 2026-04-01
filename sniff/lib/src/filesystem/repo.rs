@@ -562,7 +562,9 @@ fn detect_repo_inner(root: &Path, structure_only: bool) -> Result<Option<RepoInf
 
     let mut packages = merge_packages(packages);
     if !structure_only {
-        refresh_package_boundaries(&mut packages);
+        // Build shared repo-level file inventory once for all packages
+        let repo_inventory = super::file_types::scan_file_inventory(root).ok();
+        refresh_package_boundaries(&mut packages, repo_inventory.as_ref());
     }
     resolve_internal_deps(&mut packages);
 
@@ -1756,10 +1758,17 @@ fn detect_package_languages(
     package_relative: &str,
     path: &Path,
     exclude_roots: &[PathBuf],
+    repo_inventory: Option<&FileInventory>,
 ) -> PackageScanResult {
-    let Ok(inventory) = super::file_types::scan_file_inventory_with_exclusions(path, exclude_roots)
-    else {
-        return PackageScanResult::default();
+    let inventory = if let Some(repo_inv) = repo_inventory {
+        // Use shared repo inventory and project to this package
+        super::file_types::project_package_inventory(repo_inv, path, exclude_roots)
+    } else {
+        // Fall back to per-package scanning
+        match super::file_types::scan_file_inventory_with_exclusions(path, exclude_roots) {
+            Ok(inv) => inv,
+            Err(_) => return PackageScanResult::default(),
+        }
     };
 
     let (file_breakdown, language_breakdown) =
@@ -1980,7 +1989,10 @@ fn merge_path_lists(existing: &[PathBuf], incoming: &[PathBuf]) -> Vec<PathBuf> 
     merged
 }
 
-fn refresh_package_boundaries(packages: &mut [Package]) {
+fn refresh_package_boundaries(
+    packages: &mut [Package],
+    repo_inventory: Option<&FileInventory>,
+) {
     let package_paths: Vec<PathBuf> = packages.iter().map(|pkg| pkg.path.clone()).collect();
     let package_roots: Vec<PathBuf> = packages
         .iter()
@@ -2007,7 +2019,12 @@ fn refresh_package_boundaries(packages: &mut [Package]) {
         nested_roots.sort();
         nested_packages.sort();
 
-        let scan = detect_package_languages(&package.relative, &package.path, &nested_roots);
+        let scan = detect_package_languages(
+            &package.relative,
+            &package.path,
+            &nested_roots,
+            repo_inventory,
+        );
         package.primary_language = scan.language_breakdown.primary;
         package.secondary_languages = scan.language_breakdown.secondary;
         package.languages = scan.language_breakdown.languages;
@@ -2776,7 +2793,7 @@ mod tests {
         fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
         fs::write(dir.path().join("lib.rs"), "pub fn foo() {}").unwrap();
 
-        let scan = detect_package_languages("", dir.path(), &[]);
+        let scan = detect_package_languages("", dir.path(), &[], None);
         assert_eq!(
             scan.language_breakdown.primary,
             Some(ProgrammingLanguage::Rust)
@@ -2794,7 +2811,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("index.js"), "console.log('hello')").unwrap();
 
-        let scan = detect_package_languages("", dir.path(), &[]);
+        let scan = detect_package_languages("", dir.path(), &[], None);
         assert_eq!(
             scan.language_breakdown.primary,
             Some(ProgrammingLanguage::JavaScript)
@@ -2811,7 +2828,7 @@ mod tests {
     fn test_detect_package_languages_empty() {
         let dir = TempDir::new().unwrap();
 
-        let scan = detect_package_languages("", dir.path(), &[]);
+        let scan = detect_package_languages("", dir.path(), &[], None);
         assert!(scan.language_breakdown.primary.is_none());
         assert!(scan.language_breakdown.languages.is_empty());
     }
