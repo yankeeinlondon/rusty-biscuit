@@ -76,5 +76,5 @@ Best Practices:
 
 ## Related Skills
 
-- **bubbletea-architecture.md** - Go TUI patterns
+- **bubble-tea-architecture.md** - Go TUI patterns
 - **ratatui-architecture.md** - Rust TUI patterns

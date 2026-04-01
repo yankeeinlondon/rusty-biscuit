@@ -1,59 +1,55 @@
 ---
-name: ratatui
-description: Expert knowledge for building terminal user interfaces (TUIs) with Ratatui, a Rust library for creating rich, cross-platform terminal applications with immediate-mode rendering, layout constraints, widgets, and async integration
+name: tui
+description: Expert knowledge for building terminal user interfaces (TUIs) covering framework-agnostic best practices, Ratatui (Rust) with immediate-mode rendering and constraint-based layouts, and Bubble Tea (Go) with Elm architecture and Charm.sh ecosystem
 last_updated: 2025-12-24T12:00:00Z
 hash: 984cf841655dd773
 ---
 
-# Ratatui TUI Development
+# Terminal User Interface Development
 
-Ratatui is the industry-standard Rust crate for building Terminal User Interfaces (TUIs). It's a community-driven fork of `tui-rs` with an immediate-mode rendering philosophy and comprehensive widget ecosystem.
+This skill covers TUI development across frameworks: **Ratatui** (Rust, immediate-mode) and **Bubble Tea** (Go, Elm architecture). Most detail files focus on Ratatui since it's the primary framework in this monorepo.
 
-## Core Principles
+## Choosing a Framework
 
-- **Immediate-mode rendering**: Redraw the entire UI each frame based on current state
-- **Backend abstraction**: Choose from crossterm (default, cross-platform), termion (Unix), or termwiz
-- **Buffer-based diffing**: Maintains two buffers and only sends changed characters to terminal
-- **Constraint-based layouts**: Define responsive layouts using percentage, length, min/max, ratio, or fill
-- **Separation of concerns**: Widgets (view) are separate from state (data)
-- **Terminal state cleanup**: Always restore terminal state with panic hooks
+| | **Ratatui** (Rust) | **Bubble Tea** (Go) |
+|---|---|---|
+| **Architecture** | Immediate-mode rendering | Elm (Model-Update-View) |
+| **State** | Mutable app struct, redraw each frame | Immutable model, return new model |
+| **Async** | Tokio channels + `try_recv()` | Commands (Cmd) return messages |
+| **Styling** | `Style`, `Color`, `Modifier` on widgets | Lip Gloss (separate styling library) |
+| **Widgets** | Built-in + community crates | Bubbles component library |
+| **Rendering** | Buffer diffing (only changed cells) | Full string output each frame |
+| **Best for** | High-performance, pixel-precise UIs | Rapid prototyping, composable UIs |
 
-## Quick Start Pattern
+## Cross-Framework Principles
+
+- **Separate state from view** -- store data and UI state, create widgets/views on the fly
+- **Never block the render loop** -- offload work to background tasks, use non-blocking checks
+- **Always restore terminal state** -- panic hooks (Rust) or deferred cleanup (Go)
+- **Limit redraws** -- poll with timeout or only redraw on state changes
+- **Consistent keybindings** -- `q`/`Ctrl+C` quit, arrows/hjkl navigate, `?` help, `/` search
+
+See [TUI Best Practices](./tui-best-practices.md) for accessibility, performance, and design guidelines.
+
+## Ratatui Quick Start
 
 ```rust
-use ratatui::{
-    backend::CrosstermBackend,
-    widgets::{Block, Borders, Paragraph},
-    layout::{Layout, Constraint, Direction},
-    Terminal,
-};
-use crossterm::{
-    event::{self, Event, KeyCode},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
+use ratatui::{backend::CrosstermBackend, widgets::{Block, Borders, Paragraph}, Terminal};
+use crossterm::{event::{self, Event, KeyCode}, execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Setup terminal
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
 
-    // Main loop
     loop {
         terminal.draw(|f| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
-                .split(f.area());
-
-            let title = Paragraph::new("Hello Ratatui!")
-                .block(Block::default().borders(Borders::ALL).title("Header"));
-            f.render_widget(title, chunks[0]);
+            let p = Paragraph::new("Hello Ratatui!")
+                .block(Block::default().borders(Borders::ALL).title("Demo"));
+            f.render_widget(p, f.area());
         })?;
-
         if event::poll(std::time::Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
                 if key.code == KeyCode::Char('q') { break; }
@@ -61,234 +57,81 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Restore terminal
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     Ok(())
 }
 ```
 
-## Essential Patterns
+See [Ratatui Architecture](./ratatui-architecture.md) for the full app pattern with event loop and state management.
 
-### Terminal State Management with Panic Hook
+## Bubble Tea Quick Start
 
-```rust
-use std::panic;
+```go
+type model struct{ count int }
 
-fn setup_panic_hook() {
-    let original_hook = panic::take_hook();
-    panic::set_hook(Box::new(move |panic_info| {
-        let _ = disable_raw_mode();
-        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
-        original_hook(panic_info);
-    }));
-}
-```
-
-### Stateful Widgets
-
-```rust
-use ratatui::widgets::{List, ListItem, ListState};
-
-struct App {
-    list_state: ListState,
-    items: Vec<String>,
-}
-
-impl App {
-    fn scroll_down(&mut self) {
-        let i = match self.list_state.selected() {
-            Some(i) => if i >= self.items.len() - 1 { 0 } else { i + 1 },
-            None => 0,
-        };
-        self.list_state.select(Some(i));
-    }
-}
-
-// In draw loop:
-f.render_stateful_widget(list, area, &mut app.list_state);
-```
-
-### Async Integration
-
-```rust
-use tokio::sync::mpsc;
-
-enum Message {
-    UserPrompt(String),
-    BotResponse(String),
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (tx_to_main, mut rx_from_background) = mpsc::unbounded_channel::<Message>();
-    let (tx_to_background, mut rx_from_main) = mpsc::unbounded_channel::<String>();
-
-    // Background worker
-    tokio::spawn(async move {
-        while let Some(prompt) = rx_from_main.recv().await {
-            // Simulate API call
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            let _ = tx_to_main.send(Message::BotResponse(format!("Response to: {}", prompt)));
+func (m model) Init() tea.Cmd                           { return nil }
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    if key, ok := msg.(tea.KeyMsg); ok {
+        switch key.String() {
+        case "q": return m, tea.Quit
+        case "up": m.count++
+        case "down": m.count--
         }
-    });
-
-    // UI loop
-    loop {
-        terminal.draw(|f| ui(f, &app))?;
-
-        // Non-blocking check for background messages
-        while let Ok(msg) = rx_from_background.try_recv() {
-            match msg {
-                Message::BotResponse(text) => app.messages.push(text),
-                _ => {}
-            }
-        }
-
-        // Handle input...
     }
+    return m, nil
 }
+func (m model) View() string { return fmt.Sprintf("Count: %d\n(q to quit)", m.count) }
+
+func main() { tea.NewProgram(model{}).Run() }
 ```
 
-## Topics
-
-### Core Architecture
-
-- [Layout System](./layout-system.md) - Constraints, nested layouts, and responsive design
-- [Widgets](./widgets.md) - Built-in widgets (Paragraph, List, Table, Block, Gauge, etc.)
-- [Styling](./styling.md) - Colors, modifiers, themes, and terminal compatibility
-- [Backend System](./backend-system.md) - Crossterm, Termion, Termwiz comparison
-
-### Advanced Patterns
-
-- [Async Integration](./async-integration.md) - Tokio channels, non-blocking patterns, background workers
-- [Scrolling](./scrolling.md) - Vertical scrolling, scrollbars, auto-scroll, ListState management
-- [Event Handling](./event-handling.md) - Keyboard, mouse, resize events, input routing
-
-### Specialized Features
-
-- [Markdown Rendering](./markdown.md) - Using pulldown-cmark and tui-markdown for rich text
-- [Chat Applications](./chat-applications.md) - Bubbles, alignment, streaming responses
-- [Code Editor](./code-editor.md) - Tree-sitter syntax highlighting, file I/O, search
-- [Images](./images.md) - Terminal graphics protocols (Sixel, Kitty, iTerm2, halfblocks)
-- [Prompts and Forms](./prompts.md) - Text input, multi-field forms, validation, autocomplete
-
-### Ecosystem
-
-- [Macros](./macros.md) - ratatui-macros for simplified layout and styling syntax
-- [Widget Collections](./widget-collections.md) - tui-widgets, tui-big-text, tui-popup
-- [Web Deployment](./web-deployment.md) - Ratzilla for WASM/WebAssembly TUIs
+See [Bubble Tea Architecture](./bubble-tea-architecture.md) for commands, async, navigation, and testing patterns.
 
 ## Common Gotchas
 
-### High CPU Usage
+| Problem | Cause | Fix |
+|---|---|---|
+| 100% CPU | Redrawing without poll timeout | Use `event::poll(Duration::from_millis(16))` |
+| Terminal corruption on panic | Raw mode not restored | Set panic hook to call `disable_raw_mode()` + `LeaveAlternateScreen` |
+| Widget state lost each frame | Storing widgets instead of data | Only store data + state structs in App; create widgets in `draw` |
+| Layout overflow on small terminals | No minimum size guard | Check `area.width < 10` and show fallback message |
 
-**Problem**: Loop runs at 100% CPU redrawing static screens
+## Topics
 
-**Solution**: Use `event::poll` with timeout or rate limiting:
-```rust
-if event::poll(Duration::from_millis(16))? { // ~60 FPS max
-    // Handle events
-}
-```
+### Ratatui Core
 
-### Terminal State Corruption on Panic
+- [Layout System](./layout-system.md) -- constraints, nested layouts, responsive design, ratatui-macros
+- [Widgets](./widgets.md) -- Paragraph, List, Table, Block, Gauge, Tabs, Canvas, custom Widget trait
+- [Styling](./styling.md) -- colors (named/indexed/RGB), modifiers, themes, Stylize trait
+- [Backend System](./backend-system.md) -- Crossterm (default), Termion, Termwiz comparison and setup
+- [Event Handling](./event-handling.md) -- keyboard, mouse, resize, mode-based routing, polling vs blocking
+- [Macros](./macros.md) -- `ratatui-macros` DSL for layouts (`vertical!`, `horizontal!`) and styled text
 
-**Problem**: Panic leaves terminal in raw mode with hidden cursor
+### Ratatui Advanced
 
-**Solution**: Always set panic hook (see Essential Patterns above)
+- [Async Integration](./async-integration.md) -- Tokio channels, streaming responses, loading states, cancellation
+- [Scrolling](./scrolling.md) -- ListState, Paragraph scroll, scrollbars, page navigation, mouse scroll
+- [Chat Applications](./chat-applications.md) -- bubbles, alignment, streaming, auto-scroll, multi-line input
+- [Markdown Rendering](./markdown.md) -- tui-markdown, pulldown-cmark, syntax highlighting, caching
+- [Code Editor](./code-editor.md) -- ratatui-code-editor, Tree-sitter highlighting, file I/O, search
+- [Images](./images.md) -- ratatui-image, Kitty/Sixel/iTerm2/halfblock protocols, fallbacks
+- [Prompts and Forms](./prompts.md) -- tui-prompts, multi-field forms, validation, autocomplete
+- [Widget Collections](./widget-collections.md) -- tui-popup, tui-big-text, tui-scrollview, edtui, tui-logger
+- [Web Deployment](./web-deployment.md) -- Ratzilla WASM backends (WebGL2, Canvas, DOM), Trunk, GitHub Pages
 
-### Widget Ownership in Immediate Mode
+### Bubble Tea (Go)
 
-**Problem**: Trying to store widgets in App struct
+- [Architecture](./bubble-tea-architecture.md) -- Elm pattern, messages/commands, state management, async, navigation
+- [Components](./bubble-tea-components.md) -- Bubbles library (textinput, list, viewport, spinner) and Lip Gloss styling
 
-**Solution**: Only store data and state. Widgets are created on-the-fly in `draw`:
-```rust
-struct App {
-    data: Vec<String>,        // ✓ Store data
-    list_state: ListState,    // ✓ Store state
-    // list_widget: List,     // ✗ Never store widgets
-}
-```
+### Cross-Framework
 
-### Layout Overflow
-
-**Problem**: Widgets overflow allocated areas causing visual glitches
-
-**Solution**: Use `Wrap` for text and proper constraint sizing:
-```rust
-let paragraph = Paragraph::new("Long text")
-    .wrap(Wrap { trim: true });
-```
-
-### Color Inconsistencies Across Terminals
-
-**Problem**: RGB colors look different or glitch on some terminals
-
-**Solution**: Provide fallbacks and use indexed colors for compatibility:
-```rust
-let color = if cfg!(target_os = "macos") {
-    Color::Indexed(208)  // Use indexed color
-} else {
-    Color::Rgb(255, 128, 0)  // Use RGB elsewhere
-};
-```
-
-## Architecture Patterns
-
-### Elm/MVU Pattern
-
-```rust
-struct Model {
-    counter: i32,
-    items: Vec<String>,
-}
-
-enum Msg {
-    Increment,
-    Decrement,
-    AddItem(String),
-}
-
-fn update(msg: Msg, model: &mut Model) {
-    match msg {
-        Msg::Increment => model.counter += 1,
-        Msg::Decrement => model.counter -= 1,
-        Msg::AddItem(item) => model.items.push(item),
-    }
-}
-
-fn view(model: &Model) -> impl Widget {
-    // Build UI based on model state
-}
-```
-
-### Component Pattern
-
-```rust
-enum CurrentScreen {
-    Main,
-    Fetching,
-    Error(String),
-}
-
-struct App {
-    current_screen: CurrentScreen,
-    data: Option<String>,
-}
-
-fn ui(f: &mut Frame, app: &App) {
-    match &app.current_screen {
-        CurrentScreen::Main => render_main(f, app),
-        CurrentScreen::Fetching => render_loading(f),
-        CurrentScreen::Error(msg) => render_error(f, msg),
-    }
-}
-```
+- [Best Practices](./tui-best-practices.md) -- keyboard conventions, layout design, performance, accessibility, error handling
+- [Ratatui Architecture](./ratatui-architecture.md) -- minimal app structure and event loop pattern
 
 ## Resources
 
-- [Official Docs](https://docs.rs/ratatui)
-- [GitHub](https://github.com/ratatui-org/ratatui)
-- [Awesome Ratatui](https://github.com/ratatui-org/awesome-ratatui) - Curated ecosystem
-- [Ratatui Book](https://ratatui.rs) - Comprehensive guide
+- [Ratatui Docs](https://docs.rs/ratatui) | [GitHub](https://github.com/ratatui-org/ratatui) | [Book](https://ratatui.rs)
+- [Bubble Tea GitHub](https://github.com/charmbracelet/bubbletea) | [Charm.sh](https://charm.sh)
+- [Awesome Ratatui](https://github.com/ratatui-org/awesome-ratatui)
