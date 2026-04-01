@@ -35,7 +35,7 @@ pub use package_manager::{
     detect_macos_package_managers, detect_windows_package_managers, get_commands_for_manager,
     get_path_dirs,
 };
-pub use time::{NtpStatus, TimeInfo, detect_ntp_status, detect_timezone};
+pub use time::{NtpStatus, TimeInfo, detect_ntp_status, detect_timezone, detect_timezone_with_options};
 
 // ============================================================================
 // OS Type Detection
@@ -228,8 +228,8 @@ pub fn detect_os_with_request(request: &OsRequest) -> Result<OsInfo> {
         None
     };
 
-    let time = if request.include_time {
-        Some(detect_timezone())
+    let time = if request.include_timezone || request.include_ntp_status {
+        Some(detect_timezone_with_options(request.include_ntp_status))
     } else {
         None
     };

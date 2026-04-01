@@ -24,7 +24,7 @@ pub use crate::os::{
     PackageManagerCommands, SystemPackageManager, SystemPackageManagers, TimeInfo,
     command_exists_in_path, detect_bsd_package_managers, detect_linux_distro,
     detect_linux_package_managers, detect_locale, detect_macos_package_managers, detect_ntp_status,
-    detect_os, detect_os_type, detect_os_with_request, detect_timezone,
+    detect_os, detect_os_type, detect_os_with_request, detect_timezone, detect_timezone_with_options,
     detect_windows_package_managers, extract_encoding,
     extract_language_code, get_commands_for_manager, get_path_dirs, infer_linux_family,
     parse_lsb_release_content, parse_os_release_content, parse_system_release_content,

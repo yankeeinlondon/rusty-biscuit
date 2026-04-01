@@ -113,8 +113,10 @@ pub struct OsRequest {
     pub include_package_managers: bool,
     /// Include locale detection
     pub include_locale: bool,
-    /// Include timezone and NTP status (NTP can take up to 10s on Linux)
-    pub include_time: bool,
+    /// Include timezone, UTC offset, and DST detection (local, cheap)
+    pub include_timezone: bool,
+    /// Include NTP synchronization status (can take up to 10s on Linux)
+    pub include_ntp_status: bool,
 }
 
 impl OsRequest {
@@ -123,16 +125,18 @@ impl OsRequest {
         Self {
             include_package_managers: false,
             include_locale: false,
-            include_time: false,
+            include_timezone: false,
+            include_ntp_status: false,
         }
     }
 
-    /// Everything including package managers, locale, and timezone/NTP.
+    /// Everything including package managers, locale, timezone, and NTP.
     pub fn full() -> Self {
         Self {
             include_package_managers: true,
             include_locale: true,
-            include_time: true,
+            include_timezone: true,
+            include_ntp_status: true,
         }
     }
 
@@ -146,8 +150,13 @@ impl OsRequest {
         self
     }
 
-    pub fn include_time(mut self, include: bool) -> Self {
-        self.include_time = include;
+    pub fn include_timezone(mut self, include: bool) -> Self {
+        self.include_timezone = include;
+        self
+    }
+
+    pub fn include_ntp_status(mut self, include: bool) -> Self {
+        self.include_ntp_status = include;
         self
     }
 }
@@ -443,12 +452,14 @@ mod tests {
         let summary = OsRequest::summary();
         assert!(!summary.include_package_managers);
         assert!(!summary.include_locale);
-        assert!(!summary.include_time);
+        assert!(!summary.include_timezone);
+        assert!(!summary.include_ntp_status);
 
         let full = OsRequest::full();
         assert!(full.include_package_managers);
         assert!(full.include_locale);
-        assert!(full.include_time);
+        assert!(full.include_timezone);
+        assert!(full.include_ntp_status);
     }
 
     #[test]
