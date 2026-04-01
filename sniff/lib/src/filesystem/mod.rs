@@ -1,6 +1,6 @@
 use crate::Result;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub mod blast_radius;
 pub mod docs;
@@ -93,7 +93,16 @@ pub fn detect_filesystem(root: &Path, deep: bool, commit_count: usize) -> Result
     };
 
     let formatting = detect_formatting(root).ok().flatten();
-    let docs = detect_docs(root);
+    let docs = match (git.as_ref(), repo.as_ref().and_then(|r| r.packages.as_ref())) {
+        (Some(git_info), Some(packages)) => {
+            let pkg_tuples: Vec<(String, PathBuf)> = packages
+                .iter()
+                .map(|p| (p.name.clone(), PathBuf::from(&p.relative)))
+                .collect();
+            docs::detect_docs_with_packages(&git_info.repo_root, &pkg_tuples)
+        }
+        _ => detect_docs(root),
+    };
 
     Ok(FilesystemInfo {
         languages,
