@@ -341,6 +341,18 @@ pub struct ComposeOptions {
     pub shell_approval_handler:
         Option<std::sync::Arc<dyn super::shell_expansion::ShellApprovalHandler>>,
 
+    /// Pre-approved shell commands (normalized forms).
+    ///
+    /// When set, the shell expansion stage skips the entire approval flow
+    /// (no whitelist check, no blacklist check, no approval handler).
+    /// Each directive's normalized command is checked against this set:
+    /// - Found: execute immediately (still subject to timeout)
+    /// - Not found: immediate Denied error
+    ///
+    /// Mutually exclusive with `shell_approval_handler`. When this field
+    /// is `Some`, the approval handler is ignored.
+    pub pre_approved_commands: Option<std::collections::HashSet<String>>,
+
     // ── Cleanup ────────────────────────────────────────────────────
     /// Controls how blank lines between list items are handled
     /// during the cleanup operation. Default: `Normal`.
@@ -428,6 +440,10 @@ impl std::fmt::Debug for ComposeOptions {
                     &"None"
                 },
             )
+            .field(
+                "pre_approved_commands",
+                &self.pre_approved_commands.as_ref().map(|s| format!("{} commands", s.len())),
+            )
             .field("list_spacing", &self.list_spacing)
             .field("indent_size", &self.indent_size)
             .field("cache_access_mode", &self.cache_access_mode)
@@ -478,6 +494,7 @@ impl ComposeOptions {
             shell_policy_root: None,
             shell_working_directory: None,
             shell_approval_handler: None,
+            pre_approved_commands: None,
             list_spacing: crate::markdown::cleanup::ListSpacingMode::Normal,
             indent_size: crate::markdown::cleanup::DEFAULT_INDENT,
             cache_access_mode: CacheAccessMode::default(),
@@ -649,6 +666,13 @@ impl ComposeOptions {
         handler: std::sync::Arc<dyn super::shell_expansion::ShellApprovalHandler>,
     ) -> Self {
         self.shell_approval_handler = Some(handler);
+        self
+    }
+
+    /// Sets the pre-approved shell commands.
+    #[must_use]
+    pub fn with_pre_approved_commands(mut self, commands: std::collections::HashSet<String>) -> Self {
+        self.pre_approved_commands = Some(commands);
         self
     }
 

@@ -270,6 +270,12 @@ pub enum ShellExpansionError {
     #[error("Command denied: '{command}' on line {line}")]
     Denied { command: String, line: usize },
 
+    #[error(
+        "Command '{command}' on line {line} was not pre-approved. \
+         This is a bug in the pre-flight scanner -- please report it."
+    )]
+    NotPreApproved { command: String, line: usize },
+
     #[error("Command timed out after {timeout:?}: '{command}' on line {line}")]
     Timeout {
         command: String,
