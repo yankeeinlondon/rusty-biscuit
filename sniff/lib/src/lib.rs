@@ -57,8 +57,6 @@ pub struct SniffResult {
 pub struct SniffConfig {
     /// Base directory for filesystem analysis
     pub base_dir: Option<PathBuf>,
-    /// Include CPU usage sampling (takes ~200ms)
-    pub include_cpu_usage: bool,
     /// Enable deep git inspection (network operations for remote info)
     pub deep: bool,
     /// Number of recent commits to retrieve (default: 10)
@@ -77,7 +75,6 @@ impl Default for SniffConfig {
     fn default() -> Self {
         Self {
             base_dir: None,
-            include_cpu_usage: false,
             deep: false,
             commit_count: 10,
             skip_os: false,
@@ -97,12 +94,6 @@ impl SniffConfig {
     /// Set the base directory for filesystem analysis.
     pub fn base_dir(mut self, path: PathBuf) -> Self {
         self.base_dir = Some(path);
-        self
-    }
-
-    /// Enable CPU usage sampling.
-    pub fn include_cpu_usage(mut self, include: bool) -> Self {
-        self.include_cpu_usage = include;
         self
     }
 
@@ -185,8 +176,6 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
 
     let hardware = if config.skip_hardware {
         None
-    } else if config.include_cpu_usage {
-        Some(hardware::detect_hardware_with_usage()?)
     } else {
         Some(hardware::detect_hardware()?)
     };
@@ -253,11 +242,11 @@ mod tests {
     fn test_config_builder_pattern() {
         let config = SniffConfig::new()
             .base_dir(PathBuf::from("."))
-            .include_cpu_usage(true)
+            .deep(true)
             .skip_network();
 
         assert!(config.base_dir.is_some());
-        assert!(config.include_cpu_usage);
+        assert!(config.deep);
         assert!(config.skip_network);
     }
 

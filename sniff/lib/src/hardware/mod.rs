@@ -187,28 +187,6 @@ pub fn detect_hardware_summary() -> Result<HardwareInfo> {
     })
 }
 
-/// Detects hardware information with optional CPU usage sampling.
-///
-/// This function is identical to [`detect_hardware`] but is designed
-/// to support future CPU usage sampling (which requires ~200ms of
-/// measurement time for accurate readings).
-///
-/// Currently, this function simply calls [`detect_hardware`] and returns
-/// the same result. Future versions may add CPU usage statistics.
-///
-/// ## Examples
-///
-/// ```no_run
-/// use sniff::hardware::detect_hardware_with_usage;
-///
-/// let hw = detect_hardware_with_usage().unwrap();
-/// println!("CPU: {}", hw.cpu.brand);
-/// ```
-pub fn detect_hardware_with_usage() -> Result<HardwareInfo> {
-    // For now, just call detect_hardware - can add CPU sampling later
-    detect_hardware()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
