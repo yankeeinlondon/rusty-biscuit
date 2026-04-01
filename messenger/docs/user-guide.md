@@ -66,6 +66,7 @@ Each provider requires credentials and a destination identifier. The sections be
 
 1. Install [signal-cli](https://github.com/AsamK/signal-cli) (available via Homebrew, AUR, or manual download).
 2. Register or link an account:
+
    ```bash
    # Register a new number (requires SMS verification)
    signal-cli -a +1234567890 register
@@ -74,10 +75,13 @@ Each provider requires credentials and a destination identifier. The sections be
    # Or link to an existing Signal account
    signal-cli link -n "messenger-cli"
    ```
+
 3. Start the JSON-RPC daemon:
+
    ```bash
    signal-cli -a +1234567890 daemon --json-rpc
    ```
+
    This listens on `http://localhost:7583` by default.
 4. The recipient is either a phone number with country code (e.g., `+15551234567`) for direct messages, or a base64-encoded group ID for group messages. Find group IDs with `signal-cli -a +1234567890 listGroups`.
 

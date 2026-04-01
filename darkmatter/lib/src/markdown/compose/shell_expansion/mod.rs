@@ -42,8 +42,8 @@ pub use policy::{
 pub use store::resolve_policy_paths;
 pub use types::{
     ErrorHandling, ErrorHandlingOutcome, ShellApprovalDecision, ShellApprovalHandler,
-    ShellApprovalRequest, ShellDirective, ShellExpansionError, ShellExpansionOptions,
-    ShellExpansionRuntime, ShellPolicyPaths, ShellRuleSet,
+    ShellApprovalRequest, ShellCommandEntry, ShellDirective, ShellExpansionError,
+    ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths, ShellRuleSet,
 };
 
 use crate::markdown::compose::ComposeOptions;
