@@ -444,6 +444,22 @@ pub(crate) fn execute_composition_request(
             );
         }
 
+        // ── Pre-flight shell approval for harness commands ───────────
+        let harness_preflight = claudine::composition::resolve_shell_approvals(
+            None, // template commands already approved during compose
+            None,
+            Some(&plan),
+            &shell_options,
+        )
+        .map_err(|e| eyre!("{e}"))?;
+
+        if !request.quiet && !request.silent && harness_preflight.total_discovered > 0 {
+            log::info(&format!(
+                "Pre-flight: {} harness shell command(s) approved",
+                harness_preflight.total_discovered,
+            ));
+        }
+
         // Plan is validated; the harness loop will re-parse if needed.
         drop(plan);
     } else if is_inline {
