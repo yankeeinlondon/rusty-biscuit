@@ -75,6 +75,8 @@ The CLI stores routes in `~/.messenger.json` and delivery receipts in `~/.messen
 
 For command details and config examples, see [`messenger/cli/README.md`](./cli/README.md).
 
+For provider setup instructions, CLI configuration, and library usage examples, see the [User Guide](./docs/user-guide.md).
+
 ## Package Layout
 
 - `lib/`: library crate and provider adapters

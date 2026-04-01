@@ -194,6 +194,7 @@ Common variants:
 
 Two current limitations are worth documenting explicitly:
 
+
 - `Message::metadata` is preserved on the message and receipt types, but the built-in providers do not currently consume it.
 - Built-in providers currently return empty receipt metadata maps.
 
