@@ -1831,6 +1831,41 @@ fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<Strin
     }
 }
 
+/// Lightweight status check that only counts files by category.
+///
+/// Avoids the cost of per-file diff stat computation and unified diff
+/// generation. Use this when you only need `is_dirty` and file counts.
+fn get_repo_status_counts(repo: &Repository) -> (bool, usize) {
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true);
+    opts.recurse_untracked_dirs(true);
+
+    let statuses = match repo.statuses(Some(&mut opts)) {
+        Ok(s) => s,
+        Err(_) => return (false, 0),
+    };
+
+    let mut staged = 0usize;
+    let mut unstaged = 0usize;
+    let mut untracked = 0usize;
+
+    for entry in statuses.iter() {
+        let status = entry.status();
+        if status.is_index_new() || status.is_index_modified() || status.is_index_deleted() {
+            staged += 1;
+        }
+        if status.is_wt_modified() || status.is_wt_deleted() {
+            unstaged += 1;
+        }
+        if status.is_wt_new() {
+            untracked += 1;
+        }
+    }
+
+    let total = staged + unstaged + untracked;
+    (total > 0, total)
+}
+
 /// Retrieves all linked worktrees for the repository.
 ///
 /// Returns a HashMap keyed by branch name. Anonymous worktrees (without a name)
@@ -1904,12 +1939,7 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
             .unwrap_or(false);
 
         // Check if worktree is dirty and count changed files
-        let (dirty, changed_files) = get_repo_status_with_changes(&worktree_repo)
-            .map(|(s, _)| {
-                let count = s.staged_count + s.unstaged_count + s.untracked_count;
-                (s.is_dirty, count)
-            })
-            .unwrap_or((false, 0));
+        let (dirty, changed_files) = get_repo_status_counts(&worktree_repo);
 
         worktrees.insert(
             branch.clone(),
