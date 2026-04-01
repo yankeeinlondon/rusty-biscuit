@@ -116,15 +116,8 @@ impl SayProvider {
 
         // Sort by quality (highest first), then name alphabetically
         candidates.sort_by(|a, b| {
-            let quality_rank = |q: VoiceQuality| match q {
-                VoiceQuality::Excellent => 0,
-                VoiceQuality::Good => 1,
-                VoiceQuality::Moderate => 2,
-                VoiceQuality::Low => 3,
-                VoiceQuality::Unknown => 4,
-            };
-            quality_rank(a.quality)
-                .cmp(&quality_rank(b.quality))
+            a.quality.rank()
+                .cmp(&b.quality.rank())
                 .then_with(|| a.name.cmp(&b.name))
         });
 

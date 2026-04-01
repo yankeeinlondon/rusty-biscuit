@@ -186,16 +186,7 @@ impl EchogardenProvider {
         }
 
         // Sort by quality (highest first)
-        candidates.sort_by(|a, b| {
-            let quality_rank = |q: VoiceQuality| match q {
-                VoiceQuality::Excellent => 0,
-                VoiceQuality::Good => 1,
-                VoiceQuality::Moderate => 2,
-                VoiceQuality::Low => 3,
-                VoiceQuality::Unknown => 4,
-            };
-            quality_rank(a.quality).cmp(&quality_rank(b.quality))
-        });
+        candidates.sort_by(|a, b| a.quality.rank().cmp(&b.quality.rank()));
 
         candidates.first().cloned().cloned()
     }

@@ -843,14 +843,17 @@ impl TtsVoiceInventory for ElevenLabsProvider {
         // list_voices() already converts API responses to Voice structs
         // with gender populated via voice_response_to_voice.
         match self.list_voices().await {
-            Ok(voices) => {
-                voices
-                    .into_iter()
-                    .find(|v| v.gender == gender)
-                    .ok_or(())
-                    .or_else(|()| Ok(Self::rachel_default_voice()))
+            Ok(voices) => Ok(voices
+                .into_iter()
+                .find(|v| v.gender == gender)
+                .unwrap_or_else(Self::rachel_default_voice)),
+            Err(e) => {
+                tracing::warn!(
+                    error = ?e,
+                    "Failed to fetch ElevenLabs voices for gender filter, falling back to Rachel"
+                );
+                Ok(Self::rachel_default_voice())
             }
-            Err(_) => Ok(Self::rachel_default_voice()),
         }
     }
 }

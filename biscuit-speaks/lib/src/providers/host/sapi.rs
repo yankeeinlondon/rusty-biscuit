@@ -59,14 +59,6 @@ impl SapiProvider {
     /// Sort by quality descending, then name ascending. If no voices match the
     /// requested gender, falls back to the best voice regardless of gender.
     fn select_best_default_voice(voices: &[Voice], gender: Gender) -> Option<Voice> {
-        let quality_rank = |q: VoiceQuality| match q {
-            VoiceQuality::Excellent => 0,
-            VoiceQuality::Good => 1,
-            VoiceQuality::Moderate => 2,
-            VoiceQuality::Low => 3,
-            VoiceQuality::Unknown => 4,
-        };
-
         let mut candidates: Vec<&Voice> = voices.iter().collect();
 
         // Filter by gender if specified (not Any)
@@ -84,8 +76,8 @@ impl SapiProvider {
 
         // Sort by quality descending, then name ascending
         candidates.sort_by(|a, b| {
-            quality_rank(a.quality)
-                .cmp(&quality_rank(b.quality))
+            a.quality.rank()
+                .cmp(&b.quality.rank())
                 .then_with(|| a.name.cmp(&b.name))
         });
 
@@ -199,9 +191,9 @@ impl TtsVoiceInventory for SapiProvider {
         let voices = self.list_voices().await?;
 
         Self::select_best_default_voice(&voices, gender).ok_or_else(|| {
-            TtsError::ProviderFailed {
+            TtsError::VoiceEnumerationFailed {
                 provider: "SAPI".into(),
-                message: "SAPI is only available on Windows".into(),
+                message: "No voices available".into(),
             }
         })
     }
