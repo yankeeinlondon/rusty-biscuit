@@ -168,18 +168,41 @@ pub struct ProgramsInfo {
 impl ProgramsInfo {
     /// Detect all installed programs across all categories.
     ///
-    /// Each category performs its own internal parallel lookups via Rayon,
-    /// but categories themselves are constructed sequentially.
+    /// Detects all 8 categories in parallel using Rayon's `join` API.
+    /// Each category also performs its own internal parallel lookups,
+    /// and Rayon correctly handles this nested parallelism.
     pub fn detect() -> Self {
+
+        // Parallelize category detection in pairs using rayon::join
+        let (editors, utilities) = rayon::join(
+            InstalledEditors::new,
+            InstalledUtilities::new,
+        );
+
+        let (language_package_managers, os_package_managers) = rayon::join(
+            InstalledLanguagePackageManagers::new,
+            InstalledOsPackageManagers::new,
+        );
+
+        let (tts_clients, terminal_apps) = rayon::join(
+            InstalledTtsClients::new,
+            InstalledTerminalApps::new,
+        );
+
+        let (headless_audio, ai_clients) = rayon::join(
+            InstalledHeadlessAudio::new,
+            InstalledAiClients::new,
+        );
+
         Self {
-            editors: InstalledEditors::new(),
-            utilities: InstalledUtilities::new(),
-            language_package_managers: InstalledLanguagePackageManagers::new(),
-            os_package_managers: InstalledOsPackageManagers::new(),
-            tts_clients: InstalledTtsClients::new(),
-            terminal_apps: InstalledTerminalApps::new(),
-            headless_audio: InstalledHeadlessAudio::new(),
-            ai_clients: InstalledAiClients::new(),
+            editors,
+            utilities,
+            language_package_managers,
+            os_package_managers,
+            tts_clients,
+            terminal_apps,
+            headless_audio,
+            ai_clients,
         }
     }
 
