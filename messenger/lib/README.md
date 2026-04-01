@@ -44,18 +44,18 @@ Default features: `discord`, `slack`
 
 ## Core Types
 
-| Type | Role |
-| --- | --- |
-| `Message` | Portable body, attachments, location, and metadata |
-| `MessageBody` | Plain text or Markdown |
-| `Attachment` | Image, document, or other file payload |
-| `Dispatch` | Target, reply context, and delivery options |
-| `Target` | Provider-specific destination |
-| `MessageRef` | Provider-specific reply reference |
-| `SendReceipt` | Provider, raw ID, typed reply reference, metadata |
-| `Messenger` | Provider registry and send coordinator |
-| `Provider` | Adapter trait implemented by each provider |
-| `CapabilitySet` | Declares what a provider can actually do |
+| Type            | Role                                               |
+|-----------------|----------------------------------------------------|
+| `Message`       | Portable body, attachments, location, and metadata |
+| `MessageBody`   | Plain text or Markdown                             |
+| `Attachment`    | Image, document, or other file payload             |
+| `Dispatch`      | Target, reply context, and delivery options        |
+| `Target`        | Provider-specific destination                      |
+| `MessageRef`    | Provider-specific reply reference                  |
+| `SendReceipt`   | Provider, raw ID, typed reply reference, metadata  |
+| `Messenger`     | Provider registry and send coordinator             |
+| `Provider`      | Adapter trait implemented by each provider         |
+| `CapabilitySet` | Declares what a provider can actually do           |
 
 ## Send Flow
 
@@ -73,13 +73,13 @@ If you want visibility before sending, use `plan_send` and inspect `SendPlan::wa
 
 ## Provider Support
 
-| Provider | Rich text | Replies | Attachments | Location handling | Silent | Link previews |
-| --- | --- | --- | --- | --- | --- | --- |
-| Discord | Markdown rendering | Yes | Yes | Appends text fallback | No | No |
-| Slack | mrkdwn rendering | Yes | No | Appends text fallback | No | Yes |
-| Signal | Plain-text fallback | Yes | No | Appends text fallback | No | No |
-| WhatsApp | Plain-text fallback | Yes | No | Native location payload | No | No |
-| Telegram | HTML rendering | Yes | No | Native location payload | Yes | Yes |
+| Provider | Rich text           | Replies | Attachments | Location handling       | Silent | Link previews |
+|----------|---------------------|---------|-------------|-------------------------|--------|---------------|
+| Discord  | Markdown rendering  | Yes     | Yes         | Appends text fallback   | No     | No            |
+| Slack    | mrkdwn rendering    | Yes     | No          | Appends text fallback   | No     | Yes           |
+| Signal   | Plain-text fallback | Yes     | No          | Appends text fallback   | No     | No            |
+| WhatsApp | Plain-text fallback | Yes     | No          | Native location payload | No     | No            |
+| Telegram | HTML rendering      | Yes     | No          | Native location payload | Yes    | Yes           |
 
 Two details matter when integrating:
 

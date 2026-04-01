@@ -79,8 +79,8 @@ For command details and config examples, see [`messenger/cli/README.md`](./cli/R
 
 - `lib/`: library crate and provider adapters
 - `cli/`: command-line interface
-- `docs/platforms/`: provider-specific implementation notes
-- `docs/notifications/`: API notes and design references
+- `docs/research/platforms/`: provider-specific implementation research
+- `docs/research/notifications/`: API notes and design references
 
 ## Development
 
