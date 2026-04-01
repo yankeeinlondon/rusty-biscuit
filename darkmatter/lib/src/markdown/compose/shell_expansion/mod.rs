@@ -26,6 +26,7 @@
 //! ```
 
 pub mod alias;
+pub mod discovery;
 pub mod executor;
 pub mod parser;
 pub mod policy;
@@ -34,6 +35,7 @@ pub mod tokenize;
 pub mod types;
 
 pub use alias::{ResolvedAlias, resolve_alias};
+pub use discovery::collect_shell_commands;
 pub use executor::{execute_command, resolve_working_directory};
 pub use parser::parse_directives;
 pub use policy::{
