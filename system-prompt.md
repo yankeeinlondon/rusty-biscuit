@@ -6,9 +6,8 @@
 
 ## Best Practices
 
-- when rendering to the terminal ALWAYS try to use:
-    - if rendering Markdown:
-        - use the [Darkmatter](@darkmatter/lib/README.md) library's rendering functionality to target the terminal
-        - use the **darkmatter** agent skill to learn more about how to use the library
-        - if the Markdown you're rendering uses Darkmatter DSL then use the [Darkmatter composition pipeline](@darkmatter/docs/darkmatter-composition-pipeline.md), and then render to the terminal
-    - When rendering to the terminal but not Markdown then you should always be using renderable components from `biscuit-terminal`: [components](@darkmatter/docs/components/index.md) 
+- when rendering to the terminal ALWAYS use the `biscuit-terminal` and `darkmatter` skills!
+- when attempting to do host discovery (hardware, software, os, file-system, repo/git) you should use the `sniff` skill
+- when doing file conversions between JSON, YAML, TOML always use the `biscuit-file` skill
+- whenever you are attempt to convert a string based file reference to a real file path in the filesystem you should use `FileReference` struct from `biscuit-file` and use the `biscuit-file` skill
+
