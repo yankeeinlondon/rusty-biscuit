@@ -39,8 +39,254 @@ pub fn find_programs_parallel(programs: &[&str]) -> HashMap<String, Option<PathB
         .collect() // 3. Collect results back into a HashMap
 }
 
-use super::macos_bundle::find_macos_app_bundle;
+use super::macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
 use super::types::ExecutableSource;
+
+/// Pre-built index of executables available on PATH and macOS app bundles.
+///
+/// Built once during system detection, then used for O(1) lookups instead of
+/// per-program filesystem traversal. Significantly reduces overhead when detecting
+/// multiple programs in parallel.
+///
+/// ## Performance
+///
+/// Building the index scans all PATH directories once (typically 10-20 dirs) and
+/// all known macOS app bundles (15-20 apps on macOS). Subsequent lookups are O(1)
+/// HashMap accesses instead of repeated filesystem scans.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use sniff::programs::find_program::ExecutableIndex;
+///
+/// let index = ExecutableIndex::build();
+/// if let Some((path, source)) = index.find_with_source("git") {
+///     println!("Found git at {}", path.display());
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct ExecutableIndex {
+    /// Maps binary name to resolved path (first occurrence wins = PATH precedence)
+    path_executables: HashMap<String, PathBuf>,
+    /// Maps binary name to app bundle path (macOS only)
+    #[cfg(target_os = "macos")]
+    bundle_executables: HashMap<String, PathBuf>,
+}
+
+impl ExecutableIndex {
+    /// Build the index by scanning all PATH directories and macOS app bundles once.
+    ///
+    /// ## Process
+    ///
+    /// 1. Scans all directories in the PATH environment variable
+    /// 2. Indexes all executables (first occurrence wins for PATH precedence)
+    /// 3. On macOS: scans known app bundles in /Applications and ~/Applications
+    ///
+    /// ## Returns
+    ///
+    /// A fully populated index ready for O(1) lookups.
+    pub fn build() -> Self {
+        let mut path_executables = HashMap::new();
+
+        if let Some(path_var) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&path_var) {
+                if let Ok(entries) = std::fs::read_dir(&dir) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        if let Some(name) = entry.file_name().to_str() {
+                            // First occurrence wins (matches PATH precedence)
+                            path_executables
+                                .entry(name.to_string())
+                                .or_insert_with(|| entry.path());
+                        }
+                    }
+                }
+            }
+        }
+
+        Self {
+            path_executables,
+            #[cfg(target_os = "macos")]
+            bundle_executables: build_bundle_index(),
+        }
+    }
+
+    /// Look up a program - checks PATH first, then macOS bundles.
+    ///
+    /// Matches the behavior of [`find_program_with_source`] but uses the pre-built
+    /// index instead of filesystem traversal.
+    ///
+    /// ## Returns
+    ///
+    /// - `Some((PathBuf, ExecutableSource))` - Path and how it was found
+    /// - `None` - Program not found anywhere
+    pub fn find_with_source(&self, program: &str) -> Option<(PathBuf, ExecutableSource)> {
+        if let Some(path) = self.path_executables.get(program) {
+            return Some((path.clone(), ExecutableSource::Path));
+        }
+
+        #[cfg(target_os = "macos")]
+        if let Some(path) = self.bundle_executables.get(program) {
+            return Some((path.clone(), ExecutableSource::MacOsAppBundle));
+        }
+
+        None
+    }
+
+    /// Look up a program by PATH only.
+    ///
+    /// ## Returns
+    ///
+    /// - `Some(PathBuf)` - Path to the executable if found in PATH
+    /// - `None` - Program not found in PATH
+    pub fn find(&self, program: &str) -> Option<PathBuf> {
+        self.path_executables.get(program).cloned()
+    }
+}
+
+/// Builds the macOS app bundle index by checking known app mappings.
+///
+/// For each known binary-to-app mapping, checks if the .app bundle exists in
+/// /Applications or ~/Applications and stores the path to the executable.
+#[cfg(target_os = "macos")]
+fn build_bundle_index() -> HashMap<String, PathBuf> {
+    let mut index = HashMap::new();
+
+    // List of all known binary names that have app bundle mappings
+    let known_binaries = [
+        // Editors / IDEs
+        "code",
+        "cursor",
+        "zed",
+        "subl",
+        "sublime",
+        "sublime-text",
+        // Terminal emulators
+        "wezterm",
+        "wezterm-gui",
+        "alacritty",
+        "kitty",
+        "iterm2",
+        "ghostty",
+        "warp",
+        "warp-terminal",
+        // Browsers
+        "brave",
+        "brave-browser",
+        "chrome",
+        "google-chrome",
+        "firefox",
+        // Media
+        "vlc",
+        "spotify",
+        // Communication
+        "slack",
+        "discord",
+    ];
+
+    for binary in known_binaries {
+        if let Some(app_name) = get_app_bundle_name(binary) {
+            // Check /Applications first
+            let path = PathBuf::from(format!("/Applications/{}.app", app_name));
+            if let Some(exec_path) = check_bundle_executable(&path, binary) {
+                index.insert(binary.to_string(), exec_path);
+                continue;
+            }
+
+            // Check ~/Applications
+            if let Ok(home) = std::env::var("HOME") {
+                let home_path = PathBuf::from(home).join(format!("Applications/{}.app", app_name));
+                if let Some(exec_path) = check_bundle_executable(&home_path, binary) {
+                    index.insert(binary.to_string(), exec_path);
+                }
+            }
+        }
+    }
+
+    index
+}
+
+/// Checks if a bundle exists and returns the path to its executable.
+#[cfg(target_os = "macos")]
+fn check_bundle_executable(bundle_path: &PathBuf, binary_name: &str) -> Option<PathBuf> {
+    if !bundle_path.exists() {
+        return None;
+    }
+
+    // Use the existing find_macos_app_bundle logic by extracting just the app name
+    // Actually, we can't easily reuse that without circular logic. Let's check directly.
+    let macos_dir = bundle_path.join("Contents").join("MacOS");
+    if !macos_dir.is_dir() {
+        return None;
+    }
+
+    // Try to find an executable in the MacOS directory
+    // For simplicity, just check if there's a single executable or one matching the binary name
+    if let Ok(entries) = std::fs::read_dir(&macos_dir) {
+        let executables: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| is_executable_file(&e.path()))
+            .collect();
+
+        // If there's exactly one executable, use it
+        if executables.len() == 1 {
+            return Some(executables[0].path());
+        }
+
+        // Otherwise try to find one matching the binary name
+        for entry in executables {
+            if let Some(name) = entry.file_name().to_str() {
+                if name.to_lowercase() == binary_name.to_lowercase() {
+                    return Some(entry.path());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Checks if a path is an executable file (macOS only).
+#[cfg(target_os = "macos")]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    if !path.is_file() {
+        return false;
+    }
+
+    path.metadata()
+        .map(|m| m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+/// Finds multiple programs using a pre-built index.
+///
+/// Uses the pre-built `ExecutableIndex` for O(1) lookups instead of filesystem
+/// traversal. Significantly faster than [`find_programs_with_source_parallel`]
+/// when checking many programs.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use sniff::programs::find_program::{ExecutableIndex, find_programs_with_source_from_index};
+///
+/// let index = ExecutableIndex::build();
+/// let results = find_programs_with_source_from_index(&index, &["git", "vim", "code"]);
+/// for (name, result) in &results {
+///     if let Some((path, source)) = result {
+///         println!("{}: {} ({})", name, path.display(), source);
+///     }
+/// }
+/// ```
+pub fn find_programs_with_source_from_index(
+    index: &ExecutableIndex,
+    programs: &[&str],
+) -> HashMap<String, Option<(PathBuf, ExecutableSource)>> {
+    programs
+        .iter()
+        .map(|&prog| (prog.to_string(), index.find_with_source(prog)))
+        .collect()
+}
 
 /// Finds a program and reports its discovery source.
 ///

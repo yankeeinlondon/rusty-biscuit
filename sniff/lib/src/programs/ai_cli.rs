@@ -6,7 +6,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::AiCli;
-use crate::programs::find_program::find_programs_with_source_parallel;
+use crate::programs::find_program::{
+    ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
+};
 use crate::programs::installer::{
     InstallOptions, execute_install, execute_versioned_install, method_available,
     select_best_method,
@@ -58,6 +60,31 @@ impl InstalledAiClients {
         ];
 
         let results = find_programs_with_source_parallel(&programs);
+
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_first = |names: &[&str]| names.iter().find_map(|name| get(name));
+
+        Self {
+            claude: get("claude"),
+            opencode: get("opencode"),
+            roo: get("roo"),
+            gemini_cli: get("gemini"),
+            aider: get("aider"),
+            codex: get("codex"),
+            goose: get("goose"),
+            kimi_cli: get_first(&["kimi", "kimi-cli"]),
+            qwen_cli: get("qwen"),
+        }
+    }
+
+    /// Detect which AI CLI tools are installed using a pre-built executable index.
+    pub fn new_with_index(index: &ExecutableIndex) -> Self {
+        let programs = [
+            "claude", "opencode", "roo", "gemini", "aider", "codex", "goose", "kimi", "kimi-cli",
+            "qwen",
+        ];
+
+        let results = find_programs_with_source_from_index(index, &programs);
 
         let get = |name: &str| results.get(name).and_then(|r| r.clone());
         let get_first = |names: &[&str]| names.iter().find_map(|name| get(name));

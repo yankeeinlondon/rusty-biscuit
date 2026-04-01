@@ -87,6 +87,7 @@ Generated from client audit following the ergonomics & performance refactoring (
 ### Suggested Changes
 
 1. **MEDIUM: Migrate standard mode to DetectionPlan** (`environment.rs:295-312`)
+
    ```rust
    let plan = DetectionPlan::new()
        .os(OsRequest::full())
@@ -96,10 +97,12 @@ Generated from client audit following the ergonomics & performance refactoring (
            .git(GitRequest::full().commit_count(1)));
    let result = detect_with_plan(plan)?;
    ```
+
    - Clearer intent, enables future granular optimization
    - Could further optimize with `HardwareRequest::summary()` since claudine only uses arch, cores, and memory bytes
 
 2. **HIGH: Optimize fast mode with targeted filesystem request** (`environment.rs:320-339`)
+
    ```rust
    let plan = DetectionPlan::new()
        .without_os()
@@ -112,6 +115,7 @@ Generated from client audit following the ergonomics & performance refactoring (
            .without_docs()
            .without_formatting());
    ```
+
    - Currently does full filesystem detection but only uses git + repo
    - Skipping file inventory, docs, and formatting saves 100-500ms per hook invocation
    - Hook latency is user-facing, so even small savings matter
@@ -138,9 +142,9 @@ Generated from client audit following the ergonomics & performance refactoring (
 ### Suggested Changes
 
 - **No changes needed.** Playa's usage is already optimal:
-  - Metadata access is pure lookup (no detection overhead)
-  - Runtime detection is correctly scoped to a single program category
-  - Does not benefit from `DetectionPlan` since it only needs program metadata
+    - Metadata access is pure lookup (no detection overhead)
+    - Runtime detection is correctly scoped to a single program category
+    - Does not benefit from `DetectionPlan` since it only needs program metadata
 
 ---
 

@@ -6,7 +6,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::TerminalApp;
-use crate::programs::find_program::find_programs_with_source_parallel;
+use crate::programs::find_program::{
+    ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
+};
 use crate::programs::installer::{
     InstallOptions, execute_install, execute_versioned_install, method_available,
     select_best_method,
@@ -90,6 +92,62 @@ impl InstalledTerminalApps {
         ];
 
         let results = find_programs_with_source_parallel(&programs);
+
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
+
+        Self {
+            alacritty: get("alacritty"),
+            kitty: get("kitty"),
+            iterm2: get("iterm2"),
+            wezterm: get("wezterm"),
+            ghostty: get("ghostty"),
+            warp: get_any(&["warp-terminal", "warp"]),
+            rio: get("rio"),
+            tabby: get("tabby"),
+            foot: get("foot"),
+            gnome_terminal: get("gnome-terminal"),
+            konsole: get("konsole"),
+            xfce_terminal: get("xfce4-terminal"),
+            terminology: get("terminology"),
+            st: get("st"),
+            xterm: get("xterm"),
+            hyper: get("hyper"),
+            windows_terminal: get("wt"),
+        }
+    }
+
+    /// Detect which popular terminal apps are installed using a pre-built executable index.
+    pub fn new_with_index(index: &ExecutableIndex) -> Self {
+        let programs = [
+            "alacritty",
+            "kitty",
+            "iterm2",
+            "wezterm",
+            "ghostty",
+            "warp-terminal",
+            "warp",
+            "rio",
+            "tabby",
+            "foot",
+            "gnome-terminal",
+            "konsole",
+            "xfce4-terminal",
+            "terminology",
+            "st",
+            "xterm",
+            "hyper",
+            "wt",
+        ];
+
+        let results = find_programs_with_source_from_index(index, &programs);
 
         let get = |name: &str| results.get(name).and_then(|r| r.clone());
         let get_any = |names: &[&str]| {
