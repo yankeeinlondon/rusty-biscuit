@@ -431,13 +431,6 @@ impl ManifestIndex {
         Self { manifests }
     }
 
-    /// Get all directories containing manifests of any kind.
-    fn all_package_dirs(&self) -> Vec<&Path> {
-        let mut dirs: Vec<&Path> = self.manifests.keys().map(|p| p.as_path()).collect();
-        dirs.sort();
-        dirs
-    }
-
     /// Get directories containing manifests within a specific subtree.
     fn package_dirs_in_tree(&self, search_root: &Path, root: &Path) -> Vec<&Path> {
         let search_root_canonical = canonicalize_path(search_root);
@@ -2046,7 +2039,9 @@ fn discover_packages_with_optional_index(
     index: Option<&ManifestIndex>,
 ) -> Vec<Package> {
     if let Some(idx) = index {
-        idx.all_package_dirs()
+        // Use package_dirs_in_tree to exclude root itself (matches original
+        // discover_packages_from_manifests_in_tree which skips search_root)
+        idx.package_dirs_in_tree(root, root)
             .iter()
             .map(|path| create_package(path, root, tool, lock_versions, discovery_source))
             .collect()
