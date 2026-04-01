@@ -168,7 +168,8 @@ pub struct ProgramsInfo {
 impl ProgramsInfo {
     /// Detect all installed programs across all categories.
     ///
-    /// This runs detection in parallel for all program categories.
+    /// Each category performs its own internal parallel lookups via Rayon,
+    /// but categories themselves are constructed sequentially.
     pub fn detect() -> Self {
         Self {
             editors: InstalledEditors::new(),
