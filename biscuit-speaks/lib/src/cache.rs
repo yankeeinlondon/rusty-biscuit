@@ -906,6 +906,13 @@ mod tests {
                 Ok(self.voices.clone())
             }
         }
+
+        async fn default_voice(
+            &self,
+            _gender: crate::types::Gender,
+        ) -> Result<Voice, crate::errors::TtsError> {
+            Ok(Voice::new("MockDefault"))
+        }
     }
 
     #[tokio::test]

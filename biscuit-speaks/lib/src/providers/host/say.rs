@@ -114,7 +114,7 @@ impl SayProvider {
             }
         }
 
-        // Sort by quality (highest first)
+        // Sort by quality (highest first), then name alphabetically
         candidates.sort_by(|a, b| {
             let quality_rank = |q: VoiceQuality| match q {
                 VoiceQuality::Excellent => 0,
@@ -123,7 +123,9 @@ impl SayProvider {
                 VoiceQuality::Low => 3,
                 VoiceQuality::Unknown => 4,
             };
-            quality_rank(a.quality).cmp(&quality_rank(b.quality))
+            quality_rank(a.quality)
+                .cmp(&quality_rank(b.quality))
+                .then_with(|| a.name.cmp(&b.name))
         });
 
         candidates.first().cloned().cloned()
@@ -393,6 +395,21 @@ impl TtsVoiceInventory for SayProvider {
         );
 
         Ok(voices)
+    }
+
+    async fn default_voice(&self, gender: Gender) -> Result<Voice, TtsError> {
+        let voices = self.list_voices().await?;
+
+        let config = TtsConfig::new()
+            .with_gender(gender)
+            .with_language(Language::English);
+
+        Self::select_best_voice(&voices, &config).ok_or_else(|| {
+            TtsError::VoiceEnumerationFailed {
+                provider: Self::PROVIDER_NAME.into(),
+                message: "No voices available".into(),
+            }
+        })
     }
 }
 
@@ -709,6 +726,66 @@ mod tests {
     }
 
     // ========================================================================
+    // select_best_voice tests
+    // ========================================================================
+
+    #[test]
+    fn test_default_voice_selection_prefers_highest_quality() {
+        let voices = vec![
+            Voice::new("Albert")
+                .with_gender(Gender::Male)
+                .with_quality(VoiceQuality::Moderate)
+                .with_language(Language::English),
+            Voice::new("Alex (Premium)")
+                .with_gender(Gender::Male)
+                .with_quality(VoiceQuality::Good)
+                .with_language(Language::English),
+            Voice::new("Daniel")
+                .with_gender(Gender::Male)
+                .with_quality(VoiceQuality::Moderate)
+                .with_language(Language::English),
+        ];
+
+        let config = TtsConfig::new().with_gender(Gender::Male);
+        let best = SayProvider::select_best_voice(&voices, &config).unwrap();
+        assert_eq!(best.name, "Alex (Premium)");
+    }
+
+    #[test]
+    fn test_default_voice_selection_alphabetical_tiebreak() {
+        let voices = vec![
+            Voice::new("Zara")
+                .with_gender(Gender::Female)
+                .with_quality(VoiceQuality::Good)
+                .with_language(Language::English),
+            Voice::new("Amy")
+                .with_gender(Gender::Female)
+                .with_quality(VoiceQuality::Good)
+                .with_language(Language::English),
+            Voice::new("Kate")
+                .with_gender(Gender::Female)
+                .with_quality(VoiceQuality::Good)
+                .with_language(Language::English),
+        ];
+
+        let config = TtsConfig::new().with_gender(Gender::Female);
+        let best = SayProvider::select_best_voice(&voices, &config).unwrap();
+        assert_eq!(best.name, "Amy");
+    }
+
+    #[test]
+    fn test_default_voice_selection_gender_fallback() {
+        let voices = vec![Voice::new("Samantha")
+            .with_gender(Gender::Female)
+            .with_quality(VoiceQuality::Good)
+            .with_language(Language::English)];
+
+        let config = TtsConfig::new().with_gender(Gender::Male);
+        let best = SayProvider::select_best_voice(&voices, &config).unwrap();
+        assert_eq!(best.name, "Samantha");
+    }
+
+    // ========================================================================
     // Integration tests - macOS only
     // ========================================================================
 
@@ -796,5 +873,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn test_default_voice_integration_male() {
+        let provider = SayProvider;
+        let voice = provider.default_voice(Gender::Male).await.unwrap();
+        assert_eq!(voice.gender, Gender::Male);
+        assert!(!voice.name.is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn test_default_voice_integration_female() {
+        let provider = SayProvider;
+        let voice = provider.default_voice(Gender::Female).await.unwrap();
+        assert_eq!(voice.gender, Gender::Female);
+        assert!(!voice.name.is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn test_default_voice_integration_any() {
+        let provider = SayProvider;
+        let voice = provider.default_voice(Gender::Any).await.unwrap();
+        assert!(!voice.name.is_empty());
     }
 }

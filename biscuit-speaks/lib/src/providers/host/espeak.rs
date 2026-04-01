@@ -223,6 +223,17 @@ impl TtsVoiceInventory for ESpeakProvider {
         let stdout = String::from_utf8_lossy(&output.stdout);
         parse_espeak_voices(&stdout, &self.binary)
     }
+
+    async fn default_voice(&self, gender: Gender) -> Result<Voice, TtsError> {
+        let (name, voice_gender) = match gender {
+            Gender::Male => ("en+m3", Gender::Male),
+            Gender::Female | Gender::Any => ("en+f3", Gender::Female),
+        };
+        Ok(Voice::new(name)
+            .with_gender(voice_gender)
+            .with_quality(VoiceQuality::Low)
+            .with_language(Language::English))
+    }
 }
 
 /// Parse the output of `espeak-ng --voices` or `espeak --voices`.
@@ -730,6 +741,37 @@ Pty Language Age/Gender VoiceName File Other
         let english = voices.iter().find(|v| v.name == "english").unwrap();
         assert_eq!(english.gender, Gender::Male);
         assert_eq!(english.languages, vec![Language::English]);
+    }
+
+    // ========================================================================
+    // default_voice tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_default_voice_male() {
+        let provider = ESpeakProvider::new();
+        let voice = provider.default_voice(Gender::Male).await.unwrap();
+        assert_eq!(voice.name, "en+m3");
+        assert_eq!(voice.gender, Gender::Male);
+        assert_eq!(voice.quality, VoiceQuality::Low);
+    }
+
+    #[tokio::test]
+    async fn test_default_voice_female() {
+        let provider = ESpeakProvider::new();
+        let voice = provider.default_voice(Gender::Female).await.unwrap();
+        assert_eq!(voice.name, "en+f3");
+        assert_eq!(voice.gender, Gender::Female);
+        assert_eq!(voice.quality, VoiceQuality::Low);
+    }
+
+    #[tokio::test]
+    async fn test_default_voice_any() {
+        let provider = ESpeakProvider::new();
+        let voice = provider.default_voice(Gender::Any).await.unwrap();
+        assert_eq!(voice.name, "en+f3");
+        assert_eq!(voice.gender, Gender::Female);
+        assert_eq!(voice.quality, VoiceQuality::Low);
     }
 
     // ========================================================================

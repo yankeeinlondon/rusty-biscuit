@@ -262,6 +262,15 @@ impl ElevenLabsProvider {
         v
     }
 
+    /// Build the default Rachel voice as a `Voice` struct.
+    fn rachel_default_voice() -> Voice {
+        Voice::new("Rachel")
+            .with_gender(Gender::Female)
+            .with_quality(VoiceQuality::Excellent)
+            .with_language(Language::English)
+            .with_identifier(DEFAULT_VOICE_ID)
+    }
+
     /// Check if the ElevenLabs API key is configured in the environment.
     ///
     /// Returns `true` if either `ELEVENLABS_API_KEY` or `ELEVEN_LABS_API_KEY`
@@ -824,6 +833,26 @@ impl TtsVoiceInventory for ElevenLabsProvider {
             .map(Self::voice_response_to_voice)
             .collect())
     }
+
+    async fn default_voice(&self, gender: Gender) -> Result<Voice, TtsError> {
+        if gender == Gender::Any {
+            return Ok(Self::rachel_default_voice());
+        }
+
+        // Query API for voices matching the requested gender.
+        // list_voices() already converts API responses to Voice structs
+        // with gender populated via voice_response_to_voice.
+        match self.list_voices().await {
+            Ok(voices) => {
+                voices
+                    .into_iter()
+                    .find(|v| v.gender == gender)
+                    .ok_or(())
+                    .or_else(|()| Ok(Self::rachel_default_voice()))
+            }
+            Err(_) => Ok(Self::rachel_default_voice()),
+        }
+    }
 }
 
 // ============================================================================
@@ -843,6 +872,15 @@ mod tests {
     #[test]
     fn test_default_model_id() {
         assert_eq!(DEFAULT_MODEL_ID, "eleven_multilingual_v2");
+    }
+
+    #[test]
+    fn test_rachel_default_voice() {
+        let voice = ElevenLabsProvider::rachel_default_voice();
+        assert_eq!(voice.name, "Rachel");
+        assert_eq!(voice.gender, Gender::Female);
+        assert_eq!(voice.quality, VoiceQuality::Excellent);
+        assert_eq!(voice.identifier, Some(DEFAULT_VOICE_ID.to_string()));
     }
 
     #[test]
@@ -1330,6 +1368,34 @@ mod tests {
                 panic!("Deserialization failed: {}", e);
             }
         }
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires ELEVENLABS_API_KEY
+    async fn test_default_voice_any_returns_rachel() {
+        let provider = ElevenLabsProvider::new().expect("Requires ELEVENLABS_API_KEY");
+        let voice = provider.default_voice(Gender::Any).await.unwrap();
+        assert_eq!(voice.name, "Rachel");
+        assert_eq!(voice.gender, Gender::Female);
+        assert_eq!(voice.quality, VoiceQuality::Excellent);
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires ELEVENLABS_API_KEY
+    async fn test_default_voice_male() {
+        let provider = ElevenLabsProvider::new().expect("Requires ELEVENLABS_API_KEY");
+        let voice = provider.default_voice(Gender::Male).await.unwrap();
+        assert_eq!(voice.gender, Gender::Male);
+        assert!(!voice.name.is_empty());
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires ELEVENLABS_API_KEY
+    async fn test_default_voice_female() {
+        let provider = ElevenLabsProvider::new().expect("Requires ELEVENLABS_API_KEY");
+        let voice = provider.default_voice(Gender::Female).await.unwrap();
+        assert_eq!(voice.gender, Gender::Female);
+        assert!(!voice.name.is_empty());
     }
 
     #[tokio::test]

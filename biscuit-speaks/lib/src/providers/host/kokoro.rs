@@ -396,6 +396,17 @@ impl TtsVoiceInventory for KokoroTtsProvider {
         // we use the known voice list from the model documentation.
         Ok(get_kokoro_voices())
     }
+
+    async fn default_voice(&self, gender: Gender) -> Result<Voice, TtsError> {
+        let (name, voice_gender) = match gender {
+            Gender::Male => ("am_adam", Gender::Male),
+            Gender::Female | Gender::Any => (Self::DEFAULT_VOICE, Gender::Female),
+        };
+        Ok(Voice::new(name)
+            .with_gender(voice_gender)
+            .with_quality(VoiceQuality::Excellent)
+            .with_language(Language::English))
+    }
 }
 
 /// Get the complete list of Kokoro TTS voices.
@@ -858,6 +869,37 @@ mod tests {
         assert!(voices.iter().any(|v| v.name == "am_adam"));
         assert!(voices.iter().any(|v| v.name == "bf_emma"));
         assert!(voices.iter().any(|v| v.name == "jm_kumo"));
+    }
+
+    // ========================================================================
+    // default_voice tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_default_voice_male() {
+        let provider = KokoroTtsProvider::new();
+        let voice = provider.default_voice(Gender::Male).await.unwrap();
+        assert_eq!(voice.name, "am_adam");
+        assert_eq!(voice.gender, Gender::Male);
+        assert_eq!(voice.quality, VoiceQuality::Excellent);
+    }
+
+    #[tokio::test]
+    async fn test_default_voice_female() {
+        let provider = KokoroTtsProvider::new();
+        let voice = provider.default_voice(Gender::Female).await.unwrap();
+        assert_eq!(voice.name, "af_heart");
+        assert_eq!(voice.gender, Gender::Female);
+        assert_eq!(voice.quality, VoiceQuality::Excellent);
+    }
+
+    #[tokio::test]
+    async fn test_default_voice_any() {
+        let provider = KokoroTtsProvider::new();
+        let voice = provider.default_voice(Gender::Any).await.unwrap();
+        assert_eq!(voice.name, "af_heart");
+        assert_eq!(voice.gender, Gender::Female);
+        assert_eq!(voice.quality, VoiceQuality::Excellent);
     }
 
     // ========================================================================
