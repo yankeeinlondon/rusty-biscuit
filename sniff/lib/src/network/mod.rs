@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::process::Command;
 #[cfg(feature = "network")]
-use std::sync::OnceLock;
+use std::sync::Mutex;
 
 mod interface;
 pub use interface::{InterfaceFlags, IpAddresses, Ipv4Address, Ipv6Address, NetworkInterface};
@@ -14,8 +14,18 @@ pub use interface::{InterfaceFlags, IpAddresses, Ipv4Address, Ipv6Address, Netwo
 #[cfg(feature = "network")]
 const DEFAULT_WAN_IP_ENDPOINTS: &[&str] = &["https://api64.ipify.org"];
 
+/// Default TTL for cached WAN IP results (5 minutes).
 #[cfg(feature = "network")]
-static WAN_IP_CACHE: OnceLock<Option<String>> = OnceLock::new();
+const WAN_IP_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+#[cfg(feature = "network")]
+static WAN_IP_CACHE: Mutex<Option<WanIpCacheEntry>> = Mutex::new(None);
+
+#[cfg(feature = "network")]
+struct WanIpCacheEntry {
+    value: Option<String>,
+    fetched_at: std::time::Instant,
+}
 
 /// Network information for the system.
 ///
@@ -120,24 +130,54 @@ pub fn detect_network() -> Result<NetworkInfo> {
 ///
 /// Returns an error if the `getifaddrs` call fails for reasons other than permission denied.
 pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkInfo> {
-    let wan_ip_address = if request.include_wan_ip {
-        detect_wan_ip()
-    } else {
-        None
-    };
+    // Run WAN IP lookup concurrently with local interface enumeration
+    // so neither blocks the other.
+    std::thread::scope(|s| {
+        let wan_handle = if request.include_wan_ip {
+            Some(s.spawn(move || detect_wan_ip(request.force_refresh)))
+        } else {
+            None
+        };
 
-    let addrs = match getifaddrs::getifaddrs() {
-        Ok(addrs) => addrs,
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            return Ok(NetworkInfo {
+        let local_result = detect_local_interfaces();
+
+        let wan_ip_address = wan_handle.map(|h| h.join().unwrap()).unwrap_or(None);
+
+        match local_result {
+            Ok((interfaces, primary, ip_addresses)) => Ok(NetworkInfo {
+                interfaces,
+                primary_interface: primary,
+                ip_addresses,
+                wan_ip_address,
+                permission_denied: false,
+            }),
+            Err(PermissionOrError::PermissionDenied) => Ok(NetworkInfo {
                 interfaces: vec![],
                 primary_interface: None,
                 ip_addresses: IpAddresses::default(),
                 wan_ip_address,
                 permission_denied: true,
-            });
+            }),
+            Err(PermissionOrError::Other(e)) => Err(e),
         }
-        Err(e) => return Err(e.into()),
+    })
+}
+
+enum PermissionOrError {
+    PermissionDenied,
+    Other(crate::SniffError),
+}
+
+fn detect_local_interfaces() -> std::result::Result<
+    (Vec<NetworkInterface>, Option<String>, IpAddresses),
+    PermissionOrError,
+> {
+    let addrs = match getifaddrs::getifaddrs() {
+        Ok(addrs) => addrs,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Err(PermissionOrError::PermissionDenied);
+        }
+        Err(e) => return Err(PermissionOrError::Other(e.into())),
     };
 
     let mut interfaces: HashMap<String, NetworkInterface> = HashMap::new();
@@ -149,17 +189,14 @@ pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkIn
             .entry(interface_name.clone())
             .or_insert_with(|| NetworkInterface::new(interface_name.clone()));
 
-        // Update flags using bitflags contains() method
         entry.flags.is_up = ifaddr.flags.contains(getifaddrs::InterfaceFlags::UP);
         entry.flags.is_loopback = ifaddr.flags.contains(getifaddrs::InterfaceFlags::LOOPBACK);
         entry.flags.is_running = ifaddr.flags.contains(getifaddrs::InterfaceFlags::RUNNING);
 
-        // Add addresses based on type
         match ifaddr.address {
             getifaddrs::Address::V4(v4) => {
                 if !entry.ipv4_addresses.contains(&v4.address) {
                     entry.ipv4_addresses.push(v4.address);
-                    // Also add to aggregated addresses
                     ip_addresses.v4.push(Ipv4Address {
                         address: v4.address.to_string(),
                         interface: interface_name,
@@ -169,7 +206,6 @@ pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkIn
             getifaddrs::Address::V6(v6) => {
                 if !entry.ipv6_addresses.contains(&v6.address) {
                     entry.ipv6_addresses.push(v6.address);
-                    // Also add to aggregated addresses
                     ip_addresses.v6.push(Ipv6Address {
                         address: v6.address.to_string(),
                         interface: interface_name,
@@ -177,7 +213,6 @@ pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkIn
                 }
             }
             getifaddrs::Address::Mac(mac) => {
-                // Only set MAC if not already set (first non-zero wins)
                 if entry.mac_address.is_none() && mac != [0u8; 6] {
                     entry.mac_address = Some(format_mac_address(&mac));
                 }
@@ -190,13 +225,7 @@ pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkIn
 
     let primary = find_primary_interface(&interfaces);
 
-    Ok(NetworkInfo {
-        interfaces,
-        primary_interface: primary,
-        ip_addresses,
-        wan_ip_address,
-        permission_denied: false,
-    })
+    Ok((interfaces, primary, ip_addresses))
 }
 
 #[cfg(feature = "network")]
@@ -265,14 +294,34 @@ impl WanIpDetector {
 }
 
 #[cfg(feature = "network")]
-fn detect_wan_ip() -> Option<String> {
-    WAN_IP_CACHE
-        .get_or_init(|| WanIpDetector::new().detect())
-        .clone()
+fn detect_wan_ip(force_refresh: bool) -> Option<String> {
+    // Check cache first (unless refresh is forced)
+    if !force_refresh {
+        if let Ok(guard) = WAN_IP_CACHE.lock() {
+            if let Some(entry) = guard.as_ref() {
+                if entry.fetched_at.elapsed() < WAN_IP_TTL {
+                    return entry.value.clone();
+                }
+            }
+        }
+    }
+
+    // Fetch fresh value
+    let value = WanIpDetector::new().detect();
+
+    // Update cache
+    if let Ok(mut guard) = WAN_IP_CACHE.lock() {
+        *guard = Some(WanIpCacheEntry {
+            value: value.clone(),
+            fetched_at: std::time::Instant::now(),
+        });
+    }
+
+    value
 }
 
 #[cfg(not(feature = "network"))]
-fn detect_wan_ip() -> Option<String> {
+fn detect_wan_ip(_force_refresh: bool) -> Option<String> {
     None
 }
 

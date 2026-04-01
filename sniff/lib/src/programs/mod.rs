@@ -218,14 +218,11 @@ impl ProgramsInfo {
     }
 
     /// Re-check program availability for all categories.
+    ///
+    /// Delegates to [`Self::detect()`] so the shared executable index is
+    /// built once and reused across all categories, matching the optimized
+    /// initial-detection path.
     pub fn refresh(&mut self) {
-        self.editors.refresh();
-        self.utilities.refresh();
-        self.language_package_managers.refresh();
-        self.os_package_managers.refresh();
-        self.tts_clients.refresh();
-        self.terminal_apps.refresh();
-        self.headless_audio.refresh();
-        self.ai_clients.refresh();
+        *self = Self::detect();
     }
 }
