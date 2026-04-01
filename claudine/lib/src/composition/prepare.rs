@@ -32,10 +32,14 @@ use super::types::{
 pub fn prepare_direct(
     source: &ResolvedCompositionSource,
     set_overrides: Option<serde_json::Value>,
+    pre_approved_commands: Option<std::collections::HashSet<String>>,
 ) -> Result<PreparedComposition, CompositionError> {
     let mut options = ComposeOptions::new().with_source_file(&source.resolved_path);
     if let Some(overrides) = set_overrides {
         options = options.with_set_overrides(overrides);
+    }
+    if let Some(approved) = pre_approved_commands {
+        options = options.with_pre_approved_commands(approved);
     }
     let (composed, _report) = source
         .markdown
@@ -66,6 +70,7 @@ pub fn prepare_direct(
 pub fn prepare_inline(
     source: &ResolvedCompositionSource,
     set_overrides: Option<serde_json::Value>,
+    pre_approved_commands: Option<std::collections::HashSet<String>>,
 ) -> Result<PreparedComposition, CompositionError> {
     let fm = source.markdown.frontmatter();
 
@@ -88,6 +93,9 @@ pub fn prepare_inline(
     let mut options = ComposeOptions::new().with_source_file(&source.resolved_path);
     if let Some(overrides) = set_overrides {
         options = options.with_set_overrides(overrides);
+    }
+    if let Some(approved) = pre_approved_commands {
+        options = options.with_pre_approved_commands(approved);
     }
     let (composed, _report) = temp_md
         .compose_with(options)
@@ -184,7 +192,7 @@ mod tests {
             "# Research\n\nDo the research.",
         );
 
-        let prepared = prepare_direct(&source, None).unwrap();
+        let prepared = prepare_direct(&source, None, None).unwrap();
         assert_eq!(prepared.mode, CompositionMode::ChainedDocument);
         assert!(prepared.prompt.contains("Research"));
         // Effective frontmatter should be a JSON object with the keys
@@ -207,7 +215,7 @@ mod tests {
             "Old content",
         );
 
-        let prepared = prepare_inline(&source, None).unwrap();
+        let prepared = prepare_inline(&source, None, None).unwrap();
         assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
         assert!(prepared.prompt.contains("List three colors"));
         assert!(
@@ -238,7 +246,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("title", json!("Test"))], "Content");
 
-        let err = prepare_inline(&source, None).unwrap_err();
+        let err = prepare_inline(&source, None, None).unwrap_err();
         assert!(matches!(err, CompositionError::PromptPropertyMissing));
     }
 
@@ -247,7 +255,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("prompt", json!(42))], "Content");
 
-        let err = prepare_inline(&source, None).unwrap_err();
+        let err = prepare_inline(&source, None, None).unwrap_err();
         assert!(matches!(err, CompositionError::PromptPropertyWrongType(_)));
     }
 }
