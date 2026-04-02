@@ -50,14 +50,18 @@ pub fn resolve_shell_approvals(
     harness_plan: Option<&HarnessPlan>,
     approval_options: &ShellApprovalOptions,
 ) -> Result<PreFlightResult, CompositionError> {
-    let mut all_normalized: Vec<String> = Vec::new();
+    let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
 
     // -- Source 1: Template ::shell directives ---------------------------------
     if let (Some(md), Some(opts)) = (markdown, compose_options) {
         let entries = collect_shell_commands(md, opts)
             .map_err(|e| CompositionError::PreFlightDiscoveryFailed(e.to_string()))?;
         for entry in &entries {
-            all_normalized.push(entry.normalized.clone());
+            all_commands.push((
+                entry.normalized.clone(),
+                entry.source_file.clone(),
+                entry.line,
+            ));
         }
     }
 
@@ -69,16 +73,16 @@ pub fn resolve_shell_approvals(
             .map_err(|e| CompositionError::PreFlightFailed(e.to_string()))?;
         for cmd in &auditable {
             let normalized = normalize_command(&cmd.executable, &cmd.args);
-            all_normalized.push(normalized);
+            all_commands.push((normalized, plan.source_path.clone(), 0));
         }
     }
 
     // -- Deduplicate -----------------------------------------------------------
-    let unique: Vec<String> = {
+    let unique: Vec<(String, std::path::PathBuf, usize)> = {
         let mut seen = HashSet::new();
-        all_normalized
+        all_commands
             .into_iter()
-            .filter(|n| seen.insert(n.clone()))
+            .filter(|(normalized, _, _)| seen.insert(normalized.clone()))
             .collect()
     };
 
@@ -94,7 +98,7 @@ pub fn resolve_shell_approvals(
         .unwrap_or(0);
 
     // -- Check each command against policy -------------------------------------
-    for normalized in &unique {
+    for (normalized, source_file, line) in &unique {
         // Split normalized command back into parts for the existing validator.
         let parts: Vec<String> =
             tokenize(normalized).unwrap_or_else(|_| vec![normalized.clone()]);
@@ -109,8 +113,13 @@ pub fn resolve_shell_approvals(
                     return Err(CompositionError::ShellCommandDenied { command });
                 }
                 // No handler -- cannot get approval
+                let location = if *line > 0 {
+                    format!("{}:{}", source_file.display(), line)
+                } else {
+                    source_file.display().to_string()
+                };
                 return Err(CompositionError::PreFlightFailed(format!(
-                    "Shell command '{command}' requires approval but no approval handler \
+                    "Shell command '{command}' at {location} requires approval but no approval handler \
                      is available. Add to whitelist or run interactively."
                 )));
             }
@@ -118,8 +127,13 @@ pub fn resolve_shell_approvals(
                 command,
                 reason,
             }) => {
+                let location = if *line > 0 {
+                    format!("{}:{}", source_file.display(), line)
+                } else {
+                    source_file.display().to_string()
+                };
                 return Err(CompositionError::PreFlightFailed(format!(
-                    "Shell command '{command}' is blacklisted: {reason}"
+                    "Shell command '{command}' at {location} is blacklisted: {reason}"
                 )));
             }
             Err(e) => {
