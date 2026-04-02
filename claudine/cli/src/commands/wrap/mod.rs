@@ -1904,8 +1904,9 @@ fn try_inline_closure(
         &replacement_body,
         source_path,
         &today,
+        None,
     ) {
-        Ok(()) => {
+        Ok(_result) => {
             if show_checks {
                 log::message(&crate::output::fm_check_ok(
                     "Applied the captured replacement body to the target document",

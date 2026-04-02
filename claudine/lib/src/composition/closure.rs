@@ -7,6 +7,8 @@
 
 use std::path::Path;
 
+use indexmap::IndexMap;
+
 use crate::composition::error::CompositionError;
 use crate::composition::types::InlineClosurePlan;
 
@@ -53,7 +55,8 @@ pub fn apply_inline_closure(
     replacement_body: &str,
     target_path: &Path,
     today: &str,
-) -> Result<(), CompositionError> {
+    post_run_frontmatter: Option<&IndexMap<String, serde_json::Value>>,
+) -> Result<InlineClosureResult, CompositionError> {
     if replacement_body.trim().is_empty() {
         return Err(CompositionError::InvalidInlineResponse(
             "replacement body is empty".into(),
@@ -67,13 +70,32 @@ pub fn apply_inline_closure(
         ));
     }
 
-    let doc_string = rewrite_inline_document(&plan.original_document_text, replacement_body, today)
-        .map_err(CompositionError::InvalidInlineResponse)?;
+    // Compare frontmatter to detect new and modified properties
+    let (new_properties, reverted_properties) = match post_run_frontmatter {
+        Some(post_run_fm) => compare_frontmatter(&plan.original_document_text, post_run_fm),
+        None => (vec![], vec![]),
+    };
+
+    let serialized_props: Vec<(String, String)> = new_properties
+        .iter()
+        .filter_map(|key| {
+            post_run_frontmatter
+                .and_then(|fm| fm.get(key))
+                .map(|value| (key.clone(), serialize_frontmatter_property(key, value)))
+        })
+        .collect();
+
+    let doc_string =
+        rewrite_inline_document(&plan.original_document_text, replacement_body, today, &serialized_props)
+            .map_err(CompositionError::InvalidInlineResponse)?;
 
     crate::config::atomic::atomic_write(target_path, doc_string.as_bytes())
         .map_err(|e| CompositionError::AtomicWriteFailed(e.to_string()))?;
 
-    Ok(())
+    Ok(InlineClosureResult {
+        new_properties,
+        reverted_properties,
+    })
 }
 
 /// Reconstruct a Markdown document from `frontmatter_source` (for its
@@ -82,10 +104,12 @@ pub fn rewrite_inline_document(
     frontmatter_source: &str,
     body: &str,
     today: &str,
+    new_properties: &[(String, String)],
 ) -> Result<String, String> {
     if let Some(parts) = split_frontmatter_parts(frontmatter_source) {
         let newline = detect_newline(frontmatter_source);
-        let yaml = upsert_last_updated_in_frontmatter(parts.yaml, today, newline, &[]);
+        let prop_lines: Vec<String> = new_properties.iter().map(|(_, v)| v.clone()).collect();
+        let yaml = upsert_last_updated_in_frontmatter(parts.yaml, today, newline, &prop_lines);
         let mut document = String::with_capacity(
             parts.opening.len() + yaml.len() + parts.closing.len() + body.len(),
         );
@@ -247,11 +271,42 @@ fn trim_line_ending(line: &str) -> &str {
     line.trim_end_matches(['\r', '\n'])
 }
 
+/// Compare post-run frontmatter against the original document's frontmatter.
+///
+/// Returns `(new_keys, modified_keys)` where:
+/// - `new_keys`: present in post-run but absent in original
+/// - `modified_keys`: present in both but with different values
+fn compare_frontmatter(
+    original_document_text: &str,
+    post_run_fm: &IndexMap<String, serde_json::Value>,
+) -> (Vec<String>, Vec<String>) {
+    let original_md: darkmatter::markdown::Markdown = original_document_text.to_string().into();
+    let original_fm = original_md.frontmatter().as_map();
+
+    let mut new_keys = Vec::new();
+    let mut modified_keys = Vec::new();
+
+    for (key, post_value) in post_run_fm {
+        // Skip last_updated — managed by the closure itself
+        if key == "last_updated" {
+            continue;
+        }
+        match original_fm.get(key) {
+            None => new_keys.push(key.clone()),
+            Some(original_value) if original_value != post_value => {
+                modified_keys.push(key.clone());
+            }
+            Some(_) => {} // unchanged
+        }
+    }
+
+    (new_keys, modified_keys)
+}
+
 /// Serialize a single frontmatter property as a YAML fragment.
 ///
 /// Simple scalars produce `key: value\n`. Complex types (arrays, objects)
 /// delegate to `serde_yaml_ng` for the value portion.
-#[allow(dead_code)] // Called by apply_inline_closure after Task 3 lands
 fn serialize_frontmatter_property(key: &str, value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => format!("{key}: {s}\n"),
@@ -317,6 +372,7 @@ mod tests {
             "Original body",
             Path::new("/tmp/nonexistent"),
             "2026-03-27",
+            None,
         )
         .unwrap_err();
 
@@ -345,7 +401,7 @@ mod tests {
             "Old body\n",
         );
 
-        let rewritten = rewrite_inline_document(original, "Fresh body\n", "2026-03-19").unwrap();
+        let rewritten = rewrite_inline_document(original, "Fresh body\n", "2026-03-19", &[]).unwrap();
 
         assert!(rewritten.contains("prompt: |-"));
         assert!(rewritten.contains("  First line\n  Second line\n"));
@@ -363,7 +419,7 @@ mod tests {
             "Body\n",
         );
 
-        let rewritten = rewrite_inline_document(original, "Updated body\n", "2026-03-19").unwrap();
+        let rewritten = rewrite_inline_document(original, "Updated body\n", "2026-03-19", &[]).unwrap();
 
         assert!(rewritten.contains("prompt: |-"));
         assert!(rewritten.contains("  Keep this formatting\n"));
@@ -373,21 +429,21 @@ mod tests {
     #[test]
     fn rewrite_updates_quoted_last_updated() {
         let original = "---\nlast_updated: \"2026-01-01\"\n---\nBody\n";
-        let rewritten = rewrite_inline_document(original, "New body\n", "2026-03-27").unwrap();
+        let rewritten = rewrite_inline_document(original, "New body\n", "2026-03-27", &[]).unwrap();
         assert!(rewritten.contains("last_updated: \"2026-03-27\""));
     }
 
     #[test]
     fn rewrite_updates_single_quoted_last_updated() {
         let original = "---\nlast_updated: '2026-01-01'\n---\nBody\n";
-        let rewritten = rewrite_inline_document(original, "New body\n", "2026-03-27").unwrap();
+        let rewritten = rewrite_inline_document(original, "New body\n", "2026-03-27", &[]).unwrap();
         assert!(rewritten.contains("last_updated: '2026-03-27'"));
     }
 
     #[test]
     fn rewrite_preserves_crlf_line_endings() {
         let original = "---\r\nlast_updated: 2026-01-01\r\n---\r\nBody\r\n";
-        let rewritten = rewrite_inline_document(original, "New body\r\n", "2026-03-27").unwrap();
+        let rewritten = rewrite_inline_document(original, "New body\r\n", "2026-03-27", &[]).unwrap();
         assert!(rewritten.contains("last_updated: 2026-03-27\r\n"));
     }
 
@@ -399,8 +455,37 @@ mod tests {
             original_document_text: "---\nprompt: test\n---\nOld\n".into(),
             original_body_hash: 0,
         };
-        let err = apply_inline_closure(&plan, "  ", Path::new("/tmp/nonexistent"), "2026-03-27");
+        let err = apply_inline_closure(&plan, "  ", Path::new("/tmp/nonexistent"), "2026-03-27", None);
         assert!(err.is_err());
+    }
+
+    // -- apply_inline_closure with post-run frontmatter -----------------------
+
+    #[test]
+    fn rewrite_merges_new_properties_before_last_updated() {
+        let original = "---\nprompt: test\nlast_updated: 2026-03-18\n---\nOld body\n";
+        let new_props = vec![("tags".to_string(), "tags: research\n".to_string())];
+        let rewritten =
+            rewrite_inline_document(original, "New body\n", "2026-04-02", &new_props).unwrap();
+        assert!(rewritten.contains("prompt: test\n"));
+        assert!(rewritten.contains("tags: research\n"));
+        assert!(rewritten.contains("last_updated: 2026-04-02\n"));
+        assert!(rewritten.contains("New body\n"));
+        let tags_pos = rewritten.find("tags:").unwrap();
+        let lu_pos = rewritten.find("last_updated:").unwrap();
+        assert!(tags_pos < lu_pos);
+    }
+
+    #[test]
+    fn rewrite_no_new_properties_backward_compatible() {
+        let original = "---\nprompt: test\nlast_updated: 2026-03-18\n---\nOld body\n";
+        let rewritten =
+            rewrite_inline_document(original, "New body\n", "2026-04-02", &[]).unwrap();
+        assert!(rewritten.contains("prompt: test\n"));
+        assert!(rewritten.contains("last_updated: 2026-04-02\n"));
+        assert!(rewritten.contains("New body\n"));
+        // No extra properties injected
+        assert!(!rewritten.contains("tags:"));
     }
 
     // -- strip_leading_frontmatter ------------------------------------------
