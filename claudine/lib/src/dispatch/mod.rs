@@ -216,6 +216,7 @@ async fn dispatch_preparsed(
         Some(binding.compiled_mappers()),
         &resolved_hook.meta,
         config.settings(),
+        config.messaging(),
         resolved_hook.can_block,
         protect_pre_decision.as_ref(),
     )
