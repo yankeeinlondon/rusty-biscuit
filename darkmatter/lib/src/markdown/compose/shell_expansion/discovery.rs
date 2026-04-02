@@ -55,6 +55,8 @@ pub fn collect_shell_commands(
     // ::shell directives remain as text in the composed output.
     let discovery_options = options.clone().only(&[
         ComposeOperation::FrontmatterInterpolation,
+        ComposeOperation::TextReplacement,
+        ComposeOperation::PageBlocks,
         ComposeOperation::Interpolation,
         ComposeOperation::BlockTransclusion,
         ComposeOperation::FrontmatterTransclusion,
@@ -199,5 +201,43 @@ mod tests {
         let entries = collect_shell_commands(&md, &options).unwrap();
 
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn excludes_directives_inside_false_page_blocks() {
+        let content = "\
+---
+include_shell: false
+---
+::shell echo always
+::block when=\"include_shell\"
+::shell echo conditional
+::end-block
+";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_command, "echo always");
+    }
+
+    #[test]
+    fn discovers_directives_introduced_by_text_replacement() {
+        let content = "\
+---
+replace:
+  PLACEHOLDER: \"echo replaced\"
+---
+::shell PLACEHOLDER
+";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_command, "echo replaced");
     }
 }
