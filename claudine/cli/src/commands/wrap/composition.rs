@@ -418,13 +418,17 @@ pub(crate) fn execute_composition_request(
     let harness_enabled =
         claudine::harness::has_harness_properties(&request.prepared.effective_frontmatter);
 
+    let shell_options = build_harness_shell_options(
+        &request.prepared.resolved_path,
+        effective_repo_root,
+        request.session_interactive,
+    );
+
     if harness_enabled {
         let resolve_ctx = claudine::harness::HarnessResolutionContext {
             source_path: &request.prepared.resolved_path,
             repo_root: effective_repo_root,
         };
-        let shell_options =
-            build_harness_shell_options(&request.prepared.resolved_path, effective_repo_root);
         // Validate that the harness plan can be parsed before proceeding.
         let mut plan = claudine::harness::parse_harness_plan(
             &request.prepared.effective_frontmatter,
@@ -566,6 +570,7 @@ pub(crate) fn execute_composition_request(
             &env_plan.env,
             &mut prompt_state,
             effective_repo_root,
+            shell_options.clone(),
             use_structured,
             structured_codex_output.as_ref(),
             stdout_noise,

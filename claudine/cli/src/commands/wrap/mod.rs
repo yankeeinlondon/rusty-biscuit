@@ -170,10 +170,17 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
 pub(crate) fn build_harness_shell_options(
     source_path: &Path,
     repo_root: Option<&Path>,
+    interactive: bool,
 ) -> claudine::harness::ShellApprovalOptions {
     claudine::harness::ShellApprovalOptions {
         policy_root: harness_policy_root(source_path, repo_root),
-        approval_handler: None,
+        approval_handler: if interactive {
+            Some(std::sync::Arc::new(
+                darkmatter_cli::approval::CliShellApprovalHandler,
+            ))
+        } else {
+            None
+        },
         ..Default::default()
     }
 }
@@ -273,11 +280,15 @@ pub(crate) struct CachedHarnessLoopContext {
 }
 
 impl CachedHarnessLoopContext {
-    fn new(source_path: &Path, repo_root: Option<&Path>) -> Self {
+    fn with_shell_options(
+        source_path: &Path,
+        repo_root: Option<&Path>,
+        shell_options: claudine::harness::ShellApprovalOptions,
+    ) -> Self {
         Self {
             source_path: source_path.to_path_buf(),
             repo_root: repo_root.map(Path::to_path_buf),
-            shell_options: build_harness_shell_options(source_path, repo_root),
+            shell_options,
         }
     }
 
@@ -286,8 +297,8 @@ impl CachedHarnessLoopContext {
         if self.source_path != source_path || self.repo_root != repo_root {
             self.source_path = source_path.to_path_buf();
             self.repo_root = repo_root;
-            self.shell_options =
-                build_harness_shell_options(&self.source_path, self.repo_root.as_deref());
+            self.shell_options.policy_root =
+                harness_policy_root(&self.source_path, self.repo_root.as_deref());
         }
     }
 
@@ -1106,7 +1117,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         None
     };
 
-    let wrapper_harness = if effective_non_interactive {
+    let wrapper_harness = {
         let base_prompt =
             extract_prompt_from_child_args(provider, &child_args, stdin_seed.as_deref());
         let harness_source = base_prompt.as_ref().and_then(|_| {
@@ -1121,8 +1132,11 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     source_path: &source_path,
                     repo_root: env_plan.repo_root.as_deref(),
                 };
-                let shell_options =
-                    build_harness_shell_options(&source_path, env_plan.repo_root.as_deref());
+                let shell_options = build_harness_shell_options(
+                    &source_path,
+                    env_plan.repo_root.as_deref(),
+                    !effective_non_interactive,
+                );
                 let plan = claudine::harness::parse_harness_plan(
                     &seed.frontmatter,
                     &source_path,
@@ -1141,21 +1155,20 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
                 drop(plan);
 
-                Some((source_path, base_prompt, seed))
+                Some((source_path, base_prompt, seed, shell_options))
             } else {
                 None
             }
         } else {
             None
         }
-    } else {
-        None
     };
 
     // Execute the provider. Composition and harness execution are handled by
     // `claudine compose` / `claudine inline-compose` through the wrapper-grade
     // composition executor; the wrapper path handles plain prompt passthrough.
-    let exit_code = if let Some((source_path, base_prompt, initial_materialized)) = wrapper_harness
+    let exit_code = if let Some((source_path, base_prompt, initial_materialized, shell_options)) =
+        wrapper_harness
     {
         let mut prompt_state = HarnessPromptState {
             mode: HarnessPromptMode::Passthrough,
@@ -1185,6 +1198,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &env_plan.env,
             &mut prompt_state,
             env_plan.repo_root.as_deref(),
+            shell_options,
             use_structured,
             structured_codex_output.as_ref(),
             stdout_noise,
@@ -2164,6 +2178,7 @@ pub(crate) fn run_harness_loop(
     base_env: &HashMap<OsString, OsString>,
     prompt_state: &mut HarnessPromptState,
     repo_root: Option<&Path>,
+    shell_options: claudine::harness::ShellApprovalOptions,
     use_structured: bool,
     structured_codex_output: Option<&StructuredCodexOutput>,
     stdout_noise: &[&str],
@@ -2180,7 +2195,11 @@ pub(crate) fn run_harness_loop(
     const DEFAULT_MAX_RETRIES: u32 = 3;
     let permission_probe =
         WrapperHarnessPermissionProbe::new(provider, base_args.to_vec(), repo_root);
-    let mut harness_context = CachedHarnessLoopContext::new(&prompt_state.source_path, repo_root);
+    let mut harness_context = CachedHarnessLoopContext::with_shell_options(
+        &prompt_state.source_path,
+        repo_root,
+        shell_options,
+    );
     let mut attempt = 1u32;
     let mut initial_materialized = initial_materialized;
 
