@@ -108,7 +108,8 @@ pub fn audit_shell_commands(
                 .chain(cmd.args.iter().cloned())
                 .collect();
 
-            let result = crate::harness::shell::validate_and_approve_command_parts(&parts, options);
+            let result =
+                crate::harness::shell::validate_and_approve_command_parts(&parts, options, None, None);
 
             match result {
                 Ok(_) => ShellAuditOutcome {

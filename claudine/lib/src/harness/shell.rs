@@ -4,7 +4,7 @@
 //! for tokenization, blacklist/whitelist checking, and command approval.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::compose::ComposeSource;
@@ -64,7 +64,7 @@ pub fn validate_and_approve_command(
         });
     }
 
-    validate_and_approve_command_parts(&tokens, options)
+    validate_and_approve_command_parts(&tokens, options, None, None)
 }
 
 /// Validate an already-tokenized command against shell policies.
@@ -74,6 +74,8 @@ pub fn validate_and_approve_command(
 pub fn validate_and_approve_command_parts(
     parts: &[String],
     options: &ShellApprovalOptions,
+    source_file: Option<&Path>,
+    source_line: Option<usize>,
 ) -> Result<ApprovedRuntimeCommand, HarnessError> {
     if parts.is_empty() {
         return Err(HarnessError::ShellCommandDenied {
@@ -94,11 +96,19 @@ pub fn validate_and_approve_command_parts(
         });
     }
 
-    // Resolve policy paths
-    let source = match &options.policy_root {
+    // Resolve policy paths — needs a file under the policy root for path resolution.
+    let policy_source = match &options.policy_root {
         Some(root) => ComposeSource::File(root.join("dummy")),
         None => ComposeSource::Unknown,
     };
+
+    // Display source for approval prompts — use real provenance when available.
+    let display_source = match source_file {
+        Some(path) => ComposeSource::File(path.to_path_buf()),
+        None => policy_source.clone(),
+    };
+    let display_line = source_line.unwrap_or(0);
+
     let shell_opts = ShellExpansionOptions {
         timeout: std::time::Duration::from_secs(30),
         policy_root: options.policy_root.clone(),
@@ -106,7 +116,7 @@ pub fn validate_and_approve_command_parts(
         approval_handler: options.approval_handler.clone(),
     };
 
-    let policy_paths = resolve_policy_paths(&shell_opts, &source).map_err(|_| {
+    let policy_paths = resolve_policy_paths(&shell_opts, &policy_source).map_err(|_| {
         HarnessError::ShellCommandDenied {
             command: raw.clone(),
         }
@@ -168,8 +178,8 @@ pub fn validate_and_approve_command_parts(
     // If not whitelisted, invoke approval handler
     if let Some(ref handler) = options.approval_handler {
         let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
-            source: source.clone(),
-            line: 0,
+            source: display_source.clone(),
+            line: display_line,
             raw_command: raw.clone(),
             executable: executable.to_string(),
             args: args.clone(),
@@ -352,6 +362,36 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    struct CapturingHandler {
+        captured: Arc<Mutex<Option<ShellApprovalRequest>>>,
+    }
+
+    impl CapturingHandler {
+        fn new() -> Self {
+            Self {
+                captured: Arc::new(Mutex::new(None)),
+            }
+        }
+
+        fn captured_request(&self) -> ShellApprovalRequest {
+            self.captured
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("handler was never called")
+        }
+    }
+
+    impl ShellApprovalHandler for CapturingHandler {
+        fn approve(
+            &self,
+            request: ShellApprovalRequest,
+        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            *self.captured.lock().unwrap() = Some(request);
+            Ok(ShellApprovalDecision::AllowOnce)
+        }
+    }
+
     struct CountingApprovalHandler {
         approvals: AtomicUsize,
     }
@@ -456,5 +496,39 @@ mod tests {
         assert!(result.is_ok());
         let (exit_code, _, _) = result.unwrap();
         assert_ne!(exit_code, 0);
+    }
+
+    #[test]
+    fn provenance_is_passed_through_to_approval_request() {
+        use darkmatter::markdown::compose::ComposeSource;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let handler = Arc::new(CapturingHandler::new());
+        let options = ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: Some(handler.clone()),
+            ..Default::default()
+        };
+
+        let source_file = PathBuf::from("/home/user/project/template.md");
+        let source_line = 42usize;
+
+        let _ = validate_and_approve_command_parts(
+            &["echo".to_string(), "hello".to_string()],
+            &options,
+            Some(&source_file),
+            Some(source_line),
+        );
+
+        let captured = handler.captured_request();
+        assert_eq!(
+            captured.source,
+            ComposeSource::File(source_file),
+            "request should carry the real source file, not a dummy path"
+        );
+        assert_eq!(
+            captured.line, 42,
+            "request should carry the real line number"
+        );
     }
 }

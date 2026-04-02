@@ -103,7 +103,12 @@ pub fn resolve_shell_approvals(
         let parts: Vec<String> =
             tokenize(normalized).unwrap_or_else(|_| vec![normalized.clone()]);
 
-        match crate::harness::shell::validate_and_approve_command_parts(&parts, approval_options) {
+        match crate::harness::shell::validate_and_approve_command_parts(
+            &parts,
+            approval_options,
+            Some(source_file.as_path()),
+            Some(*line),
+        ) {
             Ok(_) => {
                 approved.insert(normalized.clone());
             }
@@ -175,6 +180,32 @@ mod tests {
     use darkmatter::markdown::compose::shell_expansion::types::{
         ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
     };
+
+    struct CapturingHandler {
+        captured: Arc<Mutex<Vec<ShellApprovalRequest>>>,
+    }
+
+    impl CapturingHandler {
+        fn new() -> Self {
+            Self {
+                captured: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn captured_requests(&self) -> Vec<ShellApprovalRequest> {
+            self.captured.lock().unwrap().clone()
+        }
+    }
+
+    impl ShellApprovalHandler for CapturingHandler {
+        fn approve(
+            &self,
+            request: ShellApprovalRequest,
+        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            self.captured.lock().unwrap().push(request);
+            Ok(ShellApprovalDecision::AllowOnce)
+        }
+    }
 
     struct MockApprovalHandler {
         decision: ShellApprovalDecision,
@@ -507,5 +538,43 @@ mod tests {
         assert!(result.approved_commands.contains("curl https://example.com"));
         assert_eq!(result.user_approved, 1);
         assert_eq!(result.already_whitelisted, 0);
+    }
+
+    #[test]
+    fn approval_request_carries_real_source_provenance() {
+        use darkmatter::markdown::compose::ComposeSource;
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("template.md");
+        std::fs::write(&file_path, "# Test\n::shell curl https://example.com\n").unwrap();
+
+        let md = Markdown::try_from(file_path.as_path()).unwrap();
+        let compose_opts = ComposeOptions::new().with_source_file(&file_path);
+
+        let handler = Arc::new(CapturingHandler::new());
+        let options = ShellApprovalOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(handler.clone()),
+            ..Default::default()
+        };
+
+        let _result =
+            resolve_shell_approvals(Some(&md), Some(&compose_opts), None, &options).unwrap();
+
+        let requests = handler.captured_requests();
+        assert_eq!(requests.len(), 1, "handler should be called once");
+
+        let req = &requests[0];
+        // The source should be the real file, not a dummy path
+        match &req.source {
+            ComposeSource::File(path) => {
+                assert_eq!(
+                    path, &file_path,
+                    "source should be the template file, not a dummy"
+                );
+            }
+            other => panic!("expected File source, got: {other:?}"),
+        }
+        assert!(req.line > 0, "line should be the real line number, not 0");
     }
 }
