@@ -85,7 +85,7 @@ pub fn rewrite_inline_document(
 ) -> Result<String, String> {
     if let Some(parts) = split_frontmatter_parts(frontmatter_source) {
         let newline = detect_newline(frontmatter_source);
-        let yaml = upsert_last_updated_in_frontmatter(parts.yaml, today, newline);
+        let yaml = upsert_last_updated_in_frontmatter(parts.yaml, today, newline, &[]);
         let mut document = String::with_capacity(
             parts.opening.len() + yaml.len() + parts.closing.len() + body.len(),
         );
@@ -162,7 +162,12 @@ fn split_frontmatter_parts(text: &str) -> Option<FrontmatterParts<'_>> {
     None
 }
 
-fn upsert_last_updated_in_frontmatter(yaml: &str, today: &str, newline: &str) -> String {
+fn upsert_last_updated_in_frontmatter(
+    yaml: &str,
+    today: &str,
+    newline: &str,
+    new_properties: &[String],
+) -> String {
     let mut updated = String::with_capacity(yaml.len() + today.len() + 32);
     let mut found = false;
     let mut had_trailing_newline = yaml.is_empty();
@@ -178,6 +183,10 @@ fn upsert_last_updated_in_frontmatter(yaml: &str, today: &str, newline: &str) ->
         let content = trim_line_ending(line);
 
         if let Some(rewritten) = rewrite_last_updated_line(content, today) {
+            // Inject new properties just before last_updated
+            for prop in new_properties {
+                updated.push_str(prop);
+            }
             updated.push_str(&rewritten);
             updated.push_str(line_ending);
             found = true;
@@ -191,6 +200,10 @@ fn upsert_last_updated_in_frontmatter(yaml: &str, today: &str, newline: &str) ->
     if !found {
         if !updated.is_empty() && !had_trailing_newline {
             updated.push_str(newline);
+        }
+        // Inject new properties before last_updated
+        for prop in new_properties {
+            updated.push_str(prop);
         }
         updated.push_str("last_updated: ");
         updated.push_str(today);
@@ -238,6 +251,7 @@ fn trim_line_ending(line: &str) -> &str {
 ///
 /// Simple scalars produce `key: value\n`. Complex types (arrays, objects)
 /// delegate to `serde_yaml_ng` for the value portion.
+#[allow(dead_code)] // Called by apply_inline_closure after Task 3 lands
 fn serialize_frontmatter_property(key: &str, value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => format!("{key}: {s}\n"),
@@ -459,7 +473,7 @@ mod tests {
     #[test]
     fn upsert_adds_when_missing() {
         let yaml = "prompt: test\n";
-        let result = upsert_last_updated_in_frontmatter(yaml, "2026-03-27", "\n");
+        let result = upsert_last_updated_in_frontmatter(yaml, "2026-03-27", "\n", &[]);
         assert!(result.contains("last_updated: 2026-03-27\n"));
         assert!(result.contains("prompt: test\n"));
     }
@@ -467,7 +481,7 @@ mod tests {
     #[test]
     fn upsert_replaces_existing() {
         let yaml = "last_updated: 2026-01-01\nprompt: test\n";
-        let result = upsert_last_updated_in_frontmatter(yaml, "2026-03-27", "\n");
+        let result = upsert_last_updated_in_frontmatter(yaml, "2026-03-27", "\n", &[]);
         assert!(result.contains("last_updated: 2026-03-27\n"));
         assert!(!result.contains("2026-01-01"));
     }
@@ -475,10 +489,46 @@ mod tests {
     #[test]
     fn upsert_ignores_indented_last_updated() {
         let yaml = "  last_updated: 2026-01-01\n";
-        let result = upsert_last_updated_in_frontmatter(yaml, "2026-03-27", "\n");
+        let result = upsert_last_updated_in_frontmatter(yaml, "2026-03-27", "\n", &[]);
         // Indented line should not be rewritten (it's nested YAML)
         assert!(result.contains("  last_updated: 2026-01-01"));
         // A new top-level entry should be appended
         assert!(result.contains("last_updated: 2026-03-27\n"));
+    }
+
+    // -- upsert with new properties -------------------------------------------
+
+    #[test]
+    fn upsert_injects_new_properties_before_last_updated() {
+        let yaml = "prompt: test\nlast_updated: 2026-01-01\n";
+        let new_props = vec!["tags: research\n".to_string()];
+        let result = upsert_last_updated_in_frontmatter(yaml, "2026-04-02", "\n", &new_props);
+        assert!(result.contains("prompt: test\n"));
+        assert!(result.contains("tags: research\n"));
+        assert!(result.contains("last_updated: 2026-04-02\n"));
+        // tags must appear before last_updated
+        let tags_pos = result.find("tags:").unwrap();
+        let lu_pos = result.find("last_updated:").unwrap();
+        assert!(tags_pos < lu_pos, "new property should appear before last_updated");
+    }
+
+    #[test]
+    fn upsert_injects_new_properties_when_last_updated_missing() {
+        let yaml = "prompt: test\n";
+        let new_props = vec!["tags: research\n".to_string()];
+        let result = upsert_last_updated_in_frontmatter(yaml, "2026-04-02", "\n", &new_props);
+        assert!(result.contains("tags: research\n"));
+        assert!(result.contains("last_updated: 2026-04-02\n"));
+        let tags_pos = result.find("tags:").unwrap();
+        let lu_pos = result.find("last_updated:").unwrap();
+        assert!(tags_pos < lu_pos);
+    }
+
+    #[test]
+    fn upsert_empty_new_properties_behaves_as_before() {
+        let yaml = "prompt: test\nlast_updated: 2026-01-01\n";
+        let no_props: Vec<String> = vec![];
+        let result = upsert_last_updated_in_frontmatter(yaml, "2026-04-02", "\n", &no_props);
+        assert_eq!(result, "prompt: test\nlast_updated: 2026-04-02\n");
     }
 }
