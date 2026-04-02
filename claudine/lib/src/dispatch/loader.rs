@@ -11,6 +11,7 @@ use crate::events::{
     AgenticEvent, CanonicalProviderSettings, GlobalSettings, HookerConfig, LinkingSettings,
     Provider,
 };
+use crate::messaging::RuntimeMessagingSettings;
 use crate::services::{ProtectConfig, ProtectPosture};
 
 /// Candidate file names for user-level configuration.
@@ -23,6 +24,7 @@ const REPO_CONFIG_NAME: &str = ".claudine/config.json";
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     settings: GlobalSettings,
+    messaging: RuntimeMessagingSettings,
     providers: HashMap<Provider, RuntimeProviderConfig>,
 }
 
@@ -44,6 +46,11 @@ impl RuntimeConfig {
     /// Get global settings.
     pub fn settings(&self) -> &GlobalSettings {
         &self.settings
+    }
+
+    /// Get runtime messaging settings.
+    pub fn messaging(&self) -> &RuntimeMessagingSettings {
+        &self.messaging
     }
 
     /// Get an event binding for a specific provider and event.
@@ -124,11 +131,56 @@ pub fn load_config(user: Option<&Path>, repo_root: Option<&Path>) -> Result<Hook
 ///
 /// Invalid regex patterns fail at load time with contextual error messages.
 pub fn load_runtime_config(user: Option<&Path>, repo_root: Option<&Path>) -> Result<RuntimeConfig> {
-    let config = load_config(user, repo_root)?;
-    compile_runtime_config(config)
+    let user_config = load_user_config(user)?;
+    let repo_config = load_repo_config(repo_root)?;
+
+    // Capture messaging scopes before merging
+    let user_messaging = user_config
+        .as_ref()
+        .and_then(|c| c.settings.messaging.clone());
+    let repo_messaging = repo_config
+        .as_ref()
+        .and_then(|c| c.settings.messaging.clone());
+
+    // Validate messaging per-scope before merging
+    if let Some(ref messaging) = user_messaging {
+        messaging.validate("user")?;
+    }
+    if let Some(ref messaging) = repo_messaging {
+        messaging.validate("repo")?;
+    }
+
+    let config = match (user_config, repo_config) {
+        (Some(user_cfg), Some(repo_cfg)) => {
+            debug!("Merging user and repo configurations");
+            merge_configs(user_cfg, repo_cfg)
+        }
+        (Some(cfg), None) => cfg,
+        (None, Some(cfg)) => cfg,
+        (None, None) => {
+            let path = user.map(PathBuf::from).unwrap_or_else(|| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("~"))
+                    .join(USER_CONFIG_NAMES[0])
+            });
+            return Err(ClaudineError::ConfigNotFound(path));
+        }
+    };
+
+    config.validate()?;
+    compile_runtime_config_with_messaging(config, user_messaging, repo_messaging)
 }
 
+#[allow(dead_code)]
 fn compile_runtime_config(config: HookerConfig) -> Result<RuntimeConfig> {
+    compile_runtime_config_with_messaging(config, None, None)
+}
+
+fn compile_runtime_config_with_messaging(
+    config: HookerConfig,
+    user_messaging: Option<crate::messaging::ScopedMessagingSettings>,
+    repo_messaging: Option<crate::messaging::ScopedMessagingSettings>,
+) -> Result<RuntimeConfig> {
     let HookerConfig {
         version: _,
         settings,
@@ -180,6 +232,10 @@ fn compile_runtime_config(config: HookerConfig) -> Result<RuntimeConfig> {
 
     Ok(RuntimeConfig {
         settings,
+        messaging: RuntimeMessagingSettings {
+            user: user_messaging,
+            repo: repo_messaging,
+        },
         providers: runtime_providers,
     })
 }
@@ -1265,5 +1321,68 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("unknown field"));
         assert!(message.contains("legacy_field"));
+    }
+
+    #[test]
+    fn runtime_config_preserves_messaging_scopes() {
+        use crate::messaging::{MessagingRouteConfig, ScopedMessagingSettings};
+
+        let user_config = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                messaging: Some(ScopedMessagingSettings {
+                    active: Some("my-slack".to_string()),
+                    configs: std::collections::HashMap::from([(
+                        "my-slack".to_string(),
+                        MessagingRouteConfig::Slack {
+                            channel_id: "C123".to_string(),
+                            bot_token: None,
+                            bot_token_env: "SLACK_BOT_TOKEN".to_string(),
+                        },
+                    )]),
+                }),
+                ..Default::default()
+            },
+            providers: std::collections::HashMap::new(),
+        };
+
+        let repo_config = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                messaging: Some(ScopedMessagingSettings {
+                    active: Some("alerts".to_string()),
+                    configs: std::collections::HashMap::from([(
+                        "alerts".to_string(),
+                        MessagingRouteConfig::Discord {
+                            channel_id: "999".to_string(),
+                            bot_token: None,
+                            bot_token_env: "DISCORD_BOT_TOKEN".to_string(),
+                        },
+                    )]),
+                }),
+                ..Default::default()
+            },
+            providers: std::collections::HashMap::new(),
+        };
+
+        let merged = merge_configs(user_config.clone(), repo_config.clone());
+        let runtime = compile_runtime_config_with_messaging(
+            merged,
+            user_config.settings.messaging,
+            repo_config.settings.messaging,
+        )
+        .unwrap();
+
+        let messaging = runtime.messaging();
+        assert!(messaging.user.is_some());
+        assert!(messaging.repo.is_some());
+        assert_eq!(
+            messaging.repo.as_ref().unwrap().active.as_deref(),
+            Some("alerts")
+        );
+        assert_eq!(
+            messaging.user.as_ref().unwrap().active.as_deref(),
+            Some("my-slack")
+        );
     }
 }
