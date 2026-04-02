@@ -1295,6 +1295,25 @@ pub struct ComposeReport {
 
     /// Performance timings when `ComposeOptions::perf_enabled` is `true`.
     pub perf: Option<ComposePerfReport>,
+
+    /// Source map tracking which byte ranges came from transcluded files.
+    pub source_map: Vec<SourceRange>,
+}
+
+/// Maps a byte range in composed output to its originating source file.
+///
+/// Populated by `BlockTransclusion` when file content replaces a
+/// `::file` directive. Byte positions refer to the final composed content.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceRange {
+    /// Start byte offset in the composed output (inclusive).
+    pub byte_start: usize,
+    /// End byte offset in the composed output (exclusive).
+    pub byte_end: usize,
+    /// The source file whose content occupies this range.
+    pub source_file: PathBuf,
+    /// The starting line number in the source file (1-based).
+    pub source_start_line: usize,
 }
 
 impl ComposeReport {

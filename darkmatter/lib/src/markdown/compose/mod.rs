@@ -64,7 +64,7 @@ pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
     ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePerfMetric,
-    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeWarning,
+    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeWarning, SourceRange,
 };
 
 // Internal re-exports for crate modules that still use TransclusionOptions
@@ -175,6 +175,8 @@ struct ResolvedTransclusion {
     target: ApplyTarget,
     content: Option<String>,
     report: ComposeReport,
+    /// Source file for file-based transclusions (used for source map).
+    source_file: Option<PathBuf>,
 }
 
 // Re-export HeadingLevel for tests
@@ -723,7 +725,12 @@ impl Markdown {
 
             match resolved.target {
                 ApplyTarget::Replace(span) => {
-                    replacements.push((resolved.order, span, resolved.content.unwrap_or_default()));
+                    replacements.push((
+                        resolved.order,
+                        span,
+                        resolved.content.unwrap_or_default(),
+                        resolved.source_file,
+                    ));
                 }
                 ApplyTarget::Section(SectionSlot::Prologue(index)) => {
                     prologue_sections[index] = resolved.content;
@@ -743,10 +750,39 @@ impl Markdown {
                     .then_with(|| right.0.cmp(&left.0))
             });
             let mut next = self.content.clone();
-            for (_, span, replacement) in replacements {
-                next.replace_range(span, &replacement);
+            for (_, span, replacement, _) in &replacements {
+                next.replace_range(span.clone(), replacement);
             }
             self.content = next;
+
+            // Build source map: compute final byte positions for each file transclusion.
+            // Sort forward by original span start and track cumulative offset.
+            {
+                let mut forward: Vec<_> = replacements
+                    .iter()
+                    .map(|(_, span, content, source)| {
+                        (span.clone(), content.len(), source.clone())
+                    })
+                    .collect();
+                forward.sort_by_key(|(span, _, _)| span.start);
+
+                let mut offset: isize = 0;
+                for (span, content_len, source_file) in forward {
+                    let final_start = (span.start as isize + offset) as usize;
+                    let final_end = final_start + content_len;
+
+                    if let Some(file) = source_file {
+                        report.source_map.push(SourceRange {
+                            byte_start: final_start,
+                            byte_end: final_end,
+                            source_file: file,
+                            source_start_line: 1,
+                        });
+                    }
+
+                    offset += content_len as isize - (span.end - span.start) as isize;
+                }
+            }
         }
 
         if prologue_count > 0 || epilogue_count > 0 {
@@ -1202,6 +1238,7 @@ impl Markdown {
                 target: ApplyTarget::Replace(span),
                 content: Some(replacement),
                 report,
+                source_file: None,
             }),
             PreparedTransclusion::FixedSection {
                 order,
@@ -1213,6 +1250,7 @@ impl Markdown {
                 target: ApplyTarget::Section(slot),
                 content,
                 report,
+                source_file: None,
             }),
             PreparedTransclusion::Markdown {
                 order,
@@ -1245,6 +1283,7 @@ impl Markdown {
                     target,
                     content: Some(content),
                     report: child_report,
+                    source_file: Some(path),
                 })
             }
             PreparedTransclusion::Code {
@@ -1276,6 +1315,7 @@ impl Markdown {
                     target: ApplyTarget::Replace(span),
                     content: Some(content),
                     report: code_report,
+                    source_file: None,
                 })
             }
             PreparedTransclusion::Toc {
@@ -1356,6 +1396,7 @@ impl Markdown {
                     target: ApplyTarget::Replace(span),
                     content: Some(replacement),
                     report: toc_report,
+                    source_file: None,
                 })
             }
         }
