@@ -371,4 +371,63 @@ mod tests {
         // The raw text should be escaped (no unescaped <b>)
         assert!(!report.outcomes[0].message.contains("<b>bold</b>"));
     }
+
+    fn empty_plan_with_pre_check(executable: &str, args: &[&str]) -> HarnessPlan {
+        let mut plan = HarnessPlan {
+            source_path: std::path::PathBuf::from("/tmp/test.md"),
+            timeout: None,
+            pre_checks: Vec::new(),
+            post_checks: Vec::new(),
+            handlers: HandlerTable::default(),
+            programmatic_handler: None,
+        };
+        plan.pre_checks.push(ValidationRule {
+            id: ValidationRuleId(0),
+            event: ValidationEvent::ShellCommand,
+            phase: ValidationPhase::Both,
+            kind: ValidationKind::ShellCommand {
+                command: ApprovedRuntimeCommand {
+                    raw: format!("{} {}", executable, args.join(" ")),
+                    executable: executable.to_string(),
+                    args: args.iter().map(|s| s.to_string()).collect(),
+                },
+                show_stdout: false,
+                show_stderr: false,
+            },
+            message_template: None,
+            subject_key: None,
+        });
+        plan
+    }
+
+    #[test]
+    fn collect_auditable_commands_excludes_source_directives_when_none() {
+        let plan = empty_plan_with_pre_check("echo", &["preflight"]);
+
+        // With source text: includes both harness + source-page commands
+        let with_source =
+            collect_auditable_commands(&plan, Some("# Test\n::shell echo hidden\n")).unwrap();
+        let source_page_count = with_source
+            .iter()
+            .filter(|c| matches!(c.source, AuditedCommandSource::ComposeSourceLine { .. }))
+            .count();
+        assert_eq!(source_page_count, 1, "source text should produce source-page commands");
+
+        // Without source text: only harness commands
+        let without_source = collect_auditable_commands(&plan, None).unwrap();
+        let source_page_count = without_source
+            .iter()
+            .filter(|c| matches!(c.source, AuditedCommandSource::ComposeSourceLine { .. }))
+            .count();
+        assert_eq!(
+            source_page_count, 0,
+            "None source_text must produce zero source-page commands"
+        );
+
+        // Harness commands still present in both
+        assert!(
+            without_source.iter().any(|c| matches!(c.source, AuditedCommandSource::PreCheck(_))),
+            "harness pre-check commands should still be collected"
+        );
+    }
 }

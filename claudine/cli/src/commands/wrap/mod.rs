@@ -2248,8 +2248,17 @@ pub(crate) fn run_harness_loop(
             );
         }
 
-        // Shell audit preflight
-        let source_text = std::fs::read_to_string(&prompt_state.source_path).ok();
+        // Shell audit preflight.
+        // Composition flows (Compose/Inline) already preflight ::shell directives
+        // during composition — re-parsing raw source would reintroduce commands
+        // hidden by false ::block directives.  Only passthrough mode needs raw
+        // source-page audit.
+        let source_text = match prompt_state.mode {
+            HarnessPromptMode::Passthrough => {
+                std::fs::read_to_string(&prompt_state.source_path).ok()
+            }
+            _ => None,
+        };
         let auditable =
             claudine::harness::collect_auditable_commands(&plan, source_text.as_deref())?;
 
