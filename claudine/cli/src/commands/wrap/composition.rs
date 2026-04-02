@@ -516,10 +516,10 @@ pub(crate) fn execute_composition_request(
 
     if !silent {
         // Everything below is suppressed by --quiet (consistent with direct-wrap)
-        if !quiet {
-            if request.session_interactive || verbose_requested {
-                crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
-            }
+        if !quiet
+            && (request.session_interactive || verbose_requested)
+        {
+            crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
         // Composed prompt block: always shown unless --silent
