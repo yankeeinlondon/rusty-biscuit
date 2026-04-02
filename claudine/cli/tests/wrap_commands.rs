@@ -1488,6 +1488,57 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn compose_preflight_error_includes_source_provenance() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // Markdown with a ::shell directive that is NOT whitelisted.
+    let md_file = workspace.path().join("template.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: provenance test\n---\n::shell curl https://example.com\n",
+    )
+    .unwrap();
+
+    // Provider binary (should never be reached — preflight should abort first).
+    write_executable(
+        &path_dir.join("codex"),
+        "#!/bin/sh\necho 'ERROR: provider should not run' >&2\nexit 99\n",
+    );
+
+    // Run without --interactive so preflight has no approval handler →
+    // the non-whitelisted command triggers a clear error with provenance.
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+
+    // Error message should mention the source file name (provenance).
+    assert!(
+        plain.contains("template.md"),
+        "preflight error should include the source file name for provenance; stderr was:\n{plain}"
+    );
+    // Error message should mention the denied command.
+    assert!(
+        plain.contains("curl"),
+        "preflight error should identify the denied command; stderr was:\n{plain}"
+    );
+    // Provider should NOT have run.
+    assert!(
+        !plain.contains("ERROR: provider should not run"),
+        "provider binary should not execute when preflight fails; stderr was:\n{plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn wrapper_restores_repo_harness_for_plain_prompts() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
