@@ -75,7 +75,7 @@ pub fn resolve_effective_route(
         return Some(route);
     }
 
-    warn!("No active messaging route found in any scope");
+    debug!("No active messaging route in any scope");
     None
 }
 
@@ -183,6 +183,7 @@ pub fn resolve_image_path(raw: &str, cwd: Option<&str>, repo_root: Option<&str>)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::collections::HashMap;
 
     // -------------------------------------------------------------------------
@@ -283,6 +284,7 @@ mod tests {
     // -------------------------------------------------------------------------
 
     #[test]
+    #[serial]
     fn inline_secret_wins_over_env() {
         // Even if the env var is set, the inline value should win
         // SAFETY: single-threaded test environment; no concurrent env access
@@ -299,6 +301,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn env_fallback_works() {
         let var_name = "TEST_ENV_FALLBACK_SECRET_VAR";
         // SAFETY: single-threaded test environment; no concurrent env access
@@ -316,6 +319,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn missing_env_returns_error() {
         let var_name = "TEST_MISSING_SECRET_VAR_XYZ_NOT_SET";
         // SAFETY: single-threaded test environment; no concurrent env access

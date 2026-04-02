@@ -60,7 +60,6 @@ pub fn execute_message(
 
     // Resolve the effective route
     let Some(route) = resolve_effective_route(messaging) else {
-        debug!("No messaging route configured; skipping message send");
         return;
     };
 
