@@ -211,10 +211,10 @@ impl ProtectConfig {
         validate_patterns(&self.mcp.redact_patterns)?;
 
         for (provider, override_cfg) in &self.providers {
-            if let Some(rules) = override_cfg.rules.as_ref() {
-                if let Some(patterns) = rules.secret_patterns.as_ref() {
-                    validate_patterns(patterns)?;
-                }
+            if let Some(rules) = override_cfg.rules.as_ref()
+                && let Some(patterns) = rules.secret_patterns.as_ref()
+            {
+                validate_patterns(patterns)?;
             }
             if let Some(mcp) = override_cfg.mcp.as_ref()
                 && let Some(patterns) = mcp.redact_patterns.as_ref()

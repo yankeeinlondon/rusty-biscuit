@@ -418,17 +418,16 @@ impl ProviderPolicyBackend for GeminiPolicyBackend {
                     .tool_names
                     .iter()
                     .any(|tool| tool == "shell" || tool == "execute")
+                    && let Some(prefix) = &rule.command_prefix
                 {
-                    if let Some(prefix) = &rule.command_prefix {
-                        policy.axes.commands.shell_rules.push(CommandAccessRule {
-                            pattern: prefix.clone(),
-                            effect: rule.decision,
-                            provenance: CanonicalRuleProvenance::exact(
-                                source.id.clone(),
-                                "policy.rule.commandPrefix",
-                            ),
-                        });
-                    }
+                    policy.axes.commands.shell_rules.push(CommandAccessRule {
+                        pattern: prefix.clone(),
+                        effect: rule.decision,
+                        provenance: CanonicalRuleProvenance::exact(
+                            source.id.clone(),
+                            "policy.rule.commandPrefix",
+                        ),
+                    });
                 }
                 if rule.tool_names.iter().any(|tool| tool == "read") {
                     policy.axes.filesystem.read_rules.push(PathAccessRule {
@@ -764,11 +763,11 @@ fn choose_targets(
             })?,
         )),
         PolicyChangeTarget::LocalOverride => {
-            return Err(ClaudineError::PolicyUnsupportedMutation {
+            Err(ClaudineError::PolicyUnsupportedMutation {
                 provider: Provider::Gemini,
                 op: "LocalOverride target is not supported by Gemini (no local override concept)"
                     .to_owned(),
-            });
+            })
         }
         PolicyChangeTarget::Auto => {
             let has_repo = current.sources.iter().any(|source| {
