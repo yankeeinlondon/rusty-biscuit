@@ -312,6 +312,15 @@ impl CachedHarnessLoopContext {
     fn shell_options(&self) -> &claudine::harness::ShellApprovalOptions {
         &self.shell_options
     }
+
+    /// Strip the interactive approval handler so subsequent harness-loop
+    /// iterations operate in deny-only mode.  Cached and whitelisted
+    /// commands still pass; new uncached commands are denied without
+    /// prompting.  This enforces the spec contract: "all shell approvals
+    /// are resolved before the provider workflow begins."
+    fn freeze_shell_approvals(&mut self) {
+        self.shell_options.approval_handler = None;
+    }
 }
 
 pub(crate) struct LiveStreamSink {
@@ -2327,6 +2336,15 @@ pub(crate) fn run_harness_loop(
                 }
                 return Err(eyre!("shell audit failed"));
             }
+        }
+
+        // Composition flows resolved all shell approvals during preflight.
+        // Freeze the approval set so redirect/retry iterations cannot
+        // trigger new interactive prompts — only cached/whitelisted
+        // commands pass; new uncached commands are denied.  Passthrough
+        // mode has no prior preflight so its handler stays active.
+        if attempt == 1 && !matches!(prompt_state.mode, HarnessPromptMode::Passthrough) {
+            harness_context.freeze_shell_approvals();
         }
 
         let pre_report = claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe));
