@@ -124,6 +124,9 @@ pub async fn execute_actions(
                 volume,
                 speed,
             } => execute_sound_effect(name, *volume, *speed),
+            HookAction::Message { .. } => {
+                debug!("Message action not yet implemented");
+            }
         }
     }
 
