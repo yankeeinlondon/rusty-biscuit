@@ -616,4 +616,86 @@ mod tests {
         let result = upsert_last_updated_in_frontmatter(yaml, "2026-04-02", "\n", &no_props);
         assert_eq!(result, "prompt: test\nlast_updated: 2026-04-02\n");
     }
+
+    // -- end-to-end integration tests -----------------------------------------
+
+    #[test]
+    fn apply_closure_merges_new_and_reports_reverted() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: original prompt\ntitle: My Doc\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_body_hash: original_markdown.hash_body(false),
+        };
+
+        // Simulate post-run state: title changed, tags added
+        let mut post_run_fm = indexmap::IndexMap::new();
+        post_run_fm.insert("prompt".to_string(), serde_json::json!("original prompt"));
+        post_run_fm.insert("title".to_string(), serde_json::json!("Changed Title"));
+        post_run_fm.insert("tags".to_string(), serde_json::json!("research"));
+
+        let result = apply_inline_closure(
+            &plan,
+            "Brand new body content\n",
+            &file,
+            "2026-04-02",
+            Some(&post_run_fm),
+        )
+        .unwrap();
+
+        assert_eq!(result.new_properties, vec!["tags"]);
+        assert_eq!(result.reverted_properties, vec!["title"]);
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        // Original title preserved
+        assert!(written.contains("title: My Doc\n"));
+        // New property merged
+        assert!(written.contains("tags: research\n"));
+        // last_updated set
+        assert!(written.contains("last_updated: 2026-04-02\n"));
+        // New body applied
+        assert!(written.contains("Brand new body content\n"));
+        // tags appears before last_updated
+        let tags_pos = written.find("tags:").unwrap();
+        let lu_pos = written.find("last_updated:").unwrap();
+        assert!(tags_pos < lu_pos);
+    }
+
+    #[test]
+    fn apply_closure_none_post_run_backward_compatible() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("test.md");
+        let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_markdown: darkmatter::markdown::Markdown = original.to_string().into();
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_body_hash: original_markdown.hash_body(false),
+        };
+
+        let result = apply_inline_closure(
+            &plan,
+            "Updated body\n",
+            &file,
+            "2026-04-02",
+            None,
+        )
+        .unwrap();
+
+        assert!(result.new_properties.is_empty());
+        assert!(result.reverted_properties.is_empty());
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert!(written.contains("last_updated: 2026-04-02\n"));
+        assert!(written.contains("Updated body\n"));
+    }
 }
