@@ -25,10 +25,7 @@ pub use handlers::{
     validate_resume,
 };
 pub use model::*;
-pub use parse::{
-    has_harness_properties, inline_writability_pre_check, parse_harness_plan,
-    parse_harness_plan_with_shell,
-};
+pub use parse::{has_harness_properties, inline_writability_pre_check, parse_harness_plan};
 pub use resolve::{HarnessResolutionContext, resolve_harness_path};
 pub use runtime::build_attempt_outcome;
 pub use shell::{

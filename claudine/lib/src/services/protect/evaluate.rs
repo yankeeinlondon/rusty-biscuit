@@ -209,10 +209,10 @@ pub(crate) fn evaluate_with_snapshot(
 // ---------------------------------------------------------------------------
 
 fn resolve_posture(config: &ProtectConfig, session: &ProtectSessionContext) -> ProtectPosture {
-    if let Some(override_cfg) = config.providers.get(&session.provider) {
-        if let Some(posture) = override_cfg.posture {
-            return posture;
-        }
+    if let Some(override_cfg) = config.providers.get(&session.provider)
+        && let Some(posture) = override_cfg.posture
+    {
+        return posture;
     }
     config.posture
 }
@@ -702,32 +702,32 @@ fn completion_scan(
     };
 
     // 1. Instruction payload detection (always active) — Critical severity
-    if let Some(text) = text {
-        if contains_instruction_payload(text) {
-            return (
-                QueryResult::denied("completion.instruction-injection"),
-                ProtectSeverity::Critical,
-            );
-        }
+    if let Some(text) = text
+        && contains_instruction_payload(text)
+    {
+        return (
+            QueryResult::denied("completion.instruction-injection"),
+            ProtectSeverity::Critical,
+        );
     }
 
     // 2. Secret pattern scanning (when enabled) — High severity
-    if config.completion.secret_scan {
-        if let Some(text) = text {
-            for pattern in config
-                .rules
-                .secret_patterns
-                .iter()
-                .chain(config.mcp.redact_patterns.iter())
+    if config.completion.secret_scan
+        && let Some(text) = text
+    {
+        for pattern in config
+            .rules
+            .secret_patterns
+            .iter()
+            .chain(config.mcp.redact_patterns.iter())
+        {
+            if let Ok(re) = regex::Regex::new(pattern)
+                && re.is_match(text)
             {
-                if let Ok(re) = regex::Regex::new(pattern) {
-                    if re.is_match(text) {
-                        return (
-                            QueryResult::denied("completion.secret-found"),
-                            ProtectSeverity::High,
-                        );
-                    }
-                }
+                return (
+                    QueryResult::denied("completion.secret-found"),
+                    ProtectSeverity::High,
+                );
             }
         }
     }
@@ -737,13 +737,13 @@ fn completion_scan(
         for intent in &observation.intents {
             if let ProtectIntent::ExecuteCommand(cmd) = intent {
                 for pattern in &config.completion.check_commands {
-                    if let Ok(re) = regex::Regex::new(pattern) {
-                        if re.is_match(&cmd.raw) {
-                            return (
-                                QueryResult::denied("completion.suspicious-command"),
-                                ProtectSeverity::High,
-                            );
-                        }
+                    if let Ok(re) = regex::Regex::new(pattern)
+                        && re.is_match(&cmd.raw)
+                    {
+                        return (
+                            QueryResult::denied("completion.suspicious-command"),
+                            ProtectSeverity::High,
+                        );
                     }
                 }
             }

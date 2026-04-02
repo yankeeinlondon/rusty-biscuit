@@ -45,6 +45,8 @@ Claudine evaluates a harnessed run in three phases.
 
 ### Before The Provider Starts
 
+Before the pre-check phase, Claudine runs a pre-flight scan that discovers and approves all shell commands that might be executed during the session — including those in pre-checks, post-checks, and handlers. See [Pre-Flight Shell Approval](pre-flight-checks.md) for details.
+
 `pre_checks` answer a simple question: should this run even start?
 
 This is where you check for prerequisites such as files, directories, clean repo state, or shell-based setup checks. A pre-check failure is treated as a real failure event, not as a warning. That matters because handlers can recover from pre-check failures just like they recover from agent failures or post-check failures.

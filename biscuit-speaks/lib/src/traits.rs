@@ -6,7 +6,7 @@
 //! - [`TtsVoiceInventory`] - Optional trait for voice enumeration and provider info
 
 use crate::errors::TtsError;
-use crate::types::{SpeakResult, TtsConfig, Voice};
+use crate::types::{Gender, SpeakResult, TtsConfig, Voice};
 
 /// Executor trait for TTS providers.
 ///
@@ -151,6 +151,21 @@ pub trait TtsVoiceInventory: Send + Sync {
     /// Returns `TtsError::VoiceEnumerationFailed` if voice listing fails.
     fn list_voices(&self)
     -> impl std::future::Future<Output = Result<Vec<Voice>, TtsError>> + Send;
+
+    /// Return the provider's default voice for the given gender.
+    ///
+    /// When `gender` is `Gender::Any`, returns the provider's overall
+    /// best default voice regardless of gender.
+    /// Always returns a concrete `Voice`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns `TtsError` if voice resolution fails (e.g., API call failure
+    /// for cloud providers, or no voices available for dynamic providers).
+    fn default_voice(
+        &self,
+        gender: Gender,
+    ) -> impl std::future::Future<Output = Result<Voice, TtsError>> + Send;
 }
 
 // ============================================================================
@@ -217,6 +232,24 @@ mod tests {
                         .with_gender(Gender::Male)
                         .with_quality(VoiceQuality::Moderate),
                 ])
+            }
+        }
+
+        async fn default_voice(&self, gender: Gender) -> Result<Voice, TtsError> {
+            if self.should_fail {
+                Err(TtsError::VoiceEnumerationFailed {
+                    provider: "mock".into(),
+                    message: "intentional failure".into(),
+                })
+            } else {
+                match gender {
+                    Gender::Male => Ok(Voice::new("MockVoice2")
+                        .with_gender(Gender::Male)
+                        .with_quality(VoiceQuality::Moderate)),
+                    Gender::Female | Gender::Any => Ok(Voice::new("MockVoice1")
+                        .with_gender(Gender::Female)
+                        .with_quality(VoiceQuality::Good)),
+                }
             }
         }
     }
@@ -295,6 +328,49 @@ mod tests {
             }
             _ => panic!("Expected VoiceEnumerationFailed error"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_mock_executor_default_voice_male() {
+        let executor = MockExecutor {
+            should_fail: false,
+            is_ready: true,
+        };
+        let voice = executor.default_voice(Gender::Male).await.unwrap();
+        assert_eq!(voice.name, "MockVoice2");
+        assert_eq!(voice.gender, Gender::Male);
+    }
+
+    #[tokio::test]
+    async fn test_mock_executor_default_voice_female() {
+        let executor = MockExecutor {
+            should_fail: false,
+            is_ready: true,
+        };
+        let voice = executor.default_voice(Gender::Female).await.unwrap();
+        assert_eq!(voice.name, "MockVoice1");
+        assert_eq!(voice.gender, Gender::Female);
+    }
+
+    #[tokio::test]
+    async fn test_mock_executor_default_voice_any() {
+        let executor = MockExecutor {
+            should_fail: false,
+            is_ready: true,
+        };
+        let voice = executor.default_voice(Gender::Any).await.unwrap();
+        assert_eq!(voice.name, "MockVoice1");
+        assert_eq!(voice.gender, Gender::Female);
+    }
+
+    #[tokio::test]
+    async fn test_mock_executor_default_voice_failure() {
+        let executor = MockExecutor {
+            should_fail: true,
+            is_ready: true,
+        };
+        let result = executor.default_voice(Gender::Any).await;
+        assert!(result.is_err());
     }
 
     // Test that default implementations work

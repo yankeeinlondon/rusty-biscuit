@@ -363,6 +363,14 @@ impl TtsVoiceInventory for GttsProvider {
 
         Ok(voices)
     }
+
+    async fn default_voice(&self, _gender: Gender) -> Result<Voice, TtsError> {
+        Ok(Voice::new("English")
+            .with_gender(Gender::Any)
+            .with_quality(VoiceQuality::Good)
+            .with_language(Language::English)
+            .with_identifier("en"))
+    }
 }
 
 // ============================================================================
@@ -372,6 +380,38 @@ impl TtsVoiceInventory for GttsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ========================================================================
+    // default_voice tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_default_voice_male() {
+        let provider = GttsProvider::new();
+        let voice = provider.default_voice(Gender::Male).await.unwrap();
+        assert_eq!(voice.name, "English");
+        assert_eq!(voice.gender, Gender::Any);
+        assert_eq!(voice.quality, VoiceQuality::Good);
+        assert_eq!(voice.identifier, Some("en".into()));
+    }
+
+    #[tokio::test]
+    async fn test_default_voice_female() {
+        let provider = GttsProvider::new();
+        let voice = provider.default_voice(Gender::Female).await.unwrap();
+        assert_eq!(voice.name, "English");
+        assert_eq!(voice.gender, Gender::Any);
+        assert_eq!(voice.quality, VoiceQuality::Good);
+    }
+
+    #[tokio::test]
+    async fn test_default_voice_any() {
+        let provider = GttsProvider::new();
+        let voice = provider.default_voice(Gender::Any).await.unwrap();
+        assert_eq!(voice.name, "English");
+        assert_eq!(voice.gender, Gender::Any);
+        assert_eq!(voice.quality, VoiceQuality::Good);
+    }
 
     // ========================================================================
     // Basic provider tests

@@ -1,44 +1,25 @@
 ---
 prompt: |-
-        Claudine wants to be able to provide a consistent and universal way to either _append to_ or _replace_ the system prompt. Your job is to research in detail how Claude Code handles the system prompt. You should be able to at least answer the following questions:
-        - What CLI switches are involved in effecting the system prompt? What does each switch do?
-        - What other ways, other than via a CLI switch, can you manipulate what the system prompt will be?
-        - Can Agents or Subagents have their own system prompt which is distinct from an orchestrator?
-        - what quirks and workarounds do developers talk about with regard to Claude Code and system prompts?
-        - have there been any recent changes to how system prompts can be manipulated? If so, when?
-        - what format works best when appending to the system prompt? what format works best when replacing the system prompt?
+    Claudine wants to be able to provide a consistent and universal way to either _append to_ or _replace_ the system prompt. Your job is to research in detail how Claude Code handles the system prompt. You should be able to at least answer the following questions:
 
-                - pure markdown? XML wrapper of markdown? Other?
+    - What CLI switches are involved in effecting the system prompt? What does each switch do?
+    - What other ways, other than via a CLI switch, can you manipulate what the system prompt will be?
+    - Can Agents or Subagents have their own system prompt which is distinct from an orchestrator?
+    - what quirks and workarounds do developers talk about with regard to Claude Code and system prompts?
+    - have there been any recent changes to how system prompts can be manipulated? If so, when?
+    - what format works best when appending to the system prompt? what format works best when replacing the system prompt?
 
-        All research and observations should be written to the body of this Markdown document while preserving the Frontmatter data. The Markdown should all be standards based and isomorphic. Tables should be Markdown tables. Links should be Markdown links.
+        - pure markdown? XML wrapper of markdown? Other?
 
-        If any data visuals are thought to be important you should feel free to use Mermaid.js charts by adding in a mermaidjs code block.
+    All research and observations should be written to the body of this Markdown document while preserving the Frontmatter data. The Markdown should all be standards based and isomorphic. Tables should be Markdown tables. Links should be Markdown links.
 
-        Provide a summary -- a paragraph and some bullet points are an ideal length for the summary -- of this document to STDOUT.
+    DO NOT ADD THINKING OR PREPARATORY STATEMENTS TO THE BODY of THE DOCUMENT. This can and should be sent to STDOUT but not this document's body.
+
+    If any data visuals are thought to be important you should feel free to use Mermaid.js charts by adding in a mermaidjs code block.
+
+    Provide a summary -- a paragraph and some bullet points are an ideal length for the summary -- of this document to STDOUT. 
 last_updated: 2026-03-30
 ---
-
-I will begin by researching Claude Code's system prompt handling, focusing on CLI switches, configuration methods, and best practices for prompt manipulation.
-
-I will now investigate the local research documents for Claude Code and conduct a targeted search for its CLI flags to better understand how to manipulate the system prompt.
-
-I will list the `claudine` directory to verify the correct path for the research documents and ensure I'm looking in the right place.
-
-I will list `claudine/docs` to search for the `research` directory mentioned in the skill instructions.
-
-I will list `claudine/docs/research` to confirm the contents and locate the relevant research documents.
-
-I will list `claudine/docs/research/system-prompt` and the other relevant directories to explore the available information on system prompts and agent CLIs.
-
-I will read `claudine/docs/research/system-prompt/claude.md` to identify any existing information and avoid duplication.
-
-I will search for Claude Code's CLI switches, specifically for any flags related to replacing or appending to the system prompt, as well as the preferred format for these prompts.
-
-I will search for any additional quirks or workarounds regarding Claude Code's system prompt, specifically looking for information on its size, context window interaction, and whether an XML wrapper is used for the system prompt.
-
-I will now verify the release date of Claude Code version 2.1.63 and check for any additional recent changes to system prompt manipulation, including the best formatting practices for appending and replacing prompts.
-
-Claude Code provides a robust and layered system for managing its system prompt, ranging from project-wide persistent files to session-specific CLI overrides.
 
 ### CLI Switches for System Prompt Manipulation
 

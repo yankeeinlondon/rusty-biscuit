@@ -186,16 +186,7 @@ impl EchogardenProvider {
         }
 
         // Sort by quality (highest first)
-        candidates.sort_by(|a, b| {
-            let quality_rank = |q: VoiceQuality| match q {
-                VoiceQuality::Excellent => 0,
-                VoiceQuality::Good => 1,
-                VoiceQuality::Moderate => 2,
-                VoiceQuality::Low => 3,
-                VoiceQuality::Unknown => 4,
-            };
-            quality_rank(a.quality).cmp(&quality_rank(b.quality))
-        });
+        candidates.sort_by(|a, b| a.quality.rank().cmp(&b.quality.rank()));
 
         candidates.first().cloned().cloned()
     }
@@ -452,6 +443,17 @@ impl TtsVoiceInventory for EchogardenProvider {
         );
 
         Ok(all_voices)
+    }
+
+    async fn default_voice(&self, gender: Gender) -> Result<Voice, TtsError> {
+        let (name, voice_gender) = match gender {
+            Gender::Male => ("Michael", Gender::Male),
+            Gender::Female | Gender::Any => ("Heart", Gender::Female),
+        };
+        Ok(Voice::new(name)
+            .with_gender(voice_gender)
+            .with_quality(self.engine.quality())
+            .with_language(Language::English))
     }
 }
 
@@ -723,6 +725,37 @@ fn parse_languages(langs_str: &str) -> Vec<Language> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ========================================================================
+    // default_voice tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_default_voice_male() {
+        let provider = EchogardenProvider::new();
+        let voice = provider.default_voice(Gender::Male).await.unwrap();
+        assert_eq!(voice.name, "Michael");
+        assert_eq!(voice.gender, Gender::Male);
+        assert_eq!(voice.quality, VoiceQuality::Excellent);
+    }
+
+    #[tokio::test]
+    async fn test_default_voice_female() {
+        let provider = EchogardenProvider::new();
+        let voice = provider.default_voice(Gender::Female).await.unwrap();
+        assert_eq!(voice.name, "Heart");
+        assert_eq!(voice.gender, Gender::Female);
+        assert_eq!(voice.quality, VoiceQuality::Excellent);
+    }
+
+    #[tokio::test]
+    async fn test_default_voice_any() {
+        let provider = EchogardenProvider::new();
+        let voice = provider.default_voice(Gender::Any).await.unwrap();
+        assert_eq!(voice.name, "Heart");
+        assert_eq!(voice.gender, Gender::Female);
+        assert_eq!(voice.quality, VoiceQuality::Excellent);
+    }
 
     // ========================================================================
     // Basic provider tests

@@ -25,6 +25,7 @@ pub async fn execute_actions(
     compiled_mappers: Option<&[Option<CompiledMapper>]>,
     meta: &EventMeta,
     settings: &GlobalSettings,
+    messaging: &crate::messaging::RuntimeMessagingSettings,
     can_block: bool,
     protect_decision: Option<&ProtectDecision>,
 ) -> Result<Option<HookResponse>> {
@@ -124,6 +125,14 @@ pub async fn execute_actions(
                 volume,
                 speed,
             } => execute_sound_effect(name, *volume, *speed),
+            HookAction::Message { message, image } => {
+                crate::messaging::execute_message(
+                    message,
+                    image.as_deref(),
+                    meta,
+                    messaging,
+                );
+            }
         }
     }
 
@@ -693,6 +702,7 @@ mod tests {
             None,
             &meta(),
             &GlobalSettings::default(),
+            &crate::messaging::RuntimeMessagingSettings::default(),
             false,
             None,
         )
@@ -867,5 +877,60 @@ mod tests {
             super::decision_for_short_circuit(&protect.outcome),
             HookDecision::Deny
         );
+    }
+
+    #[tokio::test]
+    async fn message_action_skipped_when_no_route() {
+        let actions = vec![HookAction::Message {
+            message: "test notification".to_string(),
+            image: None,
+        }];
+
+        let messaging = crate::messaging::RuntimeMessagingSettings::default();
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &meta(),
+            &GlobalSettings::default(),
+            &messaging,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn message_action_does_not_block() {
+        let actions = vec![
+            HookAction::Message {
+                message: "notify".to_string(),
+                image: None,
+            },
+            HookAction::Log {
+                target: LogTarget::File {
+                    path: None,
+                    rotate_daily: false,
+                },
+            },
+        ];
+
+        let messaging = crate::messaging::RuntimeMessagingSettings::default();
+
+        let result = execute_actions(
+            &actions,
+            None,
+            &meta(),
+            &GlobalSettings::default(),
+            &messaging,
+            true,
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok());
     }
 }

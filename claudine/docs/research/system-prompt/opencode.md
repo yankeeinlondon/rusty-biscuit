@@ -15,120 +15,120 @@ prompt: |-
         If any data visuals are thought to be important you should feel free to use Mermaid.js charts by adding in a mermaidjs code block.
 
         Provide a summary -- a paragraph and some bullet points are an ideal length for the summary -- of this document to STDOUT.
-last_updated: 2026-03-30
+last_updated: 2026-04-02
 ---
 
-To research the OpenCode CLI's handling of the system prompt, I analyzed the project's internal documentation, expert research from the `claudine` and `acp` skills, and current web-based technical references.
+# OpenCode CLI System Prompt Research
 
-OpenCode CLI (v1.2.x) employs a multi-layered approach to system prompt composition, balancing project-specific rules with core agent instructions.
+OpenCode CLI (by Anomaly) provides a highly flexible, layered architecture for manipulating the system prompt. Since the release of **v1.3.0** in early 2026, the platform has shifted toward a "crisp" prompting philosophy, reducing default instruction volume to improve model responsiveness and reduce "token burn."
 
-### **System Prompt Manipulation Mechanisms**
+## CLI Switches and Usage
 
-OpenCode provides three primary methods for influencing the system prompt, each with distinct behaviors regarding whether they append to or replace the existing instructions.
+The OpenCode CLI primarily uses two switches for direct system prompt manipulation in non-interactive mode.
 
-#### **1. CLI Switches**
+### Primary Switches
 
-The `opencode` binary includes flags specifically for non-interactive (headless) and session-start manipulation.
+| Switch     | Type                | Description                                                                                                                                                                                                        |
+|:-----------|:--------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--system` | **Override/Append** | Injects custom instructions or a persona for the session. By default, this appends to the "base" provider instructions (e.g., "You are an AI assistant...") but overrides other project-level custom instructions. |
+| `--prompt` | **Task**            | Specifies the actual request or user query. In non-interactive mode (`opencode run`), this is required if no positional argument is provided.                                                                      |
 
-| Switch                 | Type     | Behavior        | Description                                                                                                                                                                                    |
-|:-----------------------|:---------|:----------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--system <text\|file>` | Override | **Replace**     | Completely replaces the default system prompt for the current session.                                                                                                                         |
-| `--agent <name>`       | Select   | **Replace**     | Switches to a custom agent profile, using that agent's unique prompt instead of the default "Build" prompt.                                                                                    |
-| `--prompt <text>`      | Input    | **User Prompt** | Standard user input. Note: In some legacy versions (v0.x), this occasionally acted as a system prompt in specific headless modes, but in v1.x, it is consistently treated as the user message. |
-| `-s`                   | Alias    | **Session**     | **Caution:** `-s` is frequently an alias for `--session`, not `--system`. Use the long-form flag for prompt overrides to avoid ambiguity.                                                      |
+### Execution Examples
 
-#### **2. File-Based Configuration (The "Project Layer")**
+```bash
+# Append specific coding standards for a single run
+opencode run "Refactor auth.ts" --system "Use functional patterns only; no classes."
 
-OpenCode automatically discovers specific files in the project root to refine the agent's behavior.
-
-* **`AGENTS.md` (Append):** This is the standard location for project-wide rules. Instructions found here are **appended** to the system prompt. It is the preferred way to enforce coding standards (e.g., "Always use tabs") without losing the agent's core capabilities.
-* **`CONTEXT.md` (Injected Context):** Content here is injected into the conversation context as high-level project documentation. While not technically part of the system prompt "instructions," it acts as persistent context.
-* **`.opencode/agents/*.md` (Replace):** Defining a new agent in this directory allows for a completely distinct system prompt. When invoked via `opencode --agent <name>`, the agent's Markdown body **replaces** the default system instructions.
-
-#### **3. Programmatic Manipulation (Plugins)**
-
-The OpenCode plugin system (located in `.opencode/plugins/`) provides the most granular control.
-
-* **`experimental.chat.system.transform`:** This hook receives an array of system prompt strings (`output.system`).
-
-    * **To Append:** `output.system.push("New rule")`.
-    * **To Replace:** Clear the array and add a new string. However, OpenCode implements a **safety mechanism**: if the array is returned entirely empty, it silently restores the original default prompt to prevent the agent from becoming "un-instructioned."
-
----
-
-### **Agent and Subagent Distinctness**
-
-OpenCode supports a robust hierarchical prompt model where subagents are isolated from the primary orchestrator.
-
-* **Isolation:** When a primary agent invokes a subagent (via the `task` tool), a fresh child session is created.
-* **Distinct Prompts:** The subagent uses its own system prompt defined in its specific agent file (e.g., `.opencode/agents/rust-developer.md`). It does **not** inherit the parent's `AGENTS.md` content unless specifically configured to do so, ensuring that the subagent remains focused on its specialized domain (e.g., testing or security) without the "noise" of the general orchestrator's rules.
-
----
-
-### **Prompt Composition Hierarchy**
-
-The following diagram illustrates how OpenCode assembles the final system prompt sent to the LLM.
-
-```mermaid
-graph TD
-    A[Core Provider Header] --> B[Environment Info]
-    B --> C[Core Agent Instructions]
-    C --> D{Source Selected?}
-    D -- Default --> E[Build Agent Prompt]
-    D -- --agent flag --> F[Custom Agent Prompt]
-    E --> G[AGENTS.md Content]
-    F --> G
-    G --> H[Plugin Transforms]
-    H --> I[Final System Prompt]
-    
-    subgraph "Append Layer"
-    G
-    end
-    
-    subgraph "Replace Layer"
-    E
-    F
-    end
+# Use a local file to define a temporary persona
+opencode run "Analyze security" --system "$(cat security-guidelines.md)"
 ```
 
----
+## System Prompt Manipulation Methods
 
-### **Best Formats for System Prompts**
+Beyond CLI switches, OpenCode supports several layered mechanisms for system prompt control, ordered here from lowest to highest precedence.
 
-Research suggests a **hybrid approach** is most effective for modern models (especially Claude 3.5/4/4.5, which OpenCode frequently targets).
+### 1. Project-wide `AGENTS.md`
 
-| Format            | Best Use Case                      | Rationale                                                                                                                                                                |
-|:------------------|:-----------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Pure Markdown** | **Appending** (`AGENTS.md`)        | High readability for human developers; aligns with project documentation standards.                                                                                      |
-| **XML Wrappers**  | **Replacing** (Specialized Agents) | Models like Claude demonstrate significantly higher "instruction following" and "data isolation" when constraints are wrapped in tags like `<rules>` or `<constraints>`. |
+If an `AGENTS.md` file is found in the project root, OpenCode automatically discovers it and **appends** its content to the system prompt for all sessions in that project. This is the recommended way to enforce project-specific rules (e.g., "Always run `just test` before committing").
 
-**Format Recommendation:**
+### 2. Configuration Files (`opencode.json`)
 
-* **Structure:** Use Markdown headings (`# Heading`) for general organization.
-* **Segmentation:** Use XML-style tags (`<project_standards>...</project_standards>`) within the Markdown to encapsulate critical rules or few-shot examples. This prevents "instruction leakage" where the model confuses a rule with the code it is analyzing.
+Instructions can be defined globally (`~/.config/opencode/opencode.json`) or at the project level (`opencode.json`) using the `instructions` array or the `agent` configuration object.
 
----
+- **`instructions`**: An array of strings concatenated into the final prompt.
+- **`agent`**: Specific configuration for built-in or custom agents.
 
-### **Quirks, Workarounds, and Recent Changes**
+### 3. Custom Agent Definitions (`.opencode/agents/*.md`)
 
-#### **Common Quirks**
+Developers can create custom agents by placing Markdown files in the `agents/` directory. Each file can contain a `prompt` field in its YAML frontmatter or use the file body as the prompt. These are distinct from the primary "Build" agent.
 
-* **Prompt Bloat:** OpenCode's default "Build" prompt is notoriously verbose. Developers often "work around" this by creating a minimal custom agent (`minimal.md`) and running the CLI with `--agent minimal`.
-* **The Safety Mechanism:** As noted, if a plugin clears the system prompt array, the original is restored. To achieve a "true" replacement via plugins, you must ensure the array contains at least one non-empty string.
-* **`AGENTS.md` vs `CLAUDE.md`:** While OpenCode natively supports `AGENTS.md`, it does **not** natively read `CLAUDE.md` unless the `claudine` wrapper or a specific compatibility plugin is active.
+### 4. Plugin Hooks (`experimental.chat.system.transform`)
 
-#### **Recent Changes (Late 2025 - Early 2026)**
+Introduced in **v1.2.x**, this hook allows programmatic, real-time transformation of the system prompt array immediately before it is sent to the LLM. It is often used for dynamic context injection (e.g., inserting current build status or linting errors).
 
-* **v1.0.190 (Dec 2025):** Introduction of the **Skill System**. This fundamentally changed prompt composition. Skills are no longer part of the initial system prompt; instead, they are "paged in" via a `skill` tool call, reducing initial token "bloat" while effectively appending the `SKILL.md` content to the session context on-demand.
-* **v1.2.x (Feb 2026):** Stabilization of the `experimental.chat.system.transform` hook, allowing for the first time truly dynamic, multi-plugin prompt manipulation.
+### 5. Environment Variables
 
----
+- `OPENCODE_CONFIG_CONTENT`: Allows passing a raw JSON configuration string, which can include `instructions` or `agent` overrides, useful for CI/CD pipelines.
 
-### **Summary of Findings**
+## Agents and Subagents
 
-OpenCode CLI provides a sophisticated, layered system for prompt management that prioritizes project-level rules while allowing for total overrides when necessary.
+OpenCode supports a hierarchical prompt structure where **Agents** and **Subagents** have their own distinct system prompts.
 
-* **Manipulation:** Use `--system` to replace, `AGENTS.md` to append, and the `system.transform` hook for programmatic logic.
-* **Distinctness:** Subagents are isolated and carry their own unique system prompts, preventing context pollution between the orchestrator and specialized workers.
-* **Format:** A hybrid approach using Markdown for structure and XML tags for data encapsulation provides the best balance of human readability and machine precision.
-* **Recent Evolution:** The move toward on-demand "Skill" loading has shifted the paradigm from massive static system prompts to dynamic, tool-assisted context injection.
+- **Primary Agents**: Switchable via the TUI (using `Tab`). Each (e.g., Build, Plan) has a dedicated instruction set.
+- **Subagents**: Invoked via the `task` tool or `@mention` syntax. They operate in **isolated child sessions** with a fresh context and a system prompt defined by their specific `.md` or JSON definition. They do not inherit the parent session's history, ensuring they focus strictly on the delegated task.
+
+## Quirks and Workarounds
+
+### The "Bloated Prompt" Problem
+
+A common developer complaint in late 2025 was "prompt bloat," where default instructions from multiple providers (Claude, Gemini, etc.) conflicted and caused models to become overly verbose or cautious.
+
+- **Workaround**: Many developers now use the `experimental.chat.system.transform` hook to "strip" default instructions or replace them with condensed versions to improve model "crispiness."
+
+### Hook Safety Mechanism
+
+If the `experimental.chat.system.transform` hook returns an empty `system` array, OpenCode **automatically restores the original system prompt**.
+
+- **Workaround**: To effectively "replace" the prompt, developers must clear the array and then push at least one non-empty string of their own instructions.
+
+### Hook Sequence
+
+Because plugins run sequentially, a downstream plugin might accidentally overwrite or append to a prompt string added by an upstream plugin.
+
+- **Workaround**: Developers use unique XML-style tags (e.g., `<plugin-context>`) to wrap their injections, making it easier for subsequent hooks to identify and modify specific blocks.
+
+## Recent Changes (2026)
+
+The **v1.3.0 (March 2026)** release introduced significant changes:
+
+- **Auto Compact**: Automatically summarizes long conversation histories into the system prompt to stay within token limits while preserving state.
+- **Prompt Slots**: A new feature allowing the injection of project-specific instructions into pre-defined "slots" in the system prompt without needing to override the entire configuration.
+- **Provider-Specific Refactoring**: Prompts were refactored into "Beast" (GPT-4/o1), "Codex" (GPT-5.4), and "Anthropic" (Claude 3.5+) variants to optimize performance for different reasoning architectures.
+
+## Best Formatting Practices
+
+OpenCode is optimized for **Markdown**, but the strategy differs depending on whether you are appending or replacing.
+
+### Appending to the System Prompt
+
+**XML-Wrapped Markdown** is the most effective format for appending. Wrapping instructions in tags helps the model distinguish between "Base Instructions," "Project Context," and "Session-Specific Rules."
+
+```markdown
+<project-rules>
+- Use the `just` runner for all tasks.
+- Return errors in `thiserror` format.
+</project-rules>
+```
+
+### Replacing the System Prompt
+
+**Pure Markdown** works best for total replacement. Since you have full control over the context, the model does not need delimiters to separate your content from original instructions. Standard Markdown headers (`## Instructions`, `## Standards`) provide sufficient structure.
+
+## Summary
+
+OpenCode CLI handles system prompts through a layered approach, combining provider defaults with project-specific `AGENTS.md` files, configuration settings, and real-time plugin transformations.
+
+- **Key Switches**: `--system` for ad-hoc instructions and `--prompt` for the specific task.
+- **2026 Shifts**: v1.3.0 introduced Auto Compact, Prompt Caching, and specialized prompts (e.g., `PROMPT_BEAST`) to improve performance and reduce token costs.
+- **Isolation**: Agents and Subagents maintain their own distinct system prompts and isolated contexts.
+- **Best Practice**: Use XML-wrapped Markdown for appending to ensure clarity, while pure Markdown is preferred for complete replacements.

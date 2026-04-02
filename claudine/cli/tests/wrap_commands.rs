@@ -1488,6 +1488,214 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn compose_preflight_error_includes_source_provenance() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // Markdown with a ::shell directive that is NOT whitelisted.
+    let md_file = workspace.path().join("template.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: provenance test\n---\n::shell curl https://example.com\n",
+    )
+    .unwrap();
+
+    // Provider binary (should never be reached — preflight should abort first).
+    write_executable(
+        &path_dir.join("codex"),
+        "#!/bin/sh\necho 'ERROR: provider should not run' >&2\nexit 99\n",
+    );
+
+    // Run without --interactive so preflight has no approval handler →
+    // the non-whitelisted command triggers a clear error with provenance.
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+
+    // Error message should mention the source file name (provenance).
+    assert!(
+        plain.contains("template.md"),
+        "preflight error should include the source file name for provenance; stderr was:\n{plain}"
+    );
+    // Error message should mention the denied command.
+    assert!(
+        plain.contains("curl"),
+        "preflight error should identify the denied command; stderr was:\n{plain}"
+    );
+    // Provider should NOT have run.
+    assert!(
+        !plain.contains("ERROR: provider should not run"),
+        "provider binary should not execute when preflight fails; stderr was:\n{plain}"
+    );
+}
+
+/// Proves `--interactive` flag is wired up for compose preflight with a
+/// whitelisted command.  This covers the "interactive + whitelisted = success"
+/// path.  Full interactive-prompt coverage (PTY + answer prompt + assert
+/// provenance in the displayed prompt) remains a future improvement — the
+/// library-level `interactive_handler_is_invoked_for_non_whitelisted_command`
+/// test in `preflight.rs` covers the handler invocation path.
+#[cfg(unix)]
+#[test]
+fn compose_interactive_preflight_with_whitelisted_command() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("template.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: interactive test\n---\n::shell echo whitelisted\n",
+    )
+    .unwrap();
+
+    // Whitelist "echo" so the ::shell directive passes preflight.
+    fs::write(
+        workspace.path().join(".darkmatter-shell-whitelist"),
+        "prefix echo\n",
+    )
+    .unwrap();
+
+    // Also create .git so the whitelist is found (policy root = git root).
+    fs::create_dir_all(workspace.path().join(".git")).unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        "#!/bin/sh\necho 'provider-launched' >&2\nexit 0\n",
+    );
+
+    // Include system dirs so shell expansion can find `echo`.
+    let full_path = format!("{}:/usr/bin:/bin", path_dir.display());
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &full_path)
+        .args([
+            "compose",
+            "--interactive",
+            "--codex",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("provider-launched"),
+        "provider should run after --interactive preflight passes; stderr was:\n{plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_skips_shell_hidden_by_false_block() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // The ::shell is inside a ::block when="false" — Darkmatter's composition
+    // excludes it, so preflight never discovers the un-whitelisted command.
+    let md_file = workspace.path().join("template.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: false block test\n---\n\
+         Safe content here.\n\n\
+         ::block when=\"false\"\n\
+         ::shell curl https://evil.example.com\n\
+         ::end-block\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        "#!/bin/sh\necho 'provider-launched' >&2\nexit 0\n",
+    );
+
+    // No whitelist for curl — if it were discovered, preflight would fail.
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+
+    assert!(
+        plain.contains("provider-launched"),
+        "provider should launch — ::shell inside ::block when=\"false\" must be hidden; stderr was:\n{plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_shell_preflight_passes_with_whitelisted_commands() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let marker_path = workspace.path().join("provider-ran.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // Markdown with a whitelisted ::shell command AND a harness shell pre-check.
+    let md_file = workspace.path().join("template.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: full flow test\npre_checks:\n  shell_command: \"echo precheck-ok\"\n---\n\
+         ::shell echo composed-ok\n",
+    )
+    .unwrap();
+
+    // Whitelist "echo" so both the ::shell directive and the harness pre-check pass.
+    fs::write(
+        workspace.path().join(".darkmatter-shell-whitelist"),
+        "prefix echo\n",
+    )
+    .unwrap();
+    fs::create_dir_all(workspace.path().join(".git")).unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        &format!(
+            "#!/bin/sh\nprintf 'ran\\n' > \"{}\"\nexit 0\n",
+            marker_path.display()
+        ),
+    );
+
+    // Include system dirs so shell expansion can find `echo`.
+    let full_path = format!("{}:/usr/bin:/bin", path_dir.display());
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", &full_path)
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let plain = strip_ansi(&stderr);
+
+    // The provider should have run (marker file exists).
+    assert!(
+        marker_path.exists(),
+        "provider should launch after shell preflight + harness audit pass; stderr was:\n{plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn wrapper_restores_repo_harness_for_plain_prompts() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");

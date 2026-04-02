@@ -1,5 +1,7 @@
 //! Composition-specific error types.
 
+use std::path::PathBuf;
+
 use crate::events::Provider;
 use thiserror::Error;
 
@@ -75,4 +77,23 @@ pub enum CompositionError {
     /// The composition target file lacks required read/write permissions.
     #[error("insufficient file permissions (need read+write): {0}")]
     InsufficientFilePermissions(String),
+
+    /// Pre-flight shell command discovery failed.
+    #[error("pre-flight discovery failed: {0}")]
+    PreFlightDiscoveryFailed(String),
+
+    /// A general pre-flight failure (blacklisted command, missing handler, etc.).
+    #[error("pre-flight shell approval failed: {0}")]
+    PreFlightFailed(String),
+
+    /// The user denied a shell command during pre-flight approval.
+    #[error(
+        "Aborted: shell command '{command}' was denied during pre-flight approval \
+         (source: {source_file}, line {line}). No provider session was started."
+    )]
+    ShellCommandDenied {
+        command: String,
+        source_file: PathBuf,
+        line: usize,
+    },
 }
