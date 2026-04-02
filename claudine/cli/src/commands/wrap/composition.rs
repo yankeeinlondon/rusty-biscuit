@@ -12,6 +12,8 @@ use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use biscuit_terminal::components::status::{Status, StatusState};
+use biscuit_terminal::prelude::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::{
     CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
@@ -754,15 +756,23 @@ fn execute_inline_without_harness(
         };
 
         if final_exit == 0 {
+            // Read post-run frontmatter for comparison (best-effort)
+            let post_run_fm = std::fs::read_to_string(resolved_path)
+                .ok()
+                .map(|text| {
+                    let md: darkmatter::markdown::Markdown = text.into();
+                    md.frontmatter().as_map().clone()
+                });
+
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
             match claudine::composition::closure::apply_inline_closure(
                 closure_plan,
                 &replacement_body,
                 resolved_path,
                 &today,
-                None,
+                post_run_fm.as_ref(),
             ) {
-                Ok(_result) => {
+                Ok(result) => {
                     if show_checks {
                         log::message(&crate::output::fm_check_ok(
                             "Applied the captured replacement body to the target document",
@@ -772,6 +782,21 @@ fn execute_inline_without_harness(
                             "Preserved original frontmatter and updated <bold>last_updated</bold>",
                             term,
                         ));
+
+                        for key in &result.new_properties {
+                            log::message(&crate::output::fm_check_ok(
+                                &format!("Merged new frontmatter property <bold>\"{key}\"</bold>"),
+                                term,
+                            ));
+                        }
+
+                        for key in &result.reverted_properties {
+                            let status = Status::from_prose(format!(
+                                "Agent modified frontmatter property <b>\"{key}\"</b> — reverted to original value"
+                            ))
+                            .state(StatusState::Warning);
+                            log::message(&status.render(term));
+                        }
                     }
 
                     // Post-processing: run Darkmatter cleanup on the
