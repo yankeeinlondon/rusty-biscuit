@@ -1044,16 +1044,51 @@ fn cleanup_inline_output(path: &std::path::Path) -> Result<bool> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| eyre!("failed to read {}: {e}", path.display()))?;
 
-    let cleaned = darkmatter::markdown::cleanup::cleanup_content(&text);
+    // Split frontmatter from body so cleanup operates only on the body,
+    // preserving frontmatter (including YAML block scalars) byte-for-byte.
+    let (frontmatter_prefix, body) = split_frontmatter_and_body(&text);
 
-    if cleaned == text {
+    let cleaned_body = darkmatter::markdown::cleanup::cleanup_content(body);
+
+    if cleaned_body == body {
         return Ok(false);
     }
 
-    std::fs::write(path, cleaned.as_bytes())
+    let mut output = String::with_capacity(frontmatter_prefix.len() + cleaned_body.len());
+    output.push_str(frontmatter_prefix);
+    output.push_str(&cleaned_body);
+
+    std::fs::write(path, output.as_bytes())
         .map_err(|e| eyre!("failed to write cleaned output to {}: {e}", path.display()))?;
 
     Ok(true)
+}
+
+/// Split text into a frontmatter prefix (including closing delimiter) and the body.
+///
+/// If the text starts with `---\n`, scans for the closing `---\n` and returns
+/// everything up to and including that line as the prefix. Otherwise returns
+/// an empty prefix and the full text as body.
+fn split_frontmatter_and_body(text: &str) -> (&str, &str) {
+    let mut lines = text.split_inclusive('\n');
+    let first = match lines.next() {
+        Some(l) => l,
+        None => return ("", text),
+    };
+    if first.trim_end_matches(['\r', '\n']) != "---" {
+        return ("", text);
+    }
+
+    let mut offset = first.len();
+    for line in lines {
+        offset += line.len();
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            return (&text[..offset], &text[offset..]);
+        }
+    }
+
+    // No closing delimiter — treat entire text as body
+    ("", text)
 }
 
 // -- Direct execution (non-harness) ---------------------------------------
@@ -1263,5 +1298,85 @@ fn emit_legacy_composition_session_event(
 
     if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
         tracing::warn!("Failed to write legacy composition session event: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_frontmatter_basic() {
+        let text = "---\ntitle: Test\n---\n# Body\n";
+        let (prefix, body) = split_frontmatter_and_body(text);
+        assert_eq!(prefix, "---\ntitle: Test\n---\n");
+        assert_eq!(body, "# Body\n");
+    }
+
+    #[test]
+    fn split_frontmatter_block_scalar() {
+        let text = concat!(
+            "---\n",
+            "prompt: |-\n",
+            "    First line\n",
+            "\n",
+            "    - bullet\n",
+            "last_updated: 2026-03-18\n",
+            "---\n",
+            "# Body\n",
+        );
+        let (prefix, body) = split_frontmatter_and_body(text);
+        assert!(prefix.ends_with("---\n"));
+        assert!(prefix.contains("prompt: |-"));
+        assert_eq!(body, "# Body\n");
+    }
+
+    #[test]
+    fn split_frontmatter_no_frontmatter() {
+        let text = "# Just a heading\n\nContent\n";
+        let (prefix, body) = split_frontmatter_and_body(text);
+        assert_eq!(prefix, "");
+        assert_eq!(body, text);
+    }
+
+    #[test]
+    fn split_frontmatter_unclosed() {
+        let text = "---\ntitle: Test\nNo closing\n";
+        let (prefix, body) = split_frontmatter_and_body(text);
+        assert_eq!(prefix, "");
+        assert_eq!(body, text);
+    }
+
+    #[test]
+    fn cleanup_preserves_frontmatter_block_scalar() {
+        // Reproduces the bug: cleanup_content on full text corrupts YAML
+        // block scalar indentation. The fix splits frontmatter from body
+        // so cleanup only operates on the body.
+        let frontmatter = concat!(
+            "---\n",
+            "prompt: |-\n",
+            "    First line of prompt\n",
+            "\n",
+            "    - bullet one\n",
+            "    - bullet two\n",
+            "\n",
+            "    Final paragraph\n",
+            "last_updated: 2026-03-18\n",
+            "---\n",
+        );
+        let body = "# Body\n\nSome content\n";
+        let text = format!("{frontmatter}{body}");
+
+        let (prefix, body_part) = split_frontmatter_and_body(&text);
+
+        // Frontmatter must be preserved byte-for-byte
+        assert_eq!(prefix, frontmatter);
+
+        // Cleaning only the body should not corrupt frontmatter
+        let cleaned_body = darkmatter::markdown::cleanup::cleanup_content(body_part);
+        let result = format!("{prefix}{cleaned_body}");
+
+        // The frontmatter portion must remain unchanged
+        assert!(result.starts_with(frontmatter));
     }
 }
