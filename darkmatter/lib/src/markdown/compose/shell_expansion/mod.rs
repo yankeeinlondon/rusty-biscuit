@@ -107,6 +107,10 @@ pub fn execute_directive(
             return Err(ShellExpansionError::NotPreApproved {
                 command: display_command(directive, alias_name.as_deref()),
                 line: directive.line,
+                source_desc: match &options.source {
+                    crate::markdown::compose::ComposeSource::File(p) => format!(" (in {})", p.display()),
+                    _ => String::new(),
+                },
             });
         }
     }

@@ -1,5 +1,7 @@
 //! Composition-specific error types.
 
+use std::path::PathBuf;
+
 use crate::events::Provider;
 use thiserror::Error;
 
@@ -86,8 +88,12 @@ pub enum CompositionError {
 
     /// The user denied a shell command during pre-flight approval.
     #[error(
-        "Aborted: shell command '{command}' was denied during pre-flight approval. \
-         No provider session was started."
+        "Aborted: shell command '{command}' was denied during pre-flight approval \
+         (source: {source_file}, line {line}). No provider session was started."
     )]
-    ShellCommandDenied { command: String },
+    ShellCommandDenied {
+        command: String,
+        source_file: PathBuf,
+        line: usize,
+    },
 }

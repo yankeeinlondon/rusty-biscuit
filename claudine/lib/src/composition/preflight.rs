@@ -110,7 +110,11 @@ pub fn resolve_shell_approvals(
             Err(crate::harness::error::HarnessError::ShellCommandDenied { command }) => {
                 if approval_options.approval_handler.is_some() {
                     // Handler was available but user denied
-                    return Err(CompositionError::ShellCommandDenied { command });
+                    return Err(CompositionError::ShellCommandDenied {
+                        command,
+                        source_file: source_file.clone(),
+                        line: *line,
+                    });
                 }
                 // No handler -- cannot get approval
                 let location = if *line > 0 {
@@ -167,6 +171,38 @@ mod tests {
         ValidationPhase, ValidationRule, ValidationRuleId,
     };
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use darkmatter::markdown::compose::shell_expansion::types::{
+        ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
+    };
+
+    struct MockApprovalHandler {
+        decision: ShellApprovalDecision,
+        call_count: Arc<Mutex<usize>>,
+    }
+
+    impl MockApprovalHandler {
+        fn new(decision: ShellApprovalDecision) -> Self {
+            Self {
+                decision,
+                call_count: Arc::new(Mutex::new(0)),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            *self.call_count.lock().unwrap()
+        }
+    }
+
+    impl ShellApprovalHandler for MockApprovalHandler {
+        fn approve(
+            &self,
+            _request: ShellApprovalRequest,
+        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            *self.call_count.lock().unwrap() += 1;
+            Ok(self.decision.clone())
+        }
+    }
 
     fn empty_plan() -> HarnessPlan {
         HarnessPlan {
@@ -379,5 +415,75 @@ mod tests {
         let err = md.compose_with(options).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("not pre-approved"), "got: {msg}");
+    }
+
+    #[test]
+    fn allow_once_populates_cache_without_persisting() {
+        let md: Markdown = "# Test\n::shell echo test-once\n".into();
+        let compose_options = ComposeOptions::new();
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::AllowOnce));
+        let options = ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: Some(handler.clone()),
+            ..Default::default()
+        };
+
+        let result =
+            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap();
+
+        assert_eq!(result.total_discovered, 1);
+        assert_eq!(result.user_approved, 1);
+        assert!(result.approved_commands.contains("echo test-once"));
+    }
+
+    #[test]
+    fn deny_returns_shell_command_denied_error() {
+        let md: Markdown = "# Test\n::shell echo test-deny\n".into();
+        let compose_options = ComposeOptions::new();
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::Deny));
+        let options = ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: Some(handler.clone()),
+            ..Default::default()
+        };
+
+        let result =
+            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options);
+
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), CompositionError::ShellCommandDenied { .. }),
+            "expected ShellCommandDenied"
+        );
+    }
+
+    #[test]
+    fn warm_cache_prevents_second_handler_invocation() {
+        let md: Markdown = "# Test\n::shell echo cached\n".into();
+        let compose_options = ComposeOptions::new();
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::AllowOnce));
+        let options = ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: Some(handler.clone()),
+            ..Default::default()
+        };
+
+        // First call: handler invoked
+        let result1 =
+            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap();
+        assert_eq!(result1.user_approved, 1);
+        assert_eq!(handler.calls(), 1);
+
+        // Second call: cache hit, handler NOT invoked
+        let result2 =
+            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap();
+        assert_eq!(result2.total_discovered, 1);
+        assert_eq!(handler.calls(), 1, "handler should not be called again — cache hit");
     }
 }
