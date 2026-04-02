@@ -8,14 +8,42 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeOperation;
+use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
 use crate::markdown::compose::shell_expansion::types::ShellCommandEntry;
+use crate::markdown::compose::types::SourceRange;
 use crate::markdown::types::MarkdownResult;
+
+/// Looks up the originating source file for a byte position in composed output.
+///
+/// Checks the source map for a range containing `byte_pos`. If found, computes
+/// the line within the transcluded region by counting newlines. Otherwise falls
+/// back to the root document.
+fn lookup_provenance(
+    byte_pos: usize,
+    composed_line: usize,
+    source_map: &[SourceRange],
+    composed_content: &str,
+    default_source: &std::path::Path,
+) -> (PathBuf, usize) {
+    for range in source_map {
+        if byte_pos >= range.byte_start && byte_pos < range.byte_end {
+            // Count newlines from the start of the transcluded region to the
+            // directive position to get the line number within the source file.
+            let region = &composed_content[range.byte_start..byte_pos];
+            let relative_line = region.chars().filter(|&c| c == '\n').count();
+            return (
+                range.source_file.clone(),
+                range.source_start_line + relative_line,
+            );
+        }
+    }
+    (default_source.to_path_buf(), composed_line)
+}
 
 /// Walks the full document graph and returns every `::shell` directive found.
 ///
@@ -62,13 +90,13 @@ pub fn collect_shell_commands(
         ComposeOperation::FrontmatterTransclusion,
     ]);
 
-    let (composed, _report) = markdown.compose_with(discovery_options)?;
+    let (composed, report) = markdown.compose_with(discovery_options)?;
 
     // Parse ::shell directives from the fully-resolved content.
     // ShellExpansionError converts into MarkdownError via From impl.
     let directives = parse_directives(composed.content())?;
 
-    let source_file = match &options.source {
+    let default_source = match &options.source {
         ComposeSource::File(p) => p.clone(),
         _ => PathBuf::from("<unknown>"),
     };
@@ -91,13 +119,22 @@ pub fn collect_shell_commands(
         let normalized = normalize_command(&executable, &args);
 
         if seen.insert(normalized.clone()) {
+            // Look up provenance from the source map
+            let (source_file, line) = lookup_provenance(
+                directive.span.start,
+                directive.line,
+                &report.source_map,
+                composed.content(),
+                &default_source,
+            );
+
             entries.push(ShellCommandEntry {
                 raw_command: directive.raw_command,
                 executable,
                 args,
                 normalized,
-                source_file: source_file.clone(),
-                line: directive.line,
+                source_file,
+                line,
             });
         }
     }
@@ -239,5 +276,51 @@ replace:
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw_command, "echo replaced");
+    }
+
+    #[test]
+    fn transclusion_provenance_attributes_to_child_file() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Child document with a shell directive
+        let child_path = temp_dir.path().join("child.md");
+        let mut child_file = std::fs::File::create(&child_path).unwrap();
+        writeln!(child_file, "# Child").unwrap();
+        writeln!(child_file, "::shell echo from-child").unwrap();
+
+        // Root document with its own directive and a transclusion
+        let root_path = temp_dir.path().join("root.md");
+        let mut root_file = std::fs::File::create(&root_path).unwrap();
+        writeln!(root_file, "::shell echo from-root").unwrap();
+        writeln!(root_file, "::file ./child.md").unwrap();
+
+        let root_content = std::fs::read_to_string(&root_path).unwrap();
+        let md: Markdown = root_content.into();
+        let options = ComposeOptions::new().with_source_file(&root_path);
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 2);
+
+        let root_entry = entries
+            .iter()
+            .find(|e| e.raw_command == "echo from-root")
+            .unwrap();
+        // Canonicalize both paths to handle symlinks like /var -> /private/var on macOS
+        assert_eq!(
+            root_entry.source_file.canonicalize().unwrap(),
+            root_path.canonicalize().unwrap()
+        );
+
+        let child_entry = entries
+            .iter()
+            .find(|e| e.raw_command == "echo from-child")
+            .unwrap();
+        assert_eq!(
+            child_entry.source_file.canonicalize().unwrap(),
+            child_path.canonicalize().unwrap()
+        );
+        // Line 2 in child.md (line 1 is "# Child", line 2 is "::shell echo from-child")
+        assert_eq!(child_entry.line, 2, "line should be 2 in the child file");
     }
 }
