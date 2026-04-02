@@ -15,6 +15,16 @@ The library is responsible for:
 
 The library does not load secrets or configuration files. Callers construct provider configs directly and register the providers they need.
 
+The built-in providers follow the provider API models currently implemented in this repo:
+
+- Discord: bot token + channel ID
+- Slack: bot token + channel ID
+- Signal: JSON-RPC URL + sending account + recipient/group ID
+- WhatsApp: Cloud API access token + phone number ID + recipient
+- Telegram: bot token + chat ID
+
+Slack and Discord are not modeled as incoming-webhook transports in the current library API.
+
 ## Prelude
 
 For the common path, import the crate prelude:
@@ -117,6 +127,8 @@ async fn main() -> Result<(), messenger::MessengerError> {
     Ok(())
 }
 ```
+
+This example is intentionally using the implemented Slack transport model: authenticate with a bot token and choose the destination with `Target::slack_channel(...)`.
 
 ## Message Model
 

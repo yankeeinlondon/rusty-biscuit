@@ -19,6 +19,16 @@ Unified outbound messaging for Rust applications and shell workflows.
 
 The CLI enables all five providers. The library enables `discord` and `slack` by default, with the other providers behind opt-in Cargo features.
 
+For outbound sends, `messenger` uses provider API credentials plus an explicit destination identifier. In practice that means:
+
+- Discord: bot token + channel ID
+- Slack: bot token + channel ID
+- Signal: JSON-RPC account + recipient/group ID
+- WhatsApp: Cloud API credentials + recipient phone number
+- Telegram: bot token + chat ID
+
+The current implementation does not use Slack or Discord incoming webhook URLs as its primary send model.
+
 ## How It Works
 
 `messenger` separates portable content from provider-specific delivery details:
@@ -72,6 +82,8 @@ messenger send --route slack.ops --reply-to ~/.messenger/receipts/1712345678000-
 ```
 
 The CLI stores routes in `~/.messenger.json` and delivery receipts in `~/.messenger/receipts/`.
+
+Route configs mirror the implemented send model: bot-token-plus-channel for Discord and Slack, recipient-based API configuration for Signal and WhatsApp, and bot-token-plus-chat for Telegram.
 
 For command details and config examples, see [`messenger/cli/README.md`](./cli/README.md).
 

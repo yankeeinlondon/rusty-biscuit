@@ -6,6 +6,16 @@ This guide walks through setting up each messaging provider, configuring the CLI
 
 Each provider requires credentials and a destination identifier. The sections below explain what you need, where to get it, and what the setup looks like for both the CLI and the library.
 
+The outbound send model in `messenger` is provider API credentials plus an explicit destination identifier:
+
+- Discord: bot token + channel ID
+- Slack: bot token + channel ID
+- Signal: JSON-RPC URL + account + recipient/group ID
+- WhatsApp: Cloud API credentials + recipient phone number
+- Telegram: bot token + chat ID
+
+`messenger` does not currently model Slack or Discord sends as incoming-webhook URLs.
+
 ### Discord
 
 **What you need:**
@@ -151,6 +161,8 @@ Each provider requires credentials and a destination identifier. The sections be
 
 The CLI stores its configuration at `~/.messenger.json`. The `messenger setup` command creates and updates this file interactively.
 
+The config examples below intentionally follow the implemented transport models: bot-token-plus-channel for Discord and Slack, recipient-based API sends for Signal and WhatsApp, and bot-token-plus-chat for Telegram.
+
 ### Config Schema
 
 ```json
@@ -255,6 +267,8 @@ async fn main() -> Result<(), messenger::MessengerError> {
     Ok(())
 }
 ```
+
+This example is using the implemented Slack send path: authenticate with a bot token and select the destination with `Target::slack_channel(...)`.
 
 ### Multiple Providers
 
