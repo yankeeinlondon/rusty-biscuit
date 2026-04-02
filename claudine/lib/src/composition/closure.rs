@@ -37,6 +37,15 @@ pub fn extract_replacement_body(provider_output: &str) -> Result<String, Composi
     Ok(body.to_string())
 }
 
+/// Result of applying inline closure, reporting frontmatter changes.
+#[derive(Debug, Clone, Default)]
+pub struct InlineClosureResult {
+    /// Keys that were added by the agent and merged into the document.
+    pub new_properties: Vec<String>,
+    /// Keys that were modified by the agent and reverted to original values.
+    pub reverted_properties: Vec<String>,
+}
+
 /// Validate the replacement body, reconstruct the document preserving
 /// original frontmatter, and write atomically to `target_path`.
 pub fn apply_inline_closure(
@@ -225,6 +234,26 @@ fn trim_line_ending(line: &str) -> &str {
     line.trim_end_matches(['\r', '\n'])
 }
 
+/// Serialize a single frontmatter property as a YAML fragment.
+///
+/// Simple scalars produce `key: value\n`. Complex types (arrays, objects)
+/// delegate to `serde_yaml_ng` for the value portion.
+fn serialize_frontmatter_property(key: &str, value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => format!("{key}: {s}\n"),
+        serde_json::Value::Number(n) => format!("{key}: {n}\n"),
+        serde_json::Value::Bool(b) => format!("{key}: {b}\n"),
+        serde_json::Value::Null => format!("{key}: null\n"),
+        complex => {
+            // For arrays and objects, serialize the value via serde_yaml_ng
+            // then prefix the first line with the key.
+            let yaml_value = biscuit_file::serde_yaml_ng::to_string(complex)
+                .unwrap_or_else(|_| format!("{complex}"));
+            format!("{key}:\n{yaml_value}")
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -378,6 +407,51 @@ mod tests {
     fn strip_frontmatter_preserves_unclosed_fences() {
         let text = "---\ntitle: test\nNo closing fence\n";
         assert_eq!(strip_leading_frontmatter(text), text);
+    }
+
+    // -- serialize_frontmatter_property ----------------------------------------
+
+    #[test]
+    fn serialize_string_property() {
+        let value = serde_json::json!("hello world");
+        let result = serialize_frontmatter_property("title", &value);
+        assert_eq!(result, "title: hello world\n");
+    }
+
+    #[test]
+    fn serialize_number_property() {
+        let result = serialize_frontmatter_property("count", &serde_json::json!(42));
+        assert_eq!(result, "count: 42\n");
+    }
+
+    #[test]
+    fn serialize_bool_property() {
+        let result = serialize_frontmatter_property("draft", &serde_json::json!(true));
+        assert_eq!(result, "draft: true\n");
+    }
+
+    #[test]
+    fn serialize_null_property() {
+        let result = serialize_frontmatter_property("removed", &serde_json::json!(null));
+        assert_eq!(result, "removed: null\n");
+    }
+
+    #[test]
+    fn serialize_array_property() {
+        let value = serde_json::json!(["rust", "markdown"]);
+        let result = serialize_frontmatter_property("tags", &value);
+        // serde_yaml_ng serializes arrays with block style
+        assert!(result.starts_with("tags:\n"));
+        assert!(result.contains("- rust"));
+        assert!(result.contains("- markdown"));
+    }
+
+    #[test]
+    fn serialize_object_property() {
+        let value = serde_json::json!({"version": "1.0"});
+        let result = serialize_frontmatter_property("meta", &value);
+        assert!(result.starts_with("meta:\n"));
+        assert!(result.contains("version:"));
     }
 
     // -- upsert_last_updated ------------------------------------------------
