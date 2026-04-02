@@ -25,3 +25,5 @@
 - Do not second guess the files which were staged; the user intentionally chose which files they were interested in committing.
 
 - Files can only be committed once. When multiple subagent groups are committing related files, later groups will get "nothing to commit" for files already committed by earlier groups, but can still commit any remaining files assigned to them.
+
+- When using `git commit -m "message" -- path1 path2`, the `--` separator before paths combined with `-m` can cause git to source the commit message from a cached staged template instead of the inline message. To avoid this, place paths before `-m` (e.g., `git commit file1 file2 -m "message"`) or use `git commit --only -- path1 path2 -m "message"` for explicit path-limited commits with a custom message.
