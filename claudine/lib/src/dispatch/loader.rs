@@ -393,6 +393,7 @@ fn merge_configs(user: HookerConfig, repo: HookerConfig) -> HookerConfig {
         tts: repo.settings.tts.or(user.settings.tts),
         linking,
         protect,
+        messaging: repo.settings.messaging.or(user.settings.messaging),
     };
 
     HookerConfig {
@@ -650,6 +651,7 @@ mod tests {
                 }),
                 linking: None,
                 protect: None,
+                messaging: None,
             },
             providers: HashMap::new(),
         };
@@ -664,6 +666,7 @@ mod tests {
                 }),
                 linking: None,
                 protect: None,
+                messaging: None,
             },
             providers: HashMap::new(),
         };

@@ -604,6 +604,7 @@ mod tests {
                     },
                 }),
                 protect: None,
+                messaging: None,
             },
             providers: {
                 let mut providers = HashMap::new();

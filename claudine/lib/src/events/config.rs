@@ -6,6 +6,7 @@ use super::agentic_event::AgenticEvent;
 use super::provider::Provider;
 use crate::actions::{HookAction, LogTarget};
 use crate::error::{ClaudineError, Result};
+use crate::messaging::ScopedMessagingSettings;
 use crate::services::protect::ProtectConfig;
 
 /// Root configuration loaded from `~/.claudine/config.json`.
@@ -58,6 +59,10 @@ pub struct GlobalSettings {
     /// Protect service policy configuration.
     #[serde(default)]
     pub protect: Option<ProtectConfig>,
+
+    /// Messaging destination settings for `Message` actions.
+    #[serde(default)]
+    pub messaging: Option<ScopedMessagingSettings>,
 }
 
 /// TTS configuration forwarded to biscuit-speaks.
@@ -155,6 +160,12 @@ impl HookerConfig {
         if let Some(protect) = self.settings.protect.as_ref() {
             protect.validate().map_err(|error| {
                 ClaudineError::ConfigValidation(format!("invalid settings.protect: {error}"))
+            })?;
+        }
+
+        if let Some(messaging) = self.settings.messaging.as_ref() {
+            messaging.validate("config").map_err(|error| {
+                ClaudineError::ConfigValidation(format!("invalid settings.messaging: {error}"))
             })?;
         }
 
@@ -418,6 +429,32 @@ mod tests {
         });
         let config: HookerConfig = serde_json::from_value(json).unwrap();
         assert!(config.providers.is_empty());
+    }
+
+    #[test]
+    fn global_settings_with_messaging() {
+        let json = serde_json::json!({
+            "messaging": {
+                "active": "ops",
+                "configs": {
+                    "ops": {
+                        "provider": "slack",
+                        "channel_id": "C123"
+                    }
+                }
+            }
+        });
+
+        let settings: GlobalSettings = serde_json::from_value(json).unwrap();
+        let messaging = settings.messaging.unwrap();
+        assert_eq!(messaging.active.as_deref(), Some("ops"));
+    }
+
+    #[test]
+    fn global_settings_without_messaging() {
+        let json = serde_json::json!({});
+        let settings: GlobalSettings = serde_json::from_value(json).unwrap();
+        assert!(settings.messaging.is_none());
     }
 
     #[test]
