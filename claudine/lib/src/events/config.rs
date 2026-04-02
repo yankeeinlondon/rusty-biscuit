@@ -478,4 +478,35 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("invalid settings.protect"));
     }
+
+    #[test]
+    fn full_config_example_with_messaging_parses() {
+        let json = serde_json::json!({
+            "version": "1.0",
+            "settings": {
+                "messaging": {
+                    "active": "work-slack",
+                    "configs": {
+                        "work-slack": {
+                            "provider": "slack",
+                            "channel_id": "C012345ABC",
+                            "bot_token_env": "SLACK_BOT_TOKEN"
+                        },
+                        "personal-discord": {
+                            "provider": "discord",
+                            "channel_id": "123456789012345678",
+                            "bot_token_env": "DISCORD_BOT_TOKEN"
+                        }
+                    }
+                }
+            },
+            "providers": {}
+        });
+
+        let config: HookerConfig = serde_json::from_value(json).unwrap();
+        let messaging = config.settings.messaging.as_ref().unwrap();
+        assert_eq!(messaging.active.as_deref(), Some("work-slack"));
+        assert_eq!(messaging.configs.len(), 2);
+        config.validate().unwrap();
+    }
 }

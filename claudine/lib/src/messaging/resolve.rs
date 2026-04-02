@@ -110,10 +110,10 @@ pub fn resolve_secret(
     env_name: &str,
 ) -> std::result::Result<String, String> {
     // Inline value wins when present and non-empty
-    if let Some(val) = inline {
-        if !val.is_empty() {
-            return Ok(val.to_string());
-        }
+    if let Some(val) = inline
+        && !val.is_empty()
+    {
+        return Ok(val.to_string());
     }
 
     // Fall back to environment variable
