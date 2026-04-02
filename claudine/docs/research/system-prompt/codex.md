@@ -1,6 +1,7 @@
 ---
 prompt: |-
     Claudine wants to be able to provide a consistent and universal way to either _append to_ or _replace_ the system prompt. Your job is to research in detail how Codex CLI handles the system prompt. You should be able to at least answer the following questions:
+    
     - What CLI switches are involved in effecting the system prompt? What does each switch do?
     - What other ways, other than via a CLI switch, can you manipulate what the system prompt will be?
     - Can Agents or Subagents have their own system prompt which is distinct from an orchestrator?
