@@ -750,6 +750,7 @@ pub(crate) fn run_child_stream(
         .map(|s| s.to_string())
         .collect();
     let plain = crate::log::is_plain();
+    let stderr_term = crate::log::terminal();
     let stderr_handle = thread::spawn(move || {
         let reader = BufReader::new(pipe);
         let mut captured = String::new();
@@ -759,7 +760,7 @@ pub(crate) fn run_child_stream(
                 continue;
             }
             // Format raw API error JSON into human-readable messages
-            let formatted = crate::output::try_format_api_error(&line);
+            let formatted = crate::output::try_format_api_error(&line, &stderr_term);
             let output_line = formatted.as_deref().unwrap_or(&line);
             let output_line = if plain {
                 biscuit_terminal::prelude::strip_escape_codes(output_line)

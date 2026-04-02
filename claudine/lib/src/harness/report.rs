@@ -182,7 +182,11 @@ mod tests {
         AuditedCommand, AuditedCommandSource, ShellAuditOutcome, ValidationCheckOutcome,
         ValidationEvent, ValidationRuleId,
     };
-    use std::path::PathBuf;
+
+    /// Create a Terminal without real terminal probing (avoids TTY hangs in tests).
+    fn test_terminal() -> Terminal {
+        Terminal::new_optimistic(80)
+    }
 
     // -- prose_escape --
 
@@ -203,7 +207,7 @@ mod tests {
 
     #[test]
     fn report_source_file_success_path() {
-        let term = Terminal::default();
+        let term = test_terminal();
         let tmp = tempfile::NamedTempFile::new().unwrap();
         // Should not panic; emits a success status
         report_source_file("@my-ref", tmp.path(), &term);
@@ -211,7 +215,7 @@ mod tests {
 
     #[test]
     fn report_source_file_missing_path() {
-        let term = Terminal::default();
+        let term = test_terminal();
         // Should not panic; emits a failure status
         report_source_file("@missing", Path::new("/nonexistent/file.md"), &term);
     }
@@ -220,34 +224,34 @@ mod tests {
 
     #[test]
     fn report_phase_discovery_emits_nothing_for_zero() {
-        let term = Terminal::default();
+        let term = test_terminal();
         report_phase_discovery(FailurePhase::PreCheck, 0, &term);
     }
 
     #[test]
     fn report_phase_discovery_singular() {
-        let term = Terminal::default();
+        let term = test_terminal();
         // Singular grammar: "1 validation pre check was found"
         report_phase_discovery(FailurePhase::PreCheck, 1, &term);
     }
 
     #[test]
     fn report_phase_discovery_plural() {
-        let term = Terminal::default();
+        let term = test_terminal();
         // Plural grammar: "3 validation post checks were found"
         report_phase_discovery(FailurePhase::PostCheck, 3, &term);
     }
 
     #[test]
     fn report_phase_discovery_agent_is_noop() {
-        let term = Terminal::default();
+        let term = test_terminal();
         // Agent phase should silently return
         report_phase_discovery(FailurePhase::Agent, 5, &term);
     }
 
     #[test]
     fn report_phase_discovery_shell_audit_is_noop() {
-        let term = Terminal::default();
+        let term = test_terminal();
         report_phase_discovery(FailurePhase::ShellAudit, 2, &term);
     }
 
@@ -255,7 +259,7 @@ mod tests {
 
     #[test]
     fn report_check_outcomes_success_and_failure() {
-        let term = Terminal::default();
+        let term = test_terminal();
         let report = ValidationPhaseReport {
             phase: FailurePhase::PreCheck,
             outcomes: vec![
@@ -285,19 +289,19 @@ mod tests {
 
     #[test]
     fn report_shell_audit_header_emits_nothing_for_zero() {
-        let term = Terminal::default();
+        let term = test_terminal();
         report_shell_audit_header(0, &term);
     }
 
     #[test]
     fn report_shell_audit_header_singular() {
-        let term = Terminal::default();
+        let term = test_terminal();
         report_shell_audit_header(1, &term);
     }
 
     #[test]
     fn report_shell_audit_header_plural() {
-        let term = Terminal::default();
+        let term = test_terminal();
         report_shell_audit_header(4, &term);
     }
 
@@ -305,7 +309,7 @@ mod tests {
 
     #[test]
     fn report_shell_audit_outcomes_mixed() {
-        let term = Terminal::default();
+        let term = test_terminal();
         let report = ShellAuditReport {
             outcomes: vec![
                 ShellAuditOutcome {
@@ -337,7 +341,7 @@ mod tests {
 
     #[test]
     fn report_handler_engagement_escapes_source_display() {
-        let term = Terminal::default();
+        let term = test_terminal();
         // Source with markup-like characters should not panic
         report_handler_engagement("/path/to/<source>.md", &term);
     }
@@ -346,19 +350,19 @@ mod tests {
 
     #[test]
     fn report_prompt_property_present_and_non_empty() {
-        let term = Terminal::default();
+        let term = test_terminal();
         report_prompt_property(true, true, &term);
     }
 
     #[test]
     fn report_prompt_property_present_but_empty() {
-        let term = Terminal::default();
+        let term = test_terminal();
         report_prompt_property(true, false, &term);
     }
 
     #[test]
     fn report_prompt_property_missing() {
-        let term = Terminal::default();
+        let term = test_terminal();
         report_prompt_property(false, false, &term);
     }
 
@@ -366,7 +370,7 @@ mod tests {
 
     #[test]
     fn report_unhandled_failure_renders() {
-        let term = Terminal::default();
+        let term = test_terminal();
         report_unhandled_failure("pre-check validation failed (2 failures)", &term);
     }
 
@@ -377,7 +381,7 @@ mod tests {
         // Verify the state mapping logic: passed → Success, failed → Failure.
         // We can't easily capture stderr, but we verify no panic and
         // the mapping code is exercised.
-        let term = Terminal::default();
+        let term = test_terminal();
         let report = ValidationPhaseReport {
             phase: FailurePhase::PostCheck,
             outcomes: vec![ValidationCheckOutcome {

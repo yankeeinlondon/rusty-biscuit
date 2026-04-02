@@ -694,7 +694,7 @@ pub(crate) fn capitalize_provider(provider: Provider) -> String {
 
 /// Try to reformat a raw API error line (e.g. `API Error: 529 {"type":"error",...}`)
 /// into a human-readable message. Returns `None` if the line doesn't match.
-pub(crate) fn try_format_api_error(line: &str) -> Option<String> {
+pub(crate) fn try_format_api_error(line: &str, term: &Terminal) -> Option<String> {
     // Match pattern: "API Error: NNN {json}" or "API Error: NNN ..." at minimum
     let rest = line.strip_prefix("API Error: ")?;
 
@@ -749,17 +749,24 @@ pub(crate) fn try_format_api_error(line: &str) -> Option<String> {
         )
     };
 
-    Some(Prose::new(friendly).render(&crate::log::terminal()))
+    Some(Prose::new(friendly).render(term))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_terminal::terminal::Terminal;
+
+    /// Create a Terminal without real terminal probing (avoids TTY hangs in tests).
+    fn test_terminal() -> Terminal {
+        Terminal::new_optimistic(80)
+    }
 
     #[test]
     fn try_format_api_error_parses_overloaded() {
+        let term = test_terminal();
         let line = r#"API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded. https://docs.claude.com/en/api/errors"},"request_id":"req_abc123"}"#;
-        let result = try_format_api_error(line).unwrap();
+        let result = try_format_api_error(line, &term).unwrap();
         assert!(result.contains("API Error (529)"));
         assert!(result.contains("Overloaded"));
         assert!(result.contains("transient"));
@@ -768,16 +775,18 @@ mod tests {
 
     #[test]
     fn try_format_api_error_parses_500() {
+        let term = test_terminal();
         let line = r#"API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"},"request_id":"req_xyz"}"#;
-        let result = try_format_api_error(line).unwrap();
+        let result = try_format_api_error(line, &term).unwrap();
         assert!(result.contains("API Error (500)"));
         assert!(result.contains("Internal server error"));
     }
 
     #[test]
     fn try_format_api_error_returns_none_for_non_match() {
-        assert!(try_format_api_error("some random line").is_none());
-        assert!(try_format_api_error("Error: something").is_none());
+        let term = test_terminal();
+        assert!(try_format_api_error("some random line", &term).is_none());
+        assert!(try_format_api_error("Error: something", &term).is_none());
     }
 
     #[test]
