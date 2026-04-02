@@ -426,11 +426,10 @@ pub(crate) fn execute_composition_request(
         let shell_options =
             build_harness_shell_options(&request.prepared.resolved_path, effective_repo_root);
         // Validate that the harness plan can be parsed before proceeding.
-        let mut plan = claudine::harness::parse_harness_plan_with_shell(
+        let mut plan = claudine::harness::parse_harness_plan(
             &request.prepared.effective_frontmatter,
             &request.prepared.resolved_path,
             &resolve_ctx,
-            Some(&shell_options),
         )
         .map_err(|e| eyre!("{e}"))?;
 

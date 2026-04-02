@@ -1123,11 +1123,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 };
                 let shell_options =
                     build_harness_shell_options(&source_path, env_plan.repo_root.as_deref());
-                let plan = claudine::harness::parse_harness_plan_with_shell(
+                let plan = claudine::harness::parse_harness_plan(
                     &seed.frontmatter,
                     &source_path,
                     &resolve_ctx,
-                    Some(&shell_options),
                 )
                 .map_err(|e| eyre!("{e}"))?;
 
@@ -2193,11 +2192,10 @@ pub(crate) fn run_harness_loop(
             materialize_harness_prompt(prompt_state, repo_root)?
         };
         let resolve_ctx = harness_context.resolve_context();
-        let mut plan = claudine::harness::parse_harness_plan_with_shell(
+        let mut plan = claudine::harness::parse_harness_plan(
             &materialized.frontmatter,
             &prompt_state.source_path,
             &resolve_ctx,
-            Some(harness_context.shell_options()),
         )?;
 
         // Source-file existence reporting
