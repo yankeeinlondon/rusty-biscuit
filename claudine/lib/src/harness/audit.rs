@@ -430,4 +430,37 @@ mod tests {
             "harness pre-check commands should still be collected"
         );
     }
+
+    #[test]
+    fn source_scan_finds_shell_hidden_by_false_block() {
+        let plan = empty_plan();
+        let source = "# Title\n::block when=\"false\"\n::shell curl https://example.com\n::end-block\nRegular text\n";
+
+        // Raw source scan (Passthrough mode) picks up ::shell despite the
+        // enclosing ::block when="false" because parse_directives does
+        // line-level scanning without block context.
+        let with_source = collect_auditable_commands(&plan, Some(source)).unwrap();
+        let source_count = with_source
+            .iter()
+            .filter(|c| matches!(c.source, AuditedCommandSource::ComposeSourceLine { .. }))
+            .count();
+        assert_eq!(
+            source_count, 1,
+            "raw source scan should pick up ::shell inside ::block when=\"false\" (line-level scan)"
+        );
+
+        // Composition mode passes None — no source-page re-audit.
+        // This is the fix from ef6e3cf2: composition flows must not re-parse raw
+        // source because the false ::block hides the directive at the Darkmatter
+        // level but not at the raw-text level.
+        let without_source = collect_auditable_commands(&plan, None).unwrap();
+        let source_count = without_source
+            .iter()
+            .filter(|c| matches!(c.source, AuditedCommandSource::ComposeSourceLine { .. }))
+            .count();
+        assert_eq!(
+            source_count, 0,
+            "composition mode (None source_text) must not find source-page directives"
+        );
+    }
 }
