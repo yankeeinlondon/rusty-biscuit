@@ -41,6 +41,7 @@
 ## Task 1: Add `ShellCommandEntry` Type to Darkmatter
 
 **Files:**
+
 - Modify: `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs`
 - Modify: `darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs`
 
