@@ -1,64 +1,23 @@
 ---
 prompt: |-
-        Claudine wants to be able to provide a consistent and universal way to either _append to_ or _replace_ the system prompt. Your job is to research in detail how Codex CLI handles the system prompt. You should be able to at least answer the following questions:
-        - What CLI switches are involved in effecting the system prompt? What does each switch do?
-        - What other ways, other than via a CLI switch, can you manipulate what the system prompt will be?
-        - Can Agents or Subagents have their own system prompt which is distinct from an orchestrator?
-        - what quirks and workarounds do developers talk about with regard to Codex CLI and system prompts?
-        - have there been any recent changes to how system prompts can be manipulated? If so, when?
-        - what format works best when appending to the system prompt? what format works best when replacing the system prompt?
+    Claudine wants to be able to provide a consistent and universal way to either _append to_ or _replace_ the system prompt. Your job is to research in detail how Codex CLI handles the system prompt. You should be able to at least answer the following questions:
+    - What CLI switches are involved in effecting the system prompt? What does each switch do?
+    - What other ways, other than via a CLI switch, can you manipulate what the system prompt will be?
+    - Can Agents or Subagents have their own system prompt which is distinct from an orchestrator?
+    - what quirks and workarounds do developers talk about with regard to Codex CLI and system prompts?
+    - have there been any recent changes to how system prompts can be manipulated? If so, when?
+    - what format works best when appending to the system prompt? what format works best when replacing the system prompt?
 
-                - pure markdown? XML wrapper of markdown? Other?
+        - pure markdown? XML wrapper of markdown? Other?
 
-        All research and observations should be written to the body of this Markdown document while preserving the Frontmatter data. The Markdown should all be standards based and isomorphic. Tables should be Markdown tables. Links should be Markdown links.
+    All research and observations should be written to the body of this Markdown document while preserving the Frontmatter data. The Markdown should all be standards based and isomorphic. Tables should be Markdown tables. Links should be Markdown links.
 
-        If any data visuals are thought to be important you should feel free to use Mermaid.js charts by adding in a mermaidjs code block.
+    If any data visuals are thought to be important you should feel free to use Mermaid.js charts by adding in a mermaidjs code block.
 
-        Provide a summary -- a paragraph and some bullet points are an ideal length for the summary -- of this document to STDOUT.
+    Provide a summary -- a paragraph and some bullet points are an ideal length for the summary -- of this document to STDOUT.
 last_updated: 2026-03-30
 ---
 
-I will start by searching the codebase for information regarding "Codex CLI" to see how it is currently integrated or referenced.
-
-I will now explore the contents of the `.codex/` directory to see if it contains configuration or documentation that might reveal more about how the Codex CLI handles system prompts.
-
-I will now examine the contents of the `.codex/prompts/` directory to check for any files that might be related to the system prompt.
-
-I will now search for "system prompt" within the `claudine` directory to see if there is any documentation or code that explains how the system prompt is handled.
-
-I will now read the `claudine/docs/research/agent-cli/codex.md` file to gather information on how the Codex CLI handles system prompts.
-
-I will now search the codebase for any mentions of "Codex" and "subagent" to see if there is any existing information on how they interact and if subagents have distinct system prompts.
-
-I will now read the `claudine/docs/research/cross-referencing/codex.md` file to find more details on how Codex CLI handles multi-agent workflows and if they have distinct system prompts.
-
-I will now search the `claudine` directory for the mapping of the `--system-prompt` flag to Codex CLI arguments to understand how it is translated.
-
-I will now list the contents of the `claudine/lib/src/providers/` directory to locate the Codex implementation and investigate how it handles the system prompt.
-
-I will search for "Provider::Codex" to find where it is defined and used in the codebase.
-
-I will now read the `claudine/lib/src/adapters/codex.rs` file to see how it generates the CLI command for Codex and how it handles the system prompt.
-
-I will search for "Command::new" or "std::process::Command" to find where the Codex CLI command is constructed and executed.
-
-I will now read the `claudine/cli/src/commands/wrap/composition.rs` file to understand how the system prompt is applied during the composition execution pipeline.
-
-I will now read the `claudine/cli/src/commands/wrap/profile/mod.rs` file to find where the profiles are defined and locate the `CodexProfile` to see how it implements `apply_system_prompt`.
-
-I will search for "trait WrapperProfile" to find the definition of the `WrapperProfile` trait and see where its implementations are.
-
-I will read the `claudine/cli/src/commands/wrap/profile.rs` file to locate the Codex implementation and see how it maps the `--system-prompt` flag.
-
-I will search for "XML" and "system prompt" together to see if there is any mention of using XML wrappers in system prompts within the codebase.
-
-I will check for the existence of `claudine/docs/research/system-prompt/codex.md` and then list the contents of the `claudine/docs/research/` directory to see if there is any other relevant documentation.
-
-I will now list the contents of the `claudine/docs/research/system-prompt/` directory to see if there is a research file for Codex CLI.
-
-I will read the `claudine/docs/research/system-prompt/codex.md` file to see if it contains any existing research and then I will be ready to synthesize the report.
-
-Codex CLI employs a highly structured, layered approach to system prompts, transitioning from a static "constitution" model to a more dynamic, hierarchical, and skill-based architecture.
 
 ### CLI Switches for System Prompt Manipulation
 
