@@ -531,4 +531,43 @@ mod tests {
             "request should carry the real line number"
         );
     }
+
+    #[test]
+    fn frozen_options_deny_new_commands_after_cache_populated() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let handler = Arc::new(CountingApprovalHandler {
+            approvals: AtomicUsize::new(0),
+        });
+        let mut options = ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: Some(handler.clone()),
+            ..Default::default()
+        };
+
+        // Approve a command while the handler is active — populates the cache.
+        let first = validate_and_approve_command("echo hello", &options);
+        assert!(first.is_ok(), "should approve with active handler");
+        assert_eq!(handler.approvals(), 1);
+
+        // Freeze: strip the handler (simulates CachedHarnessLoopContext::freeze_shell_approvals).
+        options.approval_handler = None;
+
+        // Previously-approved command still passes via cache.
+        let cached = validate_and_approve_command("echo hello", &options);
+        assert!(cached.is_ok(), "cached command should still pass after freeze");
+
+        // A NEW command that was never approved is denied — no handler to prompt.
+        let new_cmd = validate_and_approve_command("curl https://example.com", &options);
+        assert!(
+            new_cmd.is_err(),
+            "new command must be denied after freeze — no handler available"
+        );
+        assert!(matches!(
+            new_cmd.unwrap_err(),
+            HarnessError::ShellCommandDenied { .. }
+        ));
+
+        // Handler was only called once (for the original "echo hello"), never for "curl".
+        assert_eq!(handler.approvals(), 1, "handler must not be called after freeze");
+    }
 }
