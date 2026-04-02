@@ -486,4 +486,26 @@ mod tests {
         assert_eq!(result2.total_discovered, 1);
         assert_eq!(handler.calls(), 1, "handler should not be called again — cache hit");
     }
+
+    #[test]
+    fn interactive_handler_is_invoked_for_non_whitelisted_command() {
+        let md: Markdown = "# Test\n::shell curl https://example.com\n".into();
+        let compose_options = ComposeOptions::new();
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::AllowOnce));
+        let options = ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: Some(handler.clone()),
+            ..Default::default()
+        };
+
+        let result =
+            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap();
+
+        assert_eq!(handler.calls(), 1, "handler must be invoked for non-whitelisted command");
+        assert!(result.approved_commands.contains("curl https://example.com"));
+        assert_eq!(result.user_approved, 1);
+        assert_eq!(result.already_whitelisted, 0);
+    }
 }
