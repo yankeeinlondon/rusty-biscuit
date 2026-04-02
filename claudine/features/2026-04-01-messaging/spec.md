@@ -35,15 +35,19 @@ Also use the 'messenger' skill.
   "configs": {
     "work-slack": {
       "provider": "slack",
-      "webhook_url": "https://hooks.slack.com/..."
+      "channel_id": "C012345ABC",
+      "bot_token_env": "SLACK_BOT_TOKEN"
     },
     "personal-discord": {
       "provider": "discord",
-      "webhook_url": "https://discord.com/api/webhooks/..."
+      "channel_id": "123456789012345678",
+      "bot_token_env": "DISCORD_BOT_TOKEN"
     }
   }
 }
 ```
+
+> Secrets can be provided inline (`bot_token`) or via environment variable name (`bot_token_env`). Inline values take precedence. Default env var names follow the `messenger` CLI conventions.
 
 ## Initialization
 

@@ -37,7 +37,7 @@ When `matcher` is set, the binding only fires if the regex matches the relevant 
 
 ## Action Types
 
-Every action is a JSON object with a `"type"` discriminator. Claudine supports six action types.
+Every action is a JSON object with a `"type"` discriminator. Claudine supports seven action types.
 
 ### `sound_effect`
 
@@ -155,6 +155,31 @@ Spawn an external command asynchronously without waiting for completion or inspe
 { "type": "fire_and_forget", "command": "notify-send", "args": ["Claudine", "{{event}} fired"] }
 ```
 
+### `message`
+
+Send a message to the configured messaging destination (Slack, Discord, Signal, or WhatsApp). Fire-and-forget -- delivery is async and does not block the pipeline. Empty messages after template interpolation are silently skipped.
+
+Requires messaging configuration in `settings.messaging` (see [Messaging Configuration](#messaging-configuration) below).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `message` | `string` | (required) | Template message with `{{variable}}` placeholders (rendered as Markdown where supported) |
+| `image` | `string?` | `null` | File path to a raster image attachment (Discord only in v1; ignored with a warning for other providers) |
+
+```json
+{ "type": "message", "message": "**{{provider}}** `{{event}}` in `{{cwd}}`" }
+```
+
+```json
+{
+  "type": "message",
+  "message": "Build artifact ready",
+  "image": "{{cwd}}/.claudine/artifacts/last-run.png"
+}
+```
+
+Image path resolution: absolute paths stay absolute, `~/` expands to the home directory, relative paths resolve from `{{cwd}}` then the repo root.
+
 ### `call`
 
 Execute an external command synchronously and map its output to a `HookResponse`. This is the only action type that can influence agent behavior on blocking events (e.g., `before_tool`, `before_prompt`, `permission_request`).
@@ -257,6 +282,88 @@ Shell environment variables are available via `{{env.VAR_NAME}}` with optional d
 {{env.MY_VAR | "fallback_value"}}
 ```
 
+## Messaging Configuration
+
+The `message` action requires a destination configured under `settings.messaging` in your `config.json`. Configuration supports both user scope (`~/.claudine/config.json`) and repo scope (`.claudine/config.json`).
+
+### Named Config Pattern
+
+Multiple provider configurations are stored under a `configs` map keyed by user-chosen names. An `active` field selects which named config is currently in use. Setting `active` to `null` or omitting it disables messaging for that scope.
+
+Scope resolution: repo-scope `active` overrides user-scope when present. If repo scope sets `active` to `null`, the user-scope active config is used as fallback.
+
+### Provider Configs
+
+Secrets can be provided inline (e.g., `bot_token`) or via an environment variable name (e.g., `bot_token_env`). Inline values take precedence. Default env var names follow the `messenger` CLI conventions.
+
+**Discord:**
+
+```json
+{
+  "provider": "discord",
+  "channel_id": "123456789012345678",
+  "bot_token_env": "DISCORD_BOT_TOKEN"
+}
+```
+
+**Slack:**
+
+```json
+{
+  "provider": "slack",
+  "channel_id": "C012345ABC",
+  "bot_token_env": "SLACK_BOT_TOKEN"
+}
+```
+
+**Signal:**
+
+```json
+{
+  "provider": "signal",
+  "recipient": "+15551234567",
+  "rpc_url_env": "SIGNAL_RPC_URL",
+  "account_env": "SIGNAL_ACCOUNT"
+}
+```
+
+Recipients starting with `+` are treated as phone numbers; other values are treated as Signal group IDs.
+
+**WhatsApp:**
+
+```json
+{
+  "provider": "whatsapp",
+  "recipient": "+15559876543",
+  "access_token_env": "WHATSAPP_ACCESS_TOKEN",
+  "phone_number_id_env": "WHATSAPP_PHONE_NUMBER_ID"
+}
+```
+
+### Example Settings Block
+
+```json
+{
+  "settings": {
+    "messaging": {
+      "active": "work-slack",
+      "configs": {
+        "work-slack": {
+          "provider": "slack",
+          "channel_id": "C012345ABC",
+          "bot_token_env": "SLACK_BOT_TOKEN"
+        },
+        "personal-discord": {
+          "provider": "discord",
+          "channel_id": "123456789012345678",
+          "bot_token_env": "DISCORD_BOT_TOKEN"
+        }
+      }
+    }
+  }
+}
+```
+
 ## Full Example
 
 A complete event binding with multiple actions:
@@ -289,7 +396,8 @@ A complete event binding with multiple actions:
           "actions": [
             { "type": "log" },
             { "type": "sound_effect", "name": "success" },
-            { "type": "speak", "message": "Turn complete on {{git.branch}}" }
+            { "type": "speak", "message": "Turn complete on {{git.branch}}" },
+            { "type": "message", "message": "Turn complete on **{{git.branch}}**" }
           ]
         },
         "tool_error": {
