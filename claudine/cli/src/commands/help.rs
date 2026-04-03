@@ -162,13 +162,19 @@ pub fn run() -> Result<()> {
     for (name, desc) in [
         (
             "-v, --verbose",
-            "Increase verbosity (-v for verbose, -vv for debug)",
+            "Increase presentation detail for human-facing output",
+        ),
+        (
+            "--debug <LEVEL>",
+            "Set Claudine diagnostic tracing (trace, debug, info, warn, error)",
         ),
         ("--plain", "Strip ANSI escape codes from all output"),
         ("-h, --help", "Print help"),
         ("-V, --version", "Print version"),
     ] {
-        let padded = format!("{:<width$}", name, width = NAME_COL_WIDTH);
+        let padded = format!("{:<width$}", name, width = NAME_COL_WIDTH)
+            .replace('<', "\\<")
+            .replace('>', "\\>");
         let line = Prose::new(format!("  <green>{}</green><dim>{}</dim>", padded, desc));
         output.push_str(&line.render(&term));
         output.push('\n');

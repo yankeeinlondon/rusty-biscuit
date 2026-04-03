@@ -585,7 +585,6 @@ impl WrapperProfile for CodexWrapper {
         }
     }
 
-
     fn supports_interactive_inline_closure(&self) -> bool {
         true
     }
@@ -836,7 +835,6 @@ impl WrapperProfile for KimiWrapper {
         Ok(())
     }
 
-
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
         Ok(vec![
             "kimi".to_string(),
@@ -1080,17 +1078,29 @@ impl WrapperProfile for OpencodeWrapper {
         non_interactive: bool,
     ) -> Result<()> {
         if non_interactive {
-            // In non-interactive mode, deliver via stdin to avoid ENAMETOOLONG
-            // errors when prompt-file content exceeds OS argument length limits.
+            // Non-interactive (`opencode run`): deliver via stdin to avoid
+            // exceeding OS argument-list limits on large composed prompts.
             *stdin_seed = Some(prompt.to_string());
         } else {
-            // Interactive: insert as positional after "run"
-            let insert_at = if args.first().is_some_and(|f| f == "run") {
-                1
-            } else {
-                0
-            };
-            args.insert(insert_at, prompt.to_string());
+            // Interactive TUI: use --prompt flag which auto-submits the
+            // message (OpenCode PR #4510).  This keeps stdin inherited so
+            // the TUI's raw-mode input and mouse tracking work natively.
+            //
+            // The OS enforces ARG_MAX (~1 MB on macOS) for the combined
+            // size of argv + envp passed to execve.  Guard against the
+            // rare case of an extremely large composed prompt.
+            const ARG_MAX_HEADROOM: usize = 768 * 1024; // conservative
+            if prompt.len() > ARG_MAX_HEADROOM {
+                bail!(
+                    "composed prompt is too large for interactive mode ({} KB); \
+                     the OS limits command-line arguments to ~1 MB.\n\
+                     Try running without -i to use non-interactive mode, \
+                     which delivers the prompt via stdin instead.",
+                    prompt.len() / 1024
+                );
+            }
+            args.push("--prompt".to_string());
+            args.push(prompt.to_string());
         }
         Ok(())
     }
@@ -1106,7 +1116,6 @@ impl WrapperProfile for OpencodeWrapper {
         }
         Ok(())
     }
-
 
     fn supports_structured_stream(&self) -> bool {
         true

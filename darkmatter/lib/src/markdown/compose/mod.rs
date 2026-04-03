@@ -64,7 +64,7 @@ pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
     ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePerfMetric,
-    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeWarning,
+    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeWarning, SourceRange,
 };
 
 // Internal re-exports for crate modules that still use TransclusionOptions
@@ -77,6 +77,7 @@ use super::types::{MarkdownError, MarkdownResult};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use tracing::{debug, info, instrument, trace, warn};
 
 use cache::operation::CacheableOperation;
 use shell_expansion::{apply_replacements_in_reverse, execute_directive};
@@ -175,6 +176,8 @@ struct ResolvedTransclusion {
     target: ApplyTarget,
     content: Option<String>,
     report: ComposeReport,
+    /// Source file for file-based transclusions (used for source map).
+    source_file: Option<PathBuf>,
 }
 
 // Re-export HeadingLevel for tests
@@ -217,6 +220,7 @@ impl Markdown {
     ///
     /// let (composed, report) = md.compose_with(options).unwrap();
     /// ```
+    #[instrument(skip_all, fields(source = ?options.source))]
     pub fn compose_with(
         &self,
         options: ComposeOptions,
@@ -270,6 +274,7 @@ impl Markdown {
     /// 2. **Transclusion** (prepared serially, resolved concurrently): BlockTransclusion,
     ///    FrontmatterTransclusion, CodeTransclusion, TocLinking
     /// 3. **Inline Post** (serial): Cleanup, Normalization
+    #[instrument(skip_all, fields(source = ?options.source))]
     pub(crate) fn run_compose_pipeline_internal(
         &mut self,
         options: ComposeOptions,
@@ -399,10 +404,12 @@ impl Markdown {
 
             let mut transclusion_ran = false;
             for operation in ComposeOperation::default_order() {
+                trace!(operation = ?operation, enabled = options.is_enabled(*operation), "compose: checking operation");
                 if !options.is_enabled(*operation) {
                     continue;
                 }
 
+                info!(operation = ?operation, phase = ?operation.phase(), "compose: running operation");
                 match operation.phase() {
                     ComposePhase::InlinePre => {
                         let op_start = perf.is_enabled().then(std::time::Instant::now);
@@ -578,6 +585,7 @@ impl Markdown {
             return Ok(());
         }
 
+        info!(operations = ?operations, "compose: starting transclusion phase");
         let parse_start = perf_collector.is_enabled().then(std::time::Instant::now);
 
         let parsed_directives = if operations.iter().any(|op| {
@@ -684,6 +692,7 @@ impl Markdown {
             .map(|item| self.resolve_prepared_transclusion(item, state, options, &runtime_mutex))
             .collect::<Vec<_>>();
 
+        debug!(resolved = results.len(), "compose: transclusion resolution complete");
         if let Some(start) = resolve_start {
             perf_collector.record(perf::PerfMetricKind::TransclusionResolve, start.elapsed());
         }
@@ -723,7 +732,12 @@ impl Markdown {
 
             match resolved.target {
                 ApplyTarget::Replace(span) => {
-                    replacements.push((resolved.order, span, resolved.content.unwrap_or_default()));
+                    replacements.push((
+                        resolved.order,
+                        span,
+                        resolved.content.unwrap_or_default(),
+                        resolved.source_file,
+                    ));
                 }
                 ApplyTarget::Section(SectionSlot::Prologue(index)) => {
                     prologue_sections[index] = resolved.content;
@@ -743,10 +757,37 @@ impl Markdown {
                     .then_with(|| right.0.cmp(&left.0))
             });
             let mut next = self.content.clone();
-            for (_, span, replacement) in replacements {
-                next.replace_range(span, &replacement);
+            for (_, span, replacement, _) in &replacements {
+                next.replace_range(span.clone(), replacement);
             }
             self.content = next;
+
+            // Build source map: compute final byte positions for each file transclusion.
+            // Sort forward by original span start and track cumulative offset.
+            {
+                let mut forward: Vec<_> = replacements
+                    .iter()
+                    .map(|(_, span, content, source)| (span.clone(), content.len(), source.clone()))
+                    .collect();
+                forward.sort_by_key(|(span, _, _)| span.start);
+
+                let mut offset: isize = 0;
+                for (span, content_len, source_file) in forward {
+                    let final_start = (span.start as isize + offset) as usize;
+                    let final_end = final_start + content_len;
+
+                    if let Some(file) = source_file {
+                        report.source_map.push(SourceRange {
+                            byte_start: final_start,
+                            byte_end: final_end,
+                            source_file: file,
+                            source_start_line: 1,
+                        });
+                    }
+
+                    offset += content_len as isize - (span.end - span.start) as isize;
+                }
+            }
         }
 
         if prologue_count > 0 || epilogue_count > 0 {
@@ -795,6 +836,7 @@ impl Markdown {
         if count > 0 {
             self.content = new_content;
         }
+        debug!(count, "compose: text replacements applied");
         count
     }
 
@@ -830,6 +872,7 @@ impl Markdown {
         if result.replacements > 0 {
             self.content = result.output;
         }
+        debug!(count = result.replacements, "compose: interpolations applied");
         Ok(result.replacements)
     }
 
@@ -840,6 +883,7 @@ impl Markdown {
     fn run_normalization_stage(
         &mut self,
     ) -> Result<normalize::NormalizationReport, NormalizationError> {
+        debug!("compose: running normalization");
         let (new_content, report) = normalize::normalize(&self.content, None)?;
         self.content = new_content;
         Ok(report)
@@ -853,6 +897,7 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         let directives = shell_expansion::parse_directives(&self.content)?;
+        debug!(directive_count = directives.len(), "compose: shell expansion directives found");
         if directives.is_empty() {
             return Ok(());
         }
@@ -881,6 +926,7 @@ impl Markdown {
         state: &EffectiveState,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
+        debug!("compose: running page blocks");
         let regions = page_blocks::parser::parse_page_blocks(&self.content)?;
         if regions.is_empty() {
             return Ok(());
@@ -1202,6 +1248,7 @@ impl Markdown {
                 target: ApplyTarget::Replace(span),
                 content: Some(replacement),
                 report,
+                source_file: None,
             }),
             PreparedTransclusion::FixedSection {
                 order,
@@ -1213,6 +1260,7 @@ impl Markdown {
                 target: ApplyTarget::Section(slot),
                 content,
                 report,
+                source_file: None,
             }),
             PreparedTransclusion::Markdown {
                 order,
@@ -1245,6 +1293,7 @@ impl Markdown {
                     target,
                     content: Some(content),
                     report: child_report,
+                    source_file: Some(path),
                 })
             }
             PreparedTransclusion::Code {
@@ -1276,6 +1325,7 @@ impl Markdown {
                     target: ApplyTarget::Replace(span),
                     content: Some(content),
                     report: code_report,
+                    source_file: None,
                 })
             }
             PreparedTransclusion::Toc {
@@ -1356,6 +1406,7 @@ impl Markdown {
                     target: ApplyTarget::Replace(span),
                     content: Some(replacement),
                     report: toc_report,
+                    source_file: None,
                 })
             }
         }
@@ -2164,8 +2215,7 @@ mod tests {
 
     #[test]
     fn test_interpolation_code_spans_via_frontmatter() {
-        let content =
-            "---\nname: Alice\ninterpolate_code_spans: true\n---\nHello {{ name }}! Code: `{{ name }}`";
+        let content = "---\nname: Alice\ninterpolate_code_spans: true\n---\nHello {{ name }}! Code: `{{ name }}`";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);

@@ -37,11 +37,7 @@ pub fn explain_evaluation(eval: &ProtectEvaluation) -> ProtectExplanation {
         eval.decision.outcome, eval.decision.desired_outcome, eval.decision.degraded,
     );
 
-    let findings = eval
-        .findings
-        .iter()
-        .map(explain_finding)
-        .collect();
+    let findings = eval.findings.iter().map(explain_finding).collect();
 
     let remediation = suggest_remediation(eval);
 
@@ -101,8 +97,7 @@ fn suggest_remediation(eval: &ProtectEvaluation) -> Option<ProtectRemediation> {
             one_time_args: None,
             summary: format!(
                 "The desired outcome ({:?}) was degraded to {:?} because the provider lacks the capability to enforce it.",
-                eval.decision.desired_outcome,
-                eval.decision.outcome,
+                eval.decision.desired_outcome, eval.decision.outcome,
             ),
         });
     }

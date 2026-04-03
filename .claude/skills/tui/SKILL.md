@@ -1,6 +1,6 @@
 ---
 name: tui
-description: Expert knowledge for building terminal user interfaces (TUIs) covering framework-agnostic best practices, Ratatui (Rust) with immediate-mode rendering and constraint-based layouts, and Bubble Tea (Go) with Elm architecture and Charm.sh ecosystem
+description: Expert knowledge for building and designing terminal user interfaces (TUIs) covering design systems (layout paradigms, color palettes, keyboard navigation, data visualization), framework-agnostic best practices, real-world app pattern analysis, Ratatui (Rust) with immediate-mode rendering and constraint-based layouts, and Bubble Tea (Go) with Elm architecture and Charm.sh ecosystem
 last_updated: 2025-12-24T12:00:00Z
 hash: 984cf841655dd773
 ---
@@ -8,6 +8,21 @@ hash: 984cf841655dd773
 # Terminal User Interface Development
 
 This skill covers TUI development across frameworks: **Ratatui** (Rust, immediate-mode) and **Bubble Tea** (Go, Elm architecture). Most detail files focus on Ratatui since it's the primary framework in this monorepo.
+
+## TUI Design & App Patterns
+
+Before writing code, start with design. The [TUI Design System](./tui-design-skill.md) covers:
+
+- **Layout paradigms** — persistent multi-panel, Miller columns, drill-down stack, widget dashboard, IDE three-panel, overlay/popup
+- **Interaction models** — keyboard layers, focus management, search/filtering, help systems, confirmation dialogs
+- **Color design** — 16/256/truecolor tiers, semantic color slots, theme architecture, accessibility (WCAG AA)
+- **Data visualization** — block elements, braille graphics, sparklines, gauges, spinners
+- **Animation & motion** — flicker-free rendering, synchronized output
+- **Design principles & anti-patterns** — the 7 principles and 10 ranked anti-patterns
+
+Supporting resources:
+- [App Patterns Gallery](./resources/app-patterns.md) — design analysis of lazygit, k9s, yazi, btop, zellij, and more
+- [Visual Catalog](./resources/visual-catalog.md) — box-drawing, block elements, braille, status indicators, tree characters
 
 ## Choosing a Framework
 
@@ -98,6 +113,12 @@ See [Bubble Tea Architecture](./bubble-tea-architecture.md) for commands, async,
 | Layout overflow on small terminals | No minimum size guard | Check `area.width < 10` and show fallback message |
 
 ## Topics
+
+### Design
+
+- [TUI Design System](./tui-design-skill.md) -- layout paradigms, interaction models, color systems, data visualization, design principles
+- [App Patterns Gallery](./resources/app-patterns.md) -- real-world design analysis of lazygit, k9s, yazi, btop, zellij, and more
+- [Visual Catalog](./resources/visual-catalog.md) -- box-drawing, block elements, braille, status indicators, tree characters
 
 ### Ratatui Core
 

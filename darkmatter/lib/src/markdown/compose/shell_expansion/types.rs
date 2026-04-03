@@ -22,6 +22,27 @@ pub struct ShellDirective {
     pub error_handling: ErrorHandling,
 }
 
+/// A shell command discovered during document graph analysis.
+///
+/// Returned by [`collect_shell_commands`] for pre-flight approval.
+/// Contains enough information for the caller to check policy and
+/// prompt the user without needing to understand the document graph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellCommandEntry {
+    /// The raw command as written in the directive (e.g., "sniff repo packages").
+    pub raw_command: String,
+    /// The resolved executable name (e.g., "sniff").
+    pub executable: String,
+    /// The argument list (e.g., ["repo", "packages"]).
+    pub args: Vec<String>,
+    /// Normalized form for whitelist matching (e.g., "sniff repo packages").
+    pub normalized: String,
+    /// Source file where this directive was found.
+    pub source_file: PathBuf,
+    /// Line number in the source file.
+    pub line: usize,
+}
+
 /// Error handling options parsed from `::shell` directive flags.
 ///
 /// These options control how non-zero exit codes are handled, allowing
@@ -248,6 +269,16 @@ pub enum ShellExpansionError {
 
     #[error("Command denied: '{command}' on line {line}")]
     Denied { command: String, line: usize },
+
+    #[error(
+        "Command '{command}' on line {line} was not pre-approved{source_desc}. \
+         This is a bug in the pre-flight scanner -- please report it."
+    )]
+    NotPreApproved {
+        command: String,
+        line: usize,
+        source_desc: String,
+    },
 
     #[error("Command timed out after {timeout:?}: '{command}' on line {line}")]
     Timeout {

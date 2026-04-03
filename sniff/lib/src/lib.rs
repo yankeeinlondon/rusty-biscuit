@@ -242,21 +242,25 @@ pub fn detect_with_plan(plan: DetectionPlan) -> Result<SniffResult> {
     // Run all four domains concurrently using scoped threads.
     // Each domain is independent, so there is no ordering constraint.
     let (os, hardware, network, filesystem) = std::thread::scope(|s| {
-        let os_handle = plan.os.as_ref().map(|req| {
-            s.spawn(move || os::detect_os_with_request(req))
-        });
+        let os_handle = plan
+            .os
+            .as_ref()
+            .map(|req| s.spawn(move || os::detect_os_with_request(req)));
 
-        let hw_handle = plan.hardware.as_ref().map(|req| {
-            s.spawn(move || hardware::detect_hardware_with_request(req))
-        });
+        let hw_handle = plan
+            .hardware
+            .as_ref()
+            .map(|req| s.spawn(move || hardware::detect_hardware_with_request(req)));
 
-        let net_handle = plan.network.as_ref().map(|req| {
-            s.spawn(move || network::detect_network_with_request(req))
-        });
+        let net_handle = plan
+            .network
+            .as_ref()
+            .map(|req| s.spawn(move || network::detect_network_with_request(req)));
 
-        let fs_handle = plan.filesystem.as_ref().map(|req| {
-            s.spawn(move || filesystem::detect_filesystem_with_request(&base, req))
-        });
+        let fs_handle = plan
+            .filesystem
+            .as_ref()
+            .map(|req| s.spawn(move || filesystem::detect_filesystem_with_request(&base, req)));
 
         let os = os_handle.map(|h| h.join().unwrap()).transpose();
         let hardware = hw_handle.map(|h| h.join().unwrap()).transpose();

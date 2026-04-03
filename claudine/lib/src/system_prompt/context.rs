@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use sniff::filesystem::git::detect_git;
-use sniff::filesystem::repo::{Package, detect_repo};
+use sniff::filesystem::repo::Package;
+use sniff::request::*;
 
 /// Filesystem roots resolved from the directory the user launched Claudine in.
 ///
@@ -26,26 +26,35 @@ pub struct LaunchContext {
 impl LaunchContext {
     /// Build a launch context from the given working directory.
     ///
-    /// Uses `sniff::filesystem::git::detect_git` and
-    /// `sniff::filesystem::repo::detect_repo` under the hood.
+    /// Uses a single `sniff::detect_with_plan` call with git summary
+    /// and repo structure detection.
     pub fn from_cwd(cwd: &Path) -> Result<Self, crate::error::ClaudineError> {
-        let git_root = detect_git(cwd, false, 1)
-            .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(e.to_string()))?
-            .map(|info| info.repo_root);
+        let plan = DetectionPlan::new()
+            .base_dir(cwd.to_path_buf())
+            .without_os()
+            .without_hardware()
+            .without_network()
+            .filesystem(
+                FilesystemRequest::new()
+                    .git(GitRequest::summary())
+                    .repo(RepoRequest::structure())
+                    .without_file_inventory()
+                    .without_docs()
+                    .without_formatting(),
+            );
 
-        let repo_probe_root = git_root.clone().unwrap_or_else(|| cwd.to_path_buf());
-        let repo = detect_repo(&repo_probe_root)
+        let result = sniff::detect_with_plan(plan)
             .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(e.to_string()))?;
+
+        let fs = result.filesystem;
+        let git_root = fs.as_ref().and_then(|f| f.git.as_ref()).map(|g| g.repo_root.clone());
+        let repo = fs.and_then(|f| f.repo);
 
         let (package_root, package_area_root) = match repo {
             Some(ref repo) if repo.is_monorepo => {
                 if let Some(ref packages) = repo.packages {
                     let pkg_root = select_package_root(cwd, packages);
-                    let area_root = select_package_area_root(
-                        cwd,
-                        &repo.root,
-                        packages,
-                    );
+                    let area_root = select_package_area_root(cwd, &repo.root, packages);
                     (pkg_root, area_root)
                 } else {
                     (None, None)
@@ -101,11 +110,7 @@ fn select_package_root(cwd: &Path, packages: &[Package]) -> Option<PathBuf> {
 }
 
 /// Select the deepest matching package-area root for the given cwd.
-fn select_package_area_root(
-    cwd: &Path,
-    repo_root: &Path,
-    packages: &[Package],
-) -> Option<PathBuf> {
+fn select_package_area_root(cwd: &Path, repo_root: &Path, packages: &[Package]) -> Option<PathBuf> {
     let cwd_normalized = canonical_or_self(cwd);
     let repo_root_normalized = canonical_or_self(repo_root);
 
@@ -155,19 +160,15 @@ mod tests {
     /// Create a Cargo workspace toml that declares packages.
     fn write_cargo_workspace(repo_root: &Path, members: &[&str]) {
         let members_str: Vec<String> = members.iter().map(|m| format!("    \"{m}\"")).collect();
-        let content = format!(
-            "[workspace]\nmembers = [\n{}\n]\n",
-            members_str.join(",\n")
-        );
+        let content = format!("[workspace]\nmembers = [\n{}\n]\n", members_str.join(",\n"));
         fs::write(repo_root.join("Cargo.toml"), content).unwrap();
     }
 
     /// Create a package Cargo.toml with a given name.
     fn write_package_toml(package_dir: &Path, name: &str) {
         fs::create_dir_all(package_dir).unwrap();
-        let content = format!(
-            "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
-        );
+        let content =
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n");
         fs::write(package_dir.join("Cargo.toml"), content).unwrap();
     }
 
@@ -241,8 +242,7 @@ mod tests {
 
         init_git_repo(root);
         // Single-package repo (not a monorepo)
-        let content =
-            "[package]\nname = \"my-app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n";
+        let content = "[package]\nname = \"my-app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n";
         fs::write(root.join("Cargo.toml"), content).unwrap();
 
         let ctx = LaunchContext::from_cwd(root).unwrap();

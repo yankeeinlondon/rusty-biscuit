@@ -11,11 +11,11 @@ use serde_json::Value;
 
 use crate::actions::HookResponse;
 use crate::events::{AgenticEvent, EventMeta, Provider};
+use crate::services::protect::observe::default_observe_protect;
 use crate::services::{
     ProtectDecision, ProtectObservation, ProtectOutcome, ProviderProtectCapabilities,
     ProviderProtectProfiles,
 };
-use crate::services::protect::observe::default_observe_protect;
 
 /// Adapter-level parse/format errors.
 #[derive(Debug, thiserror::Error)]
@@ -375,8 +375,8 @@ mod tests {
     /// Verify all adapters produce observations for protect-relevant events.
     #[test]
     fn all_adapters_produce_observations_for_before_tool() {
-        use std::collections::HashMap;
         use crate::events::EnvironmentContext;
+        use std::collections::HashMap;
 
         for provider in [
             Provider::Claude,
@@ -423,9 +423,9 @@ mod tests {
     /// Verify Claude adapter extracts MCP tool intents.
     #[test]
     fn claude_observe_extracts_mcp_intents() {
-        use std::collections::HashMap;
         use crate::events::EnvironmentContext;
         use crate::services::protect::intent::ProtectIntent;
+        use std::collections::HashMap;
 
         let adapter = adapter_for(Provider::Claude);
         let meta = EventMeta {
@@ -446,9 +446,13 @@ mod tests {
             env: EnvironmentContext::default(),
         };
 
-        let obs = adapter.observe_protect(&AgenticEvent::BeforeTool, &meta).unwrap();
+        let obs = adapter
+            .observe_protect(&AgenticEvent::BeforeTool, &meta)
+            .unwrap();
         assert!(
-            obs.intents.iter().any(|i| matches!(i, ProtectIntent::UseMcpServer { server } if server == "filesystem")),
+            obs.intents.iter().any(
+                |i| matches!(i, ProtectIntent::UseMcpServer { server } if server == "filesystem")
+            ),
             "Should extract MCP server intent"
         );
         assert!(
@@ -460,9 +464,9 @@ mod tests {
     /// Verify Codex adapter extracts command intents from item type.
     #[test]
     fn codex_observe_extracts_command_from_item_type() {
-        use std::collections::HashMap;
         use crate::events::EnvironmentContext;
         use crate::services::protect::intent::ProtectIntent;
+        use std::collections::HashMap;
 
         let adapter = adapter_for(Provider::Codex);
         let mut extra = HashMap::new();
@@ -486,9 +490,13 @@ mod tests {
             env: EnvironmentContext::default(),
         };
 
-        let obs = adapter.observe_protect(&AgenticEvent::BeforeTool, &meta).unwrap();
+        let obs = adapter
+            .observe_protect(&AgenticEvent::BeforeTool, &meta)
+            .unwrap();
         assert!(
-            obs.intents.iter().any(|i| matches!(i, ProtectIntent::ExecuteCommand(_))),
+            obs.intents
+                .iter()
+                .any(|i| matches!(i, ProtectIntent::ExecuteCommand(_))),
             "Codex adapter should extract command intent from command_execution item"
         );
     }
@@ -496,9 +504,9 @@ mod tests {
     /// Verify Roo adapter extracts SwitchMode intent.
     #[test]
     fn roo_observe_extracts_switch_mode() {
-        use std::collections::HashMap;
         use crate::events::EnvironmentContext;
         use crate::services::protect::intent::ProtectIntent;
+        use std::collections::HashMap;
 
         let adapter = adapter_for(Provider::RooCode);
         let meta = EventMeta {
@@ -519,7 +527,9 @@ mod tests {
             env: EnvironmentContext::default(),
         };
 
-        let obs = adapter.observe_protect(&AgenticEvent::BeforeTool, &meta).unwrap();
+        let obs = adapter
+            .observe_protect(&AgenticEvent::BeforeTool, &meta)
+            .unwrap();
         assert!(
             obs.intents.iter().any(|i| matches!(i, ProtectIntent::SwitchMode { target } if target.as_deref() == Some("architect"))),
             "Roo adapter should extract SwitchMode intent"
@@ -529,9 +539,9 @@ mod tests {
     /// Verify Roo adapter extracts MCP tool intents.
     #[test]
     fn roo_observe_extracts_mcp_tool() {
-        use std::collections::HashMap;
         use crate::events::EnvironmentContext;
         use crate::services::protect::intent::ProtectIntent;
+        use std::collections::HashMap;
 
         let adapter = adapter_for(Provider::RooCode);
         let meta = EventMeta {
@@ -552,9 +562,13 @@ mod tests {
             env: EnvironmentContext::default(),
         };
 
-        let obs = adapter.observe_protect(&AgenticEvent::BeforeTool, &meta).unwrap();
+        let obs = adapter
+            .observe_protect(&AgenticEvent::BeforeTool, &meta)
+            .unwrap();
         assert!(
-            obs.intents.iter().any(|i| matches!(i, ProtectIntent::UseMcpServer { server } if server == "my_server")),
+            obs.intents.iter().any(
+                |i| matches!(i, ProtectIntent::UseMcpServer { server } if server == "my_server")
+            ),
             "Roo adapter should extract MCP server intent from use_mcp_tool"
         );
         assert!(
@@ -566,16 +580,19 @@ mod tests {
     /// Verify Gemini adapter extracts MCP from mcp_context.
     #[test]
     fn gemini_observe_extracts_mcp_from_context() {
-        use std::collections::HashMap;
         use crate::events::EnvironmentContext;
         use crate::services::protect::intent::ProtectIntent;
+        use std::collections::HashMap;
 
         let adapter = adapter_for(Provider::Gemini);
         let mut extra = HashMap::new();
-        extra.insert("mcp_context".to_string(), json!({
-            "server_id": "github",
-            "tool_name": "search_repos"
-        }));
+        extra.insert(
+            "mcp_context".to_string(),
+            json!({
+                "server_id": "github",
+                "tool_name": "search_repos"
+            }),
+        );
 
         let meta = EventMeta {
             provider: Provider::Gemini,
@@ -595,9 +612,13 @@ mod tests {
             env: EnvironmentContext::default(),
         };
 
-        let obs = adapter.observe_protect(&AgenticEvent::BeforeTool, &meta).unwrap();
+        let obs = adapter
+            .observe_protect(&AgenticEvent::BeforeTool, &meta)
+            .unwrap();
         assert!(
-            obs.intents.iter().any(|i| matches!(i, ProtectIntent::UseMcpServer { server } if server == "github")),
+            obs.intents
+                .iter()
+                .any(|i| matches!(i, ProtectIntent::UseMcpServer { server } if server == "github")),
             "Gemini adapter should extract MCP server from mcp_context"
         );
         assert!(

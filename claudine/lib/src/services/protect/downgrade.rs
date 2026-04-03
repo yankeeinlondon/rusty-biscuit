@@ -1,6 +1,6 @@
+use super::ProtectOutcome;
 use super::config::ProtectPhase;
 use super::decision::{GateCapability, ProviderProtectCapabilities, VisibilityLevel};
-use super::ProtectOutcome;
 
 #[allow(dead_code)]
 pub(crate) fn downgrade_for_capability(

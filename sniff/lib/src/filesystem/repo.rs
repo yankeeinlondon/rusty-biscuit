@@ -480,7 +480,7 @@ impl ManifestIndex {
 /// - `Ok(None)` if no repository configuration is found
 /// - `Err(SniffError)` if there's an error reading files
 pub fn detect_repo(root: &Path) -> Result<Option<RepoInfo>> {
-    detect_repo_inner(root, false)
+    detect_repo_inner(root, false).map(|(info, _inventory)| info)
 }
 
 /// Lightweight repo detection that skips per-package language scanning.
@@ -489,10 +489,24 @@ pub fn detect_repo(root: &Path) -> Result<Option<RepoInfo>> {
 /// `primary_language`, `frameworks`, or `file_associations` per package.
 /// Typically 10-50x faster than `detect_repo` on large monorepos.
 pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
-    detect_repo_inner(root, true)
+    detect_repo_inner(root, true).map(|(info, _inventory)| info)
 }
 
-fn detect_repo_inner(root: &Path, structure_only: bool) -> Result<Option<RepoInfo>> {
+/// Full repo detection that also returns the shared file inventory.
+///
+/// The returned inventory is the same one used internally to enrich
+/// per-package language/framework data, so callers that need both repo
+/// info and a top-level file inventory can avoid scanning the tree twice.
+pub(crate) fn detect_repo_with_inventory(
+    root: &Path,
+) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
+    detect_repo_inner(root, false)
+}
+
+fn detect_repo_inner(
+    root: &Path,
+    structure_only: bool,
+) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
     // Build manifest index once for the entire tree
     let manifest_index = if structure_only {
         None
@@ -540,7 +554,7 @@ fn detect_repo_inner(root: &Path, structure_only: bool) -> Result<Option<RepoInf
     );
 
     if workspace_tools.is_empty() {
-        return Ok(None);
+        return Ok((None, None));
     }
 
     if !structure_only {
@@ -561,24 +575,30 @@ fn detect_repo_inner(root: &Path, structure_only: bool) -> Result<Option<RepoInf
     }
 
     let mut packages = merge_packages(packages);
-    if !structure_only {
+    let repo_inventory = if !structure_only {
         // Build shared repo-level file inventory once for all packages
-        let repo_inventory = super::file_types::scan_file_inventory(root).ok();
-        refresh_package_boundaries(&mut packages, repo_inventory.as_ref());
-    }
+        let inventory = super::file_types::scan_file_inventory(root).ok();
+        refresh_package_boundaries(&mut packages, inventory.as_ref());
+        inventory
+    } else {
+        None
+    };
     resolve_internal_deps(&mut packages);
 
-    Ok(Some(RepoInfo {
-        is_monorepo: true,
-        monorepo_tool: workspace_tools.first().copied(),
-        workspace_tools,
-        root: root.to_path_buf(),
-        dependencies: None,
-        dev_dependencies: None,
-        peer_dependencies: None,
-        optional_dependencies: None,
-        packages: Some(packages),
-    }))
+    Ok((
+        Some(RepoInfo {
+            is_monorepo: true,
+            monorepo_tool: workspace_tools.first().copied(),
+            workspace_tools,
+            root: root.to_path_buf(),
+            dependencies: None,
+            dev_dependencies: None,
+            peer_dependencies: None,
+            optional_dependencies: None,
+            packages: Some(packages),
+        }),
+        repo_inventory,
+    ))
 }
 
 fn collect_repo_info(
@@ -1989,10 +2009,7 @@ fn merge_path_lists(existing: &[PathBuf], incoming: &[PathBuf]) -> Vec<PathBuf> 
     merged
 }
 
-fn refresh_package_boundaries(
-    packages: &mut [Package],
-    repo_inventory: Option<&FileInventory>,
-) {
+fn refresh_package_boundaries(packages: &mut [Package], repo_inventory: Option<&FileInventory>) {
     let package_paths: Vec<PathBuf> = packages.iter().map(|pkg| pkg.path.clone()).collect();
     let package_roots: Vec<PathBuf> = packages
         .iter()

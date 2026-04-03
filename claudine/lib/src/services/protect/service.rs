@@ -15,10 +15,10 @@ use super::decision::{
 use super::downgrade::capability_for_phase;
 use super::evaluate::evaluate_request;
 use super::redact::{
-    redact_json_with_policy, redact_text_with_policy, McpJsonRedaction, McpTextRedaction,
+    McpJsonRedaction, McpTextRedaction, redact_json_with_policy, redact_text_with_policy,
 };
 use super::request::{ProtectRequest, ProtectSessionContext};
-use super::state::{ProtectDecisionRecord, ProtectState, ProtectStateExport, GLOBAL_SESSION_KEY};
+use super::state::{GLOBAL_SESSION_KEY, ProtectDecisionRecord, ProtectState, ProtectStateExport};
 
 /// Central policy actor for Protect decisions.
 ///
@@ -106,12 +106,8 @@ impl ProtectService {
         &self.engine
     }
 
-
     /// Full structured evaluation from a pre-built request.
-    pub fn evaluate_structured(
-        &mut self,
-        request: &ProtectRequest,
-    ) -> Result<ProtectEvaluation> {
+    pub fn evaluate_structured(&mut self, request: &ProtectRequest) -> Result<ProtectEvaluation> {
         let policy = self.resolve_policy_for_provider(request.provider);
 
         // Fast path: protect disabled for this provider
@@ -131,9 +127,11 @@ impl ProtectService {
         // Apply capability downgrade
         let capabilities = self.profiles.capabilities(request.provider);
         let gate = capability_for_phase(request.phase, &capabilities);
-        if let Some(degraded) =
-            downgrade_outcome_for_capability(&eval.decision.desired_outcome, request.phase, capabilities)
-        {
+        if let Some(degraded) = downgrade_outcome_for_capability(
+            &eval.decision.desired_outcome,
+            request.phase,
+            capabilities,
+        ) {
             eval.decision = ProtectDecision::degraded(
                 degraded,
                 eval.decision.desired_outcome.clone(),

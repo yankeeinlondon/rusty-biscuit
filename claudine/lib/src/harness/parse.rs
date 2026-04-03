@@ -16,9 +16,6 @@ use crate::harness::model::{
     ValidationRuleId,
 };
 use crate::harness::resolve::{HarnessResolutionContext, resolve_harness_path};
-use crate::harness::shell::{
-    ShellApprovalOptions, validate_and_approve_command, validate_and_approve_command_parts,
-};
 use crate::harness::timeout::parse_timeout;
 
 /// Harness-relevant frontmatter keys.
@@ -52,17 +49,6 @@ pub fn parse_harness_plan(
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
 ) -> Result<HarnessPlan, HarnessError> {
-    parse_harness_plan_with_shell(frontmatter, source_path, ctx, None)
-}
-
-/// Parse composed frontmatter into a [`HarnessPlan`], optionally enforcing
-/// shell approval for runtime commands at parse time.
-pub fn parse_harness_plan_with_shell(
-    frontmatter: &Value,
-    source_path: &Path,
-    ctx: &HarnessResolutionContext<'_>,
-    shell_options: Option<&ShellApprovalOptions>,
-) -> Result<HarnessPlan, HarnessError> {
     let obj = frontmatter
         .as_object()
         .ok_or_else(|| HarnessError::InvalidFrontmatter {
@@ -80,14 +66,14 @@ pub fn parse_harness_plan_with_shell(
 
     // Parse pre_checks
     let pre_checks = if let Some(v) = obj.get("pre_checks") {
-        parse_checks(v, true, source_path, ctx, shell_options, &mut alloc_id)?
+        parse_checks(v, true, source_path, ctx, &mut alloc_id)?
     } else {
         Vec::new()
     };
 
     // Parse post_checks
     let post_checks = if let Some(v) = obj.get("post_checks") {
-        parse_checks(v, false, source_path, ctx, shell_options, &mut alloc_id)?
+        parse_checks(v, false, source_path, ctx, &mut alloc_id)?
     } else {
         Vec::new()
     };
@@ -105,7 +91,7 @@ pub fn parse_harness_plan_with_shell(
     };
 
     // Parse handlers
-    let (handlers, programmatic_handler) = parse_handlers(obj, source_path, ctx, shell_options)?;
+    let (handlers, programmatic_handler) = parse_handlers(obj, source_path, ctx)?;
 
     Ok(HarnessPlan {
         source_path: source_path.to_path_buf(),
@@ -144,7 +130,6 @@ fn parse_checks(
     is_pre: bool,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
-    shell_options: Option<&ShellApprovalOptions>,
     alloc_id: &mut impl FnMut() -> ValidationRuleId,
 ) -> Result<Vec<ValidationRule>, HarnessError> {
     let property = if is_pre { "pre_checks" } else { "post_checks" };
@@ -162,15 +147,8 @@ fn parse_checks(
                         detail: "each item in the list must be an object".to_string(),
                     })?;
                 for (name, val) in obj {
-                    let rule = parse_single_validation(
-                        name,
-                        val,
-                        is_pre,
-                        source_path,
-                        ctx,
-                        shell_options,
-                        alloc_id,
-                    )?;
+                    let rule =
+                        parse_single_validation(name, val, is_pre, source_path, ctx, alloc_id)?;
                     rules.push(rule);
                 }
             }
@@ -180,15 +158,7 @@ fn parse_checks(
             // Map form: shorthand
             let mut rules = Vec::with_capacity(obj.len());
             for (name, val) in obj {
-                let rule = parse_single_validation(
-                    name,
-                    val,
-                    is_pre,
-                    source_path,
-                    ctx,
-                    shell_options,
-                    alloc_id,
-                )?;
+                let rule = parse_single_validation(name, val, is_pre, source_path, ctx, alloc_id)?;
                 rules.push(rule);
             }
             Ok(rules)
@@ -305,7 +275,6 @@ fn parse_single_validation(
     is_pre: bool,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
-    shell_options: Option<&ShellApprovalOptions>,
     alloc_id: &mut impl FnMut() -> ValidationRuleId,
 ) -> Result<ValidationRule, HarnessError> {
     let meta = validation_meta(name).ok_or_else(|| HarnessError::UnknownValidation {
@@ -328,7 +297,7 @@ fn parse_single_validation(
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    let (kind, subject_key) = parse_validation_kind(name, value, source_path, ctx, shell_options)?;
+    let (kind, subject_key) = parse_validation_kind(name, value, source_path, ctx)?;
 
     Ok(ValidationRule {
         id: alloc_id(),
@@ -348,7 +317,6 @@ fn parse_validation_kind(
     value: &Value,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
-    shell_options: Option<&ShellApprovalOptions>,
 ) -> Result<(ValidationKind, Option<String>), HarnessError> {
     match name {
         "file_exists" => {
@@ -423,7 +391,7 @@ fn parse_validation_kind(
                 })?;
             let show_stdout = extract_bool_field(value, "show_stdout").unwrap_or(true);
             let show_stderr = extract_bool_field(value, "show_stderr").unwrap_or(true);
-            let command = parse_runtime_command(&raw, source_path, shell_options)?;
+            let command = tokenize_to_approved_command(&raw, source_path)?;
             Ok((
                 ValidationKind::ShellCommand {
                     command,
@@ -555,7 +523,6 @@ fn parse_handlers(
     obj: &serde_json::Map<String, Value>,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
-    shell_options: Option<&ShellApprovalOptions>,
 ) -> Result<(HandlerTable, Option<ApprovedRuntimeCommand>), HarnessError> {
     let mut table = HandlerTable::default();
     let mut programmatic = None;
@@ -563,24 +530,13 @@ fn parse_handlers(
     for (key, value) in obj {
         if key == "handle" {
             // Programmatic handler: store raw command, defer approval to Phase 7
-            programmatic = Some(parse_programmatic_handler(
-                value,
-                source_path,
-                shell_options,
-            )?);
+            programmatic = Some(parse_programmatic_handler(value, source_path)?);
             continue;
         }
 
         if let Some(event_name) = key.strip_prefix("handle_") {
             let failure_event = parse_failure_event(event_name, source_path)?;
-            parse_handler_entry(
-                value,
-                failure_event,
-                source_path,
-                ctx,
-                shell_options,
-                &mut table,
-            )?;
+            parse_handler_entry(value, failure_event, source_path, ctx, &mut table)?;
         }
     }
 
@@ -591,7 +547,6 @@ fn parse_handlers(
 fn parse_programmatic_handler(
     value: &Value,
     source_path: &Path,
-    shell_options: Option<&ShellApprovalOptions>,
 ) -> Result<ApprovedRuntimeCommand, HarnessError> {
     // Accept: { command: ["executable", "arg1", ...] } or { command: "executable arg1 ..." }
     let cmd_value = if let Some(obj) = value.as_object() {
@@ -617,9 +572,13 @@ fn parse_programmatic_handler(
                         .unwrap_or_else(|| v.to_string())
                 })
                 .collect();
-            parse_runtime_command_parts(&parts, shell_options)
+            Ok(ApprovedRuntimeCommand {
+                raw: parts.join(" "),
+                executable: parts[0].clone(),
+                args: parts[1..].to_vec(),
+            })
         }
-        Value::String(s) => parse_runtime_command(s, source_path, shell_options),
+        Value::String(s) => tokenize_to_approved_command(s, source_path),
         _ => Err(HarnessError::InvalidFrontmatter {
             source_path: source_path.to_path_buf(),
             property: "handle".to_string(),
@@ -678,7 +637,6 @@ fn parse_handler_entry(
     event: FailureEvent,
     source_path: &Path,
     ctx: &HarnessResolutionContext<'_>,
-    shell_options: Option<&ShellApprovalOptions>,
     table: &mut HandlerTable,
 ) -> Result<(), HarnessError> {
     let obj = value
@@ -697,8 +655,7 @@ fn parse_handler_entry(
 
     if is_direct {
         // Generic handler
-        let action =
-            parse_handler_action(obj, source_path, &format!("handle_{event}"), shell_options)?;
+        let action = parse_handler_action(obj, source_path, &format!("handle_{event}"))?;
         table.generic.push(HandlerRule {
             event,
             subject_key: None,
@@ -719,7 +676,6 @@ fn parse_handler_entry(
                 subject_obj,
                 source_path,
                 &format!("handle_{event}.{subject_key}"),
-                shell_options,
             )?;
             // Normalize subject key through the same path resolver used for
             // validation subjects so that handler matching works correctly
@@ -774,7 +730,6 @@ fn parse_handler_action(
     obj: &serde_json::Map<String, Value>,
     source_path: &Path,
     property: &str,
-    shell_options: Option<&ShellApprovalOptions>,
 ) -> Result<HandlerAction, HarnessError> {
     if let Some(v) = obj.get("retry") {
         let inner = v.as_object().cloned().unwrap_or_default();
@@ -850,7 +805,7 @@ fn parse_handler_action(
                 handler: "deviate".to_string(),
                 field: "cmd".to_string(),
             })?;
-        let command = parse_runtime_command(&cmd_str, source_path, shell_options)?;
+        let command = tokenize_to_approved_command(&cmd_str, source_path)?;
         return Ok(HandlerAction::Deviate {
             command,
             set: parse_set_overlay(&inner),
@@ -907,31 +862,6 @@ fn tokenize_to_approved_command(
         executable: tokens[0].clone(),
         args: tokens[1..].to_vec(),
     })
-}
-
-fn parse_runtime_command(
-    raw: &str,
-    source_path: &Path,
-    shell_options: Option<&ShellApprovalOptions>,
-) -> Result<ApprovedRuntimeCommand, HarnessError> {
-    match shell_options {
-        Some(options) => validate_and_approve_command(raw, options),
-        None => tokenize_to_approved_command(raw, source_path),
-    }
-}
-
-fn parse_runtime_command_parts(
-    parts: &[String],
-    shell_options: Option<&ShellApprovalOptions>,
-) -> Result<ApprovedRuntimeCommand, HarnessError> {
-    match shell_options {
-        Some(options) => validate_and_approve_command_parts(parts, options),
-        None => Ok(ApprovedRuntimeCommand {
-            raw: parts.join(" "),
-            executable: parts[0].clone(),
-            args: parts[1..].to_vec(),
-        }),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1127,7 +1057,7 @@ mod tests {
                 "json_file_exists": {
                     "file": "./data.json",
                     "shape": "object",
-                    "msg": "{{status}} data file is valid"
+                    "msg": "{{file}} data file is valid"
                 }
             }]
         });
@@ -1142,7 +1072,7 @@ mod tests {
         ));
         assert_eq!(
             plan.pre_checks[0].message_template.as_deref(),
-            Some("{{status}} data file is valid")
+            Some("{{file}} data file is valid")
         );
     }
 

@@ -6,6 +6,7 @@ use super::agentic_event::AgenticEvent;
 use super::provider::Provider;
 use crate::actions::{HookAction, LogTarget};
 use crate::error::{ClaudineError, Result};
+use crate::messaging::ScopedMessagingSettings;
 use crate::services::protect::ProtectConfig;
 
 /// Root configuration loaded from `~/.claudine/config.json`.
@@ -58,6 +59,10 @@ pub struct GlobalSettings {
     /// Protect service policy configuration.
     #[serde(default)]
     pub protect: Option<ProtectConfig>,
+
+    /// Messaging destination settings for `Message` actions.
+    #[serde(default)]
+    pub messaging: Option<ScopedMessagingSettings>,
 }
 
 /// TTS configuration forwarded to biscuit-speaks.
@@ -155,6 +160,12 @@ impl HookerConfig {
         if let Some(protect) = self.settings.protect.as_ref() {
             protect.validate().map_err(|error| {
                 ClaudineError::ConfigValidation(format!("invalid settings.protect: {error}"))
+            })?;
+        }
+
+        if let Some(messaging) = self.settings.messaging.as_ref() {
+            messaging.validate("config").map_err(|error| {
+                ClaudineError::ConfigValidation(format!("invalid settings.messaging: {error}"))
             })?;
         }
 
@@ -421,6 +432,32 @@ mod tests {
     }
 
     #[test]
+    fn global_settings_with_messaging() {
+        let json = serde_json::json!({
+            "messaging": {
+                "active": "ops",
+                "configs": {
+                    "ops": {
+                        "provider": "slack",
+                        "channel_id": "C123"
+                    }
+                }
+            }
+        });
+
+        let settings: GlobalSettings = serde_json::from_value(json).unwrap();
+        let messaging = settings.messaging.unwrap();
+        assert_eq!(messaging.active.as_deref(), Some("ops"));
+    }
+
+    #[test]
+    fn global_settings_without_messaging() {
+        let json = serde_json::json!({});
+        let settings: GlobalSettings = serde_json::from_value(json).unwrap();
+        assert!(settings.messaging.is_none());
+    }
+
+    #[test]
     fn validate_rejects_invalid_protect_settings() {
         let config = HookerConfig {
             version: "1.0".to_string(),
@@ -440,5 +477,36 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("invalid settings.protect"));
+    }
+
+    #[test]
+    fn full_config_example_with_messaging_parses() {
+        let json = serde_json::json!({
+            "version": "1.0",
+            "settings": {
+                "messaging": {
+                    "active": "work-slack",
+                    "configs": {
+                        "work-slack": {
+                            "provider": "slack",
+                            "channel_id": "C012345ABC",
+                            "bot_token_env": "SLACK_BOT_TOKEN"
+                        },
+                        "personal-discord": {
+                            "provider": "discord",
+                            "channel_id": "123456789012345678",
+                            "bot_token_env": "DISCORD_BOT_TOKEN"
+                        }
+                    }
+                }
+            },
+            "providers": {}
+        });
+
+        let config: HookerConfig = serde_json::from_value(json).unwrap();
+        let messaging = config.settings.messaging.as_ref().unwrap();
+        assert_eq!(messaging.active.as_deref(), Some("work-slack"));
+        assert_eq!(messaging.configs.len(), 2);
+        config.validate().unwrap();
     }
 }

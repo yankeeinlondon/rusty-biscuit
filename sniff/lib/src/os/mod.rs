@@ -35,7 +35,9 @@ pub use package_manager::{
     detect_macos_package_managers, detect_windows_package_managers, get_commands_for_manager,
     get_path_dirs,
 };
-pub use time::{NtpStatus, TimeInfo, detect_ntp_status, detect_timezone, detect_timezone_with_options};
+pub use time::{
+    NtpStatus, TimeInfo, detect_ntp_status, detect_timezone, detect_timezone_with_options,
+};
 
 // ============================================================================
 // OS Type Detection

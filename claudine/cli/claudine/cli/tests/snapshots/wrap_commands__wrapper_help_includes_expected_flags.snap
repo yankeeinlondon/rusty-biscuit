@@ -10,7 +10,8 @@ Arguments:
   [ARGS]...  Arguments forwarded to the wrapped provider CLI
 
 Options:
-  -v, --verbose...                   Increase verbosity (-v for verbose, -vv for debug)
+  -v, --verbose...                   Increase presentation detail for human-facing output
+      --debug <LEVEL>                Set Claudine diagnostic tracing [possible values: trace, debug, info, warn, error]
   -y, --yolo                         Enable provider-specific YOLO/auto-approval mode
       --include <ENV_NAME>           Preserve this env var even when it matches sensitive-name filters
   -i, --interactive                  Force interactive mode even when a prompt string is provided

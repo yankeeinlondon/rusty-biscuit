@@ -212,6 +212,10 @@ impl HardwareRequest {
 pub struct NetworkRequest {
     /// Include WAN IP lookup (HTTP call to external service)
     pub include_wan_ip: bool,
+    /// Force a fresh WAN IP lookup, bypassing the TTL cache.
+    /// Only meaningful when `include_wan_ip` is true.
+    #[serde(default)]
+    pub force_refresh: bool,
 }
 
 impl NetworkRequest {
@@ -219,6 +223,7 @@ impl NetworkRequest {
     pub fn interfaces_only() -> Self {
         Self {
             include_wan_ip: false,
+            force_refresh: false,
         }
     }
 
@@ -226,11 +231,18 @@ impl NetworkRequest {
     pub fn full() -> Self {
         Self {
             include_wan_ip: true,
+            force_refresh: false,
         }
     }
 
     pub fn include_wan_ip(mut self, include: bool) -> Self {
         self.include_wan_ip = include;
+        self
+    }
+
+    /// Bypass the WAN IP cache and perform a fresh lookup.
+    pub fn force_refresh(mut self, refresh: bool) -> Self {
+        self.force_refresh = refresh;
         self
     }
 }
@@ -438,9 +450,7 @@ mod tests {
 
     #[test]
     fn detection_plan_skip_sections() {
-        let plan = DetectionPlan::new()
-            .without_os()
-            .without_hardware();
+        let plan = DetectionPlan::new().without_os().without_hardware();
         assert!(plan.os.is_none());
         assert!(plan.hardware.is_none());
         assert!(plan.network.is_some());
@@ -536,7 +546,7 @@ mod tests {
             .filesystem(
                 FilesystemRequest::new()
                     .git(GitRequest::deep().commit_count(5))
-                    .repo(RepoRequest::structure())
+                    .repo(RepoRequest::structure()),
             );
 
         let json = serde_json::to_string(&plan).unwrap();

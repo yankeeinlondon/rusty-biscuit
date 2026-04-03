@@ -36,6 +36,7 @@
 
 use super::EffectiveState;
 use serde_json::Value;
+use tracing::debug;
 
 /// A replacement rule with key and coerced string value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,7 +93,9 @@ pub fn apply_replacements(content: &str, state: &EffectiveState) -> (String, usi
     };
 
     // Apply replacements with single-pass scanner
-    scan_and_replace(content, &rules)
+    let (result, count) = scan_and_replace(content, &rules);
+    debug!(count, "replacement: applied text replacements");
+    (result, count)
 }
 
 /// Builds sorted replacement rules from the effective state.

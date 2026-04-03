@@ -69,6 +69,11 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
             .and_then(|v| v.as_str())
             .map(String::from);
         self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
+        super::trace_session_metadata(
+            Provider::Claude,
+            self.session_id.as_deref(),
+            self.model.as_deref(),
+        );
 
         let mut meta = EventMeta::default();
         if let Some(sid) = &self.session_id {
@@ -191,6 +196,12 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
             map.remove("mcp_servers");
         }
         self.raw_summary = Some(raw);
+        super::trace_summary_update(
+            Provider::Claude,
+            self.provider_status.as_deref(),
+            self.duration_ms,
+            self.cost_usd,
+        );
     }
 
     fn handle_rate_limit(&mut self, obj: &Value) {
@@ -210,6 +221,13 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
 
     fn handle_tool_use(&mut self, obj: &Value) {
         self.tool_calls += 1;
+        super::trace_tool_event(
+            Provider::Claude,
+            self.tool_calls,
+            obj.get("name")
+                .or_else(|| obj.get("tool_name"))
+                .and_then(|value| value.as_str()),
+        );
         let mut meta = EventMeta::default();
         if let Some(tool_name) = obj
             .get("name")
@@ -239,6 +257,7 @@ impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
         let obj: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
+            super::trace_malformed_line(Provider::Claude, self.line_num, &e.to_string());
             StreamParseError::MalformedLine {
                 line_num: self.line_num,
                 message: e.to_string(),
@@ -246,6 +265,7 @@ impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
         })?;
 
         let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        super::trace_parser_event(Provider::Claude, event_type, self.line_num);
 
         match event_type {
             "init" | "system" => {

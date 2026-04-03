@@ -149,6 +149,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn make_prepared_composition(agent_hint: Option<serde_json::Value>) -> PreparedComposition {
+        use super::super::lifecycle::LifecycleConfig;
         use super::super::types::CompositionClosurePlan;
         PreparedComposition {
             mode: CompositionMode::ChainedDocument,
@@ -158,6 +159,7 @@ mod tests {
             effective_frontmatter: json!({}),
             effective_agent_hint: agent_hint,
             closure: CompositionClosurePlan::Direct,
+            lifecycle: LifecycleConfig::default(),
         }
     }
 

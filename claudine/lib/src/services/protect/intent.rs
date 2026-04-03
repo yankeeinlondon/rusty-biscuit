@@ -26,9 +26,7 @@ impl ProtectIntent {
             ProtectIntent::ReadPath(pq) => Some(PolicyQuery::ReadPath(pq.clone())),
             ProtectIntent::WritePath(pq) => Some(PolicyQuery::WritePath(pq.clone())),
             ProtectIntent::TraversePath(pq) => Some(PolicyQuery::TraversePath(pq.clone())),
-            ProtectIntent::ExecuteCommand(cq) => {
-                Some(PolicyQuery::ExecuteCommand(cq.clone()))
-            }
+            ProtectIntent::ExecuteCommand(cq) => Some(PolicyQuery::ExecuteCommand(cq.clone())),
             ProtectIntent::AccessDomain(dq) => Some(PolicyQuery::AccessDomain(dq.clone())),
             ProtectIntent::UseMcpServer { server } => Some(PolicyQuery::UseMcpServer {
                 server: server.clone(),
@@ -37,9 +35,9 @@ impl ProtectIntent {
                 server: server.clone(),
                 tool: tool.clone(),
             }),
-            ProtectIntent::SpawnSubagent { name } => Some(PolicyQuery::SpawnSubagent {
-                name: name.clone(),
-            }),
+            ProtectIntent::SpawnSubagent { name } => {
+                Some(PolicyQuery::SpawnSubagent { name: name.clone() })
+            }
             ProtectIntent::SwitchMode { target } => Some(PolicyQuery::SwitchMode {
                 target: target.clone(),
             }),

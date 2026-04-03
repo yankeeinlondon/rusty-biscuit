@@ -1322,11 +1322,11 @@ mod tests {
     #[test]
     fn template_substitution_replaces_placeholders() {
         let mut vars = HashMap::new();
-        vars.insert("status", "OK".to_string());
         vars.insert("file", "/path/to/file.txt".to_string());
+        vars.insert("dir", "/project".to_string());
 
-        let result = render_template("{{status}} the file {{file}} exists", &vars);
-        assert_eq!(result, "OK the file /path/to/file.txt exists");
+        let result = render_template("the file {{file}} in {{dir}} exists", &vars);
+        assert_eq!(result, "the file /path/to/file.txt in /project exists");
     }
 
     #[test]

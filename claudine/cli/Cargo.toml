@@ -22,6 +22,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 inquire = "0.9"
 darkmatter = { path = "../../darkmatter/lib" }
+darkmatter-cli = { path = "../../darkmatter/cli" }
 color-eyre = "0.6"
 indexmap = "2"
 serde_json = "1.0"

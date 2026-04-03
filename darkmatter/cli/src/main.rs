@@ -10,33 +10,35 @@ use darkmatter_cli::commands::{run_clean, run_render, run_subcommand, validate_s
 use std::io::{self, IsTerminal};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-/// Initialize tracing subscriber based on verbosity level.
+/// Initialize tracing subscriber for developer debug output.
 ///
-/// Verbosity levels:
-/// - 0 (default): WARN only (errors and warnings)
-/// - 1 (-v): INFO (tool calls, phase transitions)
-/// - 2 (-vv): DEBUG (tool arguments, API requests)
-/// - 3 (-vvv): TRACE (request/response bodies)
-/// - 4+ (-vvvv): TRACE with file/line numbers
-fn init_tracing(verbose: u8) {
-    // Only initialize if verbose mode is enabled
-    if verbose == 0 {
-        return;
-    }
+/// Triggered by `--debug <level>` or `RUST_LOG` env var. The `--verbose` flag
+/// is NOT involved here — it controls styled user-facing output only.
+///
+/// ## Debug levels
+///
+/// - 1: INFO (phase transitions, high-level operations)
+/// - 2: DEBUG (decisions, resolved values, cache hits/misses)
+/// - 3: TRACE (per-item details, raw values)
+/// - 4+: TRACE with file/line source locations
+fn init_tracing(debug_level: Option<u8>) {
+    // RUST_LOG takes precedence if set
+    let env_log = std::env::var("RUST_LOG").ok();
 
-    let base_filter = match std::env::var("RUST_LOG") {
-        Ok(filter) => filter,
-        Err(_) => match verbose {
-            // -v: Show INFO for progress and tool calls
-            1 => "info,md=info,darkmatter=info".to_string(),
-            // -vv: Show DEBUG for tool arguments and requests
-            2 => "info,md=debug,darkmatter=debug".to_string(),
-            // -vvv+: Show TRACE for detailed debugging
-            _ => "debug,md=trace,darkmatter=trace".to_string(),
-        },
+    let filter_str = match (&env_log, debug_level) {
+        // RUST_LOG is set — use it directly, ignore --debug flag
+        (Some(rust_log), _) => rust_log.clone(),
+        // --debug flag provided
+        (None, Some(1)) => "warn,md=info,darkmatter=info".to_string(),
+        (None, Some(2)) => "warn,md=debug,darkmatter=debug".to_string(),
+        (None, Some(n)) if n >= 3 => "info,md=trace,darkmatter=trace".to_string(),
+        // No debug output requested
+        _ => return,
     };
 
-    let filter = EnvFilter::try_new(&base_filter).unwrap_or_else(|_| EnvFilter::new("warn"));
+    let filter =
+        EnvFilter::try_new(&filter_str).unwrap_or_else(|_| EnvFilter::new("warn"));
+    let show_locations = debug_level.unwrap_or(0) >= 4;
 
     tracing_subscriber::registry()
         .with(filter)
@@ -45,8 +47,8 @@ fn init_tracing(verbose: u8) {
                 .with_target(true)
                 .with_level(true)
                 .with_thread_ids(false)
-                .with_file(verbose >= 4)
-                .with_line_number(verbose >= 4)
+                .with_file(show_locations)
+                .with_line_number(show_locations)
                 .with_writer(std::io::stderr)
                 .compact(),
         )
@@ -99,7 +101,7 @@ fn run() -> Result<()> {
     color_eyre::install()?;
 
     let cli = Cli::parse();
-    init_tracing(cli.verbose);
+    init_tracing(cli.debug_level);
 
     // Handle --completions first (no input needed)
     if let Some(shell) = cli.completions {

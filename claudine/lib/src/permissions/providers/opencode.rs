@@ -161,9 +161,8 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                 let mut overrides = OpenCodeCliOverrides::default();
                 let mut i = 0;
                 while i < argv.len() {
-                    match argv[i].as_str() {
-                        "--yolo" => overrides.yolo = true,
-                        _ => {}
+                    if argv[i].as_str() == "--yolo" {
+                        overrides.yolo = true
                     }
                     i += 1;
                 }
@@ -581,9 +580,7 @@ fn build_one_shot_plan(change: &PolicyChange) -> Result<Option<OneShotMutationPl
 
     for operation in &change.operations {
         match operation {
-            PolicyChangeOp::SetApprovalMode(mode)
-                if matches!(mode, CanonicalApprovalMode::AutoApprove) =>
-            {
+            PolicyChangeOp::SetApprovalMode(CanonicalApprovalMode::AutoApprove) => {
                 argv.push("--yolo".to_owned());
             }
             PolicyChangeOp::SetApprovalMode(_) => {

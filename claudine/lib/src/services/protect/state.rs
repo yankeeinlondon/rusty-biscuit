@@ -7,9 +7,7 @@ use crate::events::Provider;
 use crate::permissions::PolicyCertainty;
 
 use super::config::ProtectPhase;
-use super::decision::{
-    ProtectEvaluation, ProtectFindingSource, ProtectOutcome, ProtectPolicyMode,
-};
+use super::decision::{ProtectEvaluation, ProtectFindingSource, ProtectOutcome, ProtectPolicyMode};
 
 pub(crate) const GLOBAL_SESSION_KEY: &str = "__global__";
 

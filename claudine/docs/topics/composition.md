@@ -47,9 +47,12 @@ Steps:
 6. **Execute** — run the provider session
 7. **Closure** — Claudine rewrites the file:
    - The provider returns replacement body content only (no frontmatter)
-   - If the provider modified frontmatter, Claudine reverts to the original
-   - `last_updated` is set to today's date
+   - Original frontmatter properties are preserved byte-for-byte
+   - If the provider modified an existing frontmatter property, Claudine reverts it to the original value and emits a warning
+   - If the provider added a new frontmatter property, Claudine merges it into the document (inserted before `last_updated`)
+   - `last_updated` is set to today's date (local time, `YYYY-MM-DD`)
    - The file is written atomically
+   - A cleanup pass normalizes the body markdown without touching frontmatter
 
 ### Inline Conventions
 
@@ -140,7 +143,7 @@ A programmatic `handle` property accepts a shell command that receives failure c
 
 ### Shell Policy
 
-Shell commands in `shell_command` validations and `deviate`/`handle` declarations share Darkmatter's shell policy files (`.darkmatter-shell-whitelist` and `.darkmatter-shell-blacklist`). Commands are tokenized and validated at parse time — before the provider is launched — so users are prompted for approval once rather than mid-execution.
+All shell commands — `::shell` directives in the template, `shell_command` validations, and `deviate`/`handle` declarations — are approved upfront during the pre-flight phase, before the provider session starts. See [Pre-Flight Shell Approval](pre-flight-checks.md) for the full flow.
 
 ## Retired Interfaces
 
@@ -162,14 +165,15 @@ The following interfaces have been removed and replaced by the two canonical com
 
 ## Architecture
 
-Both commands follow the same five-stage pipeline:
+Both commands follow the same six-stage pipeline:
 
 ```
-Resolve → Prepare → Select Provider → Launch → Closure
+Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure
 ```
 
 - **Resolve**: `composition::resolve_composition_source()` loads the Markdown file
-- **Prepare**: `composition::prepare_direct()` or `composition::prepare_inline()` composes through Darkmatter and produces a `PreparedComposition` with `effective_frontmatter`
+- **Pre-Flight**: `composition::resolve_shell_approvals()` discovers all `::shell` commands in the document graph and harness plan, checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
+- **Prepare**: `composition::prepare_direct()` or `composition::prepare_inline()` composes through Darkmatter with the pre-approved command set and produces a `PreparedComposition` with `effective_frontmatter`
 - **Select**: `composition::select_provider()` applies the precedence chain
 - **Launch**: `wrap::composition::execute_composition_request()` runs the provider through the full wrapper pipeline (env, MCP, harness, streaming)
 - **Closure**: `composition::closure::rewrite_inline_document()` reconstructs the document for inline mode; direct mode outputs to stdout
