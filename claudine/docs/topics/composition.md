@@ -47,9 +47,12 @@ Steps:
 6. **Execute** — run the provider session
 7. **Closure** — Claudine rewrites the file:
    - The provider returns replacement body content only (no frontmatter)
-   - If the provider modified frontmatter, Claudine reverts to the original
-   - `last_updated` is set to today's date
+   - Original frontmatter properties are preserved byte-for-byte
+   - If the provider modified an existing frontmatter property, Claudine reverts it to the original value and emits a warning
+   - If the provider added a new frontmatter property, Claudine merges it into the document (inserted before `last_updated`)
+   - `last_updated` is set to today's date (local time, `YYYY-MM-DD`)
    - The file is written atomically
+   - A cleanup pass normalizes the body markdown without touching frontmatter
 
 ### Inline Conventions
 
