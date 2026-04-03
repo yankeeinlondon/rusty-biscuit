@@ -18,5 +18,3 @@ You are in the **rusty-biscuit** repo. We are working in the **{{ctx.current_pac
 ## Plan
 
 ::file {{plan_file}}
-
-
