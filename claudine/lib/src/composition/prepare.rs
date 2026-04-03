@@ -271,10 +271,7 @@ mod tests {
             &dir,
             &[
                 ("title", json!("Test")),
-                (
-                    "start",
-                    json!({"stderr": "Starting", "effect": "doorbell"}),
-                ),
+                ("start", json!({"stderr": "Starting", "effect": "doorbell"})),
                 ("success", json!({"speak": "All done"})),
             ],
             "Do the work.",

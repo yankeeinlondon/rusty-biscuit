@@ -5,7 +5,7 @@ pub(crate) mod repo_home;
 
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
-use claudine::composition::lifecycle::{emit_lifecycle_signal, LifecycleSignal};
+use claudine::composition::lifecycle::{LifecycleSignal, emit_lifecycle_signal};
 use claudine::events::{
     AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta, Provider,
 };

@@ -18,8 +18,8 @@ mod types;
 
 pub use error::CompositionError;
 pub use lifecycle::{
-    emit_lifecycle_signal, parse_lifecycle_config, LifecycleConfig, LifecycleNotification,
-    LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
+    LifecycleConfig, LifecycleNotification, LifecycleRuntimeContext, LifecycleRuntimeState,
+    LifecycleSignal, emit_lifecycle_signal, parse_lifecycle_config,
 };
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use prepare::{prepare_direct, prepare_inline};

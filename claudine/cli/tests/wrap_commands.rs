@@ -2831,12 +2831,7 @@ fn silent_suppresses_validation_reporting_output() {
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .current_dir(workspace.path())
-        .args([
-            "compose",
-            "--codex",
-            "--silent",
-            md_file.to_str().unwrap(),
-        ])
+        .args(["compose", "--codex", "--silent", md_file.to_str().unwrap()])
         .assert()
         .code(1);
 

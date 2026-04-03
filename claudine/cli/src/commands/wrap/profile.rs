@@ -280,7 +280,6 @@ pub(crate) trait WrapperProfile: Send + Sync {
     fn supports_interactive_inline_closure(&self) -> bool {
         false
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -1110,7 +1109,6 @@ impl WrapperProfile for OpencodeWrapper {
         args.push("--format".to_string());
         args.push("json".to_string());
     }
-
 }
 
 // ---------------------------------------------------------------------------

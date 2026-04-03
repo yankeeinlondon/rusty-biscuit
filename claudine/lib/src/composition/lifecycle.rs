@@ -4,6 +4,9 @@
 //! lifecycle notifications in composition frontmatter. Each notification can
 //! specify optional fields like `speak`, `effect`, `message`, etc.
 
+// rustfmt doesn't support let-chains yet, so nested ifs are required
+#![allow(clippy::collapsible_if)]
+
 use std::path::Path;
 
 use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
@@ -300,7 +303,9 @@ pub fn parse_lifecycle_config(
 
         // Deserialize the notification
         let mut notification: LifecycleNotification = serde_json::from_value(value.clone())
-            .map_err(|e| CompositionError::ComposeFailed(format!("invalid {}: {}", property_name, e)))?;
+            .map_err(|e| {
+                CompositionError::ComposeFailed(format!("invalid {}: {}", property_name, e))
+            })?;
 
         // Normalize empty strings to None
         normalize_empty_string(&mut notification.speak);
@@ -387,7 +392,7 @@ fn play_effect_blocking(name: &str) {
 fn speak_blocking(text: &str, config: TtsConfig) {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         let text = text.to_string();
-        let _ = handle.block_on(async move {
+        handle.block_on(async move {
             if let Err(e) = biscuit_speaks::Speak::new(text)
                 .with_config(config)
                 .play()

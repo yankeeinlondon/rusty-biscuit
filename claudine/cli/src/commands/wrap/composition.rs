@@ -15,12 +15,12 @@ use std::sync::{Arc, Mutex};
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::prelude::Renderable;
 use biscuit_terminal::terminal::Terminal;
+use claudine::composition::lifecycle::{
+    LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal, emit_lifecycle_signal,
+};
 use claudine::composition::{
     CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
     InlineClosurePlan, SelectedProvider, SelectionReason, build_candidate_set, select_provider,
-};
-use claudine::composition::lifecycle::{
-    LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal, emit_lifecycle_signal,
 };
 use claudine::events::Provider;
 use claudine::stream::stderr::Verbosity;
