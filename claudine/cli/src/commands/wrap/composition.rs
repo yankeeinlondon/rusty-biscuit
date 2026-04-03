@@ -158,7 +158,7 @@ pub(crate) fn execute_composition_request(
             profile,
             request.yolo,
             effective_non_interactive,
-            request.session_interactive, // interactive_override placeholder
+            request.session_interactive,
             verbose_requested,
             request.repo,
             compose_display.as_ref(),
@@ -522,8 +522,12 @@ pub(crate) fn execute_composition_request(
             crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
-        // Composed prompt block: always shown unless --silent
-        crate::output::log_compose_prompt(&request.prepared.prompt, verbose_requested, &term);
+        // Composed prompt block: shown in non-interactive mode only.  In
+        // interactive mode the prompt is delivered into the session (via
+        // positional arg or stdin), making preamble display redundant.
+        if effective_non_interactive {
+            crate::output::log_compose_prompt(&request.prepared.prompt, verbose_requested, &term);
+        }
 
         // Blank line to separate preamble from execution output
         if !quiet {

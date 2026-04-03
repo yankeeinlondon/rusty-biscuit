@@ -280,6 +280,7 @@ pub(crate) trait WrapperProfile: Send + Sync {
     fn supports_interactive_inline_closure(&self) -> bool {
         false
     }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,24 +1073,16 @@ impl WrapperProfile for OpencodeWrapper {
 
     fn apply_prompt_body(
         &self,
-        args: &mut Vec<String>,
+        _args: &mut Vec<String>,
         stdin_seed: &mut Option<String>,
         prompt: &str,
-        non_interactive: bool,
+        _non_interactive: bool,
     ) -> Result<()> {
-        if non_interactive {
-            // In non-interactive mode, deliver via stdin to avoid ENAMETOOLONG
-            // errors when prompt-file content exceeds OS argument length limits.
-            *stdin_seed = Some(prompt.to_string());
-        } else {
-            // Interactive: insert as positional after "run"
-            let insert_at = if args.first().is_some_and(|f| f == "run") {
-                1
-            } else {
-                0
-            };
-            args.insert(insert_at, prompt.to_string());
-        }
+        // Always deliver via stdin.  OpenCode's first positional arg is a
+        // workspace directory, not a prompt, so positional delivery causes
+        // ENAMETOOLONG (prompt > 255 bytes) or a chdir error.  Stdin works
+        // for both `opencode run` (non-interactive) and the TUI.
+        *stdin_seed = Some(prompt.to_string());
         Ok(())
     }
 
@@ -1117,6 +1110,7 @@ impl WrapperProfile for OpencodeWrapper {
         args.push("--format".to_string());
         args.push("json".to_string());
     }
+
 }
 
 // ---------------------------------------------------------------------------
