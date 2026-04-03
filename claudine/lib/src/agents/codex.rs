@@ -144,7 +144,7 @@ fn codex_capabilities() -> AgentCapabilities {
                     "~/.codex/history.jsonl",
                 ],
                 log_locations: vec!["~/.codex/log/codex-tui.log", "~/.codex/shell_snapshots/"],
-                debug_controls: vec!["--verbose", "RUST_LOG"],
+                debug_controls: vec!["--debug <level>", "RUST_LOG"],
                 telemetry_controls: vec![],
             },
             billing: BillingCapabilities {
