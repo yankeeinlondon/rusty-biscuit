@@ -12,7 +12,6 @@
             "name": "Monorepo Prompts",
             "path": "prompts"
         },
-
         {
             "name": "biscuit-location",
             "path": "biscuit-location"
