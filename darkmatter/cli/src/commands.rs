@@ -564,20 +564,20 @@ pub fn run_compose(
         eprintln!("{}", status.render(&terminal));
     }
 
-    if cli.verbose > 1 {
-        if let Some(perf_report) = &report.perf {
-            use biscuit_terminal::components::renderable::Renderable;
-            use biscuit_terminal::prelude::Status;
-            use biscuit_terminal::terminal::Terminal;
-            let terminal = Terminal::default();
-            for metric in &perf_report.metrics {
-                let status = Status::from_prose(format!(
-                    "<dim>{:20}</dim> {:>8.2}ms",
-                    metric.name,
-                    metric.elapsed.as_secs_f64() * 1000.0
-                ));
-                eprintln!("{}", status.render(&terminal));
-            }
+    if cli.verbose > 1
+        && let Some(perf_report) = &report.perf
+    {
+        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::prelude::Status;
+        use biscuit_terminal::terminal::Terminal;
+        let terminal = Terminal::default();
+        for metric in &perf_report.metrics {
+            let status = Status::from_prose(format!(
+                "<dim>{:20}</dim> {:>8.2}ms",
+                metric.name,
+                metric.elapsed.as_secs_f64() * 1000.0
+            ));
+            eprintln!("{}", status.render(&terminal));
         }
     }
 
