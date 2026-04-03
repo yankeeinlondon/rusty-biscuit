@@ -668,4 +668,59 @@ mod tests {
         let phases = audio_phases(&n);
         assert!(phases.is_empty());
     }
+
+    #[test]
+    fn status_state_mapping() {
+        assert_eq!(LifecycleSignal::Start.status_state(), StatusState::Info);
+        assert_eq!(
+            LifecycleSignal::Success.status_state(),
+            StatusState::Success
+        );
+        assert_eq!(
+            LifecycleSignal::Blocked.status_state(),
+            StatusState::Failure
+        );
+        assert_eq!(
+            LifecycleSignal::Failure.status_state(),
+            StatusState::Failure
+        );
+    }
+
+    #[test]
+    fn property_names() {
+        assert_eq!(LifecycleSignal::Start.property_name(), "start");
+        assert_eq!(LifecycleSignal::Success.property_name(), "success");
+        assert_eq!(LifecycleSignal::Blocked.property_name(), "blocked");
+        assert_eq!(LifecycleSignal::Failure.property_name(), "failure");
+    }
+
+    #[test]
+    fn lifecycle_config_get() {
+        let fm = json!({
+            "start": { "stderr": "Starting" },
+            "failure": { "stderr": "Failed" }
+        });
+        let config = parse_lifecycle_config(&fm).unwrap();
+        assert!(config.get(LifecycleSignal::Start).is_some());
+        assert!(config.get(LifecycleSignal::Success).is_none());
+        assert!(config.get(LifecycleSignal::Blocked).is_none());
+        assert!(config.get(LifecycleSignal::Failure).is_some());
+    }
+
+    #[test]
+    fn lifecycle_config_is_empty() {
+        let empty = LifecycleConfig::default();
+        assert!(empty.is_empty());
+
+        let fm = json!({ "start": { "stderr": "Go" } });
+        let non_empty = parse_lifecycle_config(&fm).unwrap();
+        assert!(!non_empty.is_empty());
+    }
+
+    #[test]
+    fn lifecycle_runtime_state_defaults() {
+        let state = LifecycleRuntimeState::default();
+        assert!(!state.start_emitted);
+        assert!(!state.provider_launch_started);
+    }
 }
