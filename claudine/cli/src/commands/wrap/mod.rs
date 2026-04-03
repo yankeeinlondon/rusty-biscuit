@@ -1058,7 +1058,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         mcp_runtime = Some(runtime);
     }
 
-    let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
+    let child_cwd = env_plan.child_cwd.as_path();
 
     // --dry-run: print what would be executed and exit
     if args.dry_run {
@@ -3430,6 +3430,7 @@ mod tests {
             included: Vec::new(),
             added: Vec::new(),
             repo_root: None,
+            child_cwd: PathBuf::from("/tmp"),
             package_context: Some(env::PackageContext {
                 package_area: "claudine".to_string(),
                 package: Some("claudine-cli".to_string()),
@@ -3452,6 +3453,7 @@ mod tests {
             included: Vec::new(),
             added: Vec::new(),
             repo_root: None,
+            child_cwd: PathBuf::from("/tmp"),
             package_context: Some(env::PackageContext {
                 package_area: "claudine".to_string(),
                 package: None,

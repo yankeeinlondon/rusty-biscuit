@@ -78,7 +78,7 @@ pub(crate) fn execute_composition_request(
     verbose: u8,
 ) -> Result<i32> {
     let term = wrap_terminal();
-    let cwd = std::env::current_dir()?;
+    let launch_cwd = std::env::current_dir()?;
     let detail_requested = verbose > 0;
     let quiet = request.quiet;
     let silent = request.silent;
@@ -101,7 +101,7 @@ pub(crate) fn execute_composition_request(
     .collect();
 
     let source_repo_root = request.prepared.source_repo_root.as_deref();
-    let favorite = load_config_favorite(source_repo_root.unwrap_or(&cwd));
+    let favorite = load_config_favorite(source_repo_root.unwrap_or(&launch_cwd));
 
     let selected = match select_provider(
         request.explicit_provider,
@@ -185,7 +185,7 @@ pub(crate) fn execute_composition_request(
         yolo_enabled,
         request.session_interactive,
         &raw_agent_params,
-        &cwd,
+        &launch_cwd,
         &[],
         needs_repo_shadow_home,
         needs_mcp_shadow_home || needs_repo_shadow_home,
@@ -276,9 +276,11 @@ pub(crate) fn execute_composition_request(
         if let Some(injector) = injector_for_provider(provider) {
             if !session.servers.is_empty() {
                 if needs_mcp_shadow_home && env_plan.shadow_home_path.is_none() {
-                    let effective_root = source_repo_root.unwrap_or(&cwd);
-                    let (shadow_env, shadow_path) =
-                        super::repo_home::build_repo_home_env(provider, effective_root, false)?;
+                    let (shadow_env, shadow_path) = super::repo_home::build_repo_home_env(
+                        provider,
+                        env_plan.child_cwd.as_path(),
+                        false,
+                    )?;
                     for (key, value) in shadow_env {
                         env_plan.env.insert(key, value);
                     }
@@ -392,7 +394,7 @@ pub(crate) fn execute_composition_request(
     child_args.extend(mcp_extra_args);
 
     let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
-    let child_cwd = effective_repo_root.unwrap_or(&cwd);
+    let child_cwd = env_plan.child_cwd.as_path();
 
     profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
 
@@ -544,7 +546,7 @@ pub(crate) fn execute_composition_request(
     // Detect the environment from the source repo root when available so
     // that git/repo metadata reflects the composition source, not the
     // caller's CWD (which may be in a different repo entirely).
-    let env_detect_root = effective_repo_root.unwrap_or(&cwd);
+    let env_detect_root = effective_repo_root.unwrap_or(&launch_cwd);
     let env_context = claudine::events::detect_environment_fast(env_detect_root);
 
     if !silent {
