@@ -21,6 +21,7 @@ use std::fs;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use tracing::{Span, debug, info_span};
 
 use crate::log;
 
@@ -91,6 +92,14 @@ pub(crate) enum HarnessPromptMode {
     Passthrough,
     Inline,
     Compose,
+}
+
+fn harness_prompt_mode_label(mode: HarnessPromptMode) -> &'static str {
+    match mode {
+        HarnessPromptMode::Passthrough => "passthrough",
+        HarnessPromptMode::Inline => "inline",
+        HarnessPromptMode::Compose => "compose",
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -395,6 +404,7 @@ impl LiveStreamSink {
     fn merge_state(&mut self, meta: &StreamEventMeta) {
         if let Some(session_id) = string_from_extra(&meta.extra, &["session_id", "thread_id", "id"])
         {
+            Span::current().record("session_id", tracing::field::display(&session_id));
             self.session_id = Some(session_id);
         }
         if let Some(model) = string_from_extra(&meta.extra, &["model"]) {
@@ -533,7 +543,7 @@ impl StreamEventSink for LiveStreamSink {
         if Self::should_surface_warning(message) {
             self.emit_warning_line(message);
         } else {
-            tracing::debug!("suppressing malformed structured stream warning: {message}");
+            debug!("suppressing malformed structured stream warning: {message}");
         }
     }
 }
@@ -737,7 +747,11 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let term = wrap_terminal();
 
     let clients = InstalledAiClients::new();
-    let binary_path = resolve_binary_path(profile, &clients)?;
+    let binary_path = info_span!(
+        "wrapper_binary_resolution",
+        provider = %provider,
+    )
+    .in_scope(|| resolve_binary_path(profile, &clients))?;
 
     let raw_agent_params: Vec<String> = std::env::args().skip(2).collect();
     let mut child_args = args.passthrough.clone();
@@ -748,7 +762,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let repo_requested = args.repo || extracted.repo;
     let quiet_requested = args.quiet || extracted.quiet;
     let silent_requested = args.silent || extracted.silent;
-    let verbose_requested = verbose > 0 || extracted.verbose;
+    let detail_requested = verbose > 0 || extracted.verbose;
     let mut env_overrides: Vec<(String, String)> = Vec::new();
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
@@ -763,6 +777,19 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     } else {
         has_prompt
     };
+    let wrapper_span = info_span!(
+        "wrapper_session",
+        provider = %provider,
+        binary_path = %binary_path.display(),
+        structured_mode = tracing::field::Empty,
+        has_prompt,
+        interactive_requested,
+        yolo_requested,
+        model_override = %args.model.as_deref().unwrap_or(""),
+        session_id = tracing::field::Empty,
+        child_pid = tracing::field::Empty,
+    );
+    let _wrapper_guard = wrapper_span.enter();
 
     // Early check: --timeout + --interactive is always an error
     if args.timeout.is_some() && interactive_requested {
@@ -1062,7 +1089,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             yolo_enabled,
             effective_non_interactive,
             interactive_override,
-            verbose_requested,
+            detail_requested,
             repo_requested,
             None,
             effective_operation.as_deref(),
@@ -1115,6 +1142,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         && effective_non_interactive
         && args.output.is_none()
         && !has_explicit_native_output_request(provider, &child_args);
+    Span::current().record("structured_mode", use_structured);
     let stream_verbosity = structured_verbosity(silent_requested, quiet_requested);
 
     if use_structured {
@@ -1232,7 +1260,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             profile.suppress_structured_stderr_on_success(),
             !silent_requested,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             &env_context,
             &dispatch_context,
             Some(initial_materialized),
@@ -1294,7 +1322,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             profile,
             &env_context,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             &summary_details.lock().unwrap().clone(),
         );
 
@@ -1311,7 +1339,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed: stdin_seed.as_deref(),
-                relay_tty_after_seed: false,
             },
         )?;
         result.data
@@ -1612,6 +1639,12 @@ fn materialize_harness_prompt(
     })
 }
 
+fn launch_timeout_secs(cli_timeout: Option<u64>, plan_timeout: Option<std::time::Duration>) -> u64 {
+    cli_timeout
+        .or_else(|| plan_timeout.map(|timeout| timeout.as_secs()))
+        .unwrap_or(0)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_harness_launch(
     provider: Provider,
@@ -1674,11 +1707,20 @@ fn execute_harness_attempt(
     suppress_stderr_on_success: bool,
     show_checks: bool,
     stream_verbosity: Verbosity,
-    verbose_requested: bool,
+    detail_requested: bool,
     env_context: &EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
 ) -> Result<claudine::harness::AttemptOutcome> {
+    let _attempt_span = info_span!(
+        "harness_attempt",
+        provider = %provider,
+        attempt,
+        prompt_mode = harness_prompt_mode_label(prompt_mode),
+        source_path = %prompt_state.source_path.display(),
+        use_structured,
+    )
+    .entered();
     let (exit_code, termination, session_id, final_response, stderr_text) = if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig::default();
@@ -1731,7 +1773,7 @@ fn execute_harness_attempt(
             profile,
             env_context,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             &summary_details.lock().unwrap().clone(),
         );
 
@@ -1753,7 +1795,6 @@ fn execute_harness_attempt(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed: launch.stdin_seed.as_deref(),
-                relay_tty_after_seed: false,
             },
         )?;
         let termination = capture.termination;
@@ -2028,6 +2069,13 @@ fn try_resolve_handler(
     show_checks: bool,
     term: &Terminal,
 ) -> Result<Option<NextAttemptPlan>> {
+    let _handler_span = info_span!(
+        "harness_handler_resolution",
+        attempt,
+        failure_count = contexts.len(),
+        source_path = %source_path.display(),
+    )
+    .entered();
     for failure_ctx in contexts {
         match claudine::harness::resolve_handler(
             failure_ctx,
@@ -2080,6 +2128,13 @@ fn build_next_attempt_plan(
 ) -> Result<Option<NextAttemptPlan>> {
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::prelude::Renderable;
+    let _decision_span = info_span!(
+        "harness_handler_decision",
+        current_attempt,
+        action = %handler_action_name(action),
+        source_path = %source_path.display(),
+    )
+    .entered();
 
     let dispatch_handler_feedback = |msg: &Option<String>, say: &Option<String>| {
         if let Some(text) = say.as_deref() {
@@ -2107,6 +2162,10 @@ fn build_next_attempt_plan(
                 return Ok(None);
             }
             dispatch_handler_feedback(msg, say);
+            debug!(
+                next_attempt = current_attempt + 1,
+                "Handler requested retry"
+            );
             let prompt_append = prompt_suffix.clone().or_else(|| {
                 Some(format!(
                     "The previous attempt failed: {failure_message}. Please correct the issue and try again."
@@ -2142,6 +2201,10 @@ fn build_next_attempt_plan(
                 session_id,
             )?;
             dispatch_handler_feedback(msg, say);
+            debug!(
+                next_attempt = current_attempt + 1,
+                "Handler requested resume"
+            );
             Ok(Some(NextAttemptPlan {
                 next_attempt: current_attempt + 1,
                 prompt_append: None,
@@ -2172,6 +2235,11 @@ fn build_next_attempt_plan(
                 repo_root,
             };
             let redirect_source = claudine::harness::resolve_harness_path(file, &resolve_ctx)?;
+            debug!(
+                next_attempt = current_attempt + 1,
+                redirect_source = %redirect_source.display(),
+                "Handler requested redirect"
+            );
             let resume_session_id = if *resume {
                 session_id.map(|id| id.to_string())
             } else {
@@ -2200,6 +2268,11 @@ fn build_next_attempt_plan(
                 Some(source_path),
             ) {
                 Ok(deviate_exit) => {
+                    debug!(
+                        next_attempt = current_attempt + 1,
+                        exit_code = deviate_exit,
+                        "Handler requested deviate command"
+                    );
                     if deviate_exit != 0 {
                         log::warn(&format!(
                             "deviate command '{}' exited with code {deviate_exit}",
@@ -2219,6 +2292,15 @@ fn build_next_attempt_plan(
                 Err(e) => Err(eyre!("deviate failed: {e}")),
             }
         }
+    }
+}
+
+fn handler_action_name(action: &claudine::harness::HandlerAction) -> &'static str {
+    match action {
+        claudine::harness::HandlerAction::Retry { .. } => "retry",
+        claudine::harness::HandlerAction::Resume { .. } => "resume",
+        claudine::harness::HandlerAction::Redirect { .. } => "redirect",
+        claudine::harness::HandlerAction::Deviate { .. } => "deviate",
     }
 }
 
@@ -2242,7 +2324,7 @@ pub(crate) fn run_harness_loop(
     suppress_stderr_on_success: bool,
     show_checks: bool,
     stream_verbosity: Verbosity,
-    verbose_requested: bool,
+    detail_requested: bool,
     env_context: &EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     initial_materialized: Option<MaterializedHarnessPrompt>,
@@ -2263,18 +2345,38 @@ pub(crate) fn run_harness_loop(
     let mut initial_materialized = initial_materialized;
 
     loop {
+        let _attempt_cycle_span = info_span!(
+            "harness_attempt_cycle",
+            provider = %provider,
+            attempt,
+            prompt_mode = harness_prompt_mode_label(prompt_state.mode),
+            source_path = %prompt_state.source_path.display(),
+        )
+        .entered();
         harness_context.refresh(&prompt_state.source_path, repo_root);
         let materialized = if let Some(seed) = initial_materialized.take() {
             seed
         } else {
-            materialize_harness_prompt(prompt_state, repo_root)?
+            info_span!(
+                "harness_materialize_prompt",
+                attempt,
+                source_path = %prompt_state.source_path.display(),
+            )
+            .in_scope(|| materialize_harness_prompt(prompt_state, repo_root))?
         };
         let resolve_ctx = harness_context.resolve_context();
-        let mut plan = claudine::harness::parse_harness_plan(
-            &materialized.frontmatter,
-            &prompt_state.source_path,
-            &resolve_ctx,
-        )?;
+        let mut plan = info_span!(
+            "harness_plan_parse",
+            attempt,
+            source_path = %prompt_state.source_path.display(),
+        )
+        .in_scope(|| {
+            claudine::harness::parse_harness_plan(
+                &materialized.frontmatter,
+                &prompt_state.source_path,
+                &resolve_ctx,
+            )
+        })?;
 
         // Source-file existence reporting
         if show_checks {
@@ -2324,8 +2426,14 @@ pub(crate) fn run_harness_loop(
         let auditable =
             claudine::harness::collect_auditable_commands(&plan, source_text.as_deref())?;
 
-        let audit_report =
-            claudine::harness::audit_shell_commands(&auditable, harness_context.shell_options());
+        let audit_report = info_span!(
+            "harness_shell_audit",
+            attempt,
+            command_count = auditable.len(),
+        )
+        .in_scope(|| {
+            claudine::harness::audit_shell_commands(&auditable, harness_context.shell_options())
+        });
 
         if show_checks {
             claudine::harness::report::report_shell_audit_header(audit_report.outcomes.len(), term);
@@ -2406,7 +2514,12 @@ pub(crate) fn run_harness_loop(
             harness_context.freeze_shell_approvals();
         }
 
-        let pre_report = claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe));
+        let pre_report = info_span!(
+            "harness_pre_validation",
+            attempt,
+            rule_count = plan.pre_checks.len(),
+        )
+        .in_scope(|| claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe)));
 
         if show_checks {
             claudine::harness::report::report_phase_discovery(
@@ -2468,19 +2581,31 @@ pub(crate) fn run_harness_loop(
         }
         lifecycle_state.provider_launch_started = true;
 
-        let snapshot = claudine::harness::capture_pre_run_snapshot(&plan)
-            .map_err(|e| eyre!("harness snapshot: {e}"))?;
-        let launch = build_harness_launch(
-            provider,
-            profile,
-            base_args,
-            base_env,
-            prompt_state,
-            &materialized,
-            effective_non_interactive,
-            cli_timeout,
-            plan.timeout,
-        )?;
+        let snapshot = info_span!(
+            "harness_pre_snapshot",
+            attempt,
+            rule_count = plan.post_checks.len(),
+        )
+        .in_scope(|| claudine::harness::capture_pre_run_snapshot(&plan))
+        .map_err(|e| eyre!("harness snapshot: {e}"))?;
+        let launch = info_span!(
+            "harness_launch_plan",
+            attempt,
+            timeout_secs = launch_timeout_secs(cli_timeout, plan.timeout),
+        )
+        .in_scope(|| {
+            build_harness_launch(
+                provider,
+                profile,
+                base_args,
+                base_env,
+                prompt_state,
+                &materialized,
+                effective_non_interactive,
+                cli_timeout,
+                plan.timeout,
+            )
+        })?;
 
         let outcome = execute_harness_attempt(
             attempt,
@@ -2499,7 +2624,7 @@ pub(crate) fn run_harness_loop(
             suppress_stderr_on_success,
             show_checks,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             env_context,
             dispatch_context,
             term,
@@ -2612,12 +2737,19 @@ pub(crate) fn run_harness_loop(
 
         // Evaluate post-checks. In inline mode this now runs against the
         // post-closure document so file-state checks see the final artifact.
-        let post_report = claudine::harness::evaluate_post_checks(
-            &plan,
-            &snapshot,
-            &outcome,
-            Some(&permission_probe),
-        );
+        let post_report = info_span!(
+            "harness_post_validation",
+            attempt,
+            rule_count = plan.post_checks.len(),
+        )
+        .in_scope(|| {
+            claudine::harness::evaluate_post_checks(
+                &plan,
+                &snapshot,
+                &outcome,
+                Some(&permission_probe),
+            )
+        });
 
         if show_checks {
             claudine::harness::report::report_phase_discovery(

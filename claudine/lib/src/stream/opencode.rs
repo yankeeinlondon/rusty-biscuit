@@ -60,6 +60,11 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
         if let Some(model) = obj.get("model").and_then(|v| v.as_str()) {
             self.model = Some(model.to_string());
         }
+        super::trace_session_metadata(
+            Provider::OpenCode,
+            self.session_id.as_deref(),
+            self.model.as_deref(),
+        );
 
         let mut meta = EventMeta::default();
         if let Some(session_id) = &self.session_id {
@@ -144,6 +149,12 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
         if let Some(reason) = part.and_then(|p| p.get("reason")).and_then(|v| v.as_str()) {
             self.provider_status = Some(reason.to_string());
         }
+        super::trace_summary_update(
+            Provider::OpenCode,
+            self.provider_status.as_deref(),
+            self.duration_ms,
+            Some(self.cost_usd),
+        );
 
         let meta = EventMeta::default();
         self.sink.on_turn_complete(&meta);
@@ -171,6 +182,12 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
             .get("duration_ms")
             .and_then(|v| v.as_u64())
             .or(self.duration_ms);
+        super::trace_summary_update(
+            Provider::OpenCode,
+            self.provider_status.as_deref(),
+            self.duration_ms,
+            Some(self.cost_usd),
+        );
 
         let meta = EventMeta::default();
         self.sink.on_turn_complete(&meta);
@@ -209,6 +226,7 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
         let obj: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
+            super::trace_malformed_line(Provider::OpenCode, self.line_num, &e.to_string());
             StreamParseError::MalformedLine {
                 line_num: self.line_num,
                 message: e.to_string(),
@@ -216,6 +234,7 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
         })?;
 
         let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        super::trace_parser_event(Provider::OpenCode, event_type, self.line_num);
 
         match event_type {
             "init" | "session_start" => {
@@ -241,6 +260,13 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
             }
             "tool_use" | "tool_start" => {
                 self.tool_calls += 1;
+                super::trace_tool_event(
+                    Provider::OpenCode,
+                    self.tool_calls,
+                    obj.get("name")
+                        .or_else(|| obj.get("tool_name"))
+                        .and_then(|value| value.as_str()),
+                );
                 let mut meta = EventMeta::default();
                 if let Some(tool_name) = obj
                     .get("name")

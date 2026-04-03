@@ -36,6 +36,43 @@
 - `--no-output` suppresses both STDOUT and STDERR entirely
 - Conflicting flag combinations (e.g., `--json --no-output`) should produce a clear error explaining the conflict
 
+### Debugging and Tracing
+
+- `--verbose` is for richer human-facing output only; it should NOT map directly to debug reporting
+    - Everything that is emitted by "verbose" setting should be made to fit in with a well formed and crafted message to the user. When traces are logged, they provide useful insights to developers who are debugging but look crude in comparison to the rest of the CLI's output
+    - we recommend using `--debug <level>` as well as supporting the RUST_LOG env triggers typically used in idiomatic Rust. Both of these methods are fine to use a basic reporter to print traces and metrics.
+- Help text and docs must describe `--verbose` and debug logging separately; never imply that `-vv` means "debug"
+- Support standard Rust diagnostics through `RUST_LOG`
+- If the CLI exposes an explicit debug switch, prefer `--debug <level>` with clear values such as `trace`, `debug`, `info`, `warn`, and `error`
+- Prefer no short alias for `--debug` when the CLI wraps or forwards to other CLIs that may already use `-d`
+- Precedence should be: `RUST_LOG` first, then `--debug <level>`, then the CLI's default filter
+- Avoid custom env vars like `DEBUG` unless there is a strong compatibility reason
+- Keep diagnostic logs on STDERR so STDOUT remains clean for data and piping
+- Use `tracing` spans for major boundaries: command entry, session/run, external process execution, network calls, retries, validations, and expensive operations
+- Include timing at those span boundaries so traces explain both control flow and performance
+- When practical, configure the tracing subscriber to emit span-close timing for debug sessions
+- Prefer structured trace fields over prose: command name, subcommand, provider, session ID, model, attempt number, exit code, duration, and similar stable identifiers
+- Never emit secrets, raw tokens, or full sensitive payloads into traces by default; use redaction, hashes, counts, and short safe summaries instead
+
+
+### Trace Metrics
+
+- Treat spans as the primary source of performance truth; every major operation should have a start, end, outcome, and duration
+- Record latency at useful boundaries: total command runtime, subcommand runtime, external process execution, network requests, retries, validation passes, parsing, rendering, and file I/O
+- Include outcome fields on measured spans: success/failure, exit code, retry count, timeout, cancellation, and fallback mode
+- Prefer stable numeric fields that support aggregation: `duration_ms`, `items_processed`, `bytes_read`, `bytes_written`, `attempt`, `exit_code`, `status_code`, `cache_hit`, `tool_calls`, `warnings`, `errors`
+- For throughput-style work, record both duration and work size so downstream systems can compute rates instead of guessing
+- Distinguish queue/wait time from active execution time when both matter
+- Emit one metric per boundary, not one metric per log line; avoid noisy event spam that cannot be aggregated cleanly
+- Keep metric names and fields consistent across CLIs in the monorepo so dashboards and comparisons work without per-tool translation
+- Use low-cardinality dimensions for metrics and summary spans; avoid unbounded labels such as raw file paths, prompts, user input, UUID-heavy labels, or full command lines
+- If high-cardinality context is useful for debugging, keep it in traces as redacted fields rather than promoting it to metric labels
+- Prefer histograms or duration distributions for latency analysis; counters are better for totals such as retries, failures, warnings, bytes, and items processed
+- When timing nested operations, ensure the hierarchy is meaningful so total runtime can be explained by child spans instead of double-counted
+- For flaky or retrying workflows, record both per-attempt metrics and final rolled-up outcome metrics
+- When external systems are involved, capture enough metadata to isolate bottlenecks: remote service name, operation kind, status code/class, timeout path, and fallback path
+- Metrics should be safe by default: never include secrets, auth headers, tokens, prompt bodies, or raw sensitive payloads
+
 ### Help System
 
 - `--help` / `-h` is a globally registered flag

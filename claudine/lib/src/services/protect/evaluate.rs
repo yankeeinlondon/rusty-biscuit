@@ -1,4 +1,4 @@
-use tracing::debug;
+use tracing::{Span, debug, info_span};
 
 use crate::error::Result;
 use crate::events::Provider;
@@ -135,8 +135,21 @@ pub(crate) fn evaluate_with_snapshot(
     snapshot: Option<SnapshotBox>,
     policy_mode: ProtectPolicyMode,
 ) -> Result<ProtectEvaluation> {
+    let _evaluation_span = info_span!(
+        "protect_evaluate",
+        provider = %request.provider,
+        event = %request.event,
+        policy_mode = %protect_policy_mode_slug(&policy_mode),
+        posture = tracing::field::Empty,
+        finding_count = tracing::field::Empty,
+        outcome = tracing::field::Empty,
+        redaction_count = tracing::field::Empty,
+    )
+    .entered();
+
     // Step 1: Resolve posture
     let posture = resolve_posture(config, &request.session);
+    Span::current().record("posture", tracing::field::display(posture));
 
     // Step 3: Query each intent
     let mut findings = Vec::new();
@@ -202,6 +215,13 @@ pub(crate) fn evaluate_with_snapshot(
     };
 
     let decision = ProtectDecision::new(outcome.clone(), desired, "protect".to_string(), None);
+    let redaction_count = redaction_count(redaction.as_ref());
+    Span::current().record("finding_count", tracing::field::display(findings.len()));
+    Span::current().record(
+        "outcome",
+        tracing::field::display(protect_outcome_slug(&decision.outcome)),
+    );
+    Span::current().record("redaction_count", tracing::field::display(redaction_count));
 
     Ok(ProtectEvaluation {
         decision,
@@ -210,6 +230,33 @@ pub(crate) fn evaluate_with_snapshot(
         redaction,
         warnings,
     })
+}
+
+fn protect_policy_mode_slug(policy_mode: &ProtectPolicyMode) -> &'static str {
+    match policy_mode {
+        ProtectPolicyMode::Effective => "effective",
+        ProtectPolicyMode::ConfiguredFallback => "configured_fallback",
+    }
+}
+
+fn protect_outcome_slug(outcome: &ProtectOutcome) -> &'static str {
+    match outcome {
+        ProtectOutcome::Allow => "allow",
+        ProtectOutcome::AskThenAllowOrStop { .. } => "ask_then_allow_or_stop",
+        ProtectOutcome::StopCurrent { .. } => "stop_current",
+        ProtectOutcome::StopSession { .. } => "stop_session",
+        ProtectOutcome::AllowWithRedaction { .. } => "allow_with_redaction",
+        ProtectOutcome::AdvisoryOnly { .. } => "advisory_only",
+    }
+}
+
+fn redaction_count(redaction: Option<&ProtectRedactionPlan>) -> u32 {
+    match redaction {
+        Some(ProtectRedactionPlan::ReplaceText(plan)) => plan.redactions_applied,
+        Some(ProtectRedactionPlan::ReplaceJson(plan)) => plan.redactions_applied,
+        Some(ProtectRedactionPlan::BlockPayload { .. }) => 1,
+        None => 0,
+    }
 }
 
 // ---------------------------------------------------------------------------

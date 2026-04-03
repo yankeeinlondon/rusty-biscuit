@@ -30,7 +30,7 @@ pub(crate) fn log_wrapper_header(
     yolo_requested: bool,
     non_interactive: bool,
     _interactive_override: bool,
-    verbose_requested: bool,
+    detail_requested: bool,
     repo_requested: bool,
     compose_display: Option<&ComposeDisplay>,
     operation: Option<&str>,
@@ -58,7 +58,7 @@ pub(crate) fn log_wrapper_header(
         header_parts.push(INTERACTIVE.to_string());
     }
 
-    if verbose_requested {
+    if detail_requested {
         header_parts.push(VERBOSE.to_string());
     }
 
