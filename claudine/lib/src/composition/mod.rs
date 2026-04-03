@@ -9,6 +9,7 @@
 pub mod closure;
 mod error;
 mod guardrails;
+pub mod lifecycle;
 pub mod preflight;
 mod prepare;
 mod resolve;
@@ -16,6 +17,10 @@ mod select;
 mod types;
 
 pub use error::CompositionError;
+pub use lifecycle::{
+    LifecycleConfig, LifecycleNotification, LifecycleRuntimeContext, LifecycleRuntimeState,
+    LifecycleSignal, parse_lifecycle_config,
+};
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use prepare::{prepare_direct, prepare_inline};
 pub use resolve::{resolve_composition_source, validate_file_permissions};
