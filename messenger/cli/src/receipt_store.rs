@@ -29,14 +29,23 @@ pub fn save_receipt(receipt: &messenger::SendReceipt, route_name: Option<&str>) 
         route_name: route_name.map(ToOwned::to_owned),
         receipt: receipt.clone(),
     };
+    tracing::debug!(
+        path = %path.display(),
+        provider = %receipt.provider,
+        route_name = route_name.unwrap_or("<ad-hoc>"),
+        "saving receipt"
+    );
     std::fs::write(&path, serde_json::to_string_pretty(&stored)?)?;
+    tracing::debug!(path = %path.display(), "saved receipt");
 
     Ok(path)
 }
 
 pub fn load_message_ref(spec: &str) -> Result<messenger::MessageRef> {
+    tracing::debug!(spec = %spec, "loading message ref");
     let candidate_path = Path::new(spec);
     if candidate_path.exists() {
+        tracing::debug!(path = %candidate_path.display(), "loading message ref from file");
         let contents = std::fs::read_to_string(candidate_path)?;
         return parse_message_ref_contents(&contents);
     }
@@ -45,13 +54,19 @@ pub fn load_message_ref(spec: &str) -> Result<messenger::MessageRef> {
 }
 
 fn parse_message_ref_contents(contents: &str) -> Result<messenger::MessageRef> {
+    tracing::trace!("attempting StoredReceipt parse");
     if let Ok(stored) = serde_json::from_str::<StoredReceipt>(contents) {
+        tracing::trace!("parsed as StoredReceipt");
         return Ok(stored.receipt.message_ref);
     }
+    tracing::trace!("attempting SendReceipt parse");
     if let Ok(receipt) = messenger::SendReceipt::from_json_str(contents) {
+        tracing::trace!("parsed as SendReceipt");
         return Ok(receipt.message_ref);
     }
+    tracing::trace!("attempting MessageRef parse");
     if let Ok(message_ref) = messenger::MessageRef::from_json_str(contents) {
+        tracing::trace!("parsed as MessageRef");
         return Ok(message_ref);
     }
 
