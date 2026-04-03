@@ -10,6 +10,7 @@ use color_eyre::eyre::{Result, WrapErr, bail};
 use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
 use std::process;
+use tracing::debug;
 
 /// File format conversion and extraction utility.
 ///
@@ -62,6 +63,10 @@ struct Cli {
     /// Force input format (override auto-detection, required for STDIN)
     #[arg(long)]
     input_format: Option<InputFormat>,
+
+    /// Enable debug logging (set RUST_LOG for finer control)
+    #[arg(long)]
+    debug: bool,
 }
 
 /// Resolved output format.
@@ -141,10 +146,30 @@ enum Commands {
     },
 }
 
+fn init_tracing(debug: bool) {
+    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+    let filter = if let Ok(rust_log) = std::env::var("RUST_LOG") {
+        EnvFilter::builder().parse_lossy(rust_log)
+    } else if debug {
+        EnvFilter::builder().parse_lossy("biscuit_file=debug,biscuit_file_cli=debug")
+    } else {
+        EnvFilter::builder()
+            .with_default_directive(tracing::Level::WARN.into())
+            .from_env_lossy()
+    };
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer().with_writer(std::io::stderr).with_target(true))
+        .init();
+}
+
 fn main() -> Result<()> {
     color_eyre::install()?;
 
     let cli = Cli::parse();
+    init_tracing(cli.debug);
 
     // Handle subcommands first
     if let Some(Commands::Reference {
@@ -182,6 +207,15 @@ fn main() -> Result<()> {
 
     let format = cli.output_format();
     let compact = cli.compact;
+
+    debug!(
+        ?input_format,
+        ?format,
+        compact,
+        from_stdin,
+        file = ?cli.file,
+        "processing input"
+    );
 
     // Read input content
     let content = if from_stdin {
@@ -410,6 +444,8 @@ fn run_reference(
     relative_cwd: bool,
     vaults: &[PathBuf],
 ) -> Result<()> {
+    debug!(?reference, relative, relative_cwd, vault_count = vaults.len(), "resolving reference");
+
     let file_ref = match FileReference::new(reference) {
         Ok(fr) => fr,
         Err(e) => {
