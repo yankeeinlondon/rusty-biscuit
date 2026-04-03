@@ -103,9 +103,9 @@ This includes the full (non-truncated) session ID, model name, turn count, per-t
 
 Non-interactive sessions use two delivery mechanisms depending on the provider:
 
-**stdin pipe** — the prompt is written to the child's stdin, then the pipe is closed (EOF). This avoids `ENAMETOOLONG` errors when composed prompts exceed OS argument length limits. Used by: Claude, Kimi Code, OpenCode (non-interactive).
+**stdin pipe** — the prompt is written to the child's stdin, then the pipe is closed (EOF). This avoids `ENAMETOOLONG` errors when composed prompts exceed OS argument length limits. Used by: Claude, Kimi Code.
 
-**Positional/flag arguments** — the prompt is passed as a CLI argument. Some providers convert positionals to flags (e.g., Gemini converts to `--prompt`). Used by: Codex, Gemini, Goose.
+**Positional/flag arguments** — the prompt is passed as a CLI argument. Some providers convert positionals to flags (e.g., Gemini converts to `--prompt`). Used by: Codex, Gemini, Goose, OpenCode.
 
 ## Output Noise Filtering
 
