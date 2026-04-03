@@ -7,7 +7,9 @@ use std::net::IpAddr;
 use std::process::Command;
 #[cfg(feature = "network")]
 use std::sync::Mutex;
-use tracing::{debug, info, instrument, warn};
+#[cfg(feature = "network")]
+use tracing::{debug, info};
+use tracing::{instrument, warn};
 
 mod interface;
 pub use interface::{InterfaceFlags, IpAddresses, Ipv4Address, Ipv6Address, NetworkInterface};
