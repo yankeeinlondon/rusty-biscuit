@@ -1,7 +1,6 @@
 ---
 name: clap
-description: Expert knowledge for building command-line interfaces in Rust using the clap crate. Use when creating CLI tools, parsing arguments, defining subcommands, or implementing shell completions. Covers Derive API, Builder API, custom validation, and ecosystem crates.
-hash: 2ef29fc6150d2b15
+description: Detailed clap reference for argument parsing in Rust CLIs. Covers Derive API, Builder API, subcommands, custom validation, environment variable fallback, enum values, and shell completion generation with clap_complete.
 ---
 
 # clap
