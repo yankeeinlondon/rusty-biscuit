@@ -74,6 +74,8 @@ Two provider-specific route behaviors are worth calling out:
 - Signal targets starting with `+` are treated as direct recipients. Any other value is treated as a Signal group ID.
 - Telegram targets are parsed as numeric chat IDs when possible, otherwise they are treated as usernames such as `@ops`.
 
+For clarity, the CLI is routing against the provider API models implemented in the library, not webhook URLs. Discord and Slack routes identify a channel plus bot token, while Signal and WhatsApp routes identify a recipient plus the provider-specific API credentials.
+
 ## Configuration
 
 The config file lives at `~/.messenger.json`.

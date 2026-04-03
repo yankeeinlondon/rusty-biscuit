@@ -896,13 +896,11 @@ fn choose_target(
                 )
             })?,
         )),
-        PolicyChangeTarget::LocalOverride => {
-            return Err(ClaudineError::PolicyUnsupportedMutation {
-                provider: Provider::QwenCode,
-                op: "LocalOverride target is not supported by Qwen (no local override concept)"
-                    .to_owned(),
-            });
-        }
+        PolicyChangeTarget::LocalOverride => Err(ClaudineError::PolicyUnsupportedMutation {
+            provider: Provider::QwenCode,
+            op: "LocalOverride target is not supported by Qwen (no local override concept)"
+                .to_owned(),
+        }),
         PolicyChangeTarget::Auto => {
             let has_repo = current
                 .sources

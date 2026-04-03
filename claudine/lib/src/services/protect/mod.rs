@@ -62,9 +62,9 @@ mod tests {
     fn test_session(provider: Provider) -> ProtectSessionContext {
         ProtectSessionContext {
             provider,
-            policy_context: crate::permissions::PolicyContext::new(
-                std::path::PathBuf::from("/tmp/test"),
-            ),
+            policy_context: crate::permissions::PolicyContext::new(std::path::PathBuf::from(
+                "/tmp/test",
+            )),
             cli: ProtectCliContext::None,
             interactive: false,
             yolo: false,
@@ -177,7 +177,9 @@ mod tests {
         let request = test_request(
             Provider::Claude,
             ProtectPhase::BeforeTool,
-            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw("rm -rf /"))],
+            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw(
+                "rm -rf /",
+            ))],
         );
 
         let eval = service.evaluate_structured(&request).unwrap();
@@ -338,7 +340,9 @@ mod tests {
         let request = test_request(
             Provider::Codex,
             ProtectPhase::BeforeTool,
-            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw("rm -rf /"))],
+            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw(
+                "rm -rf /",
+            ))],
         );
 
         let eval = service.evaluate_structured(&request).unwrap();
@@ -636,7 +640,9 @@ mod tests {
         let request = test_request(
             Provider::Codex,
             ProtectPhase::BeforeTool,
-            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw("rm -rf /"))],
+            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw(
+                "rm -rf /",
+            ))],
         );
 
         let _ = service.evaluate_structured(&request).unwrap();
@@ -825,16 +831,10 @@ mod tests {
         );
 
         let eval = service.evaluate_structured(&request).unwrap();
-        let network_guard = eval
-            .findings
-            .iter()
-            .find(|f| {
-                f.source == ProtectFindingSource::RuntimeGuard
-                    && f.result
-                        .explanation
-                        .summary
-                        .contains("network-write")
-            });
+        let network_guard = eval.findings.iter().find(|f| {
+            f.source == ProtectFindingSource::RuntimeGuard
+                && f.result.explanation.summary.contains("network-write")
+        });
         assert!(
             network_guard.is_some(),
             "Network write guard should fire for curl commands"
@@ -862,16 +862,10 @@ mod tests {
         );
 
         let eval = service.evaluate_structured(&request).unwrap();
-        let fs_guard = eval
-            .findings
-            .iter()
-            .find(|f| {
-                f.source == ProtectFindingSource::RuntimeGuard
-                    && f.result
-                        .explanation
-                        .summary
-                        .contains("broad-fs-write")
-            });
+        let fs_guard = eval.findings.iter().find(|f| {
+            f.source == ProtectFindingSource::RuntimeGuard
+                && f.result.explanation.summary.contains("broad-fs-write")
+        });
         assert!(
             fs_guard.is_some(),
             "Broad FS write guard should fire for /etc/ paths"

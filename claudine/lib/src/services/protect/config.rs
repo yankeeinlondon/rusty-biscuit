@@ -164,17 +164,20 @@ impl ProtectConfig {
         }
         if !self.rules.protected_paths.is_empty() {
             return Err(ClaudineError::ProtectInvalidPolicy(
-                "settings.protect.rules.protected_paths is removed; migrate to PolicyEngine rules".to_string(),
+                "settings.protect.rules.protected_paths is removed; migrate to PolicyEngine rules"
+                    .to_string(),
             ));
         }
         if !self.mcp.allowlist.is_empty() {
             return Err(ClaudineError::ProtectInvalidPolicy(
-                "settings.protect.mcp.allowlist is removed; use MCP catalog trust instead".to_string(),
+                "settings.protect.mcp.allowlist is removed; use MCP catalog trust instead"
+                    .to_string(),
             ));
         }
         if !self.mcp.denylist.is_empty() {
             return Err(ClaudineError::ProtectInvalidPolicy(
-                "settings.protect.mcp.denylist is removed; use MCP catalog trust instead".to_string(),
+                "settings.protect.mcp.denylist is removed; use MCP catalog trust instead"
+                    .to_string(),
             ));
         }
         Ok(())
@@ -211,10 +214,10 @@ impl ProtectConfig {
         validate_patterns(&self.mcp.redact_patterns)?;
 
         for (provider, override_cfg) in &self.providers {
-            if let Some(rules) = override_cfg.rules.as_ref() {
-                if let Some(patterns) = rules.secret_patterns.as_ref() {
-                    validate_patterns(patterns)?;
-                }
+            if let Some(rules) = override_cfg.rules.as_ref()
+                && let Some(patterns) = rules.secret_patterns.as_ref()
+            {
+                validate_patterns(patterns)?;
             }
             if let Some(mcp) = override_cfg.mcp.as_ref()
                 && let Some(patterns) = mcp.redact_patterns.as_ref()

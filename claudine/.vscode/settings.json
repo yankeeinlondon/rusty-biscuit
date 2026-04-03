@@ -20,10 +20,12 @@
         "redactions",
         "replayable",
         "rescan",
+        "resumability",
         "startswith",
         "TAVILY",
         "unconfigured",
         "worktrees",
+        "xhigh",
         "ZENMUX"
     ]
 }

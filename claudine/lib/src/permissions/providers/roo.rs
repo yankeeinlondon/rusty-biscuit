@@ -921,9 +921,7 @@ fn build_one_shot_plan(change: &PolicyChange) -> Option<OneShotMutationPlan> {
     let mut argv = Vec::new();
     for operation in &change.operations {
         match operation {
-            PolicyChangeOp::SetApprovalMode(mode)
-                if matches!(mode, CanonicalApprovalMode::AlwaysAsk) =>
-            {
+            PolicyChangeOp::SetApprovalMode(CanonicalApprovalMode::AlwaysAsk) => {
                 argv.push("--require-approval".to_owned());
             }
             PolicyChangeOp::SetApprovalMode(_) => return None,

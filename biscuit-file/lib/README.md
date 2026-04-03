@@ -23,6 +23,7 @@ Core library for file format parsing, conversion, and detection as well as file 
 Parse compact file descriptors and resolve them lazily against runtime context (CWD, git repo root, Cargo workspace, env vars, configured paths).
 
 Supported reference types:
+
 - **Relative** (`./foo.md`) and **Absolute** (`/path/to/file`)
 - **Magic** (`@docs/spec.md`) -- searches repo root, HOME, and custom paths
 - **Package** (`!README.md`) -- resolves from package area in a Cargo workspace
@@ -224,18 +225,21 @@ use biscuit_file::YamlParseError;
 ### Migration Example
 
 Before (direct dependency):
+
 ```rust
 use toml::Value;
 let value: Value = toml::from_str(&content)?;
 ```
 
 After (via biscuit-file):
+
 ```rust
 use biscuit_file::toml_crate::Value;
 let value: Value = biscuit_file::toml_crate::from_str(&content)?;
 ```
 
 Or use the wrapper types directly:
+
 ```rust
 use biscuit_file::Toml;
 let toml = Toml::from_str(&content)?;

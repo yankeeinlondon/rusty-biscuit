@@ -39,14 +39,14 @@ impl PolicyEngine {
     /// Creates a new engine with the built-in high-value provider backends.
     pub fn new() -> Self {
         let mut engine = Self::empty();
-        engine.register(Box::new(ClaudePolicyBackend::default()));
-        engine.register(Box::new(CodexPolicyBackend::default()));
-        engine.register(Box::new(GeminiPolicyBackend::default()));
-        engine.register(Box::new(QwenPolicyBackend::default()));
-        engine.register(Box::new(RooPolicyBackend::default()));
-        engine.register(Box::new(GoosePolicyBackend::default()));
-        engine.register(Box::new(KimiPolicyBackend::default()));
-        engine.register(Box::new(OpenCodePolicyBackend::default()));
+        engine.register(Box::new(ClaudePolicyBackend));
+        engine.register(Box::new(CodexPolicyBackend));
+        engine.register(Box::new(GeminiPolicyBackend));
+        engine.register(Box::new(QwenPolicyBackend));
+        engine.register(Box::new(RooPolicyBackend));
+        engine.register(Box::new(GoosePolicyBackend));
+        engine.register(Box::new(KimiPolicyBackend));
+        engine.register(Box::new(OpenCodePolicyBackend));
         engine
     }
 

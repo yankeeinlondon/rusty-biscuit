@@ -39,7 +39,8 @@ Administration:
   completions       Generate shell completions
 
 Options:
-  -v, --verbose     Increase verbosity (-v for verbose, -vv for debug)
+  -v, --verbose     Increase presentation detail for human-facing output
+  --debug <LEVEL>   Set Claudine diagnostic tracing (trace, debug, info, warn, error)
   --plain           Strip ANSI escape codes from all output
   -h, --help        Print help
   -V, --version     Print version

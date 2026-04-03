@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use darkmatter::markdown::Markdown;
 use serde_json;
 
+use super::lifecycle::LifecycleConfig;
 use crate::events::Provider;
 
 /// Which composition mode to use.
@@ -79,6 +80,8 @@ pub struct PreparedComposition {
     pub effective_agent_hint: Option<serde_json::Value>,
     /// Closure plan for post-execution file updates.
     pub closure: CompositionClosurePlan,
+    /// Parsed lifecycle notification config from effective frontmatter.
+    pub lifecycle: LifecycleConfig,
 }
 
 /// How the composition result should be applied after provider execution.

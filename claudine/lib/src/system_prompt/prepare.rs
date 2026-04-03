@@ -24,8 +24,7 @@ pub fn prepare_system_prompt(
 
     // Parse and compose through Darkmatter
     let md: Markdown = raw_text.into();
-    let options = ComposeOptions::new()
-        .with_source_file(source_path);
+    let options = ComposeOptions::new().with_source_file(source_path);
 
     let (composed, _report) = md
         .compose_with(options)
@@ -122,7 +121,9 @@ mod tests {
         match result {
             EffectiveSystemPrompt::Ready(prepared) => {
                 assert!(
-                    prepared.composed_markdown.contains("Included content here."),
+                    prepared
+                        .composed_markdown
+                        .contains("Included content here."),
                     "Expected transclusion to resolve. Got: {}",
                     prepared.composed_markdown
                 );
@@ -142,15 +143,18 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
         write_temp_file(tmp.path(), ".darkmatter-shell-whitelist", "prefix echo\n");
 
-        let path = write_temp_file(tmp.path(), "prompt.md", "Pre.\n\n::shell echo hello\n\nPost.");
+        let path = write_temp_file(
+            tmp.path(),
+            "prompt.md",
+            "Pre.\n\n::shell echo hello\n\nPost.",
+        );
 
         let source = SystemPromptSource::StandardDiscovered {
             path,
             scope: StandardPromptScope::Repo,
         };
 
-        let result =
-            prepare_system_prompt(source, "Pre.\n\n::shell echo hello\n\nPost.").unwrap();
+        let result = prepare_system_prompt(source, "Pre.\n\n::shell echo hello\n\nPost.").unwrap();
 
         match result {
             EffectiveSystemPrompt::Ready(prepared) => {
@@ -167,11 +171,7 @@ mod tests {
     #[test]
     fn interpolation_expands() {
         let tmp = TempDir::new().unwrap();
-        let path = write_temp_file(
-            tmp.path(),
-            "prompt.md",
-            "Today is {{today}}.",
-        );
+        let path = write_temp_file(tmp.path(), "prompt.md", "Today is {{today}}.");
 
         let source = SystemPromptSource::StandardDiscovered {
             path,
@@ -196,11 +196,7 @@ mod tests {
     #[test]
     fn empty_body_produces_disabled() {
         let tmp = TempDir::new().unwrap();
-        let path = write_temp_file(
-            tmp.path(),
-            "prompt.md",
-            "---\ntitle: Empty\n---\n",
-        );
+        let path = write_temp_file(tmp.path(), "prompt.md", "---\ntitle: Empty\n---\n");
 
         let source = SystemPromptSource::StandardDiscovered {
             path,
@@ -218,19 +214,14 @@ mod tests {
     #[test]
     fn whitespace_only_body_produces_disabled() {
         let tmp = TempDir::new().unwrap();
-        let path = write_temp_file(
-            tmp.path(),
-            "prompt.md",
-            "---\ntitle: Blank\n---\n\n   \n\n",
-        );
+        let path = write_temp_file(tmp.path(), "prompt.md", "---\ntitle: Blank\n---\n\n   \n\n");
 
         let source = SystemPromptSource::StandardDiscovered {
             path,
             scope: StandardPromptScope::Repo,
         };
 
-        let result =
-            prepare_system_prompt(source, "---\ntitle: Blank\n---\n\n   \n\n").unwrap();
+        let result = prepare_system_prompt(source, "---\ntitle: Blank\n---\n\n   \n\n").unwrap();
 
         assert!(
             result.is_disabled(),

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value;
-use tracing::{debug, info};
+use tracing::{debug, info, info_span};
 
 use crate::actions::HookResponse;
 use crate::adapters::{self, AdapterError};
@@ -105,10 +105,32 @@ async fn dispatch_preparsed(
     meta: EventMeta,
 ) -> Result<DispatchOutcome> {
     let adapter = adapters::adapter_for(provider);
+    let can_block = adapter.can_block(&event);
+    let repo_root = runtime_repo_root(&meta.env)
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    let session_id = meta.session_id.clone().unwrap_or_default();
+    let tool_name = meta.tool_name.clone().unwrap_or_default();
+    let _dispatch_span = info_span!(
+        "dispatch_event",
+        provider = %provider,
+        event = %event,
+        session_id = %session_id,
+        tool_name = %tool_name,
+        can_block,
+        repo_root = %repo_root,
+    )
+    .entered();
 
     info!(%provider, %event, "Dispatching event");
 
-    let config = match loader::load_runtime_config(None, runtime_repo_root(&meta.env)) {
+    let config = match info_span!(
+        "dispatch_config_load",
+        provider = %provider,
+        repo_root = %repo_root
+    )
+    .in_scope(|| loader::load_runtime_config(None, runtime_repo_root(&meta.env)))
+    {
         Ok(config) => config,
         Err(crate::error::ClaudineError::ConfigNotFound(_)) => {
             debug!("No .claudine config found, skipping dispatch");
@@ -148,7 +170,7 @@ async fn dispatch_preparsed(
         meta,
         provider,
         actions: binding.actions().to_vec(),
-        can_block: adapter.can_block(&event),
+        can_block,
     };
 
     let engine = Arc::new(PolicyEngine::new());
@@ -216,6 +238,7 @@ async fn dispatch_preparsed(
         Some(binding.compiled_mappers()),
         &resolved_hook.meta,
         config.settings(),
+        config.messaging(),
         resolved_hook.can_block,
         protect_pre_decision.as_ref(),
     )
@@ -300,10 +323,7 @@ fn build_session_context(provider: Provider, meta: &EventMeta) -> ProtectSession
     let cli_ctx = std::env::var("AGENT_PARAMS")
         .ok()
         .map(|params| {
-            let argv: Vec<String> = params
-                .split_whitespace()
-                .map(String::from)
-                .collect();
+            let argv: Vec<String> = params.split_whitespace().map(String::from).collect();
             ProtectCliContext::Argv(argv)
         })
         .unwrap_or(ProtectCliContext::None);
@@ -604,6 +624,7 @@ mod tests {
                     },
                 }),
                 protect: None,
+                messaging: None,
             },
             providers: {
                 let mut providers = HashMap::new();
@@ -731,8 +752,7 @@ mod tests {
             env: EnvironmentContext::default(),
         };
 
-        meta.extra
-            .insert("is_trusted".to_string(), json!(true));
+        meta.extra.insert("is_trusted".to_string(), json!(true));
 
         let trust = derive_trust_context(&meta);
         assert_eq!(trust.is_trusted, Some(true));
@@ -868,8 +888,7 @@ mod tests {
             env: EnvironmentContext::default(),
         };
 
-        meta.extra
-            .insert("is_trusted".to_string(), json!(true));
+        meta.extra.insert("is_trusted".to_string(), json!(true));
 
         let ctx = build_session_context(Provider::Claude, &meta);
         assert_eq!(ctx.policy_context.trust.is_trusted, Some(true));

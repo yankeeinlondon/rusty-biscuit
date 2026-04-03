@@ -59,6 +59,11 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
             .and_then(|v| v.as_str())
             .map(String::from);
         self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
+        super::trace_session_metadata(
+            Provider::Gemini,
+            self.session_id.as_deref(),
+            self.model.as_deref(),
+        );
 
         let mut meta = EventMeta::default();
         if let Some(session_id) = &self.session_id {
@@ -148,6 +153,12 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
         }
 
         self.raw_summary = Some(obj.clone());
+        super::trace_summary_update(
+            Provider::Gemini,
+            self.provider_status.as_deref(),
+            self.duration_ms,
+            self.cost_usd,
+        );
     }
 
     fn handle_error(&mut self, obj: &Value) {
@@ -182,6 +193,13 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
 
     fn handle_tool_use(&mut self, obj: &Value) {
         self.tool_calls += 1;
+        super::trace_tool_event(
+            Provider::Gemini,
+            self.tool_calls,
+            obj.get("tool_name")
+                .or_else(|| obj.get("name"))
+                .and_then(|value| value.as_str()),
+        );
 
         let tool_id = obj
             .get("tool_id")
@@ -259,6 +277,7 @@ impl<S: StreamEventSink + Send> StreamParser for GeminiStreamParser<S> {
         let obj: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
+            super::trace_malformed_line(Provider::Gemini, self.line_num, &e.to_string());
             StreamParseError::MalformedLine {
                 line_num: self.line_num,
                 message: e.to_string(),
@@ -266,6 +285,7 @@ impl<S: StreamEventSink + Send> StreamParser for GeminiStreamParser<S> {
         })?;
 
         let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        super::trace_parser_event(Provider::Gemini, event_type, self.line_num);
 
         match event_type {
             "init" | "system" => {

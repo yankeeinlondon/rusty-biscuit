@@ -267,8 +267,30 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
 
     let source = composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
 
+    // ── Pre-flight shell approval ────────────────────────────────────
+    let compose_options = {
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+            .with_source_file(&source.resolved_path);
+        if let Some(ref overrides) = set_overrides {
+            opts = opts.with_set_overrides(overrides.clone());
+        }
+        opts
+    };
+
+    let approval_options =
+        super::wrap::build_harness_shell_options(&source.resolved_path, None, args.interactive);
+
+    let preflight = composition::resolve_shell_approvals(
+        Some(&source.markdown),
+        Some(&compose_options),
+        None,
+        &approval_options,
+    )
+    .map_err(|e| eyre!("{e}"))?;
+
     let prepared =
-        composition::prepare_direct(&source, set_overrides).map_err(|e| eyre!("{e}"))?;
+        composition::prepare_direct(&source, set_overrides, Some(preflight.approved_commands))
+            .map_err(|e| eyre!("{e}"))?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::ChainedDocument,
@@ -347,8 +369,30 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         claudine::harness::report::report_prompt_property(has_prompt, is_non_empty, t);
     }
 
+    // ── Pre-flight shell approval ────────────────────────────────────
+    let compose_options = {
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+            .with_source_file(&source.resolved_path);
+        if let Some(ref overrides) = set_overrides {
+            opts = opts.with_set_overrides(overrides.clone());
+        }
+        opts
+    };
+
+    let approval_options =
+        super::wrap::build_harness_shell_options(&source.resolved_path, None, args.interactive);
+
+    let preflight = composition::resolve_shell_approvals(
+        Some(&source.markdown),
+        Some(&compose_options),
+        None,
+        &approval_options,
+    )
+    .map_err(|e| eyre!("{e}"))?;
+
     let prepared =
-        composition::prepare_inline(&source, set_overrides).map_err(|e| eyre!("{e}"))?;
+        composition::prepare_inline(&source, set_overrides, Some(preflight.approved_commands))
+            .map_err(|e| eyre!("{e}"))?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,

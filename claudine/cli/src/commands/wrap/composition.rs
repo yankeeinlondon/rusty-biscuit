@@ -12,7 +12,12 @@ use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use biscuit_terminal::components::status::{Status, StatusState};
+use biscuit_terminal::prelude::Renderable;
 use biscuit_terminal::terminal::Terminal;
+use claudine::composition::lifecycle::{
+    LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal, emit_lifecycle_signal,
+};
 use claudine::composition::{
     CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
     InlineClosurePlan, SelectedProvider, SelectionReason, build_candidate_set, select_provider,
@@ -74,7 +79,7 @@ pub(crate) fn execute_composition_request(
 ) -> Result<i32> {
     let term = wrap_terminal();
     let cwd = std::env::current_dir()?;
-    let verbose_requested = verbose > 0;
+    let detail_requested = verbose > 0;
     let quiet = request.quiet;
     let silent = request.silent;
     let show_checks = !silent;
@@ -156,8 +161,8 @@ pub(crate) fn execute_composition_request(
             profile,
             request.yolo,
             effective_non_interactive,
-            request.session_interactive, // interactive_override placeholder
-            verbose_requested,
+            request.session_interactive,
+            detail_requested,
             request.repo,
             compose_display.as_ref(),
             request.operation.as_deref(),
@@ -418,21 +423,51 @@ pub(crate) fn execute_composition_request(
     let harness_enabled =
         claudine::harness::has_harness_properties(&request.prepared.effective_frontmatter);
 
+    let shell_options = build_harness_shell_options(
+        &request.prepared.resolved_path,
+        effective_repo_root,
+        request.session_interactive,
+    );
+
+    // --- Lifecycle notification setup ---
+    let lifecycle = &request.prepared.lifecycle;
+    let mut lifecycle_state = LifecycleRuntimeState::default();
+
+    let (lifecycle_settings, lifecycle_messaging) =
+        match claudine::dispatch::loader::load_runtime_config(None, effective_repo_root) {
+            Ok(config) => (config.settings().clone(), config.messaging().clone()),
+            Err(_) => (
+                claudine::events::GlobalSettings::default(),
+                claudine::messaging::RuntimeMessagingSettings {
+                    user: None,
+                    repo: None,
+                },
+            ),
+        };
+
+    let lifecycle_ctx = LifecycleRuntimeContext {
+        settings: &lifecycle_settings,
+        messaging: &lifecycle_messaging,
+        term: &term,
+        source_path: &request.prepared.resolved_path,
+        repo_root: effective_repo_root,
+    };
+
     if harness_enabled {
         let resolve_ctx = claudine::harness::HarnessResolutionContext {
             source_path: &request.prepared.resolved_path,
             repo_root: effective_repo_root,
         };
-        let shell_options =
-            build_harness_shell_options(&request.prepared.resolved_path, effective_repo_root);
         // Validate that the harness plan can be parsed before proceeding.
-        let mut plan = claudine::harness::parse_harness_plan_with_shell(
+        let mut plan = claudine::harness::parse_harness_plan(
             &request.prepared.effective_frontmatter,
             &request.prepared.resolved_path,
             &resolve_ctx,
-            Some(&shell_options),
         )
-        .map_err(|e| eyre!("{e}"))?;
+        .map_err(|e| {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
+            eyre!("{e}")
+        })?;
 
         // For inline composition, prepend a system-owned writability check
         // so that handler recovery paths can respond to permission failures
@@ -442,6 +477,25 @@ pub(crate) fn execute_composition_request(
                 0,
                 claudine::harness::inline_writability_pre_check(&request.prepared.resolved_path),
             );
+        }
+
+        // ── Pre-flight shell approval for harness commands ───────────
+        let harness_preflight = claudine::composition::resolve_shell_approvals(
+            None, // template commands already approved during compose
+            None,
+            Some(&plan),
+            &shell_options,
+        )
+        .map_err(|e| {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
+            eyre!("{e}")
+        })?;
+
+        if !request.quiet && !request.silent && harness_preflight.total_discovered > 0 {
+            log::info(&format!(
+                "Pre-flight: {} harness shell command(s) approved",
+                harness_preflight.total_discovered,
+            ));
         }
 
         // Plan is validated; the harness loop will re-parse if needed.
@@ -458,7 +512,10 @@ pub(crate) fn execute_composition_request(
             &request.prepared.resolved_path,
             Some(&permission_probe),
         )
-        .map_err(|reason| eyre!("{reason}"))?;
+        .map_err(|reason| {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
+            eyre!("{reason}")
+        })?;
     }
 
     // -- Structured streaming decision ------------------------------------
@@ -496,14 +553,22 @@ pub(crate) fn execute_composition_request(
     let env_context = claudine::events::detect_environment_fast(env_detect_root);
 
     if !silent {
-        // Env details: suppressed by --quiet; for non-interactive compose
-        // only shown with --verbose.
-        if !quiet && (request.session_interactive || verbose_requested) {
+        // Everything below is suppressed by --quiet (consistent with direct-wrap)
+        if !quiet && (request.session_interactive || detail_requested) {
             crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
-        // Composed prompt block: always shown unless --silent.
-        crate::output::log_compose_prompt(&request.prepared.prompt, verbose_requested, &term);
+        // Composed prompt block: shown in non-interactive mode only.  In
+        // interactive mode the prompt is delivered into the session (via
+        // positional arg or stdin), making preamble display redundant.
+        if effective_non_interactive {
+            crate::output::log_compose_prompt(&request.prepared.prompt, detail_requested, &term);
+        }
+
+        // Blank line to separate preamble from execution output
+        if !quiet {
+            crate::log::message("");
+        }
     }
 
     // -- Execution --------------------------------------------------------
@@ -545,6 +610,7 @@ pub(crate) fn execute_composition_request(
             &env_plan.env,
             &mut prompt_state,
             effective_repo_root,
+            shell_options.clone(),
             use_structured,
             structured_codex_output.as_ref(),
             stdout_noise,
@@ -552,18 +618,23 @@ pub(crate) fn execute_composition_request(
             profile.suppress_structured_stderr_on_success(),
             show_checks,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             &env_context,
             &dispatch_context,
             Some(materialized_harness_prompt_from_prepared(&request.prepared)),
             &term,
+            lifecycle,
+            &mut lifecycle_state,
+            &lifecycle_ctx,
         )
     } else if is_inline {
+        emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, &lifecycle_ctx);
+
         let closure_plan = match &request.prepared.closure {
             CompositionClosurePlan::Inline(plan) => plan,
             _ => unreachable!("is_inline is true but closure is not Inline"),
         };
-        execute_inline_without_harness(
+        let exit_code = execute_inline_without_harness(
             provider,
             profile,
             &binary_path,
@@ -579,14 +650,24 @@ pub(crate) fn execute_composition_request(
             stdout_noise,
             stderr_noise,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             show_checks,
             &env_context,
             &dispatch_context,
             &term,
-        )
+        )?;
+
+        if exit_code == 0 {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Success, &lifecycle_ctx);
+        } else {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, &lifecycle_ctx);
+        }
+
+        Ok(exit_code)
     } else {
-        execute_direct_without_harness(
+        emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, &lifecycle_ctx);
+
+        let exit_code = execute_direct_without_harness(
             provider,
             profile,
             &binary_path,
@@ -599,10 +680,18 @@ pub(crate) fn execute_composition_request(
             stdout_noise,
             stderr_noise,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             &env_context,
             &dispatch_context,
-        )
+        )?;
+
+        if exit_code == 0 {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Success, &lifecycle_ctx);
+        } else {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, &lifecycle_ctx);
+        }
+
+        Ok(exit_code)
     }
 }
 
@@ -625,7 +714,7 @@ fn execute_inline_without_harness(
     stdout_noise: &[&str],
     stderr_noise: &[&str],
     stream_verbosity: Verbosity,
-    verbose_requested: bool,
+    detail_requested: bool,
     show_checks: bool,
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
@@ -728,14 +817,21 @@ fn execute_inline_without_harness(
         };
 
         if final_exit == 0 {
+            // Read post-run frontmatter for comparison (best-effort)
+            let post_run_fm = std::fs::read_to_string(resolved_path).ok().map(|text| {
+                let md: darkmatter::markdown::Markdown = text.into();
+                md.frontmatter().as_map().clone()
+            });
+
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
             match claudine::composition::closure::apply_inline_closure(
                 closure_plan,
                 &replacement_body,
                 resolved_path,
                 &today,
+                post_run_fm.as_ref(),
             ) {
-                Ok(()) => {
+                Ok(result) => {
                     if show_checks {
                         log::message(&crate::output::fm_check_ok(
                             "Applied the captured replacement body to the target document",
@@ -745,6 +841,21 @@ fn execute_inline_without_harness(
                             "Preserved original frontmatter and updated <bold>last_updated</bold>",
                             term,
                         ));
+
+                        for key in &result.new_properties {
+                            log::message(&crate::output::fm_check_ok(
+                                &format!("Merged new frontmatter property <bold>\"{key}\"</bold>"),
+                                term,
+                            ));
+                        }
+
+                        for key in &result.reverted_properties {
+                            let status = Status::from_prose(format!(
+                                "Agent modified frontmatter property <b>\"{key}\"</b> — reverted to original value"
+                            ))
+                            .state(StatusState::Warning);
+                            log::message(&status.render(term));
+                        }
                     }
 
                     // Post-processing: run Darkmatter cleanup on the
@@ -794,7 +905,7 @@ fn execute_inline_without_harness(
             profile,
             env_context,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             &details,
             Some(dispatch_context),
         );
@@ -1018,16 +1129,51 @@ fn cleanup_inline_output(path: &std::path::Path) -> Result<bool> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| eyre!("failed to read {}: {e}", path.display()))?;
 
-    let cleaned = darkmatter::markdown::cleanup::cleanup_content(&text);
+    // Split frontmatter from body so cleanup operates only on the body,
+    // preserving frontmatter (including YAML block scalars) byte-for-byte.
+    let (frontmatter_prefix, body) = split_frontmatter_and_body(&text);
 
-    if cleaned == text {
+    let cleaned_body = darkmatter::markdown::cleanup::cleanup_content(body);
+
+    if cleaned_body == body {
         return Ok(false);
     }
 
-    std::fs::write(path, cleaned.as_bytes())
+    let mut output = String::with_capacity(frontmatter_prefix.len() + cleaned_body.len());
+    output.push_str(frontmatter_prefix);
+    output.push_str(&cleaned_body);
+
+    std::fs::write(path, output.as_bytes())
         .map_err(|e| eyre!("failed to write cleaned output to {}: {e}", path.display()))?;
 
     Ok(true)
+}
+
+/// Split text into a frontmatter prefix (including closing delimiter) and the body.
+///
+/// If the text starts with `---\n`, scans for the closing `---\n` and returns
+/// everything up to and including that line as the prefix. Otherwise returns
+/// an empty prefix and the full text as body.
+fn split_frontmatter_and_body(text: &str) -> (&str, &str) {
+    let mut lines = text.split_inclusive('\n');
+    let first = match lines.next() {
+        Some(l) => l,
+        None => return ("", text),
+    };
+    if first.trim_end_matches(['\r', '\n']) != "---" {
+        return ("", text);
+    }
+
+    let mut offset = first.len();
+    for line in lines {
+        offset += line.len();
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            return (&text[..offset], &text[offset..]);
+        }
+    }
+
+    // No closing delimiter — treat entire text as body
+    ("", text)
 }
 
 // -- Direct execution (non-harness) ---------------------------------------
@@ -1046,7 +1192,7 @@ fn execute_direct_without_harness(
     stdout_noise: &[&str],
     stderr_noise: &[&str],
     stream_verbosity: Verbosity,
-    verbose_requested: bool,
+    detail_requested: bool,
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
 ) -> Result<i32> {
@@ -1104,7 +1250,7 @@ fn execute_direct_without_harness(
             profile,
             env_context,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             &summary_details.lock().unwrap().clone(),
             dispatch_context,
         );
@@ -1237,5 +1383,85 @@ fn emit_legacy_composition_session_event(
 
     if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
         tracing::warn!("Failed to write legacy composition session event: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_frontmatter_basic() {
+        let text = "---\ntitle: Test\n---\n# Body\n";
+        let (prefix, body) = split_frontmatter_and_body(text);
+        assert_eq!(prefix, "---\ntitle: Test\n---\n");
+        assert_eq!(body, "# Body\n");
+    }
+
+    #[test]
+    fn split_frontmatter_block_scalar() {
+        let text = concat!(
+            "---\n",
+            "prompt: |-\n",
+            "    First line\n",
+            "\n",
+            "    - bullet\n",
+            "last_updated: 2026-03-18\n",
+            "---\n",
+            "# Body\n",
+        );
+        let (prefix, body) = split_frontmatter_and_body(text);
+        assert!(prefix.ends_with("---\n"));
+        assert!(prefix.contains("prompt: |-"));
+        assert_eq!(body, "# Body\n");
+    }
+
+    #[test]
+    fn split_frontmatter_no_frontmatter() {
+        let text = "# Just a heading\n\nContent\n";
+        let (prefix, body) = split_frontmatter_and_body(text);
+        assert_eq!(prefix, "");
+        assert_eq!(body, text);
+    }
+
+    #[test]
+    fn split_frontmatter_unclosed() {
+        let text = "---\ntitle: Test\nNo closing\n";
+        let (prefix, body) = split_frontmatter_and_body(text);
+        assert_eq!(prefix, "");
+        assert_eq!(body, text);
+    }
+
+    #[test]
+    fn cleanup_preserves_frontmatter_block_scalar() {
+        // Reproduces the bug: cleanup_content on full text corrupts YAML
+        // block scalar indentation. The fix splits frontmatter from body
+        // so cleanup only operates on the body.
+        let frontmatter = concat!(
+            "---\n",
+            "prompt: |-\n",
+            "    First line of prompt\n",
+            "\n",
+            "    - bullet one\n",
+            "    - bullet two\n",
+            "\n",
+            "    Final paragraph\n",
+            "last_updated: 2026-03-18\n",
+            "---\n",
+        );
+        let body = "# Body\n\nSome content\n";
+        let text = format!("{frontmatter}{body}");
+
+        let (prefix, body_part) = split_frontmatter_and_body(&text);
+
+        // Frontmatter must be preserved byte-for-byte
+        assert_eq!(prefix, frontmatter);
+
+        // Cleaning only the body should not corrupt frontmatter
+        let cleaned_body = darkmatter::markdown::cleanup::cleanup_content(body_part);
+        let result = format!("{prefix}{cleaned_body}");
+
+        // The frontmatter portion must remain unchanged
+        assert!(result.starts_with(frontmatter));
     }
 }

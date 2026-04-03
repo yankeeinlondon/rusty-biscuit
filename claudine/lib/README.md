@@ -4,7 +4,7 @@ Core library for the Claudine cross-agent event handling, skill linking, and MCP
 
 ## Architecture
 
-The library is organized into fourteen top-level modules plus the shared error type:
+The library is organized into fifteen top-level modules plus the shared error type:
 
 ```
 claudine/lib/src/
@@ -18,6 +18,7 @@ claudine/lib/src/
 ├── events/       → Normalized event model and types
 ├── harness/      → Typed pre/post validations, timeouts, handlers, and shell policy
 ├── linking/      → Cross-provider skill and command synchronization
+├── messaging/    → Outbound messaging routes, resolution, and provider dispatch
 ├── mcp/          → MCP catalog, defaults, import/export, session, and injection
 ├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/     → Cross-provider policy services (Protect)
@@ -29,7 +30,7 @@ claudine/lib/src/
 
 Types for hook actions that execute when events fire, and response types for blocking hooks:
 
-- `HookAction` — 6-variant tagged enum: `Speak`, `Log`, `FireAndForget`, `Call`, `Report`, `SoundEffect`
+- `HookAction` — 7-variant tagged enum: `Speak`, `Log`, `FireAndForget`, `Call`, `Report`, `SoundEffect`, `Message`
 - `HookResponse` — Unified response a hook can return to influence agent behavior (decision, reason, updated input, additional context)
 - `HookDecision` — 4-variant enum: `Allow`, `Deny`, `Ask`, `Continue`
 - `LogTarget` — File (with daily rotation) or Server (HTTP POST with timeout)
@@ -265,6 +266,7 @@ Typed pre/post validations, timeouts, handler resolution, and shell policy for c
 |--------|----------|----------|
 | `Speak` | TTS via biscuit-speaks with template interpolation | Fire-and-forget (tokio::spawn) |
 | `SoundEffect` | Playa embedded effects with volume/speed control | Fire-and-forget (tokio::spawn_blocking) |
+| `Message` | Send Markdown notifications through the configured messaging route, with Discord image attachment support in v1 | Fire-and-forget (tokio::spawn) |
 | `Log` (file) | Append JSONL, creates parent dirs, supports daily rotation | Synchronous |
 | `Log` (server) | POST JSON with configurable timeout and headers | Non-fatal on failure |
 | `Report` | Write to stdout with optional template/format (Text, Json, Compact) | Synchronous |

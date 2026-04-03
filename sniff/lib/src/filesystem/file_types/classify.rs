@@ -426,7 +426,11 @@ mod tests {
         fs::write(dir.path().join("packages/foo/lib.rs"), "pub fn foo() {}").unwrap();
 
         // Files in package bar
-        fs::write(dir.path().join("packages/bar/index.js"), "console.log('bar')").unwrap();
+        fs::write(
+            dir.path().join("packages/bar/index.js"),
+            "console.log('bar')",
+        )
+        .unwrap();
 
         // Root level file
         fs::write(dir.path().join("README.md"), "# Repo").unwrap();
@@ -440,10 +444,12 @@ mod tests {
         let foo_inventory = project_package_inventory(&repo_inventory, &foo_path, &[]);
 
         assert_eq!(foo_inventory.total_files_scanned, 2);
-        assert!(foo_inventory
-            .classifications
-            .iter()
-            .all(|c| c.language == Some(ProgrammingLanguage::Rust)));
+        assert!(
+            foo_inventory
+                .classifications
+                .iter()
+                .all(|c| c.language == Some(ProgrammingLanguage::Rust))
+        );
 
         // Project to package bar
         let bar_path = dir.path().join("packages/bar");

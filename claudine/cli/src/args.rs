@@ -1,5 +1,26 @@
 use crate::commands;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum DebugLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl DebugLevel {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
 
 /// Claudine — cross-agent hook/event system for agentic CLIs.
 #[derive(Parser)]
@@ -11,9 +32,13 @@ use clap::{Parser, Subcommand};
     disable_help_subcommand = true
 )]
 pub(crate) struct Cli {
-    /// Increase verbosity (-v for verbose, -vv for debug).
+    /// Increase presentation detail for human-facing output.
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
+
+    /// Set Claudine's diagnostic tracing level.
+    #[arg(long, value_enum, value_name = "LEVEL", global = true)]
+    pub debug: Option<DebugLevel>,
 
     /// Strip ANSI escape codes from all output.
     #[arg(long, global = true)]
