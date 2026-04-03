@@ -2,6 +2,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::PathBuf;
+use tracing::{debug, instrument, trace};
 use which::which;
 
 /// Finds a program by name in the system PATH.
@@ -29,6 +30,7 @@ pub fn find_program<P: AsRef<OsStr>>(program: P) -> Option<PathBuf> {
 
 /// Checks for the existence of multiple programs in parallel.
 /// Returns a HashMap where keys are program names and values are paths (if found).
+#[instrument(skip_all, fields(program_count = programs.len()))]
 pub fn find_programs_parallel(programs: &[&str]) -> HashMap<String, Option<PathBuf>> {
     programs
         .par_iter() // 1. Convert to a parallel iterator
@@ -85,11 +87,13 @@ impl ExecutableIndex {
     /// ## Returns
     ///
     /// A fully populated index ready for O(1) lookups.
+    #[instrument(skip_all)]
     pub fn build() -> Self {
         let mut path_executables = HashMap::new();
 
         if let Some(path_var) = std::env::var_os("PATH") {
             for dir in std::env::split_paths(&path_var) {
+                trace!(dir = %dir.display(), "scanning PATH directory");
                 if let Ok(entries) = std::fs::read_dir(&dir) {
                     for entry in entries.filter_map(|e| e.ok()) {
                         let path = entry.path();
@@ -118,6 +122,8 @@ impl ExecutableIndex {
                 }
             }
         }
+
+        debug!(path_count = path_executables.len(), "PATH scan complete");
 
         Self {
             path_executables,
