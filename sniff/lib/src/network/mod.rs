@@ -306,16 +306,15 @@ impl WanIpDetector {
 #[cfg(feature = "network")]
 fn detect_wan_ip(force_refresh: bool) -> Option<String> {
     // Check cache first (unless refresh is forced)
-    if !force_refresh {
-        if let Ok(guard) = WAN_IP_CACHE.lock() {
-            if let Some(entry) = guard.as_ref() {
-                if entry.fetched_at.elapsed() < WAN_IP_TTL {
-                    debug!("WAN IP served from cache");
-                    return entry.value.clone();
-                }
-                debug!("WAN IP cache expired");
-            }
+    if !force_refresh
+        && let Ok(guard) = WAN_IP_CACHE.lock()
+        && let Some(entry) = guard.as_ref()
+    {
+        if entry.fetched_at.elapsed() < WAN_IP_TTL {
+            debug!("WAN IP served from cache");
+            return entry.value.clone();
         }
+        debug!("WAN IP cache expired");
     }
 
     // Fetch fresh value
