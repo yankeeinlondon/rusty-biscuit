@@ -8,7 +8,6 @@ use std::process::Command;
 #[cfg(feature = "network")]
 use std::sync::Mutex;
 use tracing::{debug, info, instrument, warn};
-use tracing::instrument;
 
 mod interface;
 pub use interface::{InterfaceFlags, IpAddresses, Ipv4Address, Ipv6Address, NetworkInterface};
@@ -157,13 +156,16 @@ pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkIn
                 wan_ip_address,
                 permission_denied: false,
             }),
-            Err(PermissionOrError::PermissionDenied) => Ok(NetworkInfo {
-                interfaces: vec![],
-                primary_interface: None,
-                ip_addresses: IpAddresses::default(),
-                wan_ip_address,
-                permission_denied: true,
-            }),
+            Err(PermissionOrError::PermissionDenied) => {
+                warn!("network interface detection: permission denied");
+                Ok(NetworkInfo {
+                    interfaces: vec![],
+                    primary_interface: None,
+                    ip_addresses: IpAddresses::default(),
+                    wan_ip_address,
+                    permission_denied: true,
+                })
+            }
             Err(PermissionOrError::Other(e)) => Err(e),
         }
     })
@@ -306,14 +308,21 @@ fn detect_wan_ip(force_refresh: bool) -> Option<String> {
         if let Ok(guard) = WAN_IP_CACHE.lock() {
             if let Some(entry) = guard.as_ref() {
                 if entry.fetched_at.elapsed() < WAN_IP_TTL {
+                    debug!("WAN IP served from cache");
                     return entry.value.clone();
                 }
+                debug!("WAN IP cache expired");
             }
         }
     }
 
     // Fetch fresh value
     let value = WanIpDetector::new().detect();
+
+    match &value {
+        Some(ip) => info!(ip = %ip, "WAN IP resolved"),
+        None => warn!("WAN IP detection failed"),
+    }
 
     // Update cache
     if let Ok(mut guard) = WAN_IP_CACHE.lock() {
