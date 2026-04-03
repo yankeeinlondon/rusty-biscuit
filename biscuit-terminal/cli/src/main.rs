@@ -110,6 +110,7 @@ fn main() -> color_eyre::Result<()> {
             meta,
             debug,
         }) => {
+            tracing::debug!(command = "image", filepath, width = ?width, "Dispatching subcommand");
             return render_image(filepath, width.as_deref(), layout, meta, debug);
         }
         Some(Command::Flowchart {
@@ -122,6 +123,7 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref content,
         }) => {
+            tracing::debug!(command = "flowchart", vertical, inverse, example, "Dispatching subcommand");
             return render_flowchart(
                 vertical,
                 inverse,
@@ -156,6 +158,7 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref points,
         }) => {
+            tracing::debug!(command = "quadrant", inverse, example, "Dispatching subcommand");
             return render_quadrant(
                 x_axis.as_deref(),
                 y_axis.as_deref(),
@@ -190,6 +193,7 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref data,
         }) => {
+            tracing::debug!(command = "pie-chart", inverse, example, "Dispatching subcommand");
             return render_pie_chart(
                 inverse,
                 title.as_deref(),
@@ -211,6 +215,7 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref commands,
         }) => {
+            tracing::debug!(command = "git-graph", inverse, example, "Dispatching subcommand");
             return render_git_graph(
                 inverse,
                 title.as_deref(),
@@ -237,6 +242,7 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref data,
         }) => {
+            tracing::debug!(command = "bar-chart", inverse, horizontal, example, "Dispatching subcommand");
             return render_xy_chart(
                 XyChartType::Bar,
                 title.as_deref(),
@@ -271,6 +277,7 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref data,
         }) => {
+            tracing::debug!(command = "line-chart", inverse, horizontal, example, "Dispatching subcommand");
             return render_xy_chart(
                 XyChartType::Line,
                 title.as_deref(),
@@ -300,6 +307,7 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref events,
         }) => {
+            tracing::debug!(command = "timeline", inverse, example, "Dispatching subcommand");
             return render_timeline(
                 title.as_deref(),
                 width.as_deref(),
@@ -321,6 +329,7 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref transitions,
         }) => {
+            tracing::debug!(command = "state-diagram", inverse, example, "Dispatching subcommand");
             return render_state_diagram(
                 title.as_deref(),
                 width.as_deref(),
@@ -344,6 +353,7 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref content,
         }) => {
+            tracing::debug!(command = "graph-expression", inverse, example, syntax = ?syntax, "Dispatching subcommand");
             return render_graph_expression(
                 example,
                 syntax.clone(),
@@ -368,6 +378,7 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref relationships,
         }) => {
+            tracing::debug!(command = "erd", inverse, example, "Dispatching subcommand");
             return render_erd(
                 title.as_deref(),
                 width.as_deref(),
@@ -385,6 +396,7 @@ fn main() -> color_eyre::Result<()> {
             ref text,
             truncate,
         }) => {
+            tracing::debug!(command = "pad-left", width, truncate, "Dispatching subcommand");
             return render_pad_left(text, width, truncate);
         }
         Some(Command::PadRight {
@@ -392,6 +404,7 @@ fn main() -> color_eyre::Result<()> {
             ref text,
             truncate,
         }) => {
+            tracing::debug!(command = "pad-right", width, truncate, "Dispatching subcommand");
             return render_pad_right(text, width, truncate);
         }
         Some(Command::Prose {
@@ -399,6 +412,7 @@ fn main() -> color_eyre::Result<()> {
             no_wrap,
             ref layout,
         }) => {
+            tracing::debug!(command = "prose", no_wrap, "Dispatching subcommand");
             return render_prose(content, no_wrap, layout);
         }
         Some(Command::Quote {
@@ -406,6 +420,7 @@ fn main() -> color_eyre::Result<()> {
             ref attribution,
             ref layout,
         }) => {
+            tracing::debug!(command = "quote", "Dispatching subcommand");
             return render_quote(content, attribution.as_deref(), layout);
         }
         Some(Command::List {
@@ -414,6 +429,7 @@ fn main() -> color_eyre::Result<()> {
             no_hanging_indent,
             ref layout,
         }) => {
+            tracing::debug!(command = "list", items = items.len(), "Dispatching subcommand");
             return render_list(items, bullet, no_hanging_indent, layout);
         }
         Some(Command::Columns {
@@ -423,6 +439,7 @@ fn main() -> color_eyre::Result<()> {
             ref left_width,
             ref layout,
         }) => {
+            tracing::debug!(command = "columns", gap, left_width = ?left_width, "Dispatching subcommand");
             return render_columns(left, right, gap, left_width.as_deref(), layout);
         }
         Some(Command::Dir {
@@ -442,10 +459,11 @@ fn main() -> color_eyre::Result<()> {
                 show_modified: modified,
                 show_updated: updated,
             };
+            tracing::debug!(command = "dir", ?path, depth, ?filter, "Dispatching subcommand");
             return render_dir(path, depth, filter, skip_root, layout, &options);
         }
         None => {
-            // Default behavior: content analysis or terminal metadata
+            tracing::debug!(json = args.json, "No subcommand, showing terminal metadata");
         }
     }
 
