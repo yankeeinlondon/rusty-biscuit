@@ -10,6 +10,7 @@ use sniff::remote::{DocumentCategory, GitRemote, RemoteRepoProvider, RemoteRepor
 use sniff::request::*;
 use sniff::services::{ServiceState, detect_services};
 use sniff::{SniffResult, detect_with_plan};
+use tracing::info_span;
 
 use crate::args::{
     BlastRadiusScopeArg, COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter,
@@ -34,6 +35,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let cli = Cli::parse();
+
+    crate::init_tracing(cli.verbose);
+
+    let _root = info_span!("sniff",
+        command = ?cli.command.as_ref().map(|c| format!("{c:?}")),
+        json = cli.json,
+        plain = cli.plain,
+    ).entered();
 
     // Handle --completions first (prints setup instructions)
     if let Some(shell) = cli.completions {
