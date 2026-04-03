@@ -9,6 +9,8 @@ use std::process::Command;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
+use tracing::{debug, instrument, warn};
+
 use super::types::{ShellDirective, ShellExpansionError, ShellExpansionOptions};
 use crate::markdown::compose::ComposeSource;
 
@@ -33,6 +35,7 @@ use crate::markdown::compose::ComposeSource;
 /// let working_dir = resolve_working_directory(&options, &source);
 /// // Returns current directory
 /// ```
+#[instrument(skip_all)]
 pub fn resolve_working_directory(
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
@@ -84,6 +87,11 @@ pub fn resolve_working_directory(
 /// let output = execute_command(&directive, &options, &source).unwrap();
 /// assert!(output.contains("hello"));
 /// ```
+#[instrument(skip_all, fields(
+    command = %directive.raw_command,
+    executable = %directive.executable,
+    line = directive.line,
+))]
 pub fn execute_command(
     directive: &ShellDirective,
     shell_opts: &ShellExpansionOptions,
@@ -98,6 +106,7 @@ pub fn execute_command(
 
     // 2. Resolve working directory
     let working_dir = resolve_working_directory(shell_opts, source);
+    debug!(working_dir = %working_dir.display(), "shell: executing command");
 
     // 3. Build command
     let mut cmd = Command::new(&resolved_path);
@@ -161,6 +170,7 @@ pub fn execute_command(
                         }
                         output.push_str(&stderr_str);
                     }
+                    debug!(exit_code = 0, output_len = output.len(), "shell: command succeeded");
                     return Ok(output);
                 } else {
                     return Err(ShellExpansionError::ExecutionFailed {
@@ -178,6 +188,7 @@ pub fn execute_command(
                     // Kill the child
                     let _ = child.kill();
                     let _ = child.wait();
+                    warn!(elapsed = ?start.elapsed(), "shell: command timed out");
                     return Err(ShellExpansionError::Timeout {
                         command: directive.raw_command.clone(),
                         timeout,

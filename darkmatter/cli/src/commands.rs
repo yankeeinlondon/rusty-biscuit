@@ -17,6 +17,7 @@ use rayon::prelude::*;
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 use std::process::Command;
+use tracing::{debug, info, instrument};
 
 /// Resolved allow flags for compose validation.
 pub struct ComposeAllowFlags {
@@ -213,6 +214,7 @@ fn resolve_list_spacing(compact: bool, loose: bool) -> ListSpacingMode {
     }
 }
 
+#[instrument(skip_all)]
 pub fn run_clean(
     input: Option<&PathBuf>,
     save: bool,
@@ -262,6 +264,7 @@ fn apply_cleanup(md: &mut Markdown, indent: Option<usize>, mode: ListSpacingMode
 }
 
 /// Shared render logic for both implicit (no subcommand) and explicit `render` subcommand.
+#[instrument(skip_all, fields(command = "render"))]
 pub fn run_render(
     input: Option<&PathBuf>,
     output: OutputFormat,
@@ -269,6 +272,7 @@ pub fn run_render(
     indent: Option<usize>,
     cli: &Cli,
 ) -> Result<()> {
+    debug!("rendering document");
     let mut md = load_markdown(input)?;
 
     // Apply cleanup with the specified or default indentation
@@ -311,6 +315,7 @@ pub fn run_render(
 
 /// Run the compose pipeline.
 #[allow(clippy::too_many_arguments)]
+#[instrument(skip_all, fields(command = "compose"))]
 pub fn run_compose(
     input: Option<&PathBuf>,
     state_json: Option<&str>,
@@ -325,6 +330,7 @@ pub fn run_compose(
     perf: bool,
     cli: &Cli,
 ) -> Result<()> {
+    info!("starting compose pipeline");
     use std::time::Instant;
 
     let cmd_start = perf.then(Instant::now);
@@ -542,6 +548,39 @@ pub fn run_compose(
     })?;
     let compose_pipeline_dur = compose_start.map(|s| s.elapsed()).unwrap_or_default();
 
+    // Verbose compose summary
+    if cli.verbose > 0 {
+        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::prelude::{Status, StatusState};
+        use biscuit_terminal::terminal::Terminal;
+        let terminal = Terminal::default();
+        let status = Status::from_prose(format!(
+            "Composed <b>{}</b> transclusions, <b>{}</b> interpolations, <b>{}</b> replacements",
+            report.transclusions_applied,
+            report.interpolations_applied,
+            report.replacements_applied,
+        ))
+        .state(StatusState::Success);
+        eprintln!("{}", status.render(&terminal));
+    }
+
+    if cli.verbose > 1
+        && let Some(perf_report) = &report.perf
+    {
+        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::prelude::Status;
+        use biscuit_terminal::terminal::Terminal;
+        let terminal = Terminal::default();
+        for metric in &perf_report.metrics {
+            let status = Status::from_prose(format!(
+                "<dim>{:20}</dim> {:>8.2}ms",
+                metric.name,
+                metric.elapsed.as_secs_f64() * 1000.0
+            ));
+            eprintln!("{}", status.render(&terminal));
+        }
+    }
+
     let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
     let code_theme = cli
         .code_theme
@@ -624,6 +663,7 @@ pub fn run_compose(
 }
 
 /// Get frontmatter properties from a markdown document.
+#[instrument(skip_all)]
 pub fn run_get(
     input: &PathBuf,
     props: &[String],
@@ -667,6 +707,7 @@ pub fn run_get(
 /// By default the modified document is written to stdout without changing the
 /// source file. With `--save` the file is updated in place and nothing is
 /// printed.
+#[instrument(skip_all)]
 pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Result<()> {
     let is_stdin = input.to_str() == Some("-");
 
@@ -700,6 +741,7 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Resu
 /// Saves the file in place. By default produces no output on success.
 /// With `-v`, prints a human-readable summary. With `--json`, outputs
 /// structured JSON.
+#[instrument(skip_all)]
 pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Result<()> {
     let resolved = resolve_file_path(input)?;
     let mut md = load_markdown(Some(input))?;
@@ -748,22 +790,30 @@ pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Resul
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else if cli.verbose > 0 {
+        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::terminal::Terminal;
         let props_label = if removed.len() == 1 {
-            format!("\"{}\" property", removed[0])
+            format!("<b>{}</b> property", removed[0])
         } else {
             format!(
-                "[{}] properties",
+                "<b>{}</b> properties",
                 removed
                     .iter()
-                    .map(|p| format!("\"{p}\""))
+                    .map(|p| format!("\"{}\"", p))
                     .collect::<Vec<_>>()
                     .join(", ")
             )
         };
         let remaining_label = remaining.join(", ");
+        let terminal = Terminal::default();
         eprintln!(
-            "- removed the {} from frontmatter (\x1b[2mremaining: \x1b[3m{}\x1b[0m\x1b[2m)\x1b[0m",
-            props_label, remaining_label
+            "{}",
+            Prose::new(format!(
+                "- removed the {} from frontmatter (<dim>remaining: <i>{}</i></dim>)",
+                props_label, remaining_label
+            ))
+            .render(&terminal)
         );
     }
 
@@ -1059,6 +1109,7 @@ fn wait_args_for_editor(binary: &str) -> &'static [&'static str] {
 /// When the input is a directory, recursively finds all markdown files,
 /// hashes each in parallel, concatenates the per-file hashes, and
 /// produces a single aggregate hash.
+#[instrument(skip_all)]
 pub fn run_hash(
     input: Option<&PathBuf>,
     body_only: bool,
@@ -1352,7 +1403,9 @@ mod tests {
     }
 }
 
+#[instrument(skip_all, fields(command = "validate"))]
 fn run_validate(target: ValidateTarget) -> Result<()> {
+    info!("starting reference validation");
     use darkmatter::markdown::reference::ReferenceGraphOptions;
     use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
 
@@ -1856,6 +1909,7 @@ fn validation_report_to_json(
     })
 }
 
+#[instrument(skip_all)]
 fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Result<()> {
     use biscuit_terminal::components::renderable::Renderable;
     use biscuit_terminal::terminal::Terminal;

@@ -4,8 +4,10 @@ use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use biscuit_file::FileReference;
 use std::path::{Path, PathBuf};
+use tracing::{debug, instrument, trace};
 
 /// Resolves a directive target into a canonical local path or URL.
+#[instrument(skip_all, fields(target = %raw_target, kind = ?kind))]
 pub(crate) fn resolve_target(
     kind: DirectiveKind,
     raw_target: &str,
@@ -13,6 +15,7 @@ pub(crate) fn resolve_target(
     source: &ComposeSource,
     line: usize,
 ) -> Result<ResolvedTarget, TransclusionError> {
+    debug!("transclusion: resolving target");
     match kind {
         DirectiveKind::Url => resolve_url_target(raw_target, options),
         DirectiveKind::File | DirectiveKind::Code => {
@@ -30,6 +33,7 @@ fn resolve_url_target(
     raw_target: &str,
     options: &TransclusionOptions,
 ) -> Result<ResolvedTarget, TransclusionError> {
+    trace!(url = %raw_target, "transclusion: resolving URL target");
     let url = url::Url::parse(raw_target)?;
     if !options.allow_remote {
         return Err(TransclusionError::UrlExecutionDisabled {
@@ -55,6 +59,7 @@ pub(crate) fn resolve_path(
     source: &ComposeSource,
     line: usize,
 ) -> Result<PathBuf, TransclusionError> {
+    trace!(raw_target = %raw_target, "transclusion: resolving path");
     if raw_target.starts_with("http://") || raw_target.starts_with("https://") {
         return Err(TransclusionError::UnsupportedReferenceType {
             reference: raw_target.to_string(),
@@ -71,7 +76,7 @@ pub(crate) fn resolve_path(
         })?;
         let suffix = raw_target.trim_start_matches('~').trim_start_matches('/');
         let candidate = Path::new(&home).join(suffix);
-        return std::fs::canonicalize(&candidate).map_err(|e| {
+        let canonical = std::fs::canonicalize(&candidate).map_err(|e| {
             TransclusionError::Io(std::io::Error::new(
                 e.kind(),
                 format!(
@@ -80,7 +85,9 @@ pub(crate) fn resolve_path(
                     candidate.display()
                 ),
             ))
-        });
+        })?;
+        debug!(resolved = %canonical.display(), "transclusion: path resolved");
+        return Ok(canonical);
     }
 
     // Use FileReference for @, !, vault:, %, {{ENV}}, and absolute paths.
@@ -108,24 +115,28 @@ pub(crate) fn resolve_path(
         }
         let resolved = file_ref.resolve()?;
 
-        return resolved.ok_or_else(|| {
+        let path = resolved.ok_or_else(|| {
             TransclusionError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!("File not found: {raw_target}"),
             ))
-        });
+        })?;
+        debug!(resolved = %path.display(), "transclusion: path resolved");
+        return Ok(path);
     }
 
     // Relative paths — resolve from the source file's directory.
     let raw = PathBuf::from(raw_target);
 
     if raw.is_absolute() {
-        return std::fs::canonicalize(&raw).map_err(|e| {
+        let canonical = std::fs::canonicalize(&raw).map_err(|e| {
             TransclusionError::Io(std::io::Error::new(
                 e.kind(),
                 format!("'{}': {e}", raw.display()),
             ))
-        });
+        })?;
+        debug!(resolved = %canonical.display(), "transclusion: path resolved");
+        return Ok(canonical);
     }
 
     let source_file =
@@ -149,7 +160,7 @@ pub(crate) fn resolve_path(
     } else {
         base_dir.join(Path::new(raw_target))
     };
-    std::fs::canonicalize(&candidate).map_err(|e| {
+    let canonical = std::fs::canonicalize(&candidate).map_err(|e| {
         TransclusionError::Io(std::io::Error::new(
             e.kind(),
             format!(
@@ -158,7 +169,9 @@ pub(crate) fn resolve_path(
                 candidate.display()
             ),
         ))
-    })
+    })?;
+    debug!(resolved = %canonical.display(), "transclusion: path resolved");
+    Ok(canonical)
 }
 
 /// Returns `true` if the target should be routed through [`FileReference`]

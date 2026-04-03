@@ -11,6 +11,7 @@ use sniff::filesystem::git::{FileStatus, GitRepo};
 use sniff::filesystem::repo::{self, Package, RepoInfo};
 use sniff::hardware::{self, HardwareInfo};
 use sniff::os::{self, OsInfo, OsType};
+use sniff::request::OsRequest;
 
 use super::diagnostics::ContextMergeDiagnostic;
 use super::format;
@@ -330,7 +331,11 @@ impl ContextCapture {
                 let os_handle = if need_os {
                     Some(s.spawn(|| {
                         let t = Instant::now();
-                        let result = os::detect_os();
+                        let request = OsRequest::full()
+                            .include_locale(false)
+                            .include_timezone(false)
+                            .include_ntp_status(false);
+                        let result = os::detect_os_with_request(&request);
                         (result, t.elapsed())
                     }))
                 } else {

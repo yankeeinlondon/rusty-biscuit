@@ -32,6 +32,7 @@
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::fmt;
+use tracing::debug;
 
 /// Location of an interpolation expression in markdown content.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,6 +149,7 @@ impl<'a> ExpressionFinder<'a> {
             }
         }
 
+        debug!(count = locations.len(), "interpolation: found expressions");
         locations
     }
 
