@@ -171,7 +171,10 @@ pub(crate) fn validate(
         ..Default::default()
     };
 
-    debug!(ref_count = report.references_scanned, "validate: references collected");
+    debug!(
+        ref_count = report.references_scanned,
+        "validate: references collected"
+    );
 
     // Collect headings for fragment validation from the composed document.
     // Uses the graph's prepared content which includes transcluded headings.
@@ -604,7 +607,10 @@ async fn validate_remote_urls_async(
     records: &[&ReferenceRecord],
     timeout: Duration,
 ) -> Vec<RemoteResult> {
-    debug!(url_count = records.len(), "validate: starting remote URL checks");
+    debug!(
+        url_count = records.len(),
+        "validate: starting remote URL checks"
+    );
     let client = reqwest::Client::builder()
         .timeout(timeout)
         .user_agent("darkmatter-reference-validator/0.1")

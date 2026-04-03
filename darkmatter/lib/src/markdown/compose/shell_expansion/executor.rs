@@ -170,7 +170,11 @@ pub fn execute_command(
                         }
                         output.push_str(&stderr_str);
                     }
-                    debug!(exit_code = 0, output_len = output.len(), "shell: command succeeded");
+                    debug!(
+                        exit_code = 0,
+                        output_len = output.len(),
+                        "shell: command succeeded"
+                    );
                     return Ok(output);
                 } else {
                     return Err(ShellExpansionError::ExecutionFailed {
