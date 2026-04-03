@@ -1,13 +1,13 @@
 use clap::Parser;
 use claudine::events::Provider;
 use color_eyre::eyre::Result;
-use tracing::level_filters::LevelFilter;
 
 mod args;
 mod commands;
 mod log;
 mod output;
 mod provider_values;
+mod telemetry;
 
 use args::{Cli, Commands};
 
@@ -24,14 +24,9 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     log::set_plain(cli.plain);
-
-    // Default levels come from -v/-vv and can be overridden by RUST_LOG/DEBUG.
-    let env_filter = build_env_filter(cli.verbose);
-
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_writer(std::io::stderr)
-        .init();
+    telemetry::init_tracing(cli.debug);
+    let root_span = telemetry::root_span(&cli);
+    let _root_guard = root_span.enter();
 
     if cli.help || cli.command.is_none() {
         return commands::help::run();
@@ -74,45 +69,5 @@ async fn main() -> Result<()> {
         }
         Commands::Compose(args) => commands::compose::run_compose(args, cli.verbose),
         Commands::InlineCompose(args) => commands::compose::run_inline_compose(args, cli.verbose),
-    }
-}
-
-fn build_env_filter(verbose: u8) -> tracing_subscriber::EnvFilter {
-    let default_directive = verbosity_level(verbose).into();
-
-    if std::env::var_os("RUST_LOG").is_some() {
-        return tracing_subscriber::EnvFilter::builder()
-            .with_default_directive(default_directive)
-            .from_env_lossy();
-    }
-
-    if let Some(debug) = std::env::var("DEBUG")
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-    {
-        let directive = normalize_debug_override(&debug).unwrap_or(debug);
-        return tracing_subscriber::EnvFilter::builder()
-            .with_default_directive(default_directive)
-            .parse_lossy(directive);
-    }
-
-    tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(default_directive)
-        .from_env_lossy()
-}
-
-fn verbosity_level(verbose: u8) -> LevelFilter {
-    match verbose {
-        0 | 1 => LevelFilter::WARN,
-        _ => LevelFilter::DEBUG,
-    }
-}
-
-fn normalize_debug_override(raw: &str) -> Option<String> {
-    match raw.to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some("debug".to_string()),
-        "0" | "false" | "no" | "off" => Some("warn".to_string()),
-        _ => None,
     }
 }
