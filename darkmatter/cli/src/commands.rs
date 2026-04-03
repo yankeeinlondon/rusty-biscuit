@@ -17,6 +17,7 @@ use rayon::prelude::*;
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 use std::process::Command;
+use tracing::{debug, info, instrument};
 
 /// Resolved allow flags for compose validation.
 pub struct ComposeAllowFlags {
@@ -213,6 +214,7 @@ fn resolve_list_spacing(compact: bool, loose: bool) -> ListSpacingMode {
     }
 }
 
+#[instrument(skip_all)]
 pub fn run_clean(
     input: Option<&PathBuf>,
     save: bool,
@@ -262,6 +264,7 @@ fn apply_cleanup(md: &mut Markdown, indent: Option<usize>, mode: ListSpacingMode
 }
 
 /// Shared render logic for both implicit (no subcommand) and explicit `render` subcommand.
+#[instrument(skip_all, fields(command = "render"))]
 pub fn run_render(
     input: Option<&PathBuf>,
     output: OutputFormat,
@@ -269,6 +272,7 @@ pub fn run_render(
     indent: Option<usize>,
     cli: &Cli,
 ) -> Result<()> {
+    debug!("rendering document");
     let mut md = load_markdown(input)?;
 
     // Apply cleanup with the specified or default indentation
@@ -311,6 +315,7 @@ pub fn run_render(
 
 /// Run the compose pipeline.
 #[allow(clippy::too_many_arguments)]
+#[instrument(skip_all, fields(command = "compose"))]
 pub fn run_compose(
     input: Option<&PathBuf>,
     state_json: Option<&str>,
@@ -325,6 +330,7 @@ pub fn run_compose(
     perf: bool,
     cli: &Cli,
 ) -> Result<()> {
+    info!("starting compose pipeline");
     use std::time::Instant;
 
     let cmd_start = perf.then(Instant::now);
@@ -624,6 +630,7 @@ pub fn run_compose(
 }
 
 /// Get frontmatter properties from a markdown document.
+#[instrument(skip_all)]
 pub fn run_get(
     input: &PathBuf,
     props: &[String],
@@ -667,6 +674,7 @@ pub fn run_get(
 /// By default the modified document is written to stdout without changing the
 /// source file. With `--save` the file is updated in place and nothing is
 /// printed.
+#[instrument(skip_all)]
 pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Result<()> {
     let is_stdin = input.to_str() == Some("-");
 
@@ -700,6 +708,7 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Resu
 /// Saves the file in place. By default produces no output on success.
 /// With `-v`, prints a human-readable summary. With `--json`, outputs
 /// structured JSON.
+#[instrument(skip_all)]
 pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Result<()> {
     let resolved = resolve_file_path(input)?;
     let mut md = load_markdown(Some(input))?;
@@ -1059,6 +1068,7 @@ fn wait_args_for_editor(binary: &str) -> &'static [&'static str] {
 /// When the input is a directory, recursively finds all markdown files,
 /// hashes each in parallel, concatenates the per-file hashes, and
 /// produces a single aggregate hash.
+#[instrument(skip_all)]
 pub fn run_hash(
     input: Option<&PathBuf>,
     body_only: bool,
@@ -1352,7 +1362,9 @@ mod tests {
     }
 }
 
+#[instrument(skip_all, fields(command = "validate"))]
 fn run_validate(target: ValidateTarget) -> Result<()> {
+    info!("starting reference validation");
     use darkmatter::markdown::reference::ReferenceGraphOptions;
     use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
 
@@ -1856,6 +1868,7 @@ fn validation_report_to_json(
     })
 }
 
+#[instrument(skip_all)]
 fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Result<()> {
     use biscuit_terminal::components::renderable::Renderable;
     use biscuit_terminal::terminal::Terminal;
