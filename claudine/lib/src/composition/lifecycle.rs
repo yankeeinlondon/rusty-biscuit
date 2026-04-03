@@ -6,12 +6,15 @@
 
 use std::path::Path;
 
-use biscuit_terminal::components::status::StatusState;
+use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
+use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
+use biscuit_terminal::prelude::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use super::error::CompositionError;
-use crate::events::GlobalSettings;
+use crate::events::{GlobalSettings, TtsSettings};
 use crate::messaging::RuntimeMessagingSettings;
 
 /// A single lifecycle notification configuration.
@@ -119,6 +122,49 @@ pub struct LifecycleRuntimeContext<'a> {
 
     /// Repository root (if in a git repository).
     pub repo_root: Option<&'a Path>,
+}
+
+/// A single audio playback phase.
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq))]
+enum AudioPhase {
+    Speak(String),
+    Effect(String),
+}
+
+/// Compute the ordered audio phases for a notification.
+///
+/// When both speech and effect are present:
+/// - `speak` + `effect` → effect first, then speech
+/// - `speak_first` + `effect` → speech first, then effect
+///
+/// When only one audio output is present, it is the sole phase.
+fn audio_phases(n: &LifecycleNotification) -> Vec<AudioPhase> {
+    let speech_text = n
+        .speak
+        .as_deref()
+        .or(n.speak_first.as_deref())
+        .filter(|s| !s.is_empty());
+    let effect_name = n.effect.as_deref().filter(|s| !s.is_empty());
+    let speech_first = n.speak_first.is_some();
+
+    match (speech_text, effect_name) {
+        (Some(text), Some(effect)) if speech_first => {
+            vec![
+                AudioPhase::Speak(text.to_string()),
+                AudioPhase::Effect(effect.to_string()),
+            ]
+        }
+        (Some(text), Some(effect)) => {
+            vec![
+                AudioPhase::Effect(effect.to_string()),
+                AudioPhase::Speak(text.to_string()),
+            ]
+        }
+        (Some(text), None) => vec![AudioPhase::Speak(text.to_string())],
+        (None, Some(effect)) => vec![AudioPhase::Effect(effect.to_string())],
+        (None, None) => vec![],
+    }
 }
 
 impl LifecycleSignal {
@@ -295,6 +341,115 @@ fn normalize_empty_string(field: &mut Option<String>) {
     }
 }
 
+/// Build a `TtsConfig` from global settings.
+fn tts_config_from_settings(tts: Option<&TtsSettings>) -> TtsConfig {
+    let mut config = TtsConfig::new();
+    let Some(settings) = tts else {
+        return config;
+    };
+
+    if let Some(voice) = settings.voice.as_deref() {
+        config = config.with_voice(voice);
+    }
+    if let Some(rate) = settings.rate {
+        config = config.with_speed(SpeedLevel::Explicit(rate));
+    }
+    if let Some(provider) = settings.provider.as_deref() {
+        if let Some(provider) = biscuit_speaks::parse_provider_name(provider) {
+            config = config.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
+        } else {
+            warn!(
+                provider,
+                "Unknown TTS provider in settings; using automatic selection"
+            );
+        }
+    }
+    config
+}
+
+/// Play a sound effect synchronously (blocking).
+fn play_effect_blocking(name: &str) {
+    let Some(effect) = playa::SoundEffect::from_name(name) else {
+        warn!(%name, "Unknown sound effect in lifecycle notification");
+        return;
+    };
+    match playa::Playa::from_bytes(effect.bytes().to_vec()) {
+        Ok(player) => {
+            if let Err(e) = player.play() {
+                warn!(%e, "Lifecycle sound effect playback failed");
+            }
+        }
+        Err(e) => warn!(%e, "Failed to construct sound effect player"),
+    }
+}
+
+/// Speak text synchronously using the Tokio runtime.
+fn speak_blocking(text: &str, config: TtsConfig) {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let text = text.to_string();
+        let _ = handle.block_on(async move {
+            if let Err(e) = biscuit_speaks::Speak::new(text)
+                .with_config(config)
+                .play()
+                .await
+            {
+                warn!(%e, "Lifecycle TTS playback failed");
+            }
+        });
+    } else {
+        warn!("No Tokio runtime available for lifecycle TTS");
+    }
+}
+
+/// Emit a lifecycle signal with deterministic audio ordering.
+///
+/// Dispatches non-audio targets (stderr, message) immediately, then
+/// plays audio phases in order. All errors are logged as warnings and
+/// never propagated.
+pub fn emit_lifecycle_signal(
+    config: &LifecycleConfig,
+    signal: LifecycleSignal,
+    ctx: &LifecycleRuntimeContext<'_>,
+) {
+    let Some(notification) = config.get(signal) else {
+        return;
+    };
+
+    // --- Non-audio fan-out (immediate) ---
+
+    // stderr
+    if let Some(stderr_text) = &notification.stderr {
+        let rendered = Status::from_prose(stderr_text)
+            .state(signal.status_state())
+            .theme(StatusTheme::Circular)
+            .render(ctx.term);
+        eprintln!("{rendered}");
+    }
+
+    // message
+    if let Some(message_text) = &notification.message {
+        crate::messaging::execute_resolved_message(
+            message_text,
+            None,
+            Some(ctx.source_path),
+            ctx.repo_root,
+            ctx.messaging,
+        );
+    }
+
+    // --- Audio phases (sequential, blocking) ---
+
+    let phases = audio_phases(notification);
+    let tts_config = tts_config_from_settings(ctx.settings.tts.as_ref());
+
+    for phase in phases {
+        match phase {
+            AudioPhase::Speak(text) => speak_blocking(&text, tts_config.clone()),
+            AudioPhase::Effect(name) => play_effect_blocking(&name),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,5 +609,63 @@ mod tests {
 
         let config = parse_lifecycle_config(&frontmatter).unwrap();
         assert!(config.start.is_some());
+    }
+
+    #[test]
+    fn audio_order_speak_plus_effect() {
+        let n = LifecycleNotification {
+            speak: Some("Hello".into()),
+            effect: Some("doorbell".into()),
+            ..Default::default()
+        };
+        let phases = audio_phases(&n);
+        assert_eq!(phases.len(), 2);
+        assert!(matches!(phases[0], AudioPhase::Effect(_)));
+        assert!(matches!(phases[1], AudioPhase::Speak(_)));
+    }
+
+    #[test]
+    fn audio_order_speak_first_plus_effect() {
+        let n = LifecycleNotification {
+            speak_first: Some("Hello".into()),
+            effect: Some("doorbell".into()),
+            ..Default::default()
+        };
+        let phases = audio_phases(&n);
+        assert_eq!(phases.len(), 2);
+        assert!(matches!(phases[0], AudioPhase::Speak(_)));
+        assert!(matches!(phases[1], AudioPhase::Effect(_)));
+    }
+
+    #[test]
+    fn audio_order_speech_only() {
+        let n = LifecycleNotification {
+            speak: Some("Hello".into()),
+            ..Default::default()
+        };
+        let phases = audio_phases(&n);
+        assert_eq!(phases.len(), 1);
+        assert!(matches!(phases[0], AudioPhase::Speak(_)));
+    }
+
+    #[test]
+    fn audio_order_effect_only() {
+        let n = LifecycleNotification {
+            effect: Some("doorbell".into()),
+            ..Default::default()
+        };
+        let phases = audio_phases(&n);
+        assert_eq!(phases.len(), 1);
+        assert!(matches!(phases[0], AudioPhase::Effect(_)));
+    }
+
+    #[test]
+    fn audio_order_no_audio() {
+        let n = LifecycleNotification {
+            stderr: Some("Status only".into()),
+            ..Default::default()
+        };
+        let phases = audio_phases(&n);
+        assert!(phases.is_empty());
     }
 }
