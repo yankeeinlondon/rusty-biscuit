@@ -464,7 +464,10 @@ pub(crate) fn execute_composition_request(
             &request.prepared.resolved_path,
             &resolve_ctx,
         )
-        .map_err(|e| eyre!("{e}"))?;
+        .map_err(|e| {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
+            eyre!("{e}")
+        })?;
 
         // For inline composition, prepend a system-owned writability check
         // so that handler recovery paths can respond to permission failures
@@ -483,7 +486,10 @@ pub(crate) fn execute_composition_request(
             Some(&plan),
             &shell_options,
         )
-        .map_err(|e| eyre!("{e}"))?;
+        .map_err(|e| {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
+            eyre!("{e}")
+        })?;
 
         if !request.quiet && !request.silent && harness_preflight.total_discovered > 0 {
             log::info(&format!(
