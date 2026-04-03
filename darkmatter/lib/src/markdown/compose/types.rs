@@ -353,6 +353,10 @@ pub struct ComposeOptions {
     /// is `Some`, the approval handler is ignored.
     pub pre_approved_commands: Option<std::collections::HashSet<String>>,
 
+    /// Whether to strip ANSI escape codes and set `NO_COLOR=1` for shell commands.
+    /// Default: true.
+    pub shell_strip_ansi: bool,
+
     // ── Cleanup ────────────────────────────────────────────────────
     /// Controls how blank lines between list items are handled
     /// during the cleanup operation. Default: `Normal`.
@@ -509,6 +513,7 @@ impl ComposeOptions {
             replace_parent_wins: false,
             one_off_replace: None,
             interpolate_code_spans: false,
+            shell_strip_ansi: true,
         }
     }
 
@@ -784,7 +789,15 @@ impl ComposeOptions {
             policy_root: self.shell_policy_root.clone(),
             working_directory: self.shell_working_directory.clone(),
             approval_handler: self.shell_approval_handler.clone(),
+            strip_ansi: self.shell_strip_ansi,
         }
+    }
+
+    /// Sets whether to strip ANSI escape codes for shell commands.
+    #[must_use]
+    pub fn with_shell_strip_ansi(mut self, enabled: bool) -> Self {
+        self.shell_strip_ansi = enabled;
+        self
     }
 
     /// Internal builder: toggles parent-wins behavior for the `replace` map.
