@@ -15,6 +15,11 @@ pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdout_noise_prefixes: &'a [&'a str],
     pub(crate) stderr_noise_prefixes: &'a [&'a str],
     pub(crate) stdin_seed: Option<&'a str>,
+    /// After writing `stdin_seed`, keep the pipe open and relay bytes from
+    /// `/dev/tty` so the child's TUI receives keyboard and mouse events.
+    /// Without this, piped stdin causes orphaned mouse tracking escape
+    /// sequences to echo as text in the terminal.
+    pub(crate) relay_tty_after_seed: bool,
 }
 
 /// Result of a child process execution, enriched with termination info.
@@ -286,13 +291,39 @@ pub(crate) fn run_child(
 
     let mut child = command.spawn()?;
 
-    // Write stdin seed and close the pipe so the child sees EOF.
-    if let Some(seed) = io.stdin_seed
+    // Write stdin seed then either close the pipe (non-interactive) or
+    // relay /dev/tty input through it (interactive TUI).
+    let stdin_relay_handle = if let Some(seed) = io.stdin_seed
         && let Some(mut stdin_pipe) = child.stdin.take()
     {
         stdin_pipe.write_all(seed.as_bytes())?;
-        // Drop closes the pipe
-    }
+        if io.relay_tty_after_seed {
+            // Keep the pipe open and forward terminal input so the child's
+            // TUI receives keyboard/mouse events after the initial prompt.
+            Some(thread::spawn(move || {
+                use std::io::Read;
+                let Ok(mut tty) = std::fs::File::open("/dev/tty") else {
+                    return;
+                };
+                let mut buf = [0u8; 4096];
+                loop {
+                    match tty.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            if stdin_pipe.write_all(&buf[..n]).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }))
+        } else {
+            // Drop closes the pipe — child sees EOF.
+            None
+        }
+    } else {
+        None
+    };
 
     // Spawn filter threads that read child output line-by-line and
     // suppress lines matching any noise prefix.
@@ -364,6 +395,10 @@ pub(crate) fn run_child(
     if let Some(handle) = stderr_handle {
         let _ = handle.join();
     }
+    // The relay thread will exit when the child's stdin pipe breaks (child
+    // exited) or /dev/tty EOF.  Don't block on join — the thread may be
+    // stuck in a blocking read on /dev/tty.
+    drop(stdin_relay_handle);
 
     Ok(ProcessResult {
         data: exit_code,

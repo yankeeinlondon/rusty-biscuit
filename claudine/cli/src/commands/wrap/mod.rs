@@ -1291,6 +1291,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed: stdin_seed.as_deref(),
+                relay_tty_after_seed: false,
             },
         )?;
         result.data
@@ -1732,6 +1733,7 @@ fn execute_harness_attempt(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed: launch.stdin_seed.as_deref(),
+                relay_tty_after_seed: false,
             },
         )?;
         let termination = capture.termination;

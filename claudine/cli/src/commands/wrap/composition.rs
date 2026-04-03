@@ -19,6 +19,9 @@ use claudine::composition::{
     CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
     InlineClosurePlan, SelectedProvider, SelectionReason, build_candidate_set, select_provider,
 };
+use claudine::composition::lifecycle::{
+    LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal, emit_lifecycle_signal,
+};
 use claudine::events::Provider;
 use claudine::stream::stderr::Verbosity;
 use color_eyre::eyre::{Result, eyre};
@@ -426,6 +429,30 @@ pub(crate) fn execute_composition_request(
         request.session_interactive,
     );
 
+    // --- Lifecycle notification setup ---
+    let lifecycle = &request.prepared.lifecycle;
+    let mut _lifecycle_state = LifecycleRuntimeState::default();
+
+    let (lifecycle_settings, lifecycle_messaging) =
+        match claudine::dispatch::loader::load_runtime_config(None, effective_repo_root) {
+            Ok(config) => (config.settings().clone(), config.messaging().clone()),
+            Err(_) => (
+                claudine::events::GlobalSettings::default(),
+                claudine::messaging::RuntimeMessagingSettings {
+                    user: None,
+                    repo: None,
+                },
+            ),
+        };
+
+    let lifecycle_ctx = LifecycleRuntimeContext {
+        settings: &lifecycle_settings,
+        messaging: &lifecycle_messaging,
+        term: &term,
+        source_path: &request.prepared.resolved_path,
+        repo_root: effective_repo_root,
+    };
+
     if harness_enabled {
         let resolve_ctx = claudine::harness::HarnessResolutionContext {
             source_path: &request.prepared.resolved_path,
@@ -479,7 +506,10 @@ pub(crate) fn execute_composition_request(
             &request.prepared.resolved_path,
             Some(&permission_probe),
         )
-        .map_err(|reason| eyre!("{reason}"))?;
+        .map_err(|reason| {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
+            eyre!("{reason}")
+        })?;
     }
 
     // -- Structured streaming decision ------------------------------------
@@ -589,11 +619,15 @@ pub(crate) fn execute_composition_request(
             &term,
         )
     } else if is_inline {
+        emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, &lifecycle_ctx);
+        _lifecycle_state.start_emitted = true;
+        _lifecycle_state.provider_launch_started = true;
+
         let closure_plan = match &request.prepared.closure {
             CompositionClosurePlan::Inline(plan) => plan,
             _ => unreachable!("is_inline is true but closure is not Inline"),
         };
-        execute_inline_without_harness(
+        let exit_code = execute_inline_without_harness(
             provider,
             profile,
             &binary_path,
@@ -614,9 +648,21 @@ pub(crate) fn execute_composition_request(
             &env_context,
             &dispatch_context,
             &term,
-        )
+        )?;
+
+        if exit_code == 0 {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Success, &lifecycle_ctx);
+        } else {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, &lifecycle_ctx);
+        }
+
+        Ok(exit_code)
     } else {
-        execute_direct_without_harness(
+        emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, &lifecycle_ctx);
+        _lifecycle_state.start_emitted = true;
+        _lifecycle_state.provider_launch_started = true;
+
+        let exit_code = execute_direct_without_harness(
             provider,
             profile,
             &binary_path,
@@ -624,6 +670,7 @@ pub(crate) fn execute_composition_request(
             &env_plan.env,
             child_cwd,
             stdin_seed.as_deref(),
+            request.session_interactive,
             use_structured,
             structured_codex_output.as_ref(),
             stdout_noise,
@@ -632,7 +679,15 @@ pub(crate) fn execute_composition_request(
             verbose_requested,
             &env_context,
             &dispatch_context,
-        )
+        )?;
+
+        if exit_code == 0 {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Success, &lifecycle_ctx);
+        } else {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, &lifecycle_ctx);
+        }
+
+        Ok(exit_code)
     }
 }
 
@@ -975,6 +1030,7 @@ fn run_legacy_inline(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
+                relay_tty_after_seed: true,
             },
         )?;
         let final_response = if provider == Provider::Codex {
@@ -1002,6 +1058,7 @@ fn run_legacy_inline(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
+                relay_tty_after_seed: false,
             },
         )?;
         let response = profile.parse_captured_output(&capture.data.stdout);
@@ -1128,6 +1185,7 @@ fn execute_direct_without_harness(
     child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
     child_cwd: &std::path::Path,
     stdin_seed: Option<&str>,
+    session_interactive: bool,
     use_structured: bool,
     structured_codex_output: Option<&StructuredCodexOutput>,
     stdout_noise: &[&str],
@@ -1208,6 +1266,7 @@ fn execute_direct_without_harness(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
+                relay_tty_after_seed: session_interactive,
             },
         )?;
 
