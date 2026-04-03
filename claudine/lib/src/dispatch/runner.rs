@@ -5,7 +5,7 @@ use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
 use regex::Regex;
 use serde_json::{Map, Value};
 use tokio::process::Command;
-use tracing::{debug, warn};
+use tracing::{debug, info_span, warn};
 
 use super::template::interpolate;
 use crate::actions::{
@@ -33,13 +33,57 @@ pub async fn execute_actions(
 
     for (index, action) in actions.iter().enumerate() {
         match action {
-            HookAction::Speak { message } => execute_speak(message, meta, settings),
+            HookAction::Speak { message } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "speak",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
+                execute_speak(message, meta, settings);
+            }
             HookAction::Log { target } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "log",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = %log_target_kind(target),
+                    command = tracing::field::Empty,
+                )
+                .entered();
                 let target = resolve_log_target(target, settings);
                 execute_log(target, meta).await?
             }
-            HookAction::Report { handler } => execute_report(handler.as_ref(), meta, can_block),
+            HookAction::Report { handler } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "report",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
+                execute_report(handler.as_ref(), meta, can_block);
+            }
             HookAction::FireAndForget { command, args } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "fire_and_forget",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = %command,
+                )
+                .entered();
                 execute_fire_and_forget(command, args.as_deref(), meta)
             }
             HookAction::Call {
@@ -48,6 +92,19 @@ pub async fn execute_actions(
                 timeout_ms,
                 mapper,
             } => {
+                let timeout = timeout_ms
+                    .map(Duration::from_millis)
+                    .unwrap_or(Duration::from_secs(60));
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "call",
+                    blocking = can_block,
+                    timeout_ms = timeout.as_millis(),
+                    target_kind = tracing::field::Empty,
+                    command = %command,
+                )
+                .entered();
                 if should_short_circuit_call(protect_decision) {
                     let Some(decision) = protect_decision else {
                         continue;
@@ -68,6 +125,10 @@ pub async fn execute_actions(
                         ..HookResponse::default()
                     };
 
+                    debug!(
+                        protect_outcome = protect_outcome_slug(&decision.outcome),
+                        "Short-circuiting call action due to protect decision"
+                    );
                     if can_block && should_replace_selected(selected_response.as_ref(), &response) {
                         selected_response = Some(response);
                     }
@@ -81,10 +142,6 @@ pub async fn execute_actions(
                         .map(|arg| interpolate(arg, meta))
                         .collect::<Vec<_>>()
                 });
-
-                let timeout = timeout_ms
-                    .map(Duration::from_millis)
-                    .unwrap_or(Duration::from_secs(60));
 
                 let compiled_mapper = compiled_mappers
                     .and_then(|mappers| mappers.get(index))
@@ -124,8 +181,30 @@ pub async fn execute_actions(
                 name,
                 volume,
                 speed,
-            } => execute_sound_effect(name, *volume, *speed),
+            } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "sound_effect",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
+                execute_sound_effect(name, *volume, *speed);
+            }
             HookAction::Message { message, image } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "message",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
                 crate::messaging::execute_message(message, image.as_deref(), meta, messaging);
             }
         }
@@ -138,6 +217,13 @@ fn resolve_log_target<'a>(target: &'a LogTarget, settings: &'a GlobalSettings) -
     match (target, settings.default_log_target.as_ref()) {
         (LogTarget::File { path: None, .. }, Some(default_target)) => default_target,
         _ => target,
+    }
+}
+
+fn log_target_kind(target: &LogTarget) -> &'static str {
+    match target {
+        LogTarget::File { .. } => "file",
+        LogTarget::Server { .. } => "server",
     }
 }
 
