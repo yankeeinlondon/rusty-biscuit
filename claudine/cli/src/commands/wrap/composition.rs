@@ -306,14 +306,9 @@ pub(crate) fn execute_composition_request(
     }
 
     let mut child_args = Vec::new();
-    let mut stdin_seed: Option<String> = None;
-
-    profile.apply_prompt_body(
-        &mut child_args,
-        &mut stdin_seed,
-        &effective_prompt,
-        effective_non_interactive,
-    )?;
+    let stdin_seed = profile
+        .prompt_delivery(&child_args, &effective_prompt, effective_non_interactive)?
+        .apply_to(&mut child_args);
 
     // -- Yolo ----------------------------------------------------------------
 

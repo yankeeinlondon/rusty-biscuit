@@ -1667,13 +1667,9 @@ fn build_harness_launch(
     state.next_prompt_override = None;
 
     let prompt = strip_prompt_tags_for_provider(provider, &materialized.prompt);
-    let mut stdin_seed = None;
-    profile.apply_prompt_body(
-        &mut args,
-        &mut stdin_seed,
-        &prompt,
-        effective_non_interactive,
-    )?;
+    let stdin_seed = profile
+        .prompt_delivery(&args, &prompt, effective_non_interactive)?
+        .apply_to(&mut args);
     profile.validate_final_args(&args, effective_non_interactive, stdin_seed.is_some())?;
 
     let mut env = base_env.clone();

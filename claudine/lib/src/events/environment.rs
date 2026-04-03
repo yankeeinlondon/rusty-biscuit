@@ -300,9 +300,7 @@ pub fn detect_environment(cwd: &Path) -> EnvironmentContext {
         .os(OsRequest::full())
         .hardware(HardwareRequest::summary())
         .without_network()
-        .filesystem(
-            FilesystemRequest::new().git(GitRequest::full().commit_count(1)),
-        );
+        .filesystem(FilesystemRequest::new().git(GitRequest::full().commit_count(1)));
 
     let result = sniff::detect_with_plan(plan).unwrap_or(sniff::SniffResult {
         os: None,

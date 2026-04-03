@@ -2166,6 +2166,45 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn compose_opencode_non_interactive_passes_prompt_as_positional_arg() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let args_path = workspace.path().join("args.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n").unwrap();
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let args = fs::read_to_string(&args_path).unwrap();
+    let collected: Vec<_> = args.lines().collect();
+    assert!(
+        collected.contains(&"run"),
+        "compose should use the OpenCode run entrypoint; args: {args}"
+    );
+    assert!(
+        collected.contains(&"Hello OpenCode"),
+        "compose should pass the composed prompt as a positional arg for OpenCode; args: {args}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn compose_supports_mcp_runtime_and_tag_cleanup() {
     let workspace = tempdir().unwrap();
     let home = workspace.path().join("home");
