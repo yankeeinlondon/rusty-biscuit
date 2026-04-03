@@ -490,12 +490,6 @@ mod tests {
         let content = "- this emerging standard uses the character sequence `==` to wrap text and the wrapped text is then given a different background color to clearly ==separate it from== the rest of the text.";
         let events = process_text(content);
 
-        // Debug: print all events
-        eprintln!("Events:");
-        for (i, e) in events.iter().enumerate() {
-            eprintln!("[{}] {:?}", i, e);
-        }
-
         // Should have exactly one pair of mark events (for "separate it from")
         let start_count = events
             .iter()

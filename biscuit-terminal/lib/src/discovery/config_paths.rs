@@ -59,7 +59,7 @@ pub fn get_terminal_config_path(app: &TerminalApp) -> Option<PathBuf> {
     let os = detect_os_type();
     let home = home_dir()?;
 
-    match app {
+    let result = match app {
         TerminalApp::Wezterm => Some(wezterm_config_path(&home, os)),
         TerminalApp::Kitty => kitty_config_path(&home, os),
         TerminalApp::Ghostty => ghostty_config_path(&home, os),
@@ -78,7 +78,9 @@ pub fn get_terminal_config_path(app: &TerminalApp) -> Option<PathBuf> {
         TerminalApp::Wast => None,
         // Unknown terminals
         TerminalApp::Other(_) => None,
-    }
+    };
+    tracing::debug!(path = ?result, app = ?app, "Terminal config file path");
+    result
 }
 
 /// Get all possible configuration file paths for a terminal application.

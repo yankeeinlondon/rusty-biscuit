@@ -4,6 +4,7 @@
 //! from standard environment variables (LANG, LC_ALL, LC_CTYPE, etc.).
 
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
 // ============================================================================
 // Locale Detection
@@ -76,6 +77,7 @@ pub struct LocaleInfo {
 /// 1. `LC_ALL`
 /// 2. `LC_MESSAGES`
 /// 3. `LANG`
+#[instrument(skip_all)]
 pub fn detect_locale() -> LocaleInfo {
     let lang = std::env::var("LANG").ok();
     let lc_all = std::env::var("LC_ALL").ok();

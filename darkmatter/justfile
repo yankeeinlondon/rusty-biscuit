@@ -296,7 +296,10 @@ readme_files:
     @sniff docs --readme --json | jq -r '[.[] | select(.relative | startswith("{{LIBRARY}}")) | "@" + .relative ] | join(" ")'
 
 implement topic phase plan="":
-    @claudine compose @prompts/implement.md --set '{ topic: "{{topic}}", phase: "{{phase}}", plan: "{{plan}}" }'
+    @echo
+    @echo -e "{{BOLD}}Phase {{phase}}:{{RESET}} {{DIM}}{{topic}}{{RESET}}"
+    @echo
+    @claudine compose @prompts/implement.md --set '{ topic: "{{topic}}", phase: "{{phase}}", plan: "{{plan}}" }' || ( just _play error2 && exit 1 )
 
 # review this package using the Codex CLI
 review *args="":

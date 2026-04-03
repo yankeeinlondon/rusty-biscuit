@@ -208,6 +208,8 @@ impl Default for TerminalLocale {
 
         let tag = raw.as_ref().and_then(|r| normalize_locale_to_tag(r));
 
+        tracing::debug!(?raw, ?tag, "Detected locale");
+
         TerminalLocale { raw, tag }
     }
 }

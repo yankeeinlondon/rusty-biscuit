@@ -395,7 +395,7 @@ pub struct Cli {
     #[arg(long)]
     pub mermaid: bool,
 
-    /// Increase verbosity (-v INFO, -vv DEBUG, -vvv TRACE, -vvvv TRACE with file/line)
+    /// Increase verbosity for styled user-facing output (-v summary, -vv detailed)
     #[arg(
         short = 'v',
         long = "verbose",
@@ -403,6 +403,16 @@ pub struct Cli {
         global = true
     )]
     pub verbose: u8,
+
+    /// Enable developer debug logging (1=INFO, 2=DEBUG, 3=TRACE, 4=TRACE+locations).
+    /// Alternatively, set RUST_LOG environment variable.
+    #[arg(
+        long = "debug",
+        value_name = "LEVEL",
+        global = true,
+        hide = true,
+    )]
+    pub debug_level: Option<u8>,
 
     /// Generate shell completions for the specified shell
     #[arg(long, value_name = "SHELL")]
@@ -627,5 +637,17 @@ mod tests {
             Some(Command::Compose { perf, .. }) => assert!(!perf),
             _ => panic!("Expected Compose command"),
         }
+    }
+
+    #[test]
+    fn debug_flag_parses_level() {
+        let cli = Cli::try_parse_from(["md", "--debug", "2", "doc.md"]).unwrap();
+        assert_eq!(cli.debug_level, Some(2));
+    }
+
+    #[test]
+    fn debug_flag_absent_is_none() {
+        let cli = Cli::try_parse_from(["md", "doc.md"]).unwrap();
+        assert_eq!(cli.debug_level, None);
     }
 }

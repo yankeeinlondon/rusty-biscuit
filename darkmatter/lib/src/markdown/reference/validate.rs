@@ -8,6 +8,8 @@
 
 use std::time::Duration;
 
+use tracing::{debug, info, instrument, trace};
+
 use super::errors::ReferenceError;
 use super::types::{
     ReferenceGraphOptions, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceTarget,
@@ -152,10 +154,12 @@ pub enum ReferenceSeverity {
 }
 
 /// Run validation on a markdown document's references.
+#[instrument(skip_all)]
 pub(crate) fn validate(
     md: &Markdown,
     options: &ReferenceValidationOptions,
 ) -> Result<ReferenceValidationReport, ReferenceError> {
+    info!("validate: starting reference validation");
     let ref_set = {
         let graph = super::graph::build_reference_graph(md, &options.graph)
             .map_err(|e| ReferenceError::Validation(e.to_string()))?;
@@ -166,6 +170,8 @@ pub(crate) fn validate(
         references_scanned: ref_set.len(),
         ..Default::default()
     };
+
+    debug!(ref_count = report.references_scanned, "validate: references collected");
 
     // Collect headings for fragment validation from the composed document.
     // Uses the graph's prepared content which includes transcluded headings.
@@ -333,6 +339,7 @@ fn validate_local_path(
     report: &mut ReferenceValidationReport,
     magic_paths: &[(std::path::PathBuf, biscuit_file::PathPosition)],
 ) {
+    trace!(raw = %raw, "validate: checking local path");
     match source {
         ComposeSource::File(base_path) => {
             let base_dir = base_path.parent();
@@ -597,6 +604,7 @@ async fn validate_remote_urls_async(
     records: &[&ReferenceRecord],
     timeout: Duration,
 ) -> Vec<RemoteResult> {
+    debug!(url_count = records.len(), "validate: starting remote URL checks");
     let client = reqwest::Client::builder()
         .timeout(timeout)
         .user_agent("darkmatter-reference-validator/0.1")

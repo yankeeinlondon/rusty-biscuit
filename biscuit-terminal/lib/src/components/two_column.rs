@@ -216,6 +216,14 @@ impl TwoColumn {
         left_width = left_width.clamp(1, available.saturating_sub(1).max(1));
         let right_width = available.saturating_sub(left_width);
 
+        tracing::trace!(
+            total_width = width,
+            left_width,
+            right_width,
+            gap = self.gap,
+            "TwoColumn resolved widths"
+        );
+
         if right_width == 0 {
             return self.render_stacked(width, term);
         }

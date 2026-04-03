@@ -2054,6 +2054,12 @@ impl Renderable for FileSystem {
     /// - Dotfiles are italicized when configured
     fn render(&self, term: &Terminal) -> String {
         let width = term.width();
+        tracing::debug!(
+            root = %self.root_path.display(),
+            depth = self.max_depth,
+            entries = self.tree.as_ref().map(|t| t.len()).unwrap_or(0),
+            "FileSystem rendering"
+        );
 
         let tree = match &self.tree {
             Some(t) => t,

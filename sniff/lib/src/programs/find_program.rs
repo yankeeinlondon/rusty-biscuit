@@ -1,7 +1,8 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use tracing::{debug, instrument, trace};
 use which::which;
 
 /// Finds a program by name in the system PATH.
@@ -29,6 +30,7 @@ pub fn find_program<P: AsRef<OsStr>>(program: P) -> Option<PathBuf> {
 
 /// Checks for the existence of multiple programs in parallel.
 /// Returns a HashMap where keys are program names and values are paths (if found).
+#[instrument(skip_all, fields(program_count = programs.len()))]
 pub fn find_programs_parallel(programs: &[&str]) -> HashMap<String, Option<PathBuf>> {
     programs
         .par_iter() // 1. Convert to a parallel iterator
@@ -85,11 +87,13 @@ impl ExecutableIndex {
     /// ## Returns
     ///
     /// A fully populated index ready for O(1) lookups.
+    #[instrument(skip_all)]
     pub fn build() -> Self {
         let mut path_executables = HashMap::new();
 
         if let Some(path_var) = std::env::var_os("PATH") {
             for dir in std::env::split_paths(&path_var) {
+                trace!(dir = %dir.display(), "scanning PATH directory");
                 if let Ok(entries) = std::fs::read_dir(&dir) {
                     for entry in entries.filter_map(|e| e.ok()) {
                         let path = entry.path();
@@ -118,6 +122,8 @@ impl ExecutableIndex {
                 }
             }
         }
+
+        debug!(path_count = path_executables.len(), "PATH scan complete");
 
         Self {
             path_executables,
@@ -281,7 +287,7 @@ fn build_bundle_index() -> HashMap<String, PathBuf> {
 
 /// Checks if a bundle exists and returns the path to its executable.
 #[cfg(target_os = "macos")]
-fn check_bundle_executable(bundle_path: &PathBuf, binary_name: &str) -> Option<PathBuf> {
+fn check_bundle_executable(bundle_path: &Path, binary_name: &str) -> Option<PathBuf> {
     if !bundle_path.exists() {
         return None;
     }
@@ -308,10 +314,10 @@ fn check_bundle_executable(bundle_path: &PathBuf, binary_name: &str) -> Option<P
 
         // Otherwise try to find one matching the binary name
         for entry in executables {
-            if let Some(name) = entry.file_name().to_str() {
-                if name.to_lowercase() == binary_name.to_lowercase() {
-                    return Some(entry.path());
-                }
+            if let Some(name) = entry.file_name().to_str()
+                && name.to_lowercase() == binary_name.to_lowercase()
+            {
+                return Some(entry.path());
             }
         }
     }

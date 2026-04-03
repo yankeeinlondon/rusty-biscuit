@@ -115,6 +115,7 @@ impl Renderable for Compose {
     }
 
     fn render(&self, term: &Terminal) -> String {
+        tracing::trace!(parts = self.parts.len(), "Compose rendering");
         let mut output = String::new();
         for part in &self.parts {
             match part {
