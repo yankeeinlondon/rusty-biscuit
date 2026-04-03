@@ -769,10 +769,11 @@ fn choose_target_path(
                     PolicySourceKind::RepoConfig | PolicySourceKind::LocalOverride
                 )
             });
-            if has_repo_source && ctx.trust.is_trusted == Some(true) {
-                if let Some(path) = repo_path {
-                    return Ok(("claude-repo".to_owned(), path));
-                }
+            if has_repo_source
+                && ctx.trust.is_trusted == Some(true)
+                && let Some(path) = repo_path
+            {
+                return Ok(("claude-repo".to_owned(), path));
             }
             user_path
                 .map(|path| ("claude-user".to_owned(), path))
@@ -956,7 +957,7 @@ fn normalize_relative_pattern(pattern: &str, workspace_root: &std::path::Path) -
         return normalize_path_like_pattern(pattern);
     }
 
-    normalize_path_like_pattern(&workspace_root.join(pattern).to_string_lossy().into_owned())
+    normalize_path_like_pattern(&workspace_root.join(pattern).to_string_lossy())
 }
 
 fn normalize_path_like_pattern(pattern: &str) -> String {

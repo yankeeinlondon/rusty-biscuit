@@ -114,9 +114,7 @@ impl ProviderAdapter for ClaudeAdapter {
                 }
                 "bash" | "execute_command" => {
                     if let Some(cmd) = extract_claude_command(meta) {
-                        intents.push(ProtectIntent::ExecuteCommand(
-                            CommandQuery::from_raw(cmd),
-                        ));
+                        intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(cmd)));
                     }
                 }
                 name if name.starts_with("mcp__") => {
@@ -142,7 +140,11 @@ impl ProviderAdapter for ClaudeAdapter {
             }
 
             // Preserve completion scan intent if present.
-            if obs.intents.iter().any(|i| matches!(i, ProtectIntent::CompletionOutputScan)) {
+            if obs
+                .intents
+                .iter()
+                .any(|i| matches!(i, ProtectIntent::CompletionOutputScan))
+            {
                 intents.push(ProtectIntent::CompletionOutputScan);
             }
 
@@ -220,10 +222,7 @@ impl ProviderAdapter for ClaudeAdapter {
                     body.insert("reason".to_string(), Value::String(reason.clone()));
                 }
                 if let Some(ref ctx) = response.additional_context {
-                    body.insert(
-                        "updatedToolResult".to_string(),
-                        Value::String(ctx.clone()),
-                    );
+                    body.insert("updatedToolResult".to_string(), Value::String(ctx.clone()));
                 }
                 if let Some(ref input) = response.updated_input {
                     body.insert("updatedToolResult".to_string(), input.clone());
@@ -267,14 +266,12 @@ fn tool_input_path(meta: &EventMeta) -> Option<String> {
 }
 
 fn extract_claude_command(meta: &EventMeta) -> Option<String> {
-    meta.tool_input
-        .as_ref()
-        .and_then(|v| {
-            v.get("command")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-                .or_else(|| v.as_str().map(ToOwned::to_owned))
-        })
+    meta.tool_input.as_ref().and_then(|v| {
+        v.get("command")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| v.as_str().map(ToOwned::to_owned))
+    })
 }
 
 fn decision_to_permission(decision: Option<HookDecision>) -> &'static str {

@@ -129,6 +129,10 @@ pub struct ComposeArgs {
     #[arg(long, conflicts_with = "quiet")]
     pub silent: bool,
 
+    /// Override frontmatter values as JSON/JSON5 (e.g. `--set '{"key":"val"}'`).
+    #[arg(long, value_name = "JSON")]
+    pub set: Option<String>,
+
     /// Enable Claudine-managed MCP session composition.
     #[arg(long)]
     pub mcp: bool,
@@ -208,6 +212,10 @@ pub struct InlineComposeArgs {
     #[arg(long, conflicts_with = "quiet")]
     pub silent: bool,
 
+    /// Override frontmatter values as JSON/JSON5 (e.g. `--set '{"key":"val"}'`).
+    #[arg(long, value_name = "JSON")]
+    pub set: Option<String>,
+
     /// Enable Claudine-managed MCP session composition.
     #[arg(long)]
     pub mcp: bool,
@@ -255,10 +263,34 @@ pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
 fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
     let excluded = parse_excluded(&args.exclude, args.silent || args.quiet);
     let explicit_provider = args.provider.resolve();
+    let set_overrides = parse_set_json(args.set.as_deref())?;
 
     let source = composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
 
-    let prepared = composition::prepare_direct(&source).map_err(|e| eyre!("{e}"))?;
+    // ── Pre-flight shell approval ────────────────────────────────────
+    let compose_options = {
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+            .with_source_file(&source.resolved_path);
+        if let Some(ref overrides) = set_overrides {
+            opts = opts.with_set_overrides(overrides.clone());
+        }
+        opts
+    };
+
+    let approval_options =
+        super::wrap::build_harness_shell_options(&source.resolved_path, None, args.interactive);
+
+    let preflight = composition::resolve_shell_approvals(
+        Some(&source.markdown),
+        Some(&compose_options),
+        None,
+        &approval_options,
+    )
+    .map_err(|e| eyre!("{e}"))?;
+
+    let prepared =
+        composition::prepare_direct(&source, set_overrides, Some(preflight.approved_commands))
+            .map_err(|e| eyre!("{e}"))?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::ChainedDocument,
@@ -290,6 +322,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
 fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32> {
     let excluded = parse_excluded(&args.exclude, args.silent || args.quiet);
     let explicit_provider = args.provider.resolve();
+    let set_overrides = parse_set_json(args.set.as_deref())?;
     let show_checks = !args.silent;
     let term = if show_checks {
         Some(crate::log::terminal())
@@ -336,7 +369,30 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         claudine::harness::report::report_prompt_property(has_prompt, is_non_empty, t);
     }
 
-    let prepared = composition::prepare_inline(&source).map_err(|e| eyre!("{e}"))?;
+    // ── Pre-flight shell approval ────────────────────────────────────
+    let compose_options = {
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+            .with_source_file(&source.resolved_path);
+        if let Some(ref overrides) = set_overrides {
+            opts = opts.with_set_overrides(overrides.clone());
+        }
+        opts
+    };
+
+    let approval_options =
+        super::wrap::build_harness_shell_options(&source.resolved_path, None, args.interactive);
+
+    let preflight = composition::resolve_shell_approvals(
+        Some(&source.markdown),
+        Some(&compose_options),
+        None,
+        &approval_options,
+    )
+    .map_err(|e| eyre!("{e}"))?;
+
+    let prepared =
+        composition::prepare_inline(&source, set_overrides, Some(preflight.approved_commands))
+            .map_err(|e| eyre!("{e}"))?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,
@@ -363,6 +419,22 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
     };
 
     execute_composition_request(request, verbose)
+}
+
+/// Parse `--set` JSON/JSON5, validate it's an object, return as `serde_json::Value`.
+fn parse_set_json(raw: Option<&str>) -> Result<Option<serde_json::Value>> {
+    let Some(json_str) = raw else {
+        return Ok(None);
+    };
+    let parsed = biscuit_file::Json5::from_str(json_str)
+        .map_err(|e| eyre!("Invalid JSON/JSON5 in --set argument: {e}"))?;
+    let value = parsed.value().clone();
+    if !value.is_object() {
+        return Err(eyre!(
+            "Invalid --set argument: expected a JSON object like {{\"name\":\"Alice\"}}"
+        ));
+    }
+    Ok(Some(value))
 }
 
 fn parse_excluded(exclude: &[String], silent: bool) -> BTreeSet<Provider> {

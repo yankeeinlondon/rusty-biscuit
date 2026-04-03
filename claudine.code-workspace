@@ -5,6 +5,10 @@
             "path": ".ai"
         },
         {
+            "name": "claudine",
+            "path": "claudine"
+        },
+        {
             "name": "Monorepo Docs",
             "path": "docs"
         },
@@ -15,10 +19,6 @@
         {
             "name": ".claudine Config",
             "path": ".claudine"
-        },
-        {
-            "name": "claudine",
-            "path": "claudine"
         },
         {
             "name": "~ monorepo",

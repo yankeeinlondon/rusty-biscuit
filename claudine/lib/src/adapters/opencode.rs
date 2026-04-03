@@ -7,9 +7,9 @@ use tracing::debug;
 use crate::actions::{HookDecision, HookResponse};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
 use crate::permissions::query::{CommandQuery, PathQuery};
+use crate::services::ProtectObservation;
 use crate::services::protect::intent::ProtectIntent;
 use crate::services::protect::observe::default_observe_protect;
-use crate::services::ProtectObservation;
 
 use super::{AdapterError, ProviderAdapter};
 
@@ -149,15 +149,12 @@ impl ProviderAdapter for OpenCodeAdapter {
 
             match lowered.as_str() {
                 "bash" | "shell" | "local_shell" => {
-                    let cmd = meta
-                        .tool_input
-                        .as_ref()
-                        .and_then(|v| {
-                            v.get("command")
-                                .and_then(Value::as_str)
-                                .map(ToOwned::to_owned)
-                                .or_else(|| v.as_str().map(ToOwned::to_owned))
-                        });
+                    let cmd = meta.tool_input.as_ref().and_then(|v| {
+                        v.get("command")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned)
+                            .or_else(|| v.as_str().map(ToOwned::to_owned))
+                    });
                     if let Some(cmd) = cmd {
                         intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(&cmd)));
                     }
@@ -197,7 +194,11 @@ impl ProviderAdapter for OpenCodeAdapter {
 
             if replaced {
                 // Preserve completion scan intent if present.
-                if obs.intents.iter().any(|i| matches!(i, ProtectIntent::CompletionOutputScan)) {
+                if obs
+                    .intents
+                    .iter()
+                    .any(|i| matches!(i, ProtectIntent::CompletionOutputScan))
+                {
                     intents.push(ProtectIntent::CompletionOutputScan);
                 }
                 obs.intents = intents;

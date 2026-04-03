@@ -87,6 +87,7 @@
             "spatialization",
             "startswith",
             "tavily",
+            "timedatectl",
             "Vorbis",
             "wezterm",
             "Wezterm",

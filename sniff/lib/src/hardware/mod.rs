@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
 use crate::Result;
+use crate::request::HardwareRequest;
 
 mod audio;
 mod cpu;
@@ -23,7 +24,8 @@ pub use crate::os::{
     PackageManagerCommands, SystemPackageManager, SystemPackageManagers, TimeInfo,
     command_exists_in_path, detect_bsd_package_managers, detect_linux_distro,
     detect_linux_package_managers, detect_locale, detect_macos_package_managers, detect_ntp_status,
-    detect_os, detect_os_type, detect_timezone, detect_windows_package_managers, extract_encoding,
+    detect_os, detect_os_type, detect_os_with_request, detect_timezone,
+    detect_timezone_with_options, detect_windows_package_managers, extract_encoding,
     extract_language_code, get_commands_for_manager, get_path_dirs, infer_linux_family,
     parse_lsb_release_content, parse_os_release_content, parse_system_release_content,
 };
@@ -47,34 +49,22 @@ pub struct HardwareInfo {
     pub audio_devices: Vec<AudioDeviceInfo>,
 }
 
-/// Detects hardware information from the current system.
+/// Detect hardware information according to the given request.
 ///
-/// This function gathers CPU specifications, memory statistics,
-/// storage information, and GPU devices. For OS information,
-/// use `detect_os()` separately.
-///
-/// ## Examples
-///
-/// ```no_run
-/// use sniff::hardware::detect_hardware;
-///
-/// let hw = detect_hardware().unwrap();
-/// println!("CPU: {} ({} cores)", hw.cpu.brand, hw.cpu.logical_cores);
-/// println!("Memory: {} GB total", hw.memory.total_bytes / (1024 * 1024 * 1024));
-/// println!("GPUs: {}", hw.gpu.len());
-/// ```
-///
-/// ## Errors
-///
-/// Currently returns `Ok` in all cases, but future versions may return
-/// errors for system information gathering failures.
-pub fn detect_hardware() -> Result<HardwareInfo> {
+/// Use `HardwareRequest::summary()` for CPU and memory only (fast),
+/// or `HardwareRequest::full()` for everything including storage,
+/// GPU, and audio devices.
+pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<HardwareInfo> {
     // Audio must be detected first. On macOS, linking against extra
     // CoreAudio sub-frameworks (AudioUnit, OpenAL, CoreMIDI) caused
     // a ~10s init delay. With only the `core_audio` feature enabled
     // on `coreaudio-sys`, init is ~1.5s. Detecting audio before GPU
     // avoids any potential Metal framework interference.
-    let audio_devices = detect_audio_devices();
+    let audio_devices = if request.include_audio {
+        detect_audio_devices()
+    } else {
+        Vec::new()
+    };
 
     let sys = System::new_with_specifics(
         RefreshKind::nothing()
@@ -119,8 +109,17 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
         used_swap: sys.used_swap(),
     };
 
-    let storage = storage::detect_storage();
-    let gpu = detect_gpus();
+    let storage = if request.include_storage {
+        storage::detect_storage()
+    } else {
+        Vec::new()
+    };
+
+    let gpu = if request.include_gpu {
+        detect_gpus()
+    } else {
+        Vec::new()
+    };
 
     Ok(HardwareInfo {
         cpu,
@@ -131,82 +130,38 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
     })
 }
 
+/// Detects hardware information from the current system.
+///
+/// This function gathers CPU specifications, memory statistics,
+/// storage information, and GPU devices. For OS information,
+/// use `detect_os()` separately.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use sniff::hardware::detect_hardware;
+///
+/// let hw = detect_hardware().unwrap();
+/// println!("CPU: {} ({} cores)", hw.cpu.brand, hw.cpu.logical_cores);
+/// println!("Memory: {} GB total", hw.memory.total_bytes / (1024 * 1024 * 1024));
+/// println!("GPUs: {}", hw.gpu.len());
+/// ```
+///
+/// ## Errors
+///
+/// Currently returns `Ok` in all cases, but future versions may return
+/// errors for system information gathering failures.
+pub fn detect_hardware() -> Result<HardwareInfo> {
+    detect_hardware_with_request(&HardwareRequest::full())
+}
+
 /// Lightweight hardware summary for compose context.
 ///
 /// Returns only CPU (cores, arch) and memory information.
 /// Skips audio device enumeration (~1.5s on macOS), storage inventory,
 /// and GPU detection.
 pub fn detect_hardware_summary() -> Result<HardwareInfo> {
-    let sys = System::new_with_specifics(
-        RefreshKind::nothing()
-            .with_cpu(CpuRefreshKind::everything())
-            .with_memory(MemoryRefreshKind::everything()),
-    );
-
-    let cpu = CpuInfo {
-        brand: sys
-            .cpus()
-            .first()
-            .map(|c| c.brand().to_string())
-            .unwrap_or_default(),
-        arch: {
-            let arch = System::cpu_arch();
-            if arch.is_empty() {
-                std::env::consts::ARCH.to_string()
-            } else {
-                arch
-            }
-        },
-        logical_cores: sys.cpus().len(),
-        physical_cores: System::physical_core_count(),
-        simd: detect_simd(),
-    };
-
-    let available = sys.available_memory();
-    let available_bytes = if available == 0 {
-        sys.free_memory()
-    } else {
-        available
-    };
-
-    let memory = MemoryInfo {
-        total_bytes: sys.total_memory(),
-        available_bytes,
-        used_bytes: sys.used_memory(),
-        total_swap: sys.total_swap(),
-        free_swap: sys.free_swap(),
-        used_swap: sys.used_swap(),
-    };
-
-    Ok(HardwareInfo {
-        cpu,
-        memory,
-        storage: Vec::new(),
-        gpu: Vec::new(),
-        audio_devices: Vec::new(),
-    })
-}
-
-/// Detects hardware information with optional CPU usage sampling.
-///
-/// This function is identical to [`detect_hardware`] but is designed
-/// to support future CPU usage sampling (which requires ~200ms of
-/// measurement time for accurate readings).
-///
-/// Currently, this function simply calls [`detect_hardware`] and returns
-/// the same result. Future versions may add CPU usage statistics.
-///
-/// ## Examples
-///
-/// ```no_run
-/// use sniff::hardware::detect_hardware_with_usage;
-///
-/// let hw = detect_hardware_with_usage().unwrap();
-/// println!("CPU: {}", hw.cpu.brand);
-/// ```
-pub fn detect_hardware_with_usage() -> Result<HardwareInfo> {
-    // For now, just call detect_hardware - can add CPU sampling later
-    detect_hardware()
+    detect_hardware_with_request(&HardwareRequest::summary())
 }
 
 #[cfg(test)]
@@ -302,5 +257,15 @@ mod tests {
         let hw = detect_hardware().unwrap();
         // CPU architecture should be known
         assert!(!hw.cpu.arch.is_empty());
+    }
+
+    #[test]
+    fn test_detect_hardware_summary_skips_expensive() {
+        let info = detect_hardware_with_request(&HardwareRequest::summary()).unwrap();
+        assert!(info.cpu.logical_cores > 0);
+        assert!(info.memory.total_bytes > 0);
+        assert!(info.storage.is_empty());
+        assert!(info.gpu.is_empty());
+        assert!(info.audio_devices.is_empty());
     }
 }

@@ -651,3 +651,30 @@ fn test_network_ip_addresses_roundtrip() {
         }
     }
 }
+
+#[test]
+fn test_detect_with_plan_summary_mode() {
+    use sniff::request::*;
+
+    let plan = DetectionPlan::new()
+        .os(OsRequest::summary())
+        .hardware(HardwareRequest::summary())
+        .without_network()
+        .without_filesystem();
+
+    let start = Instant::now();
+    let result = sniff::detect_with_plan(plan).unwrap();
+    let elapsed = start.elapsed();
+
+    assert!(result.os.is_some());
+    assert!(result.hardware.is_some());
+    assert!(result.network.is_none());
+    assert!(result.filesystem.is_none());
+
+    // Summary mode should be significantly faster than full detection
+    assert!(
+        elapsed.as_millis() < 2000,
+        "Summary detection took too long: {:?}",
+        elapsed
+    );
+}

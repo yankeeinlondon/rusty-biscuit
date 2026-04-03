@@ -1,0 +1,324 @@
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+use sniff::filesystem::git::detect_git;
+use sniff::filesystem::repo::{Package, detect_repo};
+
+/// Filesystem roots resolved from the directory the user launched Claudine in.
+///
+/// All paths are canonical when possible. Fields are `None` when the
+/// corresponding scope is not detected (e.g. not inside a git repo,
+/// not inside a monorepo package).
+#[derive(Debug, Clone)]
+pub struct LaunchContext {
+    /// The working directory Claudine was launched from.
+    pub cwd: PathBuf,
+    /// Git repository root, if detected.
+    pub repo_root: Option<PathBuf>,
+    /// Package-area root inside a monorepo.
+    ///
+    /// For the "root" package area this equals `repo_root`.
+    pub package_area_root: Option<PathBuf>,
+    /// Deepest matching workspace package root.
+    pub package_root: Option<PathBuf>,
+}
+
+impl LaunchContext {
+    /// Build a launch context from the given working directory.
+    ///
+    /// Uses `sniff::filesystem::git::detect_git` and
+    /// `sniff::filesystem::repo::detect_repo` under the hood.
+    pub fn from_cwd(cwd: &Path) -> Result<Self, crate::error::ClaudineError> {
+        let git_root = detect_git(cwd, false, 1)
+            .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(e.to_string()))?
+            .map(|info| info.repo_root);
+
+        let repo_probe_root = git_root.clone().unwrap_or_else(|| cwd.to_path_buf());
+        let repo = detect_repo(&repo_probe_root)
+            .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(e.to_string()))?;
+
+        let (package_root, package_area_root) = match repo {
+            Some(ref repo) if repo.is_monorepo => {
+                if let Some(ref packages) = repo.packages {
+                    let pkg_root = select_package_root(cwd, packages);
+                    let area_root = select_package_area_root(cwd, &repo.root, packages);
+                    (pkg_root, area_root)
+                } else {
+                    (None, None)
+                }
+            }
+            _ => (None, None),
+        };
+
+        Ok(LaunchContext {
+            cwd: canonical_or_self(cwd),
+            repo_root: git_root.map(|p| canonical_or_self(&p)),
+            package_area_root: package_area_root.map(|p| canonical_or_self(&p)),
+            package_root: package_root.map(|p| canonical_or_self(&p)),
+        })
+    }
+
+    /// Deduplicated search directories in precedence order.
+    ///
+    /// Returns unique paths for: package root, package-area root, repo root.
+    /// The user-home scope (`~/.claudine/`) is NOT included here — the
+    /// caller adds it as a final fallback.
+    pub fn search_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs = Vec::with_capacity(3);
+        let mut seen = HashSet::new();
+        for p in [&self.package_root, &self.package_area_root, &self.repo_root]
+            .into_iter()
+            .flatten()
+        {
+            if seen.insert(p.clone()) {
+                dirs.push(p.clone());
+            }
+        }
+        dirs
+    }
+}
+
+/// Select the deepest matching package root for the given cwd.
+fn select_package_root(cwd: &Path, packages: &[Package]) -> Option<PathBuf> {
+    let cwd_normalized = canonical_or_self(cwd);
+
+    packages
+        .iter()
+        .filter_map(|package| {
+            let package_path = canonical_or_self(&package.path);
+            if cwd_normalized.starts_with(&package_path) {
+                Some((package_path.components().count(), package_path))
+            } else {
+                None
+            }
+        })
+        .max_by_key(|(depth, _)| *depth)
+        .map(|(_, path)| path)
+}
+
+/// Select the deepest matching package-area root for the given cwd.
+fn select_package_area_root(cwd: &Path, repo_root: &Path, packages: &[Package]) -> Option<PathBuf> {
+    let cwd_normalized = canonical_or_self(cwd);
+    let repo_root_normalized = canonical_or_self(repo_root);
+
+    packages
+        .iter()
+        .map(|package| {
+            if package.package_area == "root" {
+                repo_root_normalized.clone()
+            } else {
+                repo_root_normalized.join(&package.package_area)
+            }
+        })
+        .filter(|area_root| cwd_normalized.starts_with(area_root))
+        .max_by_key(|area_root| area_root.components().count())
+}
+
+fn canonical_or_self(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Initialize a real git repository in the given directory.
+    fn init_git_repo(dir: &Path) {
+        Command::new("git")
+            .args(["init", "--initial-branch=main"])
+            .current_dir(dir)
+            .output()
+            .expect("git init failed");
+        // Create an initial commit so HEAD is valid
+        Command::new("git")
+            .args(["commit", "--allow-empty", "-m", "init"])
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git commit failed");
+    }
+
+    /// Create a Cargo workspace toml that declares packages.
+    fn write_cargo_workspace(repo_root: &Path, members: &[&str]) {
+        let members_str: Vec<String> = members.iter().map(|m| format!("    \"{m}\"")).collect();
+        let content = format!("[workspace]\nmembers = [\n{}\n]\n", members_str.join(",\n"));
+        fs::write(repo_root.join("Cargo.toml"), content).unwrap();
+    }
+
+    /// Create a package Cargo.toml with a given name.
+    fn write_package_toml(package_dir: &Path, name: &str) {
+        fs::create_dir_all(package_dir).unwrap();
+        let content =
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n");
+        fs::write(package_dir.join("Cargo.toml"), content).unwrap();
+    }
+
+    #[test]
+    fn from_cwd_in_package() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        init_git_repo(root);
+        write_cargo_workspace(root, &["claudine/lib", "claudine/cli"]);
+        write_package_toml(&root.join("claudine/lib"), "claudine");
+        write_package_toml(&root.join("claudine/cli"), "claudine-cli");
+
+        let cwd = root.join("claudine/cli");
+        let ctx = LaunchContext::from_cwd(&cwd).unwrap();
+
+        assert!(ctx.package_root.is_some(), "package_root should be set");
+        let pkg_root = ctx.package_root.unwrap();
+        assert!(
+            pkg_root.ends_with("claudine/cli"),
+            "package_root should end with claudine/cli, got: {}",
+            pkg_root.display()
+        );
+
+        assert!(
+            ctx.package_area_root.is_some(),
+            "package_area_root should be set"
+        );
+        let area_root = ctx.package_area_root.unwrap();
+        assert!(
+            area_root.ends_with("claudine"),
+            "package_area_root should end with claudine, got: {}",
+            area_root.display()
+        );
+
+        assert!(ctx.repo_root.is_some(), "repo_root should be set");
+    }
+
+    #[test]
+    fn from_cwd_in_package_area() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        init_git_repo(root);
+        write_cargo_workspace(root, &["claudine/lib", "claudine/cli"]);
+        write_package_toml(&root.join("claudine/lib"), "claudine");
+        write_package_toml(&root.join("claudine/cli"), "claudine-cli");
+
+        // CWD is in the package area but not inside a specific package
+        let cwd = root.join("claudine");
+        let ctx = LaunchContext::from_cwd(&cwd).unwrap();
+
+        assert!(
+            ctx.package_area_root.is_some(),
+            "package_area_root should be set"
+        );
+        let area_root = ctx.package_area_root.unwrap();
+        assert!(
+            area_root.ends_with("claudine"),
+            "package_area_root should end with claudine, got: {}",
+            area_root.display()
+        );
+
+        assert!(ctx.repo_root.is_some(), "repo_root should be set");
+    }
+
+    #[test]
+    fn from_cwd_at_repo_root() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+
+        init_git_repo(root);
+        // Single-package repo (not a monorepo)
+        let content = "[package]\nname = \"my-app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n";
+        fs::write(root.join("Cargo.toml"), content).unwrap();
+
+        let ctx = LaunchContext::from_cwd(root).unwrap();
+
+        assert!(ctx.repo_root.is_some(), "repo_root should be set");
+        assert!(
+            ctx.package_root.is_none(),
+            "package_root should be None for single-package repo"
+        );
+        assert!(
+            ctx.package_area_root.is_none(),
+            "package_area_root should be None for single-package repo"
+        );
+    }
+
+    #[test]
+    fn from_cwd_outside_repo() {
+        let tmp = TempDir::new().unwrap();
+        // No .git, no Cargo.toml
+        let ctx = LaunchContext::from_cwd(tmp.path()).unwrap();
+
+        assert!(ctx.repo_root.is_none(), "repo_root should be None");
+        assert!(ctx.package_root.is_none(), "package_root should be None");
+        assert!(
+            ctx.package_area_root.is_none(),
+            "package_area_root should be None"
+        );
+    }
+
+    #[test]
+    fn search_dirs_dedupes() {
+        let path = PathBuf::from("/repo");
+        let ctx = LaunchContext {
+            cwd: path.clone(),
+            repo_root: Some(path.clone()),
+            package_area_root: Some(path.clone()),
+            package_root: Some(path.clone()),
+        };
+
+        let dirs = ctx.search_dirs();
+        assert_eq!(dirs.len(), 1, "all same path should dedupe to 1");
+        assert_eq!(dirs[0], path);
+    }
+
+    #[test]
+    fn search_dirs_ordering() {
+        let pkg = PathBuf::from("/repo/claudine/cli");
+        let area = PathBuf::from("/repo/claudine");
+        let repo = PathBuf::from("/repo");
+
+        let ctx = LaunchContext {
+            cwd: pkg.clone(),
+            repo_root: Some(repo.clone()),
+            package_area_root: Some(area.clone()),
+            package_root: Some(pkg.clone()),
+        };
+
+        let dirs = ctx.search_dirs();
+        assert_eq!(dirs.len(), 3);
+        assert_eq!(dirs[0], pkg, "package root should be first");
+        assert_eq!(dirs[1], area, "package area root should be second");
+        assert_eq!(dirs[2], repo, "repo root should be third");
+    }
+
+    #[test]
+    fn search_dirs_partial_context() {
+        let repo = PathBuf::from("/repo");
+        let ctx = LaunchContext {
+            cwd: repo.clone(),
+            repo_root: Some(repo.clone()),
+            package_area_root: None,
+            package_root: None,
+        };
+
+        let dirs = ctx.search_dirs();
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(dirs[0], repo);
+    }
+
+    #[test]
+    fn search_dirs_empty_context() {
+        let ctx = LaunchContext {
+            cwd: PathBuf::from("/tmp"),
+            repo_root: None,
+            package_area_root: None,
+            package_root: None,
+        };
+
+        let dirs = ctx.search_dirs();
+        assert!(dirs.is_empty());
+    }
+}

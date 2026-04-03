@@ -6,9 +6,9 @@ use serde_json::{Value, json};
 use crate::actions::{HookDecision, HookResponse};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
 use crate::permissions::query::{CommandQuery, DomainQuery, PathQuery};
+use crate::services::ProtectObservation;
 use crate::services::protect::intent::ProtectIntent;
 use crate::services::protect::observe::default_observe_protect;
-use crate::services::ProtectObservation;
 
 use super::{AdapterError, ProviderAdapter};
 
@@ -122,24 +122,28 @@ impl ProviderAdapter for GeminiAdapter {
         }
 
         // Extract MCP server/tool from mcp_context extra.
-        if let Some(mcp) = meta.extra.get("mcp_context") {
-            if let Some(server) = mcp.get("server_id").and_then(Value::as_str) {
-                intents.push(ProtectIntent::UseMcpServer {
+        if let Some(mcp) = meta.extra.get("mcp_context")
+            && let Some(server) = mcp.get("server_id").and_then(Value::as_str)
+        {
+            intents.push(ProtectIntent::UseMcpServer {
+                server: server.to_owned(),
+            });
+            if let Some(tool) = mcp.get("tool_name").and_then(Value::as_str) {
+                intents.push(ProtectIntent::UseMcpTool {
                     server: server.to_owned(),
+                    tool: tool.to_owned(),
                 });
-                if let Some(tool) = mcp.get("tool_name").and_then(Value::as_str) {
-                    intents.push(ProtectIntent::UseMcpTool {
-                        server: server.to_owned(),
-                        tool: tool.to_owned(),
-                    });
-                }
-                replaced = true;
             }
+            replaced = true;
         }
 
         if replaced {
             // Preserve completion scan intent if present.
-            if obs.intents.iter().any(|i| matches!(i, ProtectIntent::CompletionOutputScan)) {
+            if obs
+                .intents
+                .iter()
+                .any(|i| matches!(i, ProtectIntent::CompletionOutputScan))
+            {
                 intents.push(ProtectIntent::CompletionOutputScan);
             }
             obs.intents = intents;
@@ -188,10 +192,7 @@ impl ProviderAdapter for GeminiAdapter {
                 );
             }
             if let Some(ref ctx) = response.additional_context {
-                body.insert(
-                    "updatedToolResult".to_string(),
-                    Value::String(ctx.clone()),
-                );
+                body.insert("updatedToolResult".to_string(), Value::String(ctx.clone()));
             }
             if let Some(ref input) = response.updated_input {
                 body.insert("updatedToolResult".to_string(), input.clone());

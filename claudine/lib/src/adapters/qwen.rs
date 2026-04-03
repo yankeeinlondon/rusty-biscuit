@@ -78,15 +78,12 @@ impl ProviderAdapter for QwenAdapter {
 
             match lowered.as_str() {
                 "bash" | "shell" | "execute_command" => {
-                    let cmd = meta
-                        .tool_input
-                        .as_ref()
-                        .and_then(|v| {
-                            v.get("command")
-                                .and_then(Value::as_str)
-                                .map(ToOwned::to_owned)
-                                .or_else(|| v.as_str().map(ToOwned::to_owned))
-                        });
+                    let cmd = meta.tool_input.as_ref().and_then(|v| {
+                        v.get("command")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned)
+                            .or_else(|| v.as_str().map(ToOwned::to_owned))
+                    });
                     if let Some(cmd) = cmd {
                         intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(&cmd)));
                     }
@@ -107,7 +104,11 @@ impl ProviderAdapter for QwenAdapter {
             }
 
             if replaced {
-                if obs.intents.iter().any(|i| matches!(i, ProtectIntent::CompletionOutputScan)) {
+                if obs
+                    .intents
+                    .iter()
+                    .any(|i| matches!(i, ProtectIntent::CompletionOutputScan))
+                {
                     intents.push(ProtectIntent::CompletionOutputScan);
                 }
                 obs.intents = intents;

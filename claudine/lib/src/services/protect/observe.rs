@@ -78,11 +78,7 @@ pub fn default_observe_protect(
     }
 
     // MCP server intent
-    if let Some(server_id) = meta
-        .extra
-        .get("mcp_server_id")
-        .and_then(Value::as_str)
-    {
+    if let Some(server_id) = meta.extra.get("mcp_server_id").and_then(Value::as_str) {
         intents.push(ProtectIntent::UseMcpServer {
             server: server_id.to_owned(),
         });
@@ -108,16 +104,13 @@ pub fn default_observe_protect(
     };
 
     // Payload
-    let payload = meta
-        .tool_response
-        .as_ref()
-        .map(|v| {
-            if v.is_string() {
-                ProtectPayload::McpText(v.as_str().unwrap_or_default().to_owned())
-            } else {
-                ProtectPayload::McpJson(v.clone())
-            }
-        });
+    let payload = meta.tool_response.as_ref().map(|v| {
+        if v.is_string() {
+            ProtectPayload::McpText(v.as_str().unwrap_or_default().to_owned())
+        } else {
+            ProtectPayload::McpJson(v.clone())
+        }
+    });
 
     Some(ProtectObservation {
         summary: meta.notification_message.clone(),

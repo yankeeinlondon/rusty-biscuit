@@ -26,6 +26,7 @@
 //! ```
 
 pub mod alias;
+pub mod discovery;
 pub mod executor;
 pub mod parser;
 pub mod policy;
@@ -34,6 +35,7 @@ pub mod tokenize;
 pub mod types;
 
 pub use alias::{ResolvedAlias, resolve_alias};
+pub use discovery::collect_shell_commands;
 pub use executor::{execute_command, resolve_working_directory};
 pub use parser::parse_directives;
 pub use policy::{
@@ -42,8 +44,8 @@ pub use policy::{
 pub use store::resolve_policy_paths;
 pub use types::{
     ErrorHandling, ErrorHandlingOutcome, ShellApprovalDecision, ShellApprovalHandler,
-    ShellApprovalRequest, ShellDirective, ShellExpansionError, ShellExpansionOptions,
-    ShellExpansionRuntime, ShellPolicyPaths, ShellRuleSet,
+    ShellApprovalRequest, ShellCommandEntry, ShellDirective, ShellExpansionError,
+    ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths, ShellRuleSet,
 };
 
 use crate::markdown::compose::ComposeOptions;
@@ -92,9 +94,30 @@ pub fn execute_directive(
 ) -> Result<String, ShellExpansionError> {
     // Resolve alias if the executable is not found on PATH
     let (effective, alias_name) = resolve_or_passthrough(directive);
-    let runtime_snapshot = shell_runtime.snapshot();
 
     let normalized = normalize_command(&effective.executable, &effective.args);
+
+    // ── Pre-approved fast path ───────────────────────────────────────
+    // When a pre-approved set is provided, skip the entire approval flow.
+    // The caller (Claudine) has already verified every command.
+    if let Some(ref approved) = options.pre_approved_commands {
+        if approved.contains(&normalized) {
+            return execute_and_handle_errors(&effective, options, &directive.error_handling);
+        } else {
+            return Err(ShellExpansionError::NotPreApproved {
+                command: display_command(directive, alias_name.as_deref()),
+                line: directive.line,
+                source_desc: match &options.source {
+                    crate::markdown::compose::ComposeSource::File(p) => {
+                        format!(" (in {})", p.display())
+                    }
+                    _ => String::new(),
+                },
+            });
+        }
+    }
+
+    let runtime_snapshot = shell_runtime.snapshot();
 
     // 1. Check built-in blacklist (against resolved command)
     if let Some(reason) = check_builtin_blacklist(&effective.executable, &effective.args) {
@@ -989,6 +1012,46 @@ name: world
 
         let (composed, _) = md.compose_with(options).unwrap();
         assert!(composed.content().contains("non-fatal"));
+    }
+
+    #[test]
+    fn pre_approved_commands_bypass_approval_flow() {
+        let content = "# Test\n::shell echo hello\n::shell echo world\n";
+        let md: Markdown = content.into();
+
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("echo hello".to_string());
+        approved.insert("echo world".to_string());
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_pre_approved_commands(approved);
+
+        // No approval handler, no whitelist — should succeed via pre-approved set
+        let (composed, report) = md.compose_with(options).unwrap();
+        assert!(composed.content().contains("hello"));
+        assert!(composed.content().contains("world"));
+        assert_eq!(report.shell_expansions_applied, 2);
+        assert_eq!(report.shell_approvals_used, 0);
+    }
+
+    #[test]
+    fn pre_approved_rejects_unknown_commands() {
+        let content = "# Test\n::shell echo hello\n::shell echo sneaky\n";
+        let md: Markdown = content.into();
+
+        let mut approved = std::collections::HashSet::new();
+        approved.insert("echo hello".to_string());
+        // "echo sneaky" is NOT pre-approved
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::ShellExpansion])
+            .with_pre_approved_commands(approved);
+
+        let err = md.compose_with(options).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("not pre-approved"), "got: {msg}");
+        assert!(msg.contains("echo sneaky"), "got: {msg}");
     }
 
     /// Helper to find python3 for integration tests.

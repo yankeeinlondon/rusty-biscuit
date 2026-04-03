@@ -12,7 +12,7 @@
 
 - When committing agent/skill files in `.claude/`, use `docs(<area>)` as the prefix for documentation restructuring changes
 
-- Subagents may see a different set of staged files than what the user specifies in the prompt (due to concurrent work or a filtered list). When this happens, simply stage only the files assigned without resetting or unstaging anything. Never use `git reset *` and never try to "fix" staged files by unstaging and restaging groups
+- Subagents may see a different set of staged files than what the user specifies in the prompt (due to concurrent work or a filtered list). When this happens, verify with `git status` and if more files are staged than assigned, use `git reset HEAD` to unstage everything, then `git add` only the assigned files. This is the only way to commit only specific files when other unrelated files are also staged. Never use `git reset *` (with a glob) as that can corrupt staged state.
 
 - When multiple related files are staged together (e.g., a directory rename like `transform/` → `compose/`), git commits them as an atomic unit. In such cases, subagents will not be able to split them into separate granular commits even if semantically distinct groups were planned - the files must be committed together as they were staged
 
@@ -24,8 +24,6 @@
 
 - Do not second guess the files which were staged; the user intentionally chose which files they were interested in committing.
 
-- When the user lists files as "(created)" in the prompt, those files are untracked (not staged) and must be added with `git add` before they can be committed. Check `git status` to verify the actual state when subagents report files as untracked rather than staged.
-
-- When using subagents to commit files in groups, some subagent types (e.g., `rust-developer`) may cause `ProviderModelNotFoundError`. Use the `general` subagent type to avoid this issue.
-
 - Files can only be committed once. When multiple subagent groups are committing related files, later groups will get "nothing to commit" for files already committed by earlier groups, but can still commit any remaining files assigned to them.
+
+- When using `git commit -m "message" -- path1 path2`, the `--` separator before paths combined with `-m` can cause git to source the commit message from a cached staged template instead of the inline message. To avoid this, place paths before `-m` (e.g., `git commit file1 file2 -m "message"`) or use `git commit --only -- path1 path2 -m "message"` for explicit path-limited commits with a custom message.

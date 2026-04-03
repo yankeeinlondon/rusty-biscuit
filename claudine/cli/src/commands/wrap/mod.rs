@@ -5,6 +5,7 @@ pub(crate) mod repo_home;
 
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
+use claudine::composition::lifecycle::{LifecycleSignal, emit_lifecycle_signal};
 use claudine::events::{
     AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta, Provider,
 };
@@ -170,10 +171,17 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
 pub(crate) fn build_harness_shell_options(
     source_path: &Path,
     repo_root: Option<&Path>,
+    interactive: bool,
 ) -> claudine::harness::ShellApprovalOptions {
     claudine::harness::ShellApprovalOptions {
         policy_root: harness_policy_root(source_path, repo_root),
-        approval_handler: None,
+        approval_handler: if interactive {
+            Some(std::sync::Arc::new(
+                darkmatter_cli::approval::CliShellApprovalHandler,
+            ))
+        } else {
+            None
+        },
         ..Default::default()
     }
 }
@@ -273,11 +281,15 @@ pub(crate) struct CachedHarnessLoopContext {
 }
 
 impl CachedHarnessLoopContext {
-    fn new(source_path: &Path, repo_root: Option<&Path>) -> Self {
+    fn with_shell_options(
+        source_path: &Path,
+        repo_root: Option<&Path>,
+        shell_options: claudine::harness::ShellApprovalOptions,
+    ) -> Self {
         Self {
             source_path: source_path.to_path_buf(),
             repo_root: repo_root.map(Path::to_path_buf),
-            shell_options: build_harness_shell_options(source_path, repo_root),
+            shell_options,
         }
     }
 
@@ -286,8 +298,8 @@ impl CachedHarnessLoopContext {
         if self.source_path != source_path || self.repo_root != repo_root {
             self.source_path = source_path.to_path_buf();
             self.repo_root = repo_root;
-            self.shell_options =
-                build_harness_shell_options(&self.source_path, self.repo_root.as_deref());
+            self.shell_options.policy_root =
+                harness_policy_root(&self.source_path, self.repo_root.as_deref());
         }
     }
 
@@ -300,6 +312,15 @@ impl CachedHarnessLoopContext {
 
     fn shell_options(&self) -> &claudine::harness::ShellApprovalOptions {
         &self.shell_options
+    }
+
+    /// Strip the interactive approval handler so subsequent harness-loop
+    /// iterations operate in deny-only mode.  Cached and whitelisted
+    /// commands still pass; new uncached commands are denied without
+    /// prompting.  This enforces the spec contract: "all shell approvals
+    /// are resolved before the provider workflow begins."
+    fn freeze_shell_approvals(&mut self) {
+        self.shell_options.approval_handler = None;
     }
 }
 
@@ -1012,8 +1033,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
     let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
 
-    profile.apply_project_dir(&mut child_args, child_cwd);
-
     // --dry-run: print what would be executed and exit
     if args.dry_run {
         crate::output::log_dry_run(
@@ -1108,7 +1127,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         None
     };
 
-    let wrapper_harness = if effective_non_interactive {
+    let wrapper_harness = {
         let base_prompt =
             extract_prompt_from_child_args(provider, &child_args, stdin_seed.as_deref());
         let harness_source = base_prompt.as_ref().and_then(|_| {
@@ -1123,31 +1142,43 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     source_path: &source_path,
                     repo_root: env_plan.repo_root.as_deref(),
                 };
-                let shell_options =
-                    build_harness_shell_options(&source_path, env_plan.repo_root.as_deref());
-                claudine::harness::parse_harness_plan_with_shell(
+                let shell_options = build_harness_shell_options(
+                    &source_path,
+                    env_plan.repo_root.as_deref(),
+                    !effective_non_interactive,
+                );
+                let plan = claudine::harness::parse_harness_plan(
                     &seed.frontmatter,
                     &source_path,
                     &resolve_ctx,
-                    Some(&shell_options),
                 )
                 .map_err(|e| eyre!("{e}"))?;
 
-                Some((source_path, base_prompt, seed))
+                // Pre-flight harness shell commands
+                let _harness_preflight = claudine::composition::resolve_shell_approvals(
+                    None,
+                    None,
+                    Some(&plan),
+                    &shell_options,
+                )
+                .map_err(|e| eyre!("{e}"))?;
+
+                drop(plan);
+
+                Some((source_path, base_prompt, seed, shell_options))
             } else {
                 None
             }
         } else {
             None
         }
-    } else {
-        None
     };
 
     // Execute the provider. Composition and harness execution are handled by
     // `claudine compose` / `claudine inline-compose` through the wrapper-grade
     // composition executor; the wrapper path handles plain prompt passthrough.
-    let exit_code = if let Some((source_path, base_prompt, initial_materialized)) = wrapper_harness
+    let exit_code = if let Some((source_path, base_prompt, initial_materialized, shell_options)) =
+        wrapper_harness
     {
         let mut prompt_state = HarnessPromptState {
             mode: HarnessPromptMode::Passthrough,
@@ -1166,6 +1197,22 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             profile.prepare_captured_output(&mut harness_base_args);
         }
 
+        let source_path_for_lifecycle = prompt_state.source_path.clone();
+        let default_lifecycle = claudine::composition::LifecycleConfig::default();
+        let mut default_lifecycle_state = claudine::composition::LifecycleRuntimeState::default();
+        let default_lifecycle_settings = claudine::events::GlobalSettings::default();
+        let default_lifecycle_messaging = claudine::messaging::RuntimeMessagingSettings {
+            user: None,
+            repo: None,
+        };
+        let default_lifecycle_ctx = claudine::composition::LifecycleRuntimeContext {
+            settings: &default_lifecycle_settings,
+            messaging: &default_lifecycle_messaging,
+            term: &term,
+            source_path: &source_path_for_lifecycle,
+            repo_root: env_plan.repo_root.as_deref(),
+        };
+
         run_harness_loop(
             provider,
             profile,
@@ -1177,6 +1224,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &env_plan.env,
             &mut prompt_state,
             env_plan.repo_root.as_deref(),
+            shell_options,
             use_structured,
             structured_codex_output.as_ref(),
             stdout_noise,
@@ -1189,6 +1237,9 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &dispatch_context,
             Some(initial_materialized),
             &term,
+            &default_lifecycle,
+            &mut default_lifecycle_state,
+            &default_lifecycle_ctx,
         )?
     } else if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
@@ -1260,6 +1311,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed: stdin_seed.as_deref(),
+                relay_tty_after_seed: false,
             },
         )?;
         result.data
@@ -1529,7 +1581,7 @@ fn materialize_harness_prompt(
                 original_text: source_text.clone(),
                 markdown: effective_markdown.clone(),
             };
-            let prepared = claudine::composition::prepare_inline(&source)
+            let prepared = claudine::composition::prepare_inline(&source, None, None)
                 .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
             (
                 prepared.prompt,
@@ -1701,6 +1753,7 @@ fn execute_harness_attempt(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed: launch.stdin_seed.as_deref(),
+                relay_tty_after_seed: false,
             },
         )?;
         let termination = capture.termination;
@@ -1867,15 +1920,25 @@ fn try_inline_closure(
         }
     };
 
+    // Read post-run frontmatter for comparison (best-effort)
+    let post_run_fm = std::fs::read_to_string(source_path).ok().map(|text| {
+        let md: darkmatter::markdown::Markdown = text.into();
+        md.frontmatter().as_map().clone()
+    });
+
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     match claudine::composition::closure::apply_inline_closure(
         closure_plan,
         &replacement_body,
         source_path,
         &today,
+        post_run_fm.as_ref(),
     ) {
-        Ok(()) => {
+        Ok(result) => {
             if show_checks {
+                use biscuit_terminal::components::status::{Status, StatusState};
+                use biscuit_terminal::prelude::Renderable;
+
                 log::message(&crate::output::fm_check_ok(
                     "Applied the captured replacement body to the target document",
                     term,
@@ -1884,6 +1947,21 @@ fn try_inline_closure(
                     "Preserved original frontmatter and updated <bold>last_updated</bold>",
                     term,
                 ));
+
+                for key in &result.new_properties {
+                    log::message(&crate::output::fm_check_ok(
+                        &format!("Merged new frontmatter property <bold>\"{key}\"</bold>"),
+                        term,
+                    ));
+                }
+
+                for key in &result.reverted_properties {
+                    let status = Status::from_prose(format!(
+                        "Agent modified frontmatter property <b>\"{key}\"</b> — reverted to original value"
+                    ))
+                    .state(StatusState::Warning);
+                    log::message(&status.render(term));
+                }
             }
             Ok(())
         }
@@ -2156,6 +2234,7 @@ pub(crate) fn run_harness_loop(
     base_env: &HashMap<OsString, OsString>,
     prompt_state: &mut HarnessPromptState,
     repo_root: Option<&Path>,
+    shell_options: claudine::harness::ShellApprovalOptions,
     use_structured: bool,
     structured_codex_output: Option<&StructuredCodexOutput>,
     stdout_noise: &[&str],
@@ -2168,11 +2247,18 @@ pub(crate) fn run_harness_loop(
     dispatch_context: &HashMap<String, serde_json::Value>,
     initial_materialized: Option<MaterializedHarnessPrompt>,
     term: &Terminal,
+    lifecycle: &claudine::composition::LifecycleConfig,
+    lifecycle_state: &mut claudine::composition::LifecycleRuntimeState,
+    lifecycle_ctx: &claudine::composition::LifecycleRuntimeContext<'_>,
 ) -> Result<i32> {
     const DEFAULT_MAX_RETRIES: u32 = 3;
     let permission_probe =
         WrapperHarnessPermissionProbe::new(provider, base_args.to_vec(), repo_root);
-    let mut harness_context = CachedHarnessLoopContext::new(&prompt_state.source_path, repo_root);
+    let mut harness_context = CachedHarnessLoopContext::with_shell_options(
+        &prompt_state.source_path,
+        repo_root,
+        shell_options,
+    );
     let mut attempt = 1u32;
     let mut initial_materialized = initial_materialized;
 
@@ -2184,11 +2270,10 @@ pub(crate) fn run_harness_loop(
             materialize_harness_prompt(prompt_state, repo_root)?
         };
         let resolve_ctx = harness_context.resolve_context();
-        let mut plan = claudine::harness::parse_harness_plan_with_shell(
+        let mut plan = claudine::harness::parse_harness_plan(
             &materialized.frontmatter,
             &prompt_state.source_path,
             &resolve_ctx,
-            Some(harness_context.shell_options()),
         )?;
 
         // Source-file existence reporting
@@ -2206,6 +2291,9 @@ pub(crate) fn run_harness_loop(
                     term,
                 );
             }
+            if !lifecycle_state.provider_launch_started {
+                emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
+            }
             return Err(eyre!(
                 "source file does not exist: {}",
                 prompt_state.source_path.display()
@@ -2222,8 +2310,17 @@ pub(crate) fn run_harness_loop(
             );
         }
 
-        // Shell audit preflight
-        let source_text = std::fs::read_to_string(&prompt_state.source_path).ok();
+        // Shell audit preflight.
+        // Composition flows (Compose/Inline) already preflight ::shell directives
+        // during composition — re-parsing raw source would reintroduce commands
+        // hidden by false ::block directives.  Only passthrough mode needs raw
+        // source-page audit.
+        let source_text = match prompt_state.mode {
+            HarnessPromptMode::Passthrough => {
+                std::fs::read_to_string(&prompt_state.source_path).ok()
+            }
+            _ => None,
+        };
         let auditable =
             claudine::harness::collect_auditable_commands(&plan, source_text.as_deref())?;
 
@@ -2252,6 +2349,9 @@ pub(crate) fn run_harness_loop(
                         "shell audit failed for source-page directives — cannot proceed",
                         term,
                     );
+                }
+                if !lifecycle_state.provider_launch_started {
+                    emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
                 }
                 return Err(eyre!(
                     "shell audit failed: {} denied directive(s) in source page",
@@ -2290,8 +2390,20 @@ pub(crate) fn run_harness_loop(
                 if show_checks {
                     claudine::harness::report::report_unhandled_failure(&msg, term);
                 }
+                if !lifecycle_state.provider_launch_started {
+                    emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
+                }
                 return Err(eyre!("shell audit failed"));
             }
+        }
+
+        // Composition flows resolved all shell approvals during preflight.
+        // Freeze the approval set so redirect/retry iterations cannot
+        // trigger new interactive prompts — only cached/whitelisted
+        // commands pass; new uncached commands are denied.  Passthrough
+        // mode has no prior preflight so its handler stays active.
+        if attempt == 1 && !matches!(prompt_state.mode, HarnessPromptMode::Passthrough) {
+            harness_context.freeze_shell_approvals();
         }
 
         let pre_report = claudine::harness::evaluate_pre_checks(&plan, Some(&permission_probe));
@@ -2343,8 +2455,18 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&fail_msg, term);
             }
+            if !lifecycle_state.provider_launch_started {
+                emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
+            }
             return Err(eyre!("{fail_msg}"));
         }
+
+        // Emit start lifecycle signal before the first provider launch
+        if !lifecycle_state.start_emitted {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, lifecycle_ctx);
+            lifecycle_state.start_emitted = true;
+        }
+        lifecycle_state.provider_launch_started = true;
 
         let snapshot = claudine::harness::capture_pre_run_snapshot(&plan)
             .map_err(|e| eyre!("harness snapshot: {e}"))?;
@@ -2384,6 +2506,7 @@ pub(crate) fn run_harness_loop(
         )?;
 
         if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
             return Ok(outcome.exit_code);
         }
 
@@ -2428,6 +2551,7 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&message, term);
             }
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
             return Err(eyre!("{message}"));
         }
 
@@ -2482,6 +2606,7 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&fail_msg, term);
             }
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
             return Err(eyre!("{fail_msg}"));
         }
 
@@ -2504,6 +2629,7 @@ pub(crate) fn run_harness_loop(
         }
 
         if post_report.all_passed() {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Success, lifecycle_ctx);
             return Ok(outcome.exit_code);
         }
 
@@ -2544,6 +2670,7 @@ pub(crate) fn run_harness_loop(
         if show_checks {
             claudine::harness::report::report_unhandled_failure(&fail_msg, term);
         }
+        emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
         return Err(eyre!("{fail_msg}"));
     }
 }

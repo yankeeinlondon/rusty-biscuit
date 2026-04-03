@@ -137,19 +137,6 @@ pub(crate) trait WrapperProfile: Send + Sync {
         ))
     }
 
-    // -- Project directory ------------------------------------------------------
-
-    /// Inject provider-specific flags to set the project working directory.
-    ///
-    /// Some agents (OpenCode, Codex, Kimi) have their own internal project
-    /// root detection that may disagree with the process CWD — especially
-    /// in git worktrees where `.git` is a file pointing elsewhere. This
-    /// method passes the explicit directory flag so the agent uses the
-    /// correct project root.
-    ///
-    /// Default: no-op (process CWD via `.current_dir()` is sufficient).
-    fn apply_project_dir(&self, _args: &mut Vec<String>, _dir: &std::path::Path) {}
-
     // -- Non-interactive stdout noise filtering --------------------------------
 
     /// Line prefixes that should be stripped from stdout in non-interactive mode.
@@ -598,13 +585,6 @@ impl WrapperProfile for CodexWrapper {
         }
     }
 
-    fn apply_project_dir(&self, args: &mut Vec<String>, dir: &std::path::Path) {
-        if !has_flag(args, "--cd") && !has_flag(args, "-C") {
-            args.push("--cd".to_string());
-            args.push(dir.display().to_string());
-        }
-    }
-
     fn supports_interactive_inline_closure(&self) -> bool {
         true
     }
@@ -855,13 +835,6 @@ impl WrapperProfile for KimiWrapper {
         Ok(())
     }
 
-    fn apply_project_dir(&self, args: &mut Vec<String>, dir: &std::path::Path) {
-        if !has_flag(args, "--work-dir") && !has_flag(args, "-w") {
-            args.push("--work-dir".to_string());
-            args.push(dir.display().to_string());
-        }
-    }
-
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
         Ok(vec![
             "kimi".to_string(),
@@ -1099,24 +1072,16 @@ impl WrapperProfile for OpencodeWrapper {
 
     fn apply_prompt_body(
         &self,
-        args: &mut Vec<String>,
+        _args: &mut Vec<String>,
         stdin_seed: &mut Option<String>,
         prompt: &str,
-        non_interactive: bool,
+        _non_interactive: bool,
     ) -> Result<()> {
-        if non_interactive {
-            // In non-interactive mode, deliver via stdin to avoid ENAMETOOLONG
-            // errors when prompt-file content exceeds OS argument length limits.
-            *stdin_seed = Some(prompt.to_string());
-        } else {
-            // Interactive: insert as positional after "run"
-            let insert_at = if args.first().is_some_and(|f| f == "run") {
-                1
-            } else {
-                0
-            };
-            args.insert(insert_at, prompt.to_string());
-        }
+        // Always deliver via stdin.  OpenCode's first positional arg is a
+        // workspace directory, not a prompt, so positional delivery causes
+        // ENAMETOOLONG (prompt > 255 bytes) or a chdir error.  Stdin works
+        // for both `opencode run` (non-interactive) and the TUI.
+        *stdin_seed = Some(prompt.to_string());
         Ok(())
     }
 
@@ -1130,13 +1095,6 @@ impl WrapperProfile for OpencodeWrapper {
             bail!("--non-interactive for opencode requires a prompt after the entrypoint");
         }
         Ok(())
-    }
-
-    fn apply_project_dir(&self, args: &mut Vec<String>, dir: &std::path::Path) {
-        if !has_flag(args, "--dir") {
-            args.push("--dir".to_string());
-            args.push(dir.display().to_string());
-        }
     }
 
     fn supports_structured_stream(&self) -> bool {

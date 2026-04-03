@@ -165,6 +165,13 @@ pub enum HookAction {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         handler: Option<ReportHandler>,
     },
+
+    /// Send a message to the configured messaging destination.
+    Message {
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<String>,
+    },
 }
 
 impl HookAction {
@@ -177,6 +184,7 @@ impl HookAction {
             HookAction::FireAndForget { .. } => "fire_and_forget",
             HookAction::Call { .. } => "call",
             HookAction::Report { .. } => "report",
+            HookAction::Message { .. } => "message",
         }
     }
 
@@ -189,6 +197,7 @@ impl HookAction {
             HookAction::FireAndForget { .. } => "FireAndForget",
             HookAction::Call { .. } => "Call",
             HookAction::Report { .. } => "Report",
+            HookAction::Message { .. } => "Message",
         }
     }
 }
@@ -289,5 +298,65 @@ mod tests {
 
         assert_eq!(action.type_slug(), "fire_and_forget");
         assert_eq!(action.type_pascal_case(), "FireAndForget");
+    }
+
+    #[test]
+    fn message_deserializes_with_required_fields() {
+        let json = serde_json::json!({
+            "type": "message",
+            "message": "Deploy complete"
+        });
+
+        let action: HookAction = serde_json::from_value(json).unwrap();
+        let HookAction::Message { message, image } = action else {
+            panic!("expected message");
+        };
+
+        assert_eq!(message, "Deploy complete");
+        assert!(image.is_none());
+    }
+
+    #[test]
+    fn message_deserializes_with_image() {
+        let json = serde_json::json!({
+            "type": "message",
+            "message": "Screenshot attached",
+            "image": "/tmp/screenshot.png"
+        });
+
+        let action: HookAction = serde_json::from_value(json).unwrap();
+        let HookAction::Message { message, image } = action else {
+            panic!("expected message");
+        };
+
+        assert_eq!(message, "Screenshot attached");
+        assert_eq!(image.as_deref(), Some("/tmp/screenshot.png"));
+    }
+
+    #[test]
+    fn message_round_trip() {
+        let action = HookAction::Message {
+            message: "**build** done".to_string(),
+            image: Some("~/artifacts/build.png".to_string()),
+        };
+
+        let json = serde_json::to_value(&action).unwrap();
+        assert_eq!(json["type"], "message");
+        assert_eq!(json["message"], "**build** done");
+        assert_eq!(json["image"], "~/artifacts/build.png");
+
+        let back: HookAction = serde_json::from_value(json).unwrap();
+        assert_eq!(back, action);
+    }
+
+    #[test]
+    fn message_type_labels() {
+        let action = HookAction::Message {
+            message: "test".to_string(),
+            image: None,
+        };
+
+        assert_eq!(action.type_slug(), "message");
+        assert_eq!(action.type_pascal_case(), "Message");
     }
 }

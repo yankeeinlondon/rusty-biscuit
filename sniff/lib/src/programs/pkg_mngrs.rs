@@ -6,7 +6,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
-use crate::programs::find_program::find_programs_with_source_parallel;
+use crate::programs::find_program::{
+    ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
+};
 use crate::programs::installer::{
     InstallOptions, execute_install, execute_versioned_install, method_available,
     select_best_method,
@@ -94,6 +96,47 @@ impl InstalledLanguagePackageManagers {
         ];
 
         let results = find_programs_with_source_parallel(&programs);
+
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
+
+        Self {
+            npm: get("npm"),
+            pnpm: get("pnpm"),
+            yarn: get("yarn"),
+            bun: get("bun"),
+            cargo: get("cargo"),
+            go_modules: get("go"),
+            composer: get("composer"),
+            swift_pm: get("swift"),
+            luarocks: get("luarocks"),
+            vcpkg: get("vcpkg"),
+            conan: get("conan"),
+            nuget: get_any(&["dotnet", "nuget"]),
+            hex: get("mix"),
+            pip: get_any(&["pip", "pip3"]),
+            uv: get("uv"),
+            poetry: get("poetry"),
+            cpan: get("cpan"),
+            cpanm: get("cpanm"),
+        }
+    }
+
+    /// Detect which popular language package managers are installed using a pre-built executable index.
+    pub fn new_with_index(index: &ExecutableIndex) -> Self {
+        let programs = [
+            "npm", "pnpm", "yarn", "bun", "cargo", "go", "composer", "swift", "luarocks", "vcpkg",
+            "conan", "dotnet", "nuget", "mix", "pip", "pip3", "uv", "poetry", "cpan", "cpanm",
+        ];
+
+        let results = find_programs_with_source_from_index(index, &programs);
 
         let get = |name: &str| results.get(name).and_then(|r| r.clone());
         let get_any = |names: &[&str]| {
@@ -482,6 +525,37 @@ impl InstalledOsPackageManagers {
         ];
 
         let results = find_programs_with_source_parallel(&programs);
+
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
+
+        Self {
+            apt: get("apt"),
+            nala: get("nala"),
+            brew: get("brew"),
+            dnf: get_any(&["dnf", "yum"]),
+            pacman: get("pacman"),
+            winget: get("winget"),
+            chocolatey: get("choco"),
+            scoop: get("scoop"),
+            nix: get("nix"),
+        }
+    }
+
+    /// Detect which popular OS package managers are installed using a pre-built executable index.
+    pub fn new_with_index(index: &ExecutableIndex) -> Self {
+        let programs = [
+            "apt", "nala", "brew", "dnf", "yum", "pacman", "winget", "choco", "scoop", "nix",
+        ];
+
+        let results = find_programs_with_source_from_index(index, &programs);
 
         let get = |name: &str| results.get(name).and_then(|r| r.clone());
         let get_any = |names: &[&str]| {

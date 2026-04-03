@@ -19,6 +19,7 @@ fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
 
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
+use super::lifecycle::parse_lifecycle_config;
 use super::types::{
     CompositionClosurePlan, CompositionMode, InlineClosurePlan, PreparedComposition,
     ResolvedCompositionSource,
@@ -31,8 +32,16 @@ use super::types::{
 /// [`CompositionClosurePlan::Direct`] — no file mutation occurs.
 pub fn prepare_direct(
     source: &ResolvedCompositionSource,
+    set_overrides: Option<serde_json::Value>,
+    pre_approved_commands: Option<std::collections::HashSet<String>>,
 ) -> Result<PreparedComposition, CompositionError> {
-    let options = ComposeOptions::new().with_source_file(&source.resolved_path);
+    let mut options = ComposeOptions::new().with_source_file(&source.resolved_path);
+    if let Some(overrides) = set_overrides {
+        options = options.with_set_overrides(overrides);
+    }
+    if let Some(approved) = pre_approved_commands {
+        options = options.with_pre_approved_commands(approved);
+    }
     let (composed, _report) = source
         .markdown
         .compose_with(options)
@@ -40,6 +49,7 @@ pub fn prepare_direct(
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let effective_agent_hint = composed.frontmatter().as_map().get("agent").cloned();
+    let lifecycle = parse_lifecycle_config(&effective_frontmatter)?;
 
     let source_repo_root = find_git_root_from_path(&source.resolved_path);
 
@@ -51,6 +61,7 @@ pub fn prepare_direct(
         effective_frontmatter,
         effective_agent_hint,
         closure: CompositionClosurePlan::Direct,
+        lifecycle,
     })
 }
 
@@ -61,6 +72,8 @@ pub fn prepare_direct(
 /// for deterministic post-execution rewrite.
 pub fn prepare_inline(
     source: &ResolvedCompositionSource,
+    set_overrides: Option<serde_json::Value>,
+    pre_approved_commands: Option<std::collections::HashSet<String>>,
 ) -> Result<PreparedComposition, CompositionError> {
     let fm = source.markdown.frontmatter();
 
@@ -80,13 +93,20 @@ pub fn prepare_inline(
 
     // Build temporary markdown (frontmatter + prompt as body) and compose
     let temp_md = Markdown::with_frontmatter(fm.clone(), &prompt_text);
-    let options = ComposeOptions::new().with_source_file(&source.resolved_path);
+    let mut options = ComposeOptions::new().with_source_file(&source.resolved_path);
+    if let Some(overrides) = set_overrides {
+        options = options.with_set_overrides(overrides);
+    }
+    if let Some(approved) = pre_approved_commands {
+        options = options.with_pre_approved_commands(approved);
+    }
     let (composed, _report) = temp_md
         .compose_with(options)
         .map_err(|e| CompositionError::ComposeFailed(e.to_string()))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let effective_agent_hint = composed.frontmatter().as_map().get("agent").cloned();
+    let lifecycle = parse_lifecycle_config(&effective_frontmatter)?;
 
     let mut prompt = composed.content().to_string();
 
@@ -111,6 +131,7 @@ pub fn prepare_inline(
             original_document_text: source.original_text.clone(),
             original_body_hash,
         }),
+        lifecycle,
     })
 }
 
@@ -176,7 +197,7 @@ mod tests {
             "# Research\n\nDo the research.",
         );
 
-        let prepared = prepare_direct(&source).unwrap();
+        let prepared = prepare_direct(&source, None, None).unwrap();
         assert_eq!(prepared.mode, CompositionMode::ChainedDocument);
         assert!(prepared.prompt.contains("Research"));
         // Effective frontmatter should be a JSON object with the keys
@@ -199,7 +220,7 @@ mod tests {
             "Old content",
         );
 
-        let prepared = prepare_inline(&source).unwrap();
+        let prepared = prepare_inline(&source, None, None).unwrap();
         assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
         assert!(prepared.prompt.contains("List three colors"));
         assert!(
@@ -230,7 +251,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("title", json!("Test"))], "Content");
 
-        let err = prepare_inline(&source).unwrap_err();
+        let err = prepare_inline(&source, None, None).unwrap_err();
         assert!(matches!(err, CompositionError::PromptPropertyMissing));
     }
 
@@ -239,7 +260,63 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("prompt", json!(42))], "Content");
 
-        let err = prepare_inline(&source).unwrap_err();
+        let err = prepare_inline(&source, None, None).unwrap_err();
         assert!(matches!(err, CompositionError::PromptPropertyWrongType(_)));
+    }
+
+    #[test]
+    fn direct_composition_parses_lifecycle_config() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                ("start", json!({"stderr": "Starting", "effect": "doorbell"})),
+                ("success", json!({"speak": "All done"})),
+            ],
+            "Do the work.",
+        );
+
+        let prepared = prepare_direct(&source, None, None).unwrap();
+        assert!(prepared.lifecycle.start.is_some());
+        assert!(prepared.lifecycle.success.is_some());
+        assert!(prepared.lifecycle.blocked.is_none());
+        assert!(prepared.lifecycle.failure.is_none());
+    }
+
+    #[test]
+    fn inline_composition_parses_lifecycle_config() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("prompt", json!("Write something")),
+                ("failure", json!({"stderr": "Failed"})),
+            ],
+            "Old content",
+        );
+
+        let prepared = prepare_inline(&source, None, None).unwrap();
+        assert!(prepared.lifecycle.failure.is_some());
+        assert!(prepared.lifecycle.start.is_none());
+    }
+
+    #[test]
+    fn invalid_lifecycle_config_fails_preparation() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                (
+                    "start",
+                    json!({"speak": "Hello", "speak_first": "Also hello"}),
+                ),
+            ],
+            "Content",
+        );
+
+        let err = prepare_direct(&source, None, None).unwrap_err();
+        assert!(matches!(err, CompositionError::LifecycleSpeakConflict(_)));
     }
 }

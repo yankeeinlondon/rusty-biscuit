@@ -197,18 +197,18 @@ claudine/cli/src/commands/wrap/
 Responsibilities:
 
 - `system_prompt/context.rs`
-  - detect repo root, package-area root, and package root from the launch CWD
-  - reuse or extract the monorepo logic currently embedded in `wrap/env.rs`
+    - detect repo root, package-area root, and package root from the launch CWD
+    - reuse or extract the monorepo logic currently embedded in `wrap/env.rs`
 - `system_prompt/resolve.rs`
-  - resolve explicit file arguments
-  - find standard `system-prompt.md`
-  - return `None`, `Disabled`, or a selected source
+    - resolve explicit file arguments
+    - find standard `system-prompt.md`
+    - return `None`, `Disabled`, or a selected source
 - `system_prompt/prepare.rs`
-  - run Darkmatter composition on the selected file
-  - return composed Markdown body only
+    - run Darkmatter composition on the selected file
+    - return composed Markdown body only
 - `wrap/system_prompt.rs`
-  - own temp-file, temp-home, and inline-config application
-  - merge provider-specific prompt changes into the launch plan
+    - own temp-file, temp-home, and inline-config application
+    - merge provider-specific prompt changes into the launch plan
 
 ## Core Data Model
 

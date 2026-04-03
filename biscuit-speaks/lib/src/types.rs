@@ -97,6 +97,21 @@ pub enum VoiceQuality {
     Unknown,
 }
 
+impl VoiceQuality {
+    /// Numeric rank for sorting (lower = better quality).
+    ///
+    /// Used for deterministic voice selection when comparing quality tiers.
+    pub fn rank(self) -> u8 {
+        match self {
+            VoiceQuality::Excellent => 0,
+            VoiceQuality::Good => 1,
+            VoiceQuality::Moderate => 2,
+            VoiceQuality::Low => 3,
+            VoiceQuality::Unknown => 4,
+        }
+    }
+}
+
 /// A specific voice on a specific TTS provider.
 ///
 /// `Voice` represents a named voice with associated metadata such as

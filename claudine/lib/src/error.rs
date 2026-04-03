@@ -212,6 +212,19 @@ pub enum ClaudineError {
     /// Policy engine context is ambiguous.
     #[error("policy engine ambiguous context: {0}")]
     PolicyAmbiguousContext(String),
+
+    // --- System prompt errors ---
+    /// Launch context detection failed (git or repo detection error).
+    #[error("launch context detection failed: {0}")]
+    LaunchContextDetection(String),
+
+    /// System prompt file not found.
+    #[error("system prompt file not found: {0}")]
+    SystemPromptFileNotFound(String),
+
+    /// System prompt composition through Darkmatter failed.
+    #[error("system prompt composition failed: {0}")]
+    SystemPromptComposition(String),
 }
 
 /// Convenience type alias for Claudine results.

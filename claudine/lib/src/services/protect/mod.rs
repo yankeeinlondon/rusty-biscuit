@@ -62,9 +62,9 @@ mod tests {
     fn test_session(provider: Provider) -> ProtectSessionContext {
         ProtectSessionContext {
             provider,
-            policy_context: crate::permissions::PolicyContext::new(
-                std::path::PathBuf::from("/tmp/test"),
-            ),
+            policy_context: crate::permissions::PolicyContext::new(std::path::PathBuf::from(
+                "/tmp/test",
+            )),
             cli: ProtectCliContext::None,
             interactive: false,
             yolo: false,
@@ -177,7 +177,9 @@ mod tests {
         let request = test_request(
             Provider::Claude,
             ProtectPhase::BeforeTool,
-            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw("rm -rf /"))],
+            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw(
+                "rm -rf /",
+            ))],
         );
 
         let eval = service.evaluate_structured(&request).unwrap();
@@ -296,7 +298,7 @@ mod tests {
     fn validate_rejects_bad_regex() {
         let config = ProtectConfig {
             rules: ProtectRules {
-                blocked_command_patterns: vec!["[unterminated".to_string()],
+                secret_patterns: vec!["[unterminated".to_string()],
                 ..ProtectRules::default()
             },
             ..ProtectConfig::default()
@@ -338,7 +340,9 @@ mod tests {
         let request = test_request(
             Provider::Codex,
             ProtectPhase::BeforeTool,
-            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw("rm -rf /"))],
+            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw(
+                "rm -rf /",
+            ))],
         );
 
         let eval = service.evaluate_structured(&request).unwrap();
@@ -636,7 +640,9 @@ mod tests {
         let request = test_request(
             Provider::Codex,
             ProtectPhase::BeforeTool,
-            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw("rm -rf /"))],
+            vec![ProtectIntent::ExecuteCommand(CommandQuery::from_raw(
+                "rm -rf /",
+            ))],
         );
 
         let _ = service.evaluate_structured(&request).unwrap();
@@ -825,16 +831,10 @@ mod tests {
         );
 
         let eval = service.evaluate_structured(&request).unwrap();
-        let network_guard = eval
-            .findings
-            .iter()
-            .find(|f| {
-                f.source == ProtectFindingSource::RuntimeGuard
-                    && f.result
-                        .explanation
-                        .summary
-                        .contains("network-write")
-            });
+        let network_guard = eval.findings.iter().find(|f| {
+            f.source == ProtectFindingSource::RuntimeGuard
+                && f.result.explanation.summary.contains("network-write")
+        });
         assert!(
             network_guard.is_some(),
             "Network write guard should fire for curl commands"
@@ -862,16 +862,10 @@ mod tests {
         );
 
         let eval = service.evaluate_structured(&request).unwrap();
-        let fs_guard = eval
-            .findings
-            .iter()
-            .find(|f| {
-                f.source == ProtectFindingSource::RuntimeGuard
-                    && f.result
-                        .explanation
-                        .summary
-                        .contains("broad-fs-write")
-            });
+        let fs_guard = eval.findings.iter().find(|f| {
+            f.source == ProtectFindingSource::RuntimeGuard
+                && f.result.explanation.summary.contains("broad-fs-write")
+        });
         assert!(
             fs_guard.is_some(),
             "Broad FS write guard should fire for /etc/ paths"
@@ -879,12 +873,23 @@ mod tests {
     }
 
     #[test]
-    fn deprecation_warnings_surface_for_old_fields() {
+    fn deprecated_blocked_command_patterns_rejected() {
         let config = ProtectConfig {
             rules: ProtectRules {
                 blocked_command_patterns: vec!["rm".to_string()],
                 ..ProtectRules::default()
             },
+            ..ProtectConfig::default()
+        };
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("blocked_command_patterns"));
+        assert!(error.contains("removed"));
+    }
+
+    #[test]
+    fn deprecated_mcp_allowlist_rejected() {
+        let config = ProtectConfig {
             mcp: McpPolicy {
                 allowlist: vec!["server1".to_string()],
                 ..McpPolicy::default()
@@ -892,10 +897,52 @@ mod tests {
             ..ProtectConfig::default()
         };
 
-        let warnings = config.deprecation_warnings();
-        assert!(warnings.len() >= 2);
-        assert!(warnings.iter().any(|w| w.contains("blocked_command_patterns")));
-        assert!(warnings.iter().any(|w| w.contains("allowlist")));
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("allowlist"));
+        assert!(error.contains("removed"));
+    }
+
+    #[test]
+    fn deprecated_mcp_denylist_rejected() {
+        let config = ProtectConfig {
+            mcp: McpPolicy {
+                denylist: vec!["bad-server".to_string()],
+                ..McpPolicy::default()
+            },
+            ..ProtectConfig::default()
+        };
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("denylist"));
+        assert!(error.contains("removed"));
+    }
+
+    #[test]
+    fn deprecated_ask_command_patterns_rejected() {
+        let config = ProtectConfig {
+            rules: ProtectRules {
+                ask_command_patterns: vec!["sudo".to_string()],
+                ..ProtectRules::default()
+            },
+            ..ProtectConfig::default()
+        };
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("ask_command_patterns"));
+    }
+
+    #[test]
+    fn deprecated_protected_paths_rejected() {
+        let config = ProtectConfig {
+            rules: ProtectRules {
+                protected_paths: vec!["/etc".to_string()],
+                ..ProtectRules::default()
+            },
+            ..ProtectConfig::default()
+        };
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("protected_paths"));
     }
 
     #[test]

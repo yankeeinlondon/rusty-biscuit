@@ -216,6 +216,7 @@ async fn dispatch_preparsed(
         Some(binding.compiled_mappers()),
         &resolved_hook.meta,
         config.settings(),
+        config.messaging(),
         resolved_hook.can_block,
         protect_pre_decision.as_ref(),
     )
@@ -246,11 +247,9 @@ async fn dispatch_preparsed(
 
     let protect_post_decision = protect_post.as_ref().map(|e| e.decision.clone());
 
-    // Apply redaction from post-action evaluation
+    // Post-action: blocking outcomes take priority over redaction.
     let action_response = if let Some(eval) = protect_post.as_ref() {
-        if let Some(plan) = &eval.redaction {
-            apply_redaction(action_response, plan)
-        } else if should_short_circuit_on_protect(&eval.decision.outcome) {
+        if should_short_circuit_on_protect(&eval.decision.outcome) {
             Some(
                 adapter
                     .map_protect_outcome(&resolved_hook.event, &eval.decision)
@@ -261,6 +260,8 @@ async fn dispatch_preparsed(
                         ))
                     })?,
             )
+        } else if let Some(plan) = &eval.redaction {
+            apply_redaction(action_response, plan)
         } else {
             action_response
         }
@@ -300,10 +301,7 @@ fn build_session_context(provider: Provider, meta: &EventMeta) -> ProtectSession
     let cli_ctx = std::env::var("AGENT_PARAMS")
         .ok()
         .map(|params| {
-            let argv: Vec<String> = params
-                .split_whitespace()
-                .map(String::from)
-                .collect();
+            let argv: Vec<String> = params.split_whitespace().map(String::from).collect();
             ProtectCliContext::Argv(argv)
         })
         .unwrap_or(ProtectCliContext::None);
@@ -314,16 +312,16 @@ fn build_session_context(provider: Provider, meta: &EventMeta) -> ProtectSession
         cli: cli_ctx,
         interactive: std::env::var("INTERACTIVE")
             .ok()
-            .map_or(false, |v| v == "1" || v == "true")
+            .is_some_and(|v| v == "1" || v == "true")
             || std::env::var("CLAUDINE_INTERACTIVE")
                 .ok()
-                .map_or(false, |v| v == "1" || v == "true"),
+                .is_some_and(|v| v == "1" || v == "true"),
         yolo: std::env::var("YOLO")
             .ok()
-            .map_or(false, |v| v == "1" || v == "true")
+            .is_some_and(|v| v == "1" || v == "true")
             || std::env::var("CLAUDINE_YOLO")
                 .ok()
-                .map_or(false, |v| v == "1" || v == "true"),
+                .is_some_and(|v| v == "1" || v == "true"),
         session_id: meta
             .session_id
             .clone()
@@ -604,6 +602,7 @@ mod tests {
                     },
                 }),
                 protect: None,
+                messaging: None,
             },
             providers: {
                 let mut providers = HashMap::new();
@@ -731,8 +730,7 @@ mod tests {
             env: EnvironmentContext::default(),
         };
 
-        meta.extra
-            .insert("is_trusted".to_string(), json!(true));
+        meta.extra.insert("is_trusted".to_string(), json!(true));
 
         let trust = derive_trust_context(&meta);
         assert_eq!(trust.is_trusted, Some(true));
@@ -868,8 +866,7 @@ mod tests {
             env: EnvironmentContext::default(),
         };
 
-        meta.extra
-            .insert("is_trusted".to_string(), json!(true));
+        meta.extra.insert("is_trusted".to_string(), json!(true));
 
         let ctx = build_session_context(Provider::Claude, &meta);
         assert_eq!(ctx.policy_context.trust.is_trusted, Some(true));

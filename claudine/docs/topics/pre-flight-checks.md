@@ -1,0 +1,132 @@
+# Pre-Flight Shell Approval
+
+Before any Claudine wrapper session launches a provider, it needs to know that every shell command the session might execute has been authorized. This is what the pre-flight check does: it scans all possible shell commands, resolves their approval status, and asks the user to approve anything that is not already whitelisted. Once the pre-flight completes, the session runs without further shell-related prompts.
+
+## Why This Exists
+
+Shell commands can appear in three places during a Claudine session:
+
+1. **Template `::shell` directives** — Darkmatter's compose pipeline executes these during document composition. A prompt like `commit.md` might contain `::shell sniff repo packages` to inject dynamic content.
+2. **Harness pre-checks and post-checks** — validation rules of type `shell_command` run before and after the provider session.
+3. **Harness handlers** — recovery actions that include shell commands. These are conditional (they only fire when a specific failure occurs) but they still need pre-authorization because there is no opportunity to prompt the user mid-session.
+
+Without pre-flight, a shell command that lacks whitelist coverage would either block the process waiting for interactive approval that will never come (in a non-interactive session) or fail with a confusing error deep inside the composition pipeline. The pre-flight eliminates both problems by resolving all approvals upfront.
+
+## How It Works
+
+The pre-flight runs as part of every wrapper command — `claudine compose`, `claudine inline-compose`, `claudine claude`, `claudine codex`, and all other provider wrappers. It sits between prompt resolution and provider launch:
+
+```
+Prompt resolved → Pre-flight shell approval → Provider launches
+```
+
+### Step 1: Collect All Shell Commands
+
+Claudine gathers shell commands from all three sources:
+
+- **Template directives**: Claudine asks Darkmatter to walk the full document graph and return every `::shell` directive it finds. Darkmatter runs interpolation first (using the same state that will be used during actual composition) so that template variables and dynamic transclusion paths resolve correctly. The result is a list of concrete commands with their source file and line number.
+- **Harness checks**: Claudine iterates the `pre_checks` and `post_checks` from the harness plan, extracting any `shell_command` validation rules.
+- **Harness handlers**: Claudine iterates handler definitions, extracting shell commands from `deviate` actions and programmatic `handle` declarations.
+
+All commands are deduplicated by their normalized form. If the same command appears in multiple transclusion children or in both a pre-check and the template, it only needs one approval.
+
+### Step 2: Check Against the Whitelist
+
+Each collected command is checked against Claudine's shell policy:
+
+- Built-in blacklist (dangerous commands like `rm`, `dd`, `chmod`)
+- User blacklist (`.darkmatter-shell-blacklist`)
+- User whitelist (`.darkmatter-shell-whitelist`)
+
+Commands that match the whitelist are marked as approved. Commands that match a blacklist are rejected immediately with a clear error. Everything else moves to step 3.
+
+### Step 3: Prompt the User
+
+Any command not already covered by the whitelist is presented to the user one at a time. The user sees the command, its source file, and line number, and can choose:
+
+- **Allow this exact command** (persisted to whitelist)
+- **Allow all commands from this executable** (persisted to whitelist)
+- **Allow once** (this session only)
+- **Deny** — the session aborts immediately
+- **Blacklist** (persisted to blacklist, session aborts)
+
+If the user denies any command, Claudine stops. No provider session is started. The error message states exactly which command was denied and confirms that nothing was executed.
+
+### Step 4: Pass Pre-Approved Set to Compose
+
+After the pre-flight completes, Claudine holds a set of all authorized commands (those from the whitelist plus those the user just approved). This set is passed to Darkmatter as `pre_approved_commands` on the `ComposeOptions`.
+
+During composition, Darkmatter's shell expansion stage checks each `::shell` directive against this set. If the command is in the set, it executes. If not, it fails immediately with a clear error indicating the command was not pre-approved. Darkmatter does not run its own approval flow when a pre-approved set is provided.
+
+The same set is also used by the harness runtime when executing shell commands in pre-checks, post-checks, and handlers.
+
+## The Claudine/Darkmatter Boundary
+
+Claudine and Darkmatter each have shell approval infrastructure, but they serve different roles during pre-flight:
+
+**Darkmatter's role is discovery.** It knows how to walk the document graph — following transclusions, resolving interpolation, parsing `::shell` directives. It exposes a function (`collect_shell_commands`) that returns every shell command in the document tree. It does not check any policy files or make any approval decisions during this call.
+
+**Claudine's role is authorization.** It takes the list from Darkmatter, combines it with commands from the harness, checks everything against the whitelist, and prompts the user for anything that is missing. Claudine is the single source of truth for what is allowed.
+
+**During composition**, Darkmatter receives the pre-approved set and trusts it completely. It skips its own whitelist, blacklist, and approval handler checks. This means Darkmatter's standalone approval flow (which still works when used outside of Claudine) is bypassed entirely when Claudine provides pre-approvals.
+
+This separation ensures that:
+
+- Claudine never needs to understand transclusion, interpolation, or the document graph
+- Darkmatter never needs to understand the harness, interactive prompting, or session lifecycle
+- There is exactly one place where shell approval decisions are made (Claudine)
+- There is exactly one place where shell commands are discovered in templates (Darkmatter)
+
+## Error Messages
+
+The pre-flight system produces three categories of error, each designed to identify the problem immediately:
+
+### Command Denied During Pre-Flight
+
+The user chose to deny a command. The session was never started.
+
+```
+Aborted: shell command 'rm -rf /' was denied during pre-flight approval.
+No provider session was started.
+```
+
+### Command Not Pre-Approved at Runtime
+
+A shell command was encountered during composition or harness execution that was not in the pre-approved set. This should never happen — it means the pre-flight scanner missed a command.
+
+```
+Shell command 'sniff repo packages' was not pre-approved and cannot
+be approved during an active session. This is a bug in the pre-flight
+scanner -- please report it.
+
+Source: prompts/commit.md:23
+```
+
+### Command Execution Failure
+
+A pre-approved command was executed but failed (non-zero exit or timeout).
+
+```
+Shell command 'sniff repo packages' failed after 10s (timeout).
+
+Source: prompts/commit.md:23
+Working directory: /path/to/repo
+
+This command was approved and executed but did not complete within
+the timeout. If this command normally completes quickly, it may be
+blocked by another process or waiting on a resource.
+```
+
+## Interaction with Existing Features
+
+### Whitelist Files
+
+The pre-flight uses the same `.darkmatter-shell-whitelist` and `.darkmatter-shell-blacklist` files that Darkmatter and the harness already use. Commands that the user approves with "allow exact" or "allow command" during pre-flight are persisted to the whitelist, so they will not require approval again in future sessions.
+
+### Non-Interactive Sessions
+
+Pre-flight is especially important for non-interactive sessions where there is no terminal available for mid-session prompts. But it runs on all wrapper commands — including interactive sessions started with a prompt — because the shell commands in the template and harness execute before the interactive session begins.
+
+### Harness Validations
+
+Shell-based validations (`shell_command` in pre-checks and post-checks) and shell-based handlers (`deviate`, programmatic `handle`) are included in the pre-flight scan. This means all shell commands across the entire session lifecycle are authorized upfront, not just those in the template.

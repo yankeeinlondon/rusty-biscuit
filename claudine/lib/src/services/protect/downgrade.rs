@@ -1,6 +1,6 @@
+use super::ProtectOutcome;
 use super::config::ProtectPhase;
 use super::decision::{GateCapability, ProviderProtectCapabilities, VisibilityLevel};
-use super::ProtectOutcome;
 
 #[allow(dead_code)]
 pub(crate) fn downgrade_for_capability(
@@ -51,6 +51,7 @@ pub(crate) fn capability_for_phase(
                 VisibilityLevel::Full => GateCapability::Guarantee,
             }
         }
-        ProtectPhase::Runtime | ProtectPhase::AfterTool => GateCapability::Influence,
+        ProtectPhase::AfterTool => capabilities.post_tool_gate,
+        ProtectPhase::Runtime => GateCapability::Influence,
     }
 }

@@ -54,6 +54,37 @@ impl SapiProvider {
         false
     }
 
+    /// Select the best default voice from a list, filtering by gender with fallback.
+    ///
+    /// Sort by quality descending, then name ascending. If no voices match the
+    /// requested gender, falls back to the best voice regardless of gender.
+    fn select_best_default_voice(voices: &[Voice], gender: Gender) -> Option<Voice> {
+        let mut candidates: Vec<&Voice> = voices.iter().collect();
+
+        // Filter by gender if specified (not Any)
+        if gender != Gender::Any {
+            let gender_matches: Vec<&Voice> = candidates
+                .iter()
+                .filter(|v| v.gender == gender)
+                .copied()
+                .collect();
+
+            if !gender_matches.is_empty() {
+                candidates = gender_matches;
+            }
+        }
+
+        // Sort by quality descending, then name ascending
+        candidates.sort_by(|a, b| {
+            a.quality
+                .rank()
+                .cmp(&b.quality.rank())
+                .then_with(|| a.name.cmp(&b.name))
+        });
+
+        candidates.first().cloned().cloned()
+    }
+
     /// Parse PowerShell voice list output into Voice structs.
     #[allow(dead_code)]
     fn parse_voice_line(line: &str) -> Option<Voice> {
@@ -156,11 +187,101 @@ impl TtsVoiceInventory for SapiProvider {
 
         Ok(Vec::new())
     }
+
+    async fn default_voice(&self, gender: Gender) -> Result<Voice, TtsError> {
+        let voices = self.list_voices().await?;
+
+        Self::select_best_default_voice(&voices, gender).ok_or_else(|| {
+            TtsError::VoiceEnumerationFailed {
+                provider: "SAPI".into(),
+                message: "No voices available".into(),
+            }
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ========================================================================
+    // select_best_default_voice tests
+    // ========================================================================
+
+    #[test]
+    fn test_select_best_default_voice_by_quality() {
+        let voices = vec![
+            Voice::new("Microsoft David Desktop")
+                .with_gender(Gender::Male)
+                .with_quality(VoiceQuality::Good)
+                .with_language(Language::English),
+            Voice::new("Microsoft Mark OneCore")
+                .with_gender(Gender::Male)
+                .with_quality(VoiceQuality::Excellent)
+                .with_language(Language::English),
+        ];
+
+        let best = SapiProvider::select_best_default_voice(&voices, Gender::Male).unwrap();
+        assert_eq!(best.name, "Microsoft Mark OneCore");
+    }
+
+    #[test]
+    fn test_select_best_default_voice_gender_fallback() {
+        let voices = vec![
+            Voice::new("Microsoft Zira Desktop")
+                .with_gender(Gender::Female)
+                .with_quality(VoiceQuality::Good)
+                .with_language(Language::English),
+        ];
+
+        let best = SapiProvider::select_best_default_voice(&voices, Gender::Male).unwrap();
+        assert_eq!(best.name, "Microsoft Zira Desktop");
+    }
+
+    #[test]
+    fn test_select_best_default_voice_alphabetical_tiebreak() {
+        let voices = vec![
+            Voice::new("Microsoft Zira OneCore")
+                .with_gender(Gender::Female)
+                .with_quality(VoiceQuality::Excellent)
+                .with_language(Language::English),
+            Voice::new("Microsoft Catherine OneCore")
+                .with_gender(Gender::Female)
+                .with_quality(VoiceQuality::Excellent)
+                .with_language(Language::English),
+        ];
+
+        let best = SapiProvider::select_best_default_voice(&voices, Gender::Female).unwrap();
+        assert_eq!(best.name, "Microsoft Catherine OneCore");
+    }
+
+    #[test]
+    fn test_select_best_default_voice_any_gender() {
+        let voices = vec![
+            Voice::new("Microsoft Zira Desktop")
+                .with_gender(Gender::Female)
+                .with_quality(VoiceQuality::Good)
+                .with_language(Language::English),
+            Voice::new("Microsoft David Desktop")
+                .with_gender(Gender::Male)
+                .with_quality(VoiceQuality::Good)
+                .with_language(Language::English),
+        ];
+
+        let best = SapiProvider::select_best_default_voice(&voices, Gender::Any).unwrap();
+        assert_eq!(best.name, "Microsoft David Desktop");
+    }
+
+    #[test]
+    fn test_select_best_default_voice_empty_list() {
+        let voices: Vec<Voice> = vec![];
+        let result = SapiProvider::select_best_default_voice(&voices, Gender::Any);
+        assert!(result.is_none());
+    }
+
+    // ========================================================================
+    // Basic provider tests
+    // ========================================================================
 
     #[test]
     fn test_sapi_provider_new() {

@@ -6,7 +6,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::HeadlessAudio;
-use crate::programs::find_program::find_programs_with_source_parallel;
+use crate::programs::find_program::{
+    ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
+};
 use crate::programs::installer::{
     InstallOptions, execute_install, execute_versioned_install, method_available,
     select_best_method,
@@ -83,6 +85,57 @@ impl InstalledHeadlessAudio {
         ];
 
         let results = find_programs_with_source_parallel(&programs);
+
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
+
+        Self {
+            mpv: get("mpv"),
+            ffplay: get("ffplay"),
+            vlc: get_any(&["vlc", "cvlc"]),
+            mplayer: get("mplayer"),
+            gstreamer_gst_play: get_any(&["gst-play-1.0", "gst-play"]),
+            sox: get_any(&["play", "sox"]),
+            mpg123: get("mpg123"),
+            ogg123: get("ogg123"),
+            alsa_aplay: get("aplay"),
+            macos_afplay: get("afplay"),
+            pulseaudio_paplay: get("paplay"),
+            pulseaudio_pacat: get("pacat"),
+            pipewire: get_any(&["pw-cat", "pw-play"]),
+        }
+    }
+
+    /// Detect which headless audio players are installed using a pre-built executable index.
+    pub fn new_with_index(index: &ExecutableIndex) -> Self {
+        let programs = [
+            "mpv",
+            "ffplay",
+            "vlc",
+            "cvlc",
+            "mplayer",
+            "gst-play-1.0",
+            "gst-play",
+            "play",
+            "sox",
+            "mpg123",
+            "ogg123",
+            "aplay",
+            "afplay",
+            "paplay",
+            "pacat",
+            "pw-cat",
+            "pw-play",
+        ];
+
+        let results = find_programs_with_source_from_index(index, &programs);
 
         let get = |name: &str| results.get(name).and_then(|r| r.clone());
         let get_any = |names: &[&str]| {

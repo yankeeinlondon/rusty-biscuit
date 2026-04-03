@@ -293,6 +293,59 @@ fn is_probably_text(bytes: &[u8]) -> bool {
     std::str::from_utf8(bytes).is_ok()
 }
 
+/// Project a package-level inventory from a shared repo inventory.
+///
+/// Filters classifications by path prefix to extract the subset
+/// belonging to a specific package, avoiding a separate filesystem scan.
+///
+/// ## Returns
+///
+/// A new `FileInventory` containing only files under `package_path`,
+/// excluding any paths under `exclude_roots`.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use sniff::filesystem::file_types::{scan_file_inventory, project_package_inventory};
+/// use std::path::Path;
+///
+/// let repo_root = Path::new("/repo");
+/// let repo_inventory = scan_file_inventory(repo_root).unwrap();
+///
+/// // Extract package inventory without rescanning
+/// let package_path = repo_root.join("packages/foo");
+/// let package_inventory = project_package_inventory(
+///     &repo_inventory,
+///     &package_path,
+///     &[]
+/// );
+/// ```
+pub fn project_package_inventory(
+    repo_inventory: &FileInventory,
+    package_path: &Path,
+    exclude_roots: &[PathBuf],
+) -> FileInventory {
+    let classifications: Vec<_> = repo_inventory
+        .classifications
+        .iter()
+        .filter(|c| {
+            let full_path = repo_inventory.scope.root.join(&c.path);
+            full_path.starts_with(package_path)
+                && !exclude_roots.iter().any(|ex| full_path.starts_with(ex))
+        })
+        .cloned()
+        .collect();
+
+    FileInventory {
+        scope: FileScanScope {
+            root: package_path.to_path_buf(),
+            exclude_roots: exclude_roots.to_vec(),
+        },
+        total_files_scanned: classifications.len(),
+        classifications,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,5 +411,78 @@ mod tests {
         let file = &inventory.classifications[0];
         assert_eq!(file.association, FileAssociation::Image);
         assert_eq!(file.source, ClassificationSource::BinarySignature);
+    }
+
+    #[test]
+    fn project_package_inventory_filters_by_path() {
+        let dir = TempDir::new().unwrap();
+
+        // Create repo structure
+        fs::create_dir_all(dir.path().join("packages/foo")).unwrap();
+        fs::create_dir_all(dir.path().join("packages/bar")).unwrap();
+
+        // Files in package foo
+        fs::write(dir.path().join("packages/foo/main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("packages/foo/lib.rs"), "pub fn foo() {}").unwrap();
+
+        // Files in package bar
+        fs::write(
+            dir.path().join("packages/bar/index.js"),
+            "console.log('bar')",
+        )
+        .unwrap();
+
+        // Root level file
+        fs::write(dir.path().join("README.md"), "# Repo").unwrap();
+
+        // Scan entire repo
+        let repo_inventory = scan_file_inventory(dir.path()).unwrap();
+        assert_eq!(repo_inventory.total_files_scanned, 4);
+
+        // Project to package foo
+        let foo_path = dir.path().join("packages/foo");
+        let foo_inventory = project_package_inventory(&repo_inventory, &foo_path, &[]);
+
+        assert_eq!(foo_inventory.total_files_scanned, 2);
+        assert!(
+            foo_inventory
+                .classifications
+                .iter()
+                .all(|c| c.language == Some(ProgrammingLanguage::Rust))
+        );
+
+        // Project to package bar
+        let bar_path = dir.path().join("packages/bar");
+        let bar_inventory = project_package_inventory(&repo_inventory, &bar_path, &[]);
+
+        assert_eq!(bar_inventory.total_files_scanned, 1);
+        assert_eq!(
+            bar_inventory.classifications[0].language,
+            Some(ProgrammingLanguage::JavaScript)
+        );
+    }
+
+    #[test]
+    fn project_package_inventory_respects_exclusions() {
+        let dir = TempDir::new().unwrap();
+
+        fs::create_dir_all(dir.path().join("pkg/src")).unwrap();
+        fs::create_dir_all(dir.path().join("pkg/target")).unwrap();
+
+        fs::write(dir.path().join("pkg/src/lib.rs"), "pub fn lib() {}").unwrap();
+        fs::write(dir.path().join("pkg/target/debug.log"), "logs").unwrap();
+
+        let repo_inventory = scan_file_inventory(dir.path()).unwrap();
+
+        let pkg_path = dir.path().join("pkg");
+        let exclude_roots = vec![pkg_path.join("target")];
+        let pkg_inventory = project_package_inventory(&repo_inventory, &pkg_path, &exclude_roots);
+
+        // Should only have the src file, not the target file
+        assert_eq!(pkg_inventory.total_files_scanned, 1);
+        assert_eq!(
+            pkg_inventory.classifications[0].language,
+            Some(ProgrammingLanguage::Rust)
+        );
     }
 }

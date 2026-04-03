@@ -64,7 +64,7 @@ pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
     ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePerfMetric,
-    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeWarning,
+    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeWarning, SourceRange,
 };
 
 // Internal re-exports for crate modules that still use TransclusionOptions
@@ -89,17 +89,17 @@ use shell_expansion::{apply_replacements_in_reverse, execute_directive};
 /// otherwise.
 fn abbreviate_path(path: &Path) -> String {
     // Try git repo root first (walk up looking for .git)
-    if let Some(root) = find_git_root_from(path) {
-        if let Ok(rel) = path.strip_prefix(&root) {
-            return rel.display().to_string();
-        }
+    if let Some(root) = find_git_root_from(path)
+        && let Ok(rel) = path.strip_prefix(&root)
+    {
+        return rel.display().to_string();
     }
 
     // Fall back to ~/… for paths under HOME
-    if let Some(home) = dirs::home_dir() {
-        if let Ok(rel) = path.strip_prefix(&home) {
-            return format!("~/{}", rel.display());
-        }
+    if let Some(home) = dirs::home_dir()
+        && let Ok(rel) = path.strip_prefix(&home)
+    {
+        return format!("~/{}", rel.display());
     }
 
     path.display().to_string()
@@ -175,6 +175,8 @@ struct ResolvedTransclusion {
     target: ApplyTarget,
     content: Option<String>,
     report: ComposeReport,
+    /// Source file for file-based transclusions (used for source map).
+    source_file: Option<PathBuf>,
 }
 
 // Re-export HeadingLevel for tests
@@ -723,7 +725,12 @@ impl Markdown {
 
             match resolved.target {
                 ApplyTarget::Replace(span) => {
-                    replacements.push((resolved.order, span, resolved.content.unwrap_or_default()));
+                    replacements.push((
+                        resolved.order,
+                        span,
+                        resolved.content.unwrap_or_default(),
+                        resolved.source_file,
+                    ));
                 }
                 ApplyTarget::Section(SectionSlot::Prologue(index)) => {
                     prologue_sections[index] = resolved.content;
@@ -743,10 +750,37 @@ impl Markdown {
                     .then_with(|| right.0.cmp(&left.0))
             });
             let mut next = self.content.clone();
-            for (_, span, replacement) in replacements {
-                next.replace_range(span, &replacement);
+            for (_, span, replacement, _) in &replacements {
+                next.replace_range(span.clone(), replacement);
             }
             self.content = next;
+
+            // Build source map: compute final byte positions for each file transclusion.
+            // Sort forward by original span start and track cumulative offset.
+            {
+                let mut forward: Vec<_> = replacements
+                    .iter()
+                    .map(|(_, span, content, source)| (span.clone(), content.len(), source.clone()))
+                    .collect();
+                forward.sort_by_key(|(span, _, _)| span.start);
+
+                let mut offset: isize = 0;
+                for (span, content_len, source_file) in forward {
+                    let final_start = (span.start as isize + offset) as usize;
+                    let final_end = final_start + content_len;
+
+                    if let Some(file) = source_file {
+                        report.source_map.push(SourceRange {
+                            byte_start: final_start,
+                            byte_end: final_end,
+                            source_file: file,
+                            source_start_line: 1,
+                        });
+                    }
+
+                    offset += content_len as isize - (span.end - span.start) as isize;
+                }
+            }
         }
 
         if prologue_count > 0 || epilogue_count > 0 {
@@ -801,7 +835,10 @@ impl Markdown {
     /// Runs the interpolation stage.
     ///
     /// Finds `{{ expression }}` patterns in content and evaluates them
-    /// against the effective state. Expressions in code blocks are skipped.
+    /// against the effective state. By default, expressions inside code
+    /// spans and fenced code blocks are skipped. When
+    /// `interpolate_code_spans` is enabled (via options or frontmatter),
+    /// all expressions are processed regardless of surrounding code markup.
     fn run_interpolation_stage(
         &mut self,
         state: &EffectiveState,
@@ -809,11 +846,17 @@ impl Markdown {
     ) -> MarkdownResult<usize> {
         use interpolation::{Evaluator, ScanMode, interpolate_text};
 
+        let scan_mode = if self.resolve_interpolate_code_spans(options) {
+            ScanMode::Plain
+        } else {
+            ScanMode::MarkdownAware
+        };
+
         let evaluator = Evaluator::new(state);
         let result = interpolate_text(
             &self.content,
             &evaluator,
-            ScanMode::MarkdownAware,
+            scan_mode,
             options.fail_fast,
             "interpolation",
         )?;
@@ -1193,6 +1236,7 @@ impl Markdown {
                 target: ApplyTarget::Replace(span),
                 content: Some(replacement),
                 report,
+                source_file: None,
             }),
             PreparedTransclusion::FixedSection {
                 order,
@@ -1204,6 +1248,7 @@ impl Markdown {
                 target: ApplyTarget::Section(slot),
                 content,
                 report,
+                source_file: None,
             }),
             PreparedTransclusion::Markdown {
                 order,
@@ -1236,6 +1281,7 @@ impl Markdown {
                     target,
                     content: Some(content),
                     report: child_report,
+                    source_file: Some(path),
                 })
             }
             PreparedTransclusion::Code {
@@ -1267,6 +1313,7 @@ impl Markdown {
                     target: ApplyTarget::Replace(span),
                     content: Some(content),
                     report: code_report,
+                    source_file: None,
                 })
             }
             PreparedTransclusion::Toc {
@@ -1347,6 +1394,7 @@ impl Markdown {
                     target: ApplyTarget::Replace(span),
                     content: Some(replacement),
                     report: toc_report,
+                    source_file: None,
                 })
             }
         }
@@ -1598,6 +1646,23 @@ impl Markdown {
             .get("IGNORE_INVALID")
             .and_then(|raw| parse_bool(raw))
             .unwrap_or(false)
+    }
+
+    /// Resolves whether interpolation should process code spans.
+    ///
+    /// Checks (in priority order):
+    /// 1. `ComposeOptions::interpolate_code_spans`
+    /// 2. Frontmatter `interpolate_code_spans` key
+    fn resolve_interpolate_code_spans(&self, options: &ComposeOptions) -> bool {
+        if options.interpolate_code_spans {
+            return true;
+        }
+
+        if let Ok(Some(value)) = self.fm_get::<bool>("interpolate_code_spans") {
+            return value;
+        }
+
+        false
     }
 }
 
@@ -2118,6 +2183,36 @@ mod tests {
         // Only the first expression is expanded, code span preserved
         assert_eq!(composed.content(), "Hello Alice! Code: `{{ name }}`");
         assert_eq!(report.interpolations_applied, 1);
+    }
+
+    #[test]
+    fn test_interpolation_code_spans_via_option() {
+        let content = "---\nname: Alice\n---\nHello {{ name }}! Code: `{{ name }}`";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new()
+            .only(&[ComposeOperation::Interpolation])
+            .with_interpolate_code_spans(true);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        // Both expressions expanded when interpolate_code_spans is enabled
+        assert_eq!(composed.content(), "Hello Alice! Code: `Alice`");
+        assert_eq!(report.interpolations_applied, 2);
+    }
+
+    #[test]
+    fn test_interpolation_code_spans_via_frontmatter() {
+        let content = "---\nname: Alice\ninterpolate_code_spans: true\n---\nHello {{ name }}! Code: `{{ name }}`";
+        let md: Markdown = content.into();
+
+        let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
+
+        let (composed, report) = md.compose_with(options).unwrap();
+
+        // Both expressions expanded when frontmatter flag is set
+        assert_eq!(composed.content(), "Hello Alice! Code: `Alice`");
+        assert_eq!(report.interpolations_applied, 2);
     }
 
     #[test]

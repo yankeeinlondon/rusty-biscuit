@@ -227,14 +227,14 @@ pub(super) fn parse_frontmatter(content: &str) -> MarkdownResult<(Frontmatter, S
 fn parse_yaml_with_fallbacks(yaml: &str) -> MarkdownResult<FrontmatterMap> {
     // Strategy 1: direct parse
     match serde_yaml_ng::from_str(yaml) {
-        Ok(map) => return Ok(map),
+        Ok(map) => Ok(map),
         Err(original_err) => {
             // Strategy 2: tab normalization
             let normalized = normalize_frontmatter_indentation(yaml);
-            if normalized != *yaml {
-                if let Ok(map) = serde_yaml_ng::from_str(&normalized) {
-                    return Ok(map);
-                }
+            if normalized != *yaml
+                && let Ok(map) = serde_yaml_ng::from_str(&normalized)
+            {
+                return Ok(map);
             }
 
             // Strategy 3: protect interpolation expressions
@@ -555,8 +555,7 @@ This is content."#;
     fn test_parse_frontmatter_with_nested_quotes_in_interpolation() {
         // Double quotes inside {{ }} expressions break standard YAML parsing.
         // The expression-protection fallback should handle this.
-        let content =
-            "---\ntopic: \"\"\nplan_file: \"prefix/{{topic}}/{{plan || \"plan.md\"}}\"\n---\n# Body\n";
+        let content = "---\ntopic: \"\"\nplan_file: \"prefix/{{topic}}/{{plan || \"plan.md\"}}\"\n---\n# Body\n";
 
         let (fm, remaining) = parse_frontmatter(content).unwrap();
         let topic: Option<String> = fm.get("topic").unwrap();
@@ -603,9 +602,6 @@ This is content."#;
 
         let value = json!("prefix/__DM_EXPR_0__/__DM_EXPR_1__");
         let restored = restore_expressions_in_value(value, &replacements);
-        assert_eq!(
-            restored,
-            json!("prefix/{{foo}}/{{bar || \"baz\"}}")
-        );
+        assert_eq!(restored, json!("prefix/{{foo}}/{{bar || \"baz\"}}"));
     }
 }

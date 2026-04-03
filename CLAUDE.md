@@ -95,7 +95,7 @@ This repository has the following local Agent skills defined `.claude/skills/`:
 - `so-you-say` - TTS CLI (`speak` binary) wrapping biscuit-speaks (located at `biscuit-speaks/cli`)
 - `clap` - Command-line argument parsing
 - `color-eyre` - Error reporting
-- `ratatui` - Terminal UI framework
+- `tui` - Terminal UI development: Ratatui (Rust), Bubble Tea (Go), cross-framework best practices
 - `resvg` - SVG rendering
 - `rig` - LLM agent framework
 - `syntect` - Syntax highlighting

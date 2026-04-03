@@ -169,6 +169,7 @@ pub enum VisibilityLevel {
 #[serde(deny_unknown_fields)]
 pub struct ProviderProtectCapabilities {
     pub pre_tool_gate: GateCapability,
+    pub post_tool_gate: GateCapability,
     pub user_prompt_gate: GateCapability,
     pub mcp_response_gate: GateCapability,
     pub completion_gate: GateCapability,
@@ -193,6 +194,7 @@ impl ProviderProtectProfiles {
             Provider::Claude,
             ProviderProtectCapabilities {
                 pre_tool_gate: GateCapability::Guarantee,
+                post_tool_gate: GateCapability::Guarantee,
                 user_prompt_gate: GateCapability::Guarantee,
                 mcp_response_gate: GateCapability::Guarantee,
                 completion_gate: GateCapability::Guarantee,
@@ -207,6 +209,7 @@ impl ProviderProtectProfiles {
             Provider::Codex,
             ProviderProtectCapabilities {
                 pre_tool_gate: GateCapability::None,
+                post_tool_gate: GateCapability::None,
                 user_prompt_gate: GateCapability::None,
                 mcp_response_gate: GateCapability::None,
                 completion_gate: GateCapability::None,
@@ -221,6 +224,7 @@ impl ProviderProtectProfiles {
             Provider::Gemini,
             ProviderProtectCapabilities {
                 pre_tool_gate: GateCapability::Guarantee,
+                post_tool_gate: GateCapability::Guarantee,
                 user_prompt_gate: GateCapability::Guarantee,
                 mcp_response_gate: GateCapability::Guarantee,
                 completion_gate: GateCapability::Guarantee,
@@ -235,6 +239,7 @@ impl ProviderProtectProfiles {
             Provider::Goose,
             ProviderProtectCapabilities {
                 pre_tool_gate: GateCapability::None,
+                post_tool_gate: GateCapability::None,
                 user_prompt_gate: GateCapability::None,
                 mcp_response_gate: GateCapability::None,
                 completion_gate: GateCapability::None,
@@ -249,6 +254,7 @@ impl ProviderProtectProfiles {
             Provider::KimiCode,
             ProviderProtectCapabilities {
                 pre_tool_gate: GateCapability::Guarantee,
+                post_tool_gate: GateCapability::None,
                 user_prompt_gate: GateCapability::Influence,
                 mcp_response_gate: GateCapability::None,
                 completion_gate: GateCapability::None,
@@ -263,6 +269,7 @@ impl ProviderProtectProfiles {
             Provider::OpenCode,
             ProviderProtectCapabilities {
                 pre_tool_gate: GateCapability::Guarantee,
+                post_tool_gate: GateCapability::None,
                 user_prompt_gate: GateCapability::Influence,
                 mcp_response_gate: GateCapability::Influence,
                 completion_gate: GateCapability::Influence,
@@ -277,6 +284,7 @@ impl ProviderProtectProfiles {
             Provider::QwenCode,
             ProviderProtectCapabilities {
                 pre_tool_gate: GateCapability::Influence,
+                post_tool_gate: GateCapability::None,
                 user_prompt_gate: GateCapability::None,
                 mcp_response_gate: GateCapability::None,
                 completion_gate: GateCapability::None,
@@ -291,6 +299,7 @@ impl ProviderProtectProfiles {
             Provider::RooCode,
             ProviderProtectCapabilities {
                 pre_tool_gate: GateCapability::Guarantee,
+                post_tool_gate: GateCapability::None,
                 user_prompt_gate: GateCapability::None,
                 mcp_response_gate: GateCapability::None,
                 completion_gate: GateCapability::Guarantee,
