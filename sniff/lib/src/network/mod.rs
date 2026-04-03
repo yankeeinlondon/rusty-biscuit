@@ -7,6 +7,8 @@ use std::net::IpAddr;
 use std::process::Command;
 #[cfg(feature = "network")]
 use std::sync::Mutex;
+use tracing::{debug, info, instrument, warn};
+use tracing::instrument;
 
 mod interface;
 pub use interface::{InterfaceFlags, IpAddresses, Ipv4Address, Ipv6Address, NetworkInterface};
@@ -129,6 +131,10 @@ pub fn detect_network() -> Result<NetworkInfo> {
 /// ## Errors
 ///
 /// Returns an error if the `getifaddrs` call fails for reasons other than permission denied.
+#[instrument(skip(request), fields(
+    wan_ip = request.include_wan_ip,
+    force_refresh = request.force_refresh,
+))]
 pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkInfo> {
     // Run WAN IP lookup concurrently with local interface enumeration
     // so neither blocks the other.
