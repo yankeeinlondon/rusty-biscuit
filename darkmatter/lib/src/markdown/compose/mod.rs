@@ -77,6 +77,7 @@ use super::types::{MarkdownError, MarkdownResult};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use tracing::{debug, info, instrument, trace, warn};
 
 use cache::operation::CacheableOperation;
 use shell_expansion::{apply_replacements_in_reverse, execute_directive};
@@ -219,6 +220,7 @@ impl Markdown {
     ///
     /// let (composed, report) = md.compose_with(options).unwrap();
     /// ```
+    #[instrument(skip_all, fields(source = ?options.source))]
     pub fn compose_with(
         &self,
         options: ComposeOptions,
@@ -272,6 +274,7 @@ impl Markdown {
     /// 2. **Transclusion** (prepared serially, resolved concurrently): BlockTransclusion,
     ///    FrontmatterTransclusion, CodeTransclusion, TocLinking
     /// 3. **Inline Post** (serial): Cleanup, Normalization
+    #[instrument(skip_all, fields(source = ?options.source))]
     pub(crate) fn run_compose_pipeline_internal(
         &mut self,
         options: ComposeOptions,
@@ -401,10 +404,12 @@ impl Markdown {
 
             let mut transclusion_ran = false;
             for operation in ComposeOperation::default_order() {
+                trace!(operation = ?operation, enabled = options.is_enabled(*operation), "compose: checking operation");
                 if !options.is_enabled(*operation) {
                     continue;
                 }
 
+                info!(operation = ?operation, phase = ?operation.phase(), "compose: running operation");
                 match operation.phase() {
                     ComposePhase::InlinePre => {
                         let op_start = perf.is_enabled().then(std::time::Instant::now);
@@ -580,6 +585,7 @@ impl Markdown {
             return Ok(());
         }
 
+        info!(operations = ?operations, "compose: starting transclusion phase");
         let parse_start = perf_collector.is_enabled().then(std::time::Instant::now);
 
         let parsed_directives = if operations.iter().any(|op| {
@@ -686,6 +692,7 @@ impl Markdown {
             .map(|item| self.resolve_prepared_transclusion(item, state, options, &runtime_mutex))
             .collect::<Vec<_>>();
 
+        debug!(resolved = results.len(), "compose: transclusion resolution complete");
         if let Some(start) = resolve_start {
             perf_collector.record(perf::PerfMetricKind::TransclusionResolve, start.elapsed());
         }
@@ -829,6 +836,7 @@ impl Markdown {
         if count > 0 {
             self.content = new_content;
         }
+        debug!(count, "compose: text replacements applied");
         count
     }
 
@@ -864,6 +872,7 @@ impl Markdown {
         if result.replacements > 0 {
             self.content = result.output;
         }
+        debug!(count = result.replacements, "compose: interpolations applied");
         Ok(result.replacements)
     }
 
@@ -874,6 +883,7 @@ impl Markdown {
     fn run_normalization_stage(
         &mut self,
     ) -> Result<normalize::NormalizationReport, NormalizationError> {
+        debug!("compose: running normalization");
         let (new_content, report) = normalize::normalize(&self.content, None)?;
         self.content = new_content;
         Ok(report)
@@ -887,6 +897,7 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         let directives = shell_expansion::parse_directives(&self.content)?;
+        debug!(directive_count = directives.len(), "compose: shell expansion directives found");
         if directives.is_empty() {
             return Ok(());
         }
@@ -915,6 +926,7 @@ impl Markdown {
         state: &EffectiveState,
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
+        debug!("compose: running page blocks");
         let regions = page_blocks::parser::parse_page_blocks(&self.content)?;
         if regions.is_empty() {
             return Ok(());

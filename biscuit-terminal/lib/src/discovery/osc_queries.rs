@@ -242,6 +242,16 @@ pub fn cursor_color() -> Option<RgbValue> {
     query_osc_color(12)
 }
 
+/// Human-readable name for an OSC color query code.
+fn osc_color_name(code: u8) -> &'static str {
+    match code {
+        10 => "foreground color",
+        11 => "background color",
+        12 => "cursor color",
+        _ => "unknown color",
+    }
+}
+
 /// Query terminal color using a hybrid approach.
 ///
 /// This function tries multiple detection methods in order:
@@ -305,9 +315,11 @@ fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Option<RgbValue>
                 Err(e) => {
                     tracing::debug!(
                         code,
+                        query = osc_color_name(code),
                         error = %e,
-                        "OSC{} actual query failed, falling back to heuristics",
-                        code
+                        "OSC{} ({}) query failed, falling back to heuristics",
+                        code,
+                        osc_color_name(code)
                     );
                     // Fall through to heuristics
                 }
@@ -350,8 +362,10 @@ fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Option<RgbValue>
 
     tracing::debug!(
         code,
-        "OSC{} color detection failed, no source available",
-        code
+        query = osc_color_name(code),
+        "OSC{} ({}) detection failed, no source available",
+        code,
+        osc_color_name(code)
     );
     None
 }

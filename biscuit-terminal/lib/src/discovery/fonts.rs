@@ -583,13 +583,13 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
 
     // Must be a TTY to query
     if !is_tty() {
-        tracing::debug!("window_size_pixels(): not a TTY");
+        tracing::trace!("window_size_pixels(): not a TTY");
         return None;
     }
 
     // Skip terminal queries in CI environments (no real terminal available)
     if crate::discovery::os_detection::is_ci() {
-        tracing::debug!("window_size_pixels(): skipping in CI environment");
+        tracing::trace!("window_size_pixels(): skipping in CI environment");
         return None;
     }
 
@@ -601,7 +601,7 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
     {
         Ok(f) => f,
         Err(e) => {
-            tracing::debug!("window_size_pixels(): failed to open /dev/tty: {}", e);
+            tracing::trace!("window_size_pixels(): failed to open /dev/tty: {}", e);
             return None;
         }
     };
@@ -611,7 +611,7 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
     // Save current terminal attributes
     let mut orig_termios: libc::termios = unsafe { std::mem::zeroed() };
     if unsafe { libc::tcgetattr(fd, &mut orig_termios) } != 0 {
-        tracing::debug!("window_size_pixels(): tcgetattr failed");
+        tracing::trace!("window_size_pixels(): tcgetattr failed");
         return None;
     }
 
@@ -622,7 +622,7 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
     raw_termios.c_cc[libc::VTIME] = 1; // 100ms timeout
 
     if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw_termios) } != 0 {
-        tracing::debug!("window_size_pixels(): tcsetattr failed");
+        tracing::trace!("window_size_pixels(): tcsetattr failed");
         return None;
     }
 
@@ -634,7 +634,7 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
     // Write CSI 14 t query
     let query = b"\x1b[14t";
     if tty.write_all(query).is_err() {
-        tracing::debug!("window_size_pixels(): failed to write query");
+        tracing::trace!("window_size_pixels(): failed to write query");
         restore(fd, &orig_termios);
         return None;
     }
@@ -688,7 +688,7 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
 /// Get the terminal window size in pixels (non-Unix stub).
 #[cfg(not(unix))]
 pub fn window_size_pixels() -> Option<WindowSizePixels> {
-    tracing::debug!("window_size_pixels(): not supported on this platform");
+    tracing::trace!("window_size_pixels(): not supported on this platform");
     None
 }
 
@@ -813,7 +813,7 @@ pub fn font_name() -> Option<String> {
     let config_path = get_terminal_config_path(&app)?;
 
     if !config_path.exists() {
-        tracing::debug!("font_name(): config file does not exist: {:?}", config_path);
+        tracing::trace!("font_name(): config file does not exist: {:?}", config_path);
         return None;
     }
 
@@ -891,7 +891,7 @@ pub fn font_size() -> Option<u32> {
     let config_path = get_terminal_config_path(&app)?;
 
     if !config_path.exists() {
-        tracing::debug!("font_size(): config file does not exist: {:?}", config_path);
+        tracing::trace!("font_size(): config file does not exist: {:?}", config_path);
         return None;
     }
 
@@ -1432,7 +1432,7 @@ fn fallback_font_name_scan() -> Option<String> {
             && let Ok(content) = fs::read_to_string(&path)
             && let Some(font) = parser(&content)
         {
-            tracing::debug!(
+            tracing::trace!(
                 "fallback_font_name_scan(): found font '{}' in {:?}",
                 font,
                 path
@@ -1445,7 +1445,7 @@ fn fallback_font_name_scan() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         if let Some(font) = query_iterm2_font_name() {
-            tracing::debug!(
+            tracing::trace!(
                 "fallback_font_name_scan(): found font '{}' from iTerm2 preferences",
                 font
             );
@@ -1453,7 +1453,7 @@ fn fallback_font_name_scan() -> Option<String> {
         }
     }
 
-    tracing::debug!("fallback_font_name_scan(): no font found in any config files");
+    tracing::trace!("fallback_font_name_scan(): no font found in any config files");
     None
 }
 
@@ -1490,7 +1490,7 @@ fn fallback_font_size_scan() -> Option<u32> {
             && let Ok(content) = fs::read_to_string(&path)
             && let Some(size) = parser(&content)
         {
-            tracing::debug!(
+            tracing::trace!(
                 "fallback_font_size_scan(): found size {} in {:?}",
                 size,
                 path
@@ -1503,7 +1503,7 @@ fn fallback_font_size_scan() -> Option<u32> {
     #[cfg(target_os = "macos")]
     {
         if let Some(size) = query_iterm2_font_size() {
-            tracing::debug!(
+            tracing::trace!(
                 "fallback_font_size_scan(): found size {} from iTerm2 preferences",
                 size
             );
@@ -1511,7 +1511,7 @@ fn fallback_font_size_scan() -> Option<u32> {
         }
     }
 
-    tracing::debug!("fallback_font_size_scan(): no font size found in any config files");
+    tracing::trace!("fallback_font_size_scan(): no font size found in any config files");
     None
 }
 
