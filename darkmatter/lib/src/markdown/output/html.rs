@@ -684,7 +684,6 @@ fn main() {}
 ```"#;
         let md: Markdown = content.into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
-        eprintln!("Code block HTML: {}", html);
         assert!(html.contains("code-block"));
         // Content might be split across syntax highlighting spans
         assert!(html.contains("fn") && html.contains("main"));
@@ -846,7 +845,6 @@ fn main() {
     fn test_as_html_xss_prevention() {
         let md: Markdown = "<script>alert('xss')</script>".into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
-        eprintln!("HTML output: {}", html);
         assert!(!html.contains("<script>"));
         // html_escape uses numeric entities, not named entities
         assert!(html.contains("&") && html.contains("script"));
