@@ -4,6 +4,7 @@
 //! based on its content (magic bytes) and file extension.
 
 use std::path::Path;
+use tracing::{debug, trace};
 
 /// Detected file type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,17 +65,21 @@ impl FileType {
 /// Returns an IO error if the file cannot be read.
 pub fn detect_file_type(path: impl AsRef<Path>) -> std::io::Result<FileType> {
     let path = path.as_ref();
+    trace!(?path, "detecting file type");
 
     // Read first few bytes for magic detection
     let bytes = std::fs::read(path)?;
     let from_bytes = detect_file_type_from_bytes(&bytes);
 
     if from_bytes != FileType::Unknown {
+        debug!(?from_bytes, "detected via magic bytes");
         return Ok(from_bytes);
     }
 
     // Fall back to extension-based detection
-    Ok(detect_from_extension(path))
+    let from_ext = detect_from_extension(path);
+    debug!(?from_ext, "detected via extension");
+    Ok(from_ext)
 }
 
 /// Detect file type from raw bytes using magic bytes.

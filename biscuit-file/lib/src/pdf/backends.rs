@@ -1,5 +1,7 @@
 //! PDF backend implementations.
 
+use tracing::{debug, warn};
+
 use super::types::{PdfConfig, PdfError};
 #[cfg(feature = "lopdf")]
 use super::types::{PdfToc, PdfTocItem};
@@ -11,8 +13,11 @@ pub fn extract_text(bytes: &[u8], config: &PdfConfig) -> Result<String, PdfError
         pdf_extract::extract_text_from_mem(bytes).map_err(|e| PdfError::Parse(e.to_string()))?;
 
     let text = if config.normalize_text {
-        normalize_text(&text)
+        let normalized = normalize_text(&text);
+        debug!(input_len = text.len(), output_len = normalized.len(), "PDF text extracted (normalized)");
+        normalized
     } else {
+        debug!(output_len = text.len(), "PDF text extracted");
         text
     };
 
@@ -53,7 +58,16 @@ pub fn extract_toc(bytes: &[u8]) -> Result<PdfToc, PdfError> {
     let doc = Document::load_mem(bytes).map_err(|e| PdfError::Parse(e.to_string()))?;
 
     // Try to extract bookmarks/outlines
-    let items = extract_bookmarks(&doc).unwrap_or_default();
+    let items = match extract_bookmarks(&doc) {
+        Some(items) => {
+            debug!(item_count = items.len(), "extracted PDF bookmarks");
+            items
+        }
+        None => {
+            warn!("could not extract PDF bookmarks — TOC will be empty");
+            Vec::new()
+        }
+    };
 
     Ok(PdfToc { items })
 }
