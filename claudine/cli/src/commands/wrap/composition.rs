@@ -675,7 +675,6 @@ pub(crate) fn execute_composition_request(
             &env_plan.env,
             child_cwd,
             stdin_seed.as_deref(),
-            request.session_interactive,
             use_structured,
             structured_codex_output.as_ref(),
             stdout_noise,
@@ -1035,7 +1034,6 @@ fn run_legacy_inline(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
-                relay_tty_after_seed: true,
             },
         )?;
         let final_response = if provider == Provider::Codex {
@@ -1063,7 +1061,6 @@ fn run_legacy_inline(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
-                relay_tty_after_seed: false,
             },
         )?;
         let response = profile.parse_captured_output(&capture.data.stdout);
@@ -1190,7 +1187,6 @@ fn execute_direct_without_harness(
     child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
     child_cwd: &std::path::Path,
     stdin_seed: Option<&str>,
-    session_interactive: bool,
     use_structured: bool,
     structured_codex_output: Option<&StructuredCodexOutput>,
     stdout_noise: &[&str],
@@ -1271,7 +1267,6 @@ fn execute_direct_without_harness(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
-                relay_tty_after_seed: session_interactive,
             },
         )?;
 

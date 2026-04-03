@@ -1072,16 +1072,36 @@ impl WrapperProfile for OpencodeWrapper {
 
     fn apply_prompt_body(
         &self,
-        _args: &mut Vec<String>,
+        args: &mut Vec<String>,
         stdin_seed: &mut Option<String>,
         prompt: &str,
-        _non_interactive: bool,
+        non_interactive: bool,
     ) -> Result<()> {
-        // Always deliver via stdin.  OpenCode's first positional arg is a
-        // workspace directory, not a prompt, so positional delivery causes
-        // ENAMETOOLONG (prompt > 255 bytes) or a chdir error.  Stdin works
-        // for both `opencode run` (non-interactive) and the TUI.
-        *stdin_seed = Some(prompt.to_string());
+        if non_interactive {
+            // Non-interactive (`opencode run`): deliver via stdin to avoid
+            // exceeding OS argument-list limits on large composed prompts.
+            *stdin_seed = Some(prompt.to_string());
+        } else {
+            // Interactive TUI: use --prompt flag which auto-submits the
+            // message (OpenCode PR #4510).  This keeps stdin inherited so
+            // the TUI's raw-mode input and mouse tracking work natively.
+            //
+            // The OS enforces ARG_MAX (~1 MB on macOS) for the combined
+            // size of argv + envp passed to execve.  Guard against the
+            // rare case of an extremely large composed prompt.
+            const ARG_MAX_HEADROOM: usize = 768 * 1024; // conservative
+            if prompt.len() > ARG_MAX_HEADROOM {
+                bail!(
+                    "composed prompt is too large for interactive mode ({} KB); \
+                     the OS limits command-line arguments to ~1 MB.\n\
+                     Try running without -i to use non-interactive mode, \
+                     which delivers the prompt via stdin instead.",
+                    prompt.len() / 1024
+                );
+            }
+            args.push("--prompt".to_string());
+            args.push(prompt.to_string());
+        }
         Ok(())
     }
 
