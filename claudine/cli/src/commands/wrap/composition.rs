@@ -431,7 +431,7 @@ pub(crate) fn execute_composition_request(
 
     // --- Lifecycle notification setup ---
     let lifecycle = &request.prepared.lifecycle;
-    let mut _lifecycle_state = LifecycleRuntimeState::default();
+    let mut lifecycle_state = LifecycleRuntimeState::default();
 
     let (lifecycle_settings, lifecycle_messaging) =
         match claudine::dispatch::loader::load_runtime_config(None, effective_repo_root) {
@@ -624,13 +624,11 @@ pub(crate) fn execute_composition_request(
             Some(materialized_harness_prompt_from_prepared(&request.prepared)),
             &term,
             lifecycle,
-            &mut _lifecycle_state,
+            &mut lifecycle_state,
             &lifecycle_ctx,
         )
     } else if is_inline {
         emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, &lifecycle_ctx);
-        _lifecycle_state.start_emitted = true;
-        _lifecycle_state.provider_launch_started = true;
 
         let closure_plan = match &request.prepared.closure {
             CompositionClosurePlan::Inline(plan) => plan,
@@ -668,8 +666,6 @@ pub(crate) fn execute_composition_request(
         Ok(exit_code)
     } else {
         emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, &lifecycle_ctx);
-        _lifecycle_state.start_emitted = true;
-        _lifecycle_state.provider_launch_started = true;
 
         let exit_code = execute_direct_without_harness(
             provider,
