@@ -548,6 +548,39 @@ pub fn run_compose(
     })?;
     let compose_pipeline_dur = compose_start.map(|s| s.elapsed()).unwrap_or_default();
 
+    // Verbose compose summary
+    if cli.verbose > 0 {
+        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::prelude::{Status, StatusState};
+        use biscuit_terminal::terminal::Terminal;
+        let terminal = Terminal::default();
+        let status = Status::from_prose(format!(
+            "Composed <b>{}</b> transclusions, <b>{}</b> interpolations, <b>{}</b> replacements",
+            report.transclusions_applied,
+            report.interpolations_applied,
+            report.replacements_applied,
+        ))
+        .state(StatusState::Success);
+        eprintln!("{}", status.render(&terminal));
+    }
+
+    if cli.verbose > 1 {
+        if let Some(perf_report) = &report.perf {
+            use biscuit_terminal::components::renderable::Renderable;
+            use biscuit_terminal::prelude::Status;
+            use biscuit_terminal::terminal::Terminal;
+            let terminal = Terminal::default();
+            for metric in &perf_report.metrics {
+                let status = Status::from_prose(format!(
+                    "<dim>{:20}</dim> {:>8.2}ms",
+                    metric.name,
+                    metric.elapsed.as_secs_f64() * 1000.0
+                ));
+                eprintln!("{}", status.render(&terminal));
+            }
+        }
+    }
+
     let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
     let code_theme = cli
         .code_theme
@@ -757,22 +790,30 @@ pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Resul
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else if cli.verbose > 0 {
+        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::components::renderable::Renderable;
+        use biscuit_terminal::terminal::Terminal;
         let props_label = if removed.len() == 1 {
-            format!("\"{}\" property", removed[0])
+            format!("<b>{}</b> property", removed[0])
         } else {
             format!(
-                "[{}] properties",
+                "<b>{}</b> properties",
                 removed
                     .iter()
-                    .map(|p| format!("\"{p}\""))
+                    .map(|p| format!("\"{}\"", p))
                     .collect::<Vec<_>>()
                     .join(", ")
             )
         };
         let remaining_label = remaining.join(", ");
+        let terminal = Terminal::default();
         eprintln!(
-            "- removed the {} from frontmatter (\x1b[2mremaining: \x1b[3m{}\x1b[0m\x1b[2m)\x1b[0m",
-            props_label, remaining_label
+            "{}",
+            Prose::new(format!(
+                "- removed the {} from frontmatter (<dim>remaining: <i>{}</i></dim>)",
+                props_label, remaining_label
+            ))
+            .render(&terminal)
         );
     }
 
