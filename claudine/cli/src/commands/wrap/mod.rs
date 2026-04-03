@@ -5,6 +5,7 @@ pub(crate) mod repo_home;
 
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
+use claudine::composition::lifecycle::{emit_lifecycle_signal, LifecycleSignal};
 use claudine::events::{
     AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta, Provider,
 };
@@ -1196,6 +1197,22 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             profile.prepare_captured_output(&mut harness_base_args);
         }
 
+        let source_path_for_lifecycle = prompt_state.source_path.clone();
+        let default_lifecycle = claudine::composition::LifecycleConfig::default();
+        let mut default_lifecycle_state = claudine::composition::LifecycleRuntimeState::default();
+        let default_lifecycle_settings = claudine::events::GlobalSettings::default();
+        let default_lifecycle_messaging = claudine::messaging::RuntimeMessagingSettings {
+            user: None,
+            repo: None,
+        };
+        let default_lifecycle_ctx = claudine::composition::LifecycleRuntimeContext {
+            settings: &default_lifecycle_settings,
+            messaging: &default_lifecycle_messaging,
+            term: &term,
+            source_path: &source_path_for_lifecycle,
+            repo_root: env_plan.repo_root.as_deref(),
+        };
+
         run_harness_loop(
             provider,
             profile,
@@ -1220,6 +1237,9 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &dispatch_context,
             Some(initial_materialized),
             &term,
+            &default_lifecycle,
+            &mut default_lifecycle_state,
+            &default_lifecycle_ctx,
         )?
     } else if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
@@ -2227,6 +2247,9 @@ pub(crate) fn run_harness_loop(
     dispatch_context: &HashMap<String, serde_json::Value>,
     initial_materialized: Option<MaterializedHarnessPrompt>,
     term: &Terminal,
+    lifecycle: &claudine::composition::LifecycleConfig,
+    lifecycle_state: &mut claudine::composition::LifecycleRuntimeState,
+    lifecycle_ctx: &claudine::composition::LifecycleRuntimeContext<'_>,
 ) -> Result<i32> {
     const DEFAULT_MAX_RETRIES: u32 = 3;
     let permission_probe =
@@ -2267,6 +2290,9 @@ pub(crate) fn run_harness_loop(
                     "source file does not exist — cannot proceed",
                     term,
                 );
+            }
+            if !lifecycle_state.provider_launch_started {
+                emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
             }
             return Err(eyre!(
                 "source file does not exist: {}",
@@ -2324,6 +2350,9 @@ pub(crate) fn run_harness_loop(
                         term,
                     );
                 }
+                if !lifecycle_state.provider_launch_started {
+                    emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
+                }
                 return Err(eyre!(
                     "shell audit failed: {} denied directive(s) in source page",
                     source_failures.len()
@@ -2360,6 +2389,9 @@ pub(crate) fn run_harness_loop(
                 );
                 if show_checks {
                     claudine::harness::report::report_unhandled_failure(&msg, term);
+                }
+                if !lifecycle_state.provider_launch_started {
+                    emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
                 }
                 return Err(eyre!("shell audit failed"));
             }
@@ -2423,8 +2455,18 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&fail_msg, term);
             }
+            if !lifecycle_state.provider_launch_started {
+                emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
+            }
             return Err(eyre!("{fail_msg}"));
         }
+
+        // Emit start lifecycle signal before the first provider launch
+        if !lifecycle_state.start_emitted {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, lifecycle_ctx);
+            lifecycle_state.start_emitted = true;
+        }
+        lifecycle_state.provider_launch_started = true;
 
         let snapshot = claudine::harness::capture_pre_run_snapshot(&plan)
             .map_err(|e| eyre!("harness snapshot: {e}"))?;
@@ -2464,6 +2506,7 @@ pub(crate) fn run_harness_loop(
         )?;
 
         if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
             return Ok(outcome.exit_code);
         }
 
@@ -2508,6 +2551,7 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&message, term);
             }
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
             return Err(eyre!("{message}"));
         }
 
@@ -2562,6 +2606,7 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&fail_msg, term);
             }
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
             return Err(eyre!("{fail_msg}"));
         }
 
@@ -2584,6 +2629,7 @@ pub(crate) fn run_harness_loop(
         }
 
         if post_report.all_passed() {
+            emit_lifecycle_signal(lifecycle, LifecycleSignal::Success, lifecycle_ctx);
             return Ok(outcome.exit_code);
         }
 
@@ -2624,6 +2670,7 @@ pub(crate) fn run_harness_loop(
         if show_checks {
             claudine::harness::report::report_unhandled_failure(&fail_msg, term);
         }
+        emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
         return Err(eyre!("{fail_msg}"));
     }
 }

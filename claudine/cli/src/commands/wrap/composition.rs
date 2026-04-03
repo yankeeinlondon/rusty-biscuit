@@ -617,6 +617,9 @@ pub(crate) fn execute_composition_request(
             &dispatch_context,
             Some(materialized_harness_prompt_from_prepared(&request.prepared)),
             &term,
+            lifecycle,
+            &mut _lifecycle_state,
+            &lifecycle_ctx,
         )
     } else if is_inline {
         emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, &lifecycle_ctx);

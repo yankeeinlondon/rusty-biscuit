@@ -285,6 +285,7 @@ SyncReport
 ### Runtime Behavior
 
 **At startup** (when `sync.on_startup` is true):
+
 ```
 Claudine initialized.
 [protect:sync] Checking cross-provider policy consistency...
@@ -297,6 +298,7 @@ Claudine initialized.
 ```
 
 **During composition** (when `sync.scan_file_refs` is true):
+
 ```
 Composing document with Claude...
 [protect:file-refs] 3 file references found, checking access:
@@ -308,6 +310,7 @@ Grant read access for @~/.claude/skills/rust/SKILL.md? [Y/n]
 ```
 
 **During agent execution** (scanner):
+
 ```
 [protect:scanner] Possible API key in output: sk-...xxxx (secret_patterns)
 ```
