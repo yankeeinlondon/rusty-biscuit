@@ -126,12 +126,7 @@ pub async fn execute_actions(
                 speed,
             } => execute_sound_effect(name, *volume, *speed),
             HookAction::Message { message, image } => {
-                crate::messaging::execute_message(
-                    message,
-                    image.as_deref(),
-                    meta,
-                    messaging,
-                );
+                crate::messaging::execute_message(message, image.as_deref(), meta, messaging);
             }
         }
     }

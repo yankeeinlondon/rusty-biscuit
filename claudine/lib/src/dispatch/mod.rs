@@ -301,10 +301,7 @@ fn build_session_context(provider: Provider, meta: &EventMeta) -> ProtectSession
     let cli_ctx = std::env::var("AGENT_PARAMS")
         .ok()
         .map(|params| {
-            let argv: Vec<String> = params
-                .split_whitespace()
-                .map(String::from)
-                .collect();
+            let argv: Vec<String> = params.split_whitespace().map(String::from).collect();
             ProtectCliContext::Argv(argv)
         })
         .unwrap_or(ProtectCliContext::None);
@@ -733,8 +730,7 @@ mod tests {
             env: EnvironmentContext::default(),
         };
 
-        meta.extra
-            .insert("is_trusted".to_string(), json!(true));
+        meta.extra.insert("is_trusted".to_string(), json!(true));
 
         let trust = derive_trust_context(&meta);
         assert_eq!(trust.is_trusted, Some(true));
@@ -870,8 +866,7 @@ mod tests {
             env: EnvironmentContext::default(),
         };
 
-        meta.extra
-            .insert("is_trusted".to_string(), json!(true));
+        meta.extra.insert("is_trusted".to_string(), json!(true));
 
         let ctx = build_session_context(Provider::Claude, &meta);
         assert_eq!(ctx.policy_context.trust.is_trusted, Some(true));

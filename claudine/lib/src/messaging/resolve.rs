@@ -66,12 +66,18 @@ pub fn resolve_effective_route(
 ) -> Option<ResolvedMessagingRoute> {
     // Repo scope takes precedence over user scope
     if let Some(route) = resolve_scope(&messaging.repo, MessagingScope::Repo) {
-        debug!(scope = "repo", route.name, "Resolved messaging route from repo scope");
+        debug!(
+            scope = "repo",
+            route.name, "Resolved messaging route from repo scope"
+        );
         return Some(route);
     }
 
     if let Some(route) = resolve_scope(&messaging.user, MessagingScope::User) {
-        debug!(scope = "user", route.name, "Resolved messaging route from user scope");
+        debug!(
+            scope = "user",
+            route.name, "Resolved messaging route from user scope"
+        );
         return Some(route);
     }
 
@@ -105,10 +111,7 @@ fn resolve_scope(
 ///
 /// `Ok(value)` with the resolved secret, or `Err(message)` describing which
 /// env var was missing.
-pub fn resolve_secret(
-    inline: Option<&str>,
-    env_name: &str,
-) -> std::result::Result<String, String> {
+pub fn resolve_secret(inline: Option<&str>, env_name: &str) -> std::result::Result<String, String> {
     // Inline value wins when present and non-empty
     if let Some(val) = inline
         && !val.is_empty()
@@ -212,7 +215,10 @@ mod tests {
         )
     }
 
-    fn scoped(active: Option<&str>, routes: Vec<(String, MessagingRouteConfig)>) -> ScopedMessagingSettings {
+    fn scoped(
+        active: Option<&str>,
+        routes: Vec<(String, MessagingRouteConfig)>,
+    ) -> ScopedMessagingSettings {
         ScopedMessagingSettings {
             active: active.map(str::to_string),
             configs: routes.into_iter().collect::<HashMap<_, _>>(),
@@ -226,8 +232,14 @@ mod tests {
     #[test]
     fn repo_active_beats_user_active() {
         let settings = RuntimeMessagingSettings {
-            user: Some(scoped(Some("slack-route"), vec![slack_route("slack-route")])),
-            repo: Some(scoped(Some("discord-route"), vec![discord_route("discord-route")])),
+            user: Some(scoped(
+                Some("slack-route"),
+                vec![slack_route("slack-route")],
+            )),
+            repo: Some(scoped(
+                Some("discord-route"),
+                vec![discord_route("discord-route")],
+            )),
         };
 
         let resolved = resolve_effective_route(&settings).expect("should resolve");
@@ -238,7 +250,10 @@ mod tests {
     #[test]
     fn repo_inactive_falls_back_to_user() {
         let settings = RuntimeMessagingSettings {
-            user: Some(scoped(Some("slack-route"), vec![slack_route("slack-route")])),
+            user: Some(scoped(
+                Some("slack-route"),
+                vec![slack_route("slack-route")],
+            )),
             repo: Some(scoped(None, vec![discord_route("discord-route")])),
         };
 
@@ -270,7 +285,10 @@ mod tests {
     #[test]
     fn user_only_scope() {
         let settings = RuntimeMessagingSettings {
-            user: Some(scoped(Some("slack-route"), vec![slack_route("slack-route")])),
+            user: Some(scoped(
+                Some("slack-route"),
+                vec![slack_route("slack-route")],
+            )),
             repo: None,
         };
 
@@ -345,7 +363,10 @@ mod tests {
     #[test]
     fn signal_group_recipient() {
         let result = parse_signal_recipient("group-id-base64");
-        assert_eq!(result, SignalRecipient::Group("group-id-base64".to_string()));
+        assert_eq!(
+            result,
+            SignalRecipient::Group("group-id-base64".to_string())
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -373,7 +394,10 @@ mod tests {
             Some("/workspace/project"),
             Some("/repo/root"),
         );
-        assert_eq!(result, PathBuf::from("/workspace/project/artifacts/shot.png"));
+        assert_eq!(
+            result,
+            PathBuf::from("/workspace/project/artifacts/shot.png")
+        );
     }
 
     #[test]

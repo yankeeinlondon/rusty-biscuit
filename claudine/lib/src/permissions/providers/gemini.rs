@@ -762,13 +762,11 @@ fn choose_targets(
                 )
             })?,
         )),
-        PolicyChangeTarget::LocalOverride => {
-            Err(ClaudineError::PolicyUnsupportedMutation {
-                provider: Provider::Gemini,
-                op: "LocalOverride target is not supported by Gemini (no local override concept)"
-                    .to_owned(),
-            })
-        }
+        PolicyChangeTarget::LocalOverride => Err(ClaudineError::PolicyUnsupportedMutation {
+            provider: Provider::Gemini,
+            op: "LocalOverride target is not supported by Gemini (no local override concept)"
+                .to_owned(),
+        }),
         PolicyChangeTarget::Auto => {
             let has_repo = current.sources.iter().any(|source| {
                 matches!(

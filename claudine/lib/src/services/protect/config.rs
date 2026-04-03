@@ -164,17 +164,20 @@ impl ProtectConfig {
         }
         if !self.rules.protected_paths.is_empty() {
             return Err(ClaudineError::ProtectInvalidPolicy(
-                "settings.protect.rules.protected_paths is removed; migrate to PolicyEngine rules".to_string(),
+                "settings.protect.rules.protected_paths is removed; migrate to PolicyEngine rules"
+                    .to_string(),
             ));
         }
         if !self.mcp.allowlist.is_empty() {
             return Err(ClaudineError::ProtectInvalidPolicy(
-                "settings.protect.mcp.allowlist is removed; use MCP catalog trust instead".to_string(),
+                "settings.protect.mcp.allowlist is removed; use MCP catalog trust instead"
+                    .to_string(),
             ));
         }
         if !self.mcp.denylist.is_empty() {
             return Err(ClaudineError::ProtectInvalidPolicy(
-                "settings.protect.mcp.denylist is removed; use MCP catalog trust instead".to_string(),
+                "settings.protect.mcp.denylist is removed; use MCP catalog trust instead"
+                    .to_string(),
             ));
         }
         Ok(())

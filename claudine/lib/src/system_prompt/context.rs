@@ -41,11 +41,7 @@ impl LaunchContext {
             Some(ref repo) if repo.is_monorepo => {
                 if let Some(ref packages) = repo.packages {
                     let pkg_root = select_package_root(cwd, packages);
-                    let area_root = select_package_area_root(
-                        cwd,
-                        &repo.root,
-                        packages,
-                    );
+                    let area_root = select_package_area_root(cwd, &repo.root, packages);
                     (pkg_root, area_root)
                 } else {
                     (None, None)
@@ -101,11 +97,7 @@ fn select_package_root(cwd: &Path, packages: &[Package]) -> Option<PathBuf> {
 }
 
 /// Select the deepest matching package-area root for the given cwd.
-fn select_package_area_root(
-    cwd: &Path,
-    repo_root: &Path,
-    packages: &[Package],
-) -> Option<PathBuf> {
+fn select_package_area_root(cwd: &Path, repo_root: &Path, packages: &[Package]) -> Option<PathBuf> {
     let cwd_normalized = canonical_or_self(cwd);
     let repo_root_normalized = canonical_or_self(repo_root);
 
@@ -155,19 +147,15 @@ mod tests {
     /// Create a Cargo workspace toml that declares packages.
     fn write_cargo_workspace(repo_root: &Path, members: &[&str]) {
         let members_str: Vec<String> = members.iter().map(|m| format!("    \"{m}\"")).collect();
-        let content = format!(
-            "[workspace]\nmembers = [\n{}\n]\n",
-            members_str.join(",\n")
-        );
+        let content = format!("[workspace]\nmembers = [\n{}\n]\n", members_str.join(",\n"));
         fs::write(repo_root.join("Cargo.toml"), content).unwrap();
     }
 
     /// Create a package Cargo.toml with a given name.
     fn write_package_toml(package_dir: &Path, name: &str) {
         fs::create_dir_all(package_dir).unwrap();
-        let content = format!(
-            "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
-        );
+        let content =
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n");
         fs::write(package_dir.join("Cargo.toml"), content).unwrap();
     }
 
@@ -241,8 +229,7 @@ mod tests {
 
         init_git_repo(root);
         // Single-package repo (not a monorepo)
-        let content =
-            "[package]\nname = \"my-app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n";
+        let content = "[package]\nname = \"my-app\"\nversion = \"0.1.0\"\nedition = \"2024\"\n";
         fs::write(root.join("Cargo.toml"), content).unwrap();
 
         let ctx = LaunchContext::from_cwd(root).unwrap();

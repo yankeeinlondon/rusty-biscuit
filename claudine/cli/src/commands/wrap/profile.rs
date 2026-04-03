@@ -585,7 +585,6 @@ impl WrapperProfile for CodexWrapper {
         }
     }
 
-
     fn supports_interactive_inline_closure(&self) -> bool {
         true
     }
@@ -835,7 +834,6 @@ impl WrapperProfile for KimiWrapper {
         }
         Ok(())
     }
-
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
         Ok(vec![
@@ -1106,7 +1104,6 @@ impl WrapperProfile for OpencodeWrapper {
         }
         Ok(())
     }
-
 
     fn supports_structured_stream(&self) -> bool {
         true

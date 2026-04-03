@@ -256,7 +256,11 @@ mod tests {
 
         // Create standard discovery file
         let standard_file = package_root.join("system-prompt.md");
-        std::fs::write(&standard_file, "# Standard Discovery\nThis should be skipped").unwrap();
+        std::fs::write(
+            &standard_file,
+            "# Standard Discovery\nThis should be skipped",
+        )
+        .unwrap();
 
         // Create explicit file
         let explicit_file = tmp.path().join("explicit.md");

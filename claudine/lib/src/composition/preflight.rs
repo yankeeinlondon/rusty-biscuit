@@ -100,8 +100,7 @@ pub fn resolve_shell_approvals(
     // -- Check each command against policy -------------------------------------
     for (normalized, source_file, line) in &unique {
         // Split normalized command back into parts for the existing validator.
-        let parts: Vec<String> =
-            tokenize(normalized).unwrap_or_else(|_| vec![normalized.clone()]);
+        let parts: Vec<String> = tokenize(normalized).unwrap_or_else(|_| vec![normalized.clone()]);
 
         match crate::harness::shell::validate_and_approve_command_parts(
             &parts,
@@ -175,11 +174,11 @@ mod tests {
         ApprovedRuntimeCommand, HandlerTable, HarnessPlan, ValidationEvent, ValidationKind,
         ValidationPhase, ValidationRule, ValidationRuleId,
     };
-    use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
     use darkmatter::markdown::compose::shell_expansion::types::{
         ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
     };
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     struct CapturingHandler {
         captured: Arc<Mutex<Vec<ShellApprovalRequest>>>,
@@ -248,12 +247,11 @@ mod tests {
 
     /// Creates a temp dir with a whitelist file that allows commands prefixed
     /// with the given executables.
-    fn approval_options_with_whitelist(prefixes: &[&str]) -> (tempfile::TempDir, ShellApprovalOptions) {
+    fn approval_options_with_whitelist(
+        prefixes: &[&str],
+    ) -> (tempfile::TempDir, ShellApprovalOptions) {
         let dir = tempfile::TempDir::new().unwrap();
-        let whitelist_content: String = prefixes
-            .iter()
-            .map(|p| format!("prefix {p}\n"))
-            .collect();
+        let whitelist_content: String = prefixes.iter().map(|p| format!("prefix {p}\n")).collect();
         std::fs::write(
             dir.path().join(".darkmatter-shell-whitelist"),
             whitelist_content,
@@ -314,8 +312,7 @@ mod tests {
 
         let (_dir, approval_options) = approval_options_with_whitelist(&["echo"]);
 
-        let result =
-            resolve_shell_approvals(None, None, Some(&plan), &approval_options).unwrap();
+        let result = resolve_shell_approvals(None, None, Some(&plan), &approval_options).unwrap();
 
         assert_eq!(result.total_discovered, 1);
         assert!(result.approved_commands.contains("echo world"));
@@ -432,7 +429,11 @@ mod tests {
     fn full_flow_unapproved_command_rejected_at_compose_time() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.md");
-        std::fs::write(&file_path, "# Test\n::shell echo hello\n::shell echo sneaky\n").unwrap();
+        std::fs::write(
+            &file_path,
+            "# Test\n::shell echo hello\n::shell echo sneaky\n",
+        )
+        .unwrap();
 
         // Only pre-approve "echo hello", not "echo sneaky"
         let mut approved = std::collections::HashSet::new();
@@ -482,12 +483,14 @@ mod tests {
             ..Default::default()
         };
 
-        let result =
-            resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options);
+        let result = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options);
 
         assert!(result.is_err());
         assert!(
-            matches!(result.unwrap_err(), CompositionError::ShellCommandDenied { .. }),
+            matches!(
+                result.unwrap_err(),
+                CompositionError::ShellCommandDenied { .. }
+            ),
             "expected ShellCommandDenied"
         );
     }
@@ -515,7 +518,11 @@ mod tests {
         let result2 =
             resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap();
         assert_eq!(result2.total_discovered, 1);
-        assert_eq!(handler.calls(), 1, "handler should not be called again — cache hit");
+        assert_eq!(
+            handler.calls(),
+            1,
+            "handler should not be called again — cache hit"
+        );
     }
 
     #[test]
@@ -534,8 +541,16 @@ mod tests {
         let result =
             resolve_shell_approvals(Some(&md), Some(&compose_options), None, &options).unwrap();
 
-        assert_eq!(handler.calls(), 1, "handler must be invoked for non-whitelisted command");
-        assert!(result.approved_commands.contains("curl https://example.com"));
+        assert_eq!(
+            handler.calls(),
+            1,
+            "handler must be invoked for non-whitelisted command"
+        );
+        assert!(
+            result
+                .approved_commands
+                .contains("curl https://example.com")
+        );
         assert_eq!(result.user_approved, 1);
         assert_eq!(result.already_whitelisted, 0);
     }

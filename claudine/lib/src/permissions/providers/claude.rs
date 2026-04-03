@@ -769,7 +769,8 @@ fn choose_target_path(
                     PolicySourceKind::RepoConfig | PolicySourceKind::LocalOverride
                 )
             });
-            if has_repo_source && ctx.trust.is_trusted == Some(true)
+            if has_repo_source
+                && ctx.trust.is_trusted == Some(true)
                 && let Some(path) = repo_path
             {
                 return Ok(("claude-repo".to_owned(), path));

@@ -85,9 +85,13 @@ pub fn apply_inline_closure(
         })
         .collect();
 
-    let doc_string =
-        rewrite_inline_document(&plan.original_document_text, replacement_body, today, &serialized_props)
-            .map_err(CompositionError::InvalidInlineResponse)?;
+    let doc_string = rewrite_inline_document(
+        &plan.original_document_text,
+        replacement_body,
+        today,
+        &serialized_props,
+    )
+    .map_err(CompositionError::InvalidInlineResponse)?;
 
     crate::config::atomic::atomic_write(target_path, doc_string.as_bytes())
         .map_err(|e| CompositionError::AtomicWriteFailed(e.to_string()))?;
@@ -401,7 +405,8 @@ mod tests {
             "Old body\n",
         );
 
-        let rewritten = rewrite_inline_document(original, "Fresh body\n", "2026-03-19", &[]).unwrap();
+        let rewritten =
+            rewrite_inline_document(original, "Fresh body\n", "2026-03-19", &[]).unwrap();
 
         assert!(rewritten.contains("prompt: |-"));
         assert!(rewritten.contains("  First line\n  Second line\n"));
@@ -419,7 +424,8 @@ mod tests {
             "Body\n",
         );
 
-        let rewritten = rewrite_inline_document(original, "Updated body\n", "2026-03-19", &[]).unwrap();
+        let rewritten =
+            rewrite_inline_document(original, "Updated body\n", "2026-03-19", &[]).unwrap();
 
         assert!(rewritten.contains("prompt: |-"));
         assert!(rewritten.contains("  Keep this formatting\n"));
@@ -443,7 +449,8 @@ mod tests {
     #[test]
     fn rewrite_preserves_crlf_line_endings() {
         let original = "---\r\nlast_updated: 2026-01-01\r\n---\r\nBody\r\n";
-        let rewritten = rewrite_inline_document(original, "New body\r\n", "2026-03-27", &[]).unwrap();
+        let rewritten =
+            rewrite_inline_document(original, "New body\r\n", "2026-03-27", &[]).unwrap();
         assert!(rewritten.contains("last_updated: 2026-03-27\r\n"));
     }
 
@@ -455,7 +462,13 @@ mod tests {
             original_document_text: "---\nprompt: test\n---\nOld\n".into(),
             original_body_hash: 0,
         };
-        let err = apply_inline_closure(&plan, "  ", Path::new("/tmp/nonexistent"), "2026-03-27", None);
+        let err = apply_inline_closure(
+            &plan,
+            "  ",
+            Path::new("/tmp/nonexistent"),
+            "2026-03-27",
+            None,
+        );
         assert!(err.is_err());
     }
 
@@ -479,8 +492,7 @@ mod tests {
     #[test]
     fn rewrite_no_new_properties_backward_compatible() {
         let original = "---\nprompt: test\nlast_updated: 2026-03-18\n---\nOld body\n";
-        let rewritten =
-            rewrite_inline_document(original, "New body\n", "2026-04-02", &[]).unwrap();
+        let rewritten = rewrite_inline_document(original, "New body\n", "2026-04-02", &[]).unwrap();
         assert!(rewritten.contains("prompt: test\n"));
         assert!(rewritten.contains("last_updated: 2026-04-02\n"));
         assert!(rewritten.contains("New body\n"));
@@ -594,7 +606,10 @@ mod tests {
         // tags must appear before last_updated
         let tags_pos = result.find("tags:").unwrap();
         let lu_pos = result.find("last_updated:").unwrap();
-        assert!(tags_pos < lu_pos, "new property should appear before last_updated");
+        assert!(
+            tags_pos < lu_pos,
+            "new property should appear before last_updated"
+        );
     }
 
     #[test]
@@ -682,14 +697,8 @@ mod tests {
             original_body_hash: original_markdown.hash_body(false),
         };
 
-        let result = apply_inline_closure(
-            &plan,
-            "Updated body\n",
-            &file,
-            "2026-04-02",
-            None,
-        )
-        .unwrap();
+        let result =
+            apply_inline_closure(&plan, "Updated body\n", &file, "2026-04-02", None).unwrap();
 
         assert!(result.new_properties.is_empty());
         assert!(result.reverted_properties.is_empty());

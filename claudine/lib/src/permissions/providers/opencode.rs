@@ -161,7 +161,9 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                 let mut overrides = OpenCodeCliOverrides::default();
                 let mut i = 0;
                 while i < argv.len() {
-                    if argv[i].as_str() == "--yolo" { overrides.yolo = true }
+                    if argv[i].as_str() == "--yolo" {
+                        overrides.yolo = true
+                    }
                     i += 1;
                 }
                 Ok(ProviderCliOverrides::new(Provider::OpenCode, overrides))

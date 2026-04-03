@@ -554,7 +554,10 @@ mod tests {
 
         // Previously-approved command still passes via cache.
         let cached = validate_and_approve_command("echo hello", &options);
-        assert!(cached.is_ok(), "cached command should still pass after freeze");
+        assert!(
+            cached.is_ok(),
+            "cached command should still pass after freeze"
+        );
 
         // A NEW command that was never approved is denied — no handler to prompt.
         let new_cmd = validate_and_approve_command("curl https://example.com", &options);
@@ -568,6 +571,10 @@ mod tests {
         ));
 
         // Handler was only called once (for the original "echo hello"), never for "curl".
-        assert_eq!(handler.approvals(), 1, "handler must not be called after freeze");
+        assert_eq!(
+            handler.approvals(),
+            1,
+            "handler must not be called after freeze"
+        );
     }
 }

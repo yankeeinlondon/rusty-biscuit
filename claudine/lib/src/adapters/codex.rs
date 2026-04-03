@@ -123,7 +123,11 @@ impl ProviderAdapter for CodexAdapter {
                                             .join(" ")
                                     })
                                 })
-                                .or_else(|| p.get("command").and_then(Value::as_str).map(ToOwned::to_owned))
+                                .or_else(|| {
+                                    p.get("command")
+                                        .and_then(Value::as_str)
+                                        .map(ToOwned::to_owned)
+                                })
                         })
                         .or_else(|| {
                             meta.tool_input
@@ -171,7 +175,11 @@ impl ProviderAdapter for CodexAdapter {
             }
 
             // Preserve completion scan intent if present.
-            if obs.intents.iter().any(|i| matches!(i, ProtectIntent::CompletionOutputScan)) {
+            if obs
+                .intents
+                .iter()
+                .any(|i| matches!(i, ProtectIntent::CompletionOutputScan))
+            {
                 intents.push(ProtectIntent::CompletionOutputScan);
             }
 

@@ -4,22 +4,24 @@
 //! library, handling template interpolation, provider construction, and
 //! fire-and-forget async dispatch.
 
+use std::collections::BTreeMap;
+
 use messenger::provider::{
-    discord::{DiscordConfig, DiscordProvider},
-    slack::{SlackConfig, SlackProvider},
-    signal::{SignalConfig, SignalProvider},
-    whatsapp::{WhatsAppConfig, WhatsAppProvider},
     Messenger,
+    discord::{DiscordConfig, DiscordProvider},
+    signal::{SignalConfig, SignalProvider},
+    slack::{SlackConfig, SlackProvider},
+    whatsapp::{WhatsAppConfig, WhatsAppProvider},
 };
-use messenger::{Dispatch, Message, ProviderKind, Target};
 use messenger::target::SignalAddress;
+use messenger::{Dispatch, Message, ProviderKind, Target};
 use secrecy::SecretString;
 use tracing::{debug, warn};
 
 use super::config::MessagingRouteConfig;
 use super::resolve::{
-    ResolvedMessagingRoute, RuntimeMessagingSettings, SignalRecipient,
-    parse_signal_recipient, resolve_effective_route, resolve_image_path, resolve_secret,
+    ResolvedMessagingRoute, RuntimeMessagingSettings, SignalRecipient, parse_signal_recipient,
+    resolve_effective_route, resolve_image_path, resolve_secret,
 };
 use crate::dispatch::template::interpolate;
 use crate::events::EventMeta;
@@ -71,11 +73,7 @@ pub fn execute_message(
 
     // Extract cwd and repo_root for image path resolution
     let cwd = meta.cwd.as_deref();
-    let repo_root = meta
-        .env
-        .repo
-        .as_ref()
-        .and_then(|r| r.root.to_str());
+    let repo_root = meta.env.repo.as_ref().and_then(|r| r.root.to_str());
 
     // Build the payload
     let Some(payload) = build_payload(&route, text, image, cwd, repo_root) else {
@@ -136,11 +134,13 @@ fn build_payload(
         ),
     };
 
+    let has_text = !text.trim().is_empty();
+
     // Build the message
-    let mut message = if text.trim().is_empty() {
-        Message::text("")
-    } else {
+    let mut message = if has_text {
         Message::markdown(text)
+    } else {
+        empty_message()
     };
 
     // Attach image for Discord only; warn for other providers
@@ -150,6 +150,15 @@ fn build_payload(
         if provider_kind == ProviderKind::Discord {
             message = message.image(resolved);
         } else {
+            if !has_text {
+                warn!(
+                    provider = provider_kind_label(&provider_kind),
+                    path = %resolved.display(),
+                    "Image attachments not supported for this provider and message text is empty; skipping send"
+                );
+                return None;
+            }
+
             warn!(
                 provider = provider_kind_label(&provider_kind),
                 path = %resolved.display(),
@@ -166,6 +175,15 @@ fn build_payload(
     })
 }
 
+fn empty_message() -> Message {
+    Message {
+        body: None,
+        attachments: Vec::new(),
+        location: None,
+        metadata: BTreeMap::new(),
+    }
+}
+
 /// Sends the payload by building the provider, creating a messenger, and
 /// executing the dispatch plan.
 async fn send_payload(
@@ -176,7 +194,11 @@ async fn send_payload(
 
     // Build and register the provider based on route config
     match &payload.route_config {
-        MessagingRouteConfig::Discord { bot_token, bot_token_env, .. } => {
+        MessagingRouteConfig::Discord {
+            bot_token,
+            bot_token_env,
+            ..
+        } => {
             let token = resolve_secret(bot_token.as_deref(), bot_token_env)
                 .map_err(|e| format!("Discord: {}", e))?;
             let provider = DiscordProvider::new(DiscordConfig {
@@ -184,7 +206,11 @@ async fn send_payload(
             });
             messenger.register(Box::new(provider));
         }
-        MessagingRouteConfig::Slack { bot_token, bot_token_env, .. } => {
+        MessagingRouteConfig::Slack {
+            bot_token,
+            bot_token_env,
+            ..
+        } => {
             let token = resolve_secret(bot_token.as_deref(), bot_token_env)
                 .map_err(|e| format!("Slack: {}", e))?;
             let provider = SlackProvider::new(SlackConfig {
@@ -280,5 +306,94 @@ fn provider_kind_label_from_config(config: &MessagingRouteConfig) -> &'static st
         MessagingRouteConfig::Slack { .. } => "slack",
         MessagingRouteConfig::Signal { .. } => "signal",
         MessagingRouteConfig::WhatsApp { .. } => "whatsapp",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::messaging::{MessagingRouteConfig, MessagingScope};
+
+    fn route(name: &str, config: MessagingRouteConfig) -> ResolvedMessagingRoute {
+        ResolvedMessagingRoute {
+            scope: MessagingScope::User,
+            name: name.to_string(),
+            config,
+        }
+    }
+
+    #[test]
+    fn build_payload_skips_image_only_message_for_slack() {
+        let route = route(
+            "ops",
+            MessagingRouteConfig::Slack {
+                channel_id: "C123".to_string(),
+                bot_token: None,
+                bot_token_env: "SLACK_BOT_TOKEN".to_string(),
+            },
+        );
+
+        let payload = build_payload(
+            &route,
+            "   ".to_string(),
+            Some("screenshots/result.png".to_string()),
+            Some("/tmp"),
+            None,
+        );
+
+        assert!(payload.is_none());
+    }
+
+    #[test]
+    fn build_payload_keeps_image_only_message_for_discord() {
+        let route = route(
+            "alerts",
+            MessagingRouteConfig::Discord {
+                channel_id: "123".to_string(),
+                bot_token: None,
+                bot_token_env: "DISCORD_BOT_TOKEN".to_string(),
+            },
+        );
+
+        let payload = build_payload(
+            &route,
+            "".to_string(),
+            Some("images/chart.png".to_string()),
+            Some("/workspace"),
+            None,
+        )
+        .expect("discord image-only payload should be kept");
+
+        assert!(payload.message.body.is_none());
+        assert_eq!(payload.message.attachments.len(), 1);
+    }
+
+    #[test]
+    fn build_payload_ignores_unsupported_image_when_text_exists() {
+        let route = route(
+            "ops",
+            MessagingRouteConfig::Slack {
+                channel_id: "C123".to_string(),
+                bot_token: None,
+                bot_token_env: "SLACK_BOT_TOKEN".to_string(),
+            },
+        );
+
+        let payload = build_payload(
+            &route,
+            "**Deploy finished**".to_string(),
+            Some("images/chart.png".to_string()),
+            Some("/workspace"),
+            None,
+        )
+        .expect("text payload should still be sent");
+
+        assert_eq!(
+            payload.message.body,
+            Some(messenger::MessageBody::Markdown(
+                "**Deploy finished**".to_string()
+            ))
+        );
+        assert!(payload.message.attachments.is_empty());
     }
 }

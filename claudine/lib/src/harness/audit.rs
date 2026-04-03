@@ -108,8 +108,9 @@ pub fn audit_shell_commands(
                 .chain(cmd.args.iter().cloned())
                 .collect();
 
-            let result =
-                crate::harness::shell::validate_and_approve_command_parts(&parts, options, None, None);
+            let result = crate::harness::shell::validate_and_approve_command_parts(
+                &parts, options, None, None,
+            );
 
             match result {
                 Ok(_) => ShellAuditOutcome {
@@ -364,6 +365,29 @@ mod tests {
     }
 
     #[test]
+    fn audit_policy_denied_command() {
+        // Use an isolated policy root with no whitelist and no approval handler.
+        // A non-blacklisted command ("echo") is denied by policy, not blacklisted.
+        let dir = tempfile::TempDir::new().unwrap();
+        let options = ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: None,
+            ..Default::default()
+        };
+        let cmd = make_audited_command("echo", &["hello"]);
+        let report = audit_shell_commands(&[cmd], &options);
+        assert_eq!(report.outcomes.len(), 1);
+        assert!(!report.outcomes[0].passed);
+        assert!(
+            report.outcomes[0].message.contains("denied by policy"),
+            "expected 'denied by policy' but got: {}",
+            report.outcomes[0].message
+        );
+        assert!(!report.all_passed());
+        assert_eq!(report.failures().len(), 1);
+    }
+
+    #[test]
     fn audit_message_escapes_command_text() {
         // Command with markup characters should be escaped in the message
         let cmd = make_audited_command("echo", &["<b>bold</b>"]);
@@ -411,7 +435,10 @@ mod tests {
             .iter()
             .filter(|c| matches!(c.source, AuditedCommandSource::ComposeSourceLine { .. }))
             .count();
-        assert_eq!(source_page_count, 1, "source text should produce source-page commands");
+        assert_eq!(
+            source_page_count, 1,
+            "source text should produce source-page commands"
+        );
 
         // Without source text: only harness commands
         let without_source = collect_auditable_commands(&plan, None).unwrap();
@@ -426,7 +453,9 @@ mod tests {
 
         // Harness commands still present in both
         assert!(
-            without_source.iter().any(|c| matches!(c.source, AuditedCommandSource::PreCheck(_))),
+            without_source
+                .iter()
+                .any(|c| matches!(c.source, AuditedCommandSource::PreCheck(_))),
             "harness pre-check commands should still be collected"
         );
     }

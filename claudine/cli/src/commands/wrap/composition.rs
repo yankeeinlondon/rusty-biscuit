@@ -518,9 +518,7 @@ pub(crate) fn execute_composition_request(
 
     if !silent {
         // Everything below is suppressed by --quiet (consistent with direct-wrap)
-        if !quiet
-            && (request.session_interactive || verbose_requested)
-        {
+        if !quiet && (request.session_interactive || verbose_requested) {
             crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
@@ -757,12 +755,10 @@ fn execute_inline_without_harness(
 
         if final_exit == 0 {
             // Read post-run frontmatter for comparison (best-effort)
-            let post_run_fm = std::fs::read_to_string(resolved_path)
-                .ok()
-                .map(|text| {
-                    let md: darkmatter::markdown::Markdown = text.into();
-                    md.frontmatter().as_map().clone()
-                });
+            let post_run_fm = std::fs::read_to_string(resolved_path).ok().map(|text| {
+                let md: darkmatter::markdown::Markdown = text.into();
+                md.frontmatter().as_map().clone()
+            });
 
             let today = chrono::Local::now().format("%Y-%m-%d").to_string();
             match claudine::composition::closure::apply_inline_closure(

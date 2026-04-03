@@ -1269,10 +1269,7 @@ mod tests {
         )
     }
 
-    fn server_rule(
-        server: &str,
-        effect: PolicyEffect,
-    ) -> super::super::canonical::McpServerRule {
+    fn server_rule(server: &str, effect: PolicyEffect) -> super::super::canonical::McpServerRule {
         super::super::canonical::McpServerRule {
             server_id: server.to_owned(),
             effect,
@@ -1299,25 +1296,31 @@ mod tests {
             vec![server_rule("github", PolicyEffect::Deny)],
             vec![tool_rule("github", "create_issue", PolicyEffect::Allow)],
         );
-        assert!(snapshot.can_use_mcp_tool("github", "create_issue").is_denied());
+        assert!(
+            snapshot
+                .can_use_mcp_tool("github", "create_issue")
+                .is_denied()
+        );
     }
 
     #[test]
     fn mcp_server_allow_inherits_to_tool_when_no_tool_rule() {
-        let snapshot = mcp_snapshot(
-            vec![server_rule("filesystem", PolicyEffect::Allow)],
-            vec![],
+        let snapshot = mcp_snapshot(vec![server_rule("filesystem", PolicyEffect::Allow)], vec![]);
+        assert!(
+            snapshot
+                .can_use_mcp_tool("filesystem", "read_file")
+                .is_allowed()
         );
-        assert!(snapshot.can_use_mcp_tool("filesystem", "read_file").is_allowed());
     }
 
     #[test]
     fn mcp_server_ask_inherits_to_tool_when_no_tool_rule() {
-        let snapshot = mcp_snapshot(
-            vec![server_rule("filesystem", PolicyEffect::Ask)],
-            vec![],
+        let snapshot = mcp_snapshot(vec![server_rule("filesystem", PolicyEffect::Ask)], vec![]);
+        assert!(
+            snapshot
+                .can_use_mcp_tool("filesystem", "read_file")
+                .is_ask()
         );
-        assert!(snapshot.can_use_mcp_tool("filesystem", "read_file").is_ask());
     }
 
     #[test]
@@ -1326,9 +1329,17 @@ mod tests {
             vec![server_rule("filesystem", PolicyEffect::Allow)],
             vec![tool_rule("filesystem", "delete_file", PolicyEffect::Deny)],
         );
-        assert!(snapshot.can_use_mcp_tool("filesystem", "delete_file").is_denied());
+        assert!(
+            snapshot
+                .can_use_mcp_tool("filesystem", "delete_file")
+                .is_denied()
+        );
         // Other tools on the same server still inherit the allow.
-        assert!(snapshot.can_use_mcp_tool("filesystem", "read_file").is_allowed());
+        assert!(
+            snapshot
+                .can_use_mcp_tool("filesystem", "read_file")
+                .is_allowed()
+        );
     }
 
     #[test]

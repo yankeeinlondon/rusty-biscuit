@@ -39,7 +39,10 @@ pub(crate) fn resolve_snapshot(
             match engine.effective(provider, ctx, CliPolicyInput::Argv(args)) {
                 Ok(snapshot) => {
                     debug!(%provider, "Resolved effective policy snapshot from argv");
-                    (Some(SnapshotBox::Effective(snapshot)), ProtectPolicyMode::Effective)
+                    (
+                        Some(SnapshotBox::Effective(snapshot)),
+                        ProtectPolicyMode::Effective,
+                    )
                 }
                 Err(err) => {
                     debug!(%provider, %err, "Failed to resolve effective snapshot, using configured fallback");
@@ -51,7 +54,10 @@ pub(crate) fn resolve_snapshot(
             match engine.effective(provider, ctx, CliPolicyInput::Parsed(overrides.as_ref())) {
                 Ok(snapshot) => {
                     debug!(%provider, "Resolved effective policy snapshot from parsed overrides");
-                    (Some(SnapshotBox::Effective(snapshot)), ProtectPolicyMode::Effective)
+                    (
+                        Some(SnapshotBox::Effective(snapshot)),
+                        ProtectPolicyMode::Effective,
+                    )
                 }
                 Err(err) => {
                     debug!(%provider, %err, "Failed to resolve effective snapshot, using configured fallback");
@@ -71,7 +77,10 @@ fn try_configured_fallback(
     match engine.configured(provider, ctx) {
         Ok(snapshot) => {
             debug!(%provider, "Resolved configured policy snapshot (fallback)");
-            (Some(SnapshotBox::Configured(snapshot)), ProtectPolicyMode::ConfiguredFallback)
+            (
+                Some(SnapshotBox::Configured(snapshot)),
+                ProtectPolicyMode::ConfiguredFallback,
+            )
         }
         Err(err) => {
             debug!(%provider, %err, "Failed to resolve any policy snapshot");
@@ -184,8 +193,7 @@ pub(crate) fn evaluate_with_snapshot(
         && matches!(
             outcome,
             ProtectOutcome::Allow | ProtectOutcome::AdvisoryOnly { .. }
-        )
-    {
+        ) {
         ProtectOutcome::AllowWithRedaction {
             reason: "mcp.redaction-applied".to_string(),
         }
@@ -370,8 +378,17 @@ fn is_network_command(intent: &ProtectIntent) -> bool {
         let exe = cmd.executable.as_deref().unwrap_or("");
         matches!(
             exe,
-            "curl" | "wget" | "ssh" | "scp" | "rsync" | "nc" | "ncat"
-                | "netcat" | "socat" | "ftp" | "sftp"
+            "curl"
+                | "wget"
+                | "ssh"
+                | "scp"
+                | "rsync"
+                | "nc"
+                | "ncat"
+                | "netcat"
+                | "socat"
+                | "ftp"
+                | "sftp"
         )
     } else {
         false
@@ -750,5 +767,8 @@ fn completion_scan(
         }
     }
 
-    (QueryResult::allowed("completion.clean"), ProtectSeverity::Info)
+    (
+        QueryResult::allowed("completion.clean"),
+        ProtectSeverity::Info,
+    )
 }

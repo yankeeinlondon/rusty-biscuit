@@ -158,8 +158,7 @@ fn parse_checks(
             // Map form: shorthand
             let mut rules = Vec::with_capacity(obj.len());
             for (name, val) in obj {
-                let rule =
-                    parse_single_validation(name, val, is_pre, source_path, ctx, alloc_id)?;
+                let rule = parse_single_validation(name, val, is_pre, source_path, ctx, alloc_id)?;
                 rules.push(rule);
             }
             Ok(rules)
@@ -1058,7 +1057,7 @@ mod tests {
                 "json_file_exists": {
                     "file": "./data.json",
                     "shape": "object",
-                    "msg": "{{status}} data file is valid"
+                    "msg": "{{file}} data file is valid"
                 }
             }]
         });
@@ -1073,7 +1072,7 @@ mod tests {
         ));
         assert_eq!(
             plan.pre_checks[0].message_template.as_deref(),
-            Some("{{status}} data file is valid")
+            Some("{{file}} data file is valid")
         );
     }
 

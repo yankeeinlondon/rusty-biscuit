@@ -37,7 +37,7 @@ fn default_whatsapp_phone_number_id() -> String {
 /// Each variant represents a different messaging provider with its required
 /// credentials and endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "provider", rename_all = "lowercase")]
+#[serde(tag = "provider", rename_all = "lowercase", deny_unknown_fields)]
 pub enum MessagingRouteConfig {
     /// Discord bot configuration.
     Discord {
@@ -398,6 +398,21 @@ mod tests {
     }
 
     #[test]
+    fn route_config_rejects_unknown_fields() {
+        let json = r#"{
+            "provider": "slack",
+            "channel_id": "C0123456789",
+            "bot_toke_env": "SLACK_BOT_TOKEN"
+        }"#;
+
+        let error = serde_json::from_str::<MessagingRouteConfig>(json).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("unknown field"));
+        assert!(message.contains("bot_toke_env"));
+    }
+
+    #[test]
     fn validate_rejects_missing_active_route() {
         let settings = ScopedMessagingSettings {
             active: Some("nonexistent".to_string()),
@@ -406,10 +421,12 @@ mod tests {
 
         let result = settings.validate("global");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("active route 'nonexistent' not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("active route 'nonexistent' not found")
+        );
     }
 
     #[test]
@@ -431,10 +448,12 @@ mod tests {
 
         let result = settings.validate("repo");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("channel_id cannot be blank"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("channel_id cannot be blank")
+        );
     }
 
     #[test]
@@ -456,10 +475,12 @@ mod tests {
 
         let result = settings.validate("project");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("bot_token_env cannot be blank"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("bot_token_env cannot be blank")
+        );
     }
 
     #[test]
@@ -481,10 +502,12 @@ mod tests {
 
         let result = settings.validate("global");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("config name cannot be blank"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("config name cannot be blank")
+        );
     }
 
     #[test]

@@ -214,7 +214,6 @@ pub enum ClaudineError {
     PolicyAmbiguousContext(String),
 
     // --- System prompt errors ---
-
     /// Launch context detection failed (git or repo detection error).
     #[error("launch context detection failed: {0}")]
     LaunchContextDetection(String),

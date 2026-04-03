@@ -2602,3 +2602,310 @@ fn inline_compose_harness_writability_pre_check_fires() {
     perms.set_mode(0o644);
     fs::set_permissions(&md_file, perms).unwrap();
 }
+
+// ---------------------------------------------------------------------------
+// Handler-engagement banner emission semantics
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn handler_engagement_banner_suppressed_when_retry_ceiling_reached() {
+    // When the retry ceiling is hit and no recovery plan is produced,
+    // the "engaging registered handlers" banner must NOT appear a second time.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    // retries: 1 means only one retry attempt is allowed.
+    fs::write(
+        &md_file,
+        "---\nprompt: Rewrite the body\npost_checks:\n  response_includes: \"NEVER_APPEARS\"\nhandle_response_includes:\n  retry:\n    prompt: \"Include NEVER_APPEARS\"\n    retries: 1\n---\nOriginal body\n",
+    )
+    .unwrap();
+
+    // Agent always outputs text that does NOT contain the required string.
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\nprintf 'Some output without the keyword\\n'\nexit 0\n",
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .current_dir(workspace.path())
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .assert();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+
+    // After the first failure the retry handler fires (banner once).
+    // After the second failure the ceiling is reached — no new plan, no banner.
+    // Collapse whitespace because terminal line-wrapping can split the phrase.
+    let collapsed: String = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    let banner_count = collapsed.matches("engaging registered handlers").count();
+    assert!(
+        banner_count <= 1,
+        "banner should appear at most once; found {banner_count} occurrences in stderr:\n{stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn handler_engagement_banner_emitted_once_on_successful_recovery() {
+    // When a retry handler fires once and the retry succeeds,
+    // the banner must appear exactly once.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let count_path = workspace.path().join("attempt-count.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: Rewrite the body\npost_checks:\n  response_includes: \"MAGIC_WORD\"\nhandle_response_includes:\n  retry:\n    prompt: \"Your response must include MAGIC_WORD.\"\n---\nOriginal body\n",
+    )
+    .unwrap();
+
+    // First attempt: output without keyword. Second attempt: includes keyword.
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+count=0
+if [ -f "$CLAUDINE_COUNT_FILE" ]; then
+  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
+if [ "$count" -eq 1 ]; then
+  printf 'First attempt output\n'
+else
+  printf 'MAGIC_WORD recovery success\n'
+fi
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .current_dir(workspace.path())
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    // Collapse whitespace for line-wrapped output matching
+    let collapsed: String = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    let banner_count = collapsed.matches("engaging registered handlers").count();
+    assert_eq!(
+        banner_count, 1,
+        "banner should appear exactly once during successful recovery; found {banner_count} in stderr:\n{stderr}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Redirect status reporting
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn redirect_handler_updates_source_file_reporting() {
+    // After a redirect handler fires, the second attempt's source-file
+    // reporting should reference the redirected file, not the original.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let count_path = workspace.path().join("attempt-count.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let redirect_file = workspace.path().join("redirect-target.md");
+    fs::write(
+        &redirect_file,
+        "---\nprompt: Write the redirect content\n---\nRedirect body\n",
+    )
+    .unwrap();
+
+    let md_file = workspace.path().join("original.md");
+    fs::write(
+        &md_file,
+        format!(
+            "---\nprompt: Write content\npost_checks:\n  response_includes: \"REDIRECT_OK\"\nhandle_response_includes:\n  redirect:\n    file: \"{}\"\n---\nOriginal body\n",
+            redirect_file.display()
+        ),
+    )
+    .unwrap();
+
+    // First attempt (original.md): output lacks REDIRECT_OK → redirect fires
+    // Second attempt (redirect-target.md): no post_checks → succeeds
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+count=0
+if [ -f "$CLAUDINE_COUNT_FILE" ]; then
+  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
+if [ "$count" -eq 1 ]; then
+  printf 'First pass without keyword\n'
+else
+  printf 'REDIRECT_OK second pass\n'
+fi
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .current_dir(workspace.path())
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    // Collapse whitespace — terminal wrapping can break file names across lines
+    let collapsed: String = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // After redirect, source-file reporting should mention the redirected file
+    assert!(
+        collapsed.contains("redirect-target.md"),
+        "after redirect, stderr should reference the redirected file; stderr:\n{stderr}"
+    );
+
+    // The final file content should be written to the redirect target
+    let redirect_content = fs::read_to_string(&redirect_file).unwrap();
+    assert!(
+        redirect_content.contains("REDIRECT_OK"),
+        "redirect target should contain the second attempt's output; content:\n{redirect_content}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// --silent suppresses validation-reporting output
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn silent_suppresses_validation_reporting_output() {
+    // Normal verbosity: validation reporting appears.
+    // --silent: validation reporting is absent.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\npre_checks:\n  file_exists: \"missing-file.txt\"\n---\nBody\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        "#!/bin/sh\nprintf 'output\\n'\nexit 0\n",
+    );
+
+    // Normal run — should see pre-check failure reporting
+    let normal = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .current_dir(workspace.path())
+        .args(["compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .code(1);
+
+    let normal_stderr = strip_ansi(&String::from_utf8_lossy(&normal.get_output().stderr));
+    assert!(
+        normal_stderr.contains("pre-check")
+            || normal_stderr.contains("file_exists")
+            || normal_stderr.contains("missing-file.txt")
+            || normal_stderr.contains("validation failed"),
+        "normal verbosity should include validation reporting; stderr:\n{normal_stderr}"
+    );
+
+    // Silent run — validation reporting lines should be absent
+    let silent = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .current_dir(workspace.path())
+        .args([
+            "compose",
+            "--codex",
+            "--silent",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .code(1);
+
+    let silent_stderr = strip_ansi(&String::from_utf8_lossy(&silent.get_output().stderr));
+    // Source-file status should be suppressed
+    assert!(
+        !silent_stderr.contains("test.md"),
+        "--silent should suppress source-file status reporting; stderr:\n{silent_stderr}"
+    );
+    // Pre-check status lines should be suppressed
+    assert!(
+        !silent_stderr.contains("missing-file.txt"),
+        "--silent should suppress pre-check validation output; stderr:\n{silent_stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn silent_suppresses_handler_engagement_banner() {
+    // When --silent is active, the "engaging registered handlers" banner
+    // must not appear even when handlers fire.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let count_path = workspace.path().join("attempt-count.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(
+        &md_file,
+        "---\nprompt: Rewrite the body\npost_checks:\n  response_includes: \"REQUIRED\"\nhandle_response_includes:\n  retry:\n    prompt: \"Include REQUIRED.\"\n---\nOriginal body\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+count=0
+if [ -f "$CLAUDINE_COUNT_FILE" ]; then
+  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
+if [ "$count" -eq 1 ]; then
+  printf 'First attempt\n'
+else
+  printf 'REQUIRED second attempt\n'
+fi
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_COUNT_FILE", &count_path)
+        .current_dir(workspace.path())
+        .args([
+            "inline-compose",
+            "--goose",
+            "--silent",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    let collapsed: String = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        !collapsed.contains("engaging registered handlers"),
+        "--silent should suppress handler-engagement banner; stderr:\n{stderr}"
+    );
+}
