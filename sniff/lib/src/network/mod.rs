@@ -168,10 +168,8 @@ enum PermissionOrError {
     Other(crate::SniffError),
 }
 
-fn detect_local_interfaces() -> std::result::Result<
-    (Vec<NetworkInterface>, Option<String>, IpAddresses),
-    PermissionOrError,
-> {
+fn detect_local_interfaces()
+-> std::result::Result<(Vec<NetworkInterface>, Option<String>, IpAddresses), PermissionOrError> {
     let addrs = match getifaddrs::getifaddrs() {
         Ok(addrs) => addrs,
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
