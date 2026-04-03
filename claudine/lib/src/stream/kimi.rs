@@ -58,6 +58,11 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             .and_then(|v| v.as_str())
             .map(String::from);
         self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
+        super::trace_session_metadata(
+            Provider::KimiCode,
+            self.session_id.as_deref(),
+            self.model.as_deref(),
+        );
 
         let mut meta = EventMeta::default();
         if let Some(session_id) = &self.session_id {
@@ -173,6 +178,12 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
 
             self.context_usage = Some(context);
         }
+        super::trace_summary_update(
+            Provider::KimiCode,
+            self.provider_status.as_deref(),
+            self.duration_ms,
+            self.cost_usd,
+        );
     }
 
     fn handle_error(&mut self, obj: &Value) {
@@ -205,6 +216,7 @@ impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
         let obj: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
+            super::trace_malformed_line(Provider::KimiCode, self.line_num, &e.to_string());
             StreamParseError::MalformedLine {
                 line_num: self.line_num,
                 message: e.to_string(),
@@ -212,6 +224,7 @@ impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
         })?;
 
         let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        super::trace_parser_event(Provider::KimiCode, event_type, self.line_num);
 
         match event_type {
             "init" | "system" => {
@@ -229,6 +242,13 @@ impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
             }
             "tool_use" => {
                 self.tool_calls += 1;
+                super::trace_tool_event(
+                    Provider::KimiCode,
+                    self.tool_calls,
+                    obj.get("name")
+                        .or_else(|| obj.get("tool_name"))
+                        .and_then(|value| value.as_str()),
+                );
                 let mut meta = EventMeta::default();
                 if let Some(tool_name) = obj
                     .get("name")

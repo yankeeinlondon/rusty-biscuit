@@ -11,6 +11,7 @@ pub mod summary;
 pub mod token_usage;
 
 use serde::{Deserialize, Serialize};
+use tracing::trace;
 
 use crate::events::Provider;
 use parser::{StreamEventSink, StreamParser};
@@ -74,6 +75,61 @@ pub fn stream_protocol_for(provider: Provider) -> Option<StreamProtocol> {
         Provider::QwenCode => Some(StreamProtocol::StreamJson),
         _ => None,
     }
+}
+
+pub(crate) fn trace_parser_event(provider: Provider, event_type: &str, line_num: usize) {
+    trace!(
+        provider = %provider,
+        event_type,
+        line_num,
+        "parsed structured stream event"
+    );
+}
+
+pub(crate) fn trace_session_metadata(
+    provider: Provider,
+    session_id: Option<&str>,
+    model: Option<&str>,
+) {
+    trace!(
+        provider = %provider,
+        session_id = session_id.unwrap_or(""),
+        model = model.unwrap_or(""),
+        "updated stream session metadata"
+    );
+}
+
+pub(crate) fn trace_tool_event(provider: Provider, tool_calls: u32, tool_name: Option<&str>) {
+    trace!(
+        provider = %provider,
+        tool_calls,
+        tool_name = tool_name.unwrap_or(""),
+        "updated stream tool state"
+    );
+}
+
+pub(crate) fn trace_summary_update(
+    provider: Provider,
+    provider_status: Option<&str>,
+    duration_ms: Option<u64>,
+    cost_usd: Option<f64>,
+) {
+    trace!(
+        provider = %provider,
+        provider_status = provider_status.unwrap_or(""),
+        duration_ms = duration_ms.unwrap_or(0),
+        cost_usd = cost_usd.unwrap_or(0.0),
+        "updated stream summary state"
+    );
+}
+
+pub(crate) fn trace_malformed_line(provider: Provider, line_num: usize, message: &str) {
+    trace!(
+        provider = %provider,
+        line_num,
+        %message,
+        "skipping malformed structured stream line"
+    );
 }
 
 #[cfg(test)]
