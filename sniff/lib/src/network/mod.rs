@@ -1,5 +1,5 @@
-use crate::request::NetworkRequest;
 use crate::Result;
+use crate::request::NetworkRequest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(feature = "network")]

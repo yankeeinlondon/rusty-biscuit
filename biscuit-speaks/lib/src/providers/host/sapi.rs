@@ -76,7 +76,8 @@ impl SapiProvider {
 
         // Sort by quality descending, then name ascending
         candidates.sort_by(|a, b| {
-            a.quality.rank()
+            a.quality
+                .rank()
                 .cmp(&b.quality.rank())
                 .then_with(|| a.name.cmp(&b.name))
         });
@@ -226,10 +227,12 @@ mod tests {
 
     #[test]
     fn test_select_best_default_voice_gender_fallback() {
-        let voices = vec![Voice::new("Microsoft Zira Desktop")
-            .with_gender(Gender::Female)
-            .with_quality(VoiceQuality::Good)
-            .with_language(Language::English)];
+        let voices = vec![
+            Voice::new("Microsoft Zira Desktop")
+                .with_gender(Gender::Female)
+                .with_quality(VoiceQuality::Good)
+                .with_language(Language::English),
+        ];
 
         let best = SapiProvider::select_best_default_voice(&voices, Gender::Male).unwrap();
         assert_eq!(best.name, "Microsoft Zira Desktop");

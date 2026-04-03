@@ -24,8 +24,8 @@ pub use crate::os::{
     PackageManagerCommands, SystemPackageManager, SystemPackageManagers, TimeInfo,
     command_exists_in_path, detect_bsd_package_managers, detect_linux_distro,
     detect_linux_package_managers, detect_locale, detect_macos_package_managers, detect_ntp_status,
-    detect_os, detect_os_type, detect_os_with_request, detect_timezone, detect_timezone_with_options,
-    detect_windows_package_managers, extract_encoding,
+    detect_os, detect_os_type, detect_os_with_request, detect_timezone,
+    detect_timezone_with_options, detect_windows_package_managers, extract_encoding,
     extract_language_code, get_commands_for_manager, get_path_dirs, infer_linux_family,
     parse_lsb_release_content, parse_os_release_content, parse_system_release_content,
 };
@@ -73,10 +73,18 @@ pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<Hardwar
     );
 
     let cpu = CpuInfo {
-        brand: sys.cpus().first().map(|c| c.brand().to_string()).unwrap_or_default(),
+        brand: sys
+            .cpus()
+            .first()
+            .map(|c| c.brand().to_string())
+            .unwrap_or_default(),
         arch: {
             let arch = System::cpu_arch();
-            if arch.is_empty() { std::env::consts::ARCH.to_string() } else { arch }
+            if arch.is_empty() {
+                std::env::consts::ARCH.to_string()
+            } else {
+                arch
+            }
         },
         logical_cores: sys.cpus().len(),
         physical_cores: System::physical_core_count(),
@@ -86,7 +94,11 @@ pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<Hardwar
     // On macOS (and possibly other platforms), available_memory() may return 0.
     // In this case, fall back to free_memory() which provides usable memory info.
     let available = sys.available_memory();
-    let available_bytes = if available == 0 { sys.free_memory() } else { available };
+    let available_bytes = if available == 0 {
+        sys.free_memory()
+    } else {
+        available
+    };
 
     let memory = MemoryInfo {
         total_bytes: sys.total_memory(),
@@ -109,7 +121,13 @@ pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<Hardwar
         Vec::new()
     };
 
-    Ok(HardwareInfo { cpu, memory, storage, gpu, audio_devices })
+    Ok(HardwareInfo {
+        cpu,
+        memory,
+        storage,
+        gpu,
+        audio_devices,
+    })
 }
 
 /// Detects hardware information from the current system.

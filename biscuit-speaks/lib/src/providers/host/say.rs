@@ -116,7 +116,8 @@ impl SayProvider {
 
         // Sort by quality (highest first), then name alphabetically
         candidates.sort_by(|a, b| {
-            a.quality.rank()
+            a.quality
+                .rank()
                 .cmp(&b.quality.rank())
                 .then_with(|| a.name.cmp(&b.name))
         });
@@ -397,11 +398,9 @@ impl TtsVoiceInventory for SayProvider {
             .with_gender(gender)
             .with_language(Language::English);
 
-        Self::select_best_voice(&voices, &config).ok_or_else(|| {
-            TtsError::VoiceEnumerationFailed {
-                provider: Self::PROVIDER_NAME.into(),
-                message: "No voices available".into(),
-            }
+        Self::select_best_voice(&voices, &config).ok_or_else(|| TtsError::VoiceEnumerationFailed {
+            provider: Self::PROVIDER_NAME.into(),
+            message: "No voices available".into(),
         })
     }
 }
@@ -768,10 +767,12 @@ mod tests {
 
     #[test]
     fn test_default_voice_selection_gender_fallback() {
-        let voices = vec![Voice::new("Samantha")
-            .with_gender(Gender::Female)
-            .with_quality(VoiceQuality::Good)
-            .with_language(Language::English)];
+        let voices = vec![
+            Voice::new("Samantha")
+                .with_gender(Gender::Female)
+                .with_quality(VoiceQuality::Good)
+                .with_language(Language::English),
+        ];
 
         let config = TtsConfig::new().with_gender(Gender::Male);
         let best = SayProvider::select_best_voice(&voices, &config).unwrap();

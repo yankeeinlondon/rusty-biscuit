@@ -442,7 +442,10 @@ impl std::fmt::Debug for ComposeOptions {
             )
             .field(
                 "pre_approved_commands",
-                &self.pre_approved_commands.as_ref().map(|s| format!("{} commands", s.len())),
+                &self
+                    .pre_approved_commands
+                    .as_ref()
+                    .map(|s| format!("{} commands", s.len())),
             )
             .field("list_spacing", &self.list_spacing)
             .field("indent_size", &self.indent_size)
@@ -671,7 +674,10 @@ impl ComposeOptions {
 
     /// Sets the pre-approved shell commands.
     #[must_use]
-    pub fn with_pre_approved_commands(mut self, commands: std::collections::HashSet<String>) -> Self {
+    pub fn with_pre_approved_commands(
+        mut self,
+        commands: std::collections::HashSet<String>,
+    ) -> Self {
         self.pre_approved_commands = Some(commands);
         self
     }

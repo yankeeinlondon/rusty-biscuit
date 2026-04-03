@@ -1,5 +1,5 @@
-use crate::request::{FilesystemRequest, GitRequest};
 use crate::Result;
+use crate::request::{FilesystemRequest, GitRequest};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -121,7 +121,10 @@ pub fn detect_filesystem_with_request(
 
     // Stage 5: Docs
     let docs = if request.include_docs {
-        match (git.as_ref(), repo.as_ref().and_then(|r| r.packages.as_ref())) {
+        match (
+            git.as_ref(),
+            repo.as_ref().and_then(|r| r.packages.as_ref()),
+        ) {
             (Some(git_info), Some(packages)) => {
                 let pkg_tuples: Vec<(String, PathBuf)> = packages
                     .iter()

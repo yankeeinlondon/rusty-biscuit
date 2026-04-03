@@ -1989,10 +1989,7 @@ fn merge_path_lists(existing: &[PathBuf], incoming: &[PathBuf]) -> Vec<PathBuf> 
     merged
 }
 
-fn refresh_package_boundaries(
-    packages: &mut [Package],
-    repo_inventory: Option<&FileInventory>,
-) {
+fn refresh_package_boundaries(packages: &mut [Package], repo_inventory: Option<&FileInventory>) {
     let package_paths: Vec<PathBuf> = packages.iter().map(|pkg| pkg.path.clone()).collect();
     let package_roots: Vec<PathBuf> = packages
         .iter()

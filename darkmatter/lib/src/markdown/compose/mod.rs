@@ -760,9 +760,7 @@ impl Markdown {
             {
                 let mut forward: Vec<_> = replacements
                     .iter()
-                    .map(|(_, span, content, source)| {
-                        (span.clone(), content.len(), source.clone())
-                    })
+                    .map(|(_, span, content, source)| (span.clone(), content.len(), source.clone()))
                     .collect();
                 forward.sort_by_key(|(span, _, _)| span.start);
 
@@ -2205,8 +2203,7 @@ mod tests {
 
     #[test]
     fn test_interpolation_code_spans_via_frontmatter() {
-        let content =
-            "---\nname: Alice\ninterpolate_code_spans: true\n---\nHello {{ name }}! Code: `{{ name }}`";
+        let content = "---\nname: Alice\ninterpolate_code_spans: true\n---\nHello {{ name }}! Code: `{{ name }}`";
         let md: Markdown = content.into();
 
         let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);

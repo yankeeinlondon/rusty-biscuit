@@ -653,11 +653,7 @@ fn test_compose_set_variables_available_during_validation() {
 
     // Create a template that uses --set variable in a ::file directive
     let template_path = temp_dir.path().join("template.md");
-    std::fs::write(
-        &template_path,
-        "# Task\n\n::file features/{{plan}}\n",
-    )
-    .unwrap();
+    std::fs::write(&template_path, "# Task\n\n::file features/{{plan}}\n").unwrap();
 
     md_cmd()
         .arg("compose")
@@ -681,11 +677,7 @@ fn test_compose_state_variables_available_during_validation() {
     .unwrap();
 
     let template_path = temp_dir.path().join("template.md");
-    std::fs::write(
-        &template_path,
-        "# Docs\n\n::file docs/{{doc}}\n",
-    )
-    .unwrap();
+    std::fs::write(&template_path, "# Docs\n\n::file docs/{{doc}}\n").unwrap();
 
     md_cmd()
         .arg("compose")

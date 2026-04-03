@@ -438,9 +438,7 @@ mod tests {
 
     #[test]
     fn detection_plan_skip_sections() {
-        let plan = DetectionPlan::new()
-            .without_os()
-            .without_hardware();
+        let plan = DetectionPlan::new().without_os().without_hardware();
         assert!(plan.os.is_none());
         assert!(plan.hardware.is_none());
         assert!(plan.network.is_some());
@@ -536,7 +534,7 @@ mod tests {
             .filesystem(
                 FilesystemRequest::new()
                     .git(GitRequest::deep().commit_count(5))
-                    .repo(RepoRequest::structure())
+                    .repo(RepoRequest::structure()),
             );
 
         let json = serde_json::to_string(&plan).unwrap();

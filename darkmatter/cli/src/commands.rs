@@ -407,10 +407,9 @@ pub fn run_compose(
             ReferenceSeverity, ReferenceValidationOptions,
         };
 
-        let val_options =
-            ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
-                options.clone(),
-            ));
+        let val_options = ReferenceValidationOptions::with_graph(
+            ReferenceGraphOptions::with_compose(options.clone()),
+        );
 
         match md.validate_references(val_options) {
             Ok(report) => {
