@@ -243,6 +243,7 @@ impl super::Provider for DiscordProvider {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(provider = "discord", channel = tracing::field::Empty))]
     async fn send_prepared(
         &self,
         dispatch: &Dispatch,
@@ -256,6 +257,7 @@ impl super::Provider for DiscordProvider {
                 ));
             }
         };
+        tracing::Span::current().record("channel", tracing::field::display(channel_id));
 
         // Render the message body (with location text fallback)
         let content = match message.body() {
@@ -268,6 +270,18 @@ impl super::Provider for DiscordProvider {
             None => String::new(),
         };
         let attachments = Self::build_attachments(message)?;
+        let attachment_kinds: Vec<_> = message
+            .attachments()
+            .iter()
+            .map(|attachment| &attachment.kind)
+            .collect();
+        tracing::debug!(
+            has_reply = dispatch.reply_to.is_some(),
+            content_len = content.len(),
+            attachment_count = attachments.len(),
+            "sending Discord message"
+        );
+        tracing::trace!(attachment_kinds = ?attachment_kinds, "built Discord attachments");
 
         // Build the message request
         let mut req = self.client.create_message(channel_id);
@@ -285,18 +299,22 @@ impl super::Provider for DiscordProvider {
             req = req.reply(msg_id);
         }
         // Execute the request
-        let response = req.await.map_err(|e| MessengerError::Transport {
-            provider: ProviderKind::Discord,
-            message: e.to_string(),
-        })?;
-
-        let msg = response
-            .model()
-            .await
-            .map_err(|e| MessengerError::Transport {
+        let response = req.await.map_err(|e| {
+            tracing::warn!(error = %e, "Discord request failed");
+            MessengerError::Transport {
                 provider: ProviderKind::Discord,
                 message: e.to_string(),
-            })?;
+            }
+        })?;
+
+        let msg = response.model().await.map_err(|e| {
+            tracing::warn!(error = %e, "Discord response decode failed");
+            MessengerError::Transport {
+                provider: ProviderKind::Discord,
+                message: e.to_string(),
+            }
+        })?;
+        tracing::debug!(raw_id = %msg.id, "Discord message sent");
 
         Ok(SendReceipt {
             provider: ProviderKind::Discord,

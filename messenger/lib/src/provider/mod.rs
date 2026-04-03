@@ -39,9 +39,12 @@ pub trait Provider: Send + Sync {
         dispatch: &Dispatch,
         message: &Message,
     ) -> Result<SendReceipt, MessengerError> {
+        let provider = self.kind();
+        tracing::debug!(provider = %provider, "sending directly through provider");
         validate_message(message)?;
-        let normalized = normalize_dispatch(dispatch, message, &self.capabilities(), self.kind())?;
+        let normalized = normalize_dispatch(dispatch, message, &self.capabilities(), provider)?;
         let prepared = PreparedMessage::new(&normalized.message);
+        tracing::debug!(provider = %provider, "provider message prepared");
         self.send_prepared(&normalized.dispatch, &prepared).await
     }
 }
@@ -74,16 +77,20 @@ impl Messenger {
     }
 
     /// Send a message to a single target.
+    #[tracing::instrument(skip_all, fields(target = ?dispatch.target))]
     pub async fn send(
         &self,
         dispatch: Dispatch,
         message: &Message,
     ) -> Result<SendReceipt, MessengerError> {
         let plan = self.plan_send(dispatch, message)?;
-        self.send_planned(plan).await
+        let receipt = self.send_planned(plan).await?;
+        tracing::debug!(provider = %receipt.provider, raw_id = %receipt.raw_id, "send completed");
+        Ok(receipt)
     }
 
     /// Build a send plan, collecting any best-effort compatibility warnings.
+    #[tracing::instrument(skip_all, fields(provider = tracing::field::Empty))]
     pub fn plan_send(
         &self,
         dispatch: Dispatch,
@@ -92,6 +99,7 @@ impl Messenger {
         validate_message(message)?;
 
         let provider_kind = target_provider_kind(&dispatch.target);
+        tracing::Span::current().record("provider", tracing::field::display(provider_kind));
         let provider =
             self.providers
                 .get(&provider_kind)
@@ -102,6 +110,7 @@ impl Messenger {
 
         let normalized =
             normalize_dispatch(&dispatch, message, &provider.capabilities(), provider_kind)?;
+        tracing::debug!(warning_count = normalized.warnings.len(), "send plan ready");
 
         Ok(SendPlan {
             provider: provider_kind,
@@ -112,6 +121,7 @@ impl Messenger {
     }
 
     /// Send a previously planned message.
+    #[tracing::instrument(skip_all, fields(provider = %plan.provider))]
     pub async fn send_planned(&self, plan: SendPlan) -> Result<SendReceipt, MessengerError> {
         let provider =
             self.providers
@@ -122,21 +132,36 @@ impl Messenger {
                 })?;
 
         let prepared = PreparedMessage::new(&plan.message);
-        provider.send_prepared(&plan.dispatch, &prepared).await
+        tracing::debug!("dispatching prepared message");
+        let receipt = provider.send_prepared(&plan.dispatch, &prepared).await?;
+        tracing::info!(raw_id = %receipt.raw_id, "send complete");
+        Ok(receipt)
     }
 
     /// Send a message to multiple targets, collecting all results.
+    #[tracing::instrument(skip_all, fields(count = tracing::field::Empty))]
     pub async fn send_many(
         &self,
         dispatches: Vec<Dispatch>,
         message: &Message,
     ) -> Vec<Result<SendReceipt, MessengerError>> {
-        join_all(
+        let count = dispatches.len();
+        tracing::Span::current().record("count", count);
+        tracing::info!(count, "starting fan-out send");
+        let results = join_all(
             dispatches
                 .into_iter()
                 .map(|dispatch| self.send(dispatch, message)),
         )
-        .await
+        .await;
+        let success_count = results.iter().filter(|result| result.is_ok()).count();
+        tracing::info!(
+            count,
+            success_count,
+            error_count = count.saturating_sub(success_count),
+            "fan-out send complete"
+        );
+        results
     }
 }
 

@@ -161,6 +161,7 @@ impl super::Provider for TelegramProvider {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(provider = "telegram", chat = tracing::field::Empty))]
     async fn send_prepared(
         &self,
         dispatch: &Dispatch,
@@ -177,6 +178,7 @@ impl super::Provider for TelegramProvider {
 
         let chat_id_str = Self::chat_id_to_string(chat_id_target);
         let chat_ref = Self::chat_id_to_ref(chat_id_target);
+        tracing::Span::current().record("chat", tracing::field::display(&chat_id_str));
 
         // Build reply parameters
         let reply_params = match &dispatch.reply_to {
@@ -205,8 +207,15 @@ impl super::Provider for TelegramProvider {
                 disable_notification,
             };
 
+            tracing::debug!(
+                has_reply = reply_params.is_some(),
+                thread_id = ?thread_id,
+                silent = dispatch.options.silent,
+                "sending Telegram location"
+            );
             let url = format!("{}/sendLocation", self.api_base_url);
-            let resp = self.post_request(&url, &body).await?;
+            let resp = self.post_request("sendLocation", &url, &body).await?;
+            tracing::debug!(raw_id = %resp.message_id, "Telegram location sent");
 
             return Ok(SendReceipt {
                 provider: ProviderKind::Telegram,
@@ -232,6 +241,14 @@ impl super::Provider for TelegramProvider {
             ),
             None => (String::new(), None),
         };
+        tracing::debug!(
+            has_reply = reply_params.is_some(),
+            thread_id = ?thread_id,
+            silent = dispatch.options.silent,
+            disable_link_preview = dispatch.options.disable_link_preview,
+            text_len = text.len(),
+            "sending Telegram message"
+        );
 
         let body = SendMessageRequest {
             chat_id: &chat_id_str,
@@ -248,7 +265,8 @@ impl super::Provider for TelegramProvider {
         };
 
         let url = format!("{}/sendMessage", self.api_base_url);
-        let result = self.post_request(&url, &body).await?;
+        let result = self.post_request("sendMessage", &url, &body).await?;
+        tracing::debug!(raw_id = %result.message_id, "Telegram message sent");
 
         Ok(SendReceipt {
             provider: ProviderKind::Telegram,
@@ -266,17 +284,22 @@ impl super::Provider for TelegramProvider {
 impl TelegramProvider {
     async fn post_request<T: Serialize>(
         &self,
+        request_kind: &'static str,
         url: &str,
         body: &T,
     ) -> Result<TelegramMessage, MessengerError> {
+        tracing::debug!(request_kind, "sending Telegram API request");
         let response = self.client.post(url).json(body).send().await.map_err(|e| {
+            tracing::warn!(request_kind, error = %e, "Telegram transport request failed");
             MessengerError::Transport {
                 provider: ProviderKind::Telegram,
                 message: e.to_string(),
             }
         })?;
+        tracing::debug!(request_kind, status = %response.status(), "received Telegram response");
 
         if response.status().is_server_error() {
+            tracing::warn!(request_kind, status = %response.status(), "Telegram server error");
             return Err(MessengerError::Transport {
                 provider: ProviderKind::Telegram,
                 message: format!("server error: {}", response.status()),
@@ -293,7 +316,29 @@ impl TelegramProvider {
                 })?;
 
         if !resp.ok {
-            return Err(handle_error(&resp));
+            let error = handle_error(&resp);
+            match &error {
+                MessengerError::RateLimited { retry_after_ms, .. } => {
+                    tracing::warn!(
+                        request_kind,
+                        retry_after_ms = ?retry_after_ms,
+                        "Telegram rate limited request"
+                    );
+                }
+                MessengerError::Authentication { message, .. } => {
+                    tracing::warn!(request_kind, error = %message, "Telegram authentication failed");
+                }
+                MessengerError::Provider { code, message, .. } => {
+                    tracing::warn!(
+                        request_kind,
+                        code = ?code,
+                        error = %message,
+                        "Telegram provider returned error"
+                    );
+                }
+                _ => {}
+            }
+            return Err(error);
         }
 
         resp.result.ok_or_else(|| MessengerError::Transport {

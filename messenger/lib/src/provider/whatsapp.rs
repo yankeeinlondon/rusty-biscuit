@@ -122,6 +122,7 @@ impl super::Provider for WhatsAppProvider {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(provider = "whatsapp", recipient = tracing::field::Empty))]
     async fn send_prepared(
         &self,
         dispatch: &Dispatch,
@@ -135,6 +136,7 @@ impl super::Provider for WhatsAppProvider {
                 ));
             }
         };
+        tracing::Span::current().record("recipient", tracing::field::display(recipient));
 
         let context = match &dispatch.reply_to {
             Some(MessageRef::WhatsApp { message_id }) => Some(ContextPayload {
@@ -145,6 +147,7 @@ impl super::Provider for WhatsAppProvider {
 
         // Choose which API method to use based on content
         let body = if let Some(location) = message.location() {
+            tracing::trace!(message_type = "location", "selected WhatsApp payload type");
             WhatsAppMessageRequest {
                 messaging_product: "whatsapp",
                 to: recipient,
@@ -166,6 +169,7 @@ impl super::Provider for WhatsAppProvider {
                 }
                 None => String::new(),
             };
+            tracing::trace!(message_type = "text", "selected WhatsApp payload type");
 
             WhatsAppMessageRequest {
                 messaging_product: "whatsapp",
@@ -179,6 +183,10 @@ impl super::Provider for WhatsAppProvider {
                 context,
             }
         };
+        tracing::debug!(
+            has_reply = dispatch.reply_to.is_some(),
+            "sending WhatsApp message"
+        );
 
         let url = format!("{}/messages", self.api_base_url);
 
@@ -198,8 +206,10 @@ impl super::Provider for WhatsAppProvider {
             })?;
 
         let status = response.status();
+        tracing::debug!(status = %status, "received WhatsApp response");
 
         if status.as_u16() == 429 {
+            tracing::warn!("WhatsApp rate limited request");
             return Err(MessengerError::RateLimited {
                 provider: ProviderKind::WhatsApp,
                 retry_after_ms: None,
@@ -207,6 +217,7 @@ impl super::Provider for WhatsAppProvider {
         }
 
         if status.is_server_error() {
+            tracing::warn!(status = %status, "WhatsApp transport request failed");
             return Err(MessengerError::Transport {
                 provider: ProviderKind::WhatsApp,
                 message: format!("server error: {status}"),
@@ -227,12 +238,14 @@ impl super::Provider for WhatsAppProvider {
             let msg = error.message.unwrap_or_else(|| "unknown error".to_string());
 
             if code == 190 {
+                tracing::warn!(code, error = %msg, "WhatsApp authentication failed");
                 return Err(MessengerError::Authentication {
                     provider: ProviderKind::WhatsApp,
                     message: msg,
                 });
             }
 
+            tracing::warn!(code, error = %msg, "WhatsApp provider returned error");
             return Err(MessengerError::Provider {
                 provider: ProviderKind::WhatsApp,
                 code: Some(code.to_string()),
@@ -244,6 +257,7 @@ impl super::Provider for WhatsAppProvider {
             .messages
             .and_then(|mut m| m.pop().map(|msg| msg.id))
             .unwrap_or_default();
+        tracing::debug!(raw_id = %message_id, "WhatsApp message sent");
 
         Ok(SendReceipt {
             provider: ProviderKind::WhatsApp,
