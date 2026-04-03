@@ -68,7 +68,7 @@ pub fn osc52_support() -> bool {
         return false;
     }
 
-    matches!(
+    let supported = matches!(
         get_terminal_app(),
         TerminalApp::Kitty
             | TerminalApp::Wezterm
@@ -77,7 +77,9 @@ pub fn osc52_support() -> bool {
             | TerminalApp::Alacritty
             | TerminalApp::Foot
             | TerminalApp::Contour
-    )
+    );
+    tracing::debug!(supported, "OSC52 clipboard support");
+    supported
 }
 
 /// OSC52 clipboard target.
