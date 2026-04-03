@@ -6,6 +6,7 @@ use super::types::{PageBlockError, PageBlockRegion};
 use crate::markdown::compose::EffectiveState;
 use crate::markdown::compose::conditions;
 use crate::markdown::compose::types::ComposeReport;
+use tracing::debug;
 
 /// Renders page blocks by evaluating conditions and splicing content.
 ///
@@ -18,6 +19,8 @@ pub fn render_page_blocks(
     state: &EffectiveState,
     report: &mut ComposeReport,
 ) -> Result<String, PageBlockError> {
+    debug!(region_count = regions.len(), "page_blocks: rendering");
+
     let mut output = String::with_capacity(content.len());
     let mut cursor = 0;
 

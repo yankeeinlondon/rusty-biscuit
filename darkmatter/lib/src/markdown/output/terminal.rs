@@ -4967,8 +4967,6 @@ fn main() {}
         let output = render_table(&rows, &alignments, narrow_width);
         let plain = strip_ansi_codes(&output);
 
-        eprintln!("Table at width {}:\n{}", narrow_width, plain);
-
         // At 40 columns, this 3-column table cannot fit — the renderer returns
         // an error message explaining the minimum width required.
         if plain.contains("could not be rendered") {
@@ -6447,27 +6445,9 @@ fn line6() {}
         options.color_depth = Some(ColorDepth::TrueColor);
         let output = for_terminal(&md, options).unwrap();
 
-        eprintln!("Raw output bytes:");
-        for (i, byte) in output.bytes().enumerate() {
-            if byte == 0x1b {
-                eprint!("\n[{}] ESC", i);
-            } else if byte == b'm' {
-                eprint!("m ");
-            } else if byte.is_ascii_graphic() || byte == b' ' {
-                eprint!("{}", byte as char);
-            } else if byte == b'\n' {
-                eprint!("\\n ");
-            } else {
-                eprint!("({:02x})", byte);
-            }
-        }
-        eprintln!("\n---");
-        eprintln!("Plain output:\n{}", strip_ansi_codes(&output));
-
         // Check for duplicate background codes
         let bg_code = "\x1b[48;2;255;243;184m";
         let bg_count = output.matches(bg_code).count();
-        eprintln!("Yellow background code count: {}", bg_count);
 
         // For "separate it from" (3 words + 2 spaces when styled), we expect up to 5 bg codes
         // But we should NOT have consecutive duplicate codes
@@ -6498,10 +6478,6 @@ Unlike the strikethrough functionality, the **highlight** feature for Markdown l
         options.color_depth = Some(ColorDepth::TrueColor);
         let output = for_terminal(&md, options).unwrap();
         let plain = strip_ansi_codes(&output);
-
-        eprintln!("Plain output:\n{:?}", plain);
-        eprintln!("---");
-        eprintln!("{}", plain);
 
         // Check that there are no instances of 3 or more consecutive blank lines
         // (we allow 2 blank lines for section spacing)
@@ -6700,31 +6676,7 @@ fn bar() {}
         options.color_depth = Some(ColorDepth::TrueColor);
         let output = for_terminal(&md, options).unwrap();
 
-        // Print raw output for debugging
-        eprintln!("Raw output (escapes visible):");
-        for (i, byte) in output.bytes().enumerate() {
-            if byte == 0x1b {
-                eprint!("\n[{}] ESC", i);
-            } else if byte == b'\n' {
-                eprint!("\\n");
-            } else if byte == b' ' {
-                eprint!("_");
-            } else if byte.is_ascii_graphic() {
-                eprint!("{}", byte as char);
-            } else {
-                eprint!("({:02x})", byte);
-            }
-        }
-        eprintln!("\n---");
-
         let plain = strip_ansi_codes(&output);
-        eprintln!("Plain text ({} chars):", plain.len());
-        eprintln!("{:?}", plain);
-
-        eprintln!("\n---Lines---");
-        for (i, line) in plain.lines().enumerate() {
-            eprintln!("[{}] ({} chars) {:?}", i, line.len(), line);
-        }
 
         // The key assertion: there should be no blank lines within the wrapped list item
         let lines: Vec<&str> = plain.lines().collect();
@@ -6785,13 +6737,10 @@ fn bar() {}
             for (i, window) in lines.windows(2).enumerate() {
                 if !window[0].is_empty() && window[1].is_empty() && i + 2 < lines.len() {
                     has_unexpected_blank = true;
-                    eprintln!("Width {}: Found blank line at position {}", width, i + 1);
-                    eprintln!("  Lines: {:?}", lines);
                 }
             }
 
             if has_unexpected_blank {
-                eprintln!("Width {}: Output = {:?}", width, plain);
                 panic!("Found unexpected blank line at width {}", width);
             }
         }
