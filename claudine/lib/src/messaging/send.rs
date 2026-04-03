@@ -5,6 +5,7 @@
 //! fire-and-forget async dispatch.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use messenger::provider::{
     Messenger,
@@ -88,6 +89,54 @@ pub fn execute_message(
                 provider = provider_kind_label_from_config(&route.config),
                 error = %e,
                 "Failed to send message"
+            );
+        }
+    });
+}
+
+/// Send a pre-rendered message without template interpolation.
+///
+/// Unlike [`execute_message`], this function accepts already-resolved text
+/// and does not require an [`EventMeta`]. Designed for lifecycle notifications
+/// where the message text is a fixed string from frontmatter.
+///
+/// Follows the same fire-and-forget pattern: spawns an async task and returns
+/// immediately. Missing routes are a no-op.
+pub fn execute_resolved_message(
+    text: &str,
+    image: Option<&str>,
+    cwd: Option<&Path>,
+    repo_root: Option<&Path>,
+    messaging: &RuntimeMessagingSettings,
+) {
+    if text.trim().is_empty() && image.is_none() {
+        return;
+    }
+
+    let Some(route) = resolve_effective_route(messaging) else {
+        return;
+    };
+
+    let cwd_str = cwd.and_then(|p| p.to_str());
+    let repo_str = repo_root.and_then(|p| p.to_str());
+
+    let Some(payload) = build_payload(
+        &route,
+        text.to_string(),
+        image.map(|s| s.to_string()),
+        cwd_str,
+        repo_str,
+    ) else {
+        return;
+    };
+
+    tokio::spawn(async move {
+        if let Err(e) = send_payload(&route, payload).await {
+            warn!(
+                route = route.name,
+                provider = provider_kind_label_from_config(&route.config),
+                error = %e,
+                "Failed to send lifecycle message"
             );
         }
     });
@@ -395,5 +444,23 @@ mod tests {
             ))
         );
         assert!(payload.message.attachments.is_empty());
+    }
+
+    #[test]
+    fn execute_resolved_message_with_no_route_is_noop() {
+        let messaging = RuntimeMessagingSettings {
+            user: None,
+            repo: None,
+        };
+        execute_resolved_message("Hello world", None, None, None, &messaging);
+    }
+
+    #[test]
+    fn execute_resolved_message_empty_text_is_noop() {
+        let messaging = RuntimeMessagingSettings {
+            user: None,
+            repo: None,
+        };
+        execute_resolved_message("  ", None, None, None, &messaging);
     }
 }

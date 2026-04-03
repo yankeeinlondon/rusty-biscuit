@@ -19,6 +19,7 @@ fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
 
 use super::error::CompositionError;
 use super::guardrails::load_or_create_guardrails;
+use super::lifecycle::parse_lifecycle_config;
 use super::types::{
     CompositionClosurePlan, CompositionMode, InlineClosurePlan, PreparedComposition,
     ResolvedCompositionSource,
@@ -48,6 +49,7 @@ pub fn prepare_direct(
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let effective_agent_hint = composed.frontmatter().as_map().get("agent").cloned();
+    let lifecycle = parse_lifecycle_config(&effective_frontmatter)?;
 
     let source_repo_root = find_git_root_from_path(&source.resolved_path);
 
@@ -59,6 +61,7 @@ pub fn prepare_direct(
         effective_frontmatter,
         effective_agent_hint,
         closure: CompositionClosurePlan::Direct,
+        lifecycle,
     })
 }
 
@@ -103,6 +106,7 @@ pub fn prepare_inline(
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let effective_agent_hint = composed.frontmatter().as_map().get("agent").cloned();
+    let lifecycle = parse_lifecycle_config(&effective_frontmatter)?;
 
     let mut prompt = composed.content().to_string();
 
@@ -127,6 +131,7 @@ pub fn prepare_inline(
             original_document_text: source.original_text.clone(),
             original_body_hash,
         }),
+        lifecycle,
     })
 }
 
@@ -257,5 +262,64 @@ mod tests {
 
         let err = prepare_inline(&source, None, None).unwrap_err();
         assert!(matches!(err, CompositionError::PromptPropertyWrongType(_)));
+    }
+
+    #[test]
+    fn direct_composition_parses_lifecycle_config() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                (
+                    "start",
+                    json!({"stderr": "Starting", "effect": "doorbell"}),
+                ),
+                ("success", json!({"speak": "All done"})),
+            ],
+            "Do the work.",
+        );
+
+        let prepared = prepare_direct(&source, None, None).unwrap();
+        assert!(prepared.lifecycle.start.is_some());
+        assert!(prepared.lifecycle.success.is_some());
+        assert!(prepared.lifecycle.blocked.is_none());
+        assert!(prepared.lifecycle.failure.is_none());
+    }
+
+    #[test]
+    fn inline_composition_parses_lifecycle_config() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("prompt", json!("Write something")),
+                ("failure", json!({"stderr": "Failed"})),
+            ],
+            "Old content",
+        );
+
+        let prepared = prepare_inline(&source, None, None).unwrap();
+        assert!(prepared.lifecycle.failure.is_some());
+        assert!(prepared.lifecycle.start.is_none());
+    }
+
+    #[test]
+    fn invalid_lifecycle_config_fails_preparation() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("title", json!("Test")),
+                (
+                    "start",
+                    json!({"speak": "Hello", "speak_first": "Also hello"}),
+                ),
+            ],
+            "Content",
+        );
+
+        let err = prepare_direct(&source, None, None).unwrap_err();
+        assert!(matches!(err, CompositionError::LifecycleSpeakConflict(_)));
     }
 }

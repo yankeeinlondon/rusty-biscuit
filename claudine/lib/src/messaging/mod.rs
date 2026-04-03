@@ -12,4 +12,4 @@ pub use resolve::{
     MessagingScope, ResolvedMessagingRoute, RuntimeMessagingSettings, SignalRecipient,
     parse_signal_recipient, resolve_effective_route, resolve_image_path, resolve_secret,
 };
-pub use send::execute_message;
+pub use send::{execute_message, execute_resolved_message};
