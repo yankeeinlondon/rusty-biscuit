@@ -532,6 +532,151 @@ impl<E: CategoryEnum> CategoryDetector<E> {
     }
 }
 
+impl<E: CategoryEnum> ProgramDetector for CategoryDetector<E> {
+    type Program = E;
+
+    fn refresh(&mut self) {
+        *self = Self::new();
+    }
+
+    fn is_installed(&self, program: E) -> bool {
+        CategoryDetector::is_installed(self, program)
+    }
+
+    fn path(&self, program: E) -> Option<PathBuf> {
+        CategoryDetector::path(self, program)
+    }
+
+    fn path_with_source(&self, program: E) -> Option<(PathBuf, ExecutableSource)> {
+        CategoryDetector::path_with_source(self, program)
+    }
+
+    fn version(&self, program: E) -> Result<String, crate::programs::ProgramError> {
+        CategoryDetector::version(self, program)
+    }
+
+    fn website(&self, program: E) -> &'static str {
+        CategoryDetector::website(self, program)
+    }
+
+    fn description(&self, program: E) -> &'static str {
+        CategoryDetector::description(self, program)
+    }
+
+    fn installed(&self) -> Vec<E> {
+        CategoryDetector::installed(self)
+    }
+
+    fn installable(&self, program: E) -> bool {
+        let info = program.info();
+        if info.installation_methods.is_empty() {
+            return false;
+        }
+
+        let os_availability = info.os_availability;
+        if !os_availability.is_empty() {
+            let os_type = crate::os::detect_os_type();
+            if !os_availability.contains(&os_type) {
+                return false;
+            }
+        }
+
+        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
+
+        info.installation_methods
+            .iter()
+            .any(|method| {
+                crate::programs::installer::method_available(method, &os_pkg_mgrs, &lang_pkg_mgrs)
+            })
+    }
+
+    fn install(&self, program: E) -> Result<(), SniffInstallationError> {
+        let info = program.info();
+
+        if info.installation_methods.is_empty() {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            });
+        }
+
+        let os_availability = info.os_availability;
+        if !os_availability.is_empty() {
+            let os_type = crate::os::detect_os_type();
+            if !os_availability.contains(&os_type) {
+                return Err(SniffInstallationError::NotInstallableOnOs {
+                    pkg: program.display_name().to_string(),
+                    os: os_type.to_string(),
+                });
+            }
+        }
+
+        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
+        let method = crate::programs::installer::select_best_method(
+            info.installation_methods,
+            &os_pkg_mgrs,
+            &lang_pkg_mgrs,
+        )
+        .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+            pkg: program.display_name().to_string(),
+            manager: "package manager".to_string(),
+        })?;
+
+        let _result = crate::programs::installer::execute_install(
+            method,
+            &crate::programs::installer::InstallOptions::default(),
+        )?;
+        Ok(())
+    }
+
+    fn install_version(
+        &self,
+        program: E,
+        version: &str,
+    ) -> Result<(), SniffInstallationError> {
+        let info = program.info();
+
+        if info.installation_methods.is_empty() {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            });
+        }
+
+        let os_availability = info.os_availability;
+        if !os_availability.is_empty() {
+            let os_type = crate::os::detect_os_type();
+            if !os_availability.contains(&os_type) {
+                return Err(SniffInstallationError::NotInstallableOnOs {
+                    pkg: program.display_name().to_string(),
+                    os: os_type.to_string(),
+                });
+            }
+        }
+
+        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
+        let method = crate::programs::installer::select_best_method(
+            info.installation_methods,
+            &os_pkg_mgrs,
+            &lang_pkg_mgrs,
+        )
+        .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+            pkg: program.display_name().to_string(),
+            manager: "package manager".to_string(),
+        })?;
+
+        let _result = crate::programs::installer::execute_versioned_install(
+            method,
+            version,
+            &crate::programs::installer::InstallOptions::default(),
+        )?;
+        Ok(())
+    }
+}
+
 /// Trait for structs that detect and manage programs of a specific category.
 ///
 /// Implementors track installation status for a set of related programs
@@ -1254,5 +1399,23 @@ mod tests {
         let detector: CategoryDetector<Editor> = serde_json::from_str(json).unwrap();
         assert!(detector.is_installed(Editor::Vim));
         assert!(!detector.is_installed(Editor::VSCode));
+    }
+
+    // ============================================
+    // CategoryDetector ProgramDetector trait tests
+    // ============================================
+
+    #[test]
+    fn test_category_detector_program_detector_trait() {
+        let detector = CategoryDetector::<Editor>::default()
+            .with_program(Editor::Vim, PathBuf::from("/usr/bin/vim"), ExecutableSource::Path);
+
+        // Test through ProgramDetector trait interface
+        let pd: &dyn ProgramDetector<Program = Editor> = &detector;
+        assert!(pd.is_installed(Editor::Vim));
+        assert!(!pd.is_installed(Editor::Neovim));
+        assert_eq!(pd.path(Editor::Vim), Some(PathBuf::from("/usr/bin/vim")));
+        let installed = pd.installed();
+        assert_eq!(installed, vec![Editor::Vim]);
     }
 }
