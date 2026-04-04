@@ -7,18 +7,12 @@ use crate::error::MessengerError;
 
 /// Identifies which messaging provider was used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
-    #[cfg_attr(feature = "cli", value(name = "discord"))]
     Discord,
-    #[cfg_attr(feature = "cli", value(name = "slack"))]
     Slack,
-    #[cfg_attr(feature = "cli", value(name = "signal"))]
     Signal,
-    #[cfg_attr(feature = "cli", value(name = "whatsapp"))]
     WhatsApp,
-    #[cfg_attr(feature = "cli", value(name = "telegram"))]
     Telegram,
 }
 

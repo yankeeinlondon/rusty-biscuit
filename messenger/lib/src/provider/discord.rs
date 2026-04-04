@@ -232,7 +232,6 @@ impl super::Provider for DiscordProvider {
     }
 
     fn capabilities(&self) -> CapabilitySet {
-        use crate::capabilities::AttachmentSourceKind;
         const DISCORD_CAPABILITIES: CapabilitySet = CapabilitySet {
             supports_markdown_rendering: true,
             supports_reply: true,
@@ -240,7 +239,6 @@ impl super::Provider for DiscordProvider {
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
-            allowed_attachment_sources: &[AttachmentSourceKind::Path, AttachmentSourceKind::Bytes],
         };
         DISCORD_CAPABILITIES
     }
@@ -262,7 +260,7 @@ impl super::Provider for DiscordProvider {
         tracing::Span::current().record("channel", tracing::field::display(channel_id));
 
         // Render the message body (with location text fallback)
-        let content = message.render_body_or_location(ProviderKind::Discord);
+        let content = message.render_body_with_location(ProviderKind::Discord);
         let attachments = Self::build_attachments(message)?;
         let attachment_kinds: Vec<_> = message
             .attachments()

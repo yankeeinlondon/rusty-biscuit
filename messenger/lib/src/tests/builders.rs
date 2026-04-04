@@ -137,7 +137,7 @@ fn prepared_message_markdown_with_location() {
 fn prepared_message_no_body_has_location() {
     let msg = Message::location(34.05, -118.24);
     let prepared = PreparedMessage::new(&msg);
-    let result = prepared.render_body_or_location(ProviderKind::Discord);
+    let result = prepared.render_body_with_location(ProviderKind::Discord);
     assert_eq!(result, "📍 34.0500, -118.2400");
 }
 
@@ -150,7 +150,7 @@ fn prepared_message_no_body_no_location() {
         metadata: Default::default(),
     };
     let prepared = PreparedMessage::new(&msg);
-    let result = prepared.render_body_or_location(ProviderKind::Discord);
+    let result = prepared.render_body_with_location(ProviderKind::Discord);
     assert_eq!(result, "");
 }
 

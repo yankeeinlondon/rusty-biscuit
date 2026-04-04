@@ -74,7 +74,6 @@ impl super::Provider for SlackProvider {
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: true,
-            allowed_attachment_sources: &[],
         };
         SLACK_CAPABILITIES
     }
@@ -96,7 +95,7 @@ impl super::Provider for SlackProvider {
         tracing::Span::current().record("channel", tracing::field::display(channel_id));
 
         // Render the message body to Slack mrkdwn (with location text fallback)
-        let text = message.render_body_or_location(ProviderKind::Slack);
+        let text = message.render_body_with_location(ProviderKind::Slack);
 
         // Build the thread_ts from reply_to
         let thread_ts = match &dispatch.reply_to {

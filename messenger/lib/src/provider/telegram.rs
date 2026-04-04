@@ -158,7 +158,6 @@ impl super::Provider for TelegramProvider {
             supports_location: true,
             supports_silent_delivery: true,
             supports_link_preview_control: true,
-            allowed_attachment_sources: &[],
         };
         TELEGRAM_CAPABILITIES
     }

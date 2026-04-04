@@ -118,7 +118,6 @@ impl super::Provider for WhatsAppProvider {
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
-            allowed_attachment_sources: &[],
         };
         WHATSAPP_CAPABILITIES
     }

@@ -86,7 +86,6 @@ impl super::Provider for SignalProvider {
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
-            allowed_attachment_sources: &[],
         };
         SIGNAL_CAPABILITIES
     }
@@ -107,7 +106,7 @@ impl super::Provider for SignalProvider {
         };
 
         // Render body as plain text (with location text fallback)
-        let text = message.render_body_or_location(ProviderKind::Signal);
+        let text = message.render_body_with_location(ProviderKind::Signal);
 
         // Build JSON-RPC params based on target type
         let (method, target_kind, mut params) = match target {
