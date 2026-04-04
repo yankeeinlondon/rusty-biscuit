@@ -9,8 +9,8 @@ use tracing::{debug, instrument};
 pub enum PdfSource {
     /// Content loaded from a file path.
     Path(PathBuf),
-    /// Content provided as bytes.
-    Bytes(Vec<u8>),
+    /// Content provided as raw bytes (no file path).
+    Bytes,
 }
 
 /// Error type for PDF operations.
@@ -56,12 +56,13 @@ pub enum BackendPreference {
 }
 
 /// Page range specification.
+///
+/// Pages are 1-indexed. Use the constructors (`all()`, `single()`, `new()`,
+/// `from()`) or `try_new()` for validated construction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageRange {
-    /// Starting page (1-indexed).
-    pub start: usize,
-    /// Ending page (1-indexed, inclusive).
-    pub end: Option<usize>,
+    start: usize,
+    end: Option<usize>,
 }
 
 impl PageRange {
@@ -77,6 +78,7 @@ impl PageRange {
     /// Create a range for a single page.
     #[must_use]
     pub fn single(page: usize) -> Self {
+        assert!(page >= 1, "page number must be >= 1 (1-indexed)");
         Self {
             start: page,
             end: Some(page),
@@ -86,6 +88,8 @@ impl PageRange {
     /// Create a range from start to end (inclusive).
     #[must_use]
     pub fn new(start: usize, end: usize) -> Self {
+        assert!(start >= 1, "page range start must be >= 1 (1-indexed)");
+        assert!(end >= start, "page range end ({end}) must be >= start ({start})");
         Self {
             start,
             end: Some(end),
@@ -95,7 +99,39 @@ impl PageRange {
     /// Create a range from a starting page to the end.
     #[must_use]
     pub fn from(start: usize) -> Self {
+        assert!(start >= 1, "page range start must be >= 1 (1-indexed)");
         Self { start, end: None }
+    }
+
+    /// Create a validated range, returning `Err` if constraints are violated.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if `start` is 0 or `end` is less than `start`.
+    pub fn try_new(start: usize, end: Option<usize>) -> Result<Self, PdfError> {
+        if start == 0 {
+            return Err(PdfError::Parse("page range start must be >= 1 (1-indexed)".to_string()));
+        }
+        if let Some(e) = end
+            && e < start
+        {
+            return Err(PdfError::Parse(format!(
+                "page range end ({e}) must be >= start ({start})"
+            )));
+        }
+        Ok(Self { start, end })
+    }
+
+    /// Starting page (1-indexed).
+    #[must_use]
+    pub fn start(&self) -> usize {
+        self.start
+    }
+
+    /// Ending page (1-indexed, inclusive). `None` means to the end.
+    #[must_use]
+    pub fn end(&self) -> Option<usize> {
+        self.end
     }
 }
 
@@ -338,7 +374,7 @@ impl Pdf {
         }
 
         Ok(Self {
-            source: PdfSource::Bytes(bytes.clone()),
+            source: PdfSource::Bytes,
             config,
             bytes,
         })
@@ -559,35 +595,54 @@ mod tests {
     #[test]
     fn test_page_range_all() {
         let all = PageRange::all();
-        assert_eq!(all.start, 1);
-        assert_eq!(all.end, None);
+        assert_eq!(all.start(), 1);
+        assert_eq!(all.end(), None);
     }
 
     #[test]
     fn test_page_range_single() {
         let single = PageRange::single(5);
-        assert_eq!(single.start, 5);
-        assert_eq!(single.end, Some(5));
+        assert_eq!(single.start(), 5);
+        assert_eq!(single.end(), Some(5));
     }
 
     #[test]
     fn test_page_range_new() {
         let range = PageRange::new(2, 10);
-        assert_eq!(range.start, 2);
-        assert_eq!(range.end, Some(10));
+        assert_eq!(range.start(), 2);
+        assert_eq!(range.end(), Some(10));
     }
 
     #[test]
     fn test_page_range_from() {
         let range = PageRange::from(5);
-        assert_eq!(range.start, 5);
-        assert_eq!(range.end, None);
+        assert_eq!(range.start(), 5);
+        assert_eq!(range.end(), None);
     }
 
     #[test]
     fn test_page_range_default() {
         let range = PageRange::default();
         assert_eq!(range, PageRange::all());
+    }
+
+    #[test]
+    fn page_range_rejects_zero_start() {
+        let result = PageRange::try_new(0, Some(5));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn page_range_rejects_end_before_start() {
+        let result = PageRange::try_new(5, Some(3));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn page_range_accepts_valid_range() {
+        let range = PageRange::try_new(1, Some(10)).unwrap();
+        assert_eq!(range.start(), 1);
+        assert_eq!(range.end(), Some(10));
     }
 
     // ==========================================================================
@@ -756,12 +811,8 @@ mod tests {
 
     #[test]
     fn test_pdf_source_bytes() {
-        let source = PdfSource::Bytes(vec![1, 2, 3]);
-        if let PdfSource::Bytes(b) = source {
-            assert_eq!(b, vec![1, 2, 3]);
-        } else {
-            panic!("Expected PdfSource::Bytes");
-        }
+        let source = PdfSource::Bytes;
+        assert!(matches!(source, PdfSource::Bytes));
     }
 
     // ==========================================================================
@@ -817,7 +868,7 @@ mod tests {
         let pdf = Pdf::from_bytes(pdf_bytes.clone()).unwrap();
 
         // Test source accessor
-        assert!(matches!(pdf.source(), PdfSource::Bytes(_)));
+        assert!(matches!(pdf.source(), PdfSource::Bytes));
 
         // Test config accessor
         assert_eq!(pdf.config().backend_preference, BackendPreference::Auto);
