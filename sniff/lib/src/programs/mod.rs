@@ -108,6 +108,7 @@ pub mod types;
 pub mod utilities;
 
 use serde::{Deserialize, Serialize};
+use tracing::{info_span, instrument};
 
 pub use ai_cli::InstalledAiClients;
 pub use editors::InstalledEditors;
@@ -178,11 +179,15 @@ impl ProgramsInfo {
     /// - PATH scan: once (instead of 8x per category)
     /// - macOS bundle check: once (instead of 8x per category)
     /// - Subsequent lookups: O(1) HashMap access
+    #[instrument(skip_all)]
     pub fn detect() -> Self {
         use std::sync::Arc;
 
         // Build the shared executable index once
-        let index = Arc::new(ExecutableIndex::build());
+        let index = {
+            let _span = info_span!("build_executable_index").entered();
+            Arc::new(ExecutableIndex::build())
+        };
 
         // Parallelize category detection in pairs using rayon::join
         let (editors, utilities) = rayon::join(

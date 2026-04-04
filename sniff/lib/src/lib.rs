@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tracing::instrument;
 
 pub mod error;
 pub mod filesystem;
@@ -233,6 +234,12 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
 ///
 /// let result = detect_with_plan(plan).unwrap();
 /// ```
+#[instrument(skip(plan), fields(
+    os = plan.os.is_some(),
+    hw = plan.hardware.is_some(),
+    net = plan.network.is_some(),
+    fs = plan.filesystem.is_some(),
+))]
 pub fn detect_with_plan(plan: DetectionPlan) -> Result<SniffResult> {
     let base = plan
         .base_dir
@@ -245,22 +252,42 @@ pub fn detect_with_plan(plan: DetectionPlan) -> Result<SniffResult> {
         let os_handle = plan
             .os
             .as_ref()
-            .map(|req| s.spawn(move || os::detect_os_with_request(req)));
+            .map(|req| {
+                s.spawn(move || {
+                    let _span = tracing::info_span!("detect_os").entered();
+                    os::detect_os_with_request(req)
+                })
+            });
 
         let hw_handle = plan
             .hardware
             .as_ref()
-            .map(|req| s.spawn(move || hardware::detect_hardware_with_request(req)));
+            .map(|req| {
+                s.spawn(move || {
+                    let _span = tracing::info_span!("detect_hardware").entered();
+                    hardware::detect_hardware_with_request(req)
+                })
+            });
 
         let net_handle = plan
             .network
             .as_ref()
-            .map(|req| s.spawn(move || network::detect_network_with_request(req)));
+            .map(|req| {
+                s.spawn(move || {
+                    let _span = tracing::info_span!("detect_network").entered();
+                    network::detect_network_with_request(req)
+                })
+            });
 
         let fs_handle = plan
             .filesystem
             .as_ref()
-            .map(|req| s.spawn(move || filesystem::detect_filesystem_with_request(&base, req)));
+            .map(|req| {
+                s.spawn(move || {
+                    let _span = tracing::info_span!("detect_filesystem").entered();
+                    filesystem::detect_filesystem_with_request(&base, req)
+                })
+            });
 
         let os = os_handle.map(|h| h.join().unwrap()).transpose();
         let hardware = hw_handle.map(|h| h.join().unwrap()).transpose();

@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use tracing::instrument;
 
 /// Source tracking for YAML content.
 #[derive(Debug, Clone)]
@@ -223,6 +224,7 @@ impl Yaml {
     /// ## Errors
     ///
     /// Returns an error if the file cannot be read or contains invalid YAML.
+    #[instrument(level = "debug", skip_all, fields(path = %path.as_ref().display()))]
     pub fn new(path: impl AsRef<Path>) -> Result<Self, YamlError> {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)?;
@@ -239,6 +241,7 @@ impl Yaml {
     /// ## Errors
     ///
     /// Returns an error if the string contains invalid YAML.
+    #[instrument(level = "trace", skip_all, fields(input_len = input.as_ref().len()))]
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(input: impl AsRef<str>) -> Result<Self, YamlError> {
         let input = input.as_ref();
@@ -255,6 +258,7 @@ impl Yaml {
     /// ## Errors
     ///
     /// Returns an error if the bytes contain invalid YAML.
+    #[instrument(level = "trace", skip_all, fields(input_len = bytes.as_ref().len()))]
     pub fn from_bytes(bytes: impl AsRef<[u8]>) -> Result<Self, YamlError> {
         let bytes = bytes.as_ref();
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_slice(bytes)?;
@@ -291,6 +295,7 @@ impl Yaml {
     /// ## Errors
     ///
     /// Returns an error if conversion fails.
+    #[instrument(level = "trace", skip(self), fields(source = ?self.source))]
     pub fn as_json(&self) -> Result<serde_json::Value, YamlError> {
         let output = self.as_json_with(JsonConversionOptions::default())?;
         Ok(output.value)
@@ -316,6 +321,7 @@ impl Yaml {
     ///
     /// Returns an error if conversion fails.
     #[cfg(feature = "toml")]
+    #[instrument(level = "trace", skip(self), fields(source = ?self.source))]
     pub fn as_toml(&self) -> Result<toml::Value, YamlError> {
         let output = self.as_toml_with(TomlConversionOptions::default())?;
         Ok(output.value)

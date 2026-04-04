@@ -48,9 +48,11 @@ fn query_cursor_position(timeout: Duration) -> Result<CursorPosition, String> {
     use std::io::{Read, Write};
 
     if !is_tty() {
+        tracing::trace!("DSR cursor position query skipped: not a TTY");
         return Err("not a tty".into());
     }
     if is_ci() {
+        tracing::trace!("DSR cursor position query skipped: CI environment");
         return Err("CI environment".into());
     }
 
@@ -65,6 +67,7 @@ fn query_cursor_position(timeout: Duration) -> Result<CursorPosition, String> {
             let fd = libc::STDIN_FILENO;
             let mut original: libc::termios = unsafe { std::mem::zeroed() };
             if unsafe { libc::tcgetattr(fd, &mut original) } != 0 {
+                tracing::trace!("DSR cursor position query failed: tcgetattr error");
                 return Err("failed to get terminal attributes".into());
             }
             let mut raw = original;
@@ -72,6 +75,7 @@ fn query_cursor_position(timeout: Duration) -> Result<CursorPosition, String> {
             raw.c_cc[libc::VMIN] = 0;
             raw.c_cc[libc::VTIME] = 1;
             if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } != 0 {
+                tracing::trace!("DSR cursor position query failed: tcsetattr error");
                 return Err("failed to set raw mode".into());
             }
             Ok(Self { original, fd })
@@ -115,11 +119,18 @@ fn query_cursor_position(timeout: Duration) -> Result<CursorPosition, String> {
         }
     }
 
-    parse_cpr_response(&response).ok_or_else(|| "failed to parse CPR response".into())
+    parse_cpr_response(&response).ok_or_else(|| {
+        tracing::trace!(
+            response = ?String::from_utf8_lossy(&response),
+            "DSR cursor position query failed: could not parse CPR response"
+        );
+        "failed to parse CPR response".into()
+    })
 }
 
 #[cfg(not(unix))]
 fn query_cursor_position(_timeout: Duration) -> Result<CursorPosition, String> {
+    tracing::trace!("DSR cursor position query: not supported on this platform");
     Err("cursor position query not supported on this platform".into())
 }
 

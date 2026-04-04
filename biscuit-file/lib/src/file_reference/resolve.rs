@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use tracing::{debug, trace};
 use walkdir::WalkDir;
 
 use crate::file_reference::context::{ResolutionContext, find_git_root, find_package_area};
@@ -34,12 +35,16 @@ fn resolve_direct(
 ) -> Result<Option<PathBuf>, FileReferenceError> {
     let candidates = build_candidates(parsed, interpolated, magic_paths, vault_roots, ctx)?;
 
-    for candidate in candidates {
-        if candidate.is_file() {
-            return Ok(Some(normalize_absolute(&candidate, &ctx.cwd)));
+    for candidate in &candidates {
+        let exists = candidate.is_file();
+        trace!(?candidate, exists, "checking candidate");
+        if exists {
+            debug!(?candidate, "resolved file reference");
+            return Ok(Some(normalize_absolute(candidate, &ctx.cwd)));
         }
     }
 
+    debug!("no candidate matched");
     Ok(None)
 }
 
@@ -65,6 +70,8 @@ fn resolve_recursive(
     } else {
         None
     };
+
+    debug!(root_count = roots.len(), ?needle, "starting recursive search");
 
     let mut matches: Vec<PathBuf> = Vec::new();
 
@@ -110,6 +117,7 @@ fn resolve_recursive(
 
     // Sort lexicographically and return the first match
     matches.sort();
+    debug!(match_count = matches.len(), "recursive search complete");
     Ok(matches.into_iter().next())
 }
 

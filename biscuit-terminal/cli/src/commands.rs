@@ -90,6 +90,7 @@ pub fn emit_vertical_margins(
 ///
 /// Supports width specification syntax: "file.jpg|50%" or "file.jpg|80"
 /// CLI `--width` flag takes precedence over inline spec.
+#[tracing::instrument(skip(layout, debug))]
 pub fn render_image(
     image_spec: &str,
     cli_width: Option<&str>,
@@ -419,6 +420,7 @@ pub fn display_graph(
 /// using the MermaidRenderer. Default direction is left-right (LR),
 /// use `vertical` for top-down (TD).
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip(layout, content))]
 pub fn render_flowchart(
     vertical: bool,
     inverse: bool,

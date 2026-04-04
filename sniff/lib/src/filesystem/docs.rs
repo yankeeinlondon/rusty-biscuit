@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tracing::{debug, instrument};
 
 /// How the document title was resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +134,7 @@ impl RepoDocuments {
 ///
 /// This matches sniff's detection function pattern. Returns `None` if the
 /// directory is not inside a git repository.
+#[instrument(skip_all, fields(root = %root.display()))]
 pub fn detect_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
     let repo_docs = RepoDocuments::new(root).ok()?;
     let docs = repo_docs.documents();
@@ -182,7 +184,12 @@ fn parse_markdown_meta(
     repo_root: &Path,
     packages: &[(String, PathBuf)],
 ) -> Option<MarkdownMeta> {
-    let content = fs::read_to_string(path).ok()?;
+    let content = fs::read_to_string(path)
+        .map_err(|e| {
+            debug!(path = %path.display(), error = %e, "could not read doc file");
+            e
+        })
+        .ok()?;
     let (frontmatter, body) = extract_frontmatter(&content);
 
     let relative = path

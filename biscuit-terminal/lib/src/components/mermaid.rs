@@ -469,6 +469,7 @@ impl MermaidDiagram {
     ///     }
     /// }
     /// ```
+    #[tracing::instrument(skip(self, term))]
     pub fn try_render(
         &self,
         term: &crate::terminal::Terminal,

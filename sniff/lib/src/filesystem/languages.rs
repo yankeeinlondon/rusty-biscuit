@@ -1,5 +1,6 @@
 use crate::Result;
 use std::path::{Path, PathBuf};
+use tracing::{debug, instrument};
 
 pub use super::file_types::{
     LanguageSummary as LanguageBreakdown, ProgrammingLanguageStats as LanguageStats,
@@ -33,8 +34,15 @@ pub use super::file_types::{
 /// println!("Scanned files: {}", breakdown.total_files_scanned);
 /// println!("Language files: {}", breakdown.total_language_files);
 /// ```
+#[instrument(skip_all, fields(root = %root.display()))]
 pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
-    detect_languages_with_exclusions(root, &[])
+    let result = detect_languages_with_exclusions(root, &[])?;
+    debug!(
+        file_count = result.total_files_scanned,
+        language_count = result.languages.len(),
+        "language detection complete"
+    );
+    Ok(result)
 }
 
 /// Detects programming languages in a directory tree while excluding nested subtrees.

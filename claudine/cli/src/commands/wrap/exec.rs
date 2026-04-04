@@ -288,16 +288,10 @@ pub(crate) fn run_child(
     let mut child = command.spawn()?;
     Span::current().record("child_pid", tracing::field::display(child.id()));
 
-    // Write stdin seed and close the pipe so the child sees EOF.
-    if let Some(seed) = io.stdin_seed
-        && let Some(mut stdin_pipe) = child.stdin.take()
-    {
-        stdin_pipe.write_all(seed.as_bytes())?;
-        // Drop closes the pipe
-    }
-
-    // Spawn filter threads that read child output line-by-line and
-    // suppress lines matching any noise prefix.
+    // Spawn stdout/stderr reader threads BEFORE writing stdin to avoid a
+    // pipe deadlock: if the prompt exceeds the OS pipe buffer (~64 KB on
+    // macOS) and the child writes to stdout/stderr during startup, both
+    // processes block on pipe I/O with no reader on the other end.
     let stdout_handle = if filter_stdout {
         let pipe = child.stdout.take().expect("stdout was set to piped");
         let prefixes: Vec<String> = io
@@ -353,6 +347,14 @@ pub(crate) fn run_child(
     } else {
         None
     };
+
+    // Write stdin seed AFTER reader threads are spawned (see deadlock note above).
+    if let Some(seed) = io.stdin_seed
+        && let Some(mut stdin_pipe) = child.stdin.take()
+    {
+        stdin_pipe.write_all(seed.as_bytes())?;
+        // Drop closes the pipe so the child sees EOF.
+    }
 
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
@@ -589,12 +591,7 @@ pub(crate) fn run_child_capture(
     let mut child = command.spawn()?;
     Span::current().record("child_pid", tracing::field::display(child.id()));
 
-    // Write stdin seed and close the pipe so the child sees EOF.
-    if let Some(seed) = io.stdin_seed
-        && let Some(mut stdin_pipe) = child.stdin.take()
-    {
-        stdin_pipe.write_all(seed.as_bytes())?;
-    }
+    // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
     // Capture stdout into a string, applying noise filtering
     let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
@@ -641,6 +638,13 @@ pub(crate) fn run_child_capture(
         }
         captured
     });
+
+    // Write stdin seed AFTER reader threads are spawned (see run_child deadlock note).
+    if let Some(seed) = io.stdin_seed
+        && let Some(mut stdin_pipe) = child.stdin.take()
+    {
+        stdin_pipe.write_all(seed.as_bytes())?;
+    }
 
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
@@ -705,12 +709,7 @@ pub(crate) fn run_child_stream(
     let mut child = command.spawn()?;
     Span::current().record("child_pid", tracing::field::display(child.id()));
 
-    // Write stdin seed and close the pipe so the child sees EOF.
-    if let Some(seed) = stdin_seed
-        && let Some(mut stdin_pipe) = child.stdin.take()
-    {
-        stdin_pipe.write_all(seed.as_bytes())?;
-    }
+    // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
     // Pipe stdout through the stream parser
     let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
@@ -805,6 +804,13 @@ pub(crate) fn run_child_stream(
         captured
     });
 
+    // Write stdin seed AFTER reader threads are spawned (see run_child deadlock note).
+    if let Some(seed) = stdin_seed
+        && let Some(mut stdin_pipe) = child.stdin.take()
+    {
+        stdin_pipe.write_all(seed.as_bytes())?;
+    }
+
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
@@ -870,11 +876,7 @@ pub(crate) fn run_child_stream_capture(
     let mut child = command.spawn()?;
     Span::current().record("child_pid", tracing::field::display(child.id()));
 
-    if let Some(seed) = stdin_seed
-        && let Some(mut stdin_pipe) = child.stdin.take()
-    {
-        stdin_pipe.write_all(seed.as_bytes())?;
-    }
+    // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
     let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
     let capture_span = Span::current();
@@ -918,6 +920,13 @@ pub(crate) fn run_child_stream_capture(
         }
         captured
     });
+
+    // Write stdin seed AFTER reader threads are spawned (see run_child deadlock note).
+    if let Some(seed) = stdin_seed
+        && let Some(mut stdin_pipe) = child.stdin.take()
+    {
+        stdin_pipe.write_all(seed.as_bytes())?;
+    }
 
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?

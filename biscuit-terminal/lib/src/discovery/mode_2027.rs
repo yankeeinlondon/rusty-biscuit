@@ -63,14 +63,16 @@ pub fn supports_mode_2027() -> bool {
         return false;
     }
 
-    matches!(
+    let supported = matches!(
         get_terminal_app(),
         TerminalApp::Kitty
             | TerminalApp::Wezterm
             | TerminalApp::Ghostty
             | TerminalApp::Foot
             | TerminalApp::Contour
-    )
+    );
+    tracing::debug!(supported, "Mode 2027 grapheme cluster support");
+    supported
 }
 
 /// Enable Mode 2027 (grapheme cluster width) in the terminal.
