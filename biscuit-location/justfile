@@ -1,0 +1,45 @@
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+
+default:
+    @echo "biscuit-location Library & CLI"
+    @echo "=============================="
+    @echo
+    @just --list | grep -v 'default'
+
+# build library and CLI
+build *args="":
+    @echo "Building {{BOLD}}biscuit-location{{RESET}} library..."
+    @cargo build -p biscuit-location {{args}}
+    @echo ""
+    @echo "Building {{BOLD}}biscuit-location-cli{{RESET}}..."
+    @cargo build -p biscuit-location-cli {{args}}
+
+# test library and CLI
+test *args="":
+    @echo "Testing {{BOLD}}biscuit-location{{RESET}} library"
+    @cargo test -p biscuit-location --all-features -- {{args}}
+    @echo ""
+    @echo "Testing {{BOLD}}biscuit-location-cli{{RESET}}"
+    @cargo test -p biscuit-location-cli -- {{args}}
+
+# lint with clippy
+lint *args="":
+    @cargo clippy -p biscuit-location -p biscuit-location-cli -- {{args}}
+
+# install CLI binary
+install *args="":
+    @cargo install --path cli {{args}}
+
+# build and show the docs for the library code
+docs:
+    @echo "Build and then show latest docs for the biscuit-location library code"
+    @echo ""
+    @cargo doc -p biscuit-location --open
+
+# run CLI in development mode
+cli *args="":
+    @cargo run -p biscuit-location-cli -- {{args}}
