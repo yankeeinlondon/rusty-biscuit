@@ -151,14 +151,16 @@ impl super::Provider for TelegramProvider {
     }
 
     fn capabilities(&self) -> CapabilitySet {
-        CapabilitySet {
+        const TELEGRAM_CAPABILITIES: CapabilitySet = CapabilitySet {
             supports_markdown_rendering: true,
             supports_reply: true,
             supports_attachments: false,
             supports_location: true,
             supports_silent_delivery: true,
             supports_link_preview_control: true,
-        }
+            allowed_attachment_sources: &[],
+        };
+        TELEGRAM_CAPABILITIES
     }
 
     #[tracing::instrument(skip_all, fields(provider = "telegram", chat = tracing::field::Empty))]
@@ -291,29 +293,12 @@ impl TelegramProvider {
         tracing::debug!(request_kind, "sending Telegram API request");
         let response = self.client.post(url).json(body).send().await.map_err(|e| {
             tracing::warn!(request_kind, error = %e, "Telegram transport request failed");
-            MessengerError::Transport {
-                provider: ProviderKind::Telegram,
-                message: e.to_string(),
-            }
+            ProviderKind::Telegram.transport_error(e)
         })?;
         tracing::debug!(request_kind, status = %response.status(), "received Telegram response");
 
-        if response.status().is_server_error() {
-            tracing::warn!(request_kind, status = %response.status(), "Telegram server error");
-            return Err(MessengerError::Transport {
-                provider: ProviderKind::Telegram,
-                message: format!("server error: {}", response.status()),
-            });
-        }
-
         let resp: TelegramResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| MessengerError::Transport {
-                    provider: ProviderKind::Telegram,
-                    message: e.to_string(),
-                })?;
+            super::http_helpers::handle_http_response(response, ProviderKind::Telegram).await?;
 
         if !resp.ok {
             let error = handle_error(&resp);
@@ -341,9 +326,8 @@ impl TelegramProvider {
             return Err(error);
         }
 
-        resp.result.ok_or_else(|| MessengerError::Transport {
-            provider: ProviderKind::Telegram,
-            message: "missing result in Telegram response".into(),
+        resp.result.ok_or_else(|| {
+            ProviderKind::Telegram.transport_error("missing result in Telegram response")
         })
     }
 }

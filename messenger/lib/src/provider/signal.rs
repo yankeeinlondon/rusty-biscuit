@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
-use crate::message::MessageBody;
 use crate::prepared::PreparedMessage;
 use crate::receipt::{MessageRef, ProviderKind, SendReceipt, SignalAuthor, SignalThreadKey};
 use crate::target::{SignalAddress, SignalTarget, Target};
@@ -80,14 +79,16 @@ impl super::Provider for SignalProvider {
     }
 
     fn capabilities(&self) -> CapabilitySet {
-        CapabilitySet {
+        const SIGNAL_CAPABILITIES: CapabilitySet = CapabilitySet {
             supports_markdown_rendering: false,
             supports_reply: true,
             supports_attachments: false,
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
-        }
+            allowed_attachment_sources: &[],
+        };
+        SIGNAL_CAPABILITIES
     }
 
     #[tracing::instrument(skip_all, fields(provider = "signal", target_kind = tracing::field::Empty))]
@@ -106,15 +107,7 @@ impl super::Provider for SignalProvider {
         };
 
         // Render body as plain text (with location text fallback)
-        let text = match message.body() {
-            Some(MessageBody::Plain(_)) | Some(MessageBody::Markdown(_)) => {
-                message.render_body_with_location(ProviderKind::Signal)
-            }
-            None if message.location().is_some() => {
-                message.render_body_with_location(ProviderKind::Signal)
-            }
-            None => String::new(),
-        };
+        let text = message.render_body_or_location(ProviderKind::Signal);
 
         // Build JSON-RPC params based on target type
         let (method, target_kind, mut params) = match target {
@@ -181,28 +174,11 @@ impl super::Provider for SignalProvider {
             .json(&rpc_request)
             .send()
             .await
-            .map_err(|e| MessengerError::Transport {
-                provider: ProviderKind::Signal,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ProviderKind::Signal.transport_error(e))?;
         tracing::debug!(status = %response.status(), "received Signal response");
 
-        if response.status().is_server_error() {
-            tracing::warn!(status = %response.status(), "Signal transport request failed");
-            return Err(MessengerError::Transport {
-                provider: ProviderKind::Signal,
-                message: format!("server error: {}", response.status()),
-            });
-        }
-
         let resp: JsonRpcResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| MessengerError::Transport {
-                    provider: ProviderKind::Signal,
-                    message: e.to_string(),
-                })?;
+            super::http_helpers::handle_http_response(response, ProviderKind::Signal).await?;
 
         if let Some(error) = resp.error {
             let msg = error.message.unwrap_or_else(|| "unknown error".to_string());

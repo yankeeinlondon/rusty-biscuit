@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
-use crate::message::MessageBody;
 use crate::prepared::PreparedMessage;
 use crate::receipt::{MessageRef, ProviderKind, SendReceipt};
 use crate::target::Target;
@@ -112,14 +111,16 @@ impl super::Provider for WhatsAppProvider {
     }
 
     fn capabilities(&self) -> CapabilitySet {
-        CapabilitySet {
+        const WHATSAPP_CAPABILITIES: CapabilitySet = CapabilitySet {
             supports_markdown_rendering: false,
             supports_reply: true,
             supports_attachments: false,
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
-        }
+            allowed_attachment_sources: &[],
+        };
+        WHATSAPP_CAPABILITIES
     }
 
     #[tracing::instrument(skip_all, fields(provider = "whatsapp", recipient = tracing::field::Empty))]
@@ -163,12 +164,7 @@ impl super::Provider for WhatsAppProvider {
             }
         } else {
             // Render body as plain text (WhatsApp doesn't support rich formatting)
-            let text = match message.body() {
-                Some(MessageBody::Plain(_)) | Some(MessageBody::Markdown(_)) => {
-                    message.render_body_for_provider(ProviderKind::WhatsApp)
-                }
-                None => String::new(),
-            };
+            let text = message.render_body_for_provider(ProviderKind::WhatsApp);
             tracing::trace!(message_type = "text", "selected WhatsApp payload type");
 
             WhatsAppMessageRequest {
@@ -200,38 +196,12 @@ impl super::Provider for WhatsAppProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| MessengerError::Transport {
-                provider: ProviderKind::WhatsApp,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ProviderKind::WhatsApp.transport_error(e))?;
 
-        let status = response.status();
-        tracing::debug!(status = %status, "received WhatsApp response");
-
-        if status.as_u16() == 429 {
-            tracing::warn!("WhatsApp rate limited request");
-            return Err(MessengerError::RateLimited {
-                provider: ProviderKind::WhatsApp,
-                retry_after_ms: None,
-            });
-        }
-
-        if status.is_server_error() {
-            tracing::warn!(status = %status, "WhatsApp transport request failed");
-            return Err(MessengerError::Transport {
-                provider: ProviderKind::WhatsApp,
-                message: format!("server error: {status}"),
-            });
-        }
+        tracing::debug!(status = %response.status(), "received WhatsApp response");
 
         let resp: WhatsAppResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| MessengerError::Transport {
-                    provider: ProviderKind::WhatsApp,
-                    message: e.to_string(),
-                })?;
+            super::http_helpers::handle_http_response(response, ProviderKind::WhatsApp).await?;
 
         if let Some(error) = resp.error {
             let code = error.code.unwrap_or(0);
