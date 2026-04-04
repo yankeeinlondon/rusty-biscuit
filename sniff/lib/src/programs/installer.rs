@@ -744,4 +744,34 @@ mod tests {
         let lang_pkg_mgrs = empty_lang_pkg_mgrs();
         assert!(select_best_method(&methods, &os_pkg_mgrs, &lang_pkg_mgrs).is_none());
     }
+
+    #[test]
+    fn test_build_install_command_apt() {
+        let method = InstallationMethod::Apt("ripgrep");
+        let cmd = build_install_command(&method).unwrap();
+        assert_eq!(cmd, vec!["sudo", "apt", "install", "-y", "ripgrep"]);
+    }
+
+    #[test]
+    fn test_build_install_command_rejects_shell_metacharacters() {
+        let method = InstallationMethod::Brew("ripgrep; rm -rf /");
+        let result = build_install_command(&method);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dry_run_does_not_execute() {
+        let method = InstallationMethod::Brew("ripgrep");
+        let opts = InstallOptions::dry_run();
+        let result = execute_install(&method, &opts).unwrap();
+        assert!(!result.executed);
+        assert!(result.command.contains("brew"));
+    }
+
+    #[test]
+    fn test_get_install_command_returns_string() {
+        let method = InstallationMethod::Brew("ripgrep");
+        let cmd = get_install_command(&method).unwrap();
+        assert!(cmd.contains("brew install ripgrep"));
+    }
 }

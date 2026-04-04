@@ -3391,4 +3391,83 @@ mod tests {
             assert!(seen.insert(idx), "{:?} has duplicate index {}", editor, idx);
         }
     }
+
+    #[test]
+    fn test_all_category_enums_cover_all_programs() {
+        use crate::programs::inventory::Program;
+        use strum::EnumCount;
+
+        let category_total = Editor::COUNT
+            + Utility::COUNT
+            + LanguagePackageManager::COUNT
+            + OsPackageManager::COUNT
+            + TtsClient::COUNT
+            + TerminalApp::COUNT
+            + HeadlessAudio::COUNT
+            + AiCli::COUNT;
+
+        let program_total = Program::iter().count();
+        assert_eq!(
+            category_total, program_total,
+            "Category enum total ({}) != Program::iter() count ({})",
+            category_total, program_total
+        );
+    }
+
+    #[test]
+    fn test_program_mapping_is_bijective() {
+        use crate::programs::inventory::Program;
+        use std::collections::HashSet;
+
+        let mut seen = HashSet::new();
+
+        macro_rules! check_category {
+            ($enum_type:ty) => {
+                for variant in <$enum_type>::iter() {
+                    let program = Program::from(variant);
+                    let key = format!("{:?}", program);
+                    assert!(
+                        seen.insert(key.clone()),
+                        "Duplicate Program mapping from {:?} -> {}",
+                        variant, key
+                    );
+                }
+            };
+        }
+
+        check_category!(Editor);
+        check_category!(Utility);
+        check_category!(LanguagePackageManager);
+        check_category!(OsPackageManager);
+        check_category!(TtsClient);
+        check_category!(TerminalApp);
+        check_category!(HeadlessAudio);
+        check_category!(AiCli);
+    }
+
+    #[test]
+    fn test_category_variant_indices_are_contiguous() {
+        macro_rules! check_indices {
+            ($enum_type:ty) => {{
+                let mut indices: Vec<usize> = <$enum_type>::iter()
+                    .map(|v| v.variant_index())
+                    .collect();
+                indices.sort();
+                let expected: Vec<usize> = (0..<$enum_type>::COUNT).collect();
+                assert_eq!(
+                    indices, expected,
+                    "{} variant indices are not contiguous",
+                    std::any::type_name::<$enum_type>()
+                );
+            }};
+        }
+        check_indices!(Editor);
+        check_indices!(Utility);
+        check_indices!(LanguagePackageManager);
+        check_indices!(OsPackageManager);
+        check_indices!(TtsClient);
+        check_indices!(TerminalApp);
+        check_indices!(HeadlessAudio);
+        check_indices!(AiCli);
+    }
 }
