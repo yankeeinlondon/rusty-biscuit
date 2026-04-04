@@ -422,14 +422,9 @@ impl Markdown {
 
 /// Converts `BlockOptions` to `TransclusionRefOptions`.
 fn block_options_to_ref_options(opts: &BlockOptions) -> TransclusionRefOptions {
-    use crate::markdown::compose::transclusion::ReplaceOption;
     TransclusionRefOptions {
         when_expr: opts.when_expr.clone(),
-        replace: match &opts.replace {
-            ReplaceOption::InheritDefault => None,
-            ReplaceOption::ParentWins => Some("parent-wins".into()),
-            ReplaceOption::OneOff(map) => Some(serde_json::to_string(map).unwrap_or_default()),
-        },
+        replace: opts.replace.clone(),
         quotation: opts.quotation.clone(),
         disclosure: opts.disclosure.clone(),
         exclude: opts.exclude.clone(),

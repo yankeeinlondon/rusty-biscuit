@@ -506,8 +506,8 @@ pub enum TransclusionRefKind {
 pub struct TransclusionRefOptions {
     /// Optional `when` condition expression.
     pub when_expr: Option<String>,
-    /// Replace option (as raw string).
-    pub replace: Option<String>,
+    /// How frontmatter key conflicts are resolved during transclusion.
+    pub replace: crate::markdown::compose::transclusion::ReplaceOption,
     /// Quotation wrapper text.
     pub quotation: Option<String>,
     /// Disclosure summary text.
