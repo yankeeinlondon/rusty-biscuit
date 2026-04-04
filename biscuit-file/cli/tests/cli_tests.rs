@@ -510,3 +510,16 @@ fn unknown_extension_errors() {
 
     let _ = std::fs::remove_file(&path);
 }
+
+// ── Debug flag ──────────────────────────────────────────────────────
+
+#[test]
+fn debug_flag_produces_stderr_output() {
+    bf().arg("--debug")
+        .arg(fixture("sample.toml"))
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("processing input").or(
+            predicate::str::contains("biscuit_file"),
+        ));
+}

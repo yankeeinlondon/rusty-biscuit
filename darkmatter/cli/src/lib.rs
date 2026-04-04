@@ -120,10 +120,14 @@
 //! # Render mermaid diagrams as images
 //! md README.md --mermaid
 //!
-//! # Verbose output for debugging
-//! md README.md -v      # INFO level
-//! md README.md -vv     # DEBUG level
-//! md README.md -vvv    # TRACE level
+//! # Verbose output (styled summaries)
+//! md README.md -v      # Summary after operations
+//! md README.md -vv     # Detailed per-operation breakdown
+//!
+//! # Developer debug output (raw tracing)
+//! md README.md --debug 1   # INFO level
+//! md README.md --debug 2   # DEBUG level
+//! RUST_LOG=darkmatter=trace md README.md   # Full trace
 //! ```
 //!
 //! ## Features

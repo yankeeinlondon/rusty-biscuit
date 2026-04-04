@@ -2,14 +2,15 @@
 
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use tracing::{debug, instrument};
 
 /// Source tracking for PDF content.
 #[derive(Debug, Clone)]
 pub enum PdfSource {
     /// Content loaded from a file path.
     Path(PathBuf),
-    /// Content provided as bytes.
-    Bytes(Vec<u8>),
+    /// Content provided as raw bytes (no file path).
+    Bytes,
 }
 
 /// Error type for PDF operations.
@@ -55,12 +56,13 @@ pub enum BackendPreference {
 }
 
 /// Page range specification.
+///
+/// Pages are 1-indexed. Use the constructors (`all()`, `single()`, `new()`,
+/// `from()`) or `try_new()` for validated construction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageRange {
-    /// Starting page (1-indexed).
-    pub start: usize,
-    /// Ending page (1-indexed, inclusive).
-    pub end: Option<usize>,
+    start: usize,
+    end: Option<usize>,
 }
 
 impl PageRange {
@@ -76,6 +78,7 @@ impl PageRange {
     /// Create a range for a single page.
     #[must_use]
     pub fn single(page: usize) -> Self {
+        assert!(page >= 1, "page number must be >= 1 (1-indexed)");
         Self {
             start: page,
             end: Some(page),
@@ -85,6 +88,8 @@ impl PageRange {
     /// Create a range from start to end (inclusive).
     #[must_use]
     pub fn new(start: usize, end: usize) -> Self {
+        assert!(start >= 1, "page range start must be >= 1 (1-indexed)");
+        assert!(end >= start, "page range end ({end}) must be >= start ({start})");
         Self {
             start,
             end: Some(end),
@@ -94,7 +99,39 @@ impl PageRange {
     /// Create a range from a starting page to the end.
     #[must_use]
     pub fn from(start: usize) -> Self {
+        assert!(start >= 1, "page range start must be >= 1 (1-indexed)");
         Self { start, end: None }
+    }
+
+    /// Create a validated range, returning `Err` if constraints are violated.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if `start` is 0 or `end` is less than `start`.
+    pub fn try_new(start: usize, end: Option<usize>) -> Result<Self, PdfError> {
+        if start == 0 {
+            return Err(PdfError::Parse("page range start must be >= 1 (1-indexed)".to_string()));
+        }
+        if let Some(e) = end
+            && e < start
+        {
+            return Err(PdfError::Parse(format!(
+                "page range end ({e}) must be >= start ({start})"
+            )));
+        }
+        Ok(Self { start, end })
+    }
+
+    /// Starting page (1-indexed).
+    #[must_use]
+    pub fn start(&self) -> usize {
+        self.start
+    }
+
+    /// Ending page (1-indexed, inclusive). `None` means to the end.
+    #[must_use]
+    pub fn end(&self) -> Option<usize> {
+        self.end
     }
 }
 
@@ -141,6 +178,7 @@ pub enum TableStrategy {
 }
 
 /// Configuration for PDF operations.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct PdfConfig {
     /// Preferred backend for operations.
@@ -170,7 +208,52 @@ impl Default for PdfConfig {
     }
 }
 
+impl PdfConfig {
+    /// Set the backend preference.
+    #[must_use]
+    pub fn with_backend(mut self, backend: BackendPreference) -> Self {
+        self.backend_preference = backend;
+        self
+    }
+
+    /// Set the password for encrypted PDFs.
+    #[must_use]
+    pub fn with_password(mut self, password: impl Into<String>) -> Self {
+        self.password = Some(password.into());
+        self
+    }
+
+    /// Set the page range.
+    #[must_use]
+    pub fn with_page_range(mut self, range: PageRange) -> Self {
+        self.page_range = range;
+        self
+    }
+
+    /// Set the maximum number of pages to process.
+    #[must_use]
+    pub fn with_max_pages(mut self, max: usize) -> Self {
+        self.max_pages = Some(max);
+        self
+    }
+
+    /// Set whether to normalize extracted text.
+    #[must_use]
+    pub fn with_normalize_text(mut self, normalize: bool) -> Self {
+        self.normalize_text = normalize;
+        self
+    }
+
+    /// Set whether to remove headers and footers.
+    #[must_use]
+    pub fn with_remove_headers_footers(mut self, remove: bool) -> Self {
+        self.remove_headers_footers = remove;
+        self
+    }
+}
+
 /// Options for Markdown conversion.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct MarkdownOptions {
     /// Directory to write extracted assets.
@@ -197,7 +280,45 @@ impl Default for MarkdownOptions {
     }
 }
 
+impl MarkdownOptions {
+    /// Set the assets directory.
+    #[must_use]
+    pub fn with_assets_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.assets_dir = Some(dir.into());
+        self
+    }
+
+    /// Set the image handling mode.
+    #[must_use]
+    pub fn with_image_mode(mut self, mode: ImageMode) -> Self {
+        self.image_mode = mode;
+        self
+    }
+
+    /// Set whether to include page break markers.
+    #[must_use]
+    pub fn with_include_page_breaks(mut self, include: bool) -> Self {
+        self.include_page_breaks = include;
+        self
+    }
+
+    /// Set the heading detection strategy.
+    #[must_use]
+    pub fn with_heading_strategy(mut self, strategy: HeadingStrategy) -> Self {
+        self.heading_strategy = strategy;
+        self
+    }
+
+    /// Set the table detection strategy.
+    #[must_use]
+    pub fn with_table_strategy(mut self, strategy: TableStrategy) -> Self {
+        self.table_strategy = strategy;
+        self
+    }
+}
+
 /// Options for text extraction.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct TextOptions {
     /// Whether to include page break markers.
@@ -215,6 +336,29 @@ impl Default for TextOptions {
             normalize_text: true,
             remove_headers_footers: true,
         }
+    }
+}
+
+impl TextOptions {
+    /// Set whether to include page break markers.
+    #[must_use]
+    pub fn with_include_page_breaks(mut self, include: bool) -> Self {
+        self.include_page_breaks = include;
+        self
+    }
+
+    /// Set whether to normalize text.
+    #[must_use]
+    pub fn with_normalize_text(mut self, normalize: bool) -> Self {
+        self.normalize_text = normalize;
+        self
+    }
+
+    /// Set whether to remove headers and footers.
+    #[must_use]
+    pub fn with_remove_headers_footers(mut self, remove: bool) -> Self {
+        self.remove_headers_footers = remove;
+        self
     }
 }
 
@@ -290,6 +434,7 @@ impl Pdf {
     /// ## Errors
     ///
     /// Returns an error if the file cannot be read or is invalid.
+    #[instrument(level = "debug", skip_all, fields(path = %path.as_ref().display()))]
     pub fn new(path: impl AsRef<Path>) -> Result<Self, PdfError> {
         Self::with_config(path, PdfConfig::default())
     }
@@ -320,6 +465,7 @@ impl Pdf {
     /// ## Errors
     ///
     /// Returns an error if the bytes are not a valid PDF.
+    #[instrument(level = "debug", skip_all, fields(byte_count = bytes.len()))]
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, PdfError> {
         Self::from_bytes_with_config(bytes, PdfConfig::default())
     }
@@ -335,7 +481,7 @@ impl Pdf {
         }
 
         Ok(Self {
-            source: PdfSource::Bytes(bytes.clone()),
+            source: PdfSource::Bytes,
             config,
             bytes,
         })
@@ -365,6 +511,7 @@ impl Pdf {
     ///
     /// Returns an error if text extraction fails.
     #[cfg(feature = "extract")]
+    #[instrument(level = "debug", skip(self))]
     pub fn as_text(&self) -> Result<String, PdfError> {
         use super::backends::extract_text;
         extract_text(&self.bytes, &self.config)
@@ -383,10 +530,13 @@ impl Pdf {
     /// ## Errors
     ///
     /// Returns an error if conversion fails.
+    #[instrument(level = "debug", skip(self, _options))]
     pub fn as_markdown(&self, _options: MarkdownOptions) -> Result<PdfMarkdown, PdfError> {
         // For Phase 1, just wrap the text output in markdown
         let text = self.as_text()?;
-        Ok(PdfMarkdown::new(text))
+        let md = PdfMarkdown::new(text);
+        debug!(warnings = md.warnings.len(), assets = md.assets.len(), "PDF → Markdown complete");
+        Ok(md)
     }
 
     /// Extract the table of contents.
@@ -395,6 +545,7 @@ impl Pdf {
     ///
     /// Returns an error if TOC extraction fails.
     #[cfg(feature = "lopdf")]
+    #[instrument(level = "debug", skip(self))]
     pub fn toc(&self) -> Result<PdfToc, PdfError> {
         use super::backends::extract_toc;
         extract_toc(&self.bytes)
@@ -551,35 +702,54 @@ mod tests {
     #[test]
     fn test_page_range_all() {
         let all = PageRange::all();
-        assert_eq!(all.start, 1);
-        assert_eq!(all.end, None);
+        assert_eq!(all.start(), 1);
+        assert_eq!(all.end(), None);
     }
 
     #[test]
     fn test_page_range_single() {
         let single = PageRange::single(5);
-        assert_eq!(single.start, 5);
-        assert_eq!(single.end, Some(5));
+        assert_eq!(single.start(), 5);
+        assert_eq!(single.end(), Some(5));
     }
 
     #[test]
     fn test_page_range_new() {
         let range = PageRange::new(2, 10);
-        assert_eq!(range.start, 2);
-        assert_eq!(range.end, Some(10));
+        assert_eq!(range.start(), 2);
+        assert_eq!(range.end(), Some(10));
     }
 
     #[test]
     fn test_page_range_from() {
         let range = PageRange::from(5);
-        assert_eq!(range.start, 5);
-        assert_eq!(range.end, None);
+        assert_eq!(range.start(), 5);
+        assert_eq!(range.end(), None);
     }
 
     #[test]
     fn test_page_range_default() {
         let range = PageRange::default();
         assert_eq!(range, PageRange::all());
+    }
+
+    #[test]
+    fn page_range_rejects_zero_start() {
+        let result = PageRange::try_new(0, Some(5));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn page_range_rejects_end_before_start() {
+        let result = PageRange::try_new(5, Some(3));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn page_range_accepts_valid_range() {
+        let range = PageRange::try_new(1, Some(10)).unwrap();
+        assert_eq!(range.start(), 1);
+        assert_eq!(range.end(), Some(10));
     }
 
     // ==========================================================================
@@ -748,12 +918,8 @@ mod tests {
 
     #[test]
     fn test_pdf_source_bytes() {
-        let source = PdfSource::Bytes(vec![1, 2, 3]);
-        if let PdfSource::Bytes(b) = source {
-            assert_eq!(b, vec![1, 2, 3]);
-        } else {
-            panic!("Expected PdfSource::Bytes");
-        }
+        let source = PdfSource::Bytes;
+        assert!(matches!(source, PdfSource::Bytes));
     }
 
     // ==========================================================================
@@ -809,7 +975,7 @@ mod tests {
         let pdf = Pdf::from_bytes(pdf_bytes.clone()).unwrap();
 
         // Test source accessor
-        assert!(matches!(pdf.source(), PdfSource::Bytes(_)));
+        assert!(matches!(pdf.source(), PdfSource::Bytes));
 
         // Test config accessor
         assert_eq!(pdf.config().backend_preference, BackendPreference::Auto);
@@ -820,14 +986,13 @@ mod tests {
 
     #[test]
     fn test_pdf_with_custom_config() {
-        let config = PdfConfig {
-            backend_preference: BackendPreference::Extract,
-            password: Some("secret".to_string()),
-            page_range: PageRange::new(1, 5),
-            max_pages: Some(10),
-            normalize_text: false,
-            remove_headers_footers: false,
-        };
+        let config = PdfConfig::default()
+            .with_backend(BackendPreference::Extract)
+            .with_password("secret")
+            .with_page_range(PageRange::new(1, 5))
+            .with_max_pages(10)
+            .with_normalize_text(false)
+            .with_remove_headers_footers(false);
 
         let pdf_bytes = b"%PDF-1.4\n%%EOF".to_vec();
         let pdf = Pdf::from_bytes_with_config(pdf_bytes, config).unwrap();
@@ -845,5 +1010,43 @@ mod tests {
         let result = Pdf::new("/nonexistent/path/to/file.pdf");
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PdfError::Io(_)));
+    }
+
+    // ==========================================================================
+    // Builder method tests
+    // ==========================================================================
+
+    #[test]
+    fn pdf_config_builder_methods() {
+        let config = PdfConfig::default()
+            .with_password("secret")
+            .with_page_range(PageRange::new(1, 5))
+            .with_max_pages(10)
+            .with_normalize_text(false);
+
+        assert_eq!(config.password, Some("secret".to_string()));
+        assert_eq!(config.page_range, PageRange::new(1, 5));
+        assert_eq!(config.max_pages, Some(10));
+        assert!(!config.normalize_text);
+    }
+
+    #[test]
+    fn markdown_options_builder_methods() {
+        let options = MarkdownOptions::default()
+            .with_image_mode(ImageMode::Skip)
+            .with_include_page_breaks(false);
+
+        assert_eq!(options.image_mode, ImageMode::Skip);
+        assert!(!options.include_page_breaks);
+    }
+
+    #[test]
+    fn text_options_builder_methods() {
+        let options = TextOptions::default()
+            .with_normalize_text(false)
+            .with_include_page_breaks(true);
+
+        assert!(!options.normalize_text);
+        assert!(options.include_page_breaks);
     }
 }

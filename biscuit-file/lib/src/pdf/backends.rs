@@ -1,5 +1,7 @@
 //! PDF backend implementations.
 
+use tracing::{debug, warn};
+
 use super::types::{PdfConfig, PdfError};
 #[cfg(feature = "lopdf")]
 use super::types::{PdfToc, PdfTocItem};
@@ -11,8 +13,11 @@ pub fn extract_text(bytes: &[u8], config: &PdfConfig) -> Result<String, PdfError
         pdf_extract::extract_text_from_mem(bytes).map_err(|e| PdfError::Parse(e.to_string()))?;
 
     let text = if config.normalize_text {
-        normalize_text(&text)
+        let normalized = normalize_text(&text);
+        debug!(input_len = text.len(), output_len = normalized.len(), "PDF text extracted (normalized)");
+        normalized
     } else {
+        debug!(output_len = text.len(), "PDF text extracted");
         text
     };
 
@@ -24,12 +29,57 @@ pub fn extract_text(bytes: &[u8], config: &PdfConfig) -> Result<String, PdfError
 /// This function:
 /// - Collapses runs of whitespace into single spaces
 /// - Removes leading/trailing whitespace
-/// - De-hyphenates words split across lines ("word- continuation" -> "wordcontinuation")
+/// - De-hyphenates words split across lines (hyphen immediately before
+///   a newline, followed by whitespace on the next line)
 pub fn normalize_text(text: &str) -> String {
-    let mut result = String::with_capacity(text.len());
+    // First pass: de-hyphenate line breaks.
+    // A hyphen at the end of a line (before \n or \r\n) indicates a word split.
+    let dehyphenated = {
+        let mut result = String::with_capacity(text.len());
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '-' {
+                match chars.peek() {
+                    Some('\n') => {
+                        chars.next(); // consume \n
+                        // Skip leading whitespace on next line
+                        while let Some(&ws) = chars.peek() {
+                            if ws.is_whitespace() && ws != '\n' {
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    Some('\r') => {
+                        chars.next(); // consume \r
+                        if chars.peek() == Some(&'\n') {
+                            chars.next(); // consume \n
+                        }
+                        while let Some(&ws) = chars.peek() {
+                            if ws.is_whitespace() && ws != '\n' {
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    _ => {
+                        result.push(ch);
+                    }
+                }
+            } else {
+                result.push(ch);
+            }
+        }
+        result
+    };
+
+    // Second pass: collapse whitespace
+    let mut result = String::with_capacity(dehyphenated.len());
     let mut last_was_whitespace = false;
 
-    for ch in text.chars() {
+    for ch in dehyphenated.chars() {
         if ch.is_whitespace() {
             if !last_was_whitespace && !result.is_empty() {
                 result.push(' ');
@@ -41,8 +91,7 @@ pub fn normalize_text(text: &str) -> String {
         }
     }
 
-    // De-hyphenate line breaks (word- word -> wordword)
-    result.replace("- ", "").trim().to_string()
+    result.trim().to_string()
 }
 
 /// Extract table of contents from PDF bytes using lopdf.
@@ -53,7 +102,16 @@ pub fn extract_toc(bytes: &[u8]) -> Result<PdfToc, PdfError> {
     let doc = Document::load_mem(bytes).map_err(|e| PdfError::Parse(e.to_string()))?;
 
     // Try to extract bookmarks/outlines
-    let items = extract_bookmarks(&doc).unwrap_or_default();
+    let items = match extract_bookmarks(&doc) {
+        Some(items) => {
+            debug!(item_count = items.len(), "extracted PDF bookmarks");
+            items
+        }
+        None => {
+            warn!("could not extract PDF bookmarks — TOC will be empty");
+            Vec::new()
+        }
+    };
 
     Ok(PdfToc { items })
 }
@@ -194,14 +252,29 @@ mod tests {
 
     #[test]
     fn test_normalize_text_dehyphenates() {
-        // Standard hyphenation pattern
-        assert_eq!(normalize_text("hyphen- ated"), "hyphenated");
+        // Standard hyphenation pattern: hyphen at end of line
+        assert_eq!(normalize_text("hyphen-\nated"), "hyphenated");
 
-        // Multiple hyphenated words
+        // Multiple hyphenated words across lines
         assert_eq!(
-            normalize_text("un- fortunate and mis- placed"),
+            normalize_text("un-\nfortunate and mis-\nplaced"),
             "unfortunate and misplaced"
         );
+    }
+
+    #[test]
+    fn test_normalize_text_preserves_dash_space_in_prose() {
+        assert_eq!(
+            normalize_text("list items - first"),
+            "list items - first"
+        );
+    }
+
+    #[test]
+    fn test_normalize_text_dehyphenates_line_breaks_only() {
+        let input = "hyphen-\nated word and some - dash";
+        let result = normalize_text(input);
+        assert_eq!(result, "hyphenated word and some - dash");
     }
 
     #[test]
@@ -225,7 +298,7 @@ mod tests {
     #[test]
     fn test_normalize_text_complex() {
         let input = "  This is a test   with   multiple\n\n  \tspaces\n\
-                     and some hyphen- ated words that span- ned\n\
+                     and some hyphen-\nated words that span-\nned\n\
                      across     lines.  ";
         let expected = "This is a test with multiple spaces and some hyphenated words that spanned across lines.";
         assert_eq!(normalize_text(input), expected);

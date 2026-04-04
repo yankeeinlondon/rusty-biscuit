@@ -36,6 +36,10 @@ use crate::markdown::toc::MarkdownTocNode;
 use filter::HeadingFilter;
 use parser::parse_toc_linking_directives;
 use render::render_toc_links;
+use tracing::trace;
+
+#[cfg(test)]
+use tracing::debug;
 
 /// Parses all `::toc-linking` directives from document content.
 pub(crate) fn parse_directives(content: &str) -> Result<Vec<TocLinkingDirective>, TocLinkingError> {
@@ -48,6 +52,8 @@ pub(crate) fn resolve_target_chain(
     source: &ComposeSource,
     transclusion_options: &TransclusionOptions,
 ) -> Result<Option<(String, std::path::PathBuf)>, TocLinkingError> {
+    trace!(target = %directive.targets.join(" > "), "toc_linking: resolving target chain");
+
     for target in &directive.targets {
         match resolve_file(target, transclusion_options, source, directive.line) {
             Ok(path) => return Ok(Some((target.clone(), path))),
@@ -93,6 +99,8 @@ pub(crate) fn process_toc_linking(
     transclusion_options: &TransclusionOptions,
     _fail_fast: bool,
 ) -> Result<(String, usize), TocLinkingError> {
+    debug!("toc_linking: processing directives");
+
     let directives = parse_toc_linking_directives(content)?;
     if directives.is_empty() {
         return Ok((content.to_string(), 0));
