@@ -514,7 +514,7 @@ async fn test_filtering_works_correctly_type_filters() {
     create_skill(&library, "clap", "library");
     create_skill(&library, "thiserror", "library");
     create_skill(&library, "axum", "framework");
-    create_skill(&library, "tokio", "runtime");
+    create_skill(&library, "tokio", "tool");
 
     // Set RESEARCH_DIR and HOME environment variables
     unsafe {
