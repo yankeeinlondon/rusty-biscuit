@@ -44,6 +44,18 @@ use unchained_ai::rigging::tools::{BravePlan, BraveSearchTool, ScreenScrapeTool}
 
 use crate::validation::{parse_and_validate_frontmatter, repair_skill_frontmatter};
 
+/// Standard preamble for research agent tasks with web search tools.
+const AGENT_PREAMBLE: &str = "You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.";
+
+/// Preamble for changelog-specific research agent tasks.
+const AGENT_PREAMBLE_CHANGELOG: &str = "You are a research assistant with web search and scraping tools. Search for recent releases, changelogs, and version history. Use 1-3 targeted searches, then synthesize your findings. Do not make excessive tool calls - write your final answer after gathering sufficient information.";
+
+/// Preamble for synthesis tasks that work with pre-gathered data.
+const AGENT_PREAMBLE_SYNTHESIS: &str = "You are a research assistant with web search and scraping tools. You have been provided with pre-gathered version data from structured sources. Synthesize this data into a readable changelog, enriching with context where helpful. Use tools only if you need additional information beyond the provided data.";
+
+/// Preamble for question-answering research tasks.
+const AGENT_PREAMBLE_QUESTION: &str = "You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to find relevant information, then provide a comprehensive answer. Do not make excessive tool calls - synthesize your findings efficiently.";
+
 /// A PromptHook that emits tracing events for agent interactions.
 ///
 /// This hook is used to trace all tool calls made by agents during research tasks,
@@ -2357,7 +2369,7 @@ async fn run_incremental_research(
                     if let Some(ref z) = zai {
                         let agent = z
                             .agent(zai::GLM_4_7)
-                            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                            .preamble(AGENT_PREAMBLE)
                             .tool(search_tool.clone())
                             .tool(scrape_tool.clone())
                             .build();
@@ -2375,7 +2387,7 @@ async fn run_incremental_research(
                     } else {
                         let agent = gemini
                             .agent("gemini-3-flash-preview")
-                            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                            .preamble(AGENT_PREAMBLE)
                             .tool(search_tool.clone())
                             .tool(scrape_tool.clone())
                             .build();
@@ -2395,7 +2407,7 @@ async fn run_incremental_research(
                 "changelog" => {
                     let agent = openai
                         .agent("gpt-5.2")
-                        .preamble("You are a research assistant with web search and scraping tools. Search for recent releases, changelogs, and version history. Use 1-3 targeted searches, then synthesize your findings. Do not make excessive tool calls - write your final answer after gathering sufficient information.")
+                        .preamble(AGENT_PREAMBLE_CHANGELOG)
                         .tool(search_tool.clone())
                         .tool(scrape_tool.clone())
                         .build();
@@ -2414,7 +2426,7 @@ async fn run_incremental_research(
                 _ => {
                     let agent = gemini
                         .agent("gemini-3-flash-preview")
-                        .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                        .preamble(AGENT_PREAMBLE)
                         .tool(search_tool.clone())
                         .tool(scrape_tool.clone())
                         .build();
@@ -2437,7 +2449,7 @@ async fn run_incremental_research(
         for (num, question) in questions.iter() {
             let question_agent = gemini
                 .agent("gemini-3-flash-preview")
-                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to find relevant information, then provide a comprehensive answer. Do not make excessive tool calls - synthesize your findings efficiently.")
+                .preamble(AGENT_PREAMBLE_QUESTION)
                 .tool(search_tool.clone())
                 .tool(scrape_tool.clone())
                 .build();
@@ -3688,7 +3700,7 @@ pub async fn research(
         if let Some(ref z) = zai {
             let overview_agent = z
                 .agent(zai::GLM_4_7)
-                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                .preamble(AGENT_PREAMBLE)
                 .tool(search_tool.clone())
                 .tool(scrape_tool.clone())
                 .build();
@@ -3706,7 +3718,7 @@ pub async fn research(
         } else {
             let overview_agent = gemini
                 .agent("gemini-3-flash-preview")
-                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                .preamble(AGENT_PREAMBLE)
                 .tool(search_tool.clone())
                 .tool(scrape_tool.clone())
                 .build();
@@ -3726,7 +3738,7 @@ pub async fn research(
         // Similar libraries agent (using Gemini)
         let similar_agent = gemini
             .agent("gemini-3-flash-preview")
-            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+            .preamble(AGENT_PREAMBLE)
             .tool(search_tool.clone())
             .tool(scrape_tool.clone())
             .build();
@@ -3745,7 +3757,7 @@ pub async fn research(
         // Integration partners agent (using Gemini)
         let integration_agent = gemini
             .agent("gemini-3-flash-preview")
-            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+            .preamble(AGENT_PREAMBLE)
             .tool(search_tool.clone())
             .tool(scrape_tool.clone())
             .build();
@@ -3764,7 +3776,7 @@ pub async fn research(
         // Use cases agent (using Gemini)
         let use_cases_agent = gemini
             .agent("gemini-3-flash-preview")
-            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+            .preamble(AGENT_PREAMBLE)
             .tool(search_tool.clone())
             .tool(scrape_tool.clone())
             .build();
@@ -3783,7 +3795,7 @@ pub async fn research(
         // Changelog agent (using OpenAI GPT) with version history aggregation
         let changelog_agent = openai
             .agent("gpt-5.2")
-            .preamble("You are a research assistant with web search and scraping tools. You have been provided with pre-gathered version data from structured sources. Synthesize this data into a readable changelog, enriching with context where helpful. Use tools only if you need additional information beyond the provided data.")
+            .preamble(AGENT_PREAMBLE_SYNTHESIS)
             .tool(search_tool.clone())
             .tool(scrape_tool.clone())
             .build();
@@ -3805,7 +3817,7 @@ pub async fn research(
         for (i, question) in questions.iter().enumerate() {
             let question_agent = gemini
                 .agent("gemini-3-flash-preview")
-                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to find relevant information, then provide a comprehensive answer. Do not make excessive tool calls - synthesize your findings efficiently.")
+                .preamble(AGENT_PREAMBLE_QUESTION)
                 .tool(search_tool.clone())
                 .tool(scrape_tool.clone())
                 .build();
