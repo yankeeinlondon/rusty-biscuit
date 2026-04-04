@@ -819,3 +819,119 @@ fn completion_scan(
         ProtectSeverity::Info,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+    use crate::permissions::PathQuery;
+    use crate::permissions::query::QueryResult;
+    use crate::services::protect::{
+        McpPolicyOverride, ProtectFinding, ProtectFindingSource, ProtectIntent,
+        ProviderProtectOverride,
+    };
+
+    #[test]
+    fn select_precedence_returns_highest_priority_outcome() {
+        let selected = select_precedence(vec![
+            ProtectOutcome::Allow,
+            ProtectOutcome::AskThenAllowOrStop {
+                reason: "ask".to_string(),
+            },
+            ProtectOutcome::StopSession {
+                reason: "stop".to_string(),
+            },
+        ]);
+
+        assert!(matches!(selected, ProtectOutcome::StopSession { .. }));
+    }
+
+    #[test]
+    fn stop_outcome_matches_posture() {
+        assert!(matches!(
+            stop_outcome_for_posture(ProtectPosture::Advisory, "why"),
+            ProtectOutcome::AdvisoryOnly { .. }
+        ));
+        assert!(matches!(
+            stop_outcome_for_posture(ProtectPosture::Balanced, "why"),
+            ProtectOutcome::StopCurrent { .. }
+        ));
+        assert!(matches!(
+            stop_outcome_for_posture(ProtectPosture::Strict, "why"),
+            ProtectOutcome::StopSession { .. }
+        ));
+    }
+
+    #[test]
+    fn select_desired_outcome_returns_allow_for_empty_findings() {
+        assert!(matches!(
+            select_desired_outcome(&[], ProtectPosture::Balanced),
+            ProtectOutcome::Allow
+        ));
+    }
+
+    #[test]
+    fn build_redaction_plan_uses_provider_override_patterns() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            Provider::Claude,
+            ProviderProtectOverride {
+                mcp: Some(McpPolicyOverride {
+                    redact_patterns: Some(vec!["token=[a-z0-9]+".to_string()]),
+                    block_instruction_payloads: Some(false),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+        let config = ProtectConfig {
+            providers,
+            ..Default::default()
+        };
+        let observation = ProtectObservation {
+            summary: None,
+            intents: Vec::new(),
+            runtime: RuntimeFacts::default(),
+            payload: Some(ProtectPayload::McpText("token=abc123".to_string())),
+        };
+
+        let plan = build_redaction_plan(&config, Provider::Claude, &observation);
+
+        match plan {
+            Some(ProtectRedactionPlan::ReplaceText(plan)) => {
+                assert_eq!(plan.text, "[REDACTED]");
+                assert_eq!(plan.redactions_applied, 1);
+            }
+            other => panic!("expected text redaction plan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn completion_findings_escalate_to_stop_session() {
+        let findings = vec![ProtectFinding {
+            intent: ProtectIntent::CompletionOutputScan,
+            result: QueryResult::denied("completion.instruction-injection"),
+            severity: ProtectSeverity::Critical,
+            source: ProtectFindingSource::CompletionLoop,
+        }];
+
+        let outcome = select_desired_outcome(&findings, ProtectPosture::Balanced);
+
+        assert!(matches!(outcome, ProtectOutcome::StopSession { .. }));
+    }
+
+    #[test]
+    fn unknown_write_intent_asks_under_balanced_posture() {
+        let finding = ProtectFinding {
+            intent: ProtectIntent::WritePath(PathQuery::unknown("/tmp/out.txt")),
+            result: QueryResult::unknown(),
+            severity: ProtectSeverity::Medium,
+            source: ProtectFindingSource::PolicyQuery,
+        };
+
+        let outcome = select_desired_outcome(&[finding], ProtectPosture::Balanced);
+
+        assert!(matches!(outcome, ProtectOutcome::AskThenAllowOrStop { .. }));
+    }
+}

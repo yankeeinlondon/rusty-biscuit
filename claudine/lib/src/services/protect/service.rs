@@ -333,3 +333,106 @@ fn phase_from_event(event: AgenticEvent) -> ProtectPhase {
         _ => ProtectPhase::Runtime,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use crate::events::{AgenticEvent, Provider};
+    use crate::permissions::PolicyContext;
+    use crate::permissions::PolicyEngine;
+
+    use super::*;
+    use crate::services::protect::{
+        CompletionPolicy, McpPolicy, McpPolicyOverride, ProtectCliContext, ProtectObservation,
+        ProtectPayload, ProtectRules, ProviderProtectOverride, RuntimeFacts,
+    };
+
+    fn test_session(provider: Provider) -> ProtectSessionContext {
+        ProtectSessionContext {
+            provider,
+            policy_context: PolicyContext::new(PathBuf::from("/tmp/claudine-protect-service")),
+            cli: ProtectCliContext::None,
+            interactive: false,
+            yolo: false,
+            session_id: Some("svc-session".to_string()),
+        }
+    }
+
+    #[test]
+    fn resolve_policy_for_provider_merges_provider_override() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            Provider::Claude,
+            ProviderProtectOverride {
+                completion: Some(crate::services::protect::CompletionPolicyOverride {
+                    enabled: Some(false),
+                    ..Default::default()
+                }),
+                mcp: Some(McpPolicyOverride {
+                    redact_patterns: Some(vec!["token=[a-z0-9]+".to_string()]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+        let service = ProtectService::new(
+            Arc::new(PolicyEngine::new()),
+            ProtectConfig {
+                completion: CompletionPolicy {
+                    enabled: true,
+                    ..Default::default()
+                },
+                mcp: McpPolicy {
+                    redact_patterns: vec!["sk-[a-z]+".to_string()],
+                    ..Default::default()
+                },
+                providers,
+                ..Default::default()
+            },
+        );
+
+        let resolved = service.resolve_policy_for_provider(Provider::Claude);
+
+        assert!(!resolved.completion.enabled);
+        assert_eq!(resolved.mcp.redact_patterns, vec!["token=[a-z0-9]+"]);
+    }
+
+    #[test]
+    fn explain_last_returns_cached_evaluation() {
+        let mut service = ProtectService::new(
+            Arc::new(PolicyEngine::new()),
+            ProtectConfig {
+                rules: ProtectRules {
+                    secret_patterns: vec!["sk-[a-z]+".to_string()],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+
+        let request = ProtectRequest {
+            provider: Provider::Claude,
+            event: AgenticEvent::AfterModel,
+            phase: ProtectPhase::McpResponse,
+            session: test_session(Provider::Claude),
+            observation: ProtectObservation {
+                summary: Some("mcp".to_string()),
+                intents: Vec::new(),
+                runtime: RuntimeFacts::default(),
+                payload: Some(ProtectPayload::McpText("sk-secret".to_string())),
+            },
+        };
+
+        let eval = service.evaluate_structured(&request).unwrap();
+        let explanation = service.explain_last().unwrap();
+
+        assert!(matches!(
+            eval.decision.outcome,
+            ProtectOutcome::AllowWithRedaction { .. }
+        ));
+        assert!(explanation.summary.contains("AllowWithRedaction"));
+    }
+}

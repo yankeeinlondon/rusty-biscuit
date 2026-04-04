@@ -39,3 +39,32 @@ impl PolicyExplanation {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_match_creates_empty_reason_list() {
+        let explanation = PolicyExplanation::no_match("nothing matched");
+
+        assert_eq!(explanation.summary, "nothing matched");
+        assert!(explanation.reasons.is_empty());
+    }
+
+    #[test]
+    fn new_preserves_summary_and_reasons() {
+        let reasons = vec![ExplanationReason {
+            source_id: "user-config".to_string(),
+            native_reference: Some("permissions.read".to_string()),
+            message: "matched read rule".to_string(),
+            fidelity: MappingFidelity::Exact,
+        }];
+
+        let explanation = PolicyExplanation::new("allowed", reasons.clone());
+
+        assert_eq!(explanation.summary, "allowed");
+        assert_eq!(explanation.reasons.len(), 1);
+        assert_eq!(explanation.reasons[0].source_id, reasons[0].source_id);
+    }
+}
