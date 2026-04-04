@@ -138,7 +138,10 @@ mod tests {
 
     #[test]
     fn parse_trims_whitespace() {
-        assert_eq!(" 50% ".parse::<WidthSpec>().unwrap(), WidthSpec::Percent(50));
+        assert_eq!(
+            " 50% ".parse::<WidthSpec>().unwrap(),
+            WidthSpec::Percent(50)
+        );
         assert_eq!(" fill ".parse::<WidthSpec>().unwrap(), WidthSpec::Fill);
     }
 
@@ -280,9 +283,7 @@ impl FromStr for PositiveF32 {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let value: f32 = s
-            .parse()
-            .map_err(|_| format!("invalid number: '{}'", s))?;
+        let value: f32 = s.parse().map_err(|_| format!("invalid number: '{}'", s))?;
         if !value.is_finite() {
             return Err(format!("value must be finite, got {}", value));
         }

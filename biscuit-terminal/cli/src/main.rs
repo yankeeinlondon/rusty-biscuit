@@ -112,7 +112,13 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref content,
         }) => {
-            tracing::debug!(command = "flowchart", vertical, inverse, example, "Dispatching subcommand");
+            tracing::debug!(
+                command = "flowchart",
+                vertical,
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
             let width_str = width.as_ref().map(|w| w.to_string());
             return render_flowchart(
                 vertical,
@@ -148,7 +154,12 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref points,
         }) => {
-            tracing::debug!(command = "quadrant", inverse, example, "Dispatching subcommand");
+            tracing::debug!(
+                command = "quadrant",
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
             let width_str = width.as_ref().map(|w| w.to_string());
             return render_quadrant(
                 x_axis.as_deref(),
@@ -184,7 +195,12 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref data,
         }) => {
-            tracing::debug!(command = "pie-chart", inverse, example, "Dispatching subcommand");
+            tracing::debug!(
+                command = "pie-chart",
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
             let width_str = width.as_ref().map(|w| w.to_string());
             return render_pie_chart(
                 inverse,
@@ -207,7 +223,12 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref commands,
         }) => {
-            tracing::debug!(command = "git-graph", inverse, example, "Dispatching subcommand");
+            tracing::debug!(
+                command = "git-graph",
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
             let width_str = width.as_ref().map(|w| w.to_string());
             return render_git_graph(
                 inverse,
@@ -235,7 +256,13 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref data,
         }) => {
-            tracing::debug!(command = "bar-chart", inverse, horizontal, example, "Dispatching subcommand");
+            tracing::debug!(
+                command = "bar-chart",
+                inverse,
+                horizontal,
+                example,
+                "Dispatching subcommand"
+            );
             let width_str = width.as_ref().map(|w| w.to_string());
             return render_xy_chart(
                 XyChartType::Bar,
@@ -271,7 +298,13 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref data,
         }) => {
-            tracing::debug!(command = "line-chart", inverse, horizontal, example, "Dispatching subcommand");
+            tracing::debug!(
+                command = "line-chart",
+                inverse,
+                horizontal,
+                example,
+                "Dispatching subcommand"
+            );
             let width_str = width.as_ref().map(|w| w.to_string());
             return render_xy_chart(
                 XyChartType::Line,
@@ -302,7 +335,12 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref events,
         }) => {
-            tracing::debug!(command = "timeline", inverse, example, "Dispatching subcommand");
+            tracing::debug!(
+                command = "timeline",
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
             let width_str = width.as_ref().map(|w| w.to_string());
             return render_timeline(
                 title.as_deref(),
@@ -325,7 +363,12 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref transitions,
         }) => {
-            tracing::debug!(command = "state-diagram", inverse, example, "Dispatching subcommand");
+            tracing::debug!(
+                command = "state-diagram",
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
             let width_str = width.as_ref().map(|w| w.to_string());
             return render_state_diagram(
                 title.as_deref(),
@@ -395,7 +438,12 @@ fn main() -> color_eyre::Result<()> {
             ref text,
             truncate,
         }) => {
-            tracing::debug!(command = "pad-left", width, truncate, "Dispatching subcommand");
+            tracing::debug!(
+                command = "pad-left",
+                width,
+                truncate,
+                "Dispatching subcommand"
+            );
             return render_pad_left(text, width, truncate);
         }
         Some(Command::PadRight {
@@ -403,7 +451,12 @@ fn main() -> color_eyre::Result<()> {
             ref text,
             truncate,
         }) => {
-            tracing::debug!(command = "pad-right", width, truncate, "Dispatching subcommand");
+            tracing::debug!(
+                command = "pad-right",
+                width,
+                truncate,
+                "Dispatching subcommand"
+            );
             return render_pad_right(text, width, truncate);
         }
         Some(Command::Prose {
@@ -428,7 +481,11 @@ fn main() -> color_eyre::Result<()> {
             no_hanging_indent,
             ref layout,
         }) => {
-            tracing::debug!(command = "list", items = items.len(), "Dispatching subcommand");
+            tracing::debug!(
+                command = "list",
+                items = items.len(),
+                "Dispatching subcommand"
+            );
             return render_list(items, bullet, no_hanging_indent, layout);
         }
         Some(Command::Columns {
@@ -459,7 +516,13 @@ fn main() -> color_eyre::Result<()> {
                 show_modified: modified,
                 show_updated: updated,
             };
-            tracing::debug!(command = "dir", ?path, depth, ?filter, "Dispatching subcommand");
+            tracing::debug!(
+                command = "dir",
+                ?path,
+                depth,
+                ?filter,
+                "Dispatching subcommand"
+            );
             return render_dir(path, depth, filter, skip_root, layout, &options);
         }
         None => {
@@ -512,7 +575,6 @@ fn print_completions(shell: Shell) {
     let mut cmd = Args::command();
     clap_complete::generate(shell, &mut cmd, "bt", &mut std::io::stdout());
 }
-
 
 /// Completes font family names from system fonts available to resvg.
 pub fn font_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
