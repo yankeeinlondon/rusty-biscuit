@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use which::which;
 
 /// Finds a program by name in the system PATH.
@@ -207,7 +207,7 @@ fn build_bundle_index() -> HashMap<String, PathBuf> {
 
 /// Checks if a bundle exists and returns the path to its executable.
 #[cfg(target_os = "macos")]
-fn check_bundle_executable(bundle_path: &PathBuf, binary_name: &str) -> Option<PathBuf> {
+fn check_bundle_executable(bundle_path: &Path, binary_name: &str) -> Option<PathBuf> {
     if !bundle_path.exists() {
         return None;
     }
@@ -234,10 +234,10 @@ fn check_bundle_executable(bundle_path: &PathBuf, binary_name: &str) -> Option<P
 
         // Otherwise try to find one matching the binary name
         for entry in executables {
-            if let Some(name) = entry.file_name().to_str() {
-                if name.to_lowercase() == binary_name.to_lowercase() {
-                    return Some(entry.path());
-                }
+            if let Some(name) = entry.file_name().to_str()
+                && name.to_lowercase() == binary_name.to_lowercase()
+            {
+                return Some(entry.path());
             }
         }
     }
