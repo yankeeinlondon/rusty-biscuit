@@ -1625,7 +1625,7 @@ pub fn handle_mermaid_error(
             // Graceful degradation: output the diagram as a fenced code block
             // so piped/non-TTY consumers still get useful output.
             println!("```mermaid\n{}\n```", instructions);
-            return Ok(());
+            Ok(())
         }
         MermaidRenderError::Visualization(ref viz_err) => {
             eprintln!();
@@ -1635,16 +1635,16 @@ pub fn handle_mermaid_error(
                 s.dim, diagram_type, s.reset
             );
             eprintln!("```mermaid\n{}\n```", instructions);
+            Err(color_eyre::eyre::eyre!("{}", viz_err))
         }
         MermaidRenderError::DisplayError(ref msg) => {
             eprintln!(
                 "{}{}Error:{} Failed to display image: {}",
                 s.red, s.bold, s.reset, msg
             );
+            Err(color_eyre::eyre::eyre!("Failed to display image: {}", msg))
         }
     }
-
-    std::process::exit(1);
 }
 
 /// Handle graph rendering errors with user-friendly output.
@@ -1660,13 +1660,14 @@ pub fn handle_graph_error(
     match error {
         GraphRenderError::NoImageSupport => {
             println!("{fallback}");
-            return Ok(());
+            Ok(())
         }
         GraphRenderError::Visualization(ref viz_err) => {
             eprintln!();
             eprintln!("{}{}Error:{} {}", s.red, s.bold, s.reset, viz_err);
             eprintln!("\n{}Graph expression was defined as:{}\n", s.dim, s.reset);
             eprintln!("{fallback}");
+            Err(color_eyre::eyre::eyre!("{}", viz_err))
         }
         GraphRenderError::DisplayError(ref msg) => {
             eprintln!(
@@ -1675,10 +1676,9 @@ pub fn handle_graph_error(
             );
             eprintln!("\n{}Graph expression source was:{}\n", s.dim, s.reset);
             eprintln!("{source}");
+            Err(color_eyre::eyre::eyre!("Failed to display image: {}", msg))
         }
     }
-
-    std::process::exit(1);
 }
 
 /// Render prose content with styling tokens to the terminal.
