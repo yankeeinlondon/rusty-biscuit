@@ -13,6 +13,14 @@ use std::collections::HashMap;
 
 use futures::future::join_all;
 
+#[cfg(any(
+    feature = "slack",
+    feature = "signal",
+    feature = "whatsapp",
+    feature = "telegram"
+))]
+pub(crate) mod http_helpers;
+
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
