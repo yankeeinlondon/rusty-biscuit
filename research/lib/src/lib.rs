@@ -209,7 +209,7 @@ pub struct MissingPrompt {
 ///
 /// Returns a list of prompts that don't have corresponding output files.
 #[deprecated(
-    note = "Use research_health() from validation::health module. Note: research_health() requires ResearchType and builds paths internally using RESEARCH_DIR environment variable or current directory."
+    note = "Use research_health() from validation::health module. Note: research_health() requires TopicType and builds paths internally using RESEARCH_DIR environment variable or current directory."
 )]
 pub async fn check_missing_standard_prompts(output_dir: &std::path::Path) -> Vec<MissingPrompt> {
     let mut missing = Vec::new();
@@ -254,7 +254,7 @@ const EXPECTED_OUTPUTS: &[(&str, &str)] = &[
 ///
 /// Returns a list of outputs that don't exist.
 #[deprecated(
-    note = "Use research_health() from validation::health module. Note: research_health() requires ResearchType and builds paths internally using RESEARCH_DIR environment variable or current directory."
+    note = "Use research_health() from validation::health module. Note: research_health() requires TopicType and builds paths internally using RESEARCH_DIR environment variable or current directory."
 )]
 pub async fn check_missing_outputs(output_dir: &std::path::Path) -> Vec<MissingOutput> {
     let mut missing = Vec::new();
@@ -1029,6 +1029,74 @@ fn parse_brief_response(response: &str) -> (Option<String>, Option<String>) {
     }
 
     (brief, summary)
+}
+
+#[cfg(test)]
+mod brief_tests {
+    use super::parse_brief_response;
+
+    #[test]
+    fn test_parse_brief_response_both_markers() {
+        let response = "BRIEF: A short description\nSUMMARY: A longer summary paragraph";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, Some("A short description".to_string()));
+        assert_eq!(summary, Some("A longer summary paragraph".to_string()));
+    }
+
+    #[test]
+    fn test_parse_brief_response_multiline_summary() {
+        let response = "BRIEF: Short desc\nSUMMARY: First line\nSecond line\nThird line";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, Some("Short desc".to_string()));
+        assert!(summary.unwrap().contains("Second line"));
+    }
+
+    #[test]
+    fn test_parse_brief_response_missing_brief() {
+        let response = "SUMMARY: Just a summary";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, None);
+        assert_eq!(summary, Some("Just a summary".to_string()));
+    }
+
+    #[test]
+    fn test_parse_brief_response_missing_summary() {
+        let response = "BRIEF: Just a brief";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, Some("Just a brief".to_string()));
+        assert_eq!(summary, None);
+    }
+
+    #[test]
+    fn test_parse_brief_response_no_markers() {
+        let response = "Just some random text without markers";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, None);
+        assert_eq!(summary, None);
+    }
+
+    #[test]
+    fn test_parse_brief_response_empty_input() {
+        let (brief, summary) = parse_brief_response("");
+        assert_eq!(brief, None);
+        assert_eq!(summary, None);
+    }
+
+    #[test]
+    fn test_parse_brief_response_extra_whitespace() {
+        let response = "BRIEF:   padded brief  \nSUMMARY:   padded summary  ";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, Some("padded brief".to_string()));
+        assert!(summary.unwrap().starts_with("padded summary"));
+    }
+
+    #[test]
+    fn test_parse_brief_response_preamble_before_markers() {
+        let response = "Here is the result:\n\nBRIEF: The brief\nSUMMARY: The summary";
+        let (brief, summary) = parse_brief_response(response);
+        assert_eq!(brief, Some("The brief".to_string()));
+        assert_eq!(summary, Some("The summary".to_string()));
+    }
 }
 
 /// Library context for building prompts
@@ -3456,8 +3524,8 @@ pub async fn research(
 
         // Check for missing standard prompts
         // NOTE: Using deprecated function because research() accepts custom output_dir
-        // and doesn't have ResearchType context. This function should be kept until
-        // research() is refactored to require ResearchType parameter or can infer it.
+        // and doesn't have TopicType context. This function should be kept until
+        // research() is refactored to require TopicType parameter or can infer it.
         #[allow(deprecated)]
         let missing_prompts = check_missing_standard_prompts(&output_dir).await;
         if !missing_prompts.is_empty() {
