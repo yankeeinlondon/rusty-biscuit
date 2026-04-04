@@ -1,5 +1,9 @@
 use crate::*;
-use biscuit_terminal::discovery::detection::{Connection, MultiplexSupport, multiplex_support};
+use biscuit_terminal::discovery::detection::{
+    ColorDepth, ColorMode, Connection, ImageSupport, MultiplexSupport, multiplex_support,
+};
+use biscuit_terminal::discovery::fonts::FontLigature;
+use biscuit_terminal::discovery::locale::CharEncoding;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -44,14 +48,14 @@ pub struct TerminalMetadata {
     pub is_nerd_font: Option<bool>,
     /// Font ligatures (if detectable)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub font_ligatures: Option<Vec<String>>,
+    pub font_ligatures: Option<Vec<FontLigature>>,
     /// Whether the terminal likely supports font ligatures (heuristic)
     pub ligatures_likely: bool,
 
     /// Supported color depth
-    pub color_depth: String,
+    pub color_depth: ColorDepth,
     /// Light/dark mode
-    pub color_mode: String,
+    pub color_mode: ColorMode,
     /// Background color (if detectable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bg_color: Option<ColorInfo>,
@@ -65,7 +69,7 @@ pub struct TerminalMetadata {
     /// Whether italics are supported
     pub supports_italic: bool,
     /// Image rendering support
-    pub image_support: String,
+    pub image_support: ImageSupport,
     /// Underline style support
     pub underline_support: UnderlineInfo,
     /// OSC8 hyperlink support
@@ -82,7 +86,7 @@ pub struct TerminalMetadata {
     pub mode_2027_graphemes: bool,
 
     /// Multiplexer type
-    pub multiplex: String,
+    pub multiplex: MultiplexSupport,
 
     /// Connection type (Local, SSH, Mosh)
     pub connection: ConnectionInfo,
@@ -93,7 +97,7 @@ pub struct TerminalMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locale_tag: Option<String>,
     /// Character encoding
-    pub char_encoding: String,
+    pub char_encoding: CharEncoding,
 
     /// Path to terminal config file
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -220,7 +224,7 @@ pub fn collect_metadata() -> TerminalMetadata {
     });
 
     TerminalMetadata {
-        app: format!("{:?}", terminal.app),
+        app: terminal.app.to_string(),
         os: terminal.os.to_string(),
         distro,
         width: terminal.width(),
@@ -231,22 +235,19 @@ pub fn collect_metadata() -> TerminalMetadata {
         in_monorepo: terminal.in_monorepo,
         repo_root: terminal.repo_root.as_ref().map(|p| p.display().to_string()),
         package_root: terminal.package_root.clone(),
-        color_depth: format!("{:?}", terminal.color_depth),
-        color_mode: format!("{:?}", Terminal::color_mode()),
+        color_depth: terminal.color_depth.clone(),
+        color_mode: Terminal::color_mode(),
         bg_color,
         text_color,
         cursor_color,
         font: terminal.font.clone(),
         font_size: terminal.font_size,
         is_nerd_font: terminal.is_nerd_font,
-        font_ligatures: terminal
-            .font_ligatures
-            .as_ref()
-            .map(|ligatures| ligatures.iter().map(|l| format!("{:?}", l)).collect()),
+        font_ligatures: terminal.font_ligatures.clone(),
         ligatures_likely: fonts::ligature_support_likely(),
 
         supports_italic: terminal.supports_italic,
-        image_support: format!("{:?}", terminal.image_support),
+        image_support: terminal.image_support.clone(),
         underline_support: UnderlineInfo {
             straight: terminal.underline_support.straight,
             double: terminal.underline_support.double,
@@ -261,11 +262,11 @@ pub fn collect_metadata() -> TerminalMetadata {
         osc12_cursor_color: osc_queries::osc12_support(),
         osc52_clipboard: clipboard::osc52_support(),
         mode_2027_graphemes: mode_2027::supports_mode_2027(),
-        multiplex: format_multiplex(multiplex_support()),
+        multiplex: multiplex_support(),
         connection: format_connection(&terminal.remote),
         locale_raw: terminal.locale.raw().map(|s| s.to_string()),
         locale_tag: terminal.locale.tag().map(|s| s.to_string()),
-        char_encoding: format!("{:?}", terminal.char_encoding),
+        char_encoding: terminal.char_encoding.clone(),
         config_file: terminal
             .config_file
             .as_ref()
@@ -331,15 +332,6 @@ pub fn format_connection(conn: &Connection) -> ConnectionInfo {
         Connection::MoshClient(mosh) => ConnectionInfo::Mosh {
             connection: mosh.connection.clone(),
         },
-    }
-}
-
-pub fn format_multiplex(m: MultiplexSupport) -> String {
-    match m {
-        MultiplexSupport::None => "None".to_string(),
-        MultiplexSupport::Native => "Native".to_string(),
-        MultiplexSupport::Tmux => "tmux".to_string(),
-        MultiplexSupport::Zellij => "Zellij".to_string(),
     }
 }
 
@@ -433,8 +425,8 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
 
     // Color section
     println!("\n{}{}Colors{}", s.bold, s.blue, s.reset);
-    println!("  Depth:      {}", metadata.color_depth);
-    println!("  Mode:       {}", metadata.color_mode);
+    println!("  Depth:      {:?}", metadata.color_depth);
+    println!("  Mode:       {:?}", metadata.color_mode);
     if let Some(bg) = &metadata.bg_color {
         println!(
             "  Background: {} ({}, {}, {})",
@@ -470,7 +462,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     let check = |b: bool| if b { &yes } else { &no_mark };
 
     println!("  Italics:      {}", check(metadata.supports_italic));
-    println!("  Images:       {}", metadata.image_support);
+    println!("  Images:       {:?}", metadata.image_support);
     println!("  OSC8 Links:   {}", check(metadata.osc_link_support));
     println!("  OSC10 FG:     {}", check(metadata.osc10_fg_color));
     println!("  OSC11 BG:     {}", check(metadata.osc11_bg_color));
@@ -498,7 +490,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
 
     // Multiplexing
     println!("\n{}{}Multiplexing{}", s.bold, s.blue, s.reset);
-    println!("  Type:       {}", metadata.multiplex);
+    println!("  Type:       {:?}", metadata.multiplex);
 
     // Connection
     println!("\n{}{}Connection{}", s.bold, s.blue, s.reset);
@@ -536,7 +528,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
         "  Tag:        {}",
         metadata.locale_tag.as_deref().unwrap_or(&na)
     );
-    println!("  Encoding:   {}", metadata.char_encoding);
+    println!("  Encoding:   {:?}", metadata.char_encoding);
 
     // Config
     if let Some(config) = &metadata.config_file {
@@ -550,7 +542,10 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use biscuit_terminal::discovery::detection::MultiplexSupport;
+    use biscuit_terminal::discovery::detection::{
+        ColorDepth, ColorMode, ImageSupport, MultiplexSupport, TerminalApp,
+    };
+    use biscuit_terminal::discovery::locale::CharEncoding;
 
     #[test]
     fn test_analyze_content() {
@@ -568,11 +563,18 @@ mod tests {
     }
 
     #[test]
-    fn test_format_multiplex() {
-        assert_eq!(format_multiplex(MultiplexSupport::None), "None");
-        assert_eq!(format_multiplex(MultiplexSupport::Tmux), "tmux");
-        assert_eq!(format_multiplex(MultiplexSupport::Zellij), "Zellij");
-        assert_eq!(format_multiplex(MultiplexSupport::Native), "Native");
+    fn test_terminal_app_display() {
+        assert_eq!(TerminalApp::Kitty.to_string(), "Kitty");
+        assert_eq!(TerminalApp::Ghostty.to_string(), "Ghostty");
+        assert_eq!(TerminalApp::ITerm2.to_string(), "ITerm2");
+        assert_eq!(
+            TerminalApp::Other("xterm".to_string()).to_string(),
+            "xterm"
+        );
+        assert_eq!(
+            TerminalApp::Other("Windows Terminal".to_string()).to_string(),
+            "Windows Terminal"
+        );
     }
 
     #[test]
@@ -589,8 +591,8 @@ mod tests {
             in_monorepo: false,
             repo_root: None,
             package_root: None,
-            color_depth: "TrueColor".to_string(),
-            color_mode: "Dark".to_string(),
+            color_depth: ColorDepth::TrueColor,
+            color_mode: ColorMode::Dark,
             bg_color: None,
             text_color: None,
             cursor_color: None,
@@ -600,7 +602,7 @@ mod tests {
             font_ligatures: None,
             ligatures_likely: false,
             supports_italic: true,
-            image_support: "Kitty".to_string(),
+            image_support: ImageSupport::Kitty,
             underline_support: UnderlineInfo {
                 curly: true,
                 dashed: false,
@@ -615,11 +617,11 @@ mod tests {
             osc12_cursor_color: true,
             osc52_clipboard: true,
             mode_2027_graphemes: false,
-            multiplex: "None".to_string(),
+            multiplex: MultiplexSupport::None,
             connection: ConnectionInfo::Local,
             locale_raw: None,
             locale_tag: None,
-            char_encoding: "UTF-8".to_string(),
+            char_encoding: CharEncoding::Utf8,
             config_file: None,
         };
 
@@ -629,5 +631,11 @@ mod tests {
         assert!(json.contains("\"width\":80"));
         assert!(json.contains("\"height\":24"));
         assert!(json.contains("\"curly\":true"));
+        // Verify enum fields serialize as expected PascalCase strings
+        assert!(json.contains("\"color_depth\":\"TrueColor\""));
+        assert!(json.contains("\"color_mode\":\"Dark\""));
+        assert!(json.contains("\"image_support\":\"Kitty\""));
+        assert!(json.contains("\"multiplex\":\"None\""));
+        assert!(json.contains("\"char_encoding\":\"Utf8\""));
     }
 }

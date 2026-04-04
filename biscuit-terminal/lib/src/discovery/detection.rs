@@ -83,6 +83,15 @@ pub enum TerminalApp {
     Other(String),
 }
 
+impl std::fmt::Display for TerminalApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Other(name) => write!(f, "{}", name),
+            other => write!(f, "{:?}", other),
+        }
+    }
+}
+
 /// Client information for a host which was established over an SSH connection.
 ///
 /// Parsed from the `SSH_CLIENT` environment variable which has the format:
