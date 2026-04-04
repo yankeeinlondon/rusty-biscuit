@@ -6,7 +6,10 @@
 mod config;
 mod distance;
 mod error;
+mod ip;
 mod maps;
+#[cfg(feature = "reverse")]
+mod reverse;
 mod types;
 
 pub use config::{LocationConfig, ReverseGeocodeConfig, resolve_maxmind_path};
