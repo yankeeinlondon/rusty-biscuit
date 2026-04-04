@@ -81,6 +81,7 @@
             "proptest",
             "ptyprocess",
             "qwen",
+            "raml",
             "rmcp",
             "rodio",
             "rustls",
