@@ -1,14 +1,15 @@
 kind: sequence
 template:
-    desc: "{{name}} (_site: {{site}}, repo: {{ repo || n/a }}_)"
+    desc: "{{name}} (_site: {{site}}, repo: {{ repo || 'n/a' }}_)"
 list:
     - name: Claude Code
-      file: claude.md
+      file: ./claude.md
       site: https://code.claude.com/docs/en/overview
       repo:
     - name: Codex CLI
-      file: codex.md
-      site:
+      file: ./codex.md
+      site: https://developers.openai.com/codex/cli
+      best_practices: https://developers.openai.com/codex/learn/best-practices
       repo:
     - name: Gemini CLI
       file: gemini.md
@@ -17,10 +18,10 @@ list:
       site: https://block.github.io/goose/
       repo: https://github.com/block/goose
     - name: Kimi Code CLI
-      file: kimi.md
+      file: ./kimi.md
       site: https://moonshotai.github.io/kimi-cli/
       repo: https://github.com/MoonshotAI/kimi-cli
     - name: OpenCode CLI
-      file: opencode.md
+      file: ./opencode.md
       site: https://opencode.ai
       repo: https://github.com/anomalyco/opencode
