@@ -197,7 +197,7 @@ fn parse_heading_level(s: &str, line: usize) -> Result<HeadingLevel, TocLinkingE
         level: s.clone(),
         line,
     })?;
-    HeadingLevel::new(level).ok_or_else(|| TocLinkingError::InvalidLevel { level: s, line })
+    HeadingLevel::new(level).ok_or(TocLinkingError::InvalidLevel { level: s, line })
 }
 
 fn parse_glob_prefix(value: &str) -> (&str, bool) {
