@@ -55,10 +55,11 @@ fn make_cache(options: &ReferenceGraphOptions) -> RunLocalCache {
     }
 }
 
-/// Build a transclusion-only graph (no link/image extraction at leaf nodes).
-pub(crate) fn build_transclusion_graph(
+/// Shared graph construction with configurable reference extraction.
+fn build_graph_inner(
     md: &Markdown,
     options: &ReferenceGraphOptions,
+    extract_references: bool,
 ) -> MarkdownResult<ReferenceGraph> {
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
@@ -72,7 +73,7 @@ pub(crate) fn build_transclusion_graph(
     let root_id = source_to_id(&source);
     let _ = runtime.transclusion.enter(root_id);
 
-    let (root, all_nodes) = build_node(md, &source, options, &mut runtime, false)?;
+    let (root, all_nodes) = build_node(md, &source, options, &mut runtime, extract_references)?;
 
     runtime.transclusion.exit();
 
@@ -82,31 +83,20 @@ pub(crate) fn build_transclusion_graph(
     })
 }
 
+/// Build a transclusion-only graph (no link/image extraction at leaf nodes).
+pub(crate) fn build_transclusion_graph(
+    md: &Markdown,
+    options: &ReferenceGraphOptions,
+) -> MarkdownResult<ReferenceGraph> {
+    build_graph_inner(md, options, false)
+}
+
 /// Build a full reference graph (transclusions + all reference types at each node).
 pub(crate) fn build_reference_graph(
     md: &Markdown,
     options: &ReferenceGraphOptions,
 ) -> MarkdownResult<ReferenceGraph> {
-    let mut runtime = ReferenceAnalysisRuntime {
-        transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
-        cache: make_cache(options),
-    };
-
-    let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
-
-    // Seed the runtime with the root node so child documents that
-    // transclude the root are detected as cycles immediately.
-    let root_id = source_to_id(&source);
-    let _ = runtime.transclusion.enter(root_id);
-
-    let (root, all_nodes) = build_node(md, &source, options, &mut runtime, true)?;
-
-    runtime.transclusion.exit();
-
-    Ok(ReferenceGraph {
-        root,
-        nodes: all_nodes,
-    })
+    build_graph_inner(md, options, true)
 }
 
 /// Flatten a reference graph into composed-order [`ReferenceSet`].
