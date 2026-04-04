@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use crate::markdown::compose::ComposeSource;
+use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::reference::types::{
     NodeId, ReferenceGraph, ReferenceGraphNode, ReferenceInsertionContext, ReferenceKind,
     ReferenceRecord, ReferenceSyntax, ReferenceTarget,
@@ -433,7 +434,7 @@ pub fn transclusion_caption(context: &ReferenceInsertionContext) -> String {
         .section_heading_text
         .as_deref()
         .map(|h| {
-            let hashes = "#".repeat(context.section_heading_level.unwrap_or(2) as usize);
+            let hashes = "#".repeat(context.section_heading_level.unwrap_or(HeadingLevel::H2).hash_count());
             format!(" into the '{hashes} {h}' section")
         })
         .unwrap_or_default();
@@ -511,7 +512,7 @@ mod tests {
         let ctx = ReferenceInsertionContext {
             directive_kind: Some(ReferenceSyntax::DirectiveFile),
             section_heading_text: Some("Intro".to_string()),
-            section_heading_level: Some(2),
+            section_heading_level: Some(HeadingLevel::H2),
         };
         assert_eq!(
             transclusion_caption(&ctx),
@@ -524,7 +525,7 @@ mod tests {
         let ctx = ReferenceInsertionContext {
             directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
             section_heading_text: Some("Links".to_string()),
-            section_heading_level: Some(2),
+            section_heading_level: Some(HeadingLevel::H2),
         };
         assert_eq!(
             transclusion_caption(&ctx),
@@ -547,7 +548,7 @@ mod tests {
         let ctx = ReferenceInsertionContext {
             directive_kind: Some(ReferenceSyntax::DirectiveUrl),
             section_heading_text: Some("Summary".to_string()),
-            section_heading_level: Some(2),
+            section_heading_level: Some(HeadingLevel::H2),
         };
         assert_eq!(
             transclusion_caption(&ctx),
@@ -614,7 +615,7 @@ mod tests {
         let ctx = ReferenceInsertionContext {
             directive_kind: Some(ReferenceSyntax::DirectiveFile),
             section_heading_text: Some("Details".to_string()),
-            section_heading_level: Some(3),
+            section_heading_level: Some(HeadingLevel::H3),
         };
         assert_eq!(
             transclusion_caption(&ctx),
@@ -627,7 +628,7 @@ mod tests {
         let ctx = ReferenceInsertionContext {
             directive_kind: Some(ReferenceSyntax::DirectiveFile),
             section_heading_text: Some("Sub".to_string()),
-            section_heading_level: Some(4),
+            section_heading_level: Some(HeadingLevel::H4),
         };
         assert_eq!(
             transclusion_caption(&ctx),

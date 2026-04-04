@@ -1,6 +1,7 @@
 //! Core type definitions for the reference analysis subsystem.
 
 use crate::markdown::compose::ComposeSource;
+use crate::markdown::normalize::HeadingLevel;
 use std::ops::Range;
 
 // ── Node identifier ─────────────────────────────────────────────────
@@ -304,7 +305,7 @@ pub struct ReferenceInsertionContext {
     /// The heading text of the section containing the directive (if any).
     pub section_heading_text: Option<String>,
     /// The heading level of the containing section (1–6).
-    pub section_heading_level: Option<u8>,
+    pub section_heading_level: Option<HeadingLevel>,
 }
 
 /// Records a child document insertion within a graph node.

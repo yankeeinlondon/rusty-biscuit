@@ -10,6 +10,7 @@ use super::types::{
     ReferenceInsertionContext, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSet,
     ReferenceSyntax, classify_target, make_reference_id,
 };
+use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::Markdown;
 use crate::markdown::compose::cache::RunLocalCache;
 use crate::markdown::compose::conditions;
@@ -184,10 +185,10 @@ fn flatten_node(node: &ReferenceGraphNode, graph: &ReferenceGraph, out: &mut Vec
 /// Returns `(start_line, heading_text, heading_level)` tuples sorted by
 /// line number. Used to look up section context for transclusion directive
 /// lines.
-fn build_heading_index(prepared_content: &str) -> Vec<(usize, String, u8)> {
+fn build_heading_index(prepared_content: &str) -> Vec<(usize, String, HeadingLevel)> {
     let temp_md = Markdown::new(prepared_content);
     let toc = temp_md.toc();
-    let mut index: Vec<(usize, String, u8)> = toc
+    let mut index: Vec<(usize, String, HeadingLevel)> = toc
         .all_headings()
         .into_iter()
         .map(|h| (h.line_range.0, h.title.clone(), h.level))
@@ -200,9 +201,9 @@ fn build_heading_index(prepared_content: &str) -> Vec<(usize, String, u8)> {
 ///
 /// Finds the heading with the greatest start line that is `<= target_line`.
 fn section_at_line(
-    heading_index: &[(usize, String, u8)],
+    heading_index: &[(usize, String, HeadingLevel)],
     target_line: usize,
-) -> Option<(&str, u8)> {
+) -> Option<(&str, HeadingLevel)> {
     heading_index
         .iter()
         .rev()

@@ -1,9 +1,10 @@
 //! Type definitions for Markdown normalization and re-leveling.
 
+use serde::Serialize;
 use thiserror::Error;
 
 /// Represents a valid markdown heading level (1-6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct HeadingLevel(u8);
 
 impl HeadingLevel {

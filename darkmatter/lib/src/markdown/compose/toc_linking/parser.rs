@@ -4,6 +4,7 @@ use super::types::{
     CleanupService, HeadingGlob, TocLinkingDirective, TocLinkingError, TocLinkingOptions,
 };
 use crate::markdown::compose::parse_utils::{Cursor, find_code_regions, is_in_code_region};
+use crate::markdown::normalize::HeadingLevel;
 
 /// Parses all `::toc-linking` directives from markdown content.
 pub fn parse_toc_linking_directives(
@@ -189,17 +190,14 @@ fn apply_toc_linking_option(
     Ok(())
 }
 
-fn parse_heading_level(s: &str, line: usize) -> Result<u8, TocLinkingError> {
+fn parse_heading_level(s: &str, line: usize) -> Result<HeadingLevel, TocLinkingError> {
     let s = s.trim().to_ascii_lowercase();
     let num_str = s.strip_prefix('h').unwrap_or(&s);
     let level: u8 = num_str.parse().map_err(|_| TocLinkingError::InvalidLevel {
         level: s.clone(),
         line,
     })?;
-    if !(1..=6).contains(&level) {
-        return Err(TocLinkingError::InvalidLevel { level: s, line });
-    }
-    Ok(level)
+    HeadingLevel::new(level).ok_or_else(|| TocLinkingError::InvalidLevel { level: s, line })
 }
 
 fn parse_glob_prefix(value: &str) -> (&str, bool) {
@@ -228,9 +226,9 @@ mod tests {
         let content = "::toc-linking ./doc.md level=h2,h3\n";
         let directives = parse_toc_linking_directives(content).unwrap();
         let levels = &directives[0].options.levels.levels;
-        assert!(levels.contains(&2));
-        assert!(levels.contains(&3));
-        assert!(!levels.contains(&4));
+        assert!(levels.contains(&HeadingLevel::H2));
+        assert!(levels.contains(&HeadingLevel::H3));
+        assert!(!levels.contains(&HeadingLevel::H4));
     }
 
     #[test]
@@ -238,8 +236,8 @@ mod tests {
         let content = "::toc-linking ./doc.md level=h2 level=h4\n";
         let directives = parse_toc_linking_directives(content).unwrap();
         let levels = &directives[0].options.levels.levels;
-        assert!(levels.contains(&2));
-        assert!(levels.contains(&4));
+        assert!(levels.contains(&HeadingLevel::H2));
+        assert!(levels.contains(&HeadingLevel::H4));
     }
 
     #[test]

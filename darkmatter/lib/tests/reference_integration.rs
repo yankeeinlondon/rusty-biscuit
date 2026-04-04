@@ -3,6 +3,7 @@
 //! Tests composed graph behavior (rec #13) and validation (rec #14)
 //! with real filesystem documents using `tempfile`.
 
+use darkmatter::markdown::normalize::HeadingLevel;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::reference::types::{
@@ -806,7 +807,7 @@ fn section_context_populated_in_graph() {
         Some("Intro"),
         "expected section heading 'Intro' for ::file directive in the Intro section"
     );
-    assert_eq!(insertion.context.section_heading_level, Some(2));
+    assert_eq!(insertion.context.section_heading_level, Some(HeadingLevel::H2));
     assert_eq!(
         insertion.context.directive_kind,
         Some(ReferenceSyntax::DirectiveFile)
@@ -1088,7 +1089,7 @@ fn file_tree_section_caption_respects_heading_level() {
     // The directive is under ### Details (level 3)
     assert_eq!(
         insertion.context.section_heading_level,
-        Some(3),
+        Some(HeadingLevel::H3),
         "expected level 3 for ### Details"
     );
     assert_eq!(

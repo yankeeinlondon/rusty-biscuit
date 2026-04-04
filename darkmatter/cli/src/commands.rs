@@ -1826,7 +1826,7 @@ fn insertion_to_json(
         obj["section"] = serde_json::Value::String(heading.clone());
     }
     if let Some(level) = insertion.context.section_heading_level {
-        obj["section_level"] = serde_json::Value::Number(level.into());
+        obj["section_level"] = serde_json::Value::Number(level.as_u8().into());
     }
 
     // Recursively expand child node when following
