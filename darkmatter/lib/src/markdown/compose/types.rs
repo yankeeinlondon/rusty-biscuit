@@ -209,6 +209,34 @@ impl ComposeOperation {
     }
 }
 
+impl std::fmt::Display for ComposeOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FrontmatterInterpolation => write!(f, "FrontmatterInterpolation"),
+            Self::TextReplacement => write!(f, "TextReplacement"),
+            Self::PageBlocks => write!(f, "PageBlocks"),
+            Self::Interpolation => write!(f, "Interpolation"),
+            Self::ShellExpansion => write!(f, "ShellExpansion"),
+            Self::BlockTransclusion => write!(f, "BlockTransclusion"),
+            Self::FrontmatterTransclusion => write!(f, "FrontmatterTransclusion"),
+            Self::CodeTransclusion => write!(f, "CodeTransclusion"),
+            Self::TocLinking => write!(f, "TocLinking"),
+            Self::Cleanup => write!(f, "Cleanup"),
+            Self::Normalization => write!(f, "Normalization"),
+        }
+    }
+}
+
+impl std::fmt::Display for ComposePhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InlinePre => write!(f, "InlinePre"),
+            Self::Transclusion => write!(f, "Transclusion"),
+            Self::InlinePost => write!(f, "InlinePost"),
+        }
+    }
+}
+
 /// Configuration for the compose pipeline.
 ///
 /// Controls which operations run, how transclusion resolves references,
@@ -1194,10 +1222,10 @@ impl ComposeContext {
 }
 
 /// A single timing metric from the compose pipeline.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComposePerfMetric {
-    /// Human-readable stage name (e.g., "text replacement").
-    pub name: String,
+    /// Pipeline stage this metric represents.
+    pub stage: ComposeStage,
     /// Accumulated elapsed time for this metric.
     pub elapsed: Duration,
     /// Number of times this metric was recorded.
@@ -1211,6 +1239,45 @@ pub struct ComposePerfReport {
     pub total: Duration,
     /// Per-stage metrics in deterministic order.
     pub metrics: Vec<ComposePerfMetric>,
+}
+
+/// Named compose pipeline stages for type-safe metric identification.
+///
+/// Variants are listed in pipeline execution order so reports have
+/// a deterministic, intuitive ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ComposeStage {
+    FrontmatterInterpolation,
+    EffectiveStateBuild,
+    TextReplacement,
+    PageBlocks,
+    Interpolation,
+    ShellExpansion,
+    TransclusionParse,
+    TransclusionPrepare,
+    TransclusionResolve,
+    TransclusionApply,
+    Cleanup,
+    Normalization,
+}
+
+impl std::fmt::Display for ComposeStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::FrontmatterInterpolation => "frontmatter interpolation",
+            Self::EffectiveStateBuild => "effective state build",
+            Self::TextReplacement => "text replacement",
+            Self::PageBlocks => "page blocks",
+            Self::Interpolation => "interpolation",
+            Self::ShellExpansion => "shell expansion",
+            Self::TransclusionParse => "transclusion parse",
+            Self::TransclusionPrepare => "transclusion prepare",
+            Self::TransclusionResolve => "transclusion resolve",
+            Self::TransclusionApply => "transclusion apply",
+            Self::Cleanup => "cleanup",
+            Self::Normalization => "normalization",
+        })
+    }
 }
 
 impl ComposePerfReport {
@@ -1231,12 +1298,12 @@ impl ComposePerfReport {
             if let Some(existing) = self
                 .metrics
                 .iter_mut()
-                .find(|m| m.name == other_metric.name)
+                .find(|m| m.stage == other_metric.stage)
             {
                 existing.elapsed += other_metric.elapsed;
                 existing.calls += other_metric.calls;
             } else {
-                self.metrics.push(other_metric.clone());
+                self.metrics.push(*other_metric);
             }
         }
     }
@@ -1876,12 +1943,12 @@ mod tests {
             total: Duration::from_millis(10),
             metrics: vec![
                 ComposePerfMetric {
-                    name: "cleanup".to_string(),
+                    stage: ComposeStage::Cleanup,
                     elapsed: Duration::from_millis(3),
                     calls: 1,
                 },
                 ComposePerfMetric {
-                    name: "interpolation".to_string(),
+                    stage: ComposeStage::Interpolation,
                     elapsed: Duration::from_millis(5),
                     calls: 2,
                 },
@@ -1891,12 +1958,12 @@ mod tests {
             total: Duration::from_millis(7),
             metrics: vec![
                 ComposePerfMetric {
-                    name: "cleanup".to_string(),
+                    stage: ComposeStage::Cleanup,
                     elapsed: Duration::from_millis(2),
                     calls: 1,
                 },
                 ComposePerfMetric {
-                    name: "normalization".to_string(),
+                    stage: ComposeStage::Normalization,
                     elapsed: Duration::from_millis(4),
                     calls: 1,
                 },
@@ -1907,14 +1974,18 @@ mod tests {
 
         assert_eq!(parent.total, Duration::from_millis(17));
 
-        let cleanup = parent.metrics.iter().find(|m| m.name == "cleanup").unwrap();
+        let cleanup = parent
+            .metrics
+            .iter()
+            .find(|m| m.stage == ComposeStage::Cleanup)
+            .unwrap();
         assert_eq!(cleanup.elapsed, Duration::from_millis(5));
         assert_eq!(cleanup.calls, 2);
 
         let interp = parent
             .metrics
             .iter()
-            .find(|m| m.name == "interpolation")
+            .find(|m| m.stage == ComposeStage::Interpolation)
             .unwrap();
         assert_eq!(interp.elapsed, Duration::from_millis(5));
         assert_eq!(interp.calls, 2);
@@ -1922,7 +1993,7 @@ mod tests {
         let norm = parent
             .metrics
             .iter()
-            .find(|m| m.name == "normalization")
+            .find(|m| m.stage == ComposeStage::Normalization)
             .unwrap();
         assert_eq!(norm.elapsed, Duration::from_millis(4));
         assert_eq!(norm.calls, 1);
@@ -1937,7 +2008,7 @@ mod tests {
         report_b.perf = Some(ComposePerfReport {
             total: Duration::from_millis(5),
             metrics: vec![ComposePerfMetric {
-                name: "cleanup".to_string(),
+                stage: ComposeStage::Cleanup,
                 elapsed: Duration::from_millis(5),
                 calls: 1,
             }],
@@ -1957,7 +2028,7 @@ mod tests {
         report_a.perf = Some(ComposePerfReport {
             total: Duration::from_millis(10),
             metrics: vec![ComposePerfMetric {
-                name: "cleanup".to_string(),
+                stage: ComposeStage::Cleanup,
                 elapsed: Duration::from_millis(3),
                 calls: 1,
             }],
@@ -1967,7 +2038,7 @@ mod tests {
         report_b.perf = Some(ComposePerfReport {
             total: Duration::from_millis(7),
             metrics: vec![ComposePerfMetric {
-                name: "cleanup".to_string(),
+                stage: ComposeStage::Cleanup,
                 elapsed: Duration::from_millis(2),
                 calls: 1,
             }],

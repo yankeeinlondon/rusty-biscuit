@@ -587,7 +587,7 @@ pub fn run_compose(
         for metric in &perf_report.metrics {
             let status = Status::from_prose(format!(
                 "<dim>{:20}</dim> {:>8.2}ms",
-                metric.name,
+                metric.stage.to_string(),
                 metric.elapsed.as_secs_f64() * 1000.0
             ));
             eprintln!("{}", status.render(&terminal));
@@ -1348,7 +1348,7 @@ mod tests {
 
     #[test]
     fn format_compose_perf_report_contains_sections() {
-        use darkmatter::markdown::compose::{ComposePerfMetric, ComposePerfReport};
+        use darkmatter::markdown::compose::{ComposePerfMetric, ComposePerfReport, ComposeStage};
 
         let cli_perf = CliComposePerfReport {
             load_input: std::time::Duration::from_millis(8),
@@ -1368,12 +1368,12 @@ mod tests {
             total: std::time::Duration::from_millis(54),
             metrics: vec![
                 ComposePerfMetric {
-                    name: "cleanup".to_string(),
+                    stage: ComposeStage::Cleanup,
                     elapsed: std::time::Duration::from_millis(3),
                     calls: 1,
                 },
                 ComposePerfMetric {
-                    name: "normalization".to_string(),
+                    stage: ComposeStage::Normalization,
                     elapsed: std::time::Duration::from_millis(5),
                     calls: 1,
                 },
@@ -2086,7 +2086,7 @@ fn format_compose_perf_report(
         );
         for metric in &perf.metrics {
             col.push_str(&format_metric_line(
-                &metric.name,
+                &metric.stage.to_string(),
                 metric.elapsed,
                 metric.calls,
             ));
