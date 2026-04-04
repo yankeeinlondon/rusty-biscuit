@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use tracing::{debug, instrument};
 
 /// Source tracking for JSON5 content.
 #[derive(Debug, Clone)]
@@ -94,6 +95,7 @@ impl Json5 {
     /// ## Errors
     ///
     /// Returns an error if the file cannot be read or contains invalid JSON5.
+    #[instrument(level = "debug", skip_all, fields(path = %path.as_ref().display()))]
     pub fn new(path: impl AsRef<Path>) -> Result<Self, Json5Error> {
         let path = path.as_ref();
         let raw = std::fs::read_to_string(path)?;
@@ -112,6 +114,7 @@ impl Json5 {
     /// ## Errors
     ///
     /// Returns an error if the string contains invalid JSON5.
+    #[instrument(level = "trace", skip_all, fields(input_len = input.as_ref().len()))]
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(input: impl AsRef<str>) -> Result<Self, Json5Error> {
         let raw = input.as_ref().to_string();
@@ -167,8 +170,10 @@ impl Json5 {
     /// ## Errors
     ///
     /// Returns an error if JSON serialization fails.
+    #[instrument(level = "trace", skip(self), fields(source = ?self.source))]
     pub fn as_json(&self) -> Result<String, Json5Error> {
         let json = serde_json::to_string_pretty(&self.value)?;
+        debug!(output_len = json.len(), "JSON5 → JSON conversion complete");
         Ok(json)
     }
 
@@ -212,8 +217,10 @@ impl Json5 {
     ///
     /// Returns an error if YAML serialization fails or the feature is disabled.
     #[cfg(feature = "yaml")]
+    #[instrument(level = "trace", skip(self), fields(source = ?self.source))]
     pub fn as_yaml(&self) -> Result<String, Json5Error> {
         let yaml = serde_yaml_ng::to_string(&self.value)?;
+        debug!(output_len = yaml.len(), "JSON5 → YAML conversion complete");
         Ok(yaml)
     }
 
@@ -230,11 +237,13 @@ impl Json5 {
     /// Returns an error if TOML serialization fails or the feature is disabled.
     /// JSON5 values containing types unsupported by TOML (e.g., null) will fail.
     #[cfg(feature = "toml")]
+    #[instrument(level = "trace", skip(self), fields(source = ?self.source))]
     pub fn as_toml(&self) -> Result<String, Json5Error> {
         // Convert serde_json::Value → toml::Value via serde round-trip
         let toml_value: toml::Value = serde_json::from_value(self.value.clone())
             .map_err(|e| Json5Error::Parse(format!("cannot convert to TOML: {e}")))?;
         let toml_str = toml::to_string_pretty(&toml_value)?;
+        debug!(output_len = toml_str.len(), "JSON5 → TOML conversion complete");
         Ok(toml_str)
     }
 

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use tracing::{debug, trace};
+
 use crate::file_reference::error::FileReferenceError;
 
 /// Runtime state captured for file reference resolution.
@@ -15,7 +17,10 @@ impl ResolutionContext {
     pub fn from_ambient() -> Result<Self, FileReferenceError> {
         let cwd = std::env::current_dir().map_err(FileReferenceError::CurrentDirectory)?;
         let home_dir = home_dir();
-        let env = std::env::vars().collect();
+        let env: HashMap<String, String> = std::env::vars().collect();
+
+        debug!(?cwd, home_dir_set = home_dir.is_some(), env_var_count = env.len(),
+               "built resolution context");
 
         Ok(Self { cwd, home_dir, env })
     }
@@ -25,14 +30,19 @@ impl ResolutionContext {
 ///
 /// Returns `Ok(None)` if no git repository is found.
 pub(crate) fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError> {
+    trace!(?from, "searching for git root");
     match git2::Repository::discover(from) {
         Ok(repo) => {
             let workdir = repo.workdir().ok_or_else(|| {
                 FileReferenceError::Git("bare repository has no working directory".to_string())
             })?;
+            debug!(?workdir, "found git root");
             Ok(Some(workdir.to_path_buf()))
         }
-        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+            trace!("no git repository found");
+            Ok(None)
+        }
         Err(e) => Err(FileReferenceError::Git(e.to_string())),
     }
 }
@@ -49,6 +59,7 @@ pub(crate) fn find_package_area(
     repo_root: &Path,
     cwd: &Path,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
+    trace!(?repo_root, ?cwd, "searching for package area");
     let metadata = cargo_metadata::MetadataCommand::new()
         .manifest_path(repo_root.join("Cargo.toml"))
         .no_deps()
@@ -84,10 +95,13 @@ pub(crate) fn find_package_area(
             .unwrap_or_else(|_| pkg_dir.to_path_buf());
 
         if cwd_normalized.starts_with(&pkg_normalized) && !area.as_os_str().is_empty() {
-            return Ok(Some(workspace_root.join(area)));
+            let found = workspace_root.join(area);
+            debug!(?found, "found package area");
+            return Ok(Some(found));
         }
     }
 
+    trace!("no package area found");
     Ok(None)
 }
 

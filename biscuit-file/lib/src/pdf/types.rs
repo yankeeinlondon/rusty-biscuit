@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use tracing::{debug, instrument};
 
 /// Source tracking for PDF content.
 #[derive(Debug, Clone)]
@@ -290,6 +291,7 @@ impl Pdf {
     /// ## Errors
     ///
     /// Returns an error if the file cannot be read or is invalid.
+    #[instrument(level = "debug", skip_all, fields(path = %path.as_ref().display()))]
     pub fn new(path: impl AsRef<Path>) -> Result<Self, PdfError> {
         Self::with_config(path, PdfConfig::default())
     }
@@ -320,6 +322,7 @@ impl Pdf {
     /// ## Errors
     ///
     /// Returns an error if the bytes are not a valid PDF.
+    #[instrument(level = "debug", skip_all, fields(byte_count = bytes.len()))]
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, PdfError> {
         Self::from_bytes_with_config(bytes, PdfConfig::default())
     }
@@ -365,6 +368,7 @@ impl Pdf {
     ///
     /// Returns an error if text extraction fails.
     #[cfg(feature = "extract")]
+    #[instrument(level = "debug", skip(self))]
     pub fn as_text(&self) -> Result<String, PdfError> {
         use super::backends::extract_text;
         extract_text(&self.bytes, &self.config)
@@ -383,10 +387,13 @@ impl Pdf {
     /// ## Errors
     ///
     /// Returns an error if conversion fails.
+    #[instrument(level = "debug", skip(self, _options))]
     pub fn as_markdown(&self, _options: MarkdownOptions) -> Result<PdfMarkdown, PdfError> {
         // For Phase 1, just wrap the text output in markdown
         let text = self.as_text()?;
-        Ok(PdfMarkdown::new(text))
+        let md = PdfMarkdown::new(text);
+        debug!(warnings = md.warnings.len(), assets = md.assets.len(), "PDF → Markdown complete");
+        Ok(md)
     }
 
     /// Extract the table of contents.
@@ -395,6 +402,7 @@ impl Pdf {
     ///
     /// Returns an error if TOC extraction fails.
     #[cfg(feature = "lopdf")]
+    #[instrument(level = "debug", skip(self))]
     pub fn toc(&self) -> Result<PdfToc, PdfError> {
         use super::backends::extract_toc;
         extract_toc(&self.bytes)
