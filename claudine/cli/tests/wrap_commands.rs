@@ -2372,6 +2372,57 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn compose_opencode_launches_from_repo_root_for_package_prompt_refs() {
+    let workspace = tempdir().unwrap();
+    let Some((repo_root, _launch_dir, bin_dir)) = create_claudine_monorepo(workspace.path()) else {
+        eprintln!("Skipping integration test: git init unavailable");
+        return;
+    };
+    let package_root = repo_root.join("claudine");
+    let pwd_path = workspace.path().join("pwd-package.txt");
+    let env_path = workspace.path().join("env-package.txt");
+    let args_path = workspace.path().join("args-package.txt");
+    let md_file = package_root.join("prompts/test.md");
+    write_file(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
+
+    write_executable(
+        &bin_dir.join("opencode"),
+        r#"#!/bin/sh
+pwd > "$CLAUDINE_PWD_FILE"
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+{
+  printf 'PACKAGE=%s\n' "$PACKAGE"
+  printf 'PACKAGE_AREA=%s\n' "$PACKAGE_AREA"
+} > "$CLAUDINE_ENV_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .current_dir(&package_root)
+        .env("NO_COLOR", "1")
+        .env("PATH", &bin_dir)
+        .env("CLAUDINE_PWD_FILE", &pwd_path)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_ENV_FILE", &env_path)
+        .args(["compose", "--opencode", "@prompts/test.md"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read_to_string(&pwd_path).unwrap().trim(),
+        repo_root.canonicalize().unwrap().display().to_string()
+    );
+    let env_lines = fs::read_to_string(&env_path).unwrap();
+    assert!(env_lines.contains("PACKAGE_AREA=claudine"));
+    let args = fs::read_to_string(&args_path).unwrap();
+    let collected: Vec<_> = args.lines().collect();
+    assert!(collected.contains(&"run"));
+    assert!(collected.contains(&"Hello OpenCode"));
+}
+
+#[cfg(unix)]
+#[test]
 fn compose_supports_mcp_runtime_and_tag_cleanup() {
     let workspace = tempdir().unwrap();
     let home = workspace.path().join("home");
