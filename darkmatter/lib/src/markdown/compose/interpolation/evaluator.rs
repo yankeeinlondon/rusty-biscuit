@@ -70,6 +70,7 @@
 use super::ComparisonOp;
 use super::ast::Expr;
 use serde_json::Value;
+use tracing::{debug, trace};
 
 /// Trait for types that can resolve interpolation variable lookups.
 ///
@@ -240,9 +241,15 @@ impl<'a, L: InterpolationLookup> Evaluator<'a, L> {
     /// - Comparison expressions (`a == b`, `a > b`, etc.)
     /// - Function calls (`length()`, `number()`, `round()`)
     pub fn eval(&self, expr: &Expr) -> EvalResult {
+        trace!(expr = ?expr, "interpolation: evaluating expression");
         match expr {
             Expr::Variable(name) => {
                 let value = self.state.get_string(name);
+                if value.is_empty() {
+                    debug!(variable = %name, "interpolation: unresolved variable");
+                } else {
+                    trace!(result = %value, "interpolation: resolved");
+                }
                 EvalResult::Value(value)
             }
 

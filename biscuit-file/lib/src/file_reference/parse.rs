@@ -1,3 +1,5 @@
+use tracing::{debug, trace};
+
 use crate::file_reference::error::FileReferenceError;
 use crate::file_reference::{ParsedReference, PathTemplate, ReferenceKind, TemplateSegment};
 
@@ -5,6 +7,8 @@ use crate::file_reference::{ParsedReference, PathTemplate, ReferenceKind, Templa
 ///
 /// Parsing is purely syntactic -- no filesystem access occurs.
 pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
+    trace!(raw, "parsing file reference");
+
     if raw.is_empty() {
         return Err(FileReferenceError::InvalidSyntax(
             "empty reference string".to_string(),
@@ -15,7 +19,7 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
     let (kind, path_str) = detect_kind(remainder);
     let template = parse_template(path_str)?;
 
-    Ok(ParsedReference {
+    let parsed = ParsedReference {
         recursive,
         kind: match kind {
             DetectedKind::Relative => ReferenceKind::Relative(template),
@@ -24,7 +28,10 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
             DetectedKind::Package => ReferenceKind::Package(template),
             DetectedKind::Vault => ReferenceKind::Vault(template),
         },
-    })
+    };
+
+    debug!(kind = ?parsed.kind, recursive = parsed.recursive, "parsed reference");
+    Ok(parsed)
 }
 
 /// Strip a leading `%` and return whether the reference is recursive.

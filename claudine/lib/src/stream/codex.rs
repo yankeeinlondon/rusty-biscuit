@@ -75,6 +75,11 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
             .or_else(|| obj.get("id"))
             .and_then(|v| v.as_str())
             .map(String::from);
+        super::trace_session_metadata(
+            Provider::Codex,
+            self.session_id.as_deref(),
+            self.model.as_deref(),
+        );
 
         let meta = self.session_meta();
         self.sink.on_session_start(&meta);
@@ -122,6 +127,12 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
             .map(String::from);
 
         self.raw_summary = Some(obj.clone());
+        super::trace_summary_update(
+            Provider::Codex,
+            self.provider_status.as_deref(),
+            self.duration_ms,
+            self.cost_usd,
+        );
 
         let mut meta = self.session_meta();
         if let Some(status) = &self.provider_status {
@@ -242,6 +253,13 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
 
         if Self::is_tool_item_type(item_type) {
             self.tool_calls += 1;
+            super::trace_tool_event(
+                Provider::Codex,
+                self.tool_calls,
+                item.get("tool_name")
+                    .or_else(|| item.get("name"))
+                    .and_then(|value| value.as_str()),
+            );
             if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
                 self.tool_items.insert(id.to_string(), item.clone());
             }
@@ -293,10 +311,12 @@ impl<S: StreamEventSink + Send> StreamParser for CodexStreamParser<S> {
         let obj: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
+            super::trace_malformed_line(Provider::Codex, self.line_num, &e.to_string());
             StreamParseError::Fatal(format!("Malformed JSON on line {}: {e}", self.line_num))
         })?;
 
         let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        super::trace_parser_event(Provider::Codex, event_type, self.line_num);
 
         match event_type {
             "thread.created" | "thread.started" => {
@@ -322,6 +342,13 @@ impl<S: StreamEventSink + Send> StreamParser for CodexStreamParser<S> {
             "item.completed" => Ok(self.handle_item_completed(&obj)),
             "item.tool_use" | "tool_use" => {
                 self.tool_calls += 1;
+                super::trace_tool_event(
+                    Provider::Codex,
+                    self.tool_calls,
+                    obj.get("tool_name")
+                        .or_else(|| obj.get("name"))
+                        .and_then(|value| value.as_str()),
+                );
                 let meta = self.tool_meta_from_item(&obj);
                 self.sink.on_before_tool(&meta);
                 Ok(None)

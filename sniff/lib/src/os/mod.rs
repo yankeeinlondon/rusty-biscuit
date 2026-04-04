@@ -13,6 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
+use tracing::instrument;
 
 use crate::Result;
 use crate::request::OsRequest;
@@ -201,6 +202,11 @@ pub fn detect_os() -> Result<OsInfo> {
 ///
 /// Currently returns `Ok` in all cases, but future versions may return
 /// errors for system information gathering failures.
+#[instrument(skip(request), fields(
+    pkg_managers = request.include_package_managers,
+    locale = request.include_locale,
+    timezone = request.include_timezone,
+))]
 pub fn detect_os_with_request(request: &OsRequest) -> Result<OsInfo> {
     let non_empty = |s: String| {
         if s.is_empty() { None } else { Some(s) }

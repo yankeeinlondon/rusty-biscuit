@@ -252,7 +252,7 @@ pub fn color_depth() -> ColorDepth {
     if let Ok(colorterm) = env::var("COLORTERM") {
         let colorterm_lower = colorterm.to_lowercase();
         if colorterm_lower == "truecolor" || colorterm_lower == "24bit" {
-            tracing::info!(
+            tracing::debug!(
                 color_depth = ?ColorDepth::TrueColor,
                 source = "COLORTERM",
                 colorterm = %colorterm,
@@ -279,7 +279,7 @@ pub fn color_depth() -> ColorDepth {
                 _ => ColorDepth::None,
             };
 
-            tracing::info!(
+            tracing::debug!(
                 ?color_depth,
                 source = "terminfo",
                 "Detected color depth from terminfo"
@@ -287,7 +287,7 @@ pub fn color_depth() -> ColorDepth {
             color_depth
         }
         Err(e) => {
-            tracing::info!(
+            tracing::warn!(
                 color_depth = ?ColorDepth::None,
                 source = "fallback",
                 error = %e,

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use git2::Repository;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, instrument};
 
 use crate::filesystem::FileAssociation;
 use crate::filesystem::docs::{MarkdownMeta, detect_docs};
@@ -254,8 +255,19 @@ fn collect_working_tree_paths(repo: &Repository, scope: ChangeScope) -> Result<V
 fn collect_last_commit_paths(repo: &Repository) -> Vec<PathBuf> {
     let head_sha = repo
         .head()
+        .map_err(|e| {
+            debug!(error = %e, "Failed to get repository HEAD");
+            e
+        })
         .ok()
-        .and_then(|h| h.peel_to_commit().ok())
+        .and_then(|h| {
+            h.peel_to_commit()
+                .map_err(|e| {
+                    debug!(error = %e, "Failed to peel HEAD to commit");
+                    e
+                })
+                .ok()
+        })
         .map(|c| c.id().to_string());
 
     match head_sha {
@@ -277,6 +289,7 @@ fn collect_last_commit_paths(repo: &Repository) -> Vec<PathBuf> {
 /// ## Errors
 ///
 /// Returns an error if the directory is not inside a git repo.
+#[instrument(skip_all)]
 pub fn find_blast_radius_documents(
     base_dir: &Path,
     scope: ChangeScope,

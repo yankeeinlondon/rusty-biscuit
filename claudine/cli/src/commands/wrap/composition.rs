@@ -79,7 +79,7 @@ pub(crate) fn execute_composition_request(
 ) -> Result<i32> {
     let term = wrap_terminal();
     let cwd = std::env::current_dir()?;
-    let verbose_requested = verbose > 0;
+    let detail_requested = verbose > 0;
     let quiet = request.quiet;
     let silent = request.silent;
     let show_checks = !silent;
@@ -162,7 +162,7 @@ pub(crate) fn execute_composition_request(
             request.yolo,
             effective_non_interactive,
             request.session_interactive,
-            verbose_requested,
+            detail_requested,
             request.repo,
             compose_display.as_ref(),
             request.operation.as_deref(),
@@ -554,7 +554,7 @@ pub(crate) fn execute_composition_request(
 
     if !silent {
         // Everything below is suppressed by --quiet (consistent with direct-wrap)
-        if !quiet && (request.session_interactive || verbose_requested) {
+        if !quiet && (request.session_interactive || detail_requested) {
             crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
@@ -562,7 +562,7 @@ pub(crate) fn execute_composition_request(
         // interactive mode the prompt is delivered into the session (via
         // positional arg or stdin), making preamble display redundant.
         if effective_non_interactive {
-            crate::output::log_compose_prompt(&request.prepared.prompt, verbose_requested, &term);
+            crate::output::log_compose_prompt(&request.prepared.prompt, detail_requested, &term);
         }
 
         // Blank line to separate preamble from execution output
@@ -618,7 +618,7 @@ pub(crate) fn execute_composition_request(
             profile.suppress_structured_stderr_on_success(),
             show_checks,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             &env_context,
             &dispatch_context,
             Some(materialized_harness_prompt_from_prepared(&request.prepared)),
@@ -650,7 +650,7 @@ pub(crate) fn execute_composition_request(
             stdout_noise,
             stderr_noise,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             show_checks,
             &env_context,
             &dispatch_context,
@@ -675,13 +675,12 @@ pub(crate) fn execute_composition_request(
             &env_plan.env,
             child_cwd,
             stdin_seed.as_deref(),
-            request.session_interactive,
             use_structured,
             structured_codex_output.as_ref(),
             stdout_noise,
             stderr_noise,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             &env_context,
             &dispatch_context,
         )?;
@@ -715,7 +714,7 @@ fn execute_inline_without_harness(
     stdout_noise: &[&str],
     stderr_noise: &[&str],
     stream_verbosity: Verbosity,
-    verbose_requested: bool,
+    detail_requested: bool,
     show_checks: bool,
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
@@ -906,7 +905,7 @@ fn execute_inline_without_harness(
             profile,
             env_context,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             &details,
             Some(dispatch_context),
         );
@@ -1035,7 +1034,6 @@ fn run_legacy_inline(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
-                relay_tty_after_seed: true,
             },
         )?;
         let final_response = if provider == Provider::Codex {
@@ -1063,7 +1061,6 @@ fn run_legacy_inline(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
-                relay_tty_after_seed: false,
             },
         )?;
         let response = profile.parse_captured_output(&capture.data.stdout);
@@ -1190,13 +1187,12 @@ fn execute_direct_without_harness(
     child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
     child_cwd: &std::path::Path,
     stdin_seed: Option<&str>,
-    session_interactive: bool,
     use_structured: bool,
     structured_codex_output: Option<&StructuredCodexOutput>,
     stdout_noise: &[&str],
     stderr_noise: &[&str],
     stream_verbosity: Verbosity,
-    verbose_requested: bool,
+    detail_requested: bool,
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
 ) -> Result<i32> {
@@ -1254,7 +1250,7 @@ fn execute_direct_without_harness(
             profile,
             env_context,
             stream_verbosity,
-            verbose_requested,
+            detail_requested,
             &summary_details.lock().unwrap().clone(),
             dispatch_context,
         );
@@ -1271,7 +1267,6 @@ fn execute_direct_without_harness(
                 stdout_noise_prefixes: stdout_noise,
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
-                relay_tty_after_seed: session_interactive,
             },
         )?;
 

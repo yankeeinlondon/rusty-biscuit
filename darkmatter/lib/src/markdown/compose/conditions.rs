@@ -7,6 +7,7 @@
 use super::EffectiveState;
 use super::interpolation::{ComparisonOp, Expr, parse};
 use serde_json::Value;
+use tracing::{debug, trace};
 
 /// Errors from condition parsing or evaluation.
 #[derive(Debug, thiserror::Error)]
@@ -33,6 +34,8 @@ pub fn evaluate_condition(
     state: &EffectiveState,
     line: usize,
 ) -> Result<bool, ConditionError> {
+    trace!(expr = %expr, line, "conditions: evaluating");
+
     let parsed = parse(expr).map_err(|e| ConditionError::Parse {
         expr: expr.to_string(),
         line,
@@ -45,7 +48,10 @@ pub fn evaluate_condition(
         message,
     })?;
 
-    Ok(is_truthy(&value))
+    let result = is_truthy(&value);
+    debug!(expr = %expr, result, "conditions: evaluated");
+
+    Ok(result)
 }
 
 fn eval_expr(expr: &Expr, state: &EffectiveState) -> Result<Value, String> {

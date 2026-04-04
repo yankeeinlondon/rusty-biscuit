@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Host and repository environment snapshot.
 ///
-/// Detected once at session start via `sniff::detect_with_config`
+/// Detected once at session start via `sniff::detect_with_plan`
 /// and cached for the session lifetime. Attached to every `EventMeta`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct EnvironmentContext {
@@ -289,17 +289,22 @@ impl From<sniff::SniffResult> for EnvironmentContext {
 
 /// Detect the environment context for the given working directory.
 ///
-/// Uses `sniff` with a fast configuration (no network calls,
-/// single commit, no deep inspection) to gather OS, hardware,
-/// git, and repository information.
+/// Uses `sniff` with a plan-based configuration: no network calls,
+/// single commit, no deep inspection, hardware summary only (CPU +
+/// memory — skips storage, GPU, and audio enumeration).
 pub fn detect_environment(cwd: &Path) -> EnvironmentContext {
-    let config = sniff::SniffConfig::new()
-        .base_dir(cwd.to_path_buf())
-        .deep(false)
-        .commit_count(1)
-        .skip_network();
+    use sniff::request::*;
 
-    let result = sniff::detect_with_config(config).unwrap_or(sniff::SniffResult {
+    let plan = DetectionPlan::new()
+        .base_dir(cwd.to_path_buf())
+        .os(OsRequest::full())
+        .hardware(HardwareRequest::summary())
+        .without_network()
+        .filesystem(
+            FilesystemRequest::new().git(GitRequest::full().commit_count(1)),
+        );
+
+    let result = sniff::detect_with_plan(plan).unwrap_or(sniff::SniffResult {
         os: None,
         hardware: None,
         network: None,
@@ -313,20 +318,28 @@ pub fn detect_environment(cwd: &Path) -> EnvironmentContext {
 
 /// Lightweight environment detection for hook handlers.
 ///
-/// Only detects git and repository context (needed for log path
-/// resolution and event metadata). Skips OS, hardware, and network
-/// detection to minimize latency — critical for hooks where the
-/// provider may cancel slow processes during shutdown.
+/// Only detects git summary and repo structure (needed for log path
+/// resolution and event metadata). Skips OS, hardware, network, file
+/// inventory, docs, and formatting to minimize latency — critical for
+/// hooks where the provider may cancel slow processes during shutdown.
 pub fn detect_environment_fast(cwd: &Path) -> EnvironmentContext {
-    let config = sniff::SniffConfig::new()
-        .base_dir(cwd.to_path_buf())
-        .deep(false)
-        .commit_count(0)
-        .skip_os()
-        .skip_hardware()
-        .skip_network();
+    use sniff::request::*;
 
-    let result = sniff::detect_with_config(config).unwrap_or(sniff::SniffResult {
+    let plan = DetectionPlan::new()
+        .base_dir(cwd.to_path_buf())
+        .without_os()
+        .without_hardware()
+        .without_network()
+        .filesystem(
+            FilesystemRequest::new()
+                .git(GitRequest::summary())
+                .repo(RepoRequest::structure())
+                .without_file_inventory()
+                .without_docs()
+                .without_formatting(),
+        );
+
+    let result = sniff::detect_with_plan(plan).unwrap_or(sniff::SniffResult {
         os: None,
         hardware: None,
         network: None,

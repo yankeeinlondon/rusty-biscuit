@@ -54,6 +54,11 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
             .and_then(|v| v.as_str())
             .map(String::from);
         self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
+        super::trace_session_metadata(
+            Provider::QwenCode,
+            self.session_id.as_deref(),
+            self.model.as_deref(),
+        );
 
         let mut meta = EventMeta::default();
         if let Some(session_id) = &self.session_id {
@@ -136,6 +141,12 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
         }
 
         self.raw_summary = Some(obj.clone());
+        super::trace_summary_update(
+            Provider::QwenCode,
+            self.provider_status.as_deref(),
+            self.duration_ms,
+            self.cost_usd,
+        );
     }
 
     fn handle_error(&mut self, obj: &Value) {
@@ -174,6 +185,7 @@ impl<S: StreamEventSink + Send> StreamParser for QwenStreamParser<S> {
         let obj: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
+            super::trace_malformed_line(Provider::QwenCode, self.line_num, &e.to_string());
             StreamParseError::MalformedLine {
                 line_num: self.line_num,
                 message: e.to_string(),
@@ -182,6 +194,7 @@ impl<S: StreamEventSink + Send> StreamParser for QwenStreamParser<S> {
 
         let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
         let subtype = obj.get("subtype").and_then(|t| t.as_str()).unwrap_or("");
+        super::trace_parser_event(Provider::QwenCode, event_type, self.line_num);
 
         match event_type {
             "init" => {
@@ -203,6 +216,13 @@ impl<S: StreamEventSink + Send> StreamParser for QwenStreamParser<S> {
             }
             "tool_use" | "tool_call" => {
                 self.tool_calls += 1;
+                super::trace_tool_event(
+                    Provider::QwenCode,
+                    self.tool_calls,
+                    obj.get("name")
+                        .or_else(|| obj.get("tool_name"))
+                        .and_then(|value| value.as_str()),
+                );
                 let mut meta = EventMeta::default();
                 if let Some(tool_name) = obj
                     .get("name")
