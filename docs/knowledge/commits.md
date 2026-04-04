@@ -39,3 +39,5 @@
 - `git log --oneline -n` may not show a relevant commit if it's further back than `n`. Use a larger `-n` value or `--all` to ensure you see the full picture. A commit can exist on the branch but be deeper in history than a small `-n` count suggests.
 
 - When subagents operate concurrently on the same branch, their working trees share the same staging area. A `git reset HEAD` by one subagent affects what all other subagents see as "staged." Each subagent should verify staging state independently before committing, and use explicit `git add` of assigned files rather than relying on pre-existing staged state.
+
+- In this Claudine sandbox environment, a writable worktree can still have its git metadata stored outside the writable roots (for example under `/Volumes/.../.git/worktrees/...`). When that happens, `git commit` fails trying to create `index.lock` even though editing files in the worktree succeeds. Check the actual gitdir path before assuming commits are possible from the session.

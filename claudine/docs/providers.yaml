@@ -1,0 +1,26 @@
+kind: sequence
+template:
+    desc: "{{name}} (_site: {{site}}, repo: {{ repo || n/a }}_)"
+list:
+    - name: Claude Code
+      file: claude.md
+      site: https://code.claude.com/docs/en/overview
+      repo:
+    - name: Codex CLI
+      file: codex.md
+      site:
+      repo:
+    - name: Gemini CLI
+      file: gemini.md
+    - name: Goose CLI
+      file: goose.md
+      site: https://block.github.io/goose/
+      repo: https://github.com/block/goose
+    - name: Kimi Code CLI
+      file: kimi.md
+      site: https://moonshotai.github.io/kimi-cli/
+      repo: https://github.com/MoonshotAI/kimi-cli
+    - name: OpenCode CLI
+      file: opencode.md
+      site: https://opencode.ai
+      repo: https://github.com/anomalyco/opencode
