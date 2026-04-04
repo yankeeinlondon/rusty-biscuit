@@ -4,9 +4,48 @@
 //! lookup support via the `ProgramMetadata` trait.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::hash::Hash;
 use strum::{Display, EnumCount, EnumIter, EnumString, IntoStaticStr};
 
 use super::schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
+
+/// Trait bridging category enums to the generic `CategoryDetector<E>`.
+///
+/// Implementors provide category-level metadata and variant indexing
+/// that enables a single generic detector struct to work across all
+/// program categories.
+pub trait CategoryEnum:
+    ProgramMetadata
+    + strum::IntoEnumIterator
+    + strum::EnumCount
+    + Copy
+    + Clone
+    + Eq
+    + Hash
+    + fmt::Debug
+    + fmt::Display
+    + Send
+    + Sync
+    + 'static
+{
+    /// Human-readable category name (e.g., "editors", "utilities").
+    fn category_name() -> &'static str;
+
+    /// Returns the ordinal index of this variant (0-based, contiguous).
+    fn variant_index(&self) -> usize;
+
+    /// Serialization key for JSON output (snake_case variant name).
+    fn serde_key(&self) -> &'static str;
+
+    /// Platform-specific detection override.
+    ///
+    /// Returns `Some(...)` to inject a synthetic detection result instead of
+    /// searching PATH. Used for Windows SAPI which isn't a real executable.
+    fn platform_override(&self) -> Option<(std::path::PathBuf, crate::programs::types::ExecutableSource)> {
+        None
+    }
+}
 
 // ============================================================================
 // Editor Enum
@@ -218,6 +257,47 @@ static EDITOR_INFO: &[ProgramInfo] = &[
 impl ProgramMetadata for Editor {
     fn info(&self) -> &'static ProgramInfo {
         &EDITOR_INFO[*self as usize]
+    }
+}
+
+impl CategoryEnum for Editor {
+    fn category_name() -> &'static str {
+        "editors"
+    }
+
+    fn variant_index(&self) -> usize {
+        *self as usize
+    }
+
+    fn serde_key(&self) -> &'static str {
+        match self {
+            Editor::Vi => "vi",
+            Editor::Vim => "vim",
+            Editor::Neovim => "neovim",
+            Editor::Emacs => "emacs",
+            Editor::XEmacs => "xemacs",
+            Editor::Nano => "nano",
+            Editor::Helix => "helix",
+            Editor::VSCode => "vscode",
+            Editor::VSCodium => "vscodium",
+            Editor::Sublime => "sublime",
+            Editor::Zed => "zed",
+            Editor::Micro => "micro",
+            Editor::Kakoune => "kakoune",
+            Editor::Amp => "amp",
+            Editor::Lapce => "lapce",
+            Editor::PhpStorm => "phpstorm",
+            Editor::IntellijIdea => "intellij_idea",
+            Editor::PyCharm => "pycharm",
+            Editor::WebStorm => "webstorm",
+            Editor::CLion => "clion",
+            Editor::GoLand => "goland",
+            Editor::Rider => "rider",
+            Editor::TextMate => "textmate",
+            Editor::BBEdit => "bbedit",
+            Editor::Geany => "geany",
+            Editor::Kate => "kate",
+        }
     }
 }
 
@@ -1338,5 +1418,20 @@ mod tests {
     fn test_enum_iteration() {
         let count = Editor::iter().count();
         assert_eq!(count, Editor::COUNT);
+    }
+
+    #[test]
+    fn test_category_enum_trait_on_editor() {
+        assert_eq!(Editor::category_name(), "editors");
+        assert_eq!(Editor::Vi.variant_index(), 0);
+        assert_eq!(Editor::Kate.variant_index(), Editor::COUNT - 1);
+
+        // Verify all variant indices are unique and in range
+        let mut seen = std::collections::HashSet::new();
+        for editor in Editor::iter() {
+            let idx = editor.variant_index();
+            assert!(idx < Editor::COUNT, "{:?} index {} >= COUNT {}", editor, idx, Editor::COUNT);
+            assert!(seen.insert(idx), "{:?} has duplicate index {}", editor, idx);
+        }
     }
 }
