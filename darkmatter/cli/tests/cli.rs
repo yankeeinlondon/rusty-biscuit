@@ -7,6 +7,14 @@ fn md_cmd() -> assert_cmd::Command {
     cargo_bin_cmd!("md")
 }
 
+/// Creates a temporary markdown file with the given content.
+fn md_file(content: &str) -> tempfile::NamedTempFile {
+    use std::io::Write;
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    write!(tmp, "{}", content).unwrap();
+    tmp
+}
+
 // =============================================================================
 //                          BASIC FUNCTIONALITY TESTS
 // =============================================================================
@@ -51,9 +59,7 @@ fn test_stdin_rendering_auto_non_tty_outputs_markdown() {
 
 #[test]
 fn test_file_rendering() {
-    // Create a temporary markdown file and render it
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "# Test File\n\nSome content here.").unwrap();
+    let tmp = md_file("# Test File\n\nSome content here.\n");
 
     md_cmd()
         .arg(tmp.path())
@@ -238,8 +244,7 @@ fn test_clean_subcommand_stdin() {
 
 #[test]
 fn test_clean_subcommand_file() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "# Hello \n\nWorld  \n").unwrap();
+    let tmp = md_file("# Hello \n\nWorld  \n");
 
     md_cmd()
         .arg("clean")
@@ -863,8 +868,7 @@ fn test_hash_strict_frontmatter_differs_from_normalized() {
 
 #[test]
 fn test_hash_from_file() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "---\ntitle: File Test\n---\n# Hello\n\nWorld").unwrap();
+    let tmp = md_file("---\ntitle: File Test\n---\n# Hello\n\nWorld\n");
 
     md_cmd()
         .arg("hash")
@@ -1124,8 +1128,7 @@ fn test_get_toml_output() {
 
 #[test]
 fn test_get_from_file() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "---\nversion: 2\n---\n# Doc").unwrap();
+    let tmp = md_file("---\nversion: 2\n---\n# Doc\n");
 
     md_cmd()
         .args(["get"])
@@ -1820,8 +1823,7 @@ fn test_graph_validate_valid() {
 
 #[test]
 fn test_graph_validate_invalid() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "# Test\n\n[broken](./nonexistent.md)").unwrap();
+    let tmp = md_file("# Test\n\n[broken](./nonexistent.md)\n");
 
     let output = md_cmd()
         .arg("graph")
