@@ -163,3 +163,102 @@ mod tests {
         }
     }
 }
+
+/// A validated hexadecimal color value.
+///
+/// Accepted formats: `#rgb`, `#rrggbb`, `#rrggbbaa`
+///
+/// Implements `FromStr` for clap parse-time validation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HexColor(String);
+
+impl HexColor {
+    /// Returns the hex color string including the `#` prefix.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for HexColor {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if !s.starts_with('#') {
+            return Err(format!("hex color must start with '#', got '{}'", s));
+        }
+
+        let hex_part = &s[1..];
+        if !matches!(hex_part.len(), 3 | 6 | 8) {
+            return Err(format!(
+                "invalid hex color '{}': expected #rgb, #rrggbb, or #rrggbbaa",
+                s
+            ));
+        }
+
+        if !hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(format!("invalid hex characters in '{}'", s));
+        }
+
+        Ok(Self(s.to_string()))
+    }
+}
+
+impl fmt::Display for HexColor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod hex_color_tests {
+    use super::*;
+
+    #[test]
+    fn parse_rgb_shorthand() {
+        let c: HexColor = "#abc".parse().unwrap();
+        assert_eq!(c.as_str(), "#abc");
+    }
+
+    #[test]
+    fn parse_rrggbb() {
+        let c: HexColor = "#e8f5e9".parse().unwrap();
+        assert_eq!(c.as_str(), "#e8f5e9");
+    }
+
+    #[test]
+    fn parse_rrggbbaa() {
+        let c: HexColor = "#e8f5e9ff".parse().unwrap();
+        assert_eq!(c.as_str(), "#e8f5e9ff");
+    }
+
+    #[test]
+    fn parse_trims_whitespace() {
+        let c: HexColor = " #abc ".parse().unwrap();
+        assert_eq!(c.as_str(), "#abc");
+    }
+
+    #[test]
+    fn parse_rejects_missing_hash() {
+        assert!("e8f5e9".parse::<HexColor>().is_err());
+    }
+
+    #[test]
+    fn parse_rejects_wrong_length() {
+        assert!("#ab".parse::<HexColor>().is_err());
+        assert!("#abcd".parse::<HexColor>().is_err());
+        assert!("#abcde".parse::<HexColor>().is_err());
+        assert!("#abcdefg".parse::<HexColor>().is_err());
+    }
+
+    #[test]
+    fn parse_rejects_non_hex_chars() {
+        assert!("#xyz123".parse::<HexColor>().is_err());
+    }
+
+    #[test]
+    fn display_roundtrip() {
+        let c: HexColor = "#e8f5e9".parse().unwrap();
+        assert_eq!(c.to_string(), "#e8f5e9");
+    }
+}

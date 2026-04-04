@@ -322,19 +322,19 @@ pub enum Command {
 
         /// Top-right quadrant (q1) fill color (hex, e.g., "#e8f5e9")
         #[arg(long = "q1-fill")]
-        q1_fill: Option<String>,
+        q1_fill: Option<crate::types::HexColor>,
 
         /// Top-left quadrant (q2) fill color (hex, e.g., "#ffffff")
         #[arg(long = "q2-fill")]
-        q2_fill: Option<String>,
+        q2_fill: Option<crate::types::HexColor>,
 
         /// Bottom-left quadrant (q3) fill color (hex, e.g., "#ffebee")
         #[arg(long = "q3-fill")]
-        q3_fill: Option<String>,
+        q3_fill: Option<crate::types::HexColor>,
 
         /// Bottom-right quadrant (q4) fill color (hex, e.g., "#ffffff")
         #[arg(long = "q4-fill")]
-        q4_fill: Option<String>,
+        q4_fill: Option<crate::types::HexColor>,
 
         /// Render an example diagram and show the command used
         #[arg(long, short = 'e')]
