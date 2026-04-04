@@ -506,31 +506,14 @@ fn main() -> color_eyre::Result<()> {
     Ok(())
 }
 
-/// Handles the --completions flag.
-///
-/// If "help" is provided, shows setup instructions.
-/// Otherwise, generates shell completion scripts.
-fn handle_completions(shell_arg: &str) -> color_eyre::Result<()> {
-    let shell_lower = shell_arg.to_lowercase();
-
-    if shell_lower == "help" {
-        print_completions_help();
-        return Ok(());
-    }
-
-    let shell = match shell_lower.as_str() {
-        "bash" => Shell::Bash,
-        "elvish" => Shell::Elvish,
-        "fish" => Shell::Fish,
-        "powershell" | "pwsh" => Shell::PowerShell,
-        "zsh" => Shell::Zsh,
-        _ => {
-            eprintln!(
-                "error: invalid shell '{}'\n\nValid shells: bash, elvish, fish, powershell, zsh\n\nUse 'bt --completions help' for setup instructions.",
-                shell_arg
-            );
-            std::process::exit(1);
-        }
+/// Handles the --completions flag by generating shell completion scripts.
+fn handle_completions(shell_type: &ShellType) -> color_eyre::Result<()> {
+    let shell = match shell_type {
+        ShellType::Bash => Shell::Bash,
+        ShellType::Elvish => Shell::Elvish,
+        ShellType::Fish => Shell::Fish,
+        ShellType::Powershell => Shell::PowerShell,
+        ShellType::Zsh => Shell::Zsh,
     };
 
     print_completions(shell);
@@ -543,38 +526,6 @@ fn print_completions(shell: Shell) {
     clap_complete::generate(shell, &mut cmd, "bt", &mut std::io::stdout());
 }
 
-/// Prints help about setting up shell completions.
-fn print_completions_help() {
-    println!(
-        r#"bt Shell Completions Setup
-
-Two methods are available for enabling tab completion:
-
-DYNAMIC COMPLETIONS (recommended)
-=================================
-Dynamic completions call bt at completion time, providing:
-- Image file filtering (only *.png, *.jpg, *.jpeg, *.gif)
-- Always up-to-date with current bt version
-
-Setup:
-  Bash:  echo 'source <(COMPLETE=bash bt)' >> ~/.bashrc
-  Zsh:   echo 'source <(COMPLETE=zsh bt)' >> ~/.zshrc
-  Fish:  echo 'COMPLETE=fish bt | source' >> ~/.config/fish/config.fish
-
-STATIC COMPLETIONS
-==================
-Static completions generate a script once. Faster but less features.
-
-Setup:
-  Bash:       bt --completions bash >> ~/.bashrc
-  Zsh:        bt --completions zsh > ~/.zfunc/_bt
-  Fish:       bt --completions fish > ~/.config/fish/completions/bt.fish
-  PowerShell: bt --completions powershell >> $PROFILE
-
-After setup, restart your shell or source the file to activate completions.
-"#
-    );
-}
 
 /// Completes font family names from system fonts available to resvg.
 pub fn font_completer(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {

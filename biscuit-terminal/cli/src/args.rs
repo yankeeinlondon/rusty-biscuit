@@ -3,6 +3,17 @@ use biscuit_terminal::utils::layout;
 use clap::{Args as ClapArgs, Parser, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
 
+/// Shell type for completion script generation.
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum ShellType {
+    Bash,
+    Elvish,
+    Fish,
+    #[value(alias = "pwsh")]
+    Powershell,
+    Zsh,
+}
+
 /// Shared layout arguments for image and diagram commands.
 #[derive(ClapArgs, Debug, Clone, Default)]
 pub struct LayoutArgs {
@@ -71,9 +82,8 @@ pub struct Args {
     ///
     /// Outputs completion scripts for the specified shell to stdout.
     /// Redirect the output to the appropriate file for your shell.
-    /// Use --completions help for setup instructions.
     #[arg(long, value_name = "SHELL", global = true, display_order = 102)]
-    pub completions: Option<String>,
+    pub completions: Option<ShellType>,
 
     #[command(subcommand)]
     pub command: Option<Command>,
