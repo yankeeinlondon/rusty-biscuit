@@ -5,8 +5,10 @@
 
 mod config;
 mod error;
+mod maps;
 mod types;
 
 pub use config::{LocationConfig, ReverseGeocodeConfig, resolve_maxmind_path};
 pub use error::{LocationError, Result};
+pub use maps::google_maps_url;
 pub use types::*;
