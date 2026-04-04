@@ -353,6 +353,18 @@ impl LiveStreamSink {
         summary_details: Arc<Mutex<StructuredSummaryDetails>>,
     ) -> Self {
         let handle = tokio::runtime::Handle::try_current().ok();
+        let runtime_context = match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                tracing::warn!(%provider, "failed to preload wrapper runtime config: {error}");
+                claudine::dispatch::DispatchRuntimeContext::default()
+            }
+        };
+        tracing::trace!(
+            provider = %provider,
+            has_cached_runtime = runtime_context.has_config(),
+            "initialized wrapper dispatch runtime cache"
+        );
         Self::with_dispatcher(
             provider,
             env,
@@ -360,9 +372,13 @@ impl LiveStreamSink {
             summary_details,
             move |event, meta| {
                 if let Some(handle) = handle.as_ref()
-                    && let Err(error) = handle.block_on(claudine::dispatch::dispatch_event_meta(
-                        provider, event, meta,
-                    ))
+                    && let Err(error) =
+                        handle.block_on(claudine::dispatch::dispatch_event_meta_with_runtime(
+                            provider,
+                            event,
+                            meta,
+                            &runtime_context,
+                        ))
                 {
                     tracing::warn!(%provider, %event, "live stream dispatch failed: {error}");
                 }
@@ -437,6 +453,12 @@ impl LiveStreamSink {
         }
     }
 
+    fn emit_tool_progress_line(&self, tool_name: &str) {
+        if self.verbosity != Verbosity::Silent {
+            eprintln!("tool: {tool_name}");
+        }
+    }
+
     fn should_surface_warning(message: &str) -> bool {
         !message.starts_with("Malformed JSON on line ")
     }
@@ -501,6 +523,11 @@ impl LiveStreamSink {
         if event == AgenticEvent::SessionStart {
             self.emit_agent_session_id();
         }
+        if event == AgenticEvent::BeforeTool
+            && let Some(tool_name) = dispatch_meta.tool_name.as_deref()
+        {
+            self.emit_tool_progress_line(tool_name);
+        }
         if event == AgenticEvent::TurnError
             && let Some(message) = dispatch_meta.error.as_deref()
         {
@@ -517,6 +544,20 @@ impl StreamEventSink for LiveStreamSink {
 
     fn on_turn_start(&mut self, meta: &StreamEventMeta) {
         self.dispatch_event(AgenticEvent::BeforePrompt, meta);
+    }
+
+    fn on_step_start(&mut self, _meta: &StreamEventMeta) {
+        tracing::trace!(
+            provider = %self.provider,
+            "observed provider step_start without high-level dispatch"
+        );
+    }
+
+    fn on_step_finish(&mut self, _meta: &StreamEventMeta) {
+        tracing::trace!(
+            provider = %self.provider,
+            "observed provider step_finish without high-level dispatch"
+        );
     }
 
     fn on_turn_complete(&mut self, meta: &StreamEventMeta) {
@@ -3614,6 +3655,7 @@ mod tests {
         sink.on_session_start(&session_meta);
 
         sink.on_turn_start(&StreamEventMeta::default());
+        sink.on_step_start(&StreamEventMeta::default());
 
         let mut tool_meta = StreamEventMeta::default();
         tool_meta.extra.insert(
@@ -3642,6 +3684,7 @@ mod tests {
         );
         sink.on_turn_error(&error_meta);
 
+        sink.on_step_finish(&StreamEventMeta::default());
         sink.on_turn_complete(&StreamEventMeta::default());
 
         let metas = recorded.lock().unwrap().clone();
@@ -3667,6 +3710,26 @@ mod tests {
 
         assert_eq!(metas[5].event, AgenticEvent::TurnComplete);
         assert_eq!(metas[5].session_id.as_deref(), Some("thread-1"));
+    }
+
+    #[test]
+    fn live_stream_sink_step_events_do_not_dispatch_high_level_events() {
+        let recorded: Arc<Mutex<Vec<DispatchEventMeta>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_events = recorded.clone();
+        let mut sink = LiveStreamSink::with_dispatcher(
+            Provider::OpenCode,
+            EnvironmentContext::default(),
+            Verbosity::Silent,
+            Arc::new(Mutex::new(StructuredSummaryDetails::default())),
+            move |_event, meta| {
+                sink_events.lock().unwrap().push(meta);
+            },
+        );
+
+        sink.on_step_start(&StreamEventMeta::default());
+        sink.on_step_finish(&StreamEventMeta::default());
+
+        assert!(recorded.lock().unwrap().is_empty());
     }
 
     #[test]

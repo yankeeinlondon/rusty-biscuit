@@ -2417,6 +2417,100 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn codex_structured_compose_filters_stdin_banner() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello Codex\n").unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+last_message=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output-last-message" ]; then
+    last_message="$arg"
+  fi
+  prev="$arg"
+done
+
+printf '%s\n' 'Reading prompt from stdin...' >&2
+cat > /dev/null
+if [ -n "$last_message" ]; then
+  printf '%s\n' 'Recovered answer' > "$last_message"
+fi
+printf '%s\n' '{"type":"thread.started","thread_id":"codex-1"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":10,"cached_input_tokens":5}}'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["compose", "--codex", "--quiet", md_file.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout("Recovered answer\n");
+
+    let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(!stderr_plain.contains("Reading prompt from stdin..."));
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_structured_compose_surfaces_live_tool_progress() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello Codex\n").unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+last_message=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output-last-message" ]; then
+    last_message="$arg"
+  fi
+  prev="$arg"
+done
+
+cat > /dev/null
+printf '%s\n' '{"type":"thread.started","thread_id":"codex-1"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"item.started","item":{"id":"t1","type":"command_exec","tool_name":"shell","input":{"cmd":"git status"}}}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"t1","type":"command_exec","tool_name":"shell","output":"ok"}}'
+printf '%s\n' '{"type":"item.started","item":{"id":"t2","type":"view_image","tool_name":"view_image"}}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"t2","type":"view_image","output":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":10,"cached_input_tokens":5}}'
+if [ -n "$last_message" ]; then
+  printf '%s\n' 'Recovered answer' > "$last_message"
+fi
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["compose", "--codex", "--quiet", md_file.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout("Recovered answer\n");
+
+    let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr_plain.contains("tool: shell"));
+    assert!(stderr_plain.contains("tool: view_image"));
+}
+
+#[cfg(unix)]
+#[test]
 fn no_cross_provider_retry_after_launch() {
     // Verifies that after a provider is launched and fails, Claudine
     // does NOT automatically retry with another provider. The exit code

@@ -119,7 +119,7 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
 
         self.num_turns += 1;
         let meta = EventMeta::default();
-        self.sink.on_turn_start(&meta);
+        self.sink.on_step_start(&meta);
     }
 
     fn handle_step_finish(&mut self, obj: &Value) {
@@ -157,7 +157,7 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
         );
 
         let meta = EventMeta::default();
-        self.sink.on_turn_complete(&meta);
+        self.sink.on_step_finish(&meta);
     }
 
     fn handle_step_complete(&mut self, obj: &Value) {
@@ -215,6 +215,23 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
     }
 }
 
+fn opencode_tool_name(obj: &Value) -> Option<&str> {
+    obj.get("name")
+        .or_else(|| obj.get("tool_name"))
+        .or_else(|| obj.get("toolName"))
+        .or_else(|| obj.get("tool"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            obj.get("part").and_then(|part| {
+                part.get("name")
+                    .or_else(|| part.get("tool_name"))
+                    .or_else(|| part.get("toolName"))
+                    .or_else(|| part.get("tool"))
+                    .and_then(Value::as_str)
+            })
+        })
+}
+
 impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
     fn feed_line(&mut self, line: &str) -> Result<Option<StreamChunk>, StreamParseError> {
         self.line_num += 1;
@@ -260,19 +277,10 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
             }
             "tool_use" | "tool_start" => {
                 self.tool_calls += 1;
-                super::trace_tool_event(
-                    Provider::OpenCode,
-                    self.tool_calls,
-                    obj.get("name")
-                        .or_else(|| obj.get("tool_name"))
-                        .and_then(|value| value.as_str()),
-                );
+                let tool_name = opencode_tool_name(&obj);
+                super::trace_tool_event(Provider::OpenCode, self.tool_calls, tool_name);
                 let mut meta = EventMeta::default();
-                if let Some(tool_name) = obj
-                    .get("name")
-                    .or_else(|| obj.get("tool_name"))
-                    .and_then(|v| v.as_str())
-                {
+                if let Some(tool_name) = tool_name {
                     meta.extra
                         .insert("tool_name".into(), Value::String(tool_name.to_string()));
                 }
@@ -289,6 +297,13 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
+        super::trace_parser_finish(
+            Provider::OpenCode,
+            exit_code,
+            self.tool_calls,
+            self.num_turns,
+            self.provider_status.as_deref(),
+        );
         let has_usage = self.token_usage.input.is_some() || self.token_usage.output.is_some();
         StreamExecutionSummary {
             provider: Provider::OpenCode,
@@ -333,7 +348,43 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stream::parser::NullSink;
+    use crate::stream::parser::{EventMeta, NullSink, StreamEventSink};
+
+    #[derive(Default)]
+    struct RecordingSink {
+        session_start: usize,
+        turn_start: usize,
+        step_start: usize,
+        step_finish: usize,
+        turn_complete: usize,
+        before_tool: Vec<EventMeta>,
+    }
+
+    impl StreamEventSink for RecordingSink {
+        fn on_session_start(&mut self, _meta: &EventMeta) {
+            self.session_start += 1;
+        }
+
+        fn on_turn_start(&mut self, _meta: &EventMeta) {
+            self.turn_start += 1;
+        }
+
+        fn on_step_start(&mut self, _meta: &EventMeta) {
+            self.step_start += 1;
+        }
+
+        fn on_step_finish(&mut self, _meta: &EventMeta) {
+            self.step_finish += 1;
+        }
+
+        fn on_turn_complete(&mut self, _meta: &EventMeta) {
+            self.turn_complete += 1;
+        }
+
+        fn on_before_tool(&mut self, meta: &EventMeta) {
+            self.before_tool.push(meta.clone());
+        }
+    }
 
     fn make_parser() -> Box<OpenCodeStreamParser<NullSink>> {
         Box::new(OpenCodeStreamParser::new(NullSink, Some("gpt-4o".into())))
@@ -437,5 +488,46 @@ mod tests {
         let summary = parser.finish(1);
         assert!(summary.is_error);
         assert_eq!(summary.error_message.as_deref(), Some("API timeout"));
+    }
+
+    #[test]
+    fn tool_name_extraction_supports_nested_part_fields() {
+        let mut parser = OpenCodeStreamParser::new(RecordingSink::default(), None);
+
+        parser
+            .feed_line(r#"{"type":"tool_use","part":{"name":"search"}}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"tool_start","part":{"tool_name":"write_file"}}"#)
+            .unwrap();
+
+        let sink = parser.sink;
+        assert_eq!(sink.before_tool.len(), 2);
+        assert_eq!(sink.before_tool[0].extra["tool_name"], "search");
+        assert_eq!(sink.before_tool[1].extra["tool_name"], "write_file");
+    }
+
+    #[test]
+    fn step_boundaries_do_not_emit_high_level_turn_lifecycle_events() {
+        let mut parser = OpenCodeStreamParser::new(RecordingSink::default(), None);
+
+        parser
+            .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"step_finish","part":{"reason":"stop","cost":0.01,"tokens":{"input":1,"output":2,"total":3,"cache":{"read":0}}}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"step_complete","usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3},"cost_usd":0.01}"#)
+            .unwrap();
+
+        let sink = parser.sink;
+        assert_eq!(sink.session_start, 1);
+        assert_eq!(sink.turn_start, 0);
+        assert_eq!(sink.step_start, 1);
+        assert_eq!(sink.step_finish, 1);
+        assert_eq!(sink.turn_complete, 1);
     }
 }

@@ -29,6 +29,8 @@ pub enum StreamChunk {
 pub trait StreamEventSink: Send {
     fn on_session_start(&mut self, _meta: &EventMeta) {}
     fn on_turn_start(&mut self, _meta: &EventMeta) {}
+    fn on_step_start(&mut self, _meta: &EventMeta) {}
+    fn on_step_finish(&mut self, _meta: &EventMeta) {}
     fn on_turn_complete(&mut self, _meta: &EventMeta) {}
     fn on_turn_error(&mut self, _meta: &EventMeta) {}
     fn on_before_tool(&mut self, _meta: &EventMeta) {}

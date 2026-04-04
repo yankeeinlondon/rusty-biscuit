@@ -606,6 +606,10 @@ impl WrapperProfile for CodexWrapper {
         }
     }
 
+    fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
+        &["Reading prompt from stdin..."]
+    }
+
     fn supports_interactive_inline_closure(&self) -> bool {
         true
     }

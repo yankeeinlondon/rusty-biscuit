@@ -123,6 +123,23 @@ pub(crate) fn trace_summary_update(
     );
 }
 
+pub(crate) fn trace_parser_finish(
+    provider: Provider,
+    exit_code: i32,
+    tool_calls: u32,
+    num_turns: u32,
+    provider_status: Option<&str>,
+) {
+    trace!(
+        provider = %provider,
+        exit_code,
+        tool_calls,
+        num_turns,
+        provider_status = provider_status.unwrap_or(""),
+        "finished structured stream parser"
+    );
+}
+
 pub(crate) fn trace_malformed_line(provider: Provider, line_num: usize, message: &str) {
     trace!(
         provider = %provider,
