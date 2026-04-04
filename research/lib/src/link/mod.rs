@@ -100,15 +100,18 @@ pub async fn link(
     debug!("Searching for topics in: {:?}", library_path);
 
     // 1. Get all target directories for skills and docs
-    let claude_skills_dir =
-        detection::get_claude_skills_dir().map_err(|_| LinkError::HomeDirectory)?;
-    let opencode_skills_dir =
-        detection::get_opencode_skills_dir().map_err(|_| LinkError::HomeDirectory)?;
-    let roo_skills_dir = detection::get_roo_skills_dir().map_err(|_| LinkError::HomeDirectory)?;
-    let claude_docs_dir = detection::get_claude_docs_dir().map_err(|_| LinkError::HomeDirectory)?;
-    let opencode_docs_dir =
-        detection::get_opencode_docs_dir().map_err(|_| LinkError::HomeDirectory)?;
-    let roo_docs_dir = detection::get_roo_docs_dir().map_err(|_| LinkError::HomeDirectory)?;
+    let claude_skills_dir = detection::get_claude_skills_dir()
+        .map_err(|e| LinkError::HomeDirectory(format!("Claude skills: {}", e)))?;
+    let opencode_skills_dir = detection::get_opencode_skills_dir()
+        .map_err(|e| LinkError::HomeDirectory(format!("OpenCode skills: {}", e)))?;
+    let roo_skills_dir = detection::get_roo_skills_dir()
+        .map_err(|e| LinkError::HomeDirectory(format!("Roo skills: {}", e)))?;
+    let claude_docs_dir = detection::get_claude_docs_dir()
+        .map_err(|e| LinkError::HomeDirectory(format!("Claude docs: {}", e)))?;
+    let opencode_docs_dir = detection::get_opencode_docs_dir()
+        .map_err(|e| LinkError::HomeDirectory(format!("OpenCode docs: {}", e)))?;
+    let roo_docs_dir = detection::get_roo_docs_dir()
+        .map_err(|e| LinkError::HomeDirectory(format!("Roo docs: {}", e)))?;
 
     info!("Claude Code skills dir: {}", claude_skills_dir.display());
     info!("OpenCode skills dir: {}", opencode_skills_dir.display());
