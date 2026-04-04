@@ -24,6 +24,7 @@ use biscuit_terminal::{
 pub mod args;
 pub mod commands;
 pub mod output;
+pub mod types;
 use args::*;
 use commands::*;
 use output::*;
@@ -111,7 +112,8 @@ fn main() -> color_eyre::Result<()> {
             debug,
         }) => {
             tracing::debug!(command = "image", filepath, width = ?width, "Dispatching subcommand");
-            return render_image(filepath, width.as_deref(), layout, meta, debug);
+            let width_str = width.as_ref().map(|w| w.to_string());
+            return render_image(filepath, width_str.as_deref(), layout, meta, debug);
         }
         Some(Command::Flowchart {
             vertical,
@@ -124,11 +126,12 @@ fn main() -> color_eyre::Result<()> {
             ref content,
         }) => {
             tracing::debug!(command = "flowchart", vertical, inverse, example, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_flowchart(
                 vertical,
                 inverse,
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 example,
                 meta,
@@ -159,6 +162,7 @@ fn main() -> color_eyre::Result<()> {
             ref points,
         }) => {
             tracing::debug!(command = "quadrant", inverse, example, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_quadrant(
                 x_axis.as_deref(),
                 y_axis.as_deref(),
@@ -168,7 +172,7 @@ fn main() -> color_eyre::Result<()> {
                 bottom_left.as_deref(),
                 bottom_right.as_deref(),
                 inverse,
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 point_radius,
                 label_size,
@@ -194,10 +198,11 @@ fn main() -> color_eyre::Result<()> {
             ref data,
         }) => {
             tracing::debug!(command = "pie-chart", inverse, example, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_pie_chart(
                 inverse,
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 show_data,
                 example,
@@ -216,10 +221,11 @@ fn main() -> color_eyre::Result<()> {
             ref commands,
         }) => {
             tracing::debug!(command = "git-graph", inverse, example, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_git_graph(
                 inverse,
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 example,
                 meta,
@@ -243,12 +249,13 @@ fn main() -> color_eyre::Result<()> {
             ref data,
         }) => {
             tracing::debug!(command = "bar-chart", inverse, horizontal, example, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_xy_chart(
                 XyChartType::Bar,
                 title.as_deref(),
                 x_axis.as_deref(),
                 y_axis.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 horizontal,
                 show_data_label,
@@ -278,12 +285,13 @@ fn main() -> color_eyre::Result<()> {
             ref data,
         }) => {
             tracing::debug!(command = "line-chart", inverse, horizontal, example, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_xy_chart(
                 XyChartType::Line,
                 title.as_deref(),
                 x_axis.as_deref(),
                 y_axis.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 horizontal,
                 show_data_label,
@@ -308,9 +316,10 @@ fn main() -> color_eyre::Result<()> {
             ref events,
         }) => {
             tracing::debug!(command = "timeline", inverse, example, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_timeline(
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 section,
                 inverse,
@@ -330,9 +339,10 @@ fn main() -> color_eyre::Result<()> {
             ref transitions,
         }) => {
             tracing::debug!(command = "state-diagram", inverse, example, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_state_diagram(
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 inverse,
                 example,
@@ -354,11 +364,12 @@ fn main() -> color_eyre::Result<()> {
             ref content,
         }) => {
             tracing::debug!(command = "graph-expression", inverse, example, syntax = ?syntax, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_graph_expression(
                 example,
                 syntax.clone(),
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 inverse,
                 font.as_deref(),
                 orientation.clone(),
@@ -379,9 +390,10 @@ fn main() -> color_eyre::Result<()> {
             ref relationships,
         }) => {
             tracing::debug!(command = "erd", inverse, example, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_erd(
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 entity,
                 inverse,
@@ -440,7 +452,8 @@ fn main() -> color_eyre::Result<()> {
             ref layout,
         }) => {
             tracing::debug!(command = "columns", gap, left_width = ?left_width, "Dispatching subcommand");
-            return render_columns(left, right, gap, left_width.as_deref(), layout);
+            let left_width_str = left_width.as_ref().map(|w| w.to_string());
+            return render_columns(left, right, gap, left_width_str.as_deref(), layout);
         }
         Some(Command::Dir {
             ref path,

@@ -102,7 +102,7 @@ pub enum Command {
         ///
         /// Overrides inline width spec (e.g., "file.jpg|50%"). Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -170,7 +170,7 @@ pub enum Command {
         ///
         /// Default is 50% of terminal width. Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -297,7 +297,7 @@ pub enum Command {
         ///
         /// Default is 50% of terminal width. Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -421,7 +421,7 @@ pub enum Command {
         ///
         /// Default is 50% of terminal width. Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -506,7 +506,7 @@ pub enum Command {
         ///
         /// Default is 50% of terminal width. Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -587,7 +587,7 @@ pub enum Command {
 
         /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -676,7 +676,7 @@ pub enum Command {
 
         /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -752,9 +752,9 @@ pub enum Command {
         #[arg(long, short = 't')]
         title: Option<String>,
 
-        /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -818,9 +818,9 @@ pub enum Command {
         #[arg(long, short = 't')]
         title: Option<String>,
 
-        /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -904,7 +904,7 @@ pub enum Command {
 
         /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         /// Use inverted colors with solid background
         #[arg(long)]
@@ -969,9 +969,9 @@ pub enum Command {
         #[arg(long, short = 't')]
         title: Option<String>,
 
-        /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -1272,7 +1272,7 @@ pub enum Command {
 
         /// Left column width (e.g., "20", "20ch", "40%")
         #[arg(long = "left", value_name = "WIDTH")]
-        left_width: Option<String>,
+        left_width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
