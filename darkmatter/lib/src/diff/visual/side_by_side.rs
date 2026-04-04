@@ -10,22 +10,13 @@
 //! the appropriate background color.
 
 use super::VisualDiffOptions;
+use super::constants::{BG_ADDED, BG_CHANGED_ADD, BG_CHANGED_DEL, BG_REMOVED, BOLD, DIM, RESET, UNDERLINE};
 use super::diff::{DiffLine, InlineSpan};
 use biscuit_terminal::utils::{UnicodeWidthChar, UnicodeWidthStr};
 use std::collections::HashSet;
 
-// ANSI escape codes
-const RESET: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
-const UNDERLINE: &str = "\x1b[4m";
+// Module-specific ANSI escape code
 const INVERSE: &str = "\x1b[7m";
-
-// Background colors (256-color mode)
-const BG_REMOVED: &str = "\x1b[48;5;52m"; // Dark red
-const BG_ADDED: &str = "\x1b[48;5;22m"; // Dark green
-const BG_CHANGED_DEL: &str = "\x1b[48;5;88m"; // Brighter red for inline changes
-const BG_CHANGED_ADD: &str = "\x1b[48;5;28m"; // Brighter green for inline changes
 
 /// Render a side-by-side diff.
 pub fn render(

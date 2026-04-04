@@ -12,24 +12,13 @@
 //! the appropriate styling.
 
 use super::VisualDiffOptions;
+use super::constants::{BG_ADDED, BG_CHANGED_ADD, BG_CHANGED_DEL, BG_REMOVED, BOLD, DIM, RESET, UNDERLINE};
 use super::diff::{DiffLine, InlineSpan};
 use biscuit_terminal::utils::UnicodeWidthStr;
 
-// ANSI escape codes
-const RESET: &str = "\x1b[0m";
-const DIM: &str = "\x1b[2m";
-const BOLD: &str = "\x1b[1m";
-const UNDERLINE: &str = "\x1b[4m";
-
-// Foreground colors
+// Module-specific foreground colors
 const FG_RED: &str = "\x1b[31m";
 const FG_GREEN: &str = "\x1b[32m";
-
-// Background colors (256-color mode)
-const BG_REMOVED: &str = "\x1b[48;5;52m";
-const BG_ADDED: &str = "\x1b[48;5;22m";
-const BG_CHANGED_DEL: &str = "\x1b[48;5;88m";
-const BG_CHANGED_ADD: &str = "\x1b[48;5;28m";
 
 /// Render a unified diff.
 pub fn render(
