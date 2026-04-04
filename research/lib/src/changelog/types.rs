@@ -7,6 +7,8 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::fmt;
+use std::str::FromStr;
 use thiserror::Error;
 
 /// Error types for changelog operations.
@@ -230,6 +232,7 @@ impl VersionHistory {
 /// Indicates the reliability of the version history based on
 /// which sources were available.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ConfidenceLevel {
     /// Structured sources available (GitHub Releases + Registry/ChangelogFile)
     High,
@@ -237,6 +240,32 @@ pub enum ConfidenceLevel {
     Medium,
     /// LLM knowledge only
     Low,
+}
+
+impl fmt::Display for ConfidenceLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfidenceLevel::High => write!(f, "high"),
+            ConfidenceLevel::Medium => write!(f, "medium"),
+            ConfidenceLevel::Low => write!(f, "low"),
+        }
+    }
+}
+
+impl FromStr for ConfidenceLevel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "high" => Ok(ConfidenceLevel::High),
+            "medium" => Ok(ConfidenceLevel::Medium),
+            "low" => Ok(ConfidenceLevel::Low),
+            other => Err(format!(
+                "invalid confidence level '{}': expected 'high', 'medium', or 'low'",
+                other
+            )),
+        }
+    }
 }
 
 /// Parse dates from various formats (ISO-8601, US, UK, relative).
@@ -451,6 +480,30 @@ mod tests {
         assert_eq!(ConfidenceLevel::High, ConfidenceLevel::High);
         assert_ne!(ConfidenceLevel::High, ConfidenceLevel::Medium);
         assert_ne!(ConfidenceLevel::Medium, ConfidenceLevel::Low);
+    }
+
+    #[test]
+    fn test_confidence_level_display() {
+        assert_eq!(ConfidenceLevel::High.to_string(), "high");
+        assert_eq!(ConfidenceLevel::Medium.to_string(), "medium");
+        assert_eq!(ConfidenceLevel::Low.to_string(), "low");
+    }
+
+    #[test]
+    fn test_confidence_level_from_str() {
+        assert_eq!("high".parse::<ConfidenceLevel>().unwrap(), ConfidenceLevel::High);
+        assert_eq!("HIGH".parse::<ConfidenceLevel>().unwrap(), ConfidenceLevel::High);
+        assert_eq!("Medium".parse::<ConfidenceLevel>().unwrap(), ConfidenceLevel::Medium);
+        assert_eq!("low".parse::<ConfidenceLevel>().unwrap(), ConfidenceLevel::Low);
+        assert!("invalid".parse::<ConfidenceLevel>().is_err());
+    }
+
+    #[test]
+    fn test_confidence_level_serde_lowercase() {
+        let json = serde_json::to_string(&ConfidenceLevel::High).unwrap();
+        assert_eq!(json, r#""high""#);
+        let level: ConfidenceLevel = serde_json::from_str(r#""high""#).unwrap();
+        assert_eq!(level, ConfidenceLevel::High);
     }
 
     #[test]

@@ -102,11 +102,13 @@ where
         _internal_call_id: &str,
         args: &str,
     ) -> ToolCallHookAction {
+        // Never log raw tool args - they may contain sensitive data like API keys
+        // Only log the count of arguments, not the content
         info!(
             parent: &self.span,
             tool.name = %tool_name,
             tool.call_id = ?tool_call_id,
-            tool.args = %args,
+            tool.args_len = args.len(),
             "Invoking tool"
         );
         ToolCallHookAction::cont()
@@ -120,17 +122,17 @@ where
         _args: &str,
         result: &str,
     ) -> HookAction {
-        // Truncate result for logging (tool results can be large)
-        let result_preview: String = result.chars().take(200).collect();
-        let truncated = result.len() > 200;
+        // Never log raw tool results - they may contain sensitive data
+        // Only log the length and whether it was truncated
+        let result_len = result.len();
+        let truncated = result_len > 500;
 
         info!(
             parent: &self.span,
             tool.name = %tool_name,
             tool.call_id = ?tool_call_id,
-            tool.result_preview = %result_preview,
+            tool.result_len = result_len,
             tool.result_truncated = truncated,
-            tool.result_len = result.len(),
             "Tool returned result"
         );
         HookAction::cont()
@@ -405,7 +407,12 @@ impl ResearchMetadata {
             v1.when_to_use = Some(when_to_use);
             v1.updated_at = Utc::now();
             needs_save = true;
-            tracing::info!("✓ Extracted when_to_use from SKILL.md frontmatter");
+            tracing::info!(
+                field = "when_to_use",
+                source = "SKILL.md frontmatter",
+                status = "extracted",
+                "Metadata field extracted"
+            );
         }
 
         // Save if we made any changes
@@ -444,7 +451,12 @@ impl ResearchMetadata {
                 if let Err(e) = fs::write(&skill_path, &repaired).await {
                     tracing::warn!("Failed to save repaired SKILL.md: {}", e);
                 } else {
-                    tracing::info!("✓ Repaired and saved SKILL.md frontmatter");
+                    tracing::info!(
+                        field = "frontmatter",
+                        source = "SKILL.md",
+                        status = "repaired",
+                        "SKILL.md frontmatter repaired and saved"
+                    );
                 }
                 Some(frontmatter.description)
             }
@@ -1145,7 +1157,7 @@ fn build_changelog_prompt(
     library_info: Option<&LibraryInfo>,
     version_history: Option<&changelog::types::VersionHistory>,
 ) -> String {
-    use changelog::types::{ChangelogSource, ConfidenceLevel};
+    use changelog::types::ChangelogSource;
 
     let ctx = library_info.map(LibraryContext::from);
     let mut prompt = build_prompt_with_context(template, topic, ctx.as_ref());
@@ -1157,11 +1169,7 @@ fn build_changelog_prompt(
     // Inject version history data if available
     if let Some(history) = version_history {
         let version_data = format_version_history_for_prompt(history);
-        let confidence_str = match history.confidence {
-            ConfidenceLevel::High => "High",
-            ConfidenceLevel::Medium => "Medium",
-            ConfidenceLevel::Low => "Low",
-        };
+        let confidence_str = history.confidence.to_string();
 
         let sources_str = history
             .sources_used
@@ -1177,7 +1185,7 @@ fn build_changelog_prompt(
 
         prompt = prompt
             .replace("{{version_data}}", &version_data)
-            .replace("{{confidence_level}}", confidence_str)
+            .replace("{{confidence_level}}", &confidence_str)
             .replace("{{sources_used}}", &sources_str);
     } else {
         // No structured data available - LLM-only fallback
@@ -1196,6 +1204,17 @@ struct PromptTaskResult {
 }
 
 /// Run a prompt task and save result, printing progress as it completes
+#[instrument(
+    name = "prompt_task",
+    skip(output_dir, model, counter, cancelled),
+    fields(
+        task = %name,
+        filename = %filename,
+        output_dir = %output_dir.display(),
+        total_tasks = total,
+        prompt_len = prompt.len(),
+    )
+)]
 #[allow(clippy::too_many_arguments)]
 async fn run_prompt_task<M>(
     name: &'static str,
@@ -1294,6 +1313,16 @@ where
             None
         }
     };
+
+    // Record timing and outcome in the current span
+    let span = Span::current();
+    span.record("duration_ms", start_time.elapsed().as_millis() as u64);
+    span.record("outcome", if metrics.is_some() { "success" } else { "failed" });
+    if let Some(ref m) = metrics {
+        span.record("input_tokens", m.input_tokens);
+        span.record("output_tokens", m.output_tokens);
+        span.record("total_tokens", m.total_tokens);
+    }
 
     PromptTaskResult { metrics }
 }
@@ -1596,6 +1625,17 @@ pub fn default_output_dir(topic: &str) -> PathBuf {
 }
 
 /// Run a dynamic question task and save result
+#[instrument(
+    name = "question_task",
+    skip(output_dir, model, counter, cancelled, package_manager, language, url),
+    fields(
+        task = %format!("question_{}", question_num),
+        filename = %format!("question_{}.md", question_num),
+        output_dir = %output_dir.display(),
+        total_tasks = total,
+        question_len = question.len(),
+    )
+)]
 #[allow(clippy::too_many_arguments)]
 async fn run_question_task<M>(
     question_num: usize,
@@ -1697,6 +1737,16 @@ where
         }
     };
 
+    // Record timing and outcome in the current span
+    let span = Span::current();
+    span.record("duration_ms", start_time.elapsed().as_millis() as u64);
+    span.record("outcome", if metrics.is_some() { "success" } else { "failed" });
+    if let Some(ref m) = metrics {
+        span.record("input_tokens", m.input_tokens);
+        span.record("output_tokens", m.output_tokens);
+        span.record("total_tokens", m.total_tokens);
+    }
+
     PromptTaskResult { metrics }
 }
 
@@ -1707,6 +1757,16 @@ where
 /// 2. Builds changelog prompt with injected version data
 /// 3. Calls LLM agent with tools
 /// 4. Writes the result to changelog.md
+#[instrument(
+    name = "changelog_agent_task",
+    skip(output_dir, agent, client, counter, cancelled, library_info),
+    fields(
+        task = %name,
+        filename = %filename,
+        output_dir = %output_dir.display(),
+        total_tasks = total,
+    )
+)]
 #[allow(clippy::too_many_arguments)]
 async fn run_changelog_agent_task<M>(
     name: &'static str,
@@ -1838,6 +1898,11 @@ where
         }
     };
 
+    // Record timing and outcome in the current span
+    let span = Span::current();
+    span.record("duration_ms", start_time.elapsed().as_millis() as u64);
+    span.record("outcome", if metrics.is_some() { "success" } else { "failed" });
+
     PromptTaskResult { metrics }
 }
 
@@ -1848,6 +1913,16 @@ where
 /// 2. Builds changelog prompt with injected version data
 /// 3. Calls LLM completion model
 /// 4. Writes the result to changelog.md
+#[instrument(
+    name = "changelog_completion_task",
+    skip(output_dir, model, client, counter, cancelled, library_info),
+    fields(
+        task = %name,
+        filename = %filename,
+        output_dir = %output_dir.display(),
+        total_tasks = total,
+    )
+)]
 #[allow(clippy::too_many_arguments)]
 async fn run_changelog_completion_task<M>(
     name: &'static str,
@@ -1982,6 +2057,16 @@ where
         }
     };
 
+    // Record timing and outcome in the current span
+    let span = Span::current();
+    span.record("duration_ms", start_time.elapsed().as_millis() as u64);
+    span.record("outcome", if metrics.is_some() { "success" } else { "failed" });
+    if let Some(ref m) = metrics {
+        span.record("input_tokens", m.input_tokens);
+        span.record("output_tokens", m.output_tokens);
+        span.record("total_tokens", m.total_tokens);
+    }
+
     PromptTaskResult { metrics }
 }
 
@@ -2079,18 +2164,33 @@ async fn generate_skill_files(
         if let Ok(skill_content) = fs::read_to_string(&skill_md_path).await {
             match parse_and_validate_frontmatter(&skill_content) {
                 Ok((frontmatter, _body)) => {
-                    tracing::info!("✓ SKILL.md frontmatter is valid");
+                    tracing::info!(
+                        field = "frontmatter",
+                        source = "SKILL.md",
+                        status = "valid",
+                        "SKILL.md frontmatter validated"
+                    );
 
                     // Update metadata with when_to_use
                     metadata.when_to_use = Some(frontmatter.description.clone());
                     metadata.updated_at = Utc::now();
 
-                    tracing::info!("✓ Extracted when_to_use from frontmatter");
+                    tracing::info!(
+                        field = "when_to_use",
+                        source = "SKILL.md frontmatter",
+                        status = "extracted",
+                        "Metadata when_to_use extracted from frontmatter"
+                    );
                 }
                 Err(e) => {
-                    tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
-                    tracing::error!("  File: {}", skill_md_path.display());
-                    tracing::error!("  Please manually fix the frontmatter in SKILL.md");
+                    tracing::error!(
+                        field = "frontmatter",
+                        source = "SKILL.md",
+                        status = "validation_failed",
+                        error = %e,
+                        file = %skill_md_path.display(),
+                        "SKILL.md frontmatter validation failed"
+                    );
 
                     eprintln!("\n⚠️  Warning: SKILL.md frontmatter is invalid");
                     eprintln!("   {}", e);
@@ -2604,7 +2704,11 @@ async fn run_incremental_research(
         if let Err(e) = existing_metadata.save(&output_dir).await {
             tracing::error!("Failed to save metadata: {}", e);
         } else {
-            tracing::info!("✓ Updated metadata.when_to_use");
+            tracing::info!(
+                field = "when_to_use",
+                status = "updated",
+                "Metadata when_to_use updated"
+            );
         }
     }
 
@@ -3166,14 +3270,30 @@ async fn regenerate_skill_from_existing_research(
     if let Ok(skill_content) = fs::read_to_string(&skill_path).await {
         match parse_and_validate_frontmatter(&skill_content) {
             Ok((frontmatter, _body)) => {
-                tracing::info!("✓ SKILL.md frontmatter is valid");
+                tracing::info!(
+                    field = "frontmatter",
+                    source = "SKILL.md",
+                    status = "valid",
+                    "SKILL.md frontmatter validated"
+                );
                 // Update metadata with when_to_use from frontmatter
                 metadata.when_to_use = Some(frontmatter.description.clone());
                 metadata.save(output_dir).await?;
-                tracing::info!("✓ Extracted when_to_use from frontmatter");
+                tracing::info!(
+                    field = "when_to_use",
+                    source = "SKILL.md frontmatter",
+                    status = "extracted",
+                    "Metadata when_to_use extracted from frontmatter"
+                );
             }
             Err(e) => {
-                tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
+                tracing::error!(
+                    field = "frontmatter",
+                    source = "SKILL.md",
+                    status = "validation_failed",
+                    error = %e,
+                    "SKILL.md frontmatter validation failed during regeneration"
+                );
                 return Err(ResearchError::SkillRegenerationFailed(format!(
                     "Generated SKILL.md has invalid frontmatter: {}",
                     e
@@ -4082,7 +4202,11 @@ pub async fn research(
     if let Err(e) = metadata.save(&output_dir).await {
         eprintln!("Warning: Failed to write metadata.json: {}", e);
     } else if metadata.when_to_use.is_some() {
-        tracing::info!("✓ Updated metadata.when_to_use");
+        tracing::info!(
+            field = "when_to_use",
+            status = "updated",
+            "Metadata when_to_use updated"
+        );
     }
 
     // Exit the phase 2 span
