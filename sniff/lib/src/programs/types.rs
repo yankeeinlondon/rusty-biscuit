@@ -326,6 +326,90 @@ impl<E: CategoryEnum> PartialEq for CategoryDetector<E> {
 
 impl<E: CategoryEnum> Eq for CategoryDetector<E> {}
 
+impl<E: CategoryEnum> Serialize for CategoryDetector<E> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(E::COUNT))?;
+        for variant in E::iter() {
+            let key = variant.serde_key();
+            let info = variant.info();
+            let entry = match self.path_with_source(variant) {
+                Some((path, source)) => {
+                    crate::programs::schema::ProgramEntry::installed(info, path, source)
+                }
+                None => crate::programs::schema::ProgramEntry::not_installed(info),
+            };
+            map.serialize_entry(key, &entry)?;
+        }
+        map.end()
+    }
+}
+
+/// Helper for deserializing both boolean and ProgramEntry values.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum BoolOrEntry {
+    Bool(bool),
+    Entry { installed: bool },
+}
+
+impl<'de, E: CategoryEnum> Deserialize<'de> for CategoryDetector<E> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(CategoryDetectorVisitor::<E>(PhantomData))
+    }
+}
+
+struct CategoryDetectorVisitor<E>(PhantomData<E>);
+
+impl<'de, E: CategoryEnum> serde::de::Visitor<'de> for CategoryDetectorVisitor<E> {
+    type Value = CategoryDetector<E>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            formatter,
+            "a map of program names to booleans or program entries"
+        )
+    }
+
+    fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+    where
+        M: serde::de::MapAccess<'de>,
+    {
+        // Build key -> variant index lookup
+        let key_to_index: HashMap<&'static str, usize> = E::iter()
+            .map(|v| (v.serde_key(), v.variant_index()))
+            .collect();
+
+        let mut results = vec![None; E::COUNT];
+
+        while let Some(key) = map.next_key::<String>()? {
+            if let Some(&idx) = key_to_index.get(key.as_str()) {
+                let value: BoolOrEntry = map.next_value()?;
+                let installed = match value {
+                    BoolOrEntry::Bool(b) => b,
+                    BoolOrEntry::Entry { installed } => installed,
+                };
+                if installed {
+                    results[idx] = Some((PathBuf::new(), ExecutableSource::Path));
+                }
+            } else {
+                let _: serde::de::IgnoredAny = map.next_value()?;
+            }
+        }
+
+        Ok(CategoryDetector {
+            results,
+            _phantom: PhantomData,
+        })
+    }
+}
+
 impl<E: CategoryEnum> CategoryDetector<E> {
     /// Detect installed programs by scanning PATH.
     pub fn new() -> Self {
@@ -1087,5 +1171,88 @@ mod tests {
         assert_eq!(installed.len(), 2);
         assert!(installed.contains(&Editor::Vim));
         assert!(installed.contains(&Editor::Neovim));
+    }
+
+    // ============================================
+    // CategoryDetector Serialization/Deserialization tests
+    // ============================================
+
+    #[test]
+    fn test_category_detector_serialize_produces_program_entries() {
+        let detector = CategoryDetector::<Editor>::default();
+        let json = serde_json::to_string(&detector).unwrap();
+        // Should produce ProgramEntry objects with full metadata
+        assert!(json.contains("\"installed\":false"));
+        assert!(json.contains("\"vim\":{"));
+        assert!(json.contains("\"name\":\"Vim\""));
+    }
+
+    #[test]
+    fn test_category_detector_deserialize_from_booleans() {
+        let json = r#"{"vim": true, "vscode": false}"#;
+        let detector: CategoryDetector<Editor> = serde_json::from_str(json).unwrap();
+        assert!(detector.is_installed(Editor::Vim));
+        assert!(!detector.is_installed(Editor::VSCode));
+    }
+
+    #[test]
+    fn test_category_detector_deserialize_partial_json() {
+        let json = r#"{"vim": true}"#;
+        let detector: CategoryDetector<Editor> = serde_json::from_str(json).unwrap();
+        assert!(detector.is_installed(Editor::Vim));
+        assert!(!detector.is_installed(Editor::Neovim));
+    }
+
+    #[test]
+    fn test_category_detector_serialize_includes_path_and_source() {
+        let detector = CategoryDetector::<Editor>::default()
+            .with_program(Editor::Vim, PathBuf::from("/usr/bin/vim"), ExecutableSource::Path);
+        let json = serde_json::to_string(&detector).unwrap();
+        // Vim should be installed
+        assert!(json.contains("\"vim\":{"));
+        assert!(json.contains("\"installed\":true"));
+        assert!(json.contains("\"path\":\"/usr/bin/vim\""));
+        assert!(json.contains("\"source\":\"path\""));
+        // VSCode should not be installed
+        assert!(json.contains("\"vscode\":{"));
+        // Should contain at least one installed:false
+        assert!(json.contains("\"installed\":false"));
+    }
+
+    #[test]
+    fn test_category_detector_roundtrip_serialization() {
+        let detector1 = CategoryDetector::<Editor>::default()
+            .with_program(Editor::Vim, PathBuf::from("/usr/bin/vim"), ExecutableSource::Path)
+            .with_program(Editor::Neovim, PathBuf::from("/usr/bin/nvim"), ExecutableSource::Path);
+
+        let json = serde_json::to_string(&detector1).unwrap();
+        let detector2: CategoryDetector<Editor> = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(detector1.is_installed(Editor::Vim), detector2.is_installed(Editor::Vim));
+        assert_eq!(detector1.is_installed(Editor::Neovim), detector2.is_installed(Editor::Neovim));
+        assert_eq!(detector1.is_installed(Editor::VSCode), detector2.is_installed(Editor::VSCode));
+    }
+
+    #[test]
+    fn test_category_detector_deserialize_from_program_entries() {
+        let json = r#"{
+            "vim": {
+                "installed": true,
+                "name": "Vim",
+                "description": "Classic modal text editor",
+                "website": "https://www.vim.org",
+                "path": "/usr/bin/vim",
+                "source": "path"
+            },
+            "vscode": {
+                "installed": false,
+                "name": "Visual Studio Code",
+                "description": "Modern code editor by Microsoft",
+                "website": "https://code.visualstudio.com"
+            }
+        }"#;
+        let detector: CategoryDetector<Editor> = serde_json::from_str(json).unwrap();
+        assert!(detector.is_installed(Editor::Vim));
+        assert!(!detector.is_installed(Editor::VSCode));
     }
 }
