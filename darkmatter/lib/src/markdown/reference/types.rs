@@ -231,6 +231,15 @@ impl ReferenceSet {
     pub fn transclusions(&self) -> Vec<&ReferenceRecord> {
         self.by_kind(ReferenceKind::Transclusion)
     }
+
+    /// Consumes the set and returns records of the given kind, converted to `T`.
+    pub fn filter_convert<T: From<ReferenceRecord>>(self, kind: ReferenceKind) -> Vec<T> {
+        self.records
+            .into_iter()
+            .filter(|r| r.kind == kind)
+            .map(T::from)
+            .collect()
+    }
 }
 
 impl IntoIterator for ReferenceSet {
