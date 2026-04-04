@@ -6,6 +6,8 @@
 use std::path::Path;
 use tracing::{debug, trace};
 
+use crate::format::DataFormat;
+
 /// Detected file type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
@@ -51,6 +53,47 @@ impl FileType {
             Self::Markdown => Some("text/markdown"),
             Self::Pdf => Some("application/pdf"),
             Self::Unknown => None,
+        }
+    }
+
+    /// Convert to a `DataFormat` if this is a known type.
+    ///
+    /// ## Returns
+    ///
+    /// Returns `Some(DataFormat)` for all known types, or `None` for `Unknown`.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_file::{FileType, DataFormat};
+    ///
+    /// assert_eq!(FileType::Toml.as_data_format(), Some(DataFormat::Toml));
+    /// assert_eq!(FileType::Unknown.as_data_format(), None);
+    /// ```
+    #[must_use]
+    pub fn as_data_format(&self) -> Option<DataFormat> {
+        match self {
+            Self::Toml => Some(DataFormat::Toml),
+            Self::Yaml => Some(DataFormat::Yaml),
+            Self::Json => Some(DataFormat::Json),
+            Self::Json5 => Some(DataFormat::Json5),
+            Self::Markdown => Some(DataFormat::Markdown),
+            Self::Pdf => Some(DataFormat::Pdf),
+            Self::Unknown => None,
+        }
+    }
+}
+
+impl From<DataFormat> for FileType {
+    fn from(fmt: DataFormat) -> Self {
+        match fmt {
+            DataFormat::Toml => Self::Toml,
+            DataFormat::Yaml => Self::Yaml,
+            DataFormat::Json => Self::Json,
+            DataFormat::Json5 => Self::Json5,
+            DataFormat::Markdown => Self::Markdown,
+            DataFormat::Pdf => Self::Pdf,
+            DataFormat::Text => Self::Unknown,
         }
     }
 }
