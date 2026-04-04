@@ -166,10 +166,11 @@ pub struct UnderlineSupport {
     pub colored: bool,
 }
 
-/// Represents the type of terminal multiplexing support available.
+/// Type of terminal multiplexing support available.
 ///
-/// Terminal multiplexers allow splitting terminal windows into multiple panes,
-/// managing persistent sessions, and providing advanced navigation features.
+/// All detected multiplexers support their full capability set (split, resize,
+/// focus, tabs). Individual capability fields were removed because every variant
+/// always returned `true` for all fields — no version-based detection exists.
 ///
 /// ## Detection
 ///
@@ -177,78 +178,16 @@ pub struct UnderlineSupport {
 /// - `TMUX` - Set when running inside tmux
 /// - `ZELLIJ` - Set when running inside Zellij
 /// - `TERM_PROGRAM` - Identifies terminals with native multiplexing (Kitty, WezTerm, Ghostty)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MultiplexSupport {
     /// No multiplexing support available
     None,
-    /// Native multiplexing built into the terminal emulator
-    ///
-    /// Supported by:
-    /// - Kitty (GPU-accelerated layouts: splits, stack, grid, tall, fat)
-    /// - WezTerm (multiplexer domains with SSH, WSL, local support)
-    /// - Ghostty (native platform integration)
-    ///
-    /// Note: Native multiplexing typically loses sessions on terminal close,
-    /// unlike tmux which provides persistent sessions.
-    Native {
-        /// Whether the terminal can split the current window/pane horizontally or vertically
-        split_window: bool,
-        /// Whether the terminal can resize panes
-        resize_pane: bool,
-        /// Whether the terminal can change focus to another pane
-        focus_pane: bool,
-        /// Whether the terminal supports multiple tabs or windows
-        multiple_tabs: bool,
-    },
+    /// Native multiplexing built into the terminal emulator (Kitty, WezTerm, Ghostty)
+    Native,
     /// tmux multiplexer detected
-    ///
-    /// tmux is the standard terminal multiplexer for persistent sessions.
-    /// Features include:
-    /// - Horizontal/vertical splits
-    /// - Pane resizing
-    /// - Session persistence (detaches survive terminal close)
-    /// - Multiple windows per session
-    ///
-    /// Configuration: `~/.tmux.conf`
-    Tmux {
-        /// Whether tmux can split windows horizontally or vertically
-        split_window: bool,
-        /// Whether tmux can resize panes
-        resize_pane: bool,
-        /// Whether tmux can change focus to another pane
-        focus_pane: bool,
-        /// Whether tmux supports multiple windows (tabs) within a session
-        multiple_windows: bool,
-        /// Whether tmux sessions persist after closing the terminal
-        session_persistence: bool,
-        /// Whether tmux supports detaching and reattaching to sessions
-        detach_session: bool,
-    },
+    Tmux,
     /// Zellij multiplexer detected
-    ///
-    /// Modern multiplexer written in Rust with advanced features:
-    /// - Layout system with KDL configuration
-    /// - Session resurrection
-    /// - WebAssembly plugins
-    /// - Floating panes
-    ///
-    /// Configuration: `~/.config/zellij/config.kdl`
-    Zellij {
-        /// Whether Zellij can split windows horizontally or vertically
-        split_window: bool,
-        /// Whether Zellij can resize panes
-        resize_pane: bool,
-        /// Whether Zellij can change focus to another pane
-        focus_pane: bool,
-        /// Whether Zellij supports multiple tabs
-        multiple_tabs: bool,
-        /// Whether Zellij sessions can be resurrected after closing
-        session_resurrection: bool,
-        /// Whether Zellij supports floating panes
-        floating_panes: bool,
-        /// Whether Zellij supports detaching and reattaching to sessions
-        detach_session: bool,
-    },
+    Zellij,
 }
 
 /// Detect the terminal's color depth capability.
@@ -909,90 +848,35 @@ pub fn osc8_link_support() -> bool {
 /// use biscuit_terminal::discovery::detection::{multiplex_support, MultiplexSupport};
 ///
 /// match multiplex_support() {
-///     MultiplexSupport::Tmux { split_window: true, .. } => {
-///         println!("Running inside tmux with split support");
-///     }
-///     MultiplexSupport::Native { .. } => {
-///         println!("Terminal has native multiplexing");
-///     }
-///     MultiplexSupport::None => {
-///         println!("No multiplexing support detected");
-///     }
-///     _ => {}
+///     MultiplexSupport::Tmux => println!("Running inside tmux"),
+///     MultiplexSupport::Zellij => println!("Running inside Zellij"),
+///     MultiplexSupport::Native => println!("Terminal has native multiplexing"),
+///     MultiplexSupport::None => println!("No multiplexing support detected"),
 /// }
 /// ```
 pub fn multiplex_support() -> MultiplexSupport {
-    // Check for tmux first (most common persistent multiplexer)
     if env::var("TMUX").is_ok() {
-        return MultiplexSupport::Tmux {
-            split_window: true,
-            resize_pane: true,
-            focus_pane: true,
-            multiple_windows: true,
-            session_persistence: true,
-            detach_session: true,
-        };
+        return MultiplexSupport::Tmux;
     }
 
-    // Check for Zellij
     if env::var("ZELLIJ").is_ok() {
-        return MultiplexSupport::Zellij {
-            split_window: true,
-            resize_pane: true,
-            focus_pane: true,
-            multiple_tabs: true,
-            session_resurrection: true,
-            floating_panes: true,
-            detach_session: true,
-        };
+        return MultiplexSupport::Zellij;
     }
 
-    // Check for native multiplexing in terminal emulators
     if let Ok(term_program) = env::var("TERM_PROGRAM") {
         match term_program.as_str() {
-            // Kitty has native multiplexing with layouts
-            "kitty" => {
-                return MultiplexSupport::Native {
-                    split_window: true,
-                    resize_pane: true,
-                    focus_pane: true,
-                    multiple_tabs: true,
-                };
-            }
-            // WezTerm has multiplexer domains (SSH, WSL, local)
-            "WezTerm" => {
-                return MultiplexSupport::Native {
-                    split_window: true,
-                    resize_pane: true,
-                    focus_pane: true,
-                    multiple_tabs: true,
-                };
-            }
-            // Ghostty has native multiplexing
-            "ghostty" => {
-                return MultiplexSupport::Native {
-                    split_window: true,
-                    resize_pane: true,
-                    focus_pane: true,
-                    multiple_tabs: true,
-                };
+            "kitty" | "WezTerm" | "ghostty" => {
+                return MultiplexSupport::Native;
             }
             _ => {}
         }
     }
 
-    // Check TERM variable for terminals with native multiplexing
     let term = env::var("TERM").unwrap_or_default();
     if term.contains("kitty") || term.contains("wezterm") || term.contains("ghostty") {
-        return MultiplexSupport::Native {
-            split_window: true,
-            resize_pane: true,
-            focus_pane: true,
-            multiple_tabs: true,
-        };
+        return MultiplexSupport::Native;
     }
 
-    // No multiplexing detected
     MultiplexSupport::None
 }
 

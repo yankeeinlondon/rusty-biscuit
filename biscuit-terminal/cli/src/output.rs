@@ -347,9 +347,9 @@ pub fn format_connection(conn: &Connection) -> ConnectionInfo {
 pub fn format_multiplex(m: MultiplexSupport) -> String {
     match m {
         MultiplexSupport::None => "None".to_string(),
-        MultiplexSupport::Native { .. } => "Native".to_string(),
-        MultiplexSupport::Tmux { .. } => "tmux".to_string(),
-        MultiplexSupport::Zellij { .. } => "Zellij".to_string(),
+        MultiplexSupport::Native => "Native".to_string(),
+        MultiplexSupport::Tmux => "tmux".to_string(),
+        MultiplexSupport::Zellij => "Zellij".to_string(),
     }
 }
 
@@ -585,29 +585,9 @@ mod tests {
     #[test]
     fn test_format_multiplex() {
         assert_eq!(format_multiplex(MultiplexSupport::None), "None");
-        assert_eq!(
-            format_multiplex(MultiplexSupport::Tmux {
-                split_window: true,
-                resize_pane: true,
-                focus_pane: true,
-                multiple_windows: true,
-                session_persistence: true,
-                detach_session: true,
-            }),
-            "tmux"
-        );
-        assert_eq!(
-            format_multiplex(MultiplexSupport::Zellij {
-                split_window: true,
-                resize_pane: true,
-                focus_pane: true,
-                multiple_tabs: true,
-                session_resurrection: true,
-                floating_panes: true,
-                detach_session: true,
-            }),
-            "Zellij"
-        );
+        assert_eq!(format_multiplex(MultiplexSupport::Tmux), "tmux");
+        assert_eq!(format_multiplex(MultiplexSupport::Zellij), "Zellij");
+        assert_eq!(format_multiplex(MultiplexSupport::Native), "Native");
     }
 
     #[test]
