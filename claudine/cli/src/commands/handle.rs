@@ -5,8 +5,9 @@ use color_eyre::eyre::{Result, bail};
 use serde_json::Value;
 use tracing::debug;
 
-use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider, detect_environment_fast};
+use claudine::events::{Provider, detect_environment_fast};
 
+use crate::cli_utils::parse_provider;
 use crate::provider_values::provider_value_parser;
 
 /// Arguments for the handle subcommand.
@@ -20,7 +21,7 @@ pub struct HandleArgs {
     pub event: Option<String>,
     /// Optional provider hint (auto-detected from payload if not given).
     #[arg(long, value_parser = provider_value_parser())]
-    pub provider: Option<String>,
+    pub provider: Option<Provider>,
 
     /// Emit structured JSON output suitable for CI parsing.
     #[arg(long)]
@@ -30,7 +31,7 @@ pub struct HandleArgs {
 /// Handle an incoming event from stdin.
 pub async fn run(args: HandleArgs) -> Result<()> {
     let raw = read_stdin_json()?;
-    let provider = resolve_provider(args.provider.as_deref(), &raw)?;
+    let provider = resolve_provider(args.provider, &raw)?;
     let cwd = std::env::current_dir().unwrap_or_default();
     let env = detect_environment_fast(&cwd);
 
@@ -69,7 +70,7 @@ fn read_stdin_json() -> Result<Value> {
     Ok(raw)
 }
 
-fn resolve_provider(hint: Option<&str>, raw: &Value) -> Result<Provider> {
+fn resolve_provider(hint: Option<Provider>, raw: &Value) -> Result<Provider> {
     resolve_provider_inner(hint, raw, provider_from_wrapper_env())
 }
 
@@ -81,30 +82,17 @@ fn provider_from_wrapper_env() -> Option<Provider> {
         .and_then(parse_wrapper_env_provider)
 }
 
-fn parse_provider(name: &str) -> Result<Provider> {
-    if let Some(provider) = Provider::parse_cli_name(name) {
-        return Ok(provider);
-    }
-
-    let supported = PROVIDERS_DISPLAY_ORDER
-        .iter()
-        .map(Provider::as_slug)
-        .collect::<Vec<_>>()
-        .join(", ");
-    bail!("Unknown provider: {name}. Supported: {supported}")
-}
-
 fn parse_wrapper_env_provider(value: &str) -> Option<Provider> {
-    Provider::parse_cli_name(value)
+    parse_provider(value).ok()
 }
 
 fn resolve_provider_inner(
-    hint: Option<&str>,
+    hint: Option<Provider>,
     raw: &Value,
     env_provider: Option<Provider>,
 ) -> Result<Provider> {
-    if let Some(name) = hint {
-        return parse_provider(name);
+    if let Some(provider) = hint {
+        return Ok(provider);
     }
 
     if let Some(provider) = env_provider {
@@ -127,7 +115,8 @@ mod tests {
     #[test]
     fn resolve_provider_prefers_explicit_hint() {
         let raw = json!({ "hook_event_name": "BeforeAgent" });
-        let provider = resolve_provider_inner(Some("codex"), &raw, Some(Provider::Gemini)).unwrap();
+        let provider =
+            resolve_provider_inner(Some(Provider::Codex), &raw, Some(Provider::Gemini)).unwrap();
         assert_eq!(provider, Provider::Codex);
     }
 

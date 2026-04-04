@@ -9,14 +9,17 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::badges;
-use claudine::dispatch::loader::load_config;
 use claudine::linking::{
     CommandDirectoryDiagnostic, CommandException, CommandExceptionType, CommandFixSummary,
-    CommandInfo, CommandScope, LinkableResource, ProviderSkillPaths, ResourceFilter, ResourceScope,
-    canonical_provider, capabilities_for, fix_missing_commands, list_commands,
+    CommandInfo, CommandScope, LinkableResource, ProviderSkillPaths, ResourceFilter,
+    fix_missing_commands, list_commands,
 };
 use sniff::filesystem::git::detect_git;
 
+use super::link_display::{
+    LinkableResourceDisplay, build_provider_header, render_canonical_providers, render_footer,
+    render_normal, render_verbose, repo_canonical_needs_init,
+};
 use crate::log;
 
 /// Arguments for the slash-commands subcommand.
@@ -38,7 +41,7 @@ pub async fn run(args: SlashCommandsArgs, verbose: bool) -> Result<()> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let is_git_repo = detect_git(&cwd, false, 1).ok().flatten().is_some();
 
-    if is_git_repo && args.apply && repo_canonical_needs_init(&paths) {
+    if is_git_repo && args.apply && repo_canonical_needs_init(&paths, LinkableResource::Command) {
         log::message("");
         log::message("Repo canonical provider is not configured. Running claudine init --repo ...");
         log::message("");
@@ -88,16 +91,16 @@ pub async fn run(args: SlashCommandsArgs, verbose: bool) -> Result<()> {
     log::data(&Prose::new("<blue>==================</blue>").render(&term));
     log::data("");
 
-    render_canonical_providers(&term, &paths, is_git_repo);
+    render_canonical_providers(&term, &paths, is_git_repo, LinkableResource::Command);
 
     let cmd_count = report.commands.len();
 
     if cmd_count == 1 {
         render_detail(&term, &report.commands[0]);
     } else if cmd_count < 6 || verbose {
-        render_verbose(&term, &report.commands);
+        render_verbose(&term, &report.commands, scope_badge);
     } else {
-        render_normal(&term, &report.commands);
+        render_normal(&term, &report.commands, scope_badge);
     }
 
     if let Some(summary) = fix_summary {
@@ -117,73 +120,11 @@ pub async fn run(args: SlashCommandsArgs, verbose: bool) -> Result<()> {
         cmd_count,
         verbose,
         &args.filter,
+        "commands",
+        "<dim><i>using the <green>--verbose</green> switch will provide not only names but also descriptions</i></dim>",
     );
 
     Ok(())
-}
-
-fn repo_canonical_needs_init(paths: &ProviderSkillPaths) -> bool {
-    let repo_root = Some(paths.repo_root());
-    match load_config(None, repo_root) {
-        Ok(config) => match &config.settings.linking {
-            Some(linking) => canonical_provider(
-                &linking.canonical_provider,
-                ResourceScope::Repo,
-                LinkableResource::Command,
-            )
-            .is_none(),
-            None => true,
-        },
-        Err(_) => false,
-    }
-}
-
-fn render_canonical_providers(term: &Terminal, paths: &ProviderSkillPaths, is_git_repo: bool) {
-    let repo_root = if is_git_repo {
-        Some(paths.repo_root())
-    } else {
-        None
-    };
-
-    let config = match load_config(None, repo_root) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    let Some(linking_settings) = config.settings.linking else {
-        return;
-    };
-
-    let user_canonical = canonical_provider(
-        &linking_settings.canonical_provider,
-        ResourceScope::User,
-        LinkableResource::Command,
-    );
-
-    let not_configured = "<i><red>not configured</red></i>";
-
-    let user_part = match user_canonical {
-        Some(user) => format!("user: <b>{user}</b>"),
-        None => format!("user: {not_configured}"),
-    };
-
-    let line = if is_git_repo {
-        let repo_canonical = canonical_provider(
-            &linking_settings.canonical_provider,
-            ResourceScope::Repo,
-            LinkableResource::Command,
-        );
-        let repo_part = match repo_canonical {
-            Some(repo) => format!("repo: <b>{repo}</b>"),
-            None => format!("repo: {not_configured}"),
-        };
-        format!("<blue><b>Canonical Providers:</b></blue> {user_part}, {repo_part}")
-    } else {
-        format!("<blue><b>Canonical Providers:</b></blue> {user_part}")
-    };
-
-    log::data(&Prose::new(line).render(term));
-    log::data("");
 }
 
 fn render_detail(term: &Terminal, cmd: &CommandInfo) {
@@ -237,55 +178,6 @@ fn render_detail(term: &Terminal, cmd: &CommandInfo) {
             "<dim><i><orange>note:</orange> this command specifies a <b>model</b> property which limits cross-provider shareability</i></dim>",
         );
         log::data(&note.render(term));
-    }
-}
-
-fn render_verbose(term: &Terminal, commands: &[CommandInfo]) {
-    let mut list = UnorderedList::empty();
-
-    for cmd in commands {
-        let badge = scope_badge(cmd.scope);
-        let desc = cmd.description.as_deref().unwrap_or("no description");
-        let item = Prose::new(format!(
-            r#"<a href="{}"><b>{}</b></a> {badge} <dim><i>{desc}</i></dim>"#,
-            cmd.command_file_path.display(),
-            cmd.name,
-        ));
-        list.add(item);
-    }
-
-    log::data(&list.render(term));
-}
-
-fn render_normal(term: &Terminal, commands: &[CommandInfo]) {
-    let mut by_scope: BTreeMap<CommandScope, Vec<&CommandInfo>> = BTreeMap::new();
-    for cmd in commands {
-        by_scope.entry(cmd.scope).or_default().push(cmd);
-    }
-
-    for (scope, group) in &by_scope {
-        let count = group.len();
-        let badge_line = format!("{} <dim>(<i>{count}</i>)</dim>", scope_badge(*scope));
-        log::data(&Prose::new(badge_line).render(term));
-        log::data("");
-
-        let names: Vec<String> = group
-            .iter()
-            .map(|c| {
-                format!(
-                    r#"<a href="{}"><b>{}</b></a>"#,
-                    c.command_file_path.display(),
-                    c.name
-                )
-            })
-            .collect();
-
-        let joined = names.join("  ");
-        let rendered = Prose::new(joined)
-            .with_word_wrap(WordWrap::BespokeProse(Some(50), vec![' '], None))
-            .render(term);
-        log::data(&rendered);
-        log::data("");
     }
 }
 
@@ -357,7 +249,7 @@ fn render_exceptions(
         let mut outer_list = UnorderedList::empty();
 
         for provider_name in &regular_providers {
-            let provider_header = build_provider_header(provider_name);
+            let provider_header = build_provider_header(provider_name, LinkableResource::Command);
             outer_list.add(Prose::new(provider_header));
 
             let mut inner_list = UnorderedList::empty();
@@ -473,91 +365,30 @@ fn render_fix_summary(term: &Terminal, summary: &CommandFixSummary) {
     log::data(&format!(" {}", detail.render(term)));
 }
 
-fn build_provider_header(provider_name: &str) -> String {
-    use claudine::events::Provider;
-
-    let Some(provider) = Provider::fuzzy_match_cli_name(provider_name) else {
-        return format!("<b>{provider_name}</b>");
-    };
-
-    let caps = capabilities_for(provider);
-    let cmd_support = caps.support_for(LinkableResource::Command);
-
-    let user_display = cmd_support
-        .user_path
-        .as_ref()
-        .map(|p| format!("~/{}", p.display()))
-        .unwrap_or_else(|| "-".to_string());
-    let repo_display = cmd_support
-        .repo_path
-        .as_ref()
-        .map(|p| format!("<magenta>{}</magenta>", p.display()))
-        .unwrap_or_else(|| "-".to_string());
-
-    format!("<b>{provider_name} [ user:</b> {user_display}<b>, repo:</b> {repo_display} ]")
-}
-
-fn render_footer(
-    term: &Terminal,
-    has_exceptions: bool,
-    applied_fix: bool,
-    is_git_repo: bool,
-    cmd_count: usize,
-    verbose: bool,
-    filters: &[String],
-) {
-    let mut messages = Vec::new();
-
-    if has_exceptions && !applied_fix {
-        messages.push(
-            "<dim><i>use <red>--fix</red> to attempt to fix the reported issues</i></dim>"
-                .to_string(),
-        );
-    }
-
-    if !is_git_repo {
-        messages.push(
-            "<dim><i>the current working directory is <b>not</b> a <b>git</b> repo so we are only showing user-based scope</i></dim>"
-                .to_string(),
-        );
-    }
-
-    if cmd_count > 10 && !verbose {
-        messages.push(
-            "<dim><i>using the <green>--verbose</green> switch will provide not only names but also descriptions</i></dim>"
-                .to_string(),
-        );
-    }
-
-    if filters.is_empty() {
-        messages.push(
-            "<dim><i>using parameters in the CLI call will act as <b>filters</b> to help reduce the commands to only those you are interested in</i></dim>"
-                .to_string(),
-        );
-    }
-
-    if messages.is_empty() {
-        return;
-    }
-
-    log::data("");
-
-    if messages.len() == 1 {
-        let rendered = Prose::new(messages.into_iter().next().unwrap()).render(term);
-        log::data(&format!(" {rendered}"));
-    } else {
-        let mut list = UnorderedList::empty();
-        for msg in messages {
-            list.add(Prose::new(msg));
-        }
-        log::data(&list.render(term));
-    }
-}
-
 fn scope_badge(scope: CommandScope) -> &'static str {
     match scope {
         CommandScope::User => &badges::USER_SCOPED,
         CommandScope::RepoMasked => &badges::MASKED_REPO_SCOPED,
         CommandScope::Repo => &badges::REPO_SCOPED,
+    }
+}
+
+impl LinkableResourceDisplay for CommandInfo {
+    type Scope = CommandScope;
+
+    fn scope(&self) -> Self::Scope {
+        self.scope
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.command_file_path
     }
 }

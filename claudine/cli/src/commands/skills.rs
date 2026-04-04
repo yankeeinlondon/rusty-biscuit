@@ -11,14 +11,16 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, Margin, WordWrap};
 use claudine::badges;
-use claudine::dispatch::loader::load_config;
 use claudine::linking::{
-    ExceptionType, LinkableResource, ProviderSkillPaths, ResourceScope, SkillDirectoryDiagnostic,
-    SkillException, SkillFilter, SkillFixSummary, SkillInfo, SkillScope, canonical_provider,
-    capabilities_for, fix_missing_skills, list_skills,
+    ExceptionType, LinkableResource, ProviderSkillPaths, SkillDirectoryDiagnostic, SkillException,
+    SkillFilter, SkillFixSummary, SkillInfo, SkillScope, fix_missing_skills, list_skills,
 };
 use sniff::filesystem::git::detect_git;
 
+use super::link_display::{
+    LinkableResourceDisplay, build_provider_header, render_canonical_providers, render_footer,
+    render_normal, render_verbose, repo_canonical_needs_init,
+};
 use crate::log;
 
 /// Arguments for the skills subcommand.
@@ -42,7 +44,7 @@ pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     let is_git_repo = detect_git(&cwd, false, 1).ok().flatten().is_some();
 
     // When --fix is used in a git repo, check if repo canonical provider needs initialization
-    if is_git_repo && args.apply && repo_canonical_needs_init(&paths) {
+    if is_git_repo && args.apply && repo_canonical_needs_init(&paths, LinkableResource::Skill) {
         log::message("");
         log::message("Repo canonical provider is not configured. Running claudine init --repo ...");
         log::message("");
@@ -93,7 +95,7 @@ pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     log::data("");
 
     // Canonical providers line
-    render_canonical_providers(&term, &paths, is_git_repo);
+    render_canonical_providers(&term, &paths, is_git_repo, LinkableResource::Skill);
 
     let skill_count = report.skills.len();
 
@@ -101,9 +103,9 @@ pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
     if skill_count == 1 {
         render_detail(&term, &report.skills[0]);
     } else if skill_count < 6 || verbose {
-        render_verbose(&term, &report.skills);
+        render_verbose(&term, &report.skills, scope_badge);
     } else {
-        render_normal(&term, &report.skills);
+        render_normal(&term, &report.skills, scope_badge);
     }
 
     if let Some(summary) = fix_summary {
@@ -123,79 +125,11 @@ pub async fn run(args: SkillsArgs, verbose: bool) -> Result<()> {
         skill_count,
         verbose,
         &args.filter,
+        "skills",
+        "<dim><i>using the <green>--verbose</green> switch will provide not only topic names but also descriptions</i></dim>",
     );
 
     Ok(())
-}
-
-/// Check whether repo-scoped canonical provider needs initialization.
-///
-/// Returns `true` when a config exists (user or merged) but has no
-/// repo-scoped canonical skill provider configured.  Returns `false`
-/// when no config exists at all (user needs `claudine init` first).
-fn repo_canonical_needs_init(paths: &ProviderSkillPaths) -> bool {
-    let repo_root = Some(paths.repo_root());
-    match load_config(None, repo_root) {
-        Ok(config) => match &config.settings.linking {
-            Some(linking) => canonical_provider(
-                &linking.canonical_provider,
-                ResourceScope::Repo,
-                LinkableResource::Skill,
-            )
-            .is_none(),
-            None => true,
-        },
-        Err(_) => false,
-    }
-}
-
-/// Render the canonical providers line from config (if available).
-fn render_canonical_providers(term: &Terminal, paths: &ProviderSkillPaths, is_git_repo: bool) {
-    let repo_root = if is_git_repo {
-        Some(paths.repo_root())
-    } else {
-        None
-    };
-
-    let config = match load_config(None, repo_root) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    let Some(linking_settings) = config.settings.linking else {
-        return;
-    };
-
-    let user_canonical = canonical_provider(
-        &linking_settings.canonical_provider,
-        ResourceScope::User,
-        LinkableResource::Skill,
-    );
-
-    let not_configured = "<i><red>not configured</red></i>";
-
-    let user_part = match user_canonical {
-        Some(user) => format!("user: <b>{user}</b>"),
-        None => format!("user: {not_configured}"),
-    };
-
-    let line = if is_git_repo {
-        let repo_canonical = canonical_provider(
-            &linking_settings.canonical_provider,
-            ResourceScope::Repo,
-            LinkableResource::Skill,
-        );
-        let repo_part = match repo_canonical {
-            Some(repo) => format!("repo: <b>{repo}</b>"),
-            None => format!("repo: {not_configured}"),
-        };
-        format!("<blue><b>Canonical Providers:</b></blue> {user_part}, {repo_part}")
-    } else {
-        format!("<blue><b>Canonical Providers:</b></blue> {user_part}")
-    };
-
-    log::data(&Prose::new(line).render(term));
-    log::data("");
 }
 
 /// Detail mode: shown when exactly 1 skill matches. Shows name/badge, description, + filesystem tree.
@@ -226,57 +160,6 @@ fn render_detail(term: &Terminal, skill: &SkillInfo) {
         fs = fs.show_tokens().with_file_links().layout(layout);
         fs.ensure_tree_built();
         log::data(&fs.render(term));
-    }
-}
-
-/// Verbose mode: single list with badge, name (as link), and description.
-fn render_verbose(term: &Terminal, skills: &[SkillInfo]) {
-    let mut list = UnorderedList::empty();
-
-    for skill in skills {
-        let badge = scope_badge(skill.scope);
-        let desc = skill.description.as_deref().unwrap_or("no description");
-        let item = Prose::new(format!(
-            r#"<a href="{}"><b>{}</b></a> {badge} <dim><i>{desc}</i></dim>"#,
-            skill.skill_md_path.display(),
-            skill.name,
-        ));
-        list.add(item);
-    }
-
-    log::data(&list.render(term));
-}
-
-/// Normal mode: group skills by scope, show badge header + tab-delimited names.
-fn render_normal(term: &Terminal, skills: &[SkillInfo]) {
-    let mut by_scope: BTreeMap<SkillScope, Vec<&SkillInfo>> = BTreeMap::new();
-    for skill in skills {
-        by_scope.entry(skill.scope).or_default().push(skill);
-    }
-
-    for (scope, group) in &by_scope {
-        let count = group.len();
-        let badge_line = format!("{} <dim>(<i>{count}</i>)</dim>", scope_badge(*scope));
-        log::data(&Prose::new(badge_line).render(term));
-        log::data("");
-
-        let names: Vec<String> = group
-            .iter()
-            .map(|s| {
-                format!(
-                    r#"<a href="{}"><b>{}</b></a>"#,
-                    s.skill_md_path.display(),
-                    s.name
-                )
-            })
-            .collect();
-
-        let joined = names.join("  ");
-        let rendered = Prose::new(joined)
-            .with_word_wrap(WordWrap::BespokeProse(Some(50), vec![' '], None))
-            .render(term);
-        log::data(&rendered);
-        log::data("");
     }
 }
 
@@ -322,7 +205,7 @@ fn render_exceptions(
 
     for provider_name in &all_providers {
         // Build provider header with skill paths
-        let provider_header = build_provider_header(provider_name);
+        let provider_header = build_provider_header(provider_name, LinkableResource::Skill);
         outer_list.add(Prose::new(provider_header));
 
         let mut inner_list = UnorderedList::empty();
@@ -498,94 +381,31 @@ fn render_fix_summary(term: &Terminal, summary: &SkillFixSummary) {
     log::data(&format!(" {}", detail.render(term)));
 }
 
-/// Build the provider header line with user/repo skill paths.
-fn build_provider_header(provider_name: &str) -> String {
-    use claudine::events::Provider;
-
-    let Some(provider) = Provider::fuzzy_match_cli_name(provider_name) else {
-        return format!("<b>{provider_name}</b>");
-    };
-
-    let caps = capabilities_for(provider);
-    let skill_support = caps.support_for(LinkableResource::Skill);
-
-    let user_display = skill_support
-        .user_path
-        .as_ref()
-        .map(|p| format!("~/{}", p.display()))
-        .unwrap_or_else(|| "-".to_string());
-    let repo_display = skill_support
-        .repo_path
-        .as_ref()
-        .map(|p| format!("<magenta>{}</magenta>", p.display()))
-        .unwrap_or_else(|| "-".to_string());
-
-    format!("<b>{provider_name} [ user:</b> {user_display}<b>, repo:</b> {repo_display} ]",)
-}
-
-/// Render footer messages based on current state.
-fn render_footer(
-    term: &Terminal,
-    has_exceptions: bool,
-    applied_fix: bool,
-    is_git_repo: bool,
-    skill_count: usize,
-    verbose: bool,
-    filters: &[String],
-) {
-    let mut messages = Vec::new();
-
-    if has_exceptions && !applied_fix {
-        messages.push(
-            "<dim><i>use <red>--fix</red> to attempt to fix the reported issues</i></dim>"
-                .to_string(),
-        );
-    }
-
-    if !is_git_repo {
-        messages.push(
-            "<dim><i>the current working directory is <b>not</b> a <b>git</b> repo so we are only showing user-based scope</i></dim>"
-                .to_string(),
-        );
-    }
-
-    if skill_count > 10 && !verbose {
-        messages.push(
-            "<dim><i>using the <green>--verbose</green> switch will provide not only topic names but also descriptions</i></dim>"
-                .to_string(),
-        );
-    }
-
-    if filters.is_empty() {
-        messages.push(
-            "<dim><i>using parameters in the CLI call will act as <b>filters</b> to help reduce the skills to only those you are interested in</i></dim>"
-                .to_string(),
-        );
-    }
-
-    if messages.is_empty() {
-        return;
-    }
-
-    log::data("");
-
-    if messages.len() == 1 {
-        let rendered = Prose::new(messages.into_iter().next().unwrap()).render(term);
-        log::data(&format!(" {rendered}"));
-    } else {
-        let mut list = UnorderedList::empty();
-        for msg in messages {
-            list.add(Prose::new(msg));
-        }
-        log::data(&list.render(term));
-    }
-}
-
 /// Return the rendered badge string for a scope.
 fn scope_badge(scope: SkillScope) -> &'static str {
     match scope {
         SkillScope::User => &badges::USER_SCOPED,
         SkillScope::RepoMasked => &badges::MASKED_REPO_SCOPED,
         SkillScope::Repo => &badges::REPO_SCOPED,
+    }
+}
+
+impl LinkableResourceDisplay for SkillInfo {
+    type Scope = SkillScope;
+
+    fn scope(&self) -> Self::Scope {
+        self.scope
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.skill_md_path
     }
 }

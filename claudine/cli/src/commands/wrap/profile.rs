@@ -60,6 +60,16 @@ impl std::str::FromStr for OutputFormat {
     }
 }
 
+impl From<claudine::composition::OutputFormat> for OutputFormat {
+    fn from(value: claudine::composition::OutputFormat) -> Self {
+        match value {
+            claudine::composition::OutputFormat::Json => Self::Json,
+            claudine::composition::OutputFormat::Text => Self::Text,
+            claudine::composition::OutputFormat::Stream => Self::Stream,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // WrapperProfile trait
 // ---------------------------------------------------------------------------

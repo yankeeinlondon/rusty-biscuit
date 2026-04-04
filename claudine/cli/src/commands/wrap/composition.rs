@@ -20,7 +20,8 @@ use claudine::composition::lifecycle::{
 };
 use claudine::composition::{
     CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
-    InlineClosurePlan, SelectedProvider, SelectionReason, build_candidate_set, select_provider,
+    InlineClosurePlan, SelectedProvider, SelectionReason, SystemPromptInput, build_candidate_set,
+    select_provider,
 };
 use claudine::events::Provider;
 use claudine::stream::stderr::Verbosity;
@@ -356,8 +357,7 @@ pub(crate) fn execute_composition_request(
 
     // Universal --output flag
     if let Some(ref output_str) = request.output {
-        use super::profile::OutputFormat;
-        let format: OutputFormat = output_str.parse().map_err(|e: String| eyre!(e))?;
+        let format: super::profile::OutputFormat = (*output_str).into();
         if let Some(warn) = profile.apply_output_format(&mut child_args, format)
             && !silent
             && !quiet
@@ -368,7 +368,7 @@ pub(crate) fn execute_composition_request(
 
     // Universal --system-prompt flag
     if let Some(ref prompt) = request.system_prompt {
-        let resolved = super::resolve_system_prompt(prompt)?;
+        let resolved = resolve_system_prompt_input(prompt)?;
         if let Some(warn) = profile.apply_system_prompt(&mut child_args, &resolved)
             && !silent
             && !quiet
@@ -689,6 +689,13 @@ pub(crate) fn execute_composition_request(
         }
 
         Ok(exit_code)
+    }
+}
+
+fn resolve_system_prompt_input(input: &SystemPromptInput) -> Result<String> {
+    match input {
+        SystemPromptInput::Inline { prompt } => Ok(prompt.clone()),
+        SystemPromptInput::File { path } => Ok(std::fs::read_to_string(path)?),
     }
 }
 
