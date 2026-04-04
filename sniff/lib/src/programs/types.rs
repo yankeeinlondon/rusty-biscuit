@@ -238,6 +238,43 @@ impl InstallationMethod {
     pub fn is_remote_bash(&self) -> bool {
         matches!(self, InstallationMethod::RemoteBash(_))
     }
+
+    /// Returns the binary name of the package manager executable.
+    ///
+    /// This is the executable that must be present on the system
+    /// to use this installation method.
+    pub fn manager_binary(&self) -> &'static str {
+        match self {
+            InstallationMethod::Npm(_) => "npm",
+            InstallationMethod::Pnpm(_) => "pnpm",
+            InstallationMethod::Yarn(_) => "yarn",
+            InstallationMethod::Bun(_) => "bun",
+            InstallationMethod::Cargo(_) => "cargo",
+            InstallationMethod::GoModules(_) => "go",
+            InstallationMethod::Composer(_) => "composer",
+            InstallationMethod::SwiftPm(_) => "swift",
+            InstallationMethod::LuaRocks(_) => "luarocks",
+            InstallationMethod::VcPkg(_) => "vcpkg",
+            InstallationMethod::Conan(_) => "conan",
+            InstallationMethod::Nuget(_) => "nuget",
+            InstallationMethod::Hex(_) => "mix",
+            InstallationMethod::Pip(_) => "pip",
+            InstallationMethod::Uv(_) => "uv",
+            InstallationMethod::Poetry(_) => "poetry",
+            InstallationMethod::Cpan(_) => "cpan",
+            InstallationMethod::Cpanm(_) => "cpanm",
+            InstallationMethod::Apt(_) => "apt",
+            InstallationMethod::Nala(_) => "nala",
+            InstallationMethod::Brew(_) => "brew",
+            InstallationMethod::Dnf(_) => "dnf",
+            InstallationMethod::Pacman(_) => "pacman",
+            InstallationMethod::Winget(_) => "winget",
+            InstallationMethod::Chocolatey(_) => "choco",
+            InstallationMethod::Scoop(_) => "scoop",
+            InstallationMethod::Nix(_) => "nix",
+            InstallationMethod::RemoteBash(_) => "bash",
+        }
+    }
 }
 
 /// Details about a program including installation methods.
@@ -1053,6 +1090,17 @@ mod tests {
         assert_eq!(InstallationMethod::Brew("ripgrep").manager_name(), "brew");
         assert_eq!(InstallationMethod::Cargo("bat").manager_name(), "cargo");
         assert_eq!(InstallationMethod::Npm("typescript").manager_name(), "npm");
+    }
+
+    #[test]
+    fn test_installation_method_manager_binary() {
+        assert_eq!(InstallationMethod::Brew("vim").manager_binary(), "brew");
+        assert_eq!(InstallationMethod::Apt("vim").manager_binary(), "apt");
+        assert_eq!(InstallationMethod::Cargo("ripgrep").manager_binary(), "cargo");
+        assert_eq!(InstallationMethod::Npm("typescript").manager_binary(), "npm");
+        assert_eq!(InstallationMethod::RemoteBash("url").manager_binary(), "bash");
+        assert_eq!(InstallationMethod::Chocolatey("vim").manager_binary(), "choco");
+        assert_eq!(InstallationMethod::Hex("hex_package").manager_binary(), "mix");
     }
 
     #[test]
