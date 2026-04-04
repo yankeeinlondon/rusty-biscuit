@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::os::OsType;
+use crate::programs::types::InstallationMethod;
+
 /// Errors that can occur during program version detection.
 #[derive(Debug, Error)]
 pub enum ProgramError {
@@ -117,6 +120,21 @@ pub struct ProgramInfo {
     /// Optional prefix to skip when parsing version.
     /// Used when parse_strategy is AfterPrefix.
     pub version_prefix: Option<&'static str>,
+
+    // --- New fields (from ProgramDetails) ---
+
+    /// Alternative binary names to search when primary is not found.
+    /// E.g., kimi has alternate "kimi-cli"; sherpa-onnx has "sherpa-onnx-tts".
+    pub alternate_binary_names: &'static [&'static str],
+
+    /// Operating systems this program runs on. Empty slice means all OS.
+    pub os_availability: &'static [OsType],
+
+    /// Source code repository URL (if available).
+    pub repo: Option<&'static str>,
+
+    /// Methods for installing this program (brew, apt, cargo, etc.).
+    pub installation_methods: &'static [InstallationMethod],
 }
 
 impl ProgramInfo {
@@ -136,6 +154,10 @@ impl ProgramInfo {
             parse_strategy: VersionParseStrategy::FirstLine,
             version_regex: None,
             version_prefix: None,
+            alternate_binary_names: &[],
+            os_availability: &[],
+            repo: None,
+            installation_methods: &[],
         }
     }
 
@@ -156,6 +178,42 @@ impl ProgramInfo {
             parse_strategy: VersionParseStrategy::AfterPrefix,
             version_regex: None,
             version_prefix: Some(prefix),
+            alternate_binary_names: &[],
+            os_availability: &[],
+            repo: None,
+            installation_methods: &[],
+        }
+    }
+
+    /// Creates a ProgramInfo with all fields specified.
+    #[allow(clippy::too_many_arguments)]
+    pub const fn full(
+        binary_name: &'static str,
+        display_name: &'static str,
+        description: &'static str,
+        website: &'static str,
+        version_flag: VersionFlag,
+        parse_strategy: VersionParseStrategy,
+        version_regex: Option<&'static str>,
+        version_prefix: Option<&'static str>,
+        alternate_binary_names: &'static [&'static str],
+        os_availability: &'static [OsType],
+        repo: Option<&'static str>,
+        installation_methods: &'static [InstallationMethod],
+    ) -> Self {
+        Self {
+            binary_name,
+            display_name,
+            description,
+            website,
+            version_flag,
+            parse_strategy,
+            version_regex,
+            version_prefix,
+            alternate_binary_names,
+            os_availability,
+            repo,
+            installation_methods,
         }
     }
 }
@@ -197,6 +255,26 @@ pub trait ProgramMetadata: Sized {
     /// Returns the official website URL for this program.
     fn website(&self) -> &'static str {
         self.info().website
+    }
+
+    /// Returns alternate binary names for fallback detection.
+    fn alternate_binary_names(&self) -> &'static [&'static str] {
+        self.info().alternate_binary_names
+    }
+
+    /// Returns the OS availability list.
+    fn os_availability(&self) -> &'static [OsType] {
+        self.info().os_availability
+    }
+
+    /// Returns the installation methods.
+    fn installation_methods(&self) -> &'static [InstallationMethod] {
+        self.info().installation_methods
+    }
+
+    /// Returns the source code repository URL.
+    fn repo(&self) -> Option<&'static str> {
+        self.info().repo
     }
 
     /// Returns the path to this program's binary if installed.
@@ -470,6 +548,10 @@ mod tests {
             parse_strategy: VersionParseStrategy::SemVer,
             version_regex: None,
             version_prefix: None,
+            alternate_binary_names: &[],
+            os_availability: &[],
+            repo: None,
+            installation_methods: &[],
         };
         let output = "Some program version 1.23.456-beta+build.123";
         let result = parse_version(output, &info);
