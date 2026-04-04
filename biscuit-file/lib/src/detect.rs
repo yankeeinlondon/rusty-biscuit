@@ -107,12 +107,16 @@ impl From<DataFormat> for FileType {
 ///
 /// Returns an IO error if the file cannot be read.
 pub fn detect_file_type(path: impl AsRef<Path>) -> std::io::Result<FileType> {
+    use std::io::Read;
+
     let path = path.as_ref();
     trace!(?path, "detecting file type");
 
-    // Read first few bytes for magic detection
-    let bytes = std::fs::read(path)?;
-    let from_bytes = detect_file_type_from_bytes(&bytes);
+    // Read only first 512 bytes for magic byte detection
+    let mut file = std::fs::File::open(path)?;
+    let mut buf = [0u8; 512];
+    let n = file.read(&mut buf)?;
+    let from_bytes = detect_file_type_from_bytes(&buf[..n]);
 
     if from_bytes != FileType::Unknown {
         debug!(?from_bytes, "detected via magic bytes");
@@ -242,5 +246,35 @@ mod tests {
             detect_from_extension(Path::new("file.txt")),
             FileType::Unknown
         );
+    }
+
+    #[test]
+    fn test_detect_file_type_from_filesystem() {
+        let dir = std::env::temp_dir().join("biscuit-file-test-detect");
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml_path = dir.join("test.toml");
+        std::fs::write(&toml_path, "key = \"value\"").unwrap();
+        assert_eq!(detect_file_type(&toml_path).unwrap(), FileType::Toml);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_detect_pdf_by_magic_bytes_wrong_extension() {
+        let dir = std::env::temp_dir().join("biscuit-file-test-detect-magic");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("document.txt");
+        std::fs::write(&path, b"%PDF-1.7\nsome content here").unwrap();
+        assert_eq!(detect_file_type(&path).unwrap(), FileType::Pdf);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_detect_file_type_no_extension() {
+        let dir = std::env::temp_dir().join("biscuit-file-test-detect-noext");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config");
+        std::fs::write(&path, "key = \"value\"").unwrap();
+        assert_eq!(detect_file_type(&path).unwrap(), FileType::Unknown);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
