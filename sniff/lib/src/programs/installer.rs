@@ -27,9 +27,12 @@
 
 use std::process::{Command, Output};
 
+use strum::IntoEnumIterator;
+
 use crate::error::SniffInstallationError;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
+use crate::programs::schema::ProgramMetadata;
 use crate::programs::types::InstallationMethod;
 
 /// Default timeout for installation commands (30 seconds).
@@ -136,43 +139,16 @@ pub(crate) fn method_available(
         return false;
     }
 
-    match method {
-        InstallationMethod::Apt(_) => os_pkg_mgrs.is_installed(OsPackageManager::Apt),
-        InstallationMethod::Nala(_) => os_pkg_mgrs.is_installed(OsPackageManager::Nala),
-        InstallationMethod::Brew(_) => os_pkg_mgrs.is_installed(OsPackageManager::Brew),
-        InstallationMethod::Dnf(_) => os_pkg_mgrs.is_installed(OsPackageManager::Dnf),
-        InstallationMethod::Pacman(_) => os_pkg_mgrs.is_installed(OsPackageManager::Pacman),
-        InstallationMethod::Winget(_) => os_pkg_mgrs.is_installed(OsPackageManager::Winget),
-        InstallationMethod::Chocolatey(_) => os_pkg_mgrs.is_installed(OsPackageManager::Chocolatey),
-        InstallationMethod::Scoop(_) => os_pkg_mgrs.is_installed(OsPackageManager::Scoop),
-        InstallationMethod::Nix(_) => os_pkg_mgrs.is_installed(OsPackageManager::Nix),
-        InstallationMethod::Npm(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Npm),
-        InstallationMethod::Pnpm(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Pnpm),
-        InstallationMethod::Yarn(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Yarn),
-        InstallationMethod::Bun(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Bun),
-        InstallationMethod::Cargo(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Cargo),
-        InstallationMethod::GoModules(_) => {
-            lang_pkg_mgrs.is_installed(LanguagePackageManager::GoModules)
-        }
-        InstallationMethod::Composer(_) => {
-            lang_pkg_mgrs.is_installed(LanguagePackageManager::Composer)
-        }
-        InstallationMethod::SwiftPm(_) => {
-            lang_pkg_mgrs.is_installed(LanguagePackageManager::SwiftPm)
-        }
-        InstallationMethod::LuaRocks(_) => {
-            lang_pkg_mgrs.is_installed(LanguagePackageManager::Luarocks)
-        }
-        InstallationMethod::VcPkg(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Vcpkg),
-        InstallationMethod::Conan(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Conan),
-        InstallationMethod::Nuget(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Nuget),
-        InstallationMethod::Hex(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Hex),
-        InstallationMethod::Pip(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Pip),
-        InstallationMethod::Uv(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Uv),
-        InstallationMethod::Poetry(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Poetry),
-        InstallationMethod::Cpan(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Cpan),
-        InstallationMethod::Cpanm(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Cpanm),
-        InstallationMethod::RemoteBash(_) => false,
+    let binary = method.manager_binary();
+
+    if method.is_os_package_manager() {
+        OsPackageManager::iter().any(|mgr| {
+            mgr.binary_name() == binary && os_pkg_mgrs.is_installed(mgr)
+        })
+    } else {
+        LanguagePackageManager::iter().any(|mgr| {
+            mgr.binary_name() == binary && lang_pkg_mgrs.is_installed(mgr)
+        })
     }
 }
 
@@ -767,5 +743,35 @@ mod tests {
         let os_pkg_mgrs = empty_os_pkg_mgrs();
         let lang_pkg_mgrs = empty_lang_pkg_mgrs();
         assert!(select_best_method(&methods, &os_pkg_mgrs, &lang_pkg_mgrs).is_none());
+    }
+
+    #[test]
+    fn test_build_install_command_apt() {
+        let method = InstallationMethod::Apt("ripgrep");
+        let cmd = build_install_command(&method).unwrap();
+        assert_eq!(cmd, vec!["sudo", "apt", "install", "-y", "ripgrep"]);
+    }
+
+    #[test]
+    fn test_build_install_command_rejects_shell_metacharacters() {
+        let method = InstallationMethod::Brew("ripgrep; rm -rf /");
+        let result = build_install_command(&method);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dry_run_does_not_execute() {
+        let method = InstallationMethod::Brew("ripgrep");
+        let opts = InstallOptions::dry_run();
+        let result = execute_install(&method, &opts).unwrap();
+        assert!(!result.executed);
+        assert!(result.command.contains("brew"));
+    }
+
+    #[test]
+    fn test_get_install_command_returns_string() {
+        let method = InstallationMethod::Brew("ripgrep");
+        let cmd = get_install_command(&method).unwrap();
+        assert!(cmd.contains("brew install ripgrep"));
     }
 }

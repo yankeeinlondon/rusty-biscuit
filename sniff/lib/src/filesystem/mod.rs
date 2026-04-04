@@ -109,9 +109,7 @@ pub fn detect_filesystem_with_request(
                     })
                     .unwrap_or_default();
                 match repo_inventory {
-                    Some(ref inv) => {
-                        Some(filter_inventory(inv, &package.path, &exclude_roots))
-                    }
+                    Some(ref inv) => Some(filter_inventory(inv, &package.path, &exclude_roots)),
                     None => file_types::scan_file_inventory_with_exclusions(
                         &package.path,
                         &exclude_roots,
@@ -201,7 +199,9 @@ fn filter_inventory(
     let source_root = &source.scope.root;
 
     // Convert absolute target/exclude paths to relative prefixes within the inventory
-    let target_prefix = target_root.strip_prefix(source_root).unwrap_or(Path::new(""));
+    let target_prefix = target_root
+        .strip_prefix(source_root)
+        .unwrap_or(Path::new(""));
     let exclude_prefixes: Vec<&Path> = exclude_roots
         .iter()
         .filter_map(|ex| ex.strip_prefix(source_root).ok())
