@@ -63,10 +63,10 @@ pub fn resolve_maxmind_path(explicit: Option<&PathBuf>) -> Option<PathBuf> {
         return Some(path.clone());
     }
     // 2. Environment variable
-    if let Ok(env_path) = std::env::var(MAXMIND_ENV_VAR) {
-        if !env_path.is_empty() {
-            return Some(PathBuf::from(env_path));
-        }
+    if let Ok(env_path) = std::env::var(MAXMIND_ENV_VAR)
+        && !env_path.is_empty()
+    {
+        return Some(PathBuf::from(env_path));
     }
     // 3. OS default
     dirs::data_dir().map(|d| d.join(MAXMIND_APP_DIR).join(MAXMIND_FILENAME))

@@ -44,7 +44,7 @@ impl IpLookup {
         let city: geoip2::City = result
             .decode()
             .map_err(|e| LocationError::IpLookup(e.to_string()))?
-            .ok_or_else(|| LocationError::IpNotFound(ip))?;
+            .ok_or(LocationError::IpNotFound(ip))?;
 
         city_to_location(city, ip)
     }
