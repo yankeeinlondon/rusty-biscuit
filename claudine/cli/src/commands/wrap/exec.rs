@@ -107,6 +107,16 @@ impl StreamTextRenderer {
             return;
         }
 
+        // Ordered/unordered list items are complete enough to stream line-by-line.
+        // Waiting for a blank line or EOF can hide useful progress for minutes if
+        // the provider stalls after emitting the last list item.
+        if is_stream_safe_list_item(trimmed) {
+            self.flush_block(out);
+            self.block_buffer.push_str(line);
+            self.flush_block(out);
+            return;
+        }
+
         // Regular content — accumulate
         self.block_buffer.push_str(line);
     }
@@ -141,6 +151,13 @@ impl StreamTextRenderer {
             let _ = out.write_all(text.as_bytes());
         }
         let _ = out.flush();
+    }
+}
+
+fn is_stream_safe_list_item(line: &str) -> bool {
+    line.starts_with("- ") || line.starts_with("* ") || line.starts_with("+ ") || {
+        let digits = line.bytes().take_while(|b| b.is_ascii_digit()).count();
+        digits > 0 && line[digits..].starts_with(". ")
     }
 }
 
@@ -698,10 +715,14 @@ pub(crate) fn run_child_stream(
         .env_clear()
         .envs(env)
         .current_dir(cwd)
+        // Structured stream mode is only used for non-interactive runs. When
+        // there is no stdin seed to write, closing stdin prevents providers
+        // from waiting on the caller's terminal after they have already
+        // produced their useful output.
         .stdin(if needs_stdin_pipe {
             Stdio::piped()
         } else {
-            Stdio::inherit()
+            Stdio::null()
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1153,5 +1174,65 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
         renderer.flush_remaining(&mut out);
         let flushed = String::from_utf8(out).unwrap();
         assert_eq!(flushed, "trailing text without newline");
+    }
+
+    #[test]
+    fn stream_text_renderer_flushes_list_items_immediately() {
+        let mut renderer = StreamTextRenderer {
+            block_buffer: String::new(),
+            line_buffer: String::new(),
+            in_code_fence: false,
+            term: None,
+            terminal_options: None,
+        };
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "1. first item\n2. second item\n");
+        let flushed = String::from_utf8(out).unwrap();
+
+        assert_eq!(flushed, "1. first item\n2. second item\n");
+        assert!(renderer.block_buffer.is_empty());
+        assert!(renderer.line_buffer.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn structured_stream_closes_stdin_when_no_seed() {
+        let env = current_env();
+        let cwd = std::env::current_dir().unwrap();
+        let parser = claudine::stream::create_parser(
+            claudine::events::Provider::OpenCode,
+            claudine::stream::parser::NullSink,
+            claudine::stream::ParserConfig {
+                model: Some("minimax/MiniMax-M2.5-highspeed".into()),
+            },
+        );
+        let script = r#"
+printf '%s\n' '{"type":"step_start","sessionID":"ses_1"}'
+printf '%s\n' '{"type":"text","text":"hello"}'
+printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens":{"input":150,"output":101,"total":251,"cache":{"read":42}}}}'
+cat >/dev/null
+"#;
+        let args = vec!["-c".to_string(), script.to_string()];
+
+        let result = run_child_stream(
+            Path::new("/bin/sh"),
+            &args,
+            &env,
+            &cwd,
+            Some(2),
+            &[],
+            false,
+            None,
+            parser,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.termination,
+            claudine::harness::ProcessTermination::Completed
+        );
+        assert_eq!(result.data.exit_code, 0);
+        assert_eq!(result.data.assistant_text, "hello");
     }
 }
