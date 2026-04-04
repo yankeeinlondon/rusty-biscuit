@@ -18,6 +18,7 @@ prompt: |-
 
     - research online to find:
         - a formal specification of the structured data that Qwen CLI provides 
+        - any and all CLI switches which are involved in changing the output format of non-interactive sessions 
     - other examples online and fill in any other missing details not self-evident from the example data
     - determine how best to feed the metadata to logging and non-interactive sessions.
     
