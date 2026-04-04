@@ -3,6 +3,7 @@
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::normalize::HeadingLevel;
 use std::ops::Range;
+use std::path::PathBuf;
 
 // ── Node identifier ─────────────────────────────────────────────────
 
@@ -120,7 +121,7 @@ impl ReferenceSyntax {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReferenceTarget {
     /// A local filesystem path.
-    LocalPath { raw: String },
+    LocalPath { raw: PathBuf },
     /// A remote HTTP/HTTPS URL.
     RemoteUrl { raw: String },
     /// A fragment-only reference (`#section`).
@@ -137,8 +138,8 @@ impl ReferenceTarget {
     /// Returns the raw target string, or `None` for inline targets.
     pub fn raw(&self) -> Option<&str> {
         match self {
-            Self::LocalPath { raw }
-            | Self::RemoteUrl { raw }
+            Self::LocalPath { raw } => raw.to_str(),
+            Self::RemoteUrl { raw }
             | Self::Fragment { raw }
             | Self::DataUri { raw }
             | Self::OtherScheme { raw, .. } => Some(raw),
@@ -166,7 +167,9 @@ pub fn classify_target(raw: &str) -> ReferenceTarget {
             scheme: scheme.into(),
         }
     } else {
-        ReferenceTarget::LocalPath { raw: raw.into() }
+        ReferenceTarget::LocalPath {
+            raw: PathBuf::from(raw),
+        }
     }
 }
 
