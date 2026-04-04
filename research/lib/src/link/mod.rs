@@ -28,7 +28,89 @@ pub mod types;
 // Re-export main types for convenience
 pub use types::{LinkError, LinkResult, SkillAction, SkillLink};
 
+use std::path::Path;
+
 use tracing::instrument;
+
+/// Attempt to create a skill symlink for a single service.
+fn create_service_skill_link(
+    source_path: &Path,
+    target: &Path,
+    service_name: &str,
+    topic_name: &str,
+    errors: &mut Vec<(String, String)>,
+) -> SkillAction {
+    match creation::create_skill_symlink(source_path, target) {
+        Ok(()) => {
+            tracing::info!("Created skill symlink for {} at {}", topic_name, service_name);
+            SkillAction::CreatedLink
+        }
+        Err(creation::CreationError::InvalidSource(_)) => SkillAction::NoneSkillDirectoryInvalid,
+        Err(creation::CreationError::SymlinkCreation(e))
+            if e.kind() == std::io::ErrorKind::PermissionDenied =>
+        {
+            tracing::error!(
+                "Permission denied creating skill symlink for {}: {}",
+                topic_name,
+                e
+            );
+            errors.push((topic_name.to_string(), format!("{} skill: {}", service_name, e)));
+            SkillAction::FailedPermissionDenied(e.to_string())
+        }
+        Err(e) => {
+            tracing::error!("Failed to create skill symlink for {}: {}", topic_name, e);
+            errors.push((topic_name.to_string(), format!("{} skill: {}", service_name, e)));
+            SkillAction::FailedOther(e.to_string())
+        }
+    }
+}
+
+/// Attempt to create a deep-dive doc symlink for a single service.
+fn create_service_doc_link(
+    source_path: &Path,
+    target: &Path,
+    service_name: &str,
+    topic_name: &str,
+    errors: &mut Vec<(String, String)>,
+) -> SkillAction {
+    if detection::check_is_symlink(target) {
+        return SkillAction::NoneAlreadyLinked;
+    }
+    if detection::check_local_definition_exists(target) {
+        return SkillAction::NoneLocalDefinition;
+    }
+
+    match creation::create_deep_dive_symlink(source_path, target) {
+        Ok(()) => {
+            tracing::info!(
+                "Created deep dive symlink for {} at {}",
+                topic_name,
+                service_name
+            );
+            SkillAction::CreatedLink
+        }
+        Err(creation::CreationError::SymlinkCreation(e))
+            if e.kind() == std::io::ErrorKind::PermissionDenied =>
+        {
+            tracing::error!(
+                "Permission denied creating deep dive symlink for {}: {}",
+                topic_name,
+                e
+            );
+            errors.push((topic_name.to_string(), format!("{} doc: {}", service_name, e)));
+            SkillAction::FailedPermissionDenied(e.to_string())
+        }
+        Err(e) => {
+            tracing::error!(
+                "Failed to create deep dive symlink for {}: {}",
+                topic_name,
+                e
+            );
+            errors.push((topic_name.to_string(), format!("{} doc: {}", service_name, e)));
+            SkillAction::FailedOther(e.to_string())
+        }
+    }
+}
 
 /// Create symbolic links from research topic skill directories to Claude Code
 /// and OpenCode user-scoped skill locations.
@@ -188,107 +270,31 @@ pub async fn link(
 
         // Determine skill actions for all three services
         let (final_claude_action, final_opencode_action, final_roo_action) = if skill_source_valid {
-            let claude_target = claude_skills_dir.join(&topic.name);
-            let claude_action = detection::determine_action(&claude_target, &source_path);
+            let services = [
+                (&claude_skills_dir, "Claude Code"),
+                (&opencode_skills_dir, "OpenCode"),
+                (&roo_skills_dir, "Roo Code"),
+            ];
 
-            let opencode_target = opencode_skills_dir.join(&topic.name);
-            let opencode_action = detection::determine_action(&opencode_target, &source_path);
-
-            let roo_target = roo_skills_dir.join(&topic.name);
-            let roo_action = detection::determine_action(&roo_target, &source_path);
-
-            // Attempt creation for all three services (asymmetric failure handling)
-            let final_claude_action = match claude_action {
-                SkillAction::CreatedLink => {
-                    match creation::create_skill_symlink(&source_path, &claude_target) {
-                        Ok(()) => {
-                            info!("Created skill symlink for {} at Claude Code", topic.name);
-                            SkillAction::CreatedLink
-                        }
-                        Err(creation::CreationError::InvalidSource(_)) => {
-                            SkillAction::NoneSkillDirectoryInvalid
-                        }
-                        Err(creation::CreationError::SymlinkCreation(e))
-                            if e.kind() == std::io::ErrorKind::PermissionDenied =>
-                        {
-                            error!(
-                                "Permission denied creating skill symlink for {}: {}",
-                                topic.name, e
-                            );
-                            errors.push((topic.name.clone(), format!("Claude Code skill: {}", e)));
-                            SkillAction::FailedPermissionDenied(e.to_string())
-                        }
-                        Err(e) => {
-                            error!("Failed to create skill symlink for {}: {}", topic.name, e);
-                            errors.push((topic.name.clone(), format!("Claude Code skill: {}", e)));
-                            SkillAction::FailedOther(e.to_string())
-                        }
+            let actions: Vec<SkillAction> = services
+                .iter()
+                .map(|(dir, name)| {
+                    let target = dir.join(&topic.name);
+                    let action = detection::determine_action(&target, &source_path);
+                    match action {
+                        SkillAction::CreatedLink => create_service_skill_link(
+                            &source_path,
+                            &target,
+                            name,
+                            &topic.name,
+                            &mut errors,
+                        ),
+                        other => other,
                     }
-                }
-                other => other,
-            };
+                })
+                .collect();
 
-            let final_opencode_action = match opencode_action {
-                SkillAction::CreatedLink => {
-                    match creation::create_skill_symlink(&source_path, &opencode_target) {
-                        Ok(()) => {
-                            info!("Created skill symlink for {} at OpenCode", topic.name);
-                            SkillAction::CreatedLink
-                        }
-                        Err(creation::CreationError::InvalidSource(_)) => {
-                            SkillAction::NoneSkillDirectoryInvalid
-                        }
-                        Err(creation::CreationError::SymlinkCreation(e))
-                            if e.kind() == std::io::ErrorKind::PermissionDenied =>
-                        {
-                            error!(
-                                "Permission denied creating skill symlink for {}: {}",
-                                topic.name, e
-                            );
-                            errors.push((topic.name.clone(), format!("OpenCode skill: {}", e)));
-                            SkillAction::FailedPermissionDenied(e.to_string())
-                        }
-                        Err(e) => {
-                            error!("Failed to create skill symlink for {}: {}", topic.name, e);
-                            errors.push((topic.name.clone(), format!("OpenCode skill: {}", e)));
-                            SkillAction::FailedOther(e.to_string())
-                        }
-                    }
-                }
-                other => other,
-            };
-
-            let final_roo_action = match roo_action {
-                SkillAction::CreatedLink => {
-                    match creation::create_skill_symlink(&source_path, &roo_target) {
-                        Ok(()) => {
-                            info!("Created skill symlink for {} at Roo Code", topic.name);
-                            SkillAction::CreatedLink
-                        }
-                        Err(creation::CreationError::InvalidSource(_)) => {
-                            SkillAction::NoneSkillDirectoryInvalid
-                        }
-                        Err(creation::CreationError::SymlinkCreation(e))
-                            if e.kind() == std::io::ErrorKind::PermissionDenied =>
-                        {
-                            error!(
-                                "Permission denied creating skill symlink for {}: {}",
-                                topic.name, e
-                            );
-                            errors.push((topic.name.clone(), format!("Roo Code skill: {}", e)));
-                            SkillAction::FailedPermissionDenied(e.to_string())
-                        }
-                        Err(e) => {
-                            error!("Failed to create skill symlink for {}: {}", topic.name, e);
-                            errors.push((topic.name.clone(), format!("Roo Code skill: {}", e)));
-                            SkillAction::FailedOther(e.to_string())
-                        }
-                    }
-                }
-                other => other,
-            };
-
-            (final_claude_action, final_opencode_action, final_roo_action)
+            (actions[0].clone(), actions[1].clone(), actions[2].clone())
         } else {
             (
                 SkillAction::NoneSkillDirectoryInvalid,
@@ -299,113 +305,30 @@ pub async fn link(
 
         // Process deep dive linking (use topic name as file name: {topic}.md)
         let (claude_doc_action, opencode_doc_action, roo_doc_action) = if deep_dive_path.exists() {
-            let claude_doc_target = claude_docs_dir.join(format!("{}.md", topic.name));
-            let opencode_doc_target = opencode_docs_dir.join(format!("{}.md", topic.name));
-            let roo_doc_target = roo_docs_dir.join(format!("{}.md", topic.name));
+            let doc_dirs = [
+                (&claude_docs_dir, "Claude Code"),
+                (&opencode_docs_dir, "OpenCode"),
+                (&roo_docs_dir, "Roo Code"),
+            ];
 
-            // Claude Code deep dive
-            let claude_doc_action = if detection::check_is_symlink(&claude_doc_target) {
-                SkillAction::NoneAlreadyLinked
-            } else if detection::check_local_definition_exists(&claude_doc_target) {
-                SkillAction::NoneLocalDefinition
-            } else {
-                match creation::create_deep_dive_symlink(&deep_dive_path, &claude_doc_target) {
-                    Ok(()) => {
-                        info!(
-                            "Created deep dive symlink for {} at Claude Code",
-                            topic.name
-                        );
-                        SkillAction::CreatedLink
-                    }
-                    Err(creation::CreationError::SymlinkCreation(e))
-                        if e.kind() == std::io::ErrorKind::PermissionDenied =>
-                    {
-                        error!(
-                            "Permission denied creating deep dive symlink for {}: {}",
-                            topic.name, e
-                        );
-                        errors.push((topic.name.clone(), format!("Claude Code doc: {}", e)));
-                        SkillAction::FailedPermissionDenied(e.to_string())
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to create deep dive symlink for {}: {}",
-                            topic.name, e
-                        );
-                        errors.push((topic.name.clone(), format!("Claude Code doc: {}", e)));
-                        SkillAction::FailedOther(e.to_string())
-                    }
-                }
-            };
-
-            // OpenCode deep dive
-            let opencode_doc_action = if detection::check_is_symlink(&opencode_doc_target) {
-                SkillAction::NoneAlreadyLinked
-            } else if detection::check_local_definition_exists(&opencode_doc_target) {
-                SkillAction::NoneLocalDefinition
-            } else {
-                match creation::create_deep_dive_symlink(&deep_dive_path, &opencode_doc_target) {
-                    Ok(()) => {
-                        info!("Created deep dive symlink for {} at OpenCode", topic.name);
-                        SkillAction::CreatedLink
-                    }
-                    Err(creation::CreationError::SymlinkCreation(e))
-                        if e.kind() == std::io::ErrorKind::PermissionDenied =>
-                    {
-                        error!(
-                            "Permission denied creating deep dive symlink for {}: {}",
-                            topic.name, e
-                        );
-                        errors.push((topic.name.clone(), format!("OpenCode doc: {}", e)));
-                        SkillAction::FailedPermissionDenied(e.to_string())
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to create deep dive symlink for {}: {}",
-                            topic.name, e
-                        );
-                        errors.push((topic.name.clone(), format!("OpenCode doc: {}", e)));
-                        SkillAction::FailedOther(e.to_string())
-                    }
-                }
-            };
-
-            // Roo Code deep dive
-            let roo_doc_action = if detection::check_is_symlink(&roo_doc_target) {
-                SkillAction::NoneAlreadyLinked
-            } else if detection::check_local_definition_exists(&roo_doc_target) {
-                SkillAction::NoneLocalDefinition
-            } else {
-                match creation::create_deep_dive_symlink(&deep_dive_path, &roo_doc_target) {
-                    Ok(()) => {
-                        info!("Created deep dive symlink for {} at Roo Code", topic.name);
-                        SkillAction::CreatedLink
-                    }
-                    Err(creation::CreationError::SymlinkCreation(e))
-                        if e.kind() == std::io::ErrorKind::PermissionDenied =>
-                    {
-                        error!(
-                            "Permission denied creating deep dive symlink for {}: {}",
-                            topic.name, e
-                        );
-                        errors.push((topic.name.clone(), format!("Roo Code doc: {}", e)));
-                        SkillAction::FailedPermissionDenied(e.to_string())
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to create deep dive symlink for {}: {}",
-                            topic.name, e
-                        );
-                        errors.push((topic.name.clone(), format!("Roo Code doc: {}", e)));
-                        SkillAction::FailedOther(e.to_string())
-                    }
-                }
-            };
+            let doc_actions: Vec<SkillAction> = doc_dirs
+                .iter()
+                .map(|(dir, name)| {
+                    let target = dir.join(format!("{}.md", topic.name));
+                    create_service_doc_link(
+                        &deep_dive_path,
+                        &target,
+                        name,
+                        &topic.name,
+                        &mut errors,
+                    )
+                })
+                .collect();
 
             (
-                Some(claude_doc_action),
-                Some(opencode_doc_action),
-                Some(roo_doc_action),
+                Some(doc_actions[0].clone()),
+                Some(doc_actions[1].clone()),
+                Some(doc_actions[2].clone()),
             )
         } else {
             debug!(
