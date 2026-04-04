@@ -56,6 +56,20 @@ const AGENT_PREAMBLE_SYNTHESIS: &str = "You are a research assistant with web se
 /// Preamble for question-answering research tasks.
 const AGENT_PREAMBLE_QUESTION: &str = "You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to find relevant information, then provide a comprehensive answer. Do not make excessive tool calls - synthesize your findings efficiently.";
 
+/// Extracts text content from a sequence of assistant content blocks.
+///
+/// Filters for `AssistantContent::Text` variants and joins their text content.
+fn extract_text_content(content: impl IntoIterator<Item = AssistantContent>) -> String {
+    content
+        .into_iter()
+        .filter_map(|c| match c {
+            AssistantContent::Text(text) => Some(text.text),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// A PromptHook that emits tracing events for agent interactions.
 ///
 /// This hook is used to trace all tool calls made by agents during research tasks,
@@ -1262,15 +1276,7 @@ where
 
     let metrics = match result {
         Ok(response) => {
-            let content: String = response
-                .choice
-                .into_iter()
-                .filter_map(|c| match c {
-                    AssistantContent::Text(text) => Some(text.text),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+            let content = extract_text_content(response.choice);
 
             let usage = &response.usage;
             let metrics = PromptMetrics {
@@ -1531,19 +1537,7 @@ where
 
                 match synthesis_result {
                     Ok(response) => {
-                        // Extract text from the response
-                        let content: String = response
-                            .choice
-                            .iter()
-                            .filter_map(|c| {
-                                if let AssistantContent::Text(text) = c {
-                                    Some(text.text.clone())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
+                        let content = extract_text_content(response.choice.iter().cloned());
 
                         let metrics = PromptMetrics {
                             input_tokens: 0,
@@ -1695,15 +1689,7 @@ where
 
     let metrics = match result {
         Ok(response) => {
-            let content: String = response
-                .choice
-                .into_iter()
-                .filter_map(|c| match c {
-                    AssistantContent::Text(text) => Some(text.text),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+            let content = extract_text_content(response.choice);
 
             let usage = &response.usage;
             let metrics = PromptMetrics {
@@ -2018,14 +2004,7 @@ where
 
     let metrics = match result {
         Ok(response) => {
-            let content: String = response
-                .choice
-                .into_iter()
-                .filter_map(|c| match c {
-                    AssistantContent::Text(text) => Some(text.text),
-                    _ => None,
-                })
-                .collect();
+            let content = extract_text_content(response.choice);
 
             let metrics = PromptMetrics {
                 input_tokens: response.usage.input_tokens,
@@ -2752,15 +2731,7 @@ async fn run_incremental_research(
 
         match brief_model.completion_request(&brief_prompt).send().await {
             Ok(response) => {
-                let content: String = response
-                    .choice
-                    .into_iter()
-                    .filter_map(|c| match c {
-                        AssistantContent::Text(text) => Some(text.text),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let content = extract_text_content(response.choice);
 
                 let (brief, summary) = parse_brief_response(&content);
 
@@ -4134,15 +4105,7 @@ pub async fn research(
 
         match brief_model.completion_request(&brief_prompt).send().await {
             Ok(response) => {
-                let content: String = response
-                    .choice
-                    .into_iter()
-                    .filter_map(|c| match c {
-                        AssistantContent::Text(text) => Some(text.text),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let content = extract_text_content(response.choice);
 
                 let (brief, summary) = parse_brief_response(&content);
 
