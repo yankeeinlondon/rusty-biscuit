@@ -1,14 +1,29 @@
 //! Program enums with strum derives for metadata and iteration.
 //!
 //! This module defines enums for each program category with full metadata
-//! lookup support via the `ProgramMetadata` trait.
+//! lookup support via the `ProgramMetadata` trait. Each category also carries
+//! installation metadata (OS availability, repository URL, installation
+//! methods) previously stored in `inventory.rs`.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::hash::Hash;
 use strum::{Display, EnumCount, EnumIter, EnumString, IntoStaticStr};
 
+use crate::os::OsType;
+use crate::programs::types::InstallationMethod;
+
 use super::schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
+
+// ============================================================================
+// OS availability constants for program metadata
+// ============================================================================
+
+pub(crate) static ALL_OS: &[OsType] = &[OsType::MacOS, OsType::Linux, OsType::Windows];
+pub(crate) static UNIX_ONLY: &[OsType] = &[OsType::MacOS, OsType::Linux];
+pub(crate) static MACOS_ONLY: &[OsType] = &[OsType::MacOS];
+pub(crate) static LINUX_ONLY: &[OsType] = &[OsType::Linux];
+pub(crate) static WINDOWS_ONLY: &[OsType] = &[OsType::Windows];
 
 /// Trait bridging category enums to the generic `CategoryDetector<E>`.
 ///
@@ -42,7 +57,9 @@ pub trait CategoryEnum:
     ///
     /// Returns `Some(...)` to inject a synthetic detection result instead of
     /// searching PATH. Used for Windows SAPI which isn't a real executable.
-    fn platform_override(&self) -> Option<(std::path::PathBuf, crate::programs::types::ExecutableSource)> {
+    fn platform_override(
+        &self,
+    ) -> Option<(std::path::PathBuf, crate::programs::types::ExecutableSource)> {
         None
     }
 }
@@ -97,161 +114,502 @@ pub enum Editor {
     Kate,
 }
 
+// Editor installation methods
+pub(crate) static VIM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("vim"),
+    InstallationMethod::Apt("vim"),
+    InstallationMethod::Dnf("vim"),
+    InstallationMethod::Pacman("vim"),
+    InstallationMethod::Chocolatey("vim"),
+    InstallationMethod::Scoop("vim"),
+];
+pub(crate) static VI_INSTALL: &[InstallationMethod] = VIM_INSTALL;
+pub(crate) static EMACS_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("emacs"),
+    InstallationMethod::Apt("emacs"),
+    InstallationMethod::Dnf("emacs"),
+    InstallationMethod::Pacman("emacs"),
+    InstallationMethod::Chocolatey("emacs"),
+    InstallationMethod::Scoop("emacs"),
+];
+pub(crate) static XEMACS_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("xemacs"),
+    InstallationMethod::Apt("xemacs"),
+    InstallationMethod::Dnf("xemacs"),
+    InstallationMethod::Pacman("xemacs"),
+];
+pub(crate) static NANO_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("nano"),
+    InstallationMethod::Apt("nano"),
+    InstallationMethod::Dnf("nano"),
+    InstallationMethod::Pacman("nano"),
+    InstallationMethod::Chocolatey("nano"),
+    InstallationMethod::Scoop("nano"),
+];
+pub(crate) static NEOVIM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("neovim"),
+    InstallationMethod::Apt("neovim"),
+    InstallationMethod::Dnf("neovim"),
+    InstallationMethod::Pacman("neovim"),
+    InstallationMethod::Chocolatey("neovim"),
+    InstallationMethod::Scoop("neovim"),
+    InstallationMethod::Cargo("neovim"),
+];
+pub(crate) static HELIX_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("helix"),
+    InstallationMethod::Cargo("helix"),
+    InstallationMethod::Pacman("helix"),
+    InstallationMethod::Scoop("helix"),
+];
+pub(crate) static VSCODE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("visual-studio-code"),
+    InstallationMethod::Chocolatey("vscode"),
+    InstallationMethod::Scoop("vscode"),
+    InstallationMethod::Winget("Microsoft.VisualStudioCode"),
+];
+pub(crate) static VSCODIUM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("vscodium"),
+    InstallationMethod::Chocolatey("vscodium"),
+    InstallationMethod::Scoop("vscodium"),
+    InstallationMethod::Winget("VSCodium.VSCodium"),
+];
+pub(crate) static SUBLIME_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("sublime-text"),
+    InstallationMethod::Apt("sublime-text"),
+    InstallationMethod::Dnf("sublime-text"),
+    InstallationMethod::Pacman("sublime-text"),
+    InstallationMethod::Chocolatey("sublimetext4"),
+    InstallationMethod::Scoop("sublime-text"),
+    InstallationMethod::Winget("SublimeHQ.SublimeText.4"),
+];
+pub(crate) static ZED_INSTALL: &[InstallationMethod] = &[InstallationMethod::Brew("zed")];
+pub(crate) static MICRO_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("micro"),
+    InstallationMethod::Apt("micro"),
+    InstallationMethod::Dnf("micro"),
+    InstallationMethod::Pacman("micro"),
+    InstallationMethod::Scoop("micro"),
+];
+pub(crate) static KAKOUNE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("kakoune"),
+    InstallationMethod::Apt("kakoune"),
+    InstallationMethod::Dnf("kakoune"),
+    InstallationMethod::Pacman("kakoune"),
+];
+pub(crate) static AMP_INSTALL: &[InstallationMethod] = &[InstallationMethod::Cargo("amp")];
+pub(crate) static LAPCE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("lapce"),
+    InstallationMethod::Cargo("lapce"),
+];
+pub(crate) static PHPSTORM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("phpstorm"),
+    InstallationMethod::Winget("JetBrains.PhpStorm"),
+];
+pub(crate) static INTELLIJ_IDEA_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("intellij-idea"),
+    InstallationMethod::Winget("JetBrains.IntelliJIDEA.Community"),
+];
+pub(crate) static PYCHARM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("pycharm"),
+    InstallationMethod::Winget("JetBrains.PyCharm.Community"),
+];
+pub(crate) static WEBSTORM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("webstorm"),
+    InstallationMethod::Winget("JetBrains.WebStorm"),
+];
+pub(crate) static CLION_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("clion"),
+    InstallationMethod::Winget("JetBrains.CLion"),
+];
+pub(crate) static GOLAND_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("goland"),
+    InstallationMethod::Winget("JetBrains.GoLand"),
+];
+pub(crate) static RIDER_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("rider"),
+    InstallationMethod::Winget("JetBrains.Rider"),
+];
+pub(crate) static TEXTMATE_INSTALL: &[InstallationMethod] = &[InstallationMethod::Brew("textmate")];
+pub(crate) static BBEDIT_INSTALL: &[InstallationMethod] = &[InstallationMethod::Brew("bbedit")];
+pub(crate) static GEANY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("geany"),
+    InstallationMethod::Apt("geany"),
+    InstallationMethod::Dnf("geany"),
+    InstallationMethod::Pacman("geany"),
+];
+pub(crate) static KATE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("kate"),
+    InstallationMethod::Apt("kate"),
+    InstallationMethod::Dnf("kate"),
+    InstallationMethod::Pacman("kate"),
+];
+
 /// Metadata lookup table for editors.
 static EDITOR_INFO: &[ProgramInfo] = &[
-    ProgramInfo::standard("vi", "Vi", "The classic vi editor", "https://www.vim.org/"),
-    ProgramInfo::standard(
-        "vim",
-        "Vim",
-        "Vi IMproved text editor",
-        "https://www.vim.org/",
-    ),
-    ProgramInfo::standard(
-        "nvim",
-        "Neovim",
-        "Hyperextensible Vim-based text editor",
-        "https://neovim.io/",
-    ),
-    ProgramInfo::with_prefix(
-        "emacs",
-        "GNU Emacs",
-        "Extensible, customizable text editor",
-        "https://www.gnu.org/software/emacs/",
-        "GNU Emacs ",
-    ),
-    ProgramInfo::standard(
-        "xemacs",
-        "XEmacs",
-        "A version of Emacs that branched from GNU Emacs",
-        "http://www.xemacs.org/",
-    ),
-    ProgramInfo::with_prefix(
-        "nano",
-        "GNU nano",
-        "Small and friendly text editor",
-        "https://www.nano-editor.org/",
-        "nano ",
-    ),
-    ProgramInfo::standard(
-        "hx",
-        "Helix",
-        "Post-modern modal text editor",
-        "https://helix-editor.com/",
-    ),
-    ProgramInfo::standard(
-        "code",
-        "Visual Studio Code",
-        "Code editor for modern web and cloud applications",
-        "https://code.visualstudio.com/",
-    ),
-    ProgramInfo::standard(
-        "codium",
-        "VSCodium",
-        "Free/libre open source binaries of VS Code",
-        "https://vscodium.com/",
-    ),
-    ProgramInfo::standard(
-        "subl",
-        "Sublime Text",
-        "Sophisticated text editor for code and prose",
-        "https://www.sublimetext.com/",
-    ),
-    ProgramInfo::standard(
-        "zed",
-        "Zed",
-        "High-performance multiplayer code editor",
-        "https://zed.dev/",
-    ),
-    ProgramInfo::standard(
-        "micro",
-        "Micro",
-        "Modern and intuitive terminal-based text editor",
-        "https://micro-editor.github.io/",
-    ),
-    ProgramInfo::standard(
-        "kak",
-        "Kakoune",
-        "Modal editor with selection-based editing model",
-        "https://kakoune.org/",
-    ),
-    ProgramInfo::standard(
-        "amp",
-        "Amp",
-        "Modal text editor for the terminal inspired by Vi",
-        "https://amp.readme.io/",
-    ),
-    ProgramInfo::standard(
-        "lapce",
-        "Lapce",
-        "Lightning-fast code editor written in Rust",
-        "https://lapce.dev/",
-    ),
-    ProgramInfo::standard(
-        "phpstorm",
-        "PhpStorm",
-        "Lightning-smart PHP IDE by JetBrains",
-        "https://www.jetbrains.com/phpstorm/",
-    ),
-    ProgramInfo::standard(
-        "idea",
-        "IntelliJ IDEA",
-        "Capable and ergonomic IDE for JVM-based languages",
-        "https://www.jetbrains.com/idea/",
-    ),
-    ProgramInfo::standard(
-        "pycharm",
-        "PyCharm",
-        "The Python IDE for professional developers",
-        "https://www.jetbrains.com/pycharm/",
-    ),
-    ProgramInfo::standard(
-        "webstorm",
-        "WebStorm",
-        "The smartest JavaScript IDE",
-        "https://www.jetbrains.com/webstorm/",
-    ),
-    ProgramInfo::standard(
-        "clion",
-        "CLion",
-        "Cross-platform C and C++ IDE",
-        "https://www.jetbrains.com/clion/",
-    ),
-    ProgramInfo::standard(
-        "goland",
-        "GoLand",
-        "Cross-platform Go IDE",
-        "https://www.jetbrains.com/go/",
-    ),
-    ProgramInfo::standard(
-        "rider",
-        "Rider",
-        "Fast and powerful cross-platform .NET IDE",
-        "https://www.jetbrains.com/rider/",
-    ),
-    ProgramInfo::standard(
-        "mate",
-        "TextMate",
-        "Versatile plain text editor for macOS",
-        "https://macromates.com/",
-    ),
-    ProgramInfo::standard(
-        "bbedit",
-        "BBEdit",
-        "Professional HTML and text editor for macOS",
-        "https://www.barebones.com/products/bbedit/",
-    ),
-    ProgramInfo::standard(
-        "geany",
-        "Geany",
-        "Powerful, stable and lightweight text editor",
-        "https://www.geany.org/",
-    ),
-    ProgramInfo::standard(
-        "kate",
-        "Kate",
-        "Multi-document, multi-view text editor by KDE",
-        "https://kate-editor.org/",
-    ),
+    ProgramInfo {
+        binary_name: "vi",
+        display_name: "Vi",
+        description: "The classic vi editor",
+        website: "https://www.vim.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/vim/vim"),
+        installation_methods: VI_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "vim",
+        display_name: "Vim",
+        description: "Vi IMproved text editor",
+        website: "https://www.vim.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/vim/vim"),
+        installation_methods: VIM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "nvim",
+        display_name: "Neovim",
+        description: "Hyperextensible Vim-based text editor",
+        website: "https://neovim.io/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/neovim/neovim"),
+        installation_methods: NEOVIM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "emacs",
+        display_name: "GNU Emacs",
+        description: "Extensible, customizable text editor",
+        website: "https://www.gnu.org/software/emacs/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::AfterPrefix,
+        version_regex: None,
+        version_prefix: Some("GNU Emacs "),
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://git.savannah.gnu.org/cgit/emacs.git"),
+        installation_methods: EMACS_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "xemacs",
+        display_name: "XEmacs",
+        description: "A version of Emacs that branched from GNU Emacs",
+        website: "http://www.xemacs.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/xemacs/xemacs"),
+        installation_methods: XEMACS_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "nano",
+        display_name: "GNU nano",
+        description: "Small and friendly text editor",
+        website: "https://www.nano-editor.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::AfterPrefix,
+        version_regex: None,
+        version_prefix: Some("nano "),
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://git.savannah.gnu.org/cgit/nano.git"),
+        installation_methods: NANO_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "hx",
+        display_name: "Helix",
+        description: "Post-modern modal text editor",
+        website: "https://helix-editor.com/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/helix-editor/helix"),
+        installation_methods: HELIX_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "code",
+        display_name: "Visual Studio Code",
+        description: "Code editor for modern web and cloud applications",
+        website: "https://code.visualstudio.com/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/microsoft/vscode"),
+        installation_methods: VSCODE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "codium",
+        display_name: "VSCodium",
+        description: "Free/libre open source binaries of VS Code",
+        website: "https://vscodium.com/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/VSCodium/vscodium"),
+        installation_methods: VSCODIUM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "subl",
+        display_name: "Sublime Text",
+        description: "Sophisticated text editor for code and prose",
+        website: "https://www.sublimetext.com/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/sublimehq"),
+        installation_methods: SUBLIME_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "zed",
+        display_name: "Zed",
+        description: "High-performance multiplayer code editor",
+        website: "https://zed.dev/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: MACOS_ONLY,
+        repo: Some("https://github.com/zed-industries/zed"),
+        installation_methods: ZED_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "micro",
+        display_name: "Micro",
+        description: "Modern and intuitive terminal-based text editor",
+        website: "https://micro-editor.github.io/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/zyedidia/micro"),
+        installation_methods: MICRO_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "kak",
+        display_name: "Kakoune",
+        description: "Modal editor with selection-based editing model",
+        website: "https://kakoune.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/mawww/kakoune"),
+        installation_methods: KAKOUNE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "amp",
+        display_name: "Amp",
+        description: "Modal text editor for the terminal inspired by Vi",
+        website: "https://amp.readme.io/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/jmacdonald/amp"),
+        installation_methods: AMP_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "lapce",
+        display_name: "Lapce",
+        description: "Lightning-fast code editor written in Rust",
+        website: "https://lapce.dev/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/lapce/lapce"),
+        installation_methods: LAPCE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "phpstorm",
+        display_name: "PhpStorm",
+        description: "Lightning-smart PHP IDE by JetBrains",
+        website: "https://www.jetbrains.com/phpstorm/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://www.jetbrains.com/phpstorm/"),
+        installation_methods: PHPSTORM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "idea",
+        display_name: "IntelliJ IDEA",
+        description: "Capable and ergonomic IDE for JVM-based languages",
+        website: "https://www.jetbrains.com/idea/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://www.jetbrains.com/idea/"),
+        installation_methods: INTELLIJ_IDEA_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "pycharm",
+        display_name: "PyCharm",
+        description: "The Python IDE for professional developers",
+        website: "https://www.jetbrains.com/pycharm/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://www.jetbrains.com/pycharm/"),
+        installation_methods: PYCHARM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "webstorm",
+        display_name: "WebStorm",
+        description: "The smartest JavaScript IDE",
+        website: "https://www.jetbrains.com/webstorm/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://www.jetbrains.com/webstorm/"),
+        installation_methods: WEBSTORM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "clion",
+        display_name: "CLion",
+        description: "Cross-platform C and C++ IDE",
+        website: "https://www.jetbrains.com/clion/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://www.jetbrains.com/clion/"),
+        installation_methods: CLION_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "goland",
+        display_name: "GoLand",
+        description: "Cross-platform Go IDE",
+        website: "https://www.jetbrains.com/go/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://www.jetbrains.com/go/"),
+        installation_methods: GOLAND_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "rider",
+        display_name: "Rider",
+        description: "Fast and powerful cross-platform .NET IDE",
+        website: "https://www.jetbrains.com/rider/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://www.jetbrains.com/rider/"),
+        installation_methods: RIDER_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "mate",
+        display_name: "TextMate",
+        description: "Versatile plain text editor for macOS",
+        website: "https://macromates.com/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: MACOS_ONLY,
+        repo: Some("https://github.com/textmate/textmate"),
+        installation_methods: TEXTMATE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "bbedit",
+        display_name: "BBEdit",
+        description: "Professional HTML and text editor for macOS",
+        website: "https://www.barebones.com/products/bbedit/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: MACOS_ONLY,
+        repo: None,
+        installation_methods: BBEDIT_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "geany",
+        display_name: "Geany",
+        description: "Powerful, stable and lightweight text editor",
+        website: "https://www.geany.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/geany/geany"),
+        installation_methods: GEANY_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "kate",
+        display_name: "Kate",
+        description: "Multi-document, multi-view text editor by KDE",
+        website: "https://kate-editor.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://invent.kde.org/utilities/kate"),
+        installation_methods: KATE_INSTALL,
+    },
 ];
 
 impl ProgramMetadata for Editor {
@@ -355,193 +713,679 @@ pub enum Utility {
     Iperf3,
 }
 
+// Utility installation methods
+pub(crate) static EXA_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("exa"),
+    InstallationMethod::Cargo("exa"),
+    InstallationMethod::Apt("exa"),
+    InstallationMethod::Pacman("exa"),
+];
+pub(crate) static EZA_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("eza"),
+    InstallationMethod::Cargo("eza"),
+    InstallationMethod::Pacman("eza"),
+];
+pub(crate) static RIPGREP_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("ripgrep"),
+    InstallationMethod::Cargo("ripgrep"),
+    InstallationMethod::Apt("ripgrep"),
+    InstallationMethod::Dnf("ripgrep"),
+    InstallationMethod::Pacman("ripgrep"),
+    InstallationMethod::Chocolatey("ripgrep"),
+    InstallationMethod::Scoop("ripgrep"),
+];
+pub(crate) static DUST_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("dust"),
+    InstallationMethod::Cargo("dust"),
+    InstallationMethod::Apt("dust"),
+    InstallationMethod::Dnf("dust"),
+    InstallationMethod::Pacman("dust"),
+];
+pub(crate) static BAT_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("bat"),
+    InstallationMethod::Cargo("bat"),
+    InstallationMethod::Apt("bat"),
+    InstallationMethod::Dnf("bat"),
+    InstallationMethod::Pacman("bat"),
+    InstallationMethod::Chocolatey("bat"),
+    InstallationMethod::Scoop("bat"),
+];
+pub(crate) static FD_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("fd"),
+    InstallationMethod::Cargo("fd-find"),
+    InstallationMethod::Apt("fd-find"),
+    InstallationMethod::Dnf("fd-find"),
+    InstallationMethod::Pacman("fd"),
+    InstallationMethod::Chocolatey("fd"),
+    InstallationMethod::Scoop("fd"),
+];
+pub(crate) static PROCS_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("procs"),
+    InstallationMethod::Cargo("procs"),
+    InstallationMethod::Apt("procs"),
+    InstallationMethod::Pacman("procs"),
+];
+pub(crate) static BOTTOM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("bottom"),
+    InstallationMethod::Cargo("bottom"),
+    InstallationMethod::Apt("bottom"),
+    InstallationMethod::Pacman("bottom"),
+];
+pub(crate) static FZF_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("fzf"),
+    InstallationMethod::Apt("fzf"),
+    InstallationMethod::Dnf("fzf"),
+    InstallationMethod::Pacman("fzf"),
+    InstallationMethod::Chocolatey("fzf"),
+    InstallationMethod::Scoop("fzf"),
+];
+pub(crate) static ZOXIDE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("zoxide"),
+    InstallationMethod::Cargo("zoxide"),
+    InstallationMethod::Apt("zoxide"),
+    InstallationMethod::Dnf("zoxide"),
+    InstallationMethod::Pacman("zoxide"),
+];
+pub(crate) static STARSHIP_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("starship"),
+    InstallationMethod::Cargo("starship"),
+    InstallationMethod::Chocolatey("starship"),
+    InstallationMethod::Scoop("starship"),
+    InstallationMethod::RemoteBash("https://starship.rs/install.sh"),
+];
+pub(crate) static DIRENV_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("direnv"),
+    InstallationMethod::Apt("direnv"),
+    InstallationMethod::Dnf("direnv"),
+    InstallationMethod::Pacman("direnv"),
+];
+pub(crate) static JQ_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("jq"),
+    InstallationMethod::Apt("jq"),
+    InstallationMethod::Dnf("jq"),
+    InstallationMethod::Pacman("jq"),
+    InstallationMethod::Chocolatey("jq"),
+    InstallationMethod::Scoop("jq"),
+];
+pub(crate) static DELTA_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("git-delta"),
+    InstallationMethod::Cargo("git-delta"),
+    InstallationMethod::Pacman("git-delta"),
+    InstallationMethod::Chocolatey("delta"),
+    InstallationMethod::Scoop("delta"),
+];
+pub(crate) static TEALDEER_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("tealdeer"),
+    InstallationMethod::Cargo("tealdeer"),
+    InstallationMethod::Apt("tealdeer"),
+    InstallationMethod::Pacman("tealdeer"),
+];
+pub(crate) static LAZYGIT_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("lazygit"),
+    InstallationMethod::Pacman("lazygit"),
+    InstallationMethod::Scoop("lazygit"),
+    InstallationMethod::GoModules("github.com/jesseduffield/lazygit@latest"),
+];
+pub(crate) static GH_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("gh"),
+    InstallationMethod::Apt("gh"),
+    InstallationMethod::Dnf("gh"),
+    InstallationMethod::Pacman("github-cli"),
+    InstallationMethod::Chocolatey("gh"),
+    InstallationMethod::Scoop("gh"),
+    InstallationMethod::Winget("GitHub.cli"),
+];
+pub(crate) static HTOP_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("htop"),
+    InstallationMethod::Apt("htop"),
+    InstallationMethod::Dnf("htop"),
+    InstallationMethod::Pacman("htop"),
+];
+pub(crate) static BTOP_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("btop"),
+    InstallationMethod::Apt("btop"),
+    InstallationMethod::Dnf("btop"),
+    InstallationMethod::Pacman("btop"),
+];
+pub(crate) static TMUX_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("tmux"),
+    InstallationMethod::Apt("tmux"),
+    InstallationMethod::Dnf("tmux"),
+    InstallationMethod::Pacman("tmux"),
+];
+pub(crate) static ZELLIJ_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("zellij"),
+    InstallationMethod::Cargo("zellij"),
+    InstallationMethod::Apt("zellij"),
+    InstallationMethod::Pacman("zellij"),
+];
+pub(crate) static HTTPIE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("httpie"),
+    InstallationMethod::Apt("httpie"),
+    InstallationMethod::Dnf("httpie"),
+    InstallationMethod::Pacman("httpie"),
+    InstallationMethod::Pip("httpie"),
+];
+pub(crate) static CURLIE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("curlie"),
+    InstallationMethod::Cargo("curlie"),
+    InstallationMethod::Scoop("curlie"),
+];
+pub(crate) static MISE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("mise"),
+    InstallationMethod::Cargo("mise"),
+    InstallationMethod::Scoop("mise"),
+];
+pub(crate) static HYPERFINE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("hyperfine"),
+    InstallationMethod::Cargo("hyperfine"),
+    InstallationMethod::Apt("hyperfine"),
+    InstallationMethod::Pacman("hyperfine"),
+];
+pub(crate) static TOKEI_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("tokei"),
+    InstallationMethod::Cargo("tokei"),
+    InstallationMethod::Apt("tokei"),
+    InstallationMethod::Pacman("tokei"),
+];
+pub(crate) static XH_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("xh"),
+    InstallationMethod::Cargo("xh"),
+    InstallationMethod::Apt("xh"),
+    InstallationMethod::Pacman("xh"),
+    InstallationMethod::Scoop("xh"),
+];
+pub(crate) static CURL_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("curl"),
+    InstallationMethod::Apt("curl"),
+    InstallationMethod::Dnf("curl"),
+    InstallationMethod::Pacman("curl"),
+];
+pub(crate) static WGET_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("wget"),
+    InstallationMethod::Apt("wget"),
+    InstallationMethod::Dnf("wget"),
+    InstallationMethod::Pacman("wget"),
+];
+pub(crate) static IPERF3_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("iperf3"),
+    InstallationMethod::Apt("iperf3"),
+    InstallationMethod::Dnf("iperf3"),
+    InstallationMethod::Pacman("iperf3"),
+];
+
 /// Metadata lookup table for utilities.
 static UTILITY_INFO: &[ProgramInfo] = &[
-    ProgramInfo::standard(
-        "exa",
-        "exa",
-        "A modern replacement for ls (deprecated)",
-        "https://the.exa.website/",
-    ),
-    ProgramInfo::standard(
-        "eza",
-        "eza",
-        "A modern replacement for ls",
-        "https://eza.rocks/",
-    ),
-    ProgramInfo::standard(
-        "rg",
-        "ripgrep",
-        "Fast grep alternative with smart defaults",
-        "https://github.com/BurntSushi/ripgrep",
-    ),
-    ProgramInfo::standard(
-        "dust",
-        "dust",
-        "A more intuitive version of du",
-        "https://github.com/bootandy/dust",
-    ),
-    ProgramInfo::standard(
-        "bat",
-        "bat",
-        "A cat clone with syntax highlighting",
-        "https://github.com/sharkdp/bat",
-    ),
-    ProgramInfo::standard(
-        "fd",
-        "fd",
-        "Simple, fast alternative to find",
-        "https://github.com/sharkdp/fd",
-    ),
-    ProgramInfo::standard(
-        "procs",
-        "procs",
-        "A modern replacement for ps",
-        "https://github.com/dalance/procs",
-    ),
-    ProgramInfo::standard(
-        "btm",
-        "bottom",
-        "Cross-platform graphical process monitor",
-        "https://github.com/ClementTsang/bottom",
-    ),
-    ProgramInfo::standard(
-        "fzf",
-        "fzf",
-        "Command-line fuzzy finder",
-        "https://github.com/junegunn/fzf",
-    ),
-    ProgramInfo::standard(
-        "zoxide",
-        "zoxide",
-        "Smarter cd command",
-        "https://github.com/ajeetdsouza/zoxide",
-    ),
-    ProgramInfo::standard(
-        "starship",
-        "Starship",
-        "Minimal, blazing-fast shell prompt",
-        "https://starship.rs/",
-    ),
-    ProgramInfo::standard(
-        "direnv",
-        "direnv",
-        "Environment switcher for the shell",
-        "https://direnv.net/",
-    ),
-    ProgramInfo::standard(
-        "jq",
-        "jq",
-        "Command-line JSON processor",
-        "https://jqlang.github.io/jq/",
-    ),
-    ProgramInfo::standard(
-        "delta",
-        "delta",
-        "Viewer for git and diff output",
-        "https://github.com/dandavison/delta",
-    ),
-    ProgramInfo::standard(
-        "tldr",
-        "tealdeer",
-        "Fast tldr client for simplified man pages",
-        "https://github.com/dbrgn/tealdeer",
-    ),
-    ProgramInfo::standard(
-        "lazygit",
-        "lazygit",
-        "Simple terminal UI for git commands",
-        "https://github.com/jesseduffield/lazygit",
-    ),
-    ProgramInfo::standard(
-        "gh",
-        "GitHub CLI",
-        "GitHub's official CLI",
-        "https://cli.github.com/",
-    ),
-    ProgramInfo::standard(
-        "htop",
-        "htop",
-        "Interactive process viewer",
-        "https://htop.dev/",
-    ),
-    ProgramInfo::standard(
-        "btop",
-        "btop",
-        "Resource monitor with CPU, memory, disk, network stats",
-        "https://github.com/aristocratos/btop",
-    ),
-    ProgramInfo::standard(
-        "tmux",
-        "tmux",
-        "Terminal multiplexer",
-        "https://github.com/tmux/tmux/wiki",
-    ),
-    ProgramInfo::standard(
-        "zellij",
-        "Zellij",
-        "Modern terminal multiplexer",
-        "https://zellij.dev/",
-    ),
-    ProgramInfo::standard(
-        "http",
-        "HTTPie",
-        "User-friendly HTTP client",
-        "https://httpie.io/",
-    ),
-    ProgramInfo::standard(
-        "curlie",
-        "curlie",
-        "User-friendly alternative to curl",
-        "https://github.com/rs/curlie",
-    ),
-    ProgramInfo::standard(
-        "mise",
-        "mise",
-        "Polyglot development environment manager",
-        "https://mise.jdx.dev/",
-    ),
-    ProgramInfo::standard(
-        "hyperfine",
-        "hyperfine",
-        "Command-line benchmarking tool",
-        "https://github.com/sharkdp/hyperfine",
-    ),
-    ProgramInfo::standard(
-        "tokei",
-        "tokei",
-        "Count lines of code quickly",
-        "https://github.com/XAMPPRocky/tokei",
-    ),
-    ProgramInfo::standard(
-        "xh",
-        "xh",
-        "Friendly and fast HTTP client",
-        "https://github.com/ducaale/xh",
-    ),
-    ProgramInfo::standard(
-        "curl",
-        "curl",
-        "Transfer data with URLs",
-        "https://curl.se/",
-    ),
-    ProgramInfo::standard(
-        "wget",
-        "wget",
-        "Network utility to retrieve content from web servers",
-        "https://www.gnu.org/software/wget/",
-    ),
-    ProgramInfo::standard(
-        "iperf3",
-        "iperf3",
-        "Network bandwidth measurement tool",
-        "https://iperf.fr/",
-    ),
+    ProgramInfo {
+        binary_name: "exa",
+        display_name: "exa",
+        description: "A modern replacement for ls (deprecated)",
+        website: "https://the.exa.website/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/ogham/exa"),
+        installation_methods: EXA_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "eza",
+        display_name: "eza",
+        description: "A modern replacement for ls",
+        website: "https://eza.rocks/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/eza-community/eza"),
+        installation_methods: EZA_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "rg",
+        display_name: "ripgrep",
+        description: "Fast grep alternative with smart defaults",
+        website: "https://github.com/BurntSushi/ripgrep",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/BurntSushi/ripgrep"),
+        installation_methods: RIPGREP_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "dust",
+        display_name: "dust",
+        description: "A more intuitive version of du",
+        website: "https://github.com/bootandy/dust",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/bootandy/dust"),
+        installation_methods: DUST_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "bat",
+        display_name: "bat",
+        description: "A cat clone with syntax highlighting",
+        website: "https://github.com/sharkdp/bat",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/sharkdp/bat"),
+        installation_methods: BAT_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "fd",
+        display_name: "fd",
+        description: "Simple, fast alternative to find",
+        website: "https://github.com/sharkdp/fd",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/sharkdp/fd"),
+        installation_methods: FD_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "procs",
+        display_name: "procs",
+        description: "A modern replacement for ps",
+        website: "https://github.com/dalance/procs",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/dalance/procs"),
+        installation_methods: PROCS_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "btm",
+        display_name: "bottom",
+        description: "Cross-platform graphical process monitor",
+        website: "https://github.com/ClementTsang/bottom",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/ClementTsang/bottom"),
+        installation_methods: BOTTOM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "fzf",
+        display_name: "fzf",
+        description: "Command-line fuzzy finder",
+        website: "https://github.com/junegunn/fzf",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/junegunn/fzf"),
+        installation_methods: FZF_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "zoxide",
+        display_name: "zoxide",
+        description: "Smarter cd command",
+        website: "https://github.com/ajeetdsouza/zoxide",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/ajeetdsouza/zoxide"),
+        installation_methods: ZOXIDE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "starship",
+        display_name: "Starship",
+        description: "Minimal, blazing-fast shell prompt",
+        website: "https://starship.rs/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/starship/starship"),
+        installation_methods: STARSHIP_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "direnv",
+        display_name: "direnv",
+        description: "Environment switcher for the shell",
+        website: "https://direnv.net/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/direnv/direnv"),
+        installation_methods: DIRENV_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "jq",
+        display_name: "jq",
+        description: "Command-line JSON processor",
+        website: "https://jqlang.github.io/jq/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/jqlang/jq"),
+        installation_methods: JQ_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "delta",
+        display_name: "delta",
+        description: "Viewer for git and diff output",
+        website: "https://github.com/dandavison/delta",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/dandavison/delta"),
+        installation_methods: DELTA_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "tldr",
+        display_name: "tealdeer",
+        description: "Fast tldr client for simplified man pages",
+        website: "https://github.com/dbrgn/tealdeer",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/dbrgn/tealdeer"),
+        installation_methods: TEALDEER_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "lazygit",
+        display_name: "lazygit",
+        description: "Simple terminal UI for git commands",
+        website: "https://github.com/jesseduffield/lazygit",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/jesseduffield/lazygit"),
+        installation_methods: LAZYGIT_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "gh",
+        display_name: "GitHub CLI",
+        description: "GitHub's official CLI",
+        website: "https://cli.github.com/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/cli/cli"),
+        installation_methods: GH_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "htop",
+        display_name: "htop",
+        description: "Interactive process viewer",
+        website: "https://htop.dev/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/htop-dev/htop"),
+        installation_methods: HTOP_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "btop",
+        display_name: "btop",
+        description: "Resource monitor with CPU, memory, disk, network stats",
+        website: "https://github.com/aristocratos/btop",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/aristocratos/btop"),
+        installation_methods: BTOP_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "tmux",
+        display_name: "tmux",
+        description: "Terminal multiplexer",
+        website: "https://github.com/tmux/tmux/wiki",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/tmux/tmux"),
+        installation_methods: TMUX_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "zellij",
+        display_name: "Zellij",
+        description: "Modern terminal multiplexer",
+        website: "https://zellij.dev/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/zellij-org/zellij"),
+        installation_methods: ZELLIJ_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "http",
+        display_name: "HTTPie",
+        description: "User-friendly HTTP client",
+        website: "https://httpie.io/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/httpie/cli"),
+        installation_methods: HTTPIE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "curlie",
+        display_name: "curlie",
+        description: "User-friendly alternative to curl",
+        website: "https://github.com/rs/curlie",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/rs/curlie"),
+        installation_methods: CURLIE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "mise",
+        display_name: "mise",
+        description: "Polyglot development environment manager",
+        website: "https://mise.jdx.dev/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/jdx/mise"),
+        installation_methods: MISE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "hyperfine",
+        display_name: "hyperfine",
+        description: "Command-line benchmarking tool",
+        website: "https://github.com/sharkdp/hyperfine",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/sharkdp/hyperfine"),
+        installation_methods: HYPERFINE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "tokei",
+        display_name: "tokei",
+        description: "Count lines of code quickly",
+        website: "https://github.com/XAMPPRocky/tokei",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/XAMPPRocky/tokei"),
+        installation_methods: TOKEI_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "xh",
+        display_name: "xh",
+        description: "Friendly and fast HTTP client",
+        website: "https://github.com/ducaale/xh",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/ducaale/xh"),
+        installation_methods: XH_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "curl",
+        display_name: "curl",
+        description: "Transfer data with URLs",
+        website: "https://curl.se/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/curl/curl"),
+        installation_methods: CURL_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "wget",
+        display_name: "wget",
+        description: "Network utility to retrieve content from web servers",
+        website: "https://www.gnu.org/software/wget/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://git.savannah.gnu.org/cgit/wget.git"),
+        installation_methods: WGET_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "iperf3",
+        display_name: "iperf3",
+        description: "Network bandwidth measurement tool",
+        website: "https://iperf.fr/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/esnet/iperf"),
+        installation_methods: IPERF3_INSTALL,
+    },
 ];
 
 impl ProgramMetadata for Utility {
     fn info(&self) -> &'static ProgramInfo {
         &UTILITY_INFO[*self as usize]
+    }
+}
+
+impl CategoryEnum for Utility {
+    fn category_name() -> &'static str {
+        "utilities"
+    }
+
+    fn variant_index(&self) -> usize {
+        *self as usize
+    }
+
+    fn serde_key(&self) -> &'static str {
+        match self {
+            Utility::Exa => "exa",
+            Utility::Eza => "eza",
+            Utility::Ripgrep => "ripgrep",
+            Utility::Dust => "dust",
+            Utility::Bat => "bat",
+            Utility::Fd => "fd",
+            Utility::Procs => "procs",
+            Utility::Bottom => "bottom",
+            Utility::Fzf => "fzf",
+            Utility::Zoxide => "zoxide",
+            Utility::Starship => "starship",
+            Utility::Direnv => "direnv",
+            Utility::Jq => "jq",
+            Utility::Delta => "delta",
+            Utility::Tealdeer => "tealdeer",
+            Utility::Lazygit => "lazygit",
+            Utility::Gh => "gh",
+            Utility::Htop => "htop",
+            Utility::Btop => "btop",
+            Utility::Tmux => "tmux",
+            Utility::Zellij => "zellij",
+            Utility::Httpie => "httpie",
+            Utility::Curlie => "curlie",
+            Utility::Mise => "mise",
+            Utility::Hyperfine => "hyperfine",
+            Utility::Tokei => "tokei",
+            Utility::Xh => "xh",
+            Utility::Curl => "curl",
+            Utility::Wget => "wget",
+            Utility::Iperf3 => "iperf3",
+        }
     }
 }
 
@@ -587,123 +1431,390 @@ pub enum LanguagePackageManager {
     Cpanm,
 }
 
+// Language package manager installation methods
+pub(crate) static NPM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("node"),
+    InstallationMethod::Apt("nodejs"),
+    InstallationMethod::Dnf("nodejs"),
+    InstallationMethod::Pacman("nodejs"),
+    InstallationMethod::Chocolatey("nodejs"),
+    InstallationMethod::Scoop("nodejs"),
+];
+pub(crate) static PNPM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("pnpm"),
+    InstallationMethod::Npm("pnpm"),
+    InstallationMethod::RemoteBash("https://get.pnpm.io/install.sh"),
+];
+pub(crate) static YARN_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("yarn"),
+    InstallationMethod::Npm("yarn"),
+];
+pub(crate) static BUN_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("bun"),
+    InstallationMethod::Npm("bun"),
+];
+pub(crate) static CARGO_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::RemoteBash("https://sh.rustup.rs")];
+pub(crate) static GO_MODULES_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("go"),
+    InstallationMethod::Apt("golang"),
+    InstallationMethod::Dnf("golang"),
+    InstallationMethod::Pacman("go"),
+    InstallationMethod::Chocolatey("golang"),
+    InstallationMethod::Scoop("go"),
+];
+pub(crate) static COMPOSER_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("composer"),
+    InstallationMethod::Apt("composer"),
+    InstallationMethod::Dnf("composer"),
+    InstallationMethod::Pacman("composer"),
+    InstallationMethod::Chocolatey("composer"),
+];
+pub(crate) static SWIFTPM_INSTALL: &[InstallationMethod] = &[InstallationMethod::Brew("swift")];
+pub(crate) static LUAROCKS_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("luarocks"),
+    InstallationMethod::Apt("luarocks"),
+    InstallationMethod::Dnf("luarocks"),
+    InstallationMethod::Pacman("luarocks"),
+];
+pub(crate) static VCPKG_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("vcpkg"),
+    InstallationMethod::Chocolatey("vcpkg"),
+];
+pub(crate) static CONAN_INSTALL: &[InstallationMethod] = &[InstallationMethod::Pip("conan")];
+pub(crate) static NUGET_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("nuget"),
+    InstallationMethod::Chocolatey("nuget"),
+    InstallationMethod::Scoop("nuget"),
+];
+pub(crate) static HEX_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("elixir"),
+    InstallationMethod::Apt("elixir"),
+    InstallationMethod::Dnf("elixir"),
+    InstallationMethod::Pacman("elixir"),
+    InstallationMethod::Chocolatey("elixir"),
+];
+pub(crate) static PIP_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("python3-pip"),
+    InstallationMethod::Dnf("python3-pip"),
+    InstallationMethod::Pacman("python-pip"),
+];
+pub(crate) static UV_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("uv"),
+    InstallationMethod::Cargo("uv"),
+    InstallationMethod::Pip("uv"),
+    InstallationMethod::RemoteBash("https://astral.sh/uv/install.sh"),
+];
+pub(crate) static POETRY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("poetry"),
+    InstallationMethod::Pip("poetry"),
+];
+pub(crate) static CPAN_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("perl"),
+    InstallationMethod::Apt("perl"),
+    InstallationMethod::Dnf("perl"),
+    InstallationMethod::Pacman("perl"),
+    InstallationMethod::Chocolatey("strawberryperl"),
+];
+pub(crate) static CPANM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("cpanminus"),
+    InstallationMethod::Apt("cpanminus"),
+    InstallationMethod::Dnf("cpanminus"),
+    InstallationMethod::Pacman("perl-app-cpanminus"),
+];
+
 /// Metadata lookup table for language package managers.
 static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
-    ProgramInfo::standard(
-        "npm",
-        "npm",
-        "Node.js package manager",
-        "https://www.npmjs.com/",
-    ),
-    ProgramInfo::standard(
-        "pnpm",
-        "pnpm",
-        "Fast, disk-efficient package manager",
-        "https://pnpm.io/",
-    ),
-    ProgramInfo::standard(
-        "yarn",
-        "Yarn",
-        "Alternative Node.js package manager",
-        "https://yarnpkg.com/",
-    ),
-    ProgramInfo::standard(
-        "bun",
-        "Bun",
-        "All-in-one JS runtime with package manager",
-        "https://bun.sh/",
-    ),
-    ProgramInfo::standard(
-        "cargo",
-        "Cargo",
-        "Rust package manager and build tool",
-        "https://doc.rust-lang.org/cargo/",
-    ),
-    ProgramInfo::with_prefix(
-        "go",
-        "Go Modules",
-        "Built-in Go dependency system",
-        "https://go.dev/ref/mod",
-        "go version ",
-    ),
-    ProgramInfo::with_prefix(
-        "composer",
-        "Composer",
-        "PHP dependency manager",
-        "https://getcomposer.org/",
-        "Composer version ",
-    ),
-    ProgramInfo::standard(
-        "swift",
-        "Swift Package Manager",
-        "Swift dependency manager",
-        "https://www.swift.org/package-manager/",
-    ),
-    ProgramInfo::standard(
-        "luarocks",
-        "LuaRocks",
-        "Package manager for Lua modules",
-        "https://luarocks.org/",
-    ),
-    ProgramInfo::standard(
-        "vcpkg",
-        "vcpkg",
-        "C/C++ dependency manager by Microsoft",
-        "https://vcpkg.io/",
-    ),
-    ProgramInfo::standard(
-        "conan",
-        "Conan",
-        "Decentralized C/C++ package manager",
-        "https://conan.io/",
-    ),
-    ProgramInfo::standard(
-        "nuget",
-        "NuGet",
-        ".NET package manager",
-        "https://www.nuget.org/",
-    ),
-    ProgramInfo::standard(
-        "mix",
-        "Hex",
-        "Package manager for BEAM ecosystem",
-        "https://hex.pm/",
-    ),
-    ProgramInfo::standard(
-        "pip",
-        "pip",
-        "Python package installer",
-        "https://pip.pypa.io/",
-    ),
-    ProgramInfo::standard(
-        "uv",
-        "uv",
-        "Fast Python package manager",
-        "https://astral.sh/uv",
-    ),
-    ProgramInfo::standard(
-        "poetry",
-        "Poetry",
-        "Python dependency manager with lockfiles",
-        "https://python-poetry.org/",
-    ),
-    ProgramInfo::standard(
-        "cpan",
-        "CPAN",
-        "Perl module archive",
-        "https://www.cpan.org/",
-    ),
-    ProgramInfo::standard(
-        "cpanm",
-        "cpanminus",
-        "Lightweight CPAN client",
-        "https://metacpan.org/pod/App::cpanminus",
-    ),
+    ProgramInfo {
+        binary_name: "npm",
+        display_name: "npm",
+        description: "Node.js package manager",
+        website: "https://www.npmjs.com/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/npm/cli"),
+        installation_methods: NPM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "pnpm",
+        display_name: "pnpm",
+        description: "Fast, disk-efficient package manager",
+        website: "https://pnpm.io/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/pnpm/pnpm"),
+        installation_methods: PNPM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "yarn",
+        display_name: "Yarn",
+        description: "Alternative Node.js package manager",
+        website: "https://yarnpkg.com/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/yarnpkg/berry"),
+        installation_methods: YARN_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "bun",
+        display_name: "Bun",
+        description: "All-in-one JS runtime with package manager",
+        website: "https://bun.sh/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/oven-sh/bun"),
+        installation_methods: BUN_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "cargo",
+        display_name: "Cargo",
+        description: "Rust package manager and build tool",
+        website: "https://doc.rust-lang.org/cargo/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/rust-lang/cargo"),
+        installation_methods: CARGO_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "go",
+        display_name: "Go Modules",
+        description: "Built-in Go dependency system",
+        website: "https://go.dev/ref/mod",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::AfterPrefix,
+        version_regex: None,
+        version_prefix: Some("go version "),
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/golang/go"),
+        installation_methods: GO_MODULES_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "composer",
+        display_name: "Composer",
+        description: "PHP dependency manager",
+        website: "https://getcomposer.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::AfterPrefix,
+        version_regex: None,
+        version_prefix: Some("Composer version "),
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/composer/composer"),
+        installation_methods: COMPOSER_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "swift",
+        display_name: "Swift Package Manager",
+        description: "Swift dependency manager",
+        website: "https://www.swift.org/package-manager/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/apple/swift-package-manager"),
+        installation_methods: SWIFTPM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "luarocks",
+        display_name: "LuaRocks",
+        description: "Package manager for Lua modules",
+        website: "https://luarocks.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/luarocks/luarocks"),
+        installation_methods: LUAROCKS_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "vcpkg",
+        display_name: "vcpkg",
+        description: "C/C++ dependency manager by Microsoft",
+        website: "https://vcpkg.io/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/microsoft/vcpkg"),
+        installation_methods: VCPKG_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "conan",
+        display_name: "Conan",
+        description: "Decentralized C/C++ package manager",
+        website: "https://conan.io/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/conan-io/conan"),
+        installation_methods: CONAN_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "nuget",
+        display_name: "NuGet",
+        description: ".NET package manager",
+        website: "https://www.nuget.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/NuGet/NuGet.Client"),
+        installation_methods: NUGET_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "mix",
+        display_name: "Hex",
+        description: "Package manager for BEAM ecosystem",
+        website: "https://hex.pm/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/hexpm/hex"),
+        installation_methods: HEX_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "pip",
+        display_name: "pip",
+        description: "Python package installer",
+        website: "https://pip.pypa.io/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/pypa/pip"),
+        installation_methods: PIP_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "uv",
+        display_name: "uv",
+        description: "Fast Python package manager",
+        website: "https://astral.sh/uv",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/astral-sh/uv"),
+        installation_methods: UV_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "poetry",
+        display_name: "Poetry",
+        description: "Python dependency manager with lockfiles",
+        website: "https://python-poetry.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/python-poetry/poetry"),
+        installation_methods: POETRY_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "cpan",
+        display_name: "CPAN",
+        description: "Perl module archive",
+        website: "https://www.cpan.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/Perl/perl5"),
+        installation_methods: CPAN_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "cpanm",
+        display_name: "cpanminus",
+        description: "Lightweight CPAN client",
+        website: "https://metacpan.org/pod/App::cpanminus",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/miyagawa/cpanminus"),
+        installation_methods: CPANM_INSTALL,
+    },
 ];
 
 impl ProgramMetadata for LanguagePackageManager {
     fn info(&self) -> &'static ProgramInfo {
         &LANG_PKG_MGR_INFO[*self as usize]
+    }
+}
+
+impl CategoryEnum for LanguagePackageManager {
+    fn category_name() -> &'static str {
+        "language_package_managers"
+    }
+
+    fn variant_index(&self) -> usize {
+        *self as usize
+    }
+
+    fn serde_key(&self) -> &'static str {
+        match self {
+            LanguagePackageManager::Npm => "npm",
+            LanguagePackageManager::Pnpm => "pnpm",
+            LanguagePackageManager::Yarn => "yarn",
+            LanguagePackageManager::Bun => "bun",
+            LanguagePackageManager::Cargo => "cargo",
+            LanguagePackageManager::GoModules => "go_modules",
+            LanguagePackageManager::Composer => "composer",
+            LanguagePackageManager::SwiftPm => "swift_pm",
+            LanguagePackageManager::Luarocks => "luarocks",
+            LanguagePackageManager::Vcpkg => "vcpkg",
+            LanguagePackageManager::Conan => "conan",
+            LanguagePackageManager::Nuget => "nuget",
+            LanguagePackageManager::Hex => "hex",
+            LanguagePackageManager::Pip => "pip",
+            LanguagePackageManager::Uv => "uv",
+            LanguagePackageManager::Poetry => "poetry",
+            LanguagePackageManager::Cpan => "cpan",
+            LanguagePackageManager::Cpanm => "cpanm",
+        }
     }
 }
 
@@ -740,32 +1851,69 @@ pub enum OsPackageManager {
     Nix,
 }
 
+// OS package manager installation methods
+pub(crate) static BREW_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
+    "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
+)];
+
 /// Metadata lookup table for OS package managers.
 static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
-    ProgramInfo::standard(
-        "apt",
-        "APT",
-        "Debian/Ubuntu package manager",
-        "https://tracker.debian.org/pkg/apt",
-    ),
-    ProgramInfo::standard(
-        "nala",
-        "Nala",
-        "Modern apt frontend with parallel downloads",
-        "https://github.com/volitank/nala",
-    ),
-    ProgramInfo::standard(
-        "brew",
-        "Homebrew",
-        "macOS/Linux community package manager",
-        "https://brew.sh/",
-    ),
-    ProgramInfo::standard(
-        "dnf",
-        "DNF",
-        "Fedora/RHEL package manager",
-        "https://github.com/rpm-software-management/dnf",
-    ),
+    ProgramInfo {
+        binary_name: "apt",
+        display_name: "APT",
+        description: "Debian/Ubuntu package manager",
+        website: "https://tracker.debian.org/pkg/apt",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://salsa.debian.org/apt-team/apt"),
+        installation_methods: &[],
+    },
+    ProgramInfo {
+        binary_name: "nala",
+        display_name: "Nala",
+        description: "Modern apt frontend with parallel downloads",
+        website: "https://github.com/volitank/nala",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://github.com/volitank/nala"),
+        installation_methods: &[],
+    },
+    ProgramInfo {
+        binary_name: "brew",
+        display_name: "Homebrew",
+        description: "macOS/Linux community package manager",
+        website: "https://brew.sh/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/Homebrew/brew"),
+        installation_methods: BREW_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "dnf",
+        display_name: "DNF",
+        description: "Fedora/RHEL package manager",
+        website: "https://github.com/rpm-software-management/dnf",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://github.com/rpm-software-management/dnf"),
+        installation_methods: &[],
+    },
     ProgramInfo {
         binary_name: "pacman",
         display_name: "Pacman",
@@ -776,34 +1924,95 @@ static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
         version_regex: None,
         version_prefix: None,
         alternate_binary_names: &[],
-        os_availability: &[],
-        repo: None,
+        os_availability: LINUX_ONLY,
+        repo: Some("https://gitlab.archlinux.org/pacman/pacman"),
         installation_methods: &[],
     },
-    ProgramInfo::standard(
-        "winget",
-        "winget",
-        "Windows Package Manager",
-        "https://github.com/microsoft/winget-cli",
-    ),
-    ProgramInfo::standard(
-        "choco",
-        "Chocolatey",
-        "Windows community package manager",
-        "https://chocolatey.org/",
-    ),
-    ProgramInfo::standard(
-        "scoop",
-        "Scoop",
-        "Windows command-line installer",
-        "https://scoop.sh/",
-    ),
-    ProgramInfo::standard("nix", "Nix", "Nix package manager", "https://nixos.org/"),
+    ProgramInfo {
+        binary_name: "winget",
+        display_name: "winget",
+        description: "Windows Package Manager",
+        website: "https://github.com/microsoft/winget-cli",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: WINDOWS_ONLY,
+        repo: Some("https://github.com/microsoft/winget-cli"),
+        installation_methods: &[],
+    },
+    ProgramInfo {
+        binary_name: "choco",
+        display_name: "Chocolatey",
+        description: "Windows community package manager",
+        website: "https://chocolatey.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: WINDOWS_ONLY,
+        repo: Some("https://github.com/chocolatey/choco"),
+        installation_methods: &[],
+    },
+    ProgramInfo {
+        binary_name: "scoop",
+        display_name: "Scoop",
+        description: "Windows command-line installer",
+        website: "https://scoop.sh/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: WINDOWS_ONLY,
+        repo: Some("https://github.com/ScoopInstaller/Scoop"),
+        installation_methods: &[],
+    },
+    ProgramInfo {
+        binary_name: "nix",
+        display_name: "Nix",
+        description: "Nix package manager",
+        website: "https://nixos.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/NixOS/nix"),
+        installation_methods: &[],
+    },
 ];
 
 impl ProgramMetadata for OsPackageManager {
     fn info(&self) -> &'static ProgramInfo {
         &OS_PKG_MGR_INFO[*self as usize]
+    }
+}
+
+impl CategoryEnum for OsPackageManager {
+    fn category_name() -> &'static str {
+        "os_package_managers"
+    }
+
+    fn variant_index(&self) -> usize {
+        *self as usize
+    }
+
+    fn serde_key(&self) -> &'static str {
+        match self {
+            OsPackageManager::Apt => "apt",
+            OsPackageManager::Nala => "nala",
+            OsPackageManager::Brew => "brew",
+            OsPackageManager::Dnf => "dnf",
+            OsPackageManager::Pacman => "pacman",
+            OsPackageManager::Winget => "winget",
+            OsPackageManager::Chocolatey => "chocolatey",
+            OsPackageManager::Scoop => "scoop",
+            OsPackageManager::Nix => "nix",
+        }
     }
 }
 
@@ -846,6 +2055,47 @@ pub enum TtsClient {
     Pico2Wave,
 }
 
+// TTS client installation methods
+pub(crate) static ESPEAK_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("espeak"),
+    InstallationMethod::Apt("espeak"),
+    InstallationMethod::Dnf("espeak"),
+    InstallationMethod::Pacman("espeak"),
+];
+pub(crate) static ESPEAK_NG_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("espeak-ng"),
+    InstallationMethod::Apt("espeak-ng"),
+    InstallationMethod::Dnf("espeak-ng"),
+    InstallationMethod::Pacman("espeak-ng"),
+];
+pub(crate) static FESTIVAL_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("festival"),
+    InstallationMethod::Apt("festival"),
+    InstallationMethod::Dnf("festival"),
+    InstallationMethod::Pacman("festival"),
+];
+pub(crate) static MIMIC_INSTALL: &[InstallationMethod] = &[InstallationMethod::Pip("mimic")];
+pub(crate) static MIMIC3_INSTALL: &[InstallationMethod] = &[InstallationMethod::Pip("mimic3-tts")];
+pub(crate) static PIPER_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("piper"),
+    InstallationMethod::Pip("piper-tts"),
+];
+pub(crate) static ECHOGARDEN_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Npm("echogarden")];
+pub(crate) static BALCON_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Chocolatey("balcon")];
+pub(crate) static WINDOWS_SAPI_INSTALL: &[InstallationMethod] = &[];
+pub(crate) static GTTS_CLI_INSTALL: &[InstallationMethod] = &[InstallationMethod::Pip("gTTS")];
+pub(crate) static COQUI_TTS_INSTALL: &[InstallationMethod] = &[InstallationMethod::Pip("TTS")];
+pub(crate) static SHERPA_ONNX_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Pip("sherpa-onnx")];
+pub(crate) static KOKORO_TTS_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Pip("kokoro-tts")];
+pub(crate) static PICO2WAVE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("libttspico-utils"),
+    InstallationMethod::Pacman("svox-pico"),
+];
+
 /// Metadata lookup table for TTS clients.
 static TTS_CLIENT_INFO: &[ProgramInfo] = &[
     ProgramInfo {
@@ -858,58 +2108,122 @@ static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         version_regex: None,
         version_prefix: None,
         alternate_binary_names: &[],
-        os_availability: &[],
+        os_availability: MACOS_ONLY,
         repo: None,
         installation_methods: &[],
     },
-    ProgramInfo::standard(
-        "espeak",
-        "eSpeak",
-        "Open source speech synthesizer",
-        "http://espeak.sourceforge.net/",
-    ),
-    ProgramInfo::standard(
-        "espeak-ng",
-        "eSpeak NG",
-        "Multi-lingual speech synthesizer",
-        "https://github.com/espeak-ng/espeak-ng",
-    ),
-    ProgramInfo::standard(
-        "festival",
-        "Festival",
-        "General multi-lingual speech synthesis",
-        "http://www.cstr.ed.ac.uk/projects/festival/",
-    ),
-    ProgramInfo::standard(
-        "mimic",
-        "Mimic",
-        "Mycroft's TTS engine based on Flite",
-        "https://github.com/MycroftAI/mimic",
-    ),
-    ProgramInfo::standard(
-        "mimic3",
-        "Mimic 3",
-        "Mycroft's neural TTS engine",
-        "https://github.com/MycroftAI/mycroft-mimic3-tts",
-    ),
-    ProgramInfo::standard(
-        "piper",
-        "Piper",
-        "Fast local neural TTS using ONNX",
-        "https://github.com/rhasspy/piper",
-    ),
-    ProgramInfo::standard(
-        "echogarden",
-        "Echogarden",
-        "Speech processing engine",
-        "https://echogarden.io/",
-    ),
-    ProgramInfo::standard(
-        "balcon",
-        "Balcon",
-        "Command line TTS utility for Windows",
-        "http://www.cross-plus-a.com/balcon.htm",
-    ),
+    ProgramInfo {
+        binary_name: "espeak",
+        display_name: "eSpeak",
+        description: "Open source speech synthesizer",
+        website: "http://espeak.sourceforge.net/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/espeak-ng/espeak-ng"),
+        installation_methods: ESPEAK_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "espeak-ng",
+        display_name: "eSpeak NG",
+        description: "Multi-lingual speech synthesizer",
+        website: "https://github.com/espeak-ng/espeak-ng",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/espeak-ng/espeak-ng"),
+        installation_methods: ESPEAK_NG_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "festival",
+        display_name: "Festival",
+        description: "General multi-lingual speech synthesis",
+        website: "http://www.cstr.ed.ac.uk/projects/festival/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/festvox/festival"),
+        installation_methods: FESTIVAL_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "mimic",
+        display_name: "Mimic",
+        description: "Mycroft's TTS engine based on Flite",
+        website: "https://github.com/MycroftAI/mimic",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/MycroftAI/mimic"),
+        installation_methods: MIMIC_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "mimic3",
+        display_name: "Mimic 3",
+        description: "Mycroft's neural TTS engine",
+        website: "https://github.com/MycroftAI/mycroft-mimic3-tts",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/MycroftAI/mycroft-mimic3-tts"),
+        installation_methods: MIMIC3_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "piper",
+        display_name: "Piper",
+        description: "Fast local neural TTS using ONNX",
+        website: "https://github.com/rhasspy/piper",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/rhasspy/piper"),
+        installation_methods: PIPER_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "echogarden",
+        display_name: "Echogarden",
+        description: "Speech processing engine",
+        website: "https://echogarden.io/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/echogarden-project/echogarden"),
+        installation_methods: ECHOGARDEN_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "balcon",
+        display_name: "Balcon",
+        description: "Command line TTS utility for Windows",
+        website: "http://www.cross-plus-a.com/balcon.htm",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: WINDOWS_ONLY,
+        repo: None,
+        installation_methods: BALCON_INSTALL,
+    },
     ProgramInfo {
         binary_name: "sapi",
         display_name: "Windows SAPI",
@@ -920,45 +2234,133 @@ static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         version_regex: None,
         version_prefix: None,
         alternate_binary_names: &[],
-        os_availability: &[],
+        os_availability: WINDOWS_ONLY,
         repo: None,
-        installation_methods: &[],
+        installation_methods: WINDOWS_SAPI_INSTALL,
     },
-    ProgramInfo::standard(
-        "gtts-cli",
-        "gTTS",
-        "Google Text-to-Speech CLI tool",
-        "https://github.com/pndurette/gTTS",
-    ),
-    ProgramInfo::standard(
-        "tts",
-        "Coqui TTS",
-        "Deep learning for Text-to-Speech",
-        "https://github.com/coqui-ai/TTS",
-    ),
-    ProgramInfo::standard(
-        "sherpa-onnx-offline-tts",
-        "Sherpa-ONNX",
-        "Streaming/non-streaming TTS using ONNX",
-        "https://k2-fsa.github.io/sherpa/onnx/",
-    ),
-    ProgramInfo::standard(
-        "kokoro-tts",
-        "Kokoro TTS",
-        "High-quality neural TTS using Kokoro-82M model",
-        "https://github.com/nazdridoy/kokoro-tts",
-    ),
-    ProgramInfo::standard(
-        "pico2wave",
-        "SVOX Pico",
-        "Lightweight TTS for embedded systems",
-        "https://github.com/naggety/picmotts",
-    ),
+    ProgramInfo {
+        binary_name: "gtts-cli",
+        display_name: "gTTS",
+        description: "Google Text-to-Speech CLI tool",
+        website: "https://github.com/pndurette/gTTS",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/pndurette/gTTS"),
+        installation_methods: GTTS_CLI_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "tts",
+        display_name: "Coqui TTS",
+        description: "Deep learning for Text-to-Speech",
+        website: "https://github.com/coqui-ai/TTS",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/coqui-ai/TTS"),
+        installation_methods: COQUI_TTS_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "sherpa-onnx-offline-tts",
+        display_name: "Sherpa-ONNX",
+        description: "Streaming/non-streaming TTS using ONNX",
+        website: "https://k2-fsa.github.io/sherpa/onnx/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &["sherpa-onnx-tts"],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/k2-fsa/sherpa-onnx"),
+        installation_methods: SHERPA_ONNX_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "kokoro-tts",
+        display_name: "Kokoro TTS",
+        description: "High-quality neural TTS using Kokoro-82M model",
+        website: "https://github.com/nazdridoy/kokoro-tts",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/nazdridoy/kokoro-tts"),
+        installation_methods: KOKORO_TTS_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "pico2wave",
+        display_name: "SVOX Pico",
+        description: "Lightweight TTS for embedded systems",
+        website: "https://github.com/naggety/picmotts",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/naggety/picmotts"),
+        installation_methods: PICO2WAVE_INSTALL,
+    },
 ];
 
 impl ProgramMetadata for TtsClient {
     fn info(&self) -> &'static ProgramInfo {
         &TTS_CLIENT_INFO[*self as usize]
+    }
+}
+
+impl CategoryEnum for TtsClient {
+    fn category_name() -> &'static str {
+        "tts_clients"
+    }
+
+    fn variant_index(&self) -> usize {
+        *self as usize
+    }
+
+    fn serde_key(&self) -> &'static str {
+        match self {
+            TtsClient::Say => "say",
+            TtsClient::Espeak => "espeak",
+            TtsClient::EspeakNg => "espeak_ng",
+            TtsClient::Festival => "festival",
+            TtsClient::Mimic => "mimic",
+            TtsClient::Mimic3 => "mimic3",
+            TtsClient::Piper => "piper",
+            TtsClient::Echogarden => "echogarden",
+            TtsClient::Balcon => "balcon",
+            TtsClient::WindowsSapi => "windows_sapi",
+            TtsClient::GttsCli => "gtts_cli",
+            TtsClient::CoquiTts => "coqui_tts",
+            TtsClient::SherpaOnnx => "sherpa_onnx",
+            TtsClient::KokoroTts => "kokoro_tts",
+            TtsClient::Pico2Wave => "pico2_wave",
+        }
+    }
+
+    fn platform_override(
+        &self,
+    ) -> Option<(std::path::PathBuf, crate::programs::types::ExecutableSource)> {
+        match self {
+            TtsClient::WindowsSapi => {
+                if cfg!(target_os = "windows") {
+                    Some((
+                        std::path::PathBuf::from("sapi"),
+                        crate::programs::types::ExecutableSource::Path,
+                    ))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 }
 
@@ -1003,20 +2405,108 @@ pub enum TerminalApp {
     WindowsTerminal,
 }
 
+// Terminal app installation methods
+pub(crate) static ALACRITTY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("alacritty"),
+    InstallationMethod::Cargo("alacritty"),
+    InstallationMethod::Pacman("alacritty"),
+    InstallationMethod::Scoop("alacritty"),
+];
+pub(crate) static KITTY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("kitty"),
+    InstallationMethod::Apt("kitty"),
+    InstallationMethod::Dnf("kitty"),
+    InstallationMethod::Pacman("kitty"),
+];
+pub(crate) static ITERM2_INSTALL: &[InstallationMethod] = &[InstallationMethod::Brew("iterm2")];
+pub(crate) static WEZTERM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("wezterm"),
+    InstallationMethod::Chocolatey("wezterm"),
+    InstallationMethod::Scoop("wezterm"),
+];
+pub(crate) static GHOSTTY_INSTALL: &[InstallationMethod] = &[InstallationMethod::Brew("ghostty")];
+pub(crate) static WARP_INSTALL: &[InstallationMethod] = &[InstallationMethod::Brew("warp")];
+pub(crate) static RIO_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("rio"),
+    InstallationMethod::Scoop("rio"),
+];
+pub(crate) static TABBY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("tabby"),
+    InstallationMethod::Scoop("tabby"),
+];
+pub(crate) static FOOT_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("foot"),
+    InstallationMethod::Dnf("foot"),
+    InstallationMethod::Pacman("foot"),
+];
+pub(crate) static GNOME_TERMINAL_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("gnome-terminal"),
+    InstallationMethod::Dnf("gnome-terminal"),
+    InstallationMethod::Pacman("gnome-terminal"),
+];
+pub(crate) static KONSOLE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("konsole"),
+    InstallationMethod::Dnf("konsole"),
+    InstallationMethod::Pacman("konsole"),
+];
+pub(crate) static XFCE_TERMINAL_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("xfce4-terminal"),
+    InstallationMethod::Dnf("xfce4-terminal"),
+    InstallationMethod::Pacman("xfce4-terminal"),
+];
+pub(crate) static TERMINOLOGY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("terminology"),
+    InstallationMethod::Dnf("terminology"),
+    InstallationMethod::Pacman("terminology"),
+];
+pub(crate) static ST_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("st"),
+    InstallationMethod::Pacman("st"),
+];
+pub(crate) static XTERM_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("xterm"),
+    InstallationMethod::Dnf("xterm"),
+    InstallationMethod::Pacman("xterm"),
+];
+pub(crate) static HYPER_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("hyper"),
+    InstallationMethod::Scoop("hyper"),
+];
+pub(crate) static WINDOWS_TERMINAL_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Winget("Microsoft.WindowsTerminal"),
+    InstallationMethod::Scoop("windows-terminal"),
+];
+
 /// Metadata lookup table for terminal apps.
 static TERMINAL_APP_INFO: &[ProgramInfo] = &[
-    ProgramInfo::standard(
-        "alacritty",
-        "Alacritty",
-        "Fast, GPU-accelerated terminal emulator",
-        "https://alacritty.org/",
-    ),
-    ProgramInfo::standard(
-        "kitty",
-        "kitty",
-        "Fast, feature-rich, GPU-based terminal",
-        "https://sw.kovidgoyal.net/kitty/",
-    ),
+    ProgramInfo {
+        binary_name: "alacritty",
+        display_name: "Alacritty",
+        description: "Fast, GPU-accelerated terminal emulator",
+        website: "https://alacritty.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/alacritty/alacritty"),
+        installation_methods: ALACRITTY_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "kitty",
+        display_name: "kitty",
+        description: "Fast, feature-rich, GPU-based terminal",
+        website: "https://sw.kovidgoyal.net/kitty/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/kovidgoyal/kitty"),
+        installation_methods: KITTY_INSTALL,
+    },
     ProgramInfo {
         binary_name: "iterm2",
         display_name: "iTerm2",
@@ -1027,22 +2517,38 @@ static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         version_regex: None,
         version_prefix: None,
         alternate_binary_names: &[],
-        os_availability: &[],
-        repo: None,
-        installation_methods: &[],
+        os_availability: MACOS_ONLY,
+        repo: Some("https://github.com/gnachman/iTerm2"),
+        installation_methods: ITERM2_INSTALL,
     },
-    ProgramInfo::standard(
-        "wezterm",
-        "WezTerm",
-        "GPU-accelerated terminal emulator and multiplexer",
-        "https://wezfurlong.org/wezterm/",
-    ),
-    ProgramInfo::standard(
-        "ghostty",
-        "Ghostty",
-        "Fast, feature-rich GPU terminal written in Zig",
-        "https://ghostty.org/",
-    ),
+    ProgramInfo {
+        binary_name: "wezterm",
+        display_name: "WezTerm",
+        description: "GPU-accelerated terminal emulator and multiplexer",
+        website: "https://wezfurlong.org/wezterm/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/wez/wezterm"),
+        installation_methods: WEZTERM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "ghostty",
+        display_name: "Ghostty",
+        description: "Fast, feature-rich GPU terminal written in Zig",
+        website: "https://ghostty.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/ghostty-org/ghostty"),
+        installation_methods: GHOSTTY_INSTALL,
+    },
     ProgramInfo {
         binary_name: "warp-terminal",
         display_name: "Warp",
@@ -1053,52 +2559,108 @@ static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         version_regex: None,
         version_prefix: None,
         alternate_binary_names: &[],
-        os_availability: &[],
-        repo: None,
-        installation_methods: &[],
+        os_availability: MACOS_ONLY,
+        repo: Some("https://www.warp.dev/"),
+        installation_methods: WARP_INSTALL,
     },
-    ProgramInfo::standard(
-        "rio",
-        "Rio",
-        "Hardware-accelerated GPU terminal emulator",
-        "https://github.com/raphamorim/rio",
-    ),
-    ProgramInfo::standard(
-        "tabby",
-        "Tabby",
-        "Terminal for a more modern age",
-        "https://tabby.sh/",
-    ),
-    ProgramInfo::standard(
-        "foot",
-        "foot",
-        "Fast, lightweight Wayland terminal emulator",
-        "https://codeberg.org/dnkl/foot",
-    ),
-    ProgramInfo::standard(
-        "gnome-terminal",
-        "GNOME Terminal",
-        "Default terminal for GNOME desktop",
-        "https://help.gnome.org/users/gnome-terminal/stable/",
-    ),
-    ProgramInfo::standard(
-        "konsole",
-        "Konsole",
-        "Terminal emulator by KDE",
-        "https://konsole.kde.org/",
-    ),
-    ProgramInfo::standard(
-        "xfce4-terminal",
-        "Xfce Terminal",
-        "Terminal emulator for Xfce",
-        "https://docs.xfce.org/apps/xfce4-terminal/start",
-    ),
-    ProgramInfo::standard(
-        "terminology",
-        "Terminology",
-        "Terminal based on Enlightenment libraries",
-        "https://www.enlightenment.org/about-terminology",
-    ),
+    ProgramInfo {
+        binary_name: "rio",
+        display_name: "Rio",
+        description: "Hardware-accelerated GPU terminal emulator",
+        website: "https://github.com/raphamorim/rio",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/raphamorim/rio"),
+        installation_methods: RIO_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "tabby",
+        display_name: "Tabby",
+        description: "Terminal for a more modern age",
+        website: "https://tabby.sh/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/Eugeny/tabby"),
+        installation_methods: TABBY_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "foot",
+        display_name: "foot",
+        description: "Fast, lightweight Wayland terminal emulator",
+        website: "https://codeberg.org/dnkl/foot",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://codeberg.org/dnkl/foot"),
+        installation_methods: FOOT_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "gnome-terminal",
+        display_name: "GNOME Terminal",
+        description: "Default terminal for GNOME desktop",
+        website: "https://help.gnome.org/users/gnome-terminal/stable/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://gitlab.gnome.org/GNOME/gnome-terminal"),
+        installation_methods: GNOME_TERMINAL_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "konsole",
+        display_name: "Konsole",
+        description: "Terminal emulator by KDE",
+        website: "https://konsole.kde.org/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://invent.kde.org/utilities/konsole"),
+        installation_methods: KONSOLE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "xfce4-terminal",
+        display_name: "Xfce Terminal",
+        description: "Terminal emulator for Xfce",
+        website: "https://docs.xfce.org/apps/xfce4-terminal/start",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://gitlab.xfce.org/apps/xfce4-terminal"),
+        installation_methods: XFCE_TERMINAL_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "terminology",
+        display_name: "Terminology",
+        description: "Terminal based on Enlightenment libraries",
+        website: "https://www.enlightenment.org/about-terminology",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://github.com/Enlightenment/terminology"),
+        installation_methods: TERMINOLOGY_INSTALL,
+    },
     ProgramInfo {
         binary_name: "st",
         display_name: "st",
@@ -1109,33 +2671,89 @@ static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         version_regex: None,
         version_prefix: None,
         alternate_binary_names: &[],
-        os_availability: &[],
-        repo: None,
-        installation_methods: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://git.suckless.org/st"),
+        installation_methods: ST_INSTALL,
     },
-    ProgramInfo::standard(
-        "xterm",
-        "xterm",
-        "Standard terminal for X Window System",
-        "https://invisible-island.net/xterm/",
-    ),
-    ProgramInfo::standard(
-        "hyper",
-        "Hyper",
-        "Terminal built on web technologies",
-        "https://hyper.is/",
-    ),
-    ProgramInfo::standard(
-        "wt",
-        "Windows Terminal",
-        "Modern terminal for Windows",
-        "https://github.com/microsoft/terminal",
-    ),
+    ProgramInfo {
+        binary_name: "xterm",
+        display_name: "xterm",
+        description: "Standard terminal for X Window System",
+        website: "https://invisible-island.net/xterm/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://invisible-island.net/xterm/"),
+        installation_methods: XTERM_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "hyper",
+        display_name: "Hyper",
+        description: "Terminal built on web technologies",
+        website: "https://hyper.is/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/vercel/hyper"),
+        installation_methods: HYPER_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "wt",
+        display_name: "Windows Terminal",
+        description: "Modern terminal for Windows",
+        website: "https://github.com/microsoft/terminal",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: WINDOWS_ONLY,
+        repo: Some("https://github.com/microsoft/terminal"),
+        installation_methods: WINDOWS_TERMINAL_INSTALL,
+    },
 ];
 
 impl ProgramMetadata for TerminalApp {
     fn info(&self) -> &'static ProgramInfo {
         &TERMINAL_APP_INFO[*self as usize]
+    }
+}
+
+impl CategoryEnum for TerminalApp {
+    fn category_name() -> &'static str {
+        "terminal_apps"
+    }
+
+    fn variant_index(&self) -> usize {
+        *self as usize
+    }
+
+    fn serde_key(&self) -> &'static str {
+        match self {
+            TerminalApp::Alacritty => "alacritty",
+            TerminalApp::Kitty => "kitty",
+            TerminalApp::ITerm2 => "i_term2",
+            TerminalApp::WezTerm => "wez_term",
+            TerminalApp::Ghostty => "ghostty",
+            TerminalApp::Warp => "warp",
+            TerminalApp::Rio => "rio",
+            TerminalApp::Tabby => "tabby",
+            TerminalApp::Foot => "foot",
+            TerminalApp::GnomeTerminal => "gnome_terminal",
+            TerminalApp::Konsole => "konsole",
+            TerminalApp::XfceTerminal => "xfce_terminal",
+            TerminalApp::Terminology => "terminology",
+            TerminalApp::St => "st",
+            TerminalApp::Xterm => "xterm",
+            TerminalApp::Hyper => "hyper",
+            TerminalApp::WindowsTerminal => "windows_terminal",
+        }
     }
 }
 
@@ -1176,91 +2794,297 @@ pub enum HeadlessAudio {
     Pipewire,
 }
 
+// Headless audio player installation methods
+pub(crate) static MPV_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("mpv"),
+    InstallationMethod::Apt("mpv"),
+    InstallationMethod::Dnf("mpv"),
+    InstallationMethod::Pacman("mpv"),
+    InstallationMethod::Chocolatey("mpv"),
+    InstallationMethod::Scoop("mpv"),
+];
+pub(crate) static FFPLAY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("ffmpeg"),
+    InstallationMethod::Apt("ffmpeg"),
+    InstallationMethod::Dnf("ffmpeg"),
+    InstallationMethod::Pacman("ffmpeg"),
+    InstallationMethod::Chocolatey("ffmpeg"),
+    InstallationMethod::Scoop("ffmpeg"),
+];
+pub(crate) static VLC_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("vlc"),
+    InstallationMethod::Apt("vlc"),
+    InstallationMethod::Dnf("vlc"),
+    InstallationMethod::Pacman("vlc"),
+    InstallationMethod::Chocolatey("vlc"),
+    InstallationMethod::Scoop("vlc"),
+];
+pub(crate) static MPLAYER_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("mplayer"),
+    InstallationMethod::Apt("mplayer"),
+    InstallationMethod::Dnf("mplayer"),
+    InstallationMethod::Pacman("mplayer"),
+];
+pub(crate) static GSTREAMER_GST_PLAY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("gstreamer"),
+    InstallationMethod::Apt("gstreamer1.0-tools"),
+    InstallationMethod::Dnf("gstreamer1-plugins-base"),
+    InstallationMethod::Pacman("gstreamer"),
+];
+pub(crate) static SOX_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("sox"),
+    InstallationMethod::Apt("sox"),
+    InstallationMethod::Dnf("sox"),
+    InstallationMethod::Pacman("sox"),
+    InstallationMethod::Chocolatey("sox"),
+];
+pub(crate) static MPG123_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("mpg123"),
+    InstallationMethod::Apt("mpg123"),
+    InstallationMethod::Dnf("mpg123"),
+    InstallationMethod::Pacman("mpg123"),
+];
+pub(crate) static OGG123_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("vorbis-tools"),
+    InstallationMethod::Apt("vorbis-tools"),
+    InstallationMethod::Dnf("vorbis-tools"),
+    InstallationMethod::Pacman("vorbis-tools"),
+];
+pub(crate) static ALSA_APLAY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("alsa-utils"),
+    InstallationMethod::Dnf("alsa-utils"),
+    InstallationMethod::Pacman("alsa-utils"),
+];
+pub(crate) static MACOS_AFPLAY_INSTALL: &[InstallationMethod] = &[];
+pub(crate) static PULSEAUDIO_PAPLAY_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("pulseaudio-utils"),
+    InstallationMethod::Dnf("pulseaudio-utils"),
+    InstallationMethod::Pacman("pulseaudio"),
+];
+pub(crate) static PULSEAUDIO_PACAT_INSTALL: &[InstallationMethod] = PULSEAUDIO_PAPLAY_INSTALL;
+pub(crate) static PIPEWIRE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Apt("pipewire"),
+    InstallationMethod::Dnf("pipewire"),
+    InstallationMethod::Pacman("pipewire"),
+];
+
 /// Metadata lookup table for headless audio players.
 static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
-    ProgramInfo::standard(
-        "mpv",
-        "mpv",
-        "CLI media player for audio-only playback",
-        "https://mpv.io/",
-    ),
-    ProgramInfo::standard(
-        "ffplay",
-        "FFplay",
-        "Minimal CLI player shipped with FFmpeg",
-        "https://www.ffmpeg.org/ffplay.html",
-    ),
-    ProgramInfo::standard(
-        "cvlc",
-        "VLC",
-        "Headless VLC playback via cvlc",
-        "https://wiki.videolan.org/VLC_command-line_help/",
-    ),
-    ProgramInfo::standard(
-        "mplayer",
-        "MPlayer",
-        "Classic CLI-oriented media player",
-        "https://www.mplayerhq.hu/",
-    ),
-    ProgramInfo::standard(
-        "gst-play-1.0",
-        "GStreamer gst-play",
-        "CLI front-end to GStreamer pipelines",
-        "https://gstreamer.freedesktop.org/documentation/tools/gst-play-1.0.html",
-    ),
-    ProgramInfo::standard(
-        "play",
-        "SoX play",
-        "Swiss-army knife for audio playback",
-        "https://linux.die.net/man/1/sox",
-    ),
-    ProgramInfo::standard(
-        "mpg123",
-        "mpg123",
-        "Lightweight console MP3 player",
-        "https://www.mpg123.de/",
-    ),
-    ProgramInfo::standard(
-        "ogg123",
-        "ogg123",
-        "CLI player for Ogg/Vorbis files",
-        "https://github.com/xiph/vorbis-tools",
-    ),
-    ProgramInfo::standard(
-        "aplay",
-        "aplay",
-        "ALSA low-level playback utility",
-        "https://linux.die.net/man/1/aplay",
-    ),
-    ProgramInfo::standard(
-        "afplay",
-        "afplay",
-        "macOS native audio file player",
-        "https://ss64.com/osx/afplay.html",
-    ),
-    ProgramInfo::standard(
-        "paplay",
-        "paplay",
-        "Simple PulseAudio playback tool",
-        "https://manpages.ubuntu.com/manpages/trusty/man1/paplay.1.html",
-    ),
-    ProgramInfo::standard(
-        "pacat",
-        "pacat",
-        "PulseAudio raw audio streaming",
-        "https://www.freedesktop.org/wiki/Software/PulseAudio/",
-    ),
-    ProgramInfo::standard(
-        "pw-play",
-        "PipeWire pw-play",
-        "PipeWire CLI playback tool",
-        "https://docs.pipewire.org/page_man_pw-cat_1.html",
-    ),
+    ProgramInfo {
+        binary_name: "mpv",
+        display_name: "mpv",
+        description: "CLI media player for audio-only playback",
+        website: "https://mpv.io/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/mpv-player/mpv"),
+        installation_methods: MPV_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "ffplay",
+        display_name: "FFplay",
+        description: "Minimal CLI player shipped with FFmpeg",
+        website: "https://www.ffmpeg.org/ffplay.html",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/FFmpeg/FFmpeg"),
+        installation_methods: FFPLAY_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "cvlc",
+        display_name: "VLC",
+        description: "Headless VLC playback via cvlc",
+        website: "https://wiki.videolan.org/VLC_command-line_help/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/videolan/vlc"),
+        installation_methods: VLC_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "mplayer",
+        display_name: "MPlayer",
+        description: "Classic CLI-oriented media player",
+        website: "https://www.mplayerhq.hu/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/mplayerhq/mplayer"),
+        installation_methods: MPLAYER_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "gst-play-1.0",
+        display_name: "GStreamer gst-play",
+        description: "CLI front-end to GStreamer pipelines",
+        website: "https://gstreamer.freedesktop.org/documentation/tools/gst-play-1.0.html",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://gitlab.freedesktop.org/gstreamer/gstreamer"),
+        installation_methods: GSTREAMER_GST_PLAY_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "play",
+        display_name: "SoX play",
+        description: "Swiss-army knife for audio playback",
+        website: "https://linux.die.net/man/1/sox",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://sourceforge.net/projects/sox/"),
+        installation_methods: SOX_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "mpg123",
+        display_name: "mpg123",
+        description: "Lightweight console MP3 player",
+        website: "https://www.mpg123.de/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/madebr/mpg123"),
+        installation_methods: MPG123_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "ogg123",
+        display_name: "ogg123",
+        description: "CLI player for Ogg/Vorbis files",
+        website: "https://github.com/xiph/vorbis-tools",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: UNIX_ONLY,
+        repo: Some("https://github.com/xiph/vorbis-tools"),
+        installation_methods: OGG123_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "aplay",
+        display_name: "aplay",
+        description: "ALSA low-level playback utility",
+        website: "https://linux.die.net/man/1/aplay",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: None,
+        installation_methods: ALSA_APLAY_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "afplay",
+        display_name: "afplay",
+        description: "macOS native audio file player",
+        website: "https://ss64.com/osx/afplay.html",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: MACOS_ONLY,
+        repo: None,
+        installation_methods: MACOS_AFPLAY_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "paplay",
+        display_name: "paplay",
+        description: "Simple PulseAudio playback tool",
+        website: "https://manpages.ubuntu.com/manpages/trusty/man1/paplay.1.html",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: None,
+        installation_methods: PULSEAUDIO_PAPLAY_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "pacat",
+        display_name: "pacat",
+        description: "PulseAudio raw audio streaming",
+        website: "https://www.freedesktop.org/wiki/Software/PulseAudio/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: None,
+        installation_methods: PULSEAUDIO_PACAT_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "pw-play",
+        display_name: "PipeWire pw-play",
+        description: "PipeWire CLI playback tool",
+        website: "https://docs.pipewire.org/page_man_pw-cat_1.html",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: LINUX_ONLY,
+        repo: Some("https://gitlab.freedesktop.org/pipewire/pipewire"),
+        installation_methods: PIPEWIRE_INSTALL,
+    },
 ];
 
 impl ProgramMetadata for HeadlessAudio {
     fn info(&self) -> &'static ProgramInfo {
         &HEADLESS_AUDIO_INFO[*self as usize]
+    }
+}
+
+impl CategoryEnum for HeadlessAudio {
+    fn category_name() -> &'static str {
+        "headless_audio"
+    }
+
+    fn variant_index(&self) -> usize {
+        *self as usize
+    }
+
+    fn serde_key(&self) -> &'static str {
+        match self {
+            HeadlessAudio::Mpv => "mpv",
+            HeadlessAudio::Ffplay => "ffplay",
+            HeadlessAudio::Vlc => "vlc",
+            HeadlessAudio::MPlayer => "m_player",
+            HeadlessAudio::GstreamerGstPlay => "gstreamer_gst_play",
+            HeadlessAudio::Sox => "sox",
+            HeadlessAudio::Mpg123 => "mpg123",
+            HeadlessAudio::Ogg123 => "ogg123",
+            HeadlessAudio::AlsaAplay => "alsa_aplay",
+            HeadlessAudio::MacOsAfplay => "mac_os_afplay",
+            HeadlessAudio::PulseaudioPaplay => "pulseaudio_paplay",
+            HeadlessAudio::PulseaudioPacat => "pulseaudio_pacat",
+            HeadlessAudio::Pipewire => "pipewire",
+        }
     }
 }
 
@@ -1297,67 +3121,194 @@ pub enum AiCli {
     QwenCli,
 }
 
+// AI CLI installation methods
+pub(crate) static CLAUDE_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Npm("@anthropic-ai/claude-code")];
+pub(crate) static OPENCODE_INSTALL: &[InstallationMethod] = &[InstallationMethod::GoModules(
+    "github.com/opencode-ai/opencode@latest",
+)];
+pub(crate) static ROO_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
+    "https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/install.sh",
+)];
+pub(crate) static GEMINI_CLI_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Npm("@google/gemini-cli")];
+pub(crate) static AIDER_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Pip("aider-chat"),
+    InstallationMethod::Uv("aider-chat"),
+    InstallationMethod::Brew("aider"),
+];
+pub(crate) static CODEX_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Npm("@openai/codex")];
+pub(crate) static GOOSE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("goose"),
+    InstallationMethod::Pip("goose-ai"),
+];
+pub(crate) static KIMI_CLI_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Uv("kimi-cli"),
+    InstallationMethod::RemoteBash("https://code.kimi.com/install.sh"),
+];
+pub(crate) static QWEN_CLI_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Npm("@qwen-code/qwen-code"),
+    InstallationMethod::Brew("qwen-code"),
+];
+
 /// Metadata lookup table for AI CLI tools.
 static AI_CLI_INFO: &[ProgramInfo] = &[
-    ProgramInfo::standard(
-        "claude",
-        "Claude Code",
-        "Anthropic's agentic coding tool",
-        "https://docs.anthropic.com/en/docs/claude-code",
-    ),
-    ProgramInfo::standard(
-        "opencode",
-        "OpenCode",
-        "AI-powered coding assistant CLI",
-        "https://github.com/opencode-ai/opencode",
-    ),
-    ProgramInfo::standard(
-        "roo",
-        "Roo Code",
-        "AI pair programming in your terminal",
-        "https://github.com/RooVetGit/Roo-Code",
-    ),
-    ProgramInfo::standard(
-        "gemini",
-        "Gemini CLI",
-        "Google's Gemini AI in the terminal",
-        "https://github.com/google-gemini/gemini-cli",
-    ),
-    ProgramInfo::standard(
-        "aider",
-        "Aider",
-        "AI pair programming in your terminal",
-        "https://aider.chat/",
-    ),
-    ProgramInfo::standard(
-        "codex",
-        "Codex CLI",
-        "OpenAI lightweight coding agent",
-        "https://github.com/openai/codex",
-    ),
-    ProgramInfo::standard(
-        "goose",
-        "Goose",
-        "Block's AI developer agent",
-        "https://github.com/block/goose",
-    ),
-    ProgramInfo::standard(
-        "kimi",
-        "Kimi Code CLI",
-        "AI agent that runs in the terminal",
-        "https://moonshotai.github.io/kimi-cli/",
-    ),
-    ProgramInfo::standard(
-        "qwen",
-        "Qwen Code CLI",
-        "Qwen's AI coding agent",
-        "https://qwenlm.github.io/qwen-code-docs/",
-    ),
+    ProgramInfo {
+        binary_name: "claude",
+        display_name: "Claude Code",
+        description: "Anthropic's agentic coding tool",
+        website: "https://docs.anthropic.com/en/docs/claude-code",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/anthropics/claude-code"),
+        installation_methods: CLAUDE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "opencode",
+        display_name: "OpenCode",
+        description: "AI-powered coding assistant CLI",
+        website: "https://github.com/opencode-ai/opencode",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/opencode-ai/opencode"),
+        installation_methods: OPENCODE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "roo",
+        display_name: "Roo Code",
+        description: "AI pair programming in your terminal",
+        website: "https://github.com/RooVetGit/Roo-Code",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/RooVetGit/Roo-Code"),
+        installation_methods: ROO_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "gemini",
+        display_name: "Gemini CLI",
+        description: "Google's Gemini AI in the terminal",
+        website: "https://github.com/google-gemini/gemini-cli",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/google-gemini/gemini-cli"),
+        installation_methods: GEMINI_CLI_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "aider",
+        display_name: "Aider",
+        description: "AI pair programming in your terminal",
+        website: "https://aider.chat/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/paul-gauthier/aider"),
+        installation_methods: AIDER_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "codex",
+        display_name: "Codex CLI",
+        description: "OpenAI lightweight coding agent",
+        website: "https://github.com/openai/codex",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/openai/codex"),
+        installation_methods: CODEX_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "goose",
+        display_name: "Goose",
+        description: "Block's AI developer agent",
+        website: "https://github.com/block/goose",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/block/goose"),
+        installation_methods: GOOSE_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "kimi",
+        display_name: "Kimi Code CLI",
+        description: "AI agent that runs in the terminal",
+        website: "https://moonshotai.github.io/kimi-cli/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &["kimi-cli"],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/MoonshotAI/kimi-cli"),
+        installation_methods: KIMI_CLI_INSTALL,
+    },
+    ProgramInfo {
+        binary_name: "qwen",
+        display_name: "Qwen Code CLI",
+        description: "Qwen's AI coding agent",
+        website: "https://qwenlm.github.io/qwen-code-docs/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/QwenLM/qwen-code"),
+        installation_methods: QWEN_CLI_INSTALL,
+    },
 ];
 
 impl ProgramMetadata for AiCli {
     fn info(&self) -> &'static ProgramInfo {
         &AI_CLI_INFO[*self as usize]
+    }
+}
+
+impl CategoryEnum for AiCli {
+    fn category_name() -> &'static str {
+        "ai_clients"
+    }
+
+    fn variant_index(&self) -> usize {
+        *self as usize
+    }
+
+    fn serde_key(&self) -> &'static str {
+        match self {
+            AiCli::Claude => "claude",
+            AiCli::Opencode => "opencode",
+            AiCli::Roo => "roo",
+            AiCli::GeminiCli => "gemini_cli",
+            AiCli::Aider => "aider",
+            AiCli::Codex => "codex",
+            AiCli::Goose => "goose",
+            AiCli::KimiCli => "kimi_cli",
+            AiCli::QwenCli => "qwen_cli",
+        }
     }
 }
 
@@ -1430,7 +3381,13 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for editor in Editor::iter() {
             let idx = editor.variant_index();
-            assert!(idx < Editor::COUNT, "{:?} index {} >= COUNT {}", editor, idx, Editor::COUNT);
+            assert!(
+                idx < Editor::COUNT,
+                "{:?} index {} >= COUNT {}",
+                editor,
+                idx,
+                Editor::COUNT
+            );
             assert!(seen.insert(idx), "{:?} has duplicate index {}", editor, idx);
         }
     }

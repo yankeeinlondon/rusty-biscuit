@@ -122,7 +122,6 @@ pub struct ProgramInfo {
     pub version_prefix: Option<&'static str>,
 
     // --- New fields (from ProgramDetails) ---
-
     /// Alternative binary names to search when primary is not found.
     /// E.g., kimi has alternate "kimi-cli"; sherpa-onnx has "sherpa-onnx-tts".
     pub alternate_binary_names: &'static [&'static str],
