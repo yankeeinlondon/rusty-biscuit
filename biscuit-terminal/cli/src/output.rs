@@ -175,6 +175,17 @@ pub struct ColorInfo {
     pub hex: Option<String>,
 }
 
+impl From<biscuit_terminal::discovery::osc_queries::RgbValue> for ColorInfo {
+    fn from(c: biscuit_terminal::discovery::osc_queries::RgbValue) -> Self {
+        Self {
+            r: c.r,
+            g: c.g,
+            b: c.b,
+            hex: Some(format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)),
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct UnderlineInfo {
     /// Straight/single underline
@@ -195,26 +206,9 @@ pub fn collect_metadata() -> TerminalMetadata {
     let terminal = Terminal::new();
 
     // Get colors
-    let bg_color = osc_queries::bg_color().map(|c| ColorInfo {
-        r: c.r,
-        g: c.g,
-        b: c.b,
-        hex: Some(format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)),
-    });
-
-    let text_color = osc_queries::text_color().map(|c| ColorInfo {
-        r: c.r,
-        g: c.g,
-        b: c.b,
-        hex: Some(format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)),
-    });
-
-    let cursor_color = osc_queries::cursor_color().map(|c| ColorInfo {
-        r: c.r,
-        g: c.g,
-        b: c.b,
-        hex: Some(format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)),
-    });
+    let bg_color = osc_queries::bg_color().map(ColorInfo::from);
+    let text_color = osc_queries::text_color().map(ColorInfo::from);
+    let cursor_color = osc_queries::cursor_color().map(ColorInfo::from);
 
     // Get distro info
     let distro = terminal.distro.as_ref().map(|d| DistroInfo {
@@ -354,7 +348,10 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
 
     println!();
     println!("{}Terminal Metadata{}", s.bold, s.reset);
-    println!("{}═══════════════════════════════════════{}", s.dim, s.reset);
+    println!(
+        "{}═══════════════════════════════════════{}",
+        s.dim, s.reset
+    );
 
     // Basic info section
     println!("\n{}{}Basic Info{}", s.bold, s.blue, s.reset);
