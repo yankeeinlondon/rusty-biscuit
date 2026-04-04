@@ -113,8 +113,8 @@ use tracing::{info_span, instrument};
 pub use ai_cli::InstalledAiClients;
 pub use editors::InstalledEditors;
 pub use enums::{
-    AiCli, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager, TerminalApp, TtsClient,
-    Utility,
+    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager,
+    TerminalApp, TtsClient, Utility,
 };
 pub use find_program::{
     ExecutableIndex, find_program, find_program_with_source, find_programs_parallel,
@@ -131,7 +131,9 @@ pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;
 pub use tts_clients::InstalledTtsClients;
-pub use types::{ExecutableSource, InstallationMethod, ProgramDetails, ProgramDetector};
+pub use types::{
+    CategoryDetector, ExecutableSource, InstallationMethod, ProgramDetails, ProgramDetector,
+};
 pub use utilities::InstalledUtilities;
 
 /// Complete programs detection result.

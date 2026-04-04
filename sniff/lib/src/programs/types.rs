@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::programs::enums::CategoryEnum;
 use crate::programs::find_program::{
-    find_programs_with_source_from_index, find_programs_with_source_parallel, ExecutableIndex,
+    ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
 };
 use crate::programs::schema::{ProgramError, ProgramMetadata};
 use crate::{error::SniffInstallationError, os::OsType};
@@ -438,9 +438,7 @@ impl<E: CategoryEnum> CategoryDetector<E> {
     }
 
     /// Construct from search results HashMap.
-    fn from_search_results(
-        found: &HashMap<String, Option<(PathBuf, ExecutableSource)>>,
-    ) -> Self {
+    fn from_search_results(found: &HashMap<String, Option<(PathBuf, ExecutableSource)>>) -> Self {
         let mut results = vec![None; E::COUNT];
 
         for variant in E::iter() {
@@ -584,11 +582,9 @@ impl<E: CategoryEnum> ProgramDetector for CategoryDetector<E> {
         let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
         let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
 
-        info.installation_methods
-            .iter()
-            .any(|method| {
-                crate::programs::installer::method_available(method, &os_pkg_mgrs, &lang_pkg_mgrs)
-            })
+        info.installation_methods.iter().any(|method| {
+            crate::programs::installer::method_available(method, &os_pkg_mgrs, &lang_pkg_mgrs)
+        })
     }
 
     fn install(&self, program: E) -> Result<(), SniffInstallationError> {
@@ -631,11 +627,7 @@ impl<E: CategoryEnum> ProgramDetector for CategoryDetector<E> {
         Ok(())
     }
 
-    fn install_version(
-        &self,
-        program: E,
-        version: &str,
-    ) -> Result<(), SniffInstallationError> {
+    fn install_version(&self, program: E, version: &str) -> Result<(), SniffInstallationError> {
         let info = program.info();
 
         if info.installation_methods.is_empty() {
@@ -1297,8 +1289,11 @@ mod tests {
 
     #[test]
     fn test_category_detector_with_program_marks_installed() {
-        let detector = CategoryDetector::<Editor>::default()
-            .with_program(Editor::Vim, PathBuf::from("/usr/bin/vim"), ExecutableSource::Path);
+        let detector = CategoryDetector::<Editor>::default().with_program(
+            Editor::Vim,
+            PathBuf::from("/usr/bin/vim"),
+            ExecutableSource::Path,
+        );
         assert!(detector.is_installed(Editor::Vim));
         assert!(!detector.is_installed(Editor::Neovim));
         assert_eq!(
@@ -1310,8 +1305,16 @@ mod tests {
     #[test]
     fn test_category_detector_installed_returns_only_installed() {
         let detector = CategoryDetector::<Editor>::default()
-            .with_program(Editor::Vim, PathBuf::from("/usr/bin/vim"), ExecutableSource::Path)
-            .with_program(Editor::Neovim, PathBuf::from("/usr/bin/nvim"), ExecutableSource::Path);
+            .with_program(
+                Editor::Vim,
+                PathBuf::from("/usr/bin/vim"),
+                ExecutableSource::Path,
+            )
+            .with_program(
+                Editor::Neovim,
+                PathBuf::from("/usr/bin/nvim"),
+                ExecutableSource::Path,
+            );
         let installed = detector.installed();
         assert_eq!(installed.len(), 2);
         assert!(installed.contains(&Editor::Vim));
@@ -1350,8 +1353,11 @@ mod tests {
 
     #[test]
     fn test_category_detector_serialize_includes_path_and_source() {
-        let detector = CategoryDetector::<Editor>::default()
-            .with_program(Editor::Vim, PathBuf::from("/usr/bin/vim"), ExecutableSource::Path);
+        let detector = CategoryDetector::<Editor>::default().with_program(
+            Editor::Vim,
+            PathBuf::from("/usr/bin/vim"),
+            ExecutableSource::Path,
+        );
         let json = serde_json::to_string(&detector).unwrap();
         // Vim should be installed
         assert!(json.contains("\"vim\":{"));
@@ -1367,15 +1373,32 @@ mod tests {
     #[test]
     fn test_category_detector_roundtrip_serialization() {
         let detector1 = CategoryDetector::<Editor>::default()
-            .with_program(Editor::Vim, PathBuf::from("/usr/bin/vim"), ExecutableSource::Path)
-            .with_program(Editor::Neovim, PathBuf::from("/usr/bin/nvim"), ExecutableSource::Path);
+            .with_program(
+                Editor::Vim,
+                PathBuf::from("/usr/bin/vim"),
+                ExecutableSource::Path,
+            )
+            .with_program(
+                Editor::Neovim,
+                PathBuf::from("/usr/bin/nvim"),
+                ExecutableSource::Path,
+            );
 
         let json = serde_json::to_string(&detector1).unwrap();
         let detector2: CategoryDetector<Editor> = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(detector1.is_installed(Editor::Vim), detector2.is_installed(Editor::Vim));
-        assert_eq!(detector1.is_installed(Editor::Neovim), detector2.is_installed(Editor::Neovim));
-        assert_eq!(detector1.is_installed(Editor::VSCode), detector2.is_installed(Editor::VSCode));
+        assert_eq!(
+            detector1.is_installed(Editor::Vim),
+            detector2.is_installed(Editor::Vim)
+        );
+        assert_eq!(
+            detector1.is_installed(Editor::Neovim),
+            detector2.is_installed(Editor::Neovim)
+        );
+        assert_eq!(
+            detector1.is_installed(Editor::VSCode),
+            detector2.is_installed(Editor::VSCode)
+        );
     }
 
     #[test]
@@ -1407,8 +1430,11 @@ mod tests {
 
     #[test]
     fn test_category_detector_program_detector_trait() {
-        let detector = CategoryDetector::<Editor>::default()
-            .with_program(Editor::Vim, PathBuf::from("/usr/bin/vim"), ExecutableSource::Path);
+        let detector = CategoryDetector::<Editor>::default().with_program(
+            Editor::Vim,
+            PathBuf::from("/usr/bin/vim"),
+            ExecutableSource::Path,
+        );
 
         // Test through ProgramDetector trait interface
         let pd: &dyn ProgramDetector<Program = Editor> = &detector;
