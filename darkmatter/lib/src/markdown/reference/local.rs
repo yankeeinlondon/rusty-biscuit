@@ -7,42 +7,58 @@ use super::types::{
 use crate::markdown::compose::ComposeSource;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
-/// Extract Markdown-native links as [`ReferenceRecord`]s with provenance.
-pub(crate) fn extract_markdown_links(
+/// Tag configuration for inline reference extraction.
+enum InlineRefKind {
+    Link,
+    Image,
+}
+
+/// Extract markdown inline references (links or images) in a single pass.
+fn extract_inline_refs(
     content: &str,
     source: &ComposeSource,
+    kind: InlineRefKind,
 ) -> Vec<ReferenceRecord> {
     let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
     let parser = Parser::new_ext(content, options);
 
     let line_index = LineIndex::new(content);
     let mut records = Vec::new();
-    let mut in_link = false;
-    let mut current_href = String::new();
+    let mut active = false;
+    let mut current_target = String::new();
     let mut current_title = String::new();
-    let mut current_display = String::new();
-    let mut link_span_start: usize = 0;
+    let mut current_text = String::new();
+    let mut span_start: usize = 0;
 
     for (event, range) in parser.into_offset_iter() {
         match event {
             Event::Start(Tag::Link {
                 dest_url, title, ..
-            }) => {
-                in_link = true;
-                current_href = dest_url.to_string();
+            }) if matches!(kind, InlineRefKind::Link) => {
+                active = true;
+                current_target = dest_url.to_string();
                 current_title = title.to_string();
-                current_display.clear();
-                link_span_start = range.start;
+                current_text.clear();
+                span_start = range.start;
             }
-            Event::End(TagEnd::Link) if in_link => {
-                let display = std::mem::take(&mut current_display);
-                let href = std::mem::take(&mut current_href);
+            Event::Start(Tag::Image {
+                dest_url, title, ..
+            }) if matches!(kind, InlineRefKind::Image) => {
+                active = true;
+                current_target = dest_url.to_string();
+                current_title = title.to_string();
+                current_text.clear();
+                span_start = range.start;
+            }
+            Event::End(TagEnd::Link) if matches!(kind, InlineRefKind::Link) && active => {
+                let text = std::mem::take(&mut current_text);
+                let target = std::mem::take(&mut current_target);
                 let title = std::mem::take(&mut current_title);
-                let span = link_span_start..range.end;
-                let line = line_index.line_at(link_span_start);
+                let span = span_start..range.end;
+                let line = line_index.line_at(span_start);
 
                 let mut attributes = serde_json::Map::new();
-                attributes.insert("display".into(), serde_json::Value::String(display));
+                attributes.insert("display".into(), serde_json::Value::String(text));
                 if !title.is_empty() {
                     attributes.insert("title".into(), serde_json::Value::String(title));
                 }
@@ -50,7 +66,7 @@ pub(crate) fn extract_markdown_links(
                 records.push(ReferenceRecord {
                     id: make_reference_id(source, line, span.start),
                     kind: ReferenceKind::Hyperlink,
-                    target: classify_target(&href),
+                    target: classify_target(&target),
                     origin: ReferenceOrigin {
                         source: source.clone(),
                         line,
@@ -60,65 +76,17 @@ pub(crate) fn extract_markdown_links(
                     attributes,
                 });
 
-                in_link = false;
+                active = false;
             }
-            Event::Text(text) if in_link => {
-                current_display.push_str(&text);
-            }
-            Event::Code(code) if in_link => {
-                current_display.push('`');
-                current_display.push_str(&code);
-                current_display.push('`');
-            }
-            Event::SoftBreak if in_link => {
-                current_display.push(' ');
-            }
-            Event::HardBreak if in_link => {
-                current_display.push('\n');
-            }
-            _ => {}
-        }
-    }
-
-    records
-}
-
-/// Extract Markdown-native images as [`ReferenceRecord`]s with provenance.
-pub(crate) fn extract_markdown_images(
-    content: &str,
-    source: &ComposeSource,
-) -> Vec<ReferenceRecord> {
-    let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
-    let parser = Parser::new_ext(content, options);
-
-    let line_index = LineIndex::new(content);
-    let mut records = Vec::new();
-    let mut in_image = false;
-    let mut current_src = String::new();
-    let mut current_title = String::new();
-    let mut current_alt = String::new();
-    let mut image_span_start: usize = 0;
-
-    for (event, range) in parser.into_offset_iter() {
-        match event {
-            Event::Start(Tag::Image {
-                dest_url, title, ..
-            }) => {
-                in_image = true;
-                current_src = dest_url.to_string();
-                current_title = title.to_string();
-                current_alt.clear();
-                image_span_start = range.start;
-            }
-            Event::End(TagEnd::Image) if in_image => {
-                let alt = std::mem::take(&mut current_alt);
-                let src = std::mem::take(&mut current_src);
+            Event::End(TagEnd::Image) if matches!(kind, InlineRefKind::Image) && active => {
+                let text = std::mem::take(&mut current_text);
+                let target = std::mem::take(&mut current_target);
                 let title = std::mem::take(&mut current_title);
-                let span = image_span_start..range.end;
-                let line = line_index.line_at(image_span_start);
+                let span = span_start..range.end;
+                let line = line_index.line_at(span_start);
 
                 let mut attributes = serde_json::Map::new();
-                attributes.insert("alt".into(), serde_json::Value::String(alt));
+                attributes.insert("alt".into(), serde_json::Value::String(text));
                 if !title.is_empty() {
                     attributes.insert("title".into(), serde_json::Value::String(title));
                 }
@@ -126,7 +94,7 @@ pub(crate) fn extract_markdown_images(
                 records.push(ReferenceRecord {
                     id: make_reference_id(source, line, span.start),
                     kind: ReferenceKind::Image,
-                    target: classify_target(&src),
+                    target: classify_target(&target),
                     origin: ReferenceOrigin {
                         source: source.clone(),
                         line,
@@ -136,27 +104,43 @@ pub(crate) fn extract_markdown_images(
                     attributes,
                 });
 
-                in_image = false;
+                active = false;
             }
-            Event::Text(text) if in_image => {
-                current_alt.push_str(&text);
+            Event::Text(text) if active => {
+                current_text.push_str(&text);
             }
-            Event::Code(code) if in_image => {
-                current_alt.push('`');
-                current_alt.push_str(&code);
-                current_alt.push('`');
+            Event::Code(code) if active => {
+                current_text.push('`');
+                current_text.push_str(&code);
+                current_text.push('`');
             }
-            Event::SoftBreak if in_image => {
-                current_alt.push(' ');
+            Event::SoftBreak if active => {
+                current_text.push(' ');
             }
-            Event::HardBreak if in_image => {
-                current_alt.push('\n');
+            Event::HardBreak if active => {
+                current_text.push('\n');
             }
             _ => {}
         }
     }
 
     records
+}
+
+/// Extract Markdown-native links as [`ReferenceRecord`]s with provenance.
+pub(crate) fn extract_markdown_links(
+    content: &str,
+    source: &ComposeSource,
+) -> Vec<ReferenceRecord> {
+    extract_inline_refs(content, source, InlineRefKind::Link)
+}
+
+/// Extract Markdown-native images as [`ReferenceRecord`]s with provenance.
+pub(crate) fn extract_markdown_images(
+    content: &str,
+    source: &ComposeSource,
+) -> Vec<ReferenceRecord> {
+    extract_inline_refs(content, source, InlineRefKind::Image)
 }
 
 /// Line index for converting byte offsets to 1-based line numbers.
