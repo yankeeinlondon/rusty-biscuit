@@ -5,7 +5,7 @@
 
 use darkmatter::markdown::normalize::HeadingLevel;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::ComposeSource;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeSource};
 use darkmatter::markdown::reference::types::{
     ReferenceGraphOptions, ReferenceKind, ReferenceSyntax, ReferenceTarget,
 };
@@ -187,9 +187,10 @@ fn depth_limit_respected() {
     );
 
     let md = load_md(&dir, "a.md");
-    let mut options = ReferenceGraphOptions::default();
     // Set a depth limit of 2
-    options.compose.max_transclusion_depth = 2;
+    let options = ReferenceGraphOptions::with_compose(
+        ComposeOptions::new().with_max_transclusion_depth(2),
+    );
     let graph = md.reference_graph(options).unwrap();
 
     // Should not reach all 5 levels

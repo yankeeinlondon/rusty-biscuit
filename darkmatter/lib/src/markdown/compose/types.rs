@@ -271,102 +271,102 @@ pub struct ComposeOptions {
     ///
     /// Defaults to all operations. Use `disable()` or `only()` to
     /// restrict which operations run.
-    pub enabled_operations: ComposeOperationSet,
+    pub(crate) enabled_operations: ComposeOperationSet,
 
     // ── Error handling ─────────────────────────────────────────────
     /// When `true`, the pipeline returns an error on the first failure.
     /// When `false` (default), failures are recorded as warnings and
     /// the pipeline continues with remaining operations.
-    pub fail_fast: bool,
+    pub(crate) fail_fast: bool,
 
     // ── Context override ──────────────────────────────────────────
     /// When `true`, non-object `ctx` frontmatter is downgraded from an error
     /// to a warning and the runtime context is used instead.
-    pub allow_ctx_override: bool,
+    pub(crate) allow_ctx_override: bool,
 
     // ── Source context ─────────────────────────────────────────────
     /// Source location of the document being composed.
     ///
     /// Required for transclusion to resolve relative `::file` paths.
     /// Set via `with_source_file()` or `with_source_url()`.
-    pub source: ComposeSource,
+    pub(crate) source: ComposeSource,
 
     // ── State and data ─────────────────────────────────────────────
     /// External state merged with frontmatter for interpolation and
     /// replacement. Missing or null frontmatter keys are filled from
     /// this value using deep-merge semantics.
-    pub external_state: Option<serde_json::Value>,
+    pub(crate) external_state: Option<serde_json::Value>,
 
     /// Override values that unconditionally overwrite frontmatter keys.
     ///
     /// Unlike `external_state` which only fills missing/null keys,
     /// these values always win regardless of what the frontmatter says.
-    pub set_overrides: Option<serde_json::Value>,
+    pub(crate) set_overrides: Option<serde_json::Value>,
 
     // ── Transclusion ───────────────────────────────────────────────
     /// Maximum recursive transclusion depth before the pipeline
     /// returns an error. Prevents infinite `::file` chains.
     /// Default: 16.
-    pub max_transclusion_depth: usize,
+    pub(crate) max_transclusion_depth: usize,
 
     /// Whether `::url` remote transclusion is allowed.
     ///
     /// Disabled by default for security. When false, `::url` directives
     /// are skipped (or error if `fail_fast` is true).
-    pub allow_remote_transclusion: bool,
+    pub(crate) allow_remote_transclusion: bool,
 
     /// Whether `::file` can include local markdown documents.
     /// Default: true.
-    pub allow_local_markdown: bool,
+    pub(crate) allow_local_markdown: bool,
 
     /// Whether `::code` can include local text files as code blocks.
     /// Default: true.
-    pub allow_local_code: bool,
+    pub(crate) allow_local_code: bool,
 
     /// Language tag applied to `::code` blocks when the file extension
     /// is unknown or unmapped. Default: `"txt"`.
-    pub code_fallback_language: String,
+    pub(crate) code_fallback_language: String,
 
     /// Overrides the default behavior for invalid transclusion references.
     ///
     /// - `None`: use the document's frontmatter `ignore_invalid` setting
     /// - `Some(true)`: silently skip invalid references
     /// - `Some(false)`: treat invalid references as errors
-    pub ignore_invalid_references: Option<bool>,
+    pub(crate) ignore_invalid_references: Option<bool>,
 
     /// Whether `@`-prefixed paths resolve to the git repository root.
     /// Default: true.
-    pub resolve_repo_root: bool,
+    pub(crate) resolve_repo_root: bool,
 
     /// Custom search roots for `@`-prefixed (magic) file references.
     ///
     /// Each entry is a `(path, position)` pair where `position` controls
     /// whether the path is searched before (`Start`) or after (`End`) the
     /// default roots (git repo root, HOME).
-    pub magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
+    pub(crate) magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
 
     // ── Shell expansion ────────────────────────────────────────────
     /// Maximum execution time for a single `::shell` command.
     /// Default: 10 seconds.
-    pub shell_timeout: std::time::Duration,
+    pub(crate) shell_timeout: std::time::Duration,
 
     /// Root directory for shell expansion policy files.
     ///
     /// When set, only commands matching an approval policy in this
     /// directory (or its ancestors) are allowed to execute.
-    pub shell_policy_root: Option<PathBuf>,
+    pub(crate) shell_policy_root: Option<PathBuf>,
 
     /// Working directory for `::shell` command execution.
     ///
     /// When `None`, commands run in the directory of the source file
     /// (if known) or the current working directory.
-    pub shell_working_directory: Option<PathBuf>,
+    pub(crate) shell_working_directory: Option<PathBuf>,
 
     /// Callback for interactive shell command approval.
     ///
     /// When set, commands that require approval call this handler
     /// before execution. When `None`, unapproved commands are skipped.
-    pub shell_approval_handler:
+    pub(crate) shell_approval_handler:
         Option<std::sync::Arc<dyn super::shell_expansion::ShellApprovalHandler>>,
 
     /// Pre-approved shell commands (normalized forms).
@@ -379,40 +379,40 @@ pub struct ComposeOptions {
     ///
     /// Mutually exclusive with `shell_approval_handler`. When this field
     /// is `Some`, the approval handler is ignored.
-    pub pre_approved_commands: Option<std::collections::HashSet<String>>,
+    pub(crate) pre_approved_commands: Option<std::collections::HashSet<String>>,
 
     // ── Cleanup ────────────────────────────────────────────────────
     /// Controls how blank lines between list items are handled
     /// during the cleanup operation. Default: `Normal`.
-    pub list_spacing: crate::markdown::cleanup::ListSpacingMode,
+    pub(crate) list_spacing: crate::markdown::cleanup::ListSpacingMode,
 
     /// Number of spaces per nesting level for list indentation
     /// during cleanup. Default: 4.
-    pub indent_size: usize,
+    pub(crate) indent_size: usize,
 
     // ── Caching ───────────────────────────────────────────────────
     /// Controls whether and how caching is used during compose.
     /// Default: `ReadWrite` (full caching with single-flight dedup).
-    pub cache_access_mode: CacheAccessMode,
+    pub(crate) cache_access_mode: CacheAccessMode,
 
     /// Controls staleness tolerance for persistent cache entries.
     /// Default: `Strict` (only accept entries whose closure hash matches).
-    pub cache_freshness_mode: CacheFreshnessMode,
+    pub(crate) cache_freshness_mode: CacheFreshnessMode,
 
     /// Root directory for persistent cache storage.
     /// When `None`, persistent caching is disabled. Set to a path
     /// (typically `<workspace>/.darkmatter/cache/v1/`) to enable.
-    pub cache_root: Option<PathBuf>,
+    pub(crate) cache_root: Option<PathBuf>,
 
     /// Namespace for cache isolation (e.g., branch name, profile).
     /// When set, cache entries are stored under this namespace to
     /// prevent cross-contamination between different contexts.
-    pub cache_namespace: Option<String>,
+    pub(crate) cache_namespace: Option<String>,
 
     // ── Performance ─────────────────────────────────────────────────
     /// When `true`, the pipeline collects per-stage timing metrics
     /// and populates `ComposeReport::perf`. Default: `false`.
-    pub perf_enabled: bool,
+    pub(crate) perf_enabled: bool,
 
     // ── Internal (crate-private) ───────────────────────────────────
     /// Runtime context captured at construction time (timestamps,
@@ -438,7 +438,7 @@ pub struct ComposeOptions {
     /// should still be interpolated.
     ///
     /// Can also be set via frontmatter: `interpolate_code_spans: true`.
-    pub interpolate_code_spans: bool,
+    pub(crate) interpolate_code_spans: bool,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -846,6 +846,14 @@ impl ComposeOptions {
     pub fn with_perf(mut self, enabled: bool) -> Self {
         self.perf_enabled = enabled;
         self
+    }
+
+    // ── Getters ────────────────────────────────────────────────────
+
+    /// Returns the maximum transclusion depth.
+    #[must_use]
+    pub fn max_transclusion_depth(&self) -> usize {
+        self.max_transclusion_depth
     }
 }
 
