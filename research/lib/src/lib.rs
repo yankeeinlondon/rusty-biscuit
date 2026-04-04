@@ -270,12 +270,14 @@ pub async fn check_missing_outputs(output_dir: &std::path::Path) -> Vec<MissingO
 }
 
 /// Information about a library found in a package manager
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryInfo {
     pub package_manager: String,
     pub language: String,
     pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
@@ -338,26 +340,8 @@ fn default_schema_version() -> u32 {
     1
 }
 
-/// Library info stored in metadata (serializable version)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LibraryInfoMetadata {
-    pub package_manager: String,
-    pub language: String,
-    pub url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repository: Option<String>,
-}
-
-impl From<&LibraryInfo> for LibraryInfoMetadata {
-    fn from(info: &LibraryInfo) -> Self {
-        Self {
-            package_manager: info.package_manager.clone(),
-            language: info.language.clone(),
-            url: info.url.clone(),
-            repository: info.repository.clone(),
-        }
-    }
-}
+/// Type alias for backward compatibility with code that used `LibraryInfoMetadata`.
+pub type LibraryInfoMetadata = LibraryInfo;
 
 impl ResearchMetadata {
     /// Create new metadata for library research
@@ -1064,15 +1048,6 @@ impl<'a> From<&'a LibraryInfo> for LibraryContext<'a> {
     }
 }
 
-impl<'a> From<&'a LibraryInfoMetadata> for LibraryContext<'a> {
-    fn from(info: &'a LibraryInfoMetadata) -> Self {
-        Self {
-            package_manager: &info.package_manager,
-            language: &info.language,
-            url: &info.url,
-        }
-    }
-}
 
 /// Format VersionHistory as markdown for prompt injection.
 ///
@@ -4785,29 +4760,22 @@ mod tests {
     }
 
     // ===========================================
-    // Tests for LibraryInfoMetadata conversion
+    // Tests for LibraryInfo serialization
     // ===========================================
 
     #[test]
-    fn test_library_info_metadata_from() {
+    fn test_library_info_serialization_skips_none() {
         let lib_info = LibraryInfo {
             package_manager: "npm".to_string(),
             language: "TypeScript".to_string(),
             url: "https://npmjs.com/package/test".to_string(),
-            repository: Some("https://github.com/test/test".to_string()),
-            description: Some("Test description".to_string()),
+            repository: None,
+            description: None,
         };
 
-        let metadata: LibraryInfoMetadata = (&lib_info).into();
-
-        assert_eq!(metadata.package_manager, "npm");
-        assert_eq!(metadata.language, "TypeScript");
-        assert_eq!(metadata.url, "https://npmjs.com/package/test");
-        assert_eq!(
-            metadata.repository,
-            Some("https://github.com/test/test".to_string())
-        );
-        // Note: description is not included in metadata
+        let json = serde_json::to_string(&lib_info).unwrap();
+        assert!(!json.contains("repository"));
+        assert!(!json.contains("description"));
     }
 
     // ===========================================
