@@ -277,4 +277,61 @@ mod tests {
         assert_eq!(detect_file_type(&path).unwrap(), FileType::Unknown);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn all_known_variants_have_extension() {
+        let variants = [
+            FileType::Toml,
+            FileType::Yaml,
+            FileType::Json,
+            FileType::Json5,
+            FileType::Markdown,
+            FileType::Pdf,
+        ];
+        for v in variants {
+            assert!(
+                v.extension().is_some(),
+                "{v:?} should have a file extension"
+            );
+        }
+        assert!(FileType::Unknown.extension().is_none());
+    }
+
+    #[test]
+    fn all_known_variants_have_mime_type() {
+        let variants = [
+            FileType::Toml,
+            FileType::Yaml,
+            FileType::Json,
+            FileType::Json5,
+            FileType::Markdown,
+            FileType::Pdf,
+        ];
+        for v in variants {
+            assert!(
+                v.mime_type().is_some(),
+                "{v:?} should have a MIME type"
+            );
+        }
+        assert!(FileType::Unknown.mime_type().is_none());
+    }
+
+    #[test]
+    fn all_known_variants_have_data_format() {
+        let variants = [
+            FileType::Toml,
+            FileType::Yaml,
+            FileType::Json,
+            FileType::Json5,
+            FileType::Markdown,
+            FileType::Pdf,
+        ];
+        for v in variants {
+            assert!(
+                v.as_data_format().is_some(),
+                "{v:?} should convert to DataFormat"
+            );
+        }
+        assert!(FileType::Unknown.as_data_format().is_none());
+    }
 }
