@@ -21,6 +21,7 @@ mod constants;
 mod diff;
 mod side_by_side;
 mod unified;
+mod utils;
 
 pub use diff::{DiffLine, InlineSpan, compute_visual_diff};
 
