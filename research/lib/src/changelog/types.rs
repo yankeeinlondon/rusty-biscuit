@@ -126,12 +126,12 @@ impl VersionInfo {
 
         let significance = if !semver.pre.is_empty() {
             VersionSignificance::Prerelease
-        } else if semver.major > 0 {
-            VersionSignificance::Major
+        } else if semver.patch > 0 {
+            VersionSignificance::Patch
         } else if semver.minor > 0 {
             VersionSignificance::Minor
         } else {
-            VersionSignificance::Patch
+            VersionSignificance::Major
         };
 
         Ok(Self::new(version, significance))
@@ -323,17 +323,29 @@ mod tests {
 
     #[test]
     fn test_version_info_from_version_str() {
-        let v1 = VersionInfo::from_version_str("2.5.0").unwrap();
+        // Major version (major > 0, minor = 0, patch = 0)
+        let v1 = VersionInfo::from_version_str("2.0.0").unwrap();
         assert_eq!(v1.significance, VersionSignificance::Major);
 
-        let v2 = VersionInfo::from_version_str("0.3.0").unwrap();
+        // Minor version (minor > 0, patch = 0)
+        let v2 = VersionInfo::from_version_str("2.5.0").unwrap();
         assert_eq!(v2.significance, VersionSignificance::Minor);
 
-        let v3 = VersionInfo::from_version_str("0.0.1").unwrap();
+        // Patch version (patch > 0)
+        let v3 = VersionInfo::from_version_str("2.5.3").unwrap();
         assert_eq!(v3.significance, VersionSignificance::Patch);
 
-        let v4 = VersionInfo::from_version_str("1.0.0-alpha.1").unwrap();
-        assert_eq!(v4.significance, VersionSignificance::Prerelease);
+        // 0.x minor
+        let v4 = VersionInfo::from_version_str("0.3.0").unwrap();
+        assert_eq!(v4.significance, VersionSignificance::Minor);
+
+        // 0.0.x patch
+        let v5 = VersionInfo::from_version_str("0.0.1").unwrap();
+        assert_eq!(v5.significance, VersionSignificance::Patch);
+
+        // Prerelease
+        let v6 = VersionInfo::from_version_str("1.0.0-alpha.1").unwrap();
+        assert_eq!(v6.significance, VersionSignificance::Prerelease);
     }
 
     #[test]
