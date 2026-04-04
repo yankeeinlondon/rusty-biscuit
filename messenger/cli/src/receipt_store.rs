@@ -97,4 +97,69 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn parse_stored_receipt_json_to_extract_message_ref() {
+        let input = r#"{
+            "route_name": "slack.ops",
+            "receipt": {
+                "provider": "slack",
+                "message_ref": {
+                    "slack": {
+                        "channel_id": "C123",
+                        "thread_ts": "1712345678.000100"
+                    }
+                },
+                "raw_id": "1712345678.000100",
+                "metadata": {}
+            }
+        }"#;
+
+        let parsed = parse_message_ref_contents(input).unwrap();
+        assert_eq!(
+            parsed,
+            messenger::MessageRef::Slack {
+                channel_id: "C123".into(),
+                thread_ts: "1712345678.000100".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_send_receipt_json_to_extract_message_ref() {
+        let input = r#"{
+            "provider": "discord",
+            "message_ref": {
+                "discord": {
+                    "channel_id": "456",
+                    "message_id": "987654321"
+                }
+            },
+            "raw_id": "987654321",
+            "metadata": {}
+        }"#;
+
+        let parsed = parse_message_ref_contents(input).unwrap();
+        assert_eq!(
+            parsed,
+            messenger::MessageRef::Discord {
+                channel_id: "456".into(),
+                message_id: "987654321".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_message_ref_json_round_trip() {
+        let message_ref = messenger::MessageRef::Telegram {
+            chat_id: messenger::receipt::TelegramChatRef::Id(-1001234567),
+            message_id: 42,
+            thread_id: None,
+        };
+
+        let json = message_ref.to_pretty_json().unwrap();
+        let parsed = parse_message_ref_contents(&json).unwrap();
+
+        assert_eq!(parsed, message_ref);
+    }
 }

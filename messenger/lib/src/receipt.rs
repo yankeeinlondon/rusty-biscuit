@@ -3,15 +3,51 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::MessengerError;
+
 /// Identifies which messaging provider was used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
+    #[cfg_attr(feature = "cli", value(name = "discord"))]
     Discord,
+    #[cfg_attr(feature = "cli", value(name = "slack"))]
     Slack,
+    #[cfg_attr(feature = "cli", value(name = "signal"))]
     Signal,
+    #[cfg_attr(feature = "cli", value(name = "whatsapp"))]
     WhatsApp,
+    #[cfg_attr(feature = "cli", value(name = "telegram"))]
     Telegram,
+}
+
+impl ProviderKind {
+    pub const ALL: [Self; 5] = [
+        Self::Discord,
+        Self::Slack,
+        Self::Signal,
+        Self::WhatsApp,
+        Self::Telegram,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Discord => "discord",
+            Self::Slack => "slack",
+            Self::Signal => "signal",
+            Self::WhatsApp => "whatsapp",
+            Self::Telegram => "telegram",
+        }
+    }
+
+    /// Create a [`MessengerError::Transport`] for this provider.
+    pub fn transport_error(self, message: impl fmt::Display) -> MessengerError {
+        MessengerError::Transport {
+            provider: self,
+            message: message.to_string(),
+        }
+    }
 }
 
 impl fmt::Display for ProviderKind {
