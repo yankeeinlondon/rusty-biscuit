@@ -178,6 +178,7 @@ pub enum TableStrategy {
 }
 
 /// Configuration for PDF operations.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct PdfConfig {
     /// Preferred backend for operations.
@@ -207,7 +208,52 @@ impl Default for PdfConfig {
     }
 }
 
+impl PdfConfig {
+    /// Set the backend preference.
+    #[must_use]
+    pub fn with_backend(mut self, backend: BackendPreference) -> Self {
+        self.backend_preference = backend;
+        self
+    }
+
+    /// Set the password for encrypted PDFs.
+    #[must_use]
+    pub fn with_password(mut self, password: impl Into<String>) -> Self {
+        self.password = Some(password.into());
+        self
+    }
+
+    /// Set the page range.
+    #[must_use]
+    pub fn with_page_range(mut self, range: PageRange) -> Self {
+        self.page_range = range;
+        self
+    }
+
+    /// Set the maximum number of pages to process.
+    #[must_use]
+    pub fn with_max_pages(mut self, max: usize) -> Self {
+        self.max_pages = Some(max);
+        self
+    }
+
+    /// Set whether to normalize extracted text.
+    #[must_use]
+    pub fn with_normalize_text(mut self, normalize: bool) -> Self {
+        self.normalize_text = normalize;
+        self
+    }
+
+    /// Set whether to remove headers and footers.
+    #[must_use]
+    pub fn with_remove_headers_footers(mut self, remove: bool) -> Self {
+        self.remove_headers_footers = remove;
+        self
+    }
+}
+
 /// Options for Markdown conversion.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct MarkdownOptions {
     /// Directory to write extracted assets.
@@ -234,7 +280,45 @@ impl Default for MarkdownOptions {
     }
 }
 
+impl MarkdownOptions {
+    /// Set the assets directory.
+    #[must_use]
+    pub fn with_assets_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.assets_dir = Some(dir.into());
+        self
+    }
+
+    /// Set the image handling mode.
+    #[must_use]
+    pub fn with_image_mode(mut self, mode: ImageMode) -> Self {
+        self.image_mode = mode;
+        self
+    }
+
+    /// Set whether to include page break markers.
+    #[must_use]
+    pub fn with_include_page_breaks(mut self, include: bool) -> Self {
+        self.include_page_breaks = include;
+        self
+    }
+
+    /// Set the heading detection strategy.
+    #[must_use]
+    pub fn with_heading_strategy(mut self, strategy: HeadingStrategy) -> Self {
+        self.heading_strategy = strategy;
+        self
+    }
+
+    /// Set the table detection strategy.
+    #[must_use]
+    pub fn with_table_strategy(mut self, strategy: TableStrategy) -> Self {
+        self.table_strategy = strategy;
+        self
+    }
+}
+
 /// Options for text extraction.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct TextOptions {
     /// Whether to include page break markers.
@@ -252,6 +336,29 @@ impl Default for TextOptions {
             normalize_text: true,
             remove_headers_footers: true,
         }
+    }
+}
+
+impl TextOptions {
+    /// Set whether to include page break markers.
+    #[must_use]
+    pub fn with_include_page_breaks(mut self, include: bool) -> Self {
+        self.include_page_breaks = include;
+        self
+    }
+
+    /// Set whether to normalize text.
+    #[must_use]
+    pub fn with_normalize_text(mut self, normalize: bool) -> Self {
+        self.normalize_text = normalize;
+        self
+    }
+
+    /// Set whether to remove headers and footers.
+    #[must_use]
+    pub fn with_remove_headers_footers(mut self, remove: bool) -> Self {
+        self.remove_headers_footers = remove;
+        self
     }
 }
 
@@ -879,14 +986,13 @@ mod tests {
 
     #[test]
     fn test_pdf_with_custom_config() {
-        let config = PdfConfig {
-            backend_preference: BackendPreference::Extract,
-            password: Some("secret".to_string()),
-            page_range: PageRange::new(1, 5),
-            max_pages: Some(10),
-            normalize_text: false,
-            remove_headers_footers: false,
-        };
+        let config = PdfConfig::default()
+            .with_backend(BackendPreference::Extract)
+            .with_password("secret")
+            .with_page_range(PageRange::new(1, 5))
+            .with_max_pages(10)
+            .with_normalize_text(false)
+            .with_remove_headers_footers(false);
 
         let pdf_bytes = b"%PDF-1.4\n%%EOF".to_vec();
         let pdf = Pdf::from_bytes_with_config(pdf_bytes, config).unwrap();
@@ -904,5 +1010,43 @@ mod tests {
         let result = Pdf::new("/nonexistent/path/to/file.pdf");
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PdfError::Io(_)));
+    }
+
+    // ==========================================================================
+    // Builder method tests
+    // ==========================================================================
+
+    #[test]
+    fn pdf_config_builder_methods() {
+        let config = PdfConfig::default()
+            .with_password("secret")
+            .with_page_range(PageRange::new(1, 5))
+            .with_max_pages(10)
+            .with_normalize_text(false);
+
+        assert_eq!(config.password, Some("secret".to_string()));
+        assert_eq!(config.page_range, PageRange::new(1, 5));
+        assert_eq!(config.max_pages, Some(10));
+        assert!(!config.normalize_text);
+    }
+
+    #[test]
+    fn markdown_options_builder_methods() {
+        let options = MarkdownOptions::default()
+            .with_image_mode(ImageMode::Skip)
+            .with_include_page_breaks(false);
+
+        assert_eq!(options.image_mode, ImageMode::Skip);
+        assert!(!options.include_page_breaks);
+    }
+
+    #[test]
+    fn text_options_builder_methods() {
+        let options = TextOptions::default()
+            .with_normalize_text(false)
+            .with_include_page_breaks(true);
+
+        assert!(!options.normalize_text);
+        assert!(options.include_page_breaks);
     }
 }
