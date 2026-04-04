@@ -614,7 +614,7 @@ pub fn query_osc_actual(code: u8, timeout: Duration) -> Result<RgbValue, OscQuer
         .map_err(|_| OscQueryError::IoError("terminal query mutex poisoned".into()))?;
 
     // Enter raw mode (RAII guard restores on drop)
-    let _guard = RawModeGuard::stdin().map_err(|e| OscQueryError::IoError(e))?;
+    let _guard = RawModeGuard::stdin().map_err(OscQueryError::IoError)?;
 
     // Send the OSC query: \x1b]<code>;?\x07
     let query = format!("\x1b]{};?\x07", code);
