@@ -1808,7 +1808,7 @@ fn insertion_to_json(
         .unwrap_or("unknown");
 
     // Find the target path from the child node
-    let child_node = graph.node_by_id(&insertion.child_node_id);
+    let child_node = graph.node_by_id(insertion.child_node_id.as_ref());
     let target = child_node
         .map(|n| source_to_json(&n.source))
         .unwrap_or(serde_json::Value::Null);

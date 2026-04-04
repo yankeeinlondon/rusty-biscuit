@@ -3,6 +3,39 @@
 use crate::markdown::compose::ComposeSource;
 use std::ops::Range;
 
+// ── Node identifier ─────────────────────────────────────────────────
+
+/// Unique identifier for a node in the reference graph.
+///
+/// Wraps a string identifier to provide type safety and prevent accidental
+/// confusion with other string types.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NodeId(pub String);
+
+impl std::fmt::Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<String> for NodeId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for NodeId {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl AsRef<str> for NodeId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 // ── Reference classification ────────────────────────────────────────
 
 /// The semantic kind of a reference.
@@ -278,7 +311,7 @@ pub struct ReferenceInsertionContext {
 #[derive(Debug, Clone)]
 pub struct ReferenceInsertion {
     /// ID of the child node in the graph.
-    pub child_node_id: String,
+    pub child_node_id: NodeId,
     /// Line number of the directive that triggers insertion.
     pub directive_line: usize,
     /// Order among sibling insertions (0-based).
@@ -297,7 +330,7 @@ pub struct ReferenceInsertion {
 #[derive(Debug, Clone)]
 pub struct ReferenceGraphNode {
     /// Unique node identifier.
-    pub node_id: String,
+    pub node_id: NodeId,
     /// Source of this document.
     pub source: ComposeSource,
     /// References local to this document.
@@ -318,10 +351,10 @@ pub struct ReferenceGraph {
 impl ReferenceGraph {
     /// Finds a node by its ID.
     pub fn node_by_id(&self, id: &str) -> Option<&ReferenceGraphNode> {
-        if self.root.node_id == id {
+        if self.root.node_id.as_ref() == id {
             return Some(&self.root);
         }
-        self.nodes.iter().find(|n| n.node_id == id)
+        self.nodes.iter().find(|n| n.node_id.as_ref() == id)
     }
 
     /// Total number of nodes (including root).
@@ -342,8 +375,8 @@ impl ReferenceGraph {
         // Emit edges
         for node in std::iter::once(&self.root).chain(self.nodes.iter()) {
             for insertion in &node.child_insertions {
-                let from = mermaid_safe_id(&node.node_id);
-                let to = mermaid_safe_id(&insertion.child_node_id);
+                let from = mermaid_safe_id(node.node_id.as_ref());
+                let to = mermaid_safe_id(insertion.child_node_id.as_ref());
                 out.push_str(&format!("    {from} --> {to}\n"));
             }
         }
@@ -352,8 +385,8 @@ impl ReferenceGraph {
     }
 
     fn emit_mermaid_node(&self, node: &ReferenceGraphNode, out: &mut String) {
-        let id = mermaid_safe_id(&node.node_id);
-        let label = short_label(&node.node_id);
+        let id = mermaid_safe_id(node.node_id.as_ref());
+        let label = short_label(node.node_id.as_ref());
         let ref_count = node.local_references.len();
         out.push_str(&format!("    {id}[\"{label}<br/>{ref_count} refs\"]\n"));
     }
@@ -375,8 +408,8 @@ impl ReferenceGraph {
         // Emit edges
         for node in std::iter::once(&self.root).chain(self.nodes.iter()) {
             for insertion in &node.child_insertions {
-                let from = dot_safe_id(&node.node_id);
-                let to = dot_safe_id(&insertion.child_node_id);
+                let from = dot_safe_id(node.node_id.as_ref());
+                let to = dot_safe_id(insertion.child_node_id.as_ref());
                 out.push_str(&format!("    {from} -> {to};\n"));
             }
         }
@@ -386,8 +419,8 @@ impl ReferenceGraph {
     }
 
     fn emit_dot_node(&self, node: &ReferenceGraphNode, out: &mut String) {
-        let id = dot_safe_id(&node.node_id);
-        let label = short_label(&node.node_id);
+        let id = dot_safe_id(node.node_id.as_ref());
+        let label = short_label(node.node_id.as_ref());
         let ref_count = node.local_references.len();
         out.push_str(&format!(
             "    {id} [label=\"{label}\\n{ref_count} refs\"];\n"

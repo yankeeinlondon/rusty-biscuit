@@ -139,7 +139,7 @@ fn cycle_detection_stops_infinite_recursion() {
     // Verify no duplicate node IDs
     let mut ids = vec![graph.root.node_id.clone()];
     ids.extend(graph.nodes.iter().map(|n| n.node_id.clone()));
-    let unique: std::collections::HashSet<String> = ids.iter().cloned().collect();
+    let unique: std::collections::HashSet<_> = ids.iter().cloned().collect();
     assert_eq!(ids.len(), unique.len(), "all node IDs should be unique");
 }
 

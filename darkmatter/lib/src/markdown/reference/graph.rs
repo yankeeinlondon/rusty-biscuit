@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use super::types::{
-    ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
+    NodeId, ReferenceGraph, ReferenceGraphNode, ReferenceGraphOptions, ReferenceInsertion,
     ReferenceInsertionContext, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSet,
     ReferenceSyntax, classify_target, make_reference_id,
 };
@@ -71,7 +71,7 @@ fn build_graph_inner(
     // Seed the runtime with the root node so child documents that
     // transclude the root are detected as cycles immediately.
     let root_id = source_to_id(&source);
-    let _ = runtime.transclusion.enter(root_id);
+    let _ = runtime.transclusion.enter(root_id.to_string());
 
     let (root, all_nodes) = build_node(md, &source, options, &mut runtime, extract_references)?;
 
@@ -141,7 +141,7 @@ fn flatten_node(node: &ReferenceGraphNode, graph: &ReferenceGraph, out: &mut Vec
             for (&line, insertions) in insertion_map.range(last_line..record.origin.line) {
                 if emitted_insertion_lines.insert(line) {
                     for insertion in insertions {
-                        if let Some(child_node) = graph.node_by_id(&insertion.child_node_id) {
+                        if let Some(child_node) = graph.node_by_id(insertion.child_node_id.as_ref()) {
                             flatten_node(child_node, graph, out);
                         }
                     }
@@ -158,7 +158,7 @@ fn flatten_node(node: &ReferenceGraphNode, graph: &ReferenceGraph, out: &mut Vec
             && let Some(insertions) = insertion_map.get(&record.origin.line)
         {
             for insertion in insertions {
-                if let Some(child_node) = graph.node_by_id(&insertion.child_node_id) {
+                if let Some(child_node) = graph.node_by_id(insertion.child_node_id.as_ref()) {
                     flatten_node(child_node, graph, out);
                 }
             }
@@ -171,7 +171,7 @@ fn flatten_node(node: &ReferenceGraphNode, graph: &ReferenceGraph, out: &mut Vec
     for (&line, insertions) in insertion_map.range(last_line..) {
         if emitted_insertion_lines.insert(line) {
             for insertion in insertions {
-                if let Some(child_node) = graph.node_by_id(&insertion.child_node_id) {
+                if let Some(child_node) = graph.node_by_id(insertion.child_node_id.as_ref()) {
                     flatten_node(child_node, graph, out);
                 }
             }
@@ -315,7 +315,7 @@ fn build_node(
                     let child_id = source_to_id(&child_source);
 
                     // Cycle/depth check
-                    if runtime.transclusion.enter(child_id.clone()).is_ok() {
+                    if runtime.transclusion.enter(child_id.to_string()).is_ok() {
                         if let Some(child_md) = runtime.load_markdown(&child_path) {
                             let (child_node, mut descendants) = build_node(
                                 &child_md,
@@ -406,7 +406,7 @@ fn build_node(
                     }
                 }
 
-                if runtime.transclusion.enter(child_id.clone()).is_ok() {
+                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
                     if let Some(child_md) = runtime.load_markdown(&path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
@@ -442,7 +442,7 @@ fn build_node(
                     .any(|ins| ins.reference_id.as_deref() == Some(&ref_id))
                 {
                     child_insertions.push(ReferenceInsertion {
-                        child_node_id: String::new(),
+                        child_node_id: NodeId::from(""),
                         directive_line: directive.line,
                         insertion_order,
                         reference_id: Some(ref_id),
@@ -473,7 +473,7 @@ fn build_node(
                 }
 
                 child_insertions.push(ReferenceInsertion {
-                    child_node_id: String::new(),
+                    child_node_id: NodeId::from(""),
                     directive_line: directive.line,
                     insertion_order,
                     reference_id: Some(ref_id),
@@ -530,7 +530,7 @@ fn build_node(
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
-                if runtime.transclusion.enter(child_id.clone()).is_ok() {
+                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
                     if let Some(child_md) = runtime.load_markdown(&child_path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
@@ -601,7 +601,7 @@ fn build_node(
                 let child_source = ComposeSource::File(child_path.clone());
                 let child_id = source_to_id(&child_source);
 
-                if runtime.transclusion.enter(child_id.clone()).is_ok() {
+                if runtime.transclusion.enter(child_id.to_string()).is_ok() {
                     if let Some(child_md) = runtime.load_markdown(&child_path) {
                         let (child_node, mut descendants) = build_node(
                             &child_md,
@@ -789,15 +789,16 @@ fn resolve_local_target(
 /// File paths are canonicalized to avoid duplicate nodes when the same
 /// physical file is referenced via different path spellings (e.g.,
 /// `/var/...` vs `/private/var/...` on macOS).
-fn source_to_id(source: &ComposeSource) -> String {
+fn source_to_id(source: &ComposeSource) -> NodeId {
     match source {
-        ComposeSource::Unknown => "unknown".to_string(),
-        ComposeSource::File(p) => p
-            .canonicalize()
-            .unwrap_or_else(|_| p.clone())
-            .to_string_lossy()
-            .to_string(),
-        ComposeSource::Url(u) => u.to_string(),
+        ComposeSource::Unknown => NodeId::from("unknown"),
+        ComposeSource::File(p) => NodeId::from(
+            p.canonicalize()
+                .unwrap_or_else(|_| p.clone())
+                .to_string_lossy()
+                .to_string(),
+        ),
+        ComposeSource::Url(u) => NodeId::from(u.to_string()),
     }
 }
 
@@ -899,7 +900,7 @@ mod tests {
 
     #[test]
     fn source_to_id_unknown() {
-        assert_eq!(source_to_id(&ComposeSource::Unknown), "unknown");
+        assert_eq!(source_to_id(&ComposeSource::Unknown), NodeId::from("unknown"));
     }
 
     #[test]
@@ -1004,8 +1005,8 @@ mod tests {
         );
 
         // Verify no duplicate node IDs
-        let mut ids: Vec<&str> = vec![&graph.root.node_id];
-        ids.extend(graph.nodes.iter().map(|n| n.node_id.as_str()));
+        let mut ids: Vec<&str> = vec![graph.root.node_id.as_ref()];
+        ids.extend(graph.nodes.iter().map(|n| n.node_id.as_ref()));
         let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
         assert_eq!(ids.len(), unique.len(), "all node IDs should be unique");
     }
