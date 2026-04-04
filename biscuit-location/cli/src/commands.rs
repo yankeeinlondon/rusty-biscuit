@@ -7,21 +7,21 @@ use crate::output;
 
 /// Execute the CLI command and print output.
 pub async fn run(cli: Cli) -> color_eyre::Result<()> {
+    let gps_timeout = match &cli.command {
+        Commands::Gps { timeout } => Duration::from_secs(*timeout),
+        _ => Duration::from_secs(10),
+    };
+
     let config = LocationConfig {
-        maxmind_db_path: cli.db_path.clone(),
+        maxmind_db_path: cli.db_path,
+        gps_timeout,
         ..LocationConfig::default()
     };
 
     let svc = LocationService::new(config)?;
 
     match cli.command {
-        Commands::Gps { timeout } => {
-            let config = LocationConfig {
-                gps_timeout: Duration::from_secs(timeout),
-                maxmind_db_path: cli.db_path,
-                ..LocationConfig::default()
-            };
-            let svc = LocationService::new(config)?;
+        Commands::Gps { .. } => {
             match svc.gps().await? {
                 Some(location) => {
                     let maps_url = if cli.maps {
