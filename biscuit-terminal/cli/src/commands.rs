@@ -1695,10 +1695,7 @@ pub fn render_prose(
     }
 
     // Unescape common escape sequences (shell passes literal \n, \t, etc.)
-    let text = text
-        .replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace("\\r", "\r");
+    let text = crate::types::unescape_shell_escapes(&text);
 
     // Build the Prose component
     let mut prose = Prose::new(&text);
@@ -1803,10 +1800,7 @@ pub fn render_quote(
     }
 
     // Unescape common escape sequences (shell passes literal \n, \t, etc.)
-    let text = text
-        .replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace("\\r", "\r");
+    let text = crate::types::unescape_shell_escapes(&text);
 
     // Build the Prose component for the content
     let prose = Prose::new(&text);
@@ -1861,10 +1855,7 @@ pub fn render_list(
         .iter()
         .map(|item| {
             // Unescape common escape sequences (shell passes literal \n, \t, etc.)
-            let text = item
-                .replace("\\n", "\n")
-                .replace("\\t", "\t")
-                .replace("\\r", "\r");
+            let text = crate::types::unescape_shell_escapes(item);
 
             let prose = Prose::new(&text);
             RenderableContent::Component(Rc::new(prose))
@@ -1913,14 +1904,8 @@ pub fn render_columns(
     use biscuit_terminal::components::renderable::Renderable;
     use biscuit_terminal::utils::layout::Margin;
 
-    let left_text = left
-        .replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace("\\r", "\r");
-    let right_text = right
-        .replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace("\\r", "\r");
+    let left_text = crate::types::unescape_shell_escapes(left);
+    let right_text = crate::types::unescape_shell_escapes(right);
 
     let mut columns = TwoColumn::new(left_text, right_text).with_gap(gap);
 

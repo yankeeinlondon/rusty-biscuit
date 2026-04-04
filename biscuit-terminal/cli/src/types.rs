@@ -345,6 +345,16 @@ mod positive_f32_tests {
     }
 }
 
+/// Unescape common shell escape sequences.
+///
+/// The shell passes literal `\n`, `\t`, `\r` as two-character strings.
+/// This converts them back to actual control characters.
+pub fn unescape_shell_escapes(s: &str) -> String {
+    s.replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\r", "\r")
+}
+
 /// Terminal text styles that respect the `NO_COLOR` environment variable.
 ///
 /// When `NO_COLOR` is set, all style codes are empty strings.
