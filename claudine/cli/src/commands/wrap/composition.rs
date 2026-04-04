@@ -309,9 +309,6 @@ pub(crate) fn execute_composition_request(
     }
 
     let mut child_args = Vec::new();
-    let stdin_seed = profile
-        .prompt_delivery(&child_args, &effective_prompt, effective_non_interactive)?
-        .apply_to(&mut child_args);
 
     // -- Yolo ----------------------------------------------------------------
 
@@ -392,6 +389,39 @@ pub(crate) fn execute_composition_request(
     }
 
     child_args.extend(mcp_extra_args);
+
+    // -- Structured streaming decision ------------------------------------
+
+    let stdout_noise = if effective_non_interactive {
+        profile.stdout_noise_prefixes()
+    } else {
+        &[]
+    };
+    let stderr_noise = profile.stderr_noise_prefixes();
+
+    let use_structured = profile.supports_structured_stream() && effective_non_interactive;
+    let stream_verbosity = structured_verbosity(silent, quiet);
+
+    if use_structured {
+        profile.apply_structured_stream(&mut child_args);
+    }
+
+    let structured_codex_output = if provider == Provider::Codex
+        && (use_structured || (request.session_interactive && is_inline))
+    {
+        Some(StructuredCodexOutput::prepare(&mut child_args))
+    } else {
+        None
+    };
+
+    // Deliver the prompt after provider-specific flags have been assembled.
+    // Some CLIs, notably OpenCode, treat the first positional argument as the
+    // task body and may stop parsing subsequent flags. Appending the prompt too
+    // early can silently disable structured-output flags, leaving Claudine
+    // waiting forever for a stream the provider never enters.
+    let stdin_seed = profile
+        .prompt_delivery(&child_args, &effective_prompt, effective_non_interactive)?
+        .apply_to(&mut child_args);
 
     let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
     let child_cwd = env_plan.child_cwd.as_path();
@@ -514,30 +544,6 @@ pub(crate) fn execute_composition_request(
             eyre!("{reason}")
         })?;
     }
-
-    // -- Structured streaming decision ------------------------------------
-
-    let stdout_noise = if effective_non_interactive {
-        profile.stdout_noise_prefixes()
-    } else {
-        &[]
-    };
-    let stderr_noise = profile.stderr_noise_prefixes();
-
-    let use_structured = profile.supports_structured_stream() && effective_non_interactive;
-    let stream_verbosity = structured_verbosity(silent, quiet);
-
-    if use_structured {
-        profile.apply_structured_stream(&mut child_args);
-    }
-
-    let structured_codex_output = if provider == Provider::Codex
-        && (use_structured || (request.session_interactive && is_inline))
-    {
-        Some(StructuredCodexOutput::prepare(&mut child_args))
-    } else {
-        None
-    };
 
     // -- Preflight output (env details + prompt block) ---------------------
     // The header was already emitted early (right after profile lookup).

@@ -2297,13 +2297,25 @@ exit 0
 
     let args = fs::read_to_string(&args_path).unwrap();
     let collected: Vec<_> = args.lines().collect();
+    let run_index = collected
+        .iter()
+        .position(|arg| *arg == "run")
+        .expect("compose should use the OpenCode run entrypoint");
+    let format_index = collected
+        .iter()
+        .position(|arg| *arg == "--format")
+        .expect("compose should request OpenCode JSON format");
+    let json_index = format_index + 1;
+    let prompt_index = collected
+        .iter()
+        .position(|arg| *arg == "Hello OpenCode")
+        .expect("compose should pass the composed prompt as a positional arg for OpenCode");
+
+    assert!(run_index < format_index, "args: {args}");
+    assert_eq!(collected.get(json_index), Some(&"json"), "args: {args}");
     assert!(
-        collected.contains(&"run"),
-        "compose should use the OpenCode run entrypoint; args: {args}"
-    );
-    assert!(
-        collected.contains(&"Hello OpenCode"),
-        "compose should pass the composed prompt as a positional arg for OpenCode; args: {args}"
+        json_index < prompt_index,
+        "OpenCode flags must precede the positional prompt so structured output is enabled; args: {args}"
     );
 }
 
