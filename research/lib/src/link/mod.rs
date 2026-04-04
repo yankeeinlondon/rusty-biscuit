@@ -410,4 +410,76 @@ mod tests {
         // Should succeed or fail gracefully
         assert!(result.is_ok() || matches!(result, Err(LinkError::Discovery(_))));
     }
+
+    #[test]
+    fn test_create_service_skill_link_success() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source = temp.path().join("source_skill");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(
+            source.join("SKILL.md"),
+            "---\nname: t\ndescription: t\n---\nBody",
+        )
+        .unwrap();
+
+        let target = temp.path().join("target_dir").join("test-skill");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+
+        let mut errors = Vec::new();
+        let action = create_service_skill_link(
+            &source,
+            &target,
+            "TestService",
+            "test-skill",
+            &mut errors,
+        );
+
+        assert_eq!(action, SkillAction::CreatedLink);
+        assert!(target.exists() || target.is_symlink());
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_create_service_doc_link_already_linked() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source = temp.path().join("source.md");
+        std::fs::write(&source, "content").unwrap();
+
+        let target = temp.path().join("target.md");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&source, &target).unwrap();
+
+        let mut errors = Vec::new();
+        let action = create_service_doc_link(
+            &source,
+            &target,
+            "TestService",
+            "test-topic",
+            &mut errors,
+        );
+
+        assert_eq!(action, SkillAction::NoneAlreadyLinked);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_create_service_doc_link_local_definition() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source = temp.path().join("source.md");
+        std::fs::write(&source, "content").unwrap();
+
+        let target = temp.path().join("target.md");
+        std::fs::write(&target, "local content").unwrap();
+
+        let mut errors = Vec::new();
+        let action = create_service_doc_link(
+            &source,
+            &target,
+            "TestService",
+            "test-topic",
+            &mut errors,
+        );
+
+        assert_eq!(action, SkillAction::NoneLocalDefinition);
+    }
 }
