@@ -10,7 +10,7 @@ use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::cleanup::ListSpacingMode;
 use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::highlighting::{
-    detect_code_theme, detect_color_mode, detect_prose_theme,
+    ColorMode, ThemePair, detect_code_theme, detect_color_mode, detect_prose_theme,
 };
 use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
 use rayon::prelude::*;
@@ -18,6 +18,23 @@ use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 use std::process::Command;
 use tracing::{debug, info, instrument};
+
+/// Resolved theme configuration for terminal rendering.
+struct ResolvedTheme {
+    prose: ThemePair,
+    code: ThemePair,
+    color_mode: ColorMode,
+}
+
+impl ResolvedTheme {
+    /// Resolves theme from CLI options, falling back to auto-detection.
+    fn from_cli(cli: &Cli) -> Self {
+        let prose = cli.theme.unwrap_or_else(detect_prose_theme);
+        let code = cli.code_theme.unwrap_or_else(|| detect_code_theme(prose));
+        let color_mode = detect_color_mode();
+        Self { prose, code, color_mode }
+    }
+}
 
 /// Resolved allow flags for compose validation.
 pub struct ComposeAllowFlags {
@@ -279,17 +296,13 @@ pub fn run_render(
     let indent_size = indent.unwrap_or(darkmatter::markdown::cleanup::DEFAULT_INDENT);
     md.cleanup_with_indent(indent_size);
 
-    let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
-    let code_theme = cli
-        .code_theme
-        .unwrap_or_else(|| detect_code_theme(prose_theme));
-    let color_mode = detect_color_mode();
+    let theme = ResolvedTheme::from_cli(cli);
     let stdout_is_tty = io::stdout().is_terminal();
 
     match output {
         OutputFormat::Auto => {
             if stdout_is_tty {
-                render_terminal_output(&md, input, cli, prose_theme, code_theme, color_mode)?;
+                render_terminal_output(&md, input, cli, theme.prose, theme.code, theme.color_mode)?;
                 if show {
                     open_output_artifact(&markdown_artifact(&md))?;
                 }
@@ -301,7 +314,7 @@ pub fn run_render(
             emit_or_show_artifact(markdown_artifact(&md), show)?;
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&md, prose_theme, code_theme, color_mode)?;
+            let artifact = html_artifact(&md, theme.prose, theme.code, theme.color_mode)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
@@ -581,11 +594,7 @@ pub fn run_compose(
         }
     }
 
-    let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
-    let code_theme = cli
-        .code_theme
-        .unwrap_or_else(|| detect_code_theme(prose_theme));
-    let color_mode = detect_color_mode();
+    let theme = ResolvedTheme::from_cli(cli);
 
     match output {
         OutputFormat::Auto | OutputFormat::Markdown => {
@@ -608,7 +617,7 @@ pub fn run_compose(
             }
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&composed, prose_theme, code_theme, color_mode)?;
+            let artifact = html_artifact(&composed, theme.prose, theme.code, theme.color_mode)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
