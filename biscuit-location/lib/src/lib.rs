@@ -6,6 +6,7 @@
 mod config;
 mod distance;
 mod error;
+mod gps;
 mod ip;
 mod maps;
 #[cfg(feature = "reverse")]
