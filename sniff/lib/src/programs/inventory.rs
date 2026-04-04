@@ -1,172 +1,197 @@
 //! Program inventory with metadata lookup.
 //!
-//! This module provides the `Program` enum containing all known programs
+//! This module provides the `Program` tagged union spanning all program categories
 //! and the `PROGRAM_LOOKUP` static map for accessing their `ProgramDetails`.
 
 use std::{collections::HashMap, sync::LazyLock};
 
 use serde::{Deserialize, Serialize};
-use strum::{EnumCount, EnumIter};
+use strum::IntoEnumIterator;
 
 use crate::os::OsType;
+use crate::programs::enums::{
+    AiCli, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager, TerminalApp, TtsClient,
+    Utility,
+};
+use crate::programs::schema::{ProgramInfo, ProgramMetadata};
 use crate::programs::types::{InstallationMethod, ProgramDetails};
 
-/// An inventory of programs which this library is aware of and
-/// has metadata for.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, EnumIter, EnumCount)]
+/// Unified enum spanning all program categories.
+///
+/// Each variant wraps a category-specific enum, making the relationship
+/// between categories and the unified type structural rather than manual.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Program {
-    // Editors
-    Vi,
-    Vim,
-    Neovim,
-    Emacs,
-    XEmacs,
-    Nano,
-    Helix,
-    VSCode,
-    VSCodium,
-    Sublime,
-    Zed,
-    Micro,
-    Kakoune,
-    Amp,
-    Lapce,
-    PhpStorm,
-    IntellijIdea,
-    PyCharm,
-    WebStorm,
-    CLion,
-    GoLand,
-    Rider,
-    TextMate,
-    BBEdit,
-    Geany,
-    Kate,
+    Editor(Editor),
+    Utility(Utility),
+    LanguagePackageManager(LanguagePackageManager),
+    OsPackageManager(OsPackageManager),
+    TtsClient(TtsClient),
+    TerminalApp(TerminalApp),
+    HeadlessAudio(HeadlessAudio),
+    AiCli(AiCli),
+}
 
-    // Utilities
-    Exa,
-    Eza,
-    Ripgrep,
-    Dust,
-    Bat,
-    Fd,
-    Procs,
-    Bottom,
-    Fzf,
-    Zoxide,
-    Starship,
-    Direnv,
-    Jq,
-    Delta,
-    Tealdeer,
-    Lazygit,
-    Gh,
-    Htop,
-    Btop,
-    Tmux,
-    Zellij,
-    Httpie,
-    Curlie,
-    Mise,
-    Hyperfine,
-    Tokei,
-    Xh,
-    Curl,
-    Wget,
-    Iperf3,
+// ============================================================================
+// ProgramMetadata implementation
+// ============================================================================
 
-    // Language Package Managers
-    Npm,
-    Pnpm,
-    Yarn,
-    Bun,
-    Cargo,
-    GoModules,
-    Composer,
-    SwiftPm,
-    Luarocks,
-    Vcpkg,
-    Conan,
-    Nuget,
-    Hex,
-    Pip,
-    Uv,
-    Poetry,
-    Cpan,
-    Cpanm,
+impl ProgramMetadata for Program {
+    fn info(&self) -> &'static ProgramInfo {
+        match self {
+            Program::Editor(e) => e.info(),
+            Program::Utility(u) => u.info(),
+            Program::LanguagePackageManager(l) => l.info(),
+            Program::OsPackageManager(o) => o.info(),
+            Program::TtsClient(t) => t.info(),
+            Program::TerminalApp(t) => t.info(),
+            Program::HeadlessAudio(h) => h.info(),
+            Program::AiCli(a) => a.info(),
+        }
+    }
+}
 
-    // OS Package Managers
-    Apt,
-    Nala,
-    Brew,
-    Dnf,
-    Pacman,
-    Winget,
-    Chocolatey,
-    Scoop,
-    Nix,
+// ============================================================================
+// From conversions
+// ============================================================================
 
-    // TTS Clients
-    Say,
-    Espeak,
-    EspeakNg,
-    Festival,
-    Mimic,
-    Mimic3,
-    Piper,
-    Echogarden,
-    Balcon,
-    WindowsSapi,
-    GttsCli,
-    CoquiTts,
-    SherpaOnnx,
-    KokoroTts,
-    Pico2Wave,
+impl From<Editor> for Program {
+    fn from(e: Editor) -> Self {
+        Program::Editor(e)
+    }
+}
 
-    // Headless Audio
-    Mpv,
-    Ffplay,
-    Vlc,
-    MPlayer,
-    GstreamerGstPlay,
-    Sox,
-    Mpg123,
-    Ogg123,
-    AlsaAplay,
-    MacOsAfplay,
-    PulseaudioPaplay,
-    PulseaudioPacat,
-    Pipewire,
+impl From<Utility> for Program {
+    fn from(u: Utility) -> Self {
+        Program::Utility(u)
+    }
+}
 
-    // Terminal Apps
-    Alacritty,
-    Kitty,
-    ITerm2,
-    WezTerm,
-    Ghostty,
-    Warp,
-    Rio,
-    Tabby,
-    Foot,
-    GnomeTerminal,
-    Konsole,
-    XfceTerminal,
-    Terminology,
-    St,
-    Xterm,
-    Hyper,
-    WindowsTerminal,
+impl From<LanguagePackageManager> for Program {
+    fn from(l: LanguagePackageManager) -> Self {
+        Program::LanguagePackageManager(l)
+    }
+}
 
-    // AI CLI Tools
-    Claude,
-    Opencode,
-    Roo,
-    GeminiCli,
-    Aider,
-    Codex,
-    Goose,
-    KimiCli,
-    QwenCli,
+impl From<OsPackageManager> for Program {
+    fn from(o: OsPackageManager) -> Self {
+        Program::OsPackageManager(o)
+    }
+}
+
+impl From<TtsClient> for Program {
+    fn from(t: TtsClient) -> Self {
+        Program::TtsClient(t)
+    }
+}
+
+impl From<TerminalApp> for Program {
+    fn from(t: TerminalApp) -> Self {
+        Program::TerminalApp(t)
+    }
+}
+
+impl From<HeadlessAudio> for Program {
+    fn from(h: HeadlessAudio) -> Self {
+        Program::HeadlessAudio(h)
+    }
+}
+
+impl From<AiCli> for Program {
+    fn from(a: AiCli) -> Self {
+        Program::AiCli(a)
+    }
+}
+
+// ============================================================================
+// Display, Serialize, Deserialize
+// ============================================================================
+
+impl std::fmt::Display for Program {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.binary_name())
+    }
+}
+
+impl Serialize for Program {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.binary_name())
+    }
+}
+
+impl<'de> Deserialize<'de> for Program {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let name = String::deserialize(deserializer)?;
+        Program::from_binary_name(&name)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown program: {}", name)))
+    }
+}
+
+// ============================================================================
+// Helper methods
+// ============================================================================
+
+impl Program {
+    /// Look up a Program by binary name.
+    pub fn from_binary_name(name: &str) -> Option<Self> {
+        Editor::iter()
+            .find(|e| e.binary_name() == name)
+            .map(Program::Editor)
+            .or_else(|| {
+                Utility::iter()
+                    .find(|u| u.binary_name() == name)
+                    .map(Program::Utility)
+            })
+            .or_else(|| {
+                LanguagePackageManager::iter()
+                    .find(|l| l.binary_name() == name)
+                    .map(Program::LanguagePackageManager)
+            })
+            .or_else(|| {
+                OsPackageManager::iter()
+                    .find(|o| o.binary_name() == name)
+                    .map(Program::OsPackageManager)
+            })
+            .or_else(|| {
+                TtsClient::iter()
+                    .find(|t| t.binary_name() == name)
+                    .map(Program::TtsClient)
+            })
+            .or_else(|| {
+                TerminalApp::iter()
+                    .find(|t| t.binary_name() == name)
+                    .map(Program::TerminalApp)
+            })
+            .or_else(|| {
+                HeadlessAudio::iter()
+                    .find(|h| h.binary_name() == name)
+                    .map(Program::HeadlessAudio)
+            })
+            .or_else(|| {
+                AiCli::iter()
+                    .find(|a| a.binary_name() == name)
+                    .map(Program::AiCli)
+            })
+    }
+
+    /// Iterate over all programs across all categories.
+    pub fn iter() -> impl Iterator<Item = Program> {
+        Editor::iter()
+            .map(Program::from)
+            .chain(Utility::iter().map(Program::from))
+            .chain(LanguagePackageManager::iter().map(Program::from))
+            .chain(OsPackageManager::iter().map(Program::from))
+            .chain(TtsClient::iter().map(Program::from))
+            .chain(TerminalApp::iter().map(Program::from))
+            .chain(HeadlessAudio::iter().map(Program::from))
+            .chain(AiCli::iter().map(Program::from))
+    }
 }
 
 // ============================================================================
@@ -959,7 +984,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     // Editors (26 entries)
     // ========================================================================
     lookup.insert(
-        Program::Vi,
+        Program::Editor(Editor::Vi),
         ProgramDetails::full(
             "Vi",
             "Classic vi text editor",
@@ -970,7 +995,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
         ),
     );
     lookup.insert(
-        Program::Vim,
+        Program::Editor(Editor::Vim),
         ProgramDetails::full(
             "Vim",
             "Vi IMproved text editor",
@@ -982,7 +1007,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Neovim,
+        Program::Editor(Editor::Neovim),
         ProgramDetails::full(
             "Neovim",
             "Hyperextensible Vim-based text editor",
@@ -994,7 +1019,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Emacs,
+        Program::Editor(Editor::Emacs),
         ProgramDetails::full(
             "GNU Emacs",
             "Extensible, customizable text editor",
@@ -1006,7 +1031,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::XEmacs,
+        Program::Editor(Editor::XEmacs),
         ProgramDetails::full(
             "XEmacs",
             "Emacs variant with additional features",
@@ -1018,7 +1043,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Nano,
+        Program::Editor(Editor::Nano),
         ProgramDetails::full(
             "GNU nano",
             "Small and friendly text editor",
@@ -1030,7 +1055,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Helix,
+        Program::Editor(Editor::Helix),
         ProgramDetails::full(
             "Helix",
             "Post-modern modal text editor",
@@ -1042,7 +1067,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::VSCode,
+        Program::Editor(Editor::VSCode),
         ProgramDetails::full(
             "Visual Studio Code",
             "Code editor for modern web and cloud applications",
@@ -1054,7 +1079,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::VSCodium,
+        Program::Editor(Editor::VSCodium),
         ProgramDetails::full(
             "VSCodium",
             "Free/libre open source binaries of VS Code",
@@ -1066,7 +1091,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Sublime,
+        Program::Editor(Editor::Sublime),
         ProgramDetails::full(
             "Sublime Text",
             "Sophisticated text editor for code and prose",
@@ -1078,7 +1103,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Zed,
+        Program::Editor(Editor::Zed),
         ProgramDetails::full(
             "Zed",
             "High-performance multiplayer code editor",
@@ -1090,7 +1115,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Micro,
+        Program::Editor(Editor::Micro),
         ProgramDetails::full(
             "Micro",
             "Modern terminal-based text editor",
@@ -1102,7 +1127,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Kakoune,
+        Program::Editor(Editor::Kakoune),
         ProgramDetails::full(
             "Kakoune",
             "Modal editor with selection-based editing model",
@@ -1114,7 +1139,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Amp,
+        Program::Editor(Editor::Amp),
         ProgramDetails::full(
             "Amp",
             "Modal text editor inspired by Vi",
@@ -1126,7 +1151,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Lapce,
+        Program::Editor(Editor::Lapce),
         ProgramDetails::full(
             "Lapce",
             "Lightning-fast code editor written in Rust",
@@ -1138,7 +1163,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::PhpStorm,
+        Program::Editor(Editor::PhpStorm),
         ProgramDetails::full(
             "PhpStorm",
             "Lightning-smart PHP IDE by JetBrains",
@@ -1150,7 +1175,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::IntellijIdea,
+        Program::Editor(Editor::IntellijIdea),
         ProgramDetails::full(
             "IntelliJ IDEA",
             "Capable and ergonomic IDE for JVM-based languages",
@@ -1162,7 +1187,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::PyCharm,
+        Program::Editor(Editor::PyCharm),
         ProgramDetails::full(
             "PyCharm",
             "Python IDE for professional developers",
@@ -1174,7 +1199,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::WebStorm,
+        Program::Editor(Editor::WebStorm),
         ProgramDetails::full(
             "WebStorm",
             "JetBrains IDE for JavaScript and TypeScript",
@@ -1186,7 +1211,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::CLion,
+        Program::Editor(Editor::CLion),
         ProgramDetails::full(
             "CLion",
             "Cross-platform C and C++ IDE",
@@ -1198,7 +1223,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::GoLand,
+        Program::Editor(Editor::GoLand),
         ProgramDetails::full(
             "GoLand",
             "Cross-platform Go IDE",
@@ -1210,7 +1235,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Rider,
+        Program::Editor(Editor::Rider),
         ProgramDetails::full(
             "Rider",
             "Cross-platform .NET IDE",
@@ -1222,7 +1247,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::TextMate,
+        Program::Editor(Editor::TextMate),
         ProgramDetails::full(
             "TextMate",
             "Versatile plain text editor for macOS",
@@ -1234,7 +1259,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::BBEdit,
+        Program::Editor(Editor::BBEdit),
         ProgramDetails::full(
             "BBEdit",
             "Professional HTML and text editor for macOS",
@@ -1246,7 +1271,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Geany,
+        Program::Editor(Editor::Geany),
         ProgramDetails::full(
             "Geany",
             "Lightweight programmer's text editor",
@@ -1258,7 +1283,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Kate,
+        Program::Editor(Editor::Kate),
         ProgramDetails::full(
             "Kate",
             "Multi-document text editor by KDE",
@@ -1273,7 +1298,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     // Utilities (30 entries)
     // ========================================================================
     lookup.insert(
-        Program::Ripgrep,
+        Program::Utility(Utility::Ripgrep),
         ProgramDetails::full(
             "ripgrep",
             "Fast grep alternative with smart defaults",
@@ -1285,7 +1310,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Bat,
+        Program::Utility(Utility::Bat),
         ProgramDetails::full(
             "bat",
             "A cat clone with syntax highlighting",
@@ -1297,7 +1322,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Fd,
+        Program::Utility(Utility::Fd),
         ProgramDetails::full(
             "fd",
             "Simple, fast alternative to find",
@@ -1309,7 +1334,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Fzf,
+        Program::Utility(Utility::Fzf),
         ProgramDetails::full(
             "fzf",
             "Command-line fuzzy finder",
@@ -1321,7 +1346,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Exa,
+        Program::Utility(Utility::Exa),
         ProgramDetails::full(
             "exa",
             "Modern replacement for ls (deprecated)",
@@ -1333,7 +1358,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Eza,
+        Program::Utility(Utility::Eza),
         ProgramDetails::full(
             "eza",
             "A modern replacement for ls",
@@ -1345,7 +1370,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Dust,
+        Program::Utility(Utility::Dust),
         ProgramDetails::full(
             "dust",
             "A more intuitive version of du",
@@ -1357,7 +1382,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Procs,
+        Program::Utility(Utility::Procs),
         ProgramDetails::full(
             "procs",
             "A modern replacement for ps",
@@ -1369,7 +1394,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Bottom,
+        Program::Utility(Utility::Bottom),
         ProgramDetails::full(
             "bottom",
             "Cross-platform graphical process monitor",
@@ -1381,7 +1406,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Zoxide,
+        Program::Utility(Utility::Zoxide),
         ProgramDetails::full(
             "zoxide",
             "Smarter cd command",
@@ -1393,7 +1418,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Direnv,
+        Program::Utility(Utility::Direnv),
         ProgramDetails::full(
             "direnv",
             "Environment switcher for the shell",
@@ -1405,7 +1430,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Tealdeer,
+        Program::Utility(Utility::Tealdeer),
         ProgramDetails::full(
             "tealdeer",
             "Fast tldr client for simplified man pages",
@@ -1417,7 +1442,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Jq,
+        Program::Utility(Utility::Jq),
         ProgramDetails::full(
             "jq",
             "Command-line JSON processor",
@@ -1429,7 +1454,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Gh,
+        Program::Utility(Utility::Gh),
         ProgramDetails::full(
             "GitHub CLI",
             "GitHub's official CLI",
@@ -1441,7 +1466,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Lazygit,
+        Program::Utility(Utility::Lazygit),
         ProgramDetails::full(
             "lazygit",
             "Simple terminal UI for git commands",
@@ -1453,7 +1478,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Delta,
+        Program::Utility(Utility::Delta),
         ProgramDetails::full(
             "delta",
             "Viewer for git and diff output",
@@ -1465,7 +1490,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Starship,
+        Program::Utility(Utility::Starship),
         ProgramDetails::full(
             "Starship",
             "Minimal, blazing-fast shell prompt",
@@ -1477,7 +1502,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Htop,
+        Program::Utility(Utility::Htop),
         ProgramDetails::full(
             "htop",
             "Interactive process viewer",
@@ -1489,7 +1514,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Btop,
+        Program::Utility(Utility::Btop),
         ProgramDetails::full(
             "btop",
             "Resource monitor with CPU, memory, disk, network stats",
@@ -1501,7 +1526,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Tmux,
+        Program::Utility(Utility::Tmux),
         ProgramDetails::full(
             "tmux",
             "Terminal multiplexer",
@@ -1513,7 +1538,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Zellij,
+        Program::Utility(Utility::Zellij),
         ProgramDetails::full(
             "Zellij",
             "Modern terminal multiplexer",
@@ -1525,7 +1550,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Httpie,
+        Program::Utility(Utility::Httpie),
         ProgramDetails::full(
             "HTTPie",
             "User-friendly HTTP client",
@@ -1537,7 +1562,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Curlie,
+        Program::Utility(Utility::Curlie),
         ProgramDetails::full(
             "curlie",
             "User-friendly alternative to curl",
@@ -1549,7 +1574,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Mise,
+        Program::Utility(Utility::Mise),
         ProgramDetails::full(
             "mise",
             "Polyglot development environment manager",
@@ -1561,7 +1586,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Hyperfine,
+        Program::Utility(Utility::Hyperfine),
         ProgramDetails::full(
             "hyperfine",
             "Command-line benchmarking tool",
@@ -1573,7 +1598,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Tokei,
+        Program::Utility(Utility::Tokei),
         ProgramDetails::full(
             "tokei",
             "Count lines of code quickly",
@@ -1585,7 +1610,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Xh,
+        Program::Utility(Utility::Xh),
         ProgramDetails::full(
             "xh",
             "Friendly and fast HTTP client",
@@ -1597,7 +1622,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Curl,
+        Program::Utility(Utility::Curl),
         ProgramDetails::full(
             "curl",
             "Transfer data with URLs",
@@ -1609,7 +1634,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Wget,
+        Program::Utility(Utility::Wget),
         ProgramDetails::full(
             "wget",
             "Network utility to retrieve content from web servers",
@@ -1621,7 +1646,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Iperf3,
+        Program::Utility(Utility::Iperf3),
         ProgramDetails::full(
             "iperf3",
             "Network bandwidth measurement tool",
@@ -1636,7 +1661,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     // Package Managers (27 entries)
     // ========================================================================
     lookup.insert(
-        Program::Brew,
+        Program::OsPackageManager(OsPackageManager::Brew),
         ProgramDetails::full(
             "Homebrew",
             "macOS/Linux community package manager",
@@ -1648,7 +1673,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Cargo,
+        Program::LanguagePackageManager(LanguagePackageManager::Cargo),
         ProgramDetails::full(
             "Cargo",
             "Rust package manager and build tool",
@@ -1660,7 +1685,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Npm,
+        Program::LanguagePackageManager(LanguagePackageManager::Npm),
         ProgramDetails::full(
             "npm",
             "Node.js package manager",
@@ -1672,7 +1697,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Pnpm,
+        Program::LanguagePackageManager(LanguagePackageManager::Pnpm),
         ProgramDetails::full(
             "pnpm",
             "Fast, disk-efficient package manager",
@@ -1684,7 +1709,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Yarn,
+        Program::LanguagePackageManager(LanguagePackageManager::Yarn),
         ProgramDetails::full(
             "Yarn",
             "Alternative Node.js package manager",
@@ -1696,7 +1721,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Bun,
+        Program::LanguagePackageManager(LanguagePackageManager::Bun),
         ProgramDetails::full(
             "Bun",
             "All-in-one JS runtime with package manager",
@@ -1708,7 +1733,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::GoModules,
+        Program::LanguagePackageManager(LanguagePackageManager::GoModules),
         ProgramDetails::full(
             "Go Modules",
             "Built-in Go dependency system",
@@ -1720,7 +1745,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Composer,
+        Program::LanguagePackageManager(LanguagePackageManager::Composer),
         ProgramDetails::full(
             "Composer",
             "PHP dependency manager",
@@ -1732,7 +1757,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::SwiftPm,
+        Program::LanguagePackageManager(LanguagePackageManager::SwiftPm),
         ProgramDetails::full(
             "Swift Package Manager",
             "Swift dependency manager",
@@ -1744,7 +1769,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Luarocks,
+        Program::LanguagePackageManager(LanguagePackageManager::Luarocks),
         ProgramDetails::full(
             "LuaRocks",
             "Package manager for Lua modules",
@@ -1756,7 +1781,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Vcpkg,
+        Program::LanguagePackageManager(LanguagePackageManager::Vcpkg),
         ProgramDetails::full(
             "vcpkg",
             "C/C++ dependency manager by Microsoft",
@@ -1768,7 +1793,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Conan,
+        Program::LanguagePackageManager(LanguagePackageManager::Conan),
         ProgramDetails::full(
             "Conan",
             "Decentralized C/C++ package manager",
@@ -1780,7 +1805,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Nuget,
+        Program::LanguagePackageManager(LanguagePackageManager::Nuget),
         ProgramDetails::full(
             "NuGet",
             ".NET package manager",
@@ -1792,7 +1817,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Hex,
+        Program::LanguagePackageManager(LanguagePackageManager::Hex),
         ProgramDetails::full(
             "Hex",
             "Package manager for BEAM ecosystem",
@@ -1804,7 +1829,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Pip,
+        Program::LanguagePackageManager(LanguagePackageManager::Pip),
         ProgramDetails::full(
             "pip",
             "Python package installer",
@@ -1816,7 +1841,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Uv,
+        Program::LanguagePackageManager(LanguagePackageManager::Uv),
         ProgramDetails::full(
             "uv",
             "Fast Python package manager",
@@ -1828,7 +1853,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Poetry,
+        Program::LanguagePackageManager(LanguagePackageManager::Poetry),
         ProgramDetails::full(
             "Poetry",
             "Python dependency manager with lockfiles",
@@ -1840,7 +1865,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Cpan,
+        Program::LanguagePackageManager(LanguagePackageManager::Cpan),
         ProgramDetails::full(
             "CPAN",
             "Perl module archive",
@@ -1852,7 +1877,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Cpanm,
+        Program::LanguagePackageManager(LanguagePackageManager::Cpanm),
         ProgramDetails::full(
             "cpanminus",
             "Lightweight CPAN client",
@@ -1864,7 +1889,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Apt,
+        Program::OsPackageManager(OsPackageManager::Apt),
         ProgramDetails::full(
             "APT",
             "Debian/Ubuntu package manager",
@@ -1876,7 +1901,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Nala,
+        Program::OsPackageManager(OsPackageManager::Nala),
         ProgramDetails::full(
             "Nala",
             "Modern apt frontend with parallel downloads",
@@ -1888,7 +1913,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Dnf,
+        Program::OsPackageManager(OsPackageManager::Dnf),
         ProgramDetails::full(
             "DNF",
             "Fedora/RHEL package manager",
@@ -1900,7 +1925,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Pacman,
+        Program::OsPackageManager(OsPackageManager::Pacman),
         ProgramDetails::full(
             "Pacman",
             "Arch Linux package manager",
@@ -1912,7 +1937,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Winget,
+        Program::OsPackageManager(OsPackageManager::Winget),
         ProgramDetails::full(
             "winget",
             "Windows Package Manager",
@@ -1924,7 +1949,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Chocolatey,
+        Program::OsPackageManager(OsPackageManager::Chocolatey),
         ProgramDetails::full(
             "Chocolatey",
             "Windows community package manager",
@@ -1936,7 +1961,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Scoop,
+        Program::OsPackageManager(OsPackageManager::Scoop),
         ProgramDetails::full(
             "Scoop",
             "Windows command-line installer",
@@ -1948,7 +1973,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Nix,
+        Program::OsPackageManager(OsPackageManager::Nix),
         ProgramDetails::full(
             "Nix",
             "Nix package manager",
@@ -1963,7 +1988,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     // TTS Clients (15 entries)
     // ========================================================================
     lookup.insert(
-        Program::Say,
+        Program::TtsClient(TtsClient::Say),
         ProgramDetails::full(
             "say",
             "macOS built-in speech synthesis",
@@ -1975,7 +2000,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::EspeakNg,
+        Program::TtsClient(TtsClient::EspeakNg),
         ProgramDetails::full(
             "eSpeak NG",
             "Multi-lingual speech synthesizer",
@@ -1987,7 +2012,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Espeak,
+        Program::TtsClient(TtsClient::Espeak),
         ProgramDetails::full(
             "eSpeak",
             "Open source speech synthesizer",
@@ -1999,7 +2024,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Festival,
+        Program::TtsClient(TtsClient::Festival),
         ProgramDetails::full(
             "Festival",
             "General multi-lingual speech synthesis",
@@ -2011,7 +2036,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Mimic,
+        Program::TtsClient(TtsClient::Mimic),
         ProgramDetails::full(
             "Mimic",
             "Mycroft's TTS engine based on Flite",
@@ -2023,7 +2048,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Mimic3,
+        Program::TtsClient(TtsClient::Mimic3),
         ProgramDetails::full(
             "Mimic 3",
             "Mycroft's neural TTS engine",
@@ -2035,7 +2060,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Piper,
+        Program::TtsClient(TtsClient::Piper),
         ProgramDetails::full(
             "Piper",
             "Fast local neural TTS using ONNX",
@@ -2047,7 +2072,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Echogarden,
+        Program::TtsClient(TtsClient::Echogarden),
         ProgramDetails::full(
             "Echogarden",
             "Speech processing engine",
@@ -2059,7 +2084,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Balcon,
+        Program::TtsClient(TtsClient::Balcon),
         ProgramDetails::full(
             "Balcon",
             "Command line TTS utility for Windows",
@@ -2071,7 +2096,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::WindowsSapi,
+        Program::TtsClient(TtsClient::WindowsSapi),
         ProgramDetails::full(
             "Windows SAPI",
             "Windows Speech API",
@@ -2083,7 +2108,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::GttsCli,
+        Program::TtsClient(TtsClient::GttsCli),
         ProgramDetails::full(
             "gTTS",
             "Google Text-to-Speech CLI tool",
@@ -2095,7 +2120,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::CoquiTts,
+        Program::TtsClient(TtsClient::CoquiTts),
         ProgramDetails::full(
             "Coqui TTS",
             "Deep learning for Text-to-Speech",
@@ -2107,7 +2132,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::SherpaOnnx,
+        Program::TtsClient(TtsClient::SherpaOnnx),
         ProgramDetails::full(
             "Sherpa-ONNX",
             "Streaming/non-streaming TTS using ONNX",
@@ -2119,7 +2144,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::KokoroTts,
+        Program::TtsClient(TtsClient::KokoroTts),
         ProgramDetails::full(
             "Kokoro TTS",
             "High-quality neural TTS using Kokoro-82M model",
@@ -2131,7 +2156,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Pico2Wave,
+        Program::TtsClient(TtsClient::Pico2Wave),
         ProgramDetails::full(
             "SVOX Pico",
             "Lightweight TTS for embedded systems",
@@ -2146,7 +2171,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     // Audio Players (11 entries)
     // ========================================================================
     lookup.insert(
-        Program::Mpv,
+        Program::HeadlessAudio(HeadlessAudio::Mpv),
         ProgramDetails::full(
             "mpv",
             "CLI media player for audio-only playback",
@@ -2158,7 +2183,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Ffplay,
+        Program::HeadlessAudio(HeadlessAudio::Ffplay),
         ProgramDetails::full(
             "FFplay",
             "Minimal CLI player shipped with FFmpeg",
@@ -2170,7 +2195,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Sox,
+        Program::HeadlessAudio(HeadlessAudio::Sox),
         ProgramDetails::full(
             "SoX play",
             "Swiss-army knife for audio playback",
@@ -2182,7 +2207,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Vlc,
+        Program::HeadlessAudio(HeadlessAudio::Vlc),
         ProgramDetails::full(
             "VLC",
             "Headless VLC playback via cvlc",
@@ -2194,7 +2219,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::MPlayer,
+        Program::HeadlessAudio(HeadlessAudio::MPlayer),
         ProgramDetails::full(
             "MPlayer",
             "Classic CLI-oriented media player",
@@ -2206,7 +2231,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::GstreamerGstPlay,
+        Program::HeadlessAudio(HeadlessAudio::GstreamerGstPlay),
         ProgramDetails::full(
             "GStreamer gst-play",
             "CLI front-end to GStreamer pipelines",
@@ -2218,7 +2243,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Mpg123,
+        Program::HeadlessAudio(HeadlessAudio::Mpg123),
         ProgramDetails::full(
             "mpg123",
             "Lightweight console MP3 player",
@@ -2230,7 +2255,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Ogg123,
+        Program::HeadlessAudio(HeadlessAudio::Ogg123),
         ProgramDetails::full(
             "ogg123",
             "CLI player for Ogg/Vorbis files",
@@ -2242,7 +2267,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::AlsaAplay,
+        Program::HeadlessAudio(HeadlessAudio::AlsaAplay),
         ProgramDetails::full(
             "aplay",
             "ALSA low-level playback utility",
@@ -2254,7 +2279,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::MacOsAfplay,
+        Program::HeadlessAudio(HeadlessAudio::MacOsAfplay),
         ProgramDetails::full(
             "afplay",
             "macOS native audio file player",
@@ -2266,7 +2291,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::PulseaudioPaplay,
+        Program::HeadlessAudio(HeadlessAudio::PulseaudioPaplay),
         ProgramDetails::full(
             "paplay",
             "Simple PulseAudio playback tool",
@@ -2278,7 +2303,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::PulseaudioPacat,
+        Program::HeadlessAudio(HeadlessAudio::PulseaudioPacat),
         ProgramDetails::full(
             "pacat",
             "PulseAudio raw audio streaming",
@@ -2290,7 +2315,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Pipewire,
+        Program::HeadlessAudio(HeadlessAudio::Pipewire),
         ProgramDetails::full(
             "PipeWire",
             "PipeWire CLI playback tool",
@@ -2305,7 +2330,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     // Terminal Apps (17 entries)
     // ========================================================================
     lookup.insert(
-        Program::Alacritty,
+        Program::TerminalApp(TerminalApp::Alacritty),
         ProgramDetails::full(
             "Alacritty",
             "Fast, GPU-accelerated terminal emulator",
@@ -2317,7 +2342,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Kitty,
+        Program::TerminalApp(TerminalApp::Kitty),
         ProgramDetails::full(
             "kitty",
             "Fast, feature-rich, GPU-based terminal",
@@ -2329,7 +2354,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::WezTerm,
+        Program::TerminalApp(TerminalApp::WezTerm),
         ProgramDetails::full(
             "WezTerm",
             "GPU-accelerated terminal emulator and multiplexer",
@@ -2341,7 +2366,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::ITerm2,
+        Program::TerminalApp(TerminalApp::ITerm2),
         ProgramDetails::full(
             "iTerm2",
             "Terminal emulator for macOS",
@@ -2353,7 +2378,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Ghostty,
+        Program::TerminalApp(TerminalApp::Ghostty),
         ProgramDetails::full(
             "Ghostty",
             "Fast, feature-rich GPU terminal written in Zig",
@@ -2365,7 +2390,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Warp,
+        Program::TerminalApp(TerminalApp::Warp),
         ProgramDetails::full(
             "Warp",
             "Modern, Rust-based terminal with AI",
@@ -2377,7 +2402,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Rio,
+        Program::TerminalApp(TerminalApp::Rio),
         ProgramDetails::full(
             "Rio",
             "Hardware-accelerated GPU terminal emulator",
@@ -2389,7 +2414,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Tabby,
+        Program::TerminalApp(TerminalApp::Tabby),
         ProgramDetails::full(
             "Tabby",
             "Terminal for a more modern age",
@@ -2401,7 +2426,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Foot,
+        Program::TerminalApp(TerminalApp::Foot),
         ProgramDetails::full(
             "foot",
             "Fast, lightweight Wayland terminal emulator",
@@ -2413,7 +2438,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::GnomeTerminal,
+        Program::TerminalApp(TerminalApp::GnomeTerminal),
         ProgramDetails::full(
             "GNOME Terminal",
             "Default terminal for GNOME desktop",
@@ -2425,7 +2450,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Konsole,
+        Program::TerminalApp(TerminalApp::Konsole),
         ProgramDetails::full(
             "Konsole",
             "Terminal emulator by KDE",
@@ -2437,7 +2462,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::XfceTerminal,
+        Program::TerminalApp(TerminalApp::XfceTerminal),
         ProgramDetails::full(
             "Xfce Terminal",
             "Terminal emulator for Xfce",
@@ -2449,7 +2474,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Terminology,
+        Program::TerminalApp(TerminalApp::Terminology),
         ProgramDetails::full(
             "Terminology",
             "Terminal based on Enlightenment libraries",
@@ -2461,7 +2486,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::St,
+        Program::TerminalApp(TerminalApp::St),
         ProgramDetails::full(
             "st",
             "Simple terminal for X which sucks less",
@@ -2473,7 +2498,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Xterm,
+        Program::TerminalApp(TerminalApp::Xterm),
         ProgramDetails::full(
             "xterm",
             "Standard terminal for X Window System",
@@ -2485,7 +2510,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Hyper,
+        Program::TerminalApp(TerminalApp::Hyper),
         ProgramDetails::full(
             "Hyper",
             "Terminal built on web technologies",
@@ -2497,7 +2522,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::WindowsTerminal,
+        Program::TerminalApp(TerminalApp::WindowsTerminal),
         ProgramDetails::full(
             "Windows Terminal",
             "Modern terminal for Windows",
@@ -2512,7 +2537,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     // AI CLI Tools (9 entries)
     // ========================================================================
     lookup.insert(
-        Program::Claude,
+        Program::AiCli(AiCli::Claude),
         ProgramDetails::full(
             "Claude Code",
             "Anthropic's agentic coding tool",
@@ -2524,7 +2549,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Opencode,
+        Program::AiCli(AiCli::Opencode),
         ProgramDetails::full(
             "OpenCode",
             "AI-powered coding assistant CLI",
@@ -2536,7 +2561,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Roo,
+        Program::AiCli(AiCli::Roo),
         ProgramDetails::full(
             "Roo Code",
             "AI pair programming in your terminal",
@@ -2548,7 +2573,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::GeminiCli,
+        Program::AiCli(AiCli::GeminiCli),
         ProgramDetails::full(
             "Gemini CLI",
             "Google's Gemini AI in the terminal",
@@ -2560,7 +2585,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Aider,
+        Program::AiCli(AiCli::Aider),
         ProgramDetails::full(
             "Aider",
             "AI pair programming in your terminal",
@@ -2572,7 +2597,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Codex,
+        Program::AiCli(AiCli::Codex),
         ProgramDetails::full(
             "Codex CLI",
             "OpenAI lightweight coding agent",
@@ -2584,7 +2609,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::Goose,
+        Program::AiCli(AiCli::Goose),
         ProgramDetails::full(
             "Goose",
             "Block's AI developer agent",
@@ -2596,7 +2621,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::KimiCli,
+        Program::AiCli(AiCli::KimiCli),
         ProgramDetails::full(
             "Kimi Code CLI",
             "AI agent that runs in the terminal",
@@ -2608,7 +2633,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
-        Program::QwenCli,
+        Program::AiCli(AiCli::QwenCli),
         ProgramDetails::full(
             "Qwen Code CLI",
             "Qwen's AI coding agent",
@@ -2625,70 +2650,89 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strum::IntoEnumIterator;
+    use strum::EnumCount;
 
     #[test]
-    fn test_program_lookup_has_entries() {
-        let lookup = &*PROGRAM_LOOKUP;
+    fn test_program_from_category_enums() {
+        let p = Program::from(Editor::Vim);
+        assert_eq!(p.display_name(), "Vim");
+
+        let p = Program::from(Utility::Ripgrep);
+        assert_eq!(p.binary_name(), "rg");
+    }
+
+    #[test]
+    fn test_program_display_uses_binary_name() {
+        let p = Program::from(Editor::Vim);
+        assert_eq!(p.to_string(), "vim");
+    }
+
+    #[test]
+    fn test_program_serde_roundtrip() {
+        let p = Program::from(Editor::Vim);
+        let json = serde_json::to_string(&p).unwrap();
+        assert_eq!(json, "\"vim\"");
+        let p2: Program = serde_json::from_str(&json).unwrap();
+        assert_eq!(p, p2);
+    }
+
+    #[test]
+    fn test_program_iter_covers_all_categories() {
+        let all: Vec<Program> = Program::iter().collect();
+        let expected = Editor::COUNT
+            + Utility::COUNT
+            + LanguagePackageManager::COUNT
+            + OsPackageManager::COUNT
+            + TtsClient::COUNT
+            + TerminalApp::COUNT
+            + HeadlessAudio::COUNT
+            + AiCli::COUNT;
+        assert_eq!(all.len(), expected);
+    }
+
+    #[test]
+    fn test_all_programs_have_valid_metadata() {
+        for program in Program::iter() {
+            let info = program.info();
+            assert!(
+                !info.display_name.is_empty(),
+                "{:?} has empty display_name",
+                program
+            );
+            assert!(
+                !info.description.is_empty(),
+                "{:?} has empty description",
+                program
+            );
+            assert!(!info.website.is_empty(), "{:?} has empty website", program);
+        }
+    }
+
+    #[test]
+    fn test_program_from_binary_name() {
         assert_eq!(
-            lookup.len(),
-            Program::COUNT,
-            "Expected {} programs, got {}",
-            Program::COUNT,
-            lookup.len()
+            Program::from_binary_name("vim"),
+            Some(Program::Editor(Editor::Vim))
         );
-    }
-
-    #[test]
-    fn test_program_lookup_vim_has_details() {
-        let details = PROGRAM_LOOKUP
-            .get(&Program::Vim)
-            .expect("Vim should be in lookup");
-        assert_eq!(details.name, "Vim");
-        assert!(!details.installation_methods.is_empty());
-    }
-
-    #[test]
-    fn test_program_lookup_ripgrep_has_cargo() {
-        let details = PROGRAM_LOOKUP
-            .get(&Program::Ripgrep)
-            .expect("Ripgrep should be in lookup");
-        assert!(
-            details
-                .installation_methods
-                .iter()
-                .any(|m| matches!(m, InstallationMethod::Cargo(_))),
-            "Ripgrep should have Cargo installation method"
+        assert_eq!(
+            Program::from_binary_name("rg"),
+            Some(Program::Utility(Utility::Ripgrep))
         );
+        assert_eq!(Program::from_binary_name("nonexistent"), None);
     }
 
     #[test]
     fn test_program_copy_derive() {
-        let p1 = Program::Vim;
-        let p2 = p1; // Copy
-        assert_eq!(p1, p2);
+        let p = Program::from(Editor::Vim);
+        let p2 = p;
+        assert_eq!(p, p2);
     }
 
+    // Keep PROGRAM_LOOKUP tests until Task 10 removes it
     #[test]
-    fn test_all_programs_in_lookup_have_valid_details() {
-        for (program, details) in PROGRAM_LOOKUP.iter() {
-            assert!(!details.name.is_empty(), "{:?} has empty name", program);
-            assert!(
-                !details.description.is_empty(),
-                "{:?} has empty description",
-                program
-            );
-            assert!(
-                !details.website.is_empty(),
-                "{:?} has empty website",
-                program
-            );
-            assert!(
-                !details.os_availability.is_empty(),
-                "{:?} has no OS availability",
-                program
-            );
-        }
+    fn test_program_lookup_has_entries() {
+        let lookup = &*PROGRAM_LOOKUP;
+        assert!(!lookup.is_empty());
     }
 
     #[test]
