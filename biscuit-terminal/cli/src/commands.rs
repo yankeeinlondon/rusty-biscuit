@@ -1638,12 +1638,7 @@ pub fn handle_mermaid_error(
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::mermaid::MermaidRenderError;
 
-    // Check for NO_COLOR
-    let no_color = std::env::var("NO_COLOR").is_ok();
-    let red = if no_color { "" } else { "\x1b[31m" };
-    let bold = if no_color { "" } else { "\x1b[1m" };
-    let dim = if no_color { "" } else { "\x1b[2m" };
-    let reset = if no_color { "" } else { "\x1b[0m" };
+    let s = crate::types::CliStyles::detect();
 
     match error {
         MermaidRenderError::NoImageSupport => {
@@ -1654,17 +1649,17 @@ pub fn handle_mermaid_error(
         }
         MermaidRenderError::Visualization(ref viz_err) => {
             eprintln!();
-            eprintln!("{}{}Error:{} {}", red, bold, reset, viz_err);
+            eprintln!("{}{}Error:{} {}", s.red, s.bold, s.reset, viz_err);
             eprintln!(
                 "\n{}Mermaid {} was defined as:{}\n",
-                dim, diagram_type, reset
+                s.dim, diagram_type, s.reset
             );
             eprintln!("```mermaid\n{}\n```", instructions);
         }
         MermaidRenderError::DisplayError(ref msg) => {
             eprintln!(
                 "{}{}Error:{} Failed to display image: {}",
-                red, bold, reset, msg
+                s.red, s.bold, s.reset, msg
             );
         }
     }
@@ -1680,11 +1675,7 @@ pub fn handle_graph_error(
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::graph_expression::GraphRenderError;
 
-    let no_color = std::env::var("NO_COLOR").is_ok();
-    let red = if no_color { "" } else { "\x1b[31m" };
-    let bold = if no_color { "" } else { "\x1b[1m" };
-    let dim = if no_color { "" } else { "\x1b[2m" };
-    let reset = if no_color { "" } else { "\x1b[0m" };
+    let s = crate::types::CliStyles::detect();
 
     match error {
         GraphRenderError::NoImageSupport => {
@@ -1693,16 +1684,16 @@ pub fn handle_graph_error(
         }
         GraphRenderError::Visualization(ref viz_err) => {
             eprintln!();
-            eprintln!("{}{}Error:{} {}", red, bold, reset, viz_err);
-            eprintln!("\n{}Graph expression was defined as:{}\n", dim, reset);
+            eprintln!("{}{}Error:{} {}", s.red, s.bold, s.reset, viz_err);
+            eprintln!("\n{}Graph expression was defined as:{}\n", s.dim, s.reset);
             eprintln!("{fallback}");
         }
         GraphRenderError::DisplayError(ref msg) => {
             eprintln!(
                 "{}{}Error:{} Failed to display image: {}",
-                red, bold, reset, msg
+                s.red, s.bold, s.reset, msg
             );
-            eprintln!("\n{}Graph expression source was:{}\n", dim, reset);
+            eprintln!("\n{}Graph expression source was:{}\n", s.dim, s.reset);
             eprintln!("{source}");
         }
     }

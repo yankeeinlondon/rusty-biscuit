@@ -62,23 +62,10 @@ fn emit_image_output(output: &str) -> color_eyre::Result<()> {
 /// Uses bold text for header and dim text for command.
 /// Avoids terminal color mode queries which can interfere with Kitty graphics protocol.
 fn print_example_command(cmd: &str) {
-    // Check NO_COLOR environment variable
-    let no_color = std::env::var("NO_COLOR").is_ok();
-
-    if no_color {
-        println!();
-        println!("Command:");
-        println!("{}", cmd);
-    } else {
-        // Use bold for header - terminal's default foreground color is already appropriate
-        let bold = "\x1b[1m";
-        let dim = "\x1b[2m";
-        let reset = "\x1b[0m";
-
-        println!();
-        println!("{}Command:{}", bold, reset);
-        println!("{}{}{}", dim, cmd, reset);
-    }
+    let s = crate::types::CliStyles::detect();
+    println!();
+    println!("{}Command:{}", s.bold, s.reset);
+    println!("{}{}{}", s.dim, cmd, s.reset);
 }
 
 fn main() -> color_eyre::Result<()> {

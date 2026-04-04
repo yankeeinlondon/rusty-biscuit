@@ -298,14 +298,10 @@ pub fn analyze_content(content: &str) -> ContentAnalysis {
 }
 
 pub fn print_content_analysis(analysis: &ContentAnalysis) {
-    let no_color = std::env::var("NO_COLOR").is_ok();
-    let bold = if no_color { "" } else { "\x1b[1m" };
-    let dim = if no_color { "" } else { "\x1b[2m" };
-    let reset = if no_color { "" } else { "\x1b[0m" };
-    let green = if no_color { "" } else { "\x1b[32m" };
+    let s = crate::types::CliStyles::detect();
 
-    let yes = format!("{}yes{}", green, reset);
-    let no_mark = format!("{}no{}", dim, reset);
+    let yes = format!("{}yes{}", s.green, s.reset);
+    let no_mark = format!("{}no{}", s.dim, s.reset);
     let check = |b: bool| if b { &yes } else { &no_mark };
 
     let line_lengths = analysis
@@ -316,8 +312,8 @@ pub fn print_content_analysis(analysis: &ContentAnalysis) {
         .join(", ");
 
     println!();
-    println!("{}Content Analysis{}", bold, reset);
-    println!("{}══════════════════{}", dim, reset);
+    println!("{}Content Analysis{}", s.bold, s.reset);
+    println!("{}══════════════════{}", s.dim, s.reset);
     println!("  Lines:        {}", analysis.line_count);
     println!("  Line lengths: {}", line_lengths);
     println!("  Total length: {}", analysis.total_length);
@@ -354,22 +350,14 @@ pub fn format_multiplex(m: MultiplexSupport) -> String {
 }
 
 pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
-    // Respect NO_COLOR environment variable
-    let no_color = std::env::var("NO_COLOR").is_ok();
-
-    let bold = if no_color { "" } else { "\x1b[1m" };
-    let dim = if no_color { "" } else { "\x1b[2m" };
-    let reset = if no_color { "" } else { "\x1b[0m" };
-    let green = if no_color { "" } else { "\x1b[32m" };
-    let yellow = if no_color { "" } else { "\x1b[33m" };
-    let blue = if no_color { "" } else { "\x1b[34m" };
+    let s = crate::types::CliStyles::detect();
 
     println!();
-    println!("{}Terminal Metadata{}", bold, reset);
-    println!("{}═══════════════════════════════════════{}", dim, reset);
+    println!("{}Terminal Metadata{}", s.bold, s.reset);
+    println!("{}═══════════════════════════════════════{}", s.dim, s.reset);
 
     // Basic info section
-    println!("\n{}{}Basic Info{}", bold, blue, reset);
+    println!("\n{}{}Basic Info{}", s.bold, s.blue, s.reset);
     println!("  App:        {}", metadata.app);
     println!("  OS:         {}", metadata.os);
     if let Some(distro) = &metadata.distro {
@@ -379,7 +367,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     println!(
         "  Is TTY:     {}",
         if metadata.is_tty {
-            format!("{}yes{}", green, reset)
+            format!("{}yes{}", s.green, s.reset)
         } else {
             "no".to_string()
         }
@@ -387,17 +375,17 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     println!(
         "  In CI:      {}",
         if metadata.is_ci {
-            format!("{}yes{}", yellow, reset)
+            format!("{}yes{}", s.yellow, s.reset)
         } else {
             "no".to_string()
         }
     );
 
-    println!("\n{}{}Repository{}", bold, blue, reset);
+    println!("\n{}{}Repository{}", s.bold, s.blue, s.reset);
     println!(
         "  In Repo:    {}",
         if metadata.in_repo {
-            format!("{}yes{}", green, reset)
+            format!("{}yes{}", s.green, s.reset)
         } else {
             "no".to_string()
         }
@@ -405,7 +393,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     println!(
         "  Monorepo:   {}",
         if metadata.in_monorepo {
-            format!("{}yes{}", green, reset)
+            format!("{}yes{}", s.green, s.reset)
         } else {
             "no".to_string()
         }
@@ -418,36 +406,36 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     }
 
     // Font section (always displayed)
-    println!("\n{}{}Fonts{}", bold, blue, reset);
+    println!("\n{}{}Fonts{}", s.bold, s.blue, s.reset);
     if let Some(font) = &metadata.font {
         println!("  Name:       {}", font);
     } else {
-        println!("  Name:       {}n/a{}", dim, reset);
+        println!("  Name:       {}n/a{}", s.dim, s.reset);
     }
     if let Some(size) = metadata.font_size {
         println!("  Size:       {}pt", size);
     } else {
-        println!("  Size:       {}n/a{}", dim, reset);
+        println!("  Size:       {}n/a{}", s.dim, s.reset);
     }
     println!(
         "  Nerd Font:  {}",
         match metadata.is_nerd_font {
-            Some(true) => format!("{}yes{}", green, reset),
+            Some(true) => format!("{}yes{}", s.green, s.reset),
             Some(false) => "no".to_string(),
-            None => format!("{}unknown{}", dim, reset),
+            None => format!("{}unknown{}", s.dim, s.reset),
         }
     );
     println!(
         "  Ligatures:  {}",
         if metadata.ligatures_likely {
-            format!("{}likely{}", green, reset)
+            format!("{}likely{}", s.green, s.reset)
         } else {
-            format!("{}unlikely{}", dim, reset)
+            format!("{}unlikely{}", s.dim, s.reset)
         }
     );
 
     // Color section
-    println!("\n{}{}Colors{}", bold, blue, reset);
+    println!("\n{}{}Colors{}", s.bold, s.blue, s.reset);
     println!("  Depth:      {}", metadata.color_depth);
     println!("  Mode:       {}", metadata.color_mode);
     if let Some(bg) = &metadata.bg_color {
@@ -479,9 +467,9 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     }
 
     // Features section
-    println!("\n{}{}Features{}", bold, blue, reset);
-    let yes = format!("{}yes{}", green, reset);
-    let no_mark = format!("{}no{}", dim, reset);
+    println!("\n{}{}Features{}", s.bold, s.blue, s.reset);
+    let yes = format!("{}yes{}", s.green, s.reset);
+    let no_mark = format!("{}no{}", s.dim, s.reset);
     let check = |b: bool| if b { &yes } else { &no_mark };
 
     println!("  Italics:      {}", check(metadata.supports_italic));
@@ -494,7 +482,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     println!("  Mode 2027:    {}", check(metadata.mode_2027_graphemes));
 
     // Underline section
-    println!("\n{}{}Underline Support{}", bold, blue, reset);
+    println!("\n{}{}Underline Support{}", s.bold, s.blue, s.reset);
     println!(
         "  Straight:   {}",
         check(metadata.underline_support.straight)
@@ -512,14 +500,14 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     let _ = verbose;
 
     // Multiplexing
-    println!("\n{}{}Multiplexing{}", bold, blue, reset);
+    println!("\n{}{}Multiplexing{}", s.bold, s.blue, s.reset);
     println!("  Type:       {}", metadata.multiplex);
 
     // Connection
-    println!("\n{}{}Connection{}", bold, blue, reset);
+    println!("\n{}{}Connection{}", s.bold, s.blue, s.reset);
     match &metadata.connection {
         ConnectionInfo::Local => {
-            println!("  Type:       {}Local{}", green, reset);
+            println!("  Type:       {}Local{}", s.green, s.reset);
         }
         ConnectionInfo::Ssh {
             host,
@@ -527,7 +515,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
             server_port,
             tty_path,
         } => {
-            println!("  Type:       {}SSH{}", yellow, reset);
+            println!("  Type:       {}SSH{}", s.yellow, s.reset);
             println!("  Host:       {}", host);
             println!("  Ports:      {} -> {}", source_port, server_port);
             if let Some(tty) = tty_path {
@@ -535,14 +523,14 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
             }
         }
         ConnectionInfo::Mosh { connection } => {
-            println!("  Type:       {}Mosh{}", yellow, reset);
+            println!("  Type:       {}Mosh{}", s.yellow, s.reset);
             println!("  Connection: {}", connection);
         }
     }
 
     // Locale & Encoding
-    println!("\n{}{}Locale{}", bold, blue, reset);
-    let na = format!("{}n/a{}", dim, reset);
+    println!("\n{}{}Locale{}", s.bold, s.blue, s.reset);
+    let na = format!("{}n/a{}", s.dim, s.reset);
     println!(
         "  Raw:        {}",
         metadata.locale_raw.as_deref().unwrap_or(&na)
@@ -555,7 +543,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
 
     // Config
     if let Some(config) = &metadata.config_file {
-        println!("\n{}{}Config{}", bold, blue, reset);
+        println!("\n{}{}Config{}", s.bold, s.blue, s.reset);
         println!("  File:       {}", config);
     }
 
