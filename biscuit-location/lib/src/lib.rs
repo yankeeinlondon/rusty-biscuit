@@ -2,3 +2,9 @@
 //!
 //! Provides host GPS lookup, IP-to-location resolution, reverse geocoding,
 //! distance calculation, and Google Maps link generation.
+
+mod error;
+mod types;
+
+pub use error::{LocationError, Result};
+pub use types::*;
