@@ -24,3 +24,4 @@ pub mod locale;
 pub mod mode_2027;
 pub mod os_detection;
 pub mod osc_queries;
+pub mod raw_mode;
