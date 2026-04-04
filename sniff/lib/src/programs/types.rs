@@ -2,9 +2,9 @@
 //!
 //! This module provides:
 //! - `ExecutableSource`: Describes where a program executable was discovered
-//! - `ProgramDetails`: Metadata about a program including installation methods
 //! - `ProgramDetector`: Trait for structs that detect and manage installed programs
 //! - `InstallationMethod`: Enum describing how to install a program
+//! - `CategoryDetector<E>`: Generic detector for any category enum
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -17,7 +17,7 @@ use crate::programs::find_program::{
     ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
 };
 use crate::programs::schema::{ProgramError, ProgramMetadata};
-use crate::{error::SniffInstallationError, os::OsType};
+use crate::error::SniffInstallationError;
 
 /// Describes where a program executable was discovered.
 ///
@@ -273,64 +273,6 @@ impl InstallationMethod {
             InstallationMethod::Scoop(_) => "scoop",
             InstallationMethod::Nix(_) => "nix",
             InstallationMethod::RemoteBash(_) => "bash",
-        }
-    }
-}
-
-/// Details about a program including installation methods.
-///
-/// This struct provides the metadata for a program to support detection
-/// and installation via the `ProgramDetector` trait.
-///
-/// ## Notes
-///
-/// All fields use `'static` lifetime references to allow embedding in
-/// static arrays without allocation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProgramDetails {
-    /// The name of the software.
-    pub name: &'static str,
-    /// A description of the software.
-    pub description: &'static str,
-    /// The operating systems this software can run on.
-    pub os_availability: &'static [OsType],
-    /// The primary website describing the program.
-    pub website: &'static str,
-    /// The repo for the program (if available).
-    pub repo: Option<&'static str>,
-    /// Describes various methods for installing this software.
-    pub installation_methods: &'static [InstallationMethod],
-}
-
-impl ProgramDetails {
-    /// Creates a new `ProgramDetails` with required fields.
-    pub const fn new(name: &'static str, description: &'static str, website: &'static str) -> Self {
-        Self {
-            name,
-            description,
-            os_availability: &[OsType::MacOS, OsType::Linux, OsType::Windows],
-            website,
-            repo: None,
-            installation_methods: &[],
-        }
-    }
-
-    /// Creates a `ProgramDetails` with full configuration.
-    pub const fn full(
-        name: &'static str,
-        description: &'static str,
-        os_availability: &'static [OsType],
-        website: &'static str,
-        repo: Option<&'static str>,
-        installation_methods: &'static [InstallationMethod],
-    ) -> Self {
-        Self {
-            name,
-            description,
-            os_availability,
-            website,
-            repo,
-            installation_methods,
         }
     }
 }
@@ -1111,42 +1053,6 @@ mod tests {
         assert!(!InstallationMethod::Npm("typescript").is_os_package_manager());
     }
 
-    #[test]
-    fn test_program_details_new() {
-        let details = ProgramDetails::new(
-            "ripgrep",
-            "Fast grep",
-            "https://github.com/BurntSushi/ripgrep",
-        );
-        assert_eq!(details.name, "ripgrep");
-        assert_eq!(details.description, "Fast grep");
-        assert_eq!(details.website, "https://github.com/BurntSushi/ripgrep");
-        assert!(details.repo.is_none());
-        assert!(details.installation_methods.is_empty());
-    }
-
-    #[test]
-    fn test_program_details_full() {
-        static METHODS: &[InstallationMethod] = &[
-            InstallationMethod::Brew("ripgrep"),
-            InstallationMethod::Cargo("ripgrep"),
-        ];
-
-        let details = ProgramDetails::full(
-            "ripgrep",
-            "Fast grep",
-            &[OsType::MacOS, OsType::Linux],
-            "https://github.com/BurntSushi/ripgrep",
-            Some("https://github.com/BurntSushi/ripgrep"),
-            METHODS,
-        );
-
-        assert_eq!(details.name, "ripgrep");
-        assert_eq!(details.os_availability.len(), 2);
-        assert_eq!(details.installation_methods.len(), 2);
-        assert!(details.repo.is_some());
-    }
-
     // ============================================
     // InstallationMethod comprehensive tests
     // ============================================
@@ -1267,25 +1173,6 @@ mod tests {
                 method
             );
         }
-    }
-
-    // ============================================
-    // ProgramDetails edge case tests
-    // ============================================
-
-    #[test]
-    fn test_program_details_default_os_availability() {
-        let details = ProgramDetails::new("test", "Test program", "https://example.com");
-        // Default should include all three major OS types
-        assert!(details.os_availability.contains(&OsType::MacOS));
-        assert!(details.os_availability.contains(&OsType::Linux));
-        assert!(details.os_availability.contains(&OsType::Windows));
-    }
-
-    #[test]
-    fn test_program_details_empty_installation_methods() {
-        let details = ProgramDetails::new("test", "Test program", "https://example.com");
-        assert!(details.installation_methods.is_empty());
     }
 
     // ============================================

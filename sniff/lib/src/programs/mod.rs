@@ -125,15 +125,13 @@ pub use installer::{
     InstallOptions, InstallResult, execute_install, execute_versioned_install, get_install_command,
     get_versioned_install_command,
 };
-pub use inventory::{PROGRAM_LOOKUP, Program};
+pub use inventory::Program;
 pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
 pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;
 pub use tts_clients::InstalledTtsClients;
-pub use types::{
-    CategoryDetector, ExecutableSource, InstallationMethod, ProgramDetails, ProgramDetector,
-};
+pub use types::{CategoryDetector, ExecutableSource, InstallationMethod, ProgramDetector};
 pub use utilities::InstalledUtilities;
 
 /// Complete programs detection result.
