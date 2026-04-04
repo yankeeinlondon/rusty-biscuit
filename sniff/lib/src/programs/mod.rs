@@ -139,7 +139,7 @@ pub use utilities::InstalledUtilities;
 /// Contains detection results for all supported program categories:
 /// editors, utilities, package managers, TTS clients, terminal apps, headless audio players,
 /// and AI CLI tools.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ProgramsInfo {
     /// Text editors and IDEs installed on the system.
     pub editors: InstalledEditors,
