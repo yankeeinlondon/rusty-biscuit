@@ -612,7 +612,7 @@ pub enum Command {
 
         /// Aspect ratio (width/height). Default: 1.5
         #[arg(long)]
-        aspect_ratio: Option<f32>,
+        aspect_ratio: Option<crate::types::PositiveF32>,
 
         /// Also render data as a line
         #[arg(long)]
@@ -701,7 +701,7 @@ pub enum Command {
 
         /// Aspect ratio (width/height). Default: 1.5
         #[arg(long)]
-        aspect_ratio: Option<f32>,
+        aspect_ratio: Option<crate::types::PositiveF32>,
 
         /// Also render data as bars
         #[arg(long)]

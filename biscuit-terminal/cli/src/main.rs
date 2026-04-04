@@ -259,7 +259,7 @@ fn main() -> color_eyre::Result<()> {
                 layout,
                 horizontal,
                 show_data_label,
-                aspect_ratio,
+                aspect_ratio.map(|a| a.value()),
                 line,  // add_line for bar chart
                 false, // add_bar is false since we're a bar chart
                 inverse,
@@ -295,7 +295,7 @@ fn main() -> color_eyre::Result<()> {
                 layout,
                 horizontal,
                 show_data_label,
-                aspect_ratio,
+                aspect_ratio.map(|a| a.value()),
                 false, // add_line is false since we're a line chart
                 bar,   // add_bar for line chart
                 inverse,

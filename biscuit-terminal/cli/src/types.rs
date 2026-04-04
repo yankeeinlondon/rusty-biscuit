@@ -262,3 +262,85 @@ mod hex_color_tests {
         assert_eq!(c.to_string(), "#e8f5e9");
     }
 }
+
+/// A positive, finite f32 value (> 0.0, not NaN, not infinity).
+///
+/// Used for aspect ratios and other values that must be positive real numbers.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PositiveF32(f32);
+
+impl PositiveF32 {
+    /// Returns the inner f32 value.
+    pub fn value(self) -> f32 {
+        self.0
+    }
+}
+
+impl FromStr for PositiveF32 {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let value: f32 = s
+            .parse()
+            .map_err(|_| format!("invalid number: '{}'", s))?;
+        if !value.is_finite() {
+            return Err(format!("value must be finite, got {}", value));
+        }
+        if value <= 0.0 {
+            return Err(format!("value must be positive, got {}", value));
+        }
+        Ok(Self(value))
+    }
+}
+
+impl fmt::Display for PositiveF32 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod positive_f32_tests {
+    use super::*;
+
+    #[test]
+    fn parse_valid_positive() {
+        let v: PositiveF32 = "1.5".parse().unwrap();
+        assert_eq!(v.value(), 1.5_f32);
+    }
+
+    #[test]
+    fn parse_rejects_zero() {
+        assert!("0.0".parse::<PositiveF32>().is_err());
+        assert!("0".parse::<PositiveF32>().is_err());
+    }
+
+    #[test]
+    fn parse_rejects_negative() {
+        assert!("-1.0".parse::<PositiveF32>().is_err());
+        assert!("-0.001".parse::<PositiveF32>().is_err());
+    }
+
+    #[test]
+    fn parse_rejects_infinity() {
+        assert!("inf".parse::<PositiveF32>().is_err());
+        assert!("-inf".parse::<PositiveF32>().is_err());
+    }
+
+    #[test]
+    fn parse_rejects_nan() {
+        assert!("NaN".parse::<PositiveF32>().is_err());
+    }
+
+    #[test]
+    fn parse_rejects_non_numeric() {
+        assert!("abc".parse::<PositiveF32>().is_err());
+        assert!("".parse::<PositiveF32>().is_err());
+    }
+
+    #[test]
+    fn display_roundtrip() {
+        let v: PositiveF32 = "2.5".parse().unwrap();
+        assert_eq!(v.to_string(), "2.5");
+    }
+}
