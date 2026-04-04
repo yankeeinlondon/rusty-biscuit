@@ -27,5 +27,6 @@ pub use resolve::{resolve_composition_source, validate_file_permissions};
 pub use select::{build_candidate_set, select_provider};
 pub use types::{
     CompositionClosurePlan, CompositionExecutionRequest, CompositionMode, InlineClosurePlan,
-    PreparedComposition, ResolvedCompositionSource, SelectedProvider, SelectionReason,
+    OutputFormat, PreparedComposition, ResolvedCompositionSource, SelectedProvider,
+    SelectionReason, SystemPromptInput,
 };

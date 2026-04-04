@@ -630,9 +630,7 @@ mod tests {
         let env = EnvironmentContext::default();
 
         let outcome = dispatch(&raw, Provider::Claude, &env).await.unwrap();
-        // Claude adapter returns {} ack for non-blocking events
-        assert_eq!(outcome.response, Some(Value::Object(Default::default())));
-        assert_eq!(outcome.exit_code, None);
+        assert_eq!(outcome, DispatchOutcome::default());
     }
 
     #[test]

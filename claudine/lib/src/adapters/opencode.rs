@@ -1,17 +1,19 @@
 use std::collections::HashMap;
 
-use chrono::Utc;
 use serde_json::{Value, json};
 use tracing::debug;
 
 use crate::actions::{HookDecision, HookResponse};
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::events::{AgenticEvent, EventMeta, Provider, ToolName};
 use crate::permissions::query::{CommandQuery, PathQuery};
 use crate::services::ProtectObservation;
 use crate::services::protect::intent::ProtectIntent;
 use crate::services::protect::observe::default_observe_protect;
 
-use super::{AdapterError, ProviderAdapter};
+use super::{
+    AdapterError, ProviderAdapter, extract_tool_input_path, replace_intents_preserving_completion,
+    str_field,
+};
 
 pub(crate) struct OpenCodeAdapter;
 
@@ -34,54 +36,48 @@ impl ProviderAdapter for OpenCodeAdapter {
         let event_context = properties.unwrap_or(raw);
         let info = event_context.get("info");
         let part = event_context.get("part");
-        let mut meta = EventMeta {
-            provider: Provider::OpenCode,
-            event,
-            timestamp: Utc::now(),
-            session_id: str_field(raw, "session_id")
-                .or_else(|| str_field(raw, "sessionId"))
-                .or_else(|| str_field(raw, "sessionID"))
-                .or_else(|| str_field(event_context, "session_id"))
-                .or_else(|| str_field(event_context, "sessionId"))
-                .or_else(|| str_field(event_context, "sessionID"))
-                .or_else(|| str_field(info.unwrap_or(&Value::Null), "sessionID"))
-                .or_else(|| str_field(info.unwrap_or(&Value::Null), "id")),
-            cwd: str_field(raw, "cwd")
-                .or_else(|| value_path_string(raw, &["path", "cwd"]))
-                .or_else(|| str_field(event_context, "directory"))
-                .or_else(|| value_path_string(info.unwrap_or(&Value::Null), &["path", "cwd"]))
-                .or_else(|| str_field(info.unwrap_or(&Value::Null), "directory")),
-            tool_name: str_field(raw, "tool_name")
-                .or_else(|| str_field(raw, "toolName"))
-                .or_else(|| str_field(raw, "tool"))
-                .or_else(|| str_field(event_context, "tool_name"))
-                .or_else(|| str_field(event_context, "toolName"))
-                .or_else(|| str_field(event_context, "tool")),
-            tool_input: raw
-                .get("tool_input")
-                .cloned()
-                .or_else(|| raw.get("args").cloned())
-                .or_else(|| event_context.get("tool_input").cloned())
-                .or_else(|| event_context.get("args").cloned()),
-            tool_response: raw
-                .get("tool_response")
-                .cloned()
-                .or_else(|| raw.get("output").cloned())
-                .or_else(|| event_context.get("tool_response").cloned())
-                .or_else(|| event_context.get("output").cloned()),
-            error: extract_error(raw, event_context, event),
-            prompt: str_field(raw, "prompt"),
-            agent_type: str_field(raw, "agent_type"),
-            notification_type: if event == AgenticEvent::Notification {
-                Some(event_type.to_string())
-            } else {
-                None
-            },
-            notification_message: str_field(raw, "message")
-                .or_else(|| str_field(event_context, "message")),
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
+        let mut meta = EventMeta::new(Provider::OpenCode, event);
+        meta.session_id = str_field(raw, "session_id")
+            .or_else(|| str_field(raw, "sessionId"))
+            .or_else(|| str_field(raw, "sessionID"))
+            .or_else(|| str_field(event_context, "session_id"))
+            .or_else(|| str_field(event_context, "sessionId"))
+            .or_else(|| str_field(event_context, "sessionID"))
+            .or_else(|| str_field(info.unwrap_or(&Value::Null), "sessionID"))
+            .or_else(|| str_field(info.unwrap_or(&Value::Null), "id"));
+        meta.cwd = str_field(raw, "cwd")
+            .or_else(|| value_path_string(raw, &["path", "cwd"]))
+            .or_else(|| str_field(event_context, "directory"))
+            .or_else(|| value_path_string(info.unwrap_or(&Value::Null), &["path", "cwd"]))
+            .or_else(|| str_field(info.unwrap_or(&Value::Null), "directory"));
+        meta.tool_name = str_field(raw, "tool_name")
+            .or_else(|| str_field(raw, "toolName"))
+            .or_else(|| str_field(raw, "tool"))
+            .or_else(|| str_field(event_context, "tool_name"))
+            .or_else(|| str_field(event_context, "toolName"))
+            .or_else(|| str_field(event_context, "tool"));
+        meta.tool_input = raw
+            .get("tool_input")
+            .cloned()
+            .or_else(|| raw.get("args").cloned())
+            .or_else(|| event_context.get("tool_input").cloned())
+            .or_else(|| event_context.get("args").cloned());
+        meta.tool_response = raw
+            .get("tool_response")
+            .cloned()
+            .or_else(|| raw.get("output").cloned())
+            .or_else(|| event_context.get("tool_response").cloned())
+            .or_else(|| event_context.get("output").cloned());
+        meta.error = extract_error(raw, event_context, event);
+        meta.prompt = str_field(raw, "prompt");
+        meta.agent_type = str_field(raw, "agent_type");
+        meta.notification_type = if event == AgenticEvent::Notification {
+            Some(event_type.to_string())
+        } else {
+            None
         };
+        meta.notification_message =
+            str_field(raw, "message").or_else(|| str_field(event_context, "message"));
 
         // Capture well-known structured fields into extra with semantic keys.
         if let Some(value) = properties {
@@ -160,29 +156,27 @@ impl ProviderAdapter for OpenCodeAdapter {
                     }
                 }
                 "write" | "write_file" | "edit" | "edit_file" | "create_file" => {
-                    if let Some(path) = oc_tool_input_path(meta) {
+                    if let Some(path) = extract_tool_input_path(meta) {
                         intents.push(ProtectIntent::WritePath(PathQuery::file(&path)));
                     }
                 }
                 "read" | "read_file" | "list_dir" => {
-                    if let Some(path) = oc_tool_input_path(meta) {
+                    if let Some(path) = extract_tool_input_path(meta) {
                         intents.push(ProtectIntent::ReadPath(PathQuery::unknown(&path)));
                     }
                 }
-                name if name.contains("mcp") || name.contains("__") => {
-                    // MCP tool pattern: may contain server/tool info
-                    let parts: Vec<&str> = name.splitn(3, "__").collect();
-                    if parts.len() >= 2 {
-                        let server = parts[1].to_owned();
+                name if ToolName(name.to_owned()).is_mcp_tool() => {
+                    if let Some((server_name, tool_name)) =
+                        ToolName(name.to_owned()).mcp_components()
+                    {
+                        let server = server_name.to_owned();
                         intents.push(ProtectIntent::UseMcpServer {
                             server: server.clone(),
                         });
-                        if parts.len() == 3 {
-                            intents.push(ProtectIntent::UseMcpTool {
-                                server,
-                                tool: parts[2].to_owned(),
-                            });
-                        }
+                        intents.push(ProtectIntent::UseMcpTool {
+                            server,
+                            tool: tool_name.to_owned(),
+                        });
                     } else {
                         replaced = false;
                     }
@@ -193,15 +187,7 @@ impl ProviderAdapter for OpenCodeAdapter {
             }
 
             if replaced {
-                // Preserve completion scan intent if present.
-                if obs
-                    .intents
-                    .iter()
-                    .any(|i| matches!(i, ProtectIntent::CompletionOutputScan))
-                {
-                    intents.push(ProtectIntent::CompletionOutputScan);
-                }
-                obs.intents = intents;
+                replace_intents_preserving_completion(&mut obs, intents);
             }
         }
 
@@ -344,23 +330,6 @@ fn extract_error(raw: &Value, event_context: &Value, event: AgenticEvent) -> Opt
     }
 
     None
-}
-
-fn oc_tool_input_path(meta: &EventMeta) -> Option<String> {
-    meta.tool_input
-        .as_ref()
-        .and_then(|v| v.as_object())
-        .and_then(|map| {
-            map.get("file_path")
-                .or_else(|| map.get("path"))
-                .or_else(|| map.get("file"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-}
-
-fn str_field(raw: &Value, key: &str) -> Option<String> {
-    raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
 fn value_path_string(raw: &Value, path: &[&str]) -> Option<String> {

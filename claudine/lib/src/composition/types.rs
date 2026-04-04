@@ -1,10 +1,12 @@
 //! Core types for composition workflows.
 
 use std::collections::BTreeSet;
+use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use darkmatter::markdown::Markdown;
-use serde_json;
+use serde::{Deserialize, Serialize};
 
 use super::lifecycle::LifecycleConfig;
 use crate::events::Provider;
@@ -102,6 +104,48 @@ pub struct InlineClosurePlan {
     pub original_body_hash: u64,
 }
 
+/// Universal output format for composed provider execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputFormat {
+    Json,
+    Text,
+    Stream,
+}
+
+impl fmt::Display for OutputFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json => write!(f, "json"),
+            Self::Text => write!(f, "text"),
+            Self::Stream => write!(f, "stream"),
+        }
+    }
+}
+
+impl FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "json" => Ok(Self::Json),
+            "text" => Ok(Self::Text),
+            "stream" | "stream-json" => Ok(Self::Stream),
+            _ => Err(format!(
+                "unknown output format '{value}'; expected json, text, or stream"
+            )),
+        }
+    }
+}
+
+/// Explicit system prompt input source for composition execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SystemPromptInput {
+    Inline { prompt: String },
+    File { path: PathBuf },
+}
+
 /// A fully-specified request to execute a composition through the
 /// wrapper-grade pipeline.
 #[derive(Debug, Clone)]
@@ -123,9 +167,9 @@ pub struct CompositionExecutionRequest {
     /// Override the model used by the provider.
     pub model: Option<String>,
     /// Set the output format (json, text, stream).
-    pub output: Option<String>,
-    /// Set or append a system prompt (string or file path).
-    pub system_prompt: Option<String>,
+    pub output: Option<OutputFormat>,
+    /// Set or append a system prompt from either inline content or a file.
+    pub system_prompt: Option<SystemPromptInput>,
     /// Timeout in seconds for non-interactive mode.
     pub timeout: Option<u64>,
     /// OPERATION env var value for the composed session.
