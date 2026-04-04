@@ -133,13 +133,7 @@ pub fn render_image(
     let output = term_image.render(&terminal);
 
     // Output the result with vertical margins
-    for _ in 0..layout.margin_top.unwrap_or(0) {
-        println!();
-    }
-    emit_image_output(&output)?;
-    for _ in 0..layout.margin_bottom.unwrap_or(0) {
-        println!();
-    }
+    emit_vertical_margins(layout, || emit_image_output(&output))?;
 
     // Debug: query cursor position AFTER image render + output
     if debug {
@@ -319,14 +313,9 @@ pub fn display_mermaid(
 
     let render_time_ms = start_time.elapsed().as_millis() as u64;
 
-    // Top margin
-    for _ in 0..layout.margin_top.unwrap_or(0) {
-        println!();
-    }
+    emit_vertical_margins(layout, || emit_image_output(&result.output))?;
 
-    emit_image_output(&result.output)?;
-
-    // Output metadata if requested
+    // Output metadata if requested (goes to stderr, outside layout margins)
     if meta {
         let file_size_bytes = std::fs::metadata(&result.png_path)
             .map(|m| m.len())
@@ -340,11 +329,6 @@ pub fn display_mermaid(
         };
 
         eprintln!("{}", serde_json::to_string(&render_meta)?);
-    }
-
-    // Bottom margin
-    for _ in 0..layout.margin_bottom.unwrap_or(0) {
-        println!();
     }
 
     // Let terminal settle after image rendering
@@ -370,13 +354,10 @@ pub fn display_graph(
     let result = match graph.try_render(&terminal) {
         Ok(result) => result,
         Err(GraphRenderError::NoImageSupport) => {
-            for _ in 0..layout.margin_top.unwrap_or(0) {
-                println!();
-            }
-            print!("{}", graph.render(&terminal));
-            for _ in 0..layout.margin_bottom.unwrap_or(0) {
-                println!();
-            }
+            emit_vertical_margins(layout, || {
+                print!("{}", graph.render(&terminal));
+                Ok(())
+            })?;
             return Ok(());
         }
         Err(error) => return handle_graph_error(error, &graph.fallback_code_block(), source),
@@ -384,12 +365,9 @@ pub fn display_graph(
 
     let render_time_ms = start_time.elapsed().as_millis() as u64;
 
-    for _ in 0..layout.margin_top.unwrap_or(0) {
-        println!();
-    }
+    emit_vertical_margins(layout, || emit_image_output(&result.output))?;
 
-    emit_image_output(&result.output)?;
-
+    // Output metadata if requested (goes to stderr, outside layout margins)
     if meta {
         let file_size_bytes = std::fs::metadata(&result.png_path)
             .map(|m| m.len())
@@ -403,10 +381,6 @@ pub fn display_graph(
         };
 
         eprintln!("{}", serde_json::to_string(&render_meta)?);
-    }
-
-    for _ in 0..layout.margin_bottom.unwrap_or(0) {
-        println!();
     }
 
     settle_terminal();
