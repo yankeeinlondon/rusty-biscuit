@@ -86,6 +86,12 @@ pub fn emit_vertical_margins(
     Ok(())
 }
 
+/// Output render metadata to stderr as JSON.
+fn output_render_meta(render_meta: &RenderMeta) -> color_eyre::Result<()> {
+    eprintln!("{}", serde_json::to_string(render_meta)?);
+    Ok(())
+}
+
 /// Render an image to the terminal.
 ///
 /// Supports width specification syntax: "file.jpg|50%" or "file.jpg|80"
@@ -237,7 +243,7 @@ pub fn render_image(
             render_time_ms,
         };
 
-        eprintln!("{}", serde_json::to_string(&render_meta)?);
+        output_render_meta(&render_meta)?;
     }
 
     Ok(())
@@ -328,7 +334,7 @@ pub fn display_mermaid(
             render_time_ms,
         };
 
-        eprintln!("{}", serde_json::to_string(&render_meta)?);
+        output_render_meta(&render_meta)?;
     }
 
     // Let terminal settle after image rendering
@@ -380,7 +386,7 @@ pub fn display_graph(
             render_time_ms,
         };
 
-        eprintln!("{}", serde_json::to_string(&render_meta)?);
+        output_render_meta(&render_meta)?;
     }
 
     settle_terminal();
