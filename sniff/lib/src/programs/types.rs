@@ -6,11 +6,18 @@
 //! - `ProgramDetector`: Trait for structs that detect and manage installed programs
 //! - `InstallationMethod`: Enum describing how to install a program
 
+use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{error::SniffInstallationError, os::OsType, programs::schema::ProgramMetadata};
+use crate::programs::enums::CategoryEnum;
+use crate::programs::find_program::{
+    find_programs_with_source_from_index, find_programs_with_source_parallel, ExecutableIndex,
+};
+use crate::programs::schema::{ProgramError, ProgramMetadata};
+use crate::{error::SniffInstallationError, os::OsType};
 
 /// Describes where a program executable was discovered.
 ///
@@ -288,6 +295,156 @@ impl ProgramDetails {
             repo,
             installation_methods,
         }
+    }
+}
+
+/// Generic program detector for any category enum.
+///
+/// Stores detection results (path + source) indexed by enum variant ordinal.
+/// Replaces the per-category `InstalledEditors`, `InstalledUtilities`, etc.
+/// structs with a single generic implementation.
+#[derive(Debug, Clone)]
+pub struct CategoryDetector<E: CategoryEnum> {
+    results: Vec<Option<(PathBuf, ExecutableSource)>>,
+    _phantom: PhantomData<E>,
+}
+
+impl<E: CategoryEnum> Default for CategoryDetector<E> {
+    fn default() -> Self {
+        Self {
+            results: vec![None; E::COUNT],
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<E: CategoryEnum> PartialEq for CategoryDetector<E> {
+    fn eq(&self, other: &Self) -> bool {
+        self.results == other.results
+    }
+}
+
+impl<E: CategoryEnum> Eq for CategoryDetector<E> {}
+
+impl<E: CategoryEnum> CategoryDetector<E> {
+    /// Detect installed programs by scanning PATH.
+    pub fn new() -> Self {
+        let mut names_to_search: Vec<&'static str> = Vec::new();
+        for variant in E::iter() {
+            let info = variant.info();
+            names_to_search.push(info.binary_name);
+            names_to_search.extend_from_slice(info.alternate_binary_names);
+        }
+
+        let found = find_programs_with_source_parallel(&names_to_search);
+        Self::from_search_results(&found)
+    }
+
+    /// Detect installed programs using a pre-built executable index.
+    pub fn new_with_index(index: &ExecutableIndex) -> Self {
+        let mut names_to_search: Vec<&'static str> = Vec::new();
+        for variant in E::iter() {
+            let info = variant.info();
+            names_to_search.push(info.binary_name);
+            names_to_search.extend_from_slice(info.alternate_binary_names);
+        }
+
+        let found = find_programs_with_source_from_index(index, &names_to_search);
+        Self::from_search_results(&found)
+    }
+
+    /// Construct from search results HashMap.
+    fn from_search_results(
+        found: &HashMap<String, Option<(PathBuf, ExecutableSource)>>,
+    ) -> Self {
+        let mut results = vec![None; E::COUNT];
+
+        for variant in E::iter() {
+            let idx = variant.variant_index();
+
+            // Check platform override first (e.g., Windows SAPI)
+            if let Some(override_result) = variant.platform_override() {
+                results[idx] = Some(override_result);
+                continue;
+            }
+
+            // Try primary binary name
+            let info = variant.info();
+            if let Some(result) = found.get(info.binary_name).and_then(|r| r.clone()) {
+                results[idx] = Some(result);
+                continue;
+            }
+
+            // Try alternate binary names
+            for alt in info.alternate_binary_names {
+                if let Some(result) = found.get(*alt).and_then(|r| r.clone()) {
+                    results[idx] = Some(result);
+                    break;
+                }
+            }
+        }
+
+        Self {
+            results,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Re-check program availability and update internal state.
+    pub fn refresh(&mut self) {
+        *self = Self::new();
+    }
+
+    /// Returns true if the specified program is installed.
+    pub fn is_installed(&self, program: E) -> bool {
+        self.results[program.variant_index()].is_some()
+    }
+
+    /// Returns the path to the specified program's binary if installed.
+    pub fn path(&self, program: E) -> Option<PathBuf> {
+        self.results[program.variant_index()]
+            .as_ref()
+            .map(|(p, _)| p.clone())
+    }
+
+    /// Returns the path and source of the specified program if installed.
+    pub fn path_with_source(&self, program: E) -> Option<(PathBuf, ExecutableSource)> {
+        self.results[program.variant_index()].clone()
+    }
+
+    /// Returns the version of the specified program if available.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if the program is not installed or version detection fails.
+    pub fn version(&self, program: E) -> Result<String, ProgramError> {
+        if !self.is_installed(program) {
+            return Err(ProgramError::NotFound(program.binary_name().to_string()));
+        }
+        program.version()
+    }
+
+    /// Returns the official website URL for the specified program.
+    pub fn website(&self, program: E) -> &'static str {
+        program.website()
+    }
+
+    /// Returns a one-line description of the specified program.
+    pub fn description(&self, program: E) -> &'static str {
+        program.description()
+    }
+
+    /// Returns a list of all installed programs in this category.
+    pub fn installed(&self) -> Vec<E> {
+        E::iter().filter(|p| self.is_installed(*p)).collect()
+    }
+
+    /// Builder method: mark a program as installed with given path and source.
+    ///
+    /// Useful for testing.
+    pub fn with_program(mut self, program: E, path: PathBuf, source: ExecutableSource) -> Self {
+        self.results[program.variant_index()] = Some((path, source));
+        self
     }
 }
 
@@ -892,5 +1049,43 @@ mod tests {
         // Invalid JSON value should fail to deserialize
         let result: Result<ExecutableSource, _> = serde_json::from_str("\"invalid_source\"");
         assert!(result.is_err(), "Invalid source should fail to deserialize");
+    }
+
+    // ============================================
+    // CategoryDetector tests
+    // ============================================
+
+    use crate::programs::enums::Editor;
+
+    #[test]
+    fn test_category_detector_default_has_nothing_installed() {
+        let detector = CategoryDetector::<Editor>::default();
+        assert!(detector.installed().is_empty());
+        assert!(!detector.is_installed(Editor::Vim));
+        assert!(detector.path(Editor::Vim).is_none());
+        assert!(detector.path_with_source(Editor::Vim).is_none());
+    }
+
+    #[test]
+    fn test_category_detector_with_program_marks_installed() {
+        let detector = CategoryDetector::<Editor>::default()
+            .with_program(Editor::Vim, PathBuf::from("/usr/bin/vim"), ExecutableSource::Path);
+        assert!(detector.is_installed(Editor::Vim));
+        assert!(!detector.is_installed(Editor::Neovim));
+        assert_eq!(
+            detector.path(Editor::Vim),
+            Some(PathBuf::from("/usr/bin/vim"))
+        );
+    }
+
+    #[test]
+    fn test_category_detector_installed_returns_only_installed() {
+        let detector = CategoryDetector::<Editor>::default()
+            .with_program(Editor::Vim, PathBuf::from("/usr/bin/vim"), ExecutableSource::Path)
+            .with_program(Editor::Neovim, PathBuf::from("/usr/bin/nvim"), ExecutableSource::Path);
+        let installed = detector.installed();
+        assert_eq!(installed.len(), 2);
+        assert!(installed.contains(&Editor::Vim));
+        assert!(installed.contains(&Editor::Neovim));
     }
 }
