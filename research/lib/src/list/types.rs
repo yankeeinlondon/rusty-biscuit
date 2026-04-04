@@ -7,10 +7,11 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// The type/category of a research topic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TopicType {
     /// Software library (npm package, Rust crate, Python package, etc.)
+    #[default]
     Library,
     /// Software framework or platform
     Framework,
@@ -66,12 +67,6 @@ impl std::str::FromStr for TopicType {
             "api" => Ok(Self::Api),
             _ => Err(format!("unknown topic type: '{}'", s)),
         }
-    }
-}
-
-impl Default for TopicType {
-    fn default() -> Self {
-        Self::Library
     }
 }
 
