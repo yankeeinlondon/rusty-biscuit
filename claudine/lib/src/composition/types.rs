@@ -275,10 +275,7 @@ impl SequenceStepOverlay {
         map.insert("next_state".into(), self.next_state.clone());
         map.insert("is_first".into(), serde_json::Value::Bool(self.is_first));
         map.insert("is_last".into(), serde_json::Value::Bool(self.is_last));
-        map.insert(
-            "step".into(),
-            serde_json::Value::Number(self.step.into()),
-        );
+        map.insert("step".into(), serde_json::Value::Number(self.step.into()));
         map.insert(
             "total_steps".into(),
             serde_json::Value::Number(self.total_steps.into()),

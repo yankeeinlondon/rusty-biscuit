@@ -157,7 +157,13 @@ impl LifecycleEmitter for DefaultLifecycleEmitter {
         repo_root: Option<&Path>,
         messaging: &RuntimeMessagingSettings,
     ) {
-        crate::messaging::execute_resolved_message(text, None, Some(source_path), repo_root, messaging);
+        crate::messaging::execute_resolved_message(
+            text,
+            None,
+            Some(source_path),
+            repo_root,
+            messaging,
+        );
     }
 
     fn emit_speech(&self, text: &str, tts_config: TtsConfig) {
@@ -279,8 +285,7 @@ impl<'a> LifecycleRunGuard<'a> {
 
         // --- Non-audio fan-out (immediate) ---
         if let Some(stderr_text) = &notification.stderr {
-            self.emitter
-                .emit_stderr(signal, stderr_text, self.ctx.term);
+            self.emitter.emit_stderr(signal, stderr_text, self.ctx.term);
         }
         if let Some(message_text) = &notification.message {
             self.emitter.emit_message(

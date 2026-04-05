@@ -106,7 +106,6 @@ pub enum CompositionError {
     LifecycleUnknownEffect(String, String),
 
     // -- Sequence errors -------------------------------------------------------
-
     /// The `sequence` frontmatter value is not a valid type (must be a list or a string).
     #[error("invalid sequence definition: {0}")]
     SequenceInvalid(String),

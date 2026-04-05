@@ -32,6 +32,6 @@ pub use sequence::{build_step_overlay, resolve_sequence_plan};
 pub use types::{
     CompositionClosurePlan, CompositionExecutionRequest, CompositionMode, InlineClosurePlan,
     OutputFormat, PreparedComposition, ResolvedCompositionSource, SelectedProvider,
-    SelectionReason, SequenceExecutionOptions, SequencePlan, SequenceRunSummary,
-    SequenceSource, SequenceStep, SequenceStepOverlay, SequenceStepResult, SystemPromptInput,
+    SelectionReason, SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource,
+    SequenceStep, SequenceStepOverlay, SequenceStepResult, SystemPromptInput,
 };
