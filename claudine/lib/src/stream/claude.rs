@@ -409,6 +409,7 @@ mod tests {
 
     use super::*;
     use crate::stream::parser::NullSink;
+    use crate::stream::test_support::{ToolContractExpectation, assert_tool_event_contract};
 
     /// A recording sink that captures event calls for verification.
     struct RecordingSink {
@@ -642,14 +643,17 @@ mod tests {
         let before_tool = parser.sink.before_tool.lock().unwrap().clone();
         let after_tool = parser.sink.after_tool.lock().unwrap().clone();
 
-        assert_eq!(before_tool[0].extra["tool_name"], "bash");
-        assert_eq!(before_tool[0].extra["tool_id"], "tu-1");
-        assert_eq!(before_tool[0].extra["tool_input"]["command"], "git status");
-
-        assert_eq!(after_tool[0].extra["tool_name"], "bash");
-        assert_eq!(after_tool[0].extra["tool_id"], "tu-1");
-        assert_eq!(after_tool[0].extra["tool_input"]["command"], "git status");
-        assert_eq!(after_tool[0].extra["tool_response"], "clean");
+        assert_tool_event_contract(
+            &before_tool[0],
+            Some(&after_tool[0]),
+            ToolContractExpectation {
+                name: "bash",
+                id: Some("tu-1"),
+                input_field: Some(("command", "git status")),
+                status: None,
+                response: Some(Value::String("clean".into())),
+            },
+        );
     }
 
     #[test]
@@ -663,9 +667,17 @@ mod tests {
             .unwrap();
 
         let before_tool = parser.sink.before_tool.lock().unwrap().clone();
-        assert_eq!(before_tool[0].extra["tool_name"], "bash");
-        assert_eq!(before_tool[0].extra["tool_id"], "tu-2");
-        assert_eq!(before_tool[0].extra["tool_input"]["command"], "ls -la");
+        assert_tool_event_contract(
+            &before_tool[0],
+            None,
+            ToolContractExpectation {
+                name: "bash",
+                id: Some("tu-2"),
+                input_field: Some(("command", "ls -la")),
+                status: None,
+                response: None,
+            },
+        );
     }
 
     #[test]

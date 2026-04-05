@@ -150,6 +150,53 @@ pub(crate) fn trace_malformed_line(provider: Provider, line_num: usize, message:
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use serde_json::Value;
+
+    use super::parser::EventMeta;
+
+    pub(crate) struct ToolContractExpectation<'a> {
+        pub(crate) name: &'a str,
+        pub(crate) id: Option<&'a str>,
+        pub(crate) input_field: Option<(&'a str, &'a str)>,
+        pub(crate) status: Option<&'a str>,
+        pub(crate) response: Option<Value>,
+    }
+
+    pub(crate) fn assert_tool_event_contract(
+        before: &EventMeta,
+        after: Option<&EventMeta>,
+        expected: ToolContractExpectation<'_>,
+    ) {
+        assert_eq!(before.extra["tool_name"], expected.name);
+        if let Some(id) = expected.id {
+            assert_eq!(before.extra["tool_id"], id);
+        }
+        if let Some((field, value)) = expected.input_field {
+            assert_eq!(before.extra["tool_input"][field], value);
+        }
+
+        let Some(after) = after else {
+            return;
+        };
+
+        assert_eq!(after.extra["tool_name"], expected.name);
+        if let Some(id) = expected.id {
+            assert_eq!(after.extra["tool_id"], id);
+        }
+        if let Some((field, value)) = expected.input_field {
+            assert_eq!(after.extra["tool_input"][field], value);
+        }
+        if let Some(status) = expected.status {
+            assert_eq!(after.extra["status"], status);
+        }
+        if let Some(response) = expected.response {
+            assert_eq!(after.extra["tool_response"], response);
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use parser::NullSink;

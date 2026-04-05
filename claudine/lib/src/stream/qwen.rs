@@ -337,6 +337,7 @@ impl<S: StreamEventSink + Send> StreamParser for QwenStreamParser<S> {
 mod tests {
     use super::*;
     use crate::stream::parser::{EventMeta, NullSink, StreamEventSink};
+    use crate::stream::test_support::{ToolContractExpectation, assert_tool_event_contract};
 
     #[derive(Default)]
     struct ToolRecordingSink {
@@ -473,19 +474,16 @@ mod tests {
         let sink = parser.sink;
         assert_eq!(sink.before_tool.len(), 1);
         assert_eq!(sink.after_tool.len(), 1);
-        assert_eq!(sink.before_tool[0].extra["tool_name"], "bash");
-        assert_eq!(sink.before_tool[0].extra["tool_id"], "q1");
-        assert_eq!(
-            sink.before_tool[0].extra["tool_input"]["command"],
-            "git status"
+        assert_tool_event_contract(
+            &sink.before_tool[0],
+            Some(&sink.after_tool[0]),
+            ToolContractExpectation {
+                name: "bash",
+                id: Some("q1"),
+                input_field: Some(("command", "git status")),
+                status: Some("success"),
+                response: Some(Value::String("clean".into())),
+            },
         );
-        assert_eq!(sink.after_tool[0].extra["tool_name"], "bash");
-        assert_eq!(sink.after_tool[0].extra["tool_id"], "q1");
-        assert_eq!(sink.after_tool[0].extra["status"], "success");
-        assert_eq!(
-            sink.after_tool[0].extra["tool_input"]["command"],
-            "git status"
-        );
-        assert_eq!(sink.after_tool[0].extra["tool_response"], "clean");
     }
 }
