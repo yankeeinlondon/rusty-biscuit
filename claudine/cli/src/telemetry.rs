@@ -144,6 +144,7 @@ fn command_name(command: &Commands) -> &'static str {
         | Commands::Goose(_) => "wrap",
         Commands::Compose(_) => "compose",
         Commands::InlineCompose(_) => "inline-compose",
+        Commands::Sequence(_) => "sequence",
     }
 }
 

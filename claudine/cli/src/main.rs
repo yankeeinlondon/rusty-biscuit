@@ -79,5 +79,6 @@ async fn main() -> Result<()> {
         | Commands::Goose(_) => unreachable!("wrapper commands are handled before this match"),
         Commands::Compose(args) => commands::compose::run_compose(args, cli.verbose),
         Commands::InlineCompose(args) => commands::compose::run_inline_compose(args, cli.verbose),
+        Commands::Sequence(args) => commands::sequence::run_sequence(args, cli.verbose),
     }
 }

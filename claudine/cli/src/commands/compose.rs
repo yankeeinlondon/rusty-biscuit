@@ -147,7 +147,7 @@ pub struct SharedComposeArgs {
 }
 
 impl SharedComposeArgs {
-    fn explicit_provider(&self) -> Option<Provider> {
+    pub(crate) fn explicit_provider(&self) -> Option<Provider> {
         self.provider
             .or_else(|| self.claude.then_some(Provider::Claude))
             .or_else(|| self.codex.then_some(Provider::Codex))
@@ -159,7 +159,7 @@ impl SharedComposeArgs {
             .or_else(|| self.roo.then_some(Provider::RooCode))
     }
 
-    fn excluded(&self) -> BTreeSet<Provider> {
+    pub(crate) fn excluded(&self) -> BTreeSet<Provider> {
         self.exclude.iter().copied().collect()
     }
 
@@ -393,7 +393,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
 }
 
 /// Parse `--set` JSON/JSON5, validate it's an object, return as `serde_json::Value`.
-fn parse_set_json(raw: Option<&str>) -> Result<Option<serde_json::Value>> {
+pub(crate) fn parse_set_json(raw: Option<&str>) -> Result<Option<serde_json::Value>> {
     let Some(json_str) = raw else {
         return Ok(None);
     };

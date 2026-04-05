@@ -86,6 +86,7 @@ impl StructuredSummaryDetails {
 }
 
 pub(crate) mod composition;
+pub(crate) mod sequence;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HarnessPromptMode {
