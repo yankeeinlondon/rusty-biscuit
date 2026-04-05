@@ -31,7 +31,9 @@ Of these packages, the following ones appear to have changes _staged_ for commit
 
 ## Orchestration
 
-We will act as an aggregator when we can see opportunities to do so effectively. This will be done to allow for concurrent activity as well as to preserve the context window as much as possible.
+We will act as an aggregator when we can see opportunities to do so effectively. This will be done to allow for concurrent activity as well as to preserve the context window as much as possible. 
+
+> **IMPORTANT:** when you spawn a sub-agent always reinforce that they CAN NOT ask the user for feedback or permissions as they are in a non-interactive session!
 
 ## Lessons Learned
 
