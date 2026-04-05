@@ -5,10 +5,10 @@ use color_eyre::eyre::{Result, eyre};
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
-use biscuit_terminal::components::table::table::{Table, TableColumn};
+use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::{Alignment, Margin, WordWrap};
+use biscuit_terminal::utils::layout::{Alignment, WordWrap};
 use claudine::events::Provider;
 use claudine::reporting::{
     DailySummary, DateRange, ErrorsReport, LabeledCount, ProviderSplit, ReportingFilters,
@@ -16,8 +16,10 @@ use claudine::reporting::{
     ToolsReport, TrendsReport, UsageTotals,
 };
 
+use crate::cli_utils::parse_naive_date;
 use crate::log;
 use crate::provider_values::provider_value_parser;
+use crate::table_utils::base_table;
 
 /// Query Claudine's SQLite-backed log reports.
 #[derive(Args)]
@@ -26,20 +28,20 @@ pub struct LogsArgs {
     pub command: Option<LogsCommand>,
 
     /// One local date in YYYY-MM-DD format.
-    #[arg(long)]
-    pub date: Option<String>,
+    #[arg(long, value_parser = parse_naive_date)]
+    pub date: Option<NaiveDate>,
 
     /// Inclusive range start in YYYY-MM-DD format.
-    #[arg(long)]
-    pub from: Option<String>,
+    #[arg(long, value_parser = parse_naive_date)]
+    pub from: Option<NaiveDate>,
 
     /// Inclusive range end in YYYY-MM-DD format.
-    #[arg(long)]
-    pub to: Option<String>,
+    #[arg(long, value_parser = parse_naive_date)]
+    pub to: Option<NaiveDate>,
 
     /// Filter by provider.
     #[arg(long, value_parser = provider_value_parser())]
-    pub provider: Option<String>,
+    pub provider: Option<Provider>,
 
     /// Filter by repo name or org/name.
     #[arg(long)]
@@ -206,7 +208,7 @@ fn run_day_window(
     label: &'static str,
     fallback_date: NaiveDate,
 ) -> Result<()> {
-    let date = parse_single_date(args.date.as_deref())?.unwrap_or(fallback_date);
+    let date = args.date.unwrap_or(fallback_date);
     let range = DateRange::single(date);
     best_effort_sync(store, SyncRequest::Date(date));
 
@@ -263,16 +265,8 @@ fn output_json_or<T: serde::Serialize>(json: bool, value: &T, render: impl FnOnc
 }
 
 fn parse_filters(args: &LogsArgs) -> Result<ReportingFilters> {
-    let provider = args
-        .provider
-        .as_deref()
-        .map(|input| {
-            Provider::fuzzy_match_cli_name(input).ok_or_else(|| eyre!("unknown provider `{input}`"))
-        })
-        .transpose()?;
-
     Ok(ReportingFilters {
-        provider,
+        provider: args.provider,
         repo: args.repo.clone(),
         package_area: args.package_area.clone(),
         package: args.package.clone(),
@@ -280,11 +274,7 @@ fn parse_filters(args: &LogsArgs) -> Result<ReportingFilters> {
 }
 
 fn sync_request_from_args(args: &LogsArgs) -> Result<SyncRequest> {
-    let date = parse_single_date(args.date.as_deref())?;
-    let from = parse_single_date(args.from.as_deref())?;
-    let to = parse_single_date(args.to.as_deref())?;
-
-    match (date, from, to) {
+    match (args.date, args.from, args.to) {
         (Some(date), None, None) => Ok(SyncRequest::Date(date)),
         (None, Some(from), Some(to)) => Ok(SyncRequest::Range(DateRange { from, to })),
         (None, None, None) => Ok(SyncRequest::All),
@@ -295,11 +285,7 @@ fn sync_request_from_args(args: &LogsArgs) -> Result<SyncRequest> {
 }
 
 fn range_from_args(args: &LogsArgs, default_date: NaiveDate) -> Result<DateRange> {
-    let date = parse_single_date(args.date.as_deref())?;
-    let from = parse_single_date(args.from.as_deref())?;
-    let to = parse_single_date(args.to.as_deref())?;
-
-    match (date, from, to) {
+    match (args.date, args.from, args.to) {
         (Some(date), None, None) => Ok(DateRange::single(date)),
         (None, Some(from), Some(to)) => Ok(DateRange { from, to }),
         (None, None, None) => Ok(DateRange::single(default_date)),
@@ -307,12 +293,6 @@ fn range_from_args(args: &LogsArgs, default_date: NaiveDate) -> Result<DateRange
             "use either `--date YYYY-MM-DD` or `--from YYYY-MM-DD --to YYYY-MM-DD`"
         )),
     }
-}
-
-fn parse_single_date(value: Option<&str>) -> Result<Option<NaiveDate>> {
-    value
-        .map(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(Into::into))
-        .transpose()
 }
 
 fn default_window(days: u64) -> DateRange {
@@ -1045,12 +1025,6 @@ fn render_trends_report(report: &TrendsReport, error_hint: Option<&str>) {
     }
     let definitions = UnorderedList::from(definitions).with_bullet("  ");
     log::data(&definitions.render(&term));
-}
-
-fn base_table(columns: Vec<TableColumn>) -> Table {
-    let mut table = Table::new().with_columns(columns);
-    table.layout_mut().left_margin = Margin::Chars(1);
-    table
 }
 
 fn render_provider_split(items: &[ProviderSplit]) -> String {

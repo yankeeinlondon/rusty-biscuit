@@ -69,3 +69,26 @@ pub fn daily_log_date_from_path(path: &Path) -> Option<NaiveDate> {
     let stem = path.file_stem()?.to_str()?;
     NaiveDate::parse_from_str(stem, "%Y-%m-%d").ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Local, TimeZone};
+
+    use super::*;
+
+    #[test]
+    fn resolve_file_log_path_at_uses_daily_rotation_name() {
+        let now = Local.with_ymd_and_hms(2026, 4, 3, 12, 0, 0).unwrap();
+        let path = resolve_file_log_path_at(None, true, now).unwrap();
+
+        assert!(path.ends_with("2026-04-03.jsonl"));
+    }
+
+    #[test]
+    fn daily_log_date_from_path_parses_valid_date_stems() {
+        let parsed = daily_log_date_from_path(Path::new("/tmp/2026-04-03.jsonl"));
+
+        assert_eq!(parsed, NaiveDate::from_ymd_opt(2026, 4, 3));
+        assert!(daily_log_date_from_path(Path::new("/tmp/events.jsonl")).is_none());
+    }
+}

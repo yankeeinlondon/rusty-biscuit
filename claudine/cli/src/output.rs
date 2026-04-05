@@ -616,6 +616,16 @@ pub(crate) fn format_session_start(
     .render(&crate::log::terminal())
 }
 
+/// Format an INFO-only line announcing the working directory used to launch the agent.
+pub(crate) fn format_launch_directory(directory: &Path) -> String {
+    Prose::new(format!(
+        "- <dim>starting agent in</dim> <blue>{}</blue>",
+        directory.display()
+    ))
+    .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
+    .render(&crate::log::terminal())
+}
+
 /// Render assistant terminal text through `Prose` so wrapping and styling are terminal-aware.
 pub(crate) fn render_assistant_text(text: &str, term: &Terminal) -> String {
     Prose::new(text)
@@ -831,6 +841,13 @@ mod tests {
     #[test]
     fn shell_escape_replaces_tabs_and_carriage_returns() {
         assert_eq!(shell_escape("a\tb\rc"), "'a\\tb\\rc'");
+    }
+
+    #[test]
+    fn format_launch_directory_mentions_directory() {
+        let rendered = format_launch_directory(Path::new("/tmp/project"));
+        assert!(rendered.contains("starting agent in"));
+        assert!(rendered.contains("/tmp/project"));
     }
 
     #[test]

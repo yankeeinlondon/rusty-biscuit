@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
@@ -38,6 +40,7 @@ pub struct ClaudeStreamParser<S: StreamEventSink> {
     rate_limit: Option<RateLimitInfo>,
     // Raw result for provider-specific extra
     raw_summary: Option<Value>,
+    tool_uses: HashMap<String, (Option<String>, Option<Value>)>,
 }
 
 impl<S: StreamEventSink> ClaudeStreamParser<S> {
@@ -60,7 +63,12 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
             error_message: None,
             rate_limit: None,
             raw_summary: None,
+            tool_uses: HashMap::new(),
         }
+    }
+
+    fn tool_use_payload(obj: &Value) -> &Value {
+        obj.get("content_block").unwrap_or(obj)
     }
 
     fn handle_init(&mut self, obj: &Value) {
@@ -220,28 +228,76 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
     }
 
     fn handle_tool_use(&mut self, obj: &Value) {
+        let payload = Self::tool_use_payload(obj);
         self.tool_calls += 1;
         super::trace_tool_event(
             Provider::Claude,
             self.tool_calls,
-            obj.get("name")
+            payload
+                .get("name")
                 .or_else(|| obj.get("tool_name"))
                 .and_then(|value| value.as_str()),
         );
         let mut meta = EventMeta::default();
-        if let Some(tool_name) = obj
-            .get("name")
-            .or_else(|| obj.get("tool_name"))
+        let tool_id = payload
+            .get("id")
+            .or_else(|| obj.get("tool_use_id"))
             .and_then(|v| v.as_str())
-        {
+            .map(ToOwned::to_owned);
+        let tool_name = payload
+            .get("name")
+            .or_else(|| payload.get("tool_name"))
+            .and_then(|v| v.as_str())
+            .map(ToOwned::to_owned);
+        let tool_input = payload.get("input").cloned();
+
+        if let Some(tool_id) = &tool_id {
             meta.extra
-                .insert("tool_name".into(), Value::String(tool_name.to_string()));
+                .insert("tool_id".into(), Value::String(tool_id.clone()));
+        }
+        if let Some(tool_name) = &tool_name {
+            meta.extra
+                .insert("tool_name".into(), Value::String(tool_name.clone()));
+        }
+        if let Some(tool_input) = &tool_input {
+            meta.extra.insert("tool_input".into(), tool_input.clone());
+        }
+        if let Some(tool_id) = tool_id {
+            self.tool_uses.insert(tool_id, (tool_name, tool_input));
         }
         self.sink.on_before_tool(&meta);
     }
 
-    fn handle_tool_result(&mut self) {
-        let meta = EventMeta::default();
+    fn handle_tool_result(&mut self, obj: &Value) {
+        let tool_id = obj
+            .get("tool_use_id")
+            .or_else(|| obj.get("id"))
+            .and_then(|v| v.as_str())
+            .map(ToOwned::to_owned);
+        let (tool_name, tool_input) = tool_id
+            .as_ref()
+            .and_then(|id| self.tool_uses.remove(id))
+            .unwrap_or((None, None));
+
+        let mut meta = EventMeta::default();
+        if let Some(tool_id) = tool_id {
+            meta.extra.insert("tool_id".into(), Value::String(tool_id));
+        }
+        if let Some(tool_name) = tool_name {
+            meta.extra
+                .insert("tool_name".into(), Value::String(tool_name));
+        }
+        if let Some(tool_input) = tool_input {
+            meta.extra.insert("tool_input".into(), tool_input);
+        }
+        if let Some(tool_response) = obj
+            .get("content")
+            .or_else(|| obj.get("output"))
+            .or_else(|| obj.get("result"))
+        {
+            meta.extra
+                .insert("tool_response".into(), tool_response.clone());
+        }
         self.sink.on_after_tool(&meta);
     }
 }
@@ -308,7 +364,7 @@ impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
                 Ok(None)
             }
             "tool_result" => {
-                self.handle_tool_result();
+                self.handle_tool_result(&obj);
                 Ok(None)
             }
             _ => {
@@ -353,11 +409,14 @@ mod tests {
 
     use super::*;
     use crate::stream::parser::NullSink;
+    use crate::stream::test_support::{ToolContractExpectation, assert_tool_event_contract};
 
     /// A recording sink that captures event calls for verification.
     struct RecordingSink {
         events: Mutex<Vec<String>>,
         warnings: Mutex<Vec<String>>,
+        before_tool: Mutex<Vec<EventMeta>>,
+        after_tool: Mutex<Vec<EventMeta>>,
     }
 
     impl RecordingSink {
@@ -365,6 +424,8 @@ mod tests {
             Self {
                 events: Mutex::new(Vec::new()),
                 warnings: Mutex::new(Vec::new()),
+                before_tool: Mutex::new(Vec::new()),
+                after_tool: Mutex::new(Vec::new()),
             }
         }
         fn event_names(&self) -> Vec<String> {
@@ -382,11 +443,13 @@ mod tests {
         fn on_turn_error(&mut self, _meta: &EventMeta) {
             self.events.lock().unwrap().push("turn_error".into());
         }
-        fn on_before_tool(&mut self, _meta: &EventMeta) {
+        fn on_before_tool(&mut self, meta: &EventMeta) {
             self.events.lock().unwrap().push("before_tool".into());
+            self.before_tool.lock().unwrap().push(meta.clone());
         }
-        fn on_after_tool(&mut self, _meta: &EventMeta) {
+        fn on_after_tool(&mut self, meta: &EventMeta) {
             self.events.lock().unwrap().push("after_tool".into());
+            self.after_tool.lock().unwrap().push(meta.clone());
         }
         fn on_warning(&mut self, message: &str) {
             self.warnings.lock().unwrap().push(message.into());
@@ -562,6 +625,59 @@ mod tests {
 
         let summary = parser.finish(0);
         assert_eq!(summary.tool_calls, Some(2));
+    }
+
+    #[test]
+    fn tool_use_events_preserve_input_and_result_metadata() {
+        let mut parser = make_recording_parser();
+
+        parser
+            .feed_line(
+                r#"{"type":"tool_use","id":"tu-1","name":"bash","input":{"command":"git status"}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"tool_result","tool_use_id":"tu-1","content":"clean"}"#)
+            .unwrap();
+
+        let before_tool = parser.sink.before_tool.lock().unwrap().clone();
+        let after_tool = parser.sink.after_tool.lock().unwrap().clone();
+
+        assert_tool_event_contract(
+            &before_tool[0],
+            Some(&after_tool[0]),
+            ToolContractExpectation {
+                name: "bash",
+                id: Some("tu-1"),
+                input_field: Some(("command", "git status")),
+                status: None,
+                response: Some(Value::String("clean".into())),
+            },
+        );
+    }
+
+    #[test]
+    fn content_block_tool_use_preserves_nested_input() {
+        let mut parser = make_recording_parser();
+
+        parser
+            .feed_line(
+                r#"{"type":"content_block_start","content_block":{"type":"tool_use","id":"tu-2","name":"bash","input":{"command":"ls -la"}}}"#,
+            )
+            .unwrap();
+
+        let before_tool = parser.sink.before_tool.lock().unwrap().clone();
+        assert_tool_event_contract(
+            &before_tool[0],
+            None,
+            ToolContractExpectation {
+                name: "bash",
+                id: Some("tu-2"),
+                input_field: Some(("command", "ls -la")),
+                status: None,
+                response: None,
+            },
+        );
     }
 
     #[test]

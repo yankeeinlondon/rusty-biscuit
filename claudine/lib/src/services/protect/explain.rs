@@ -121,3 +121,90 @@ fn suggest_remediation(eval: &ProtectEvaluation) -> Option<ProtectRemediation> {
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::permissions::query::QueryResult;
+
+    use super::*;
+    use crate::services::protect::{
+        ProtectDecision, ProtectFinding, ProtectIntent, ProtectOutcome, ProtectSeverity,
+    };
+
+    fn sample_finding(source: ProtectFindingSource, severity: ProtectSeverity) -> ProtectFinding {
+        ProtectFinding {
+            intent: ProtectIntent::ModifyProviderConfig,
+            result: QueryResult::denied("policy.deny"),
+            severity,
+            source,
+        }
+    }
+
+    #[test]
+    fn degraded_evaluation_reports_capability_remediation() {
+        let eval = ProtectEvaluation {
+            decision: ProtectDecision::degraded(
+                ProtectOutcome::AdvisoryOnly {
+                    reason: "capability.no-stop-current".to_string(),
+                },
+                ProtectOutcome::StopCurrent {
+                    reason: "policy.deny".to_string(),
+                },
+                "protect".to_string(),
+            ),
+            policy_mode: ProtectPolicyMode::Effective,
+            findings: vec![sample_finding(
+                ProtectFindingSource::PolicyQuery,
+                ProtectSeverity::High,
+            )],
+            redaction: None,
+            warnings: Vec::new(),
+        };
+
+        let explanation = explain_evaluation(&eval);
+
+        assert!(explanation.summary.contains("AdvisoryOnly"));
+        assert!(
+            explanation
+                .remediation
+                .as_ref()
+                .unwrap()
+                .summary
+                .contains("provider lacks the capability")
+        );
+    }
+
+    #[test]
+    fn configured_fallback_with_non_trivial_finding_suggests_wrapper() {
+        let eval = ProtectEvaluation {
+            decision: ProtectDecision::new(
+                ProtectOutcome::AskThenAllowOrStop {
+                    reason: "runtime-guard".to_string(),
+                },
+                ProtectOutcome::AskThenAllowOrStop {
+                    reason: "runtime-guard".to_string(),
+                },
+                "protect".to_string(),
+                None,
+            ),
+            policy_mode: ProtectPolicyMode::ConfiguredFallback,
+            findings: vec![sample_finding(
+                ProtectFindingSource::RuntimeGuard,
+                ProtectSeverity::Medium,
+            )],
+            redaction: None,
+            warnings: Vec::new(),
+        };
+
+        let explanation = explain_evaluation(&eval);
+
+        assert!(
+            explanation
+                .remediation
+                .as_ref()
+                .unwrap()
+                .summary
+                .contains("through a Claudine wrapper")
+        );
+    }
+}

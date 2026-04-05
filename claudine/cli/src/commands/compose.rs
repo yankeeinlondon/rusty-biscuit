@@ -7,72 +7,63 @@
 //! [`execute_composition_request`] for wrapper-grade execution.
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 use clap::Args;
-use claudine::composition::{self, CompositionExecutionRequest, CompositionMode};
+use claudine::composition::{
+    self, CompositionExecutionRequest, CompositionMode, OutputFormat as CompositionOutputFormat,
+    SystemPromptInput,
+};
 use claudine::events::Provider;
 use color_eyre::eyre::{Result, eyre};
 
 use super::wrap::composition::execute_composition_request;
 use crate::log;
+use crate::provider_values::provider_value_parser;
 
-/// Shared provider-override flags for composition commands.
+/// Shared flags for composition commands.
 #[derive(Debug, Clone, Args)]
-pub struct ProviderOverrideArgs {
-    /// Use Claude as the provider.
-    #[arg(long, group = "provider_select")]
+pub struct SharedComposeArgs {
+    /// Use a specific provider.
+    #[arg(long, value_parser = provider_value_parser(), group = "compose_provider")]
+    pub provider: Option<Provider>,
+
+    /// Use Claude Code.
+    #[arg(long, group = "compose_provider")]
     pub claude: bool,
 
-    /// Use Codex as the provider.
-    #[arg(long, group = "provider_select")]
+    /// Use Codex CLI.
+    #[arg(long, group = "compose_provider")]
     pub codex: bool,
 
-    /// Use Gemini as the provider.
-    #[arg(long, group = "provider_select")]
+    /// Use Gemini CLI.
+    #[arg(long, group = "compose_provider")]
     pub gemini: bool,
 
-    /// Use OpenCode as the provider.
-    #[arg(long, group = "provider_select")]
-    pub opencode: bool,
-
-    /// Use Qwen Code as the provider.
-    #[arg(long, group = "provider_select")]
-    pub qwen: bool,
-
-    /// Use Goose as the provider.
-    #[arg(long, group = "provider_select")]
+    /// Use Goose.
+    #[arg(long, group = "compose_provider")]
     pub goose: bool,
 
-    /// Use Kimi Code as the provider.
-    #[arg(long, group = "provider_select")]
-    pub kimi: bool,
-}
+    /// Use Kimi Code.
+    #[arg(long = "kimi", group = "compose_provider")]
+    pub kimicode: bool,
 
-impl ProviderOverrideArgs {
-    fn resolve(&self) -> Option<Provider> {
-        if self.claude {
-            Some(Provider::Claude)
-        } else if self.codex {
-            Some(Provider::Codex)
-        } else if self.gemini {
-            Some(Provider::Gemini)
-        } else if self.opencode {
-            Some(Provider::OpenCode)
-        } else if self.qwen {
-            Some(Provider::QwenCode)
-        } else if self.goose {
-            Some(Provider::Goose)
-        } else if self.kimi {
-            Some(Provider::KimiCode)
-        } else {
-            None
-        }
-    }
-}
+    /// Use OpenCode.
+    #[arg(long, group = "compose_provider")]
+    pub opencode: bool,
 
-/// Compose a Markdown document through an agentic CLI.
-#[derive(Debug, Clone, Args)]
-pub struct ComposeArgs {
+    /// Use Qwen Code.
+    #[arg(long = "qwen", group = "compose_provider")]
+    pub qwen: bool,
+
+    /// Use Roo Code.
+    #[arg(long = "roo", group = "compose_provider")]
+    pub roo: bool,
+
+    /// Exclude providers from automatic selection (repeatable).
+    #[arg(long = "exclude", value_name = "PROVIDER", value_parser = provider_value_parser())]
+    pub exclude: Vec<Provider>,
+
     /// Enable provider-specific YOLO/auto-approval mode.
     #[arg(short = 'y', long)]
     pub yolo: bool,
@@ -80,10 +71,6 @@ pub struct ComposeArgs {
     /// Run the provider session in interactive mode.
     #[arg(short = 'i', long)]
     pub interactive: bool,
-
-    /// Exclude providers from automatic selection (repeatable).
-    #[arg(long = "exclude", value_name = "PROVIDER")]
-    pub exclude: Vec<String>,
 
     /// Preserve this env var even when it matches sensitive-name filters.
     #[arg(long = "include", value_name = "ENV_NAME")]
@@ -95,11 +82,24 @@ pub struct ComposeArgs {
 
     /// Set the output format (json, text, stream).
     #[arg(short = 'o', long = "output", value_name = "FORMAT")]
-    pub output: Option<String>,
+    pub output: Option<CompositionOutputFormat>,
 
-    /// Set or append a system prompt (string or file path).
-    #[arg(short = 's', long = "system-prompt", value_name = "PROMPT|FILE")]
+    /// Set or append an inline system prompt.
+    #[arg(
+        short = 's',
+        long = "system-prompt",
+        value_name = "PROMPT",
+        conflicts_with = "system_prompt_file"
+    )]
     pub system_prompt: Option<String>,
+
+    /// Load the system prompt from a file.
+    #[arg(
+        long = "system-prompt-file",
+        value_name = "FILE",
+        conflicts_with = "system_prompt"
+    )]
+    pub system_prompt_file: Option<PathBuf>,
 
     /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
     #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
@@ -144,9 +144,44 @@ pub struct ComposeArgs {
     /// Treat unresolved or ambiguous MCP tags as hard errors.
     #[arg(long)]
     pub strict: bool,
+}
 
+impl SharedComposeArgs {
+    pub(crate) fn explicit_provider(&self) -> Option<Provider> {
+        self.provider
+            .or_else(|| self.claude.then_some(Provider::Claude))
+            .or_else(|| self.codex.then_some(Provider::Codex))
+            .or_else(|| self.gemini.then_some(Provider::Gemini))
+            .or_else(|| self.goose.then_some(Provider::Goose))
+            .or_else(|| self.kimicode.then_some(Provider::KimiCode))
+            .or_else(|| self.opencode.then_some(Provider::OpenCode))
+            .or_else(|| self.qwen.then_some(Provider::QwenCode))
+            .or_else(|| self.roo.then_some(Provider::RooCode))
+    }
+
+    pub(crate) fn excluded(&self) -> BTreeSet<Provider> {
+        self.exclude.iter().copied().collect()
+    }
+
+    fn system_prompt_input(&self) -> Option<SystemPromptInput> {
+        self.system_prompt
+            .as_ref()
+            .map(|prompt| SystemPromptInput::Inline {
+                prompt: prompt.clone(),
+            })
+            .or_else(|| {
+                self.system_prompt_file
+                    .as_ref()
+                    .map(|path| SystemPromptInput::File { path: path.clone() })
+            })
+    }
+}
+
+/// Compose a Markdown document through an agentic CLI.
+#[derive(Debug, Clone, Args)]
+pub struct ComposeArgs {
     #[command(flatten)]
-    pub provider: ProviderOverrideArgs,
+    pub shared: SharedComposeArgs,
 
     /// File reference to compose.
     #[arg(value_name = "FILE")]
@@ -156,80 +191,8 @@ pub struct ComposeArgs {
 /// Inline composition: use frontmatter `prompt`, replace body with output.
 #[derive(Debug, Clone, Args)]
 pub struct InlineComposeArgs {
-    /// Enable provider-specific YOLO/auto-approval mode.
-    #[arg(short = 'y', long)]
-    pub yolo: bool,
-
-    /// Run the provider session in interactive mode.
-    #[arg(short = 'i', long)]
-    pub interactive: bool,
-
-    /// Exclude providers from automatic selection (repeatable).
-    #[arg(long = "exclude", value_name = "PROVIDER")]
-    pub exclude: Vec<String>,
-
-    /// Preserve this env var even when it matches sensitive-name filters.
-    #[arg(long = "include", value_name = "ENV_NAME")]
-    pub include: Vec<String>,
-
-    /// Override the model used by the provider.
-    #[arg(short = 'm', long = "model", value_name = "MODEL")]
-    pub model: Option<String>,
-
-    /// Set the output format (json, text, stream).
-    #[arg(short = 'o', long = "output", value_name = "FORMAT")]
-    pub output: Option<String>,
-
-    /// Set or append a system prompt (string or file path).
-    #[arg(short = 's', long = "system-prompt", value_name = "PROMPT|FILE")]
-    pub system_prompt: Option<String>,
-
-    /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
-    #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
-    pub timeout: Option<u64>,
-
-    /// Set the OPERATION env var for the composed session.
-    #[arg(long = "operation", visible_alias = "op", value_name = "OP")]
-    pub operation: Option<String>,
-
-    /// Enable provider-specific sandboxing.
-    #[arg(long)]
-    pub sandbox: bool,
-
-    /// Use only repo-scoped skills, commands, and agents via a shadow HOME.
-    #[arg(long)]
-    pub repo: bool,
-
-    /// Show what would be executed without launching the child.
-    #[arg(long)]
-    pub dry_run: bool,
-
-    /// Show only the header line; suppress env details and info messages.
-    #[arg(short = 'q', long)]
-    pub quiet: bool,
-
-    /// Suppress all output except the composition result.
-    #[arg(long, conflicts_with = "quiet")]
-    pub silent: bool,
-
-    /// Override frontmatter values as JSON/JSON5 (e.g. `--set '{"key":"val"}'`).
-    #[arg(long, value_name = "JSON")]
-    pub set: Option<String>,
-
-    /// Enable Claudine-managed MCP session composition.
-    #[arg(long)]
-    pub mcp: bool,
-
-    /// Activate specific MCP servers by ID or alias (comma-separated).
-    #[arg(long = "use", value_name = "ID", value_delimiter = ',')]
-    pub mcp_use: Vec<String>,
-
-    /// Treat unresolved or ambiguous MCP tags as hard errors.
-    #[arg(long)]
-    pub strict: bool,
-
     #[command(flatten)]
-    pub provider: ProviderOverrideArgs,
+    pub shared: SharedComposeArgs,
 
     /// File reference to compose.
     #[arg(value_name = "FILE")]
@@ -261,11 +224,11 @@ pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
 }
 
 fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
-    let excluded = parse_excluded(&args.exclude, args.silent || args.quiet);
-    let explicit_provider = args.provider.resolve();
-    let set_overrides = parse_set_json(args.set.as_deref())?;
+    let ComposeArgs { shared, file } = args;
+    let set_overrides = parse_set_json(shared.set.as_deref())?;
+    let system_prompt = shared.system_prompt_input();
 
-    let source = composition::resolve_composition_source(&args.file).map_err(|e| eyre!("{e}"))?;
+    let source = composition::resolve_composition_source(&file).map_err(|e| eyre!("{e}"))?;
 
     // ── Pre-flight shell approval ────────────────────────────────────
     let compose_options = {
@@ -278,7 +241,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
     };
 
     let approval_options =
-        super::wrap::build_harness_shell_options(&source.resolved_path, None, args.interactive);
+        super::wrap::build_harness_shell_options(&source.resolved_path, None, shared.interactive);
 
     let preflight = composition::resolve_shell_approvals(
         Some(&source.markdown),
@@ -288,42 +251,50 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
     )
     .map_err(|e| eyre!("{e}"))?;
 
-    let prepared =
-        composition::prepare_direct(&source, set_overrides, Some(preflight.approved_commands))
-            .map_err(|e| eyre!("{e}"))?;
+    let prepared = composition::prepare_direct(
+        &source,
+        composition::PrepareOptions {
+            set_overrides,
+            pre_approved_commands: Some(preflight.approved_commands),
+            ..Default::default()
+        },
+    )
+    .map_err(|e| eyre!("{e}"))?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::ChainedDocument,
-        file_ref: args.file,
+        file_ref: file,
         prepared,
-        explicit_provider,
-        excluded,
-        yolo: args.yolo,
-        include: args.include,
-        model: args.model,
-        output: args.output,
-        system_prompt: args.system_prompt,
-        timeout: args.timeout,
-        operation: args.operation,
-        sandbox: args.sandbox,
-        repo: args.repo,
-        dry_run: args.dry_run,
-        mcp: args.mcp,
-        mcp_use: args.mcp_use,
-        strict: args.strict,
-        session_interactive: args.interactive,
-        quiet: args.quiet,
-        silent: args.silent,
+        explicit_provider: shared.explicit_provider(),
+        excluded: shared.excluded(),
+        yolo: shared.yolo,
+        include: shared.include,
+        model: shared.model,
+        output: shared.output,
+        system_prompt,
+        timeout: shared.timeout,
+        operation: shared.operation,
+        sandbox: shared.sandbox,
+        repo: shared.repo,
+        dry_run: shared.dry_run,
+        mcp: shared.mcp,
+        mcp_use: shared.mcp_use,
+        strict: shared.strict,
+        session_interactive: shared.interactive,
+        quiet: shared.quiet,
+        silent: shared.silent,
+        env_overrides: std::collections::BTreeMap::new(),
+        shared_approval_cache: None,
     };
 
     execute_composition_request(request, verbose)
 }
 
 fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32> {
-    let excluded = parse_excluded(&args.exclude, args.silent || args.quiet);
-    let explicit_provider = args.provider.resolve();
-    let set_overrides = parse_set_json(args.set.as_deref())?;
-    let show_checks = !args.silent;
+    let InlineComposeArgs { shared, file } = args;
+    let set_overrides = parse_set_json(shared.set.as_deref())?;
+    let system_prompt = shared.system_prompt_input();
+    let show_checks = !shared.silent;
     let term = if show_checks {
         Some(crate::log::terminal())
     } else {
@@ -332,20 +303,16 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
 
     // -- Pre-validation: file resolution ------------------------------------
 
-    let source = match composition::resolve_composition_source(&args.file) {
+    let source = match composition::resolve_composition_source(&file) {
         Ok(source) => {
             if let Some(ref t) = term {
-                claudine::harness::report::report_source_file(&args.file, &source.resolved_path, t);
+                claudine::harness::report::report_source_file(&file, &source.resolved_path, t);
             }
             source
         }
         Err(e) => {
             if let Some(ref t) = term {
-                claudine::harness::report::report_source_file(
-                    &args.file,
-                    std::path::Path::new(""),
-                    t,
-                );
+                claudine::harness::report::report_source_file(&file, std::path::Path::new(""), t);
             }
             return Err(eyre!("{e}"));
         }
@@ -380,7 +347,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
     };
 
     let approval_options =
-        super::wrap::build_harness_shell_options(&source.resolved_path, None, args.interactive);
+        super::wrap::build_harness_shell_options(&source.resolved_path, None, shared.interactive);
 
     let preflight = composition::resolve_shell_approvals(
         Some(&source.markdown),
@@ -390,39 +357,47 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
     )
     .map_err(|e| eyre!("{e}"))?;
 
-    let prepared =
-        composition::prepare_inline(&source, set_overrides, Some(preflight.approved_commands))
-            .map_err(|e| eyre!("{e}"))?;
+    let prepared = composition::prepare_inline(
+        &source,
+        composition::PrepareOptions {
+            set_overrides,
+            pre_approved_commands: Some(preflight.approved_commands),
+            ..Default::default()
+        },
+    )
+    .map_err(|e| eyre!("{e}"))?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,
-        file_ref: args.file,
+        file_ref: file,
         prepared,
-        explicit_provider,
-        excluded,
-        yolo: args.yolo,
-        include: args.include,
-        model: args.model,
-        output: args.output,
-        system_prompt: args.system_prompt,
-        timeout: args.timeout,
-        operation: args.operation,
-        sandbox: args.sandbox,
-        repo: args.repo,
-        dry_run: args.dry_run,
-        mcp: args.mcp,
-        mcp_use: args.mcp_use,
-        strict: args.strict,
-        session_interactive: args.interactive,
-        quiet: args.quiet,
-        silent: args.silent,
+        explicit_provider: shared.explicit_provider(),
+        excluded: shared.excluded(),
+        yolo: shared.yolo,
+        include: shared.include,
+        model: shared.model,
+        output: shared.output,
+        system_prompt,
+        timeout: shared.timeout,
+        operation: shared.operation,
+        sandbox: shared.sandbox,
+        repo: shared.repo,
+        dry_run: shared.dry_run,
+        mcp: shared.mcp,
+        mcp_use: shared.mcp_use,
+        strict: shared.strict,
+        session_interactive: shared.interactive,
+        quiet: shared.quiet,
+        silent: shared.silent,
+        env_overrides: std::collections::BTreeMap::new(),
+        shared_approval_cache: None,
     };
 
     execute_composition_request(request, verbose)
 }
 
 /// Parse `--set` JSON/JSON5, validate it's an object, return as `serde_json::Value`.
-fn parse_set_json(raw: Option<&str>) -> Result<Option<serde_json::Value>> {
+pub(crate) fn parse_set_json(raw: Option<&str>) -> Result<Option<serde_json::Value>> {
     let Some(json_str) = raw else {
         return Ok(None);
     };
@@ -435,18 +410,4 @@ fn parse_set_json(raw: Option<&str>) -> Result<Option<serde_json::Value>> {
         ));
     }
     Ok(Some(value))
-}
-
-fn parse_excluded(exclude: &[String], silent: bool) -> BTreeSet<Provider> {
-    exclude
-        .iter()
-        .filter_map(|name| {
-            Provider::fuzzy_match_cli_name(name).or_else(|| {
-                if !silent {
-                    eprintln!("warning: unknown provider '{name}', ignoring --exclude");
-                }
-                None
-            })
-        })
-        .collect()
 }

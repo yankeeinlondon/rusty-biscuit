@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use crate::actions::HookResponse;
 use crate::events::{AgenticEvent, EventMeta, Provider};
+use crate::services::protect::intent::ProtectIntent;
 use crate::services::protect::observe::default_observe_protect;
 use crate::services::{
     ProtectDecision, ProtectObservation, ProtectOutcome, ProviderProtectCapabilities,
@@ -148,6 +149,35 @@ pub trait ProviderAdapter: Send + Sync {
 
         Ok(response)
     }
+
+    /// Shared advisory mapping for providers without native blocking responses.
+    fn map_non_blocking_protect_outcome(
+        &self,
+        decision: &ProtectDecision,
+        degraded_suffix: &str,
+    ) -> HookResponse {
+        let mut reason = match &decision.outcome {
+            ProtectOutcome::Allow => None,
+            ProtectOutcome::AskThenAllowOrStop { reason }
+            | ProtectOutcome::StopCurrent { reason }
+            | ProtectOutcome::StopSession { reason }
+            | ProtectOutcome::AllowWithRedaction { reason }
+            | ProtectOutcome::AdvisoryOnly { reason } => Some(reason.clone()),
+        };
+
+        if decision.degraded {
+            reason = Some(format!(
+                "{} ({degraded_suffix})",
+                reason.unwrap_or_else(|| "protect decision".to_string())
+            ));
+        }
+
+        HookResponse {
+            decision: Some(crate::actions::HookDecision::Continue),
+            reason,
+            ..HookResponse::default()
+        }
+    }
 }
 
 static CLAUDE_ADAPTER: claude::ClaudeAdapter = claude::ClaudeAdapter;
@@ -171,6 +201,37 @@ pub fn adapter_for(provider: Provider) -> &'static dyn ProviderAdapter {
         Provider::QwenCode => &QWEN_ADAPTER,
         Provider::RooCode => &ROO_ADAPTER,
     }
+}
+
+pub(crate) fn str_field(raw: &Value, key: &str) -> Option<String> {
+    raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
+}
+
+pub(crate) fn extract_tool_input_path(meta: &EventMeta) -> Option<String> {
+    meta.tool_input
+        .as_ref()
+        .and_then(|value| value.as_object())
+        .and_then(|map| {
+            map.get("file_path")
+                .or_else(|| map.get("path"))
+                .or_else(|| map.get("file"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+}
+
+pub(crate) fn replace_intents_preserving_completion(
+    obs: &mut ProtectObservation,
+    mut new_intents: Vec<ProtectIntent>,
+) {
+    if obs
+        .intents
+        .iter()
+        .any(|intent| matches!(intent, ProtectIntent::CompletionOutputScan))
+    {
+        new_intents.push(ProtectIntent::CompletionOutputScan);
+    }
+    obs.intents = new_intents;
 }
 
 #[cfg(test)]

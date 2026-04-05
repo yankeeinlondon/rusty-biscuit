@@ -18,6 +18,40 @@ use crate::services::{
     ProtectCliContext, ProtectDecision, ProtectOutcome, ProtectService, ProtectSessionContext,
 };
 
+/// Wrapper-session-scoped dispatch runtime.
+///
+/// Holds the compiled runtime configuration for repeated dispatches within
+/// a single wrapper process. `None` means no Claudine config was found.
+#[derive(Debug, Clone, Default)]
+pub struct DispatchRuntimeContext {
+    config: Option<Arc<loader::RuntimeConfig>>,
+}
+
+impl DispatchRuntimeContext {
+    /// Load and compile the runtime config once for a specific environment.
+    pub fn load_for_env(env: &EnvironmentContext) -> Result<Self> {
+        match loader::load_runtime_config(None, runtime_repo_root(env)) {
+            Ok(config) => Ok(Self {
+                config: Some(Arc::new(config)),
+            }),
+            Err(crate::error::ClaudineError::ConfigNotFound(_)) => Ok(Self { config: None }),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Build a cached runtime context from a preloaded runtime config.
+    pub fn from_runtime_config(config: loader::RuntimeConfig) -> Self {
+        Self {
+            config: Some(Arc::new(config)),
+        }
+    }
+
+    /// Return true when a compiled runtime config is available.
+    pub fn has_config(&self) -> bool {
+        self.config.is_some()
+    }
+}
+
 /// Result of dispatching a single incoming provider event.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DispatchOutcome {
@@ -74,6 +108,29 @@ pub async fn dispatch_event_meta(
     dispatch_preparsed(provider, event, meta).await
 }
 
+/// Dispatch a normalized event using a cached wrapper-session runtime config.
+///
+/// This avoids reloading and recompiling Claudine config for every streamed
+/// event within a single wrapper process.
+pub async fn dispatch_event_meta_with_runtime(
+    provider: Provider,
+    event: AgenticEvent,
+    mut meta: EventMeta,
+    runtime: &DispatchRuntimeContext,
+) -> Result<DispatchOutcome> {
+    debug!(
+        %provider,
+        %event,
+        has_cached_runtime = runtime.has_config(),
+        "Dispatching event with wrapper-session runtime cache"
+    );
+    meta.provider = provider;
+    meta.event = event;
+    let env = meta.env.clone();
+    prepare_meta_for_dispatch(&mut meta, &env);
+    dispatch_preparsed_with_config(provider, event, meta, runtime.config.as_deref()).await
+}
+
 fn prepare_meta_for_dispatch(meta: &mut EventMeta, env: &EnvironmentContext) {
     meta.env = env.clone();
 
@@ -104,6 +161,97 @@ async fn dispatch_preparsed(
     event: AgenticEvent,
     meta: EventMeta,
 ) -> Result<DispatchOutcome> {
+    let repo_root_path = runtime_repo_root(&meta.env);
+    let repo_root = repo_root_path
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+
+    let config = match info_span!(
+        "dispatch_config_load",
+        provider = %provider,
+        repo_root = %repo_root
+    )
+    .in_scope(|| loader::load_runtime_config(None, repo_root_path))
+    {
+        Ok(config) => config,
+        Err(crate::error::ClaudineError::ConfigNotFound(_)) => {
+            debug!("No .claudine config found, skipping dispatch");
+            return Ok(DispatchOutcome::default());
+        }
+        Err(error) => return Err(error),
+    };
+
+    dispatch_preparsed_with_config(provider, event, meta, Some(&config)).await
+}
+
+fn tool_detail_for_log(event: AgenticEvent, meta: &EventMeta) -> Option<String> {
+    match event {
+        AgenticEvent::BeforeTool | AgenticEvent::PermissionRequest => meta
+            .tool_input
+            .as_ref()
+            .map(|value| compact_value_for_log(value, 120)),
+        AgenticEvent::AfterTool => {
+            let mut parts = Vec::new();
+
+            if let Some(tool_id) = meta.extra.get("tool_id").and_then(|value| value.as_str()) {
+                parts.push(format!("id={tool_id}"));
+            }
+            if let Some(status) = meta.extra.get("status").and_then(|value| value.as_str()) {
+                parts.push(format!("status={status}"));
+            }
+            let error = meta.error.clone().or_else(|| {
+                meta.extra
+                    .get("error")
+                    .and_then(|value| compact_scalar_for_log(value, 80))
+            });
+            if let Some(error) = error {
+                parts.push(format!("error={error}"));
+            }
+            if let Some(response) = meta.tool_response.as_ref() {
+                parts.push(format!("result={}", compact_value_for_log(response, 120)));
+            }
+
+            (!parts.is_empty()).then(|| parts.join(" "))
+        }
+        AgenticEvent::ToolError => meta
+            .error
+            .as_deref()
+            .map(|error| format!("error={}", truncate_for_log(error, 80))),
+        _ => None,
+    }
+}
+
+fn compact_value_for_log(value: &Value, max_chars: usize) -> String {
+    let rendered = serde_json::to_string(value).unwrap_or_else(|_| value.to_string());
+    truncate_for_log(&rendered, max_chars)
+}
+
+fn compact_scalar_for_log(value: &Value, max_chars: usize) -> Option<String> {
+    match value {
+        Value::String(text) => Some(truncate_for_log(text, max_chars)),
+        Value::Null | Value::Bool(_) | Value::Number(_) => {
+            Some(compact_value_for_log(value, max_chars))
+        }
+        _ => None,
+    }
+}
+
+fn truncate_for_log(value: &str, max_chars: usize) -> String {
+    let count = value.chars().count();
+    if count <= max_chars {
+        return value.to_string();
+    }
+
+    let truncated: String = value.chars().take(max_chars.saturating_sub(3)).collect();
+    format!("{truncated}...")
+}
+
+async fn dispatch_preparsed_with_config(
+    provider: Provider,
+    event: AgenticEvent,
+    meta: EventMeta,
+    config: Option<&loader::RuntimeConfig>,
+) -> Result<DispatchOutcome> {
     let adapter = adapters::adapter_for(provider);
     let can_block = adapter.can_block(&event);
     let repo_root = runtime_repo_root(&meta.env)
@@ -111,6 +259,7 @@ async fn dispatch_preparsed(
         .unwrap_or_default();
     let session_id = meta.session_id.clone().unwrap_or_default();
     let tool_name = meta.tool_name.clone().unwrap_or_default();
+    let tool_detail = tool_detail_for_log(event, &meta);
     let _dispatch_span = info_span!(
         "dispatch_event",
         provider = %provider,
@@ -122,21 +271,17 @@ async fn dispatch_preparsed(
     )
     .entered();
 
-    info!(%provider, %event, "Dispatching event");
+    info!(
+        %provider,
+        %event,
+        tool_name = %tool_name,
+        tool_detail = tool_detail.as_deref().unwrap_or(""),
+        "Dispatching event"
+    );
 
-    let config = match info_span!(
-        "dispatch_config_load",
-        provider = %provider,
-        repo_root = %repo_root
-    )
-    .in_scope(|| loader::load_runtime_config(None, runtime_repo_root(&meta.env)))
-    {
-        Ok(config) => config,
-        Err(crate::error::ClaudineError::ConfigNotFound(_)) => {
-            debug!("No .claudine config found, skipping dispatch");
-            return Ok(DispatchOutcome::default());
-        }
-        Err(error) => return Err(error),
+    let Some(config) = config else {
+        debug!("No cached .claudine config found, skipping dispatch");
+        return Ok(DispatchOutcome::default());
     };
 
     let binding = match config.get_binding(provider, &event) {
@@ -228,6 +373,8 @@ async fn dispatch_preparsed(
     info!(
         event = %resolved_hook.event,
         provider = %resolved_hook.provider,
+        tool_name = resolved_hook.meta.tool_name.as_deref().unwrap_or(""),
+        tool_detail = tool_detail.as_deref().unwrap_or(""),
         action_count = resolved_hook.actions.len(),
         can_block = resolved_hook.can_block,
         "Executing resolved hook"
@@ -547,16 +694,21 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_returns_default_when_no_config() {
+        // Exercises the "no runtime config" branch in `dispatch_preparsed_with_config`
+        // without depending on the absence of a user-level `~/.claudine/config.json`
+        // on the machine running the test.
         let raw = json!({
             "hook_event_name": "SessionStart",
             "session_id": "test-123"
         });
-        let env = EnvironmentContext::default();
+        let adapter = adapters::adapter_for(Provider::Claude);
+        let (event, mut meta) = adapter.parse_event(&raw).unwrap();
+        meta.env = EnvironmentContext::default();
 
-        let outcome = dispatch(&raw, Provider::Claude, &env).await.unwrap();
-        // Claude adapter returns {} ack for non-blocking events
-        assert_eq!(outcome.response, Some(Value::Object(Default::default())));
-        assert_eq!(outcome.exit_code, None);
+        let outcome = dispatch_preparsed_with_config(Provider::Claude, event, meta, None)
+            .await
+            .unwrap();
+        assert_eq!(outcome, DispatchOutcome::default());
     }
 
     #[test]
@@ -589,6 +741,32 @@ mod tests {
         });
 
         assert_eq!(value.as_deref(), Some("true"));
+    }
+
+    #[test]
+    fn tool_detail_for_log_formats_before_tool_input() {
+        let mut meta = EventMeta::new(Provider::Codex, AgenticEvent::BeforeTool);
+        meta.tool_name = Some("shell".into());
+        meta.tool_input = Some(json!({"cmd": "git status"}));
+
+        assert_eq!(
+            tool_detail_for_log(AgenticEvent::BeforeTool, &meta).as_deref(),
+            Some(r#"{"cmd":"git status"}"#)
+        );
+    }
+
+    #[test]
+    fn tool_detail_for_log_formats_after_tool_metadata() {
+        let mut meta = EventMeta::new(Provider::Gemini, AgenticEvent::AfterTool);
+        meta.tool_name = Some("search".into());
+        meta.tool_response = Some(json!({"hits": 3}));
+        meta.extra.insert("tool_id".into(), json!("tool-1"));
+        meta.extra.insert("status".into(), json!("success"));
+
+        assert_eq!(
+            tool_detail_for_log(AgenticEvent::AfterTool, &meta).as_deref(),
+            Some(r#"id=tool-1 status=success result={"hits":3}"#)
+        );
     }
 
     #[tokio::test]
@@ -689,7 +867,19 @@ mod tests {
 
         let config = HookerConfig {
             version: "1.0".to_string(),
-            settings: GlobalSettings::default(),
+            settings: GlobalSettings {
+                default_log_target: None,
+                tts: None,
+                linking: Some(LinkingSettings {
+                    preference: vec![],
+                    canonical_provider: CanonicalProviderSettings {
+                        repo_skill: Some(Provider::Claude),
+                        ..CanonicalProviderSettings::default()
+                    },
+                }),
+                protect: None,
+                messaging: None,
+            },
             providers: {
                 let mut providers = HashMap::new();
                 providers.insert(Provider::Claude, claude_config);
@@ -706,6 +896,133 @@ mod tests {
         let loaded = loader::load_config(Some(&path), None).unwrap();
         assert!(loaded.providers.contains_key(&Provider::Claude));
         assert_eq!(loaded.providers[&Provider::Claude].events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cached_runtime_context_reuses_loaded_config_after_file_removal() {
+        let repo = tempfile::tempdir().unwrap();
+        let log_path = repo.path().join("cached-runtime-events.jsonl");
+
+        let mut claude_config = ProviderConfig::default();
+        claude_config.events.insert(
+            AgenticEvent::SessionStart,
+            EventBinding {
+                enabled: true,
+                actions: vec![HookAction::Log {
+                    target: LogTarget::File {
+                        path: Some(log_path.clone()),
+                        rotate_daily: false,
+                    },
+                }],
+                matcher: None,
+            },
+        );
+
+        let config = HookerConfig {
+            version: "1.0".to_string(),
+            settings: GlobalSettings {
+                default_log_target: None,
+                tts: None,
+                linking: Some(LinkingSettings {
+                    preference: vec![],
+                    canonical_provider: CanonicalProviderSettings {
+                        repo_skill: Some(Provider::Claude),
+                        ..CanonicalProviderSettings::default()
+                    },
+                }),
+                protect: None,
+                messaging: None,
+            },
+            providers: {
+                let mut providers = HashMap::new();
+                providers.insert(Provider::Claude, claude_config);
+                providers
+            },
+        };
+
+        let config_path = repo.path().join(".claudine/config.json");
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&config_path, serde_json::to_string(&config).unwrap()).unwrap();
+
+        let env = EnvironmentContext {
+            git: Some(GitContext {
+                repo_root: repo.path().to_path_buf(),
+                branch: None,
+                is_dirty: false,
+                staged_count: 0,
+                unstaged_count: 0,
+                untracked_count: 0,
+                head_sha: None,
+                head_message: None,
+                user_name: None,
+                user_email: None,
+                remote_name: None,
+                remote_url: None,
+                hosting_provider: None,
+                repo_name: None,
+                repo_org: None,
+            }),
+            ..EnvironmentContext::default()
+        };
+
+        let runtime = DispatchRuntimeContext::load_for_env(&env).unwrap();
+        assert!(runtime.has_config());
+
+        std::fs::remove_file(&config_path).unwrap();
+
+        let first = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::SessionStart,
+            timestamp: chrono::Utc::now(),
+            session_id: Some("cached-1".to_string()),
+            cwd: None,
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env: env.clone(),
+        };
+        let second = EventMeta {
+            session_id: Some("cached-2".to_string()),
+            ..first.clone()
+        };
+
+        let first_outcome = dispatch_event_meta_with_runtime(
+            Provider::Claude,
+            AgenticEvent::SessionStart,
+            first,
+            &runtime,
+        )
+        .await
+        .unwrap();
+        let second_outcome = dispatch_event_meta_with_runtime(
+            Provider::Claude,
+            AgenticEvent::SessionStart,
+            second,
+            &runtime,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            first_outcome.response,
+            Some(Value::Object(Default::default()))
+        );
+        assert_eq!(
+            second_outcome.response,
+            Some(Value::Object(Default::default()))
+        );
+
+        let content = std::fs::read_to_string(log_path).unwrap();
+        assert!(content.contains("cached-1"));
+        assert!(content.contains("cached-2"));
     }
 
     #[test]

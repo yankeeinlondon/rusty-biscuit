@@ -230,12 +230,9 @@ fn apply_statuses(
 fn matches_scope_style(
     source: &std::path::Path,
     dest: &std::path::Path,
-    scope: ResourceScope,
+    _scope: ResourceScope,
 ) -> bool {
-    match scope {
-        ResourceScope::User => source.is_absolute() && dest.is_absolute(),
-        ResourceScope::Repo => source.is_absolute() && dest.is_absolute(),
-    }
+    source.is_absolute() && dest.is_absolute()
 }
 
 /// Link commands across providers that support Markdown command files.

@@ -8,8 +8,9 @@ use clap::Args;
 use color_eyre::eyre::Result;
 
 use claudine::config::{RegistrationResult, SkipReason, detect_agents, get_configurator};
-use claudine::events::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider};
+use claudine::events::Provider;
 
+use crate::cli_utils::event_name_pascal;
 use crate::log;
 use crate::provider_values::provider_value_parser;
 
@@ -21,7 +22,7 @@ pub struct SyncArgs {
     pub dry_run: bool,
     /// Sync only a specific provider.
     #[arg(long, value_parser = provider_value_parser())]
-    pub provider: Option<String>,
+    pub provider: Option<Provider>,
     /// Remove unsupported events from config.
     ///
     /// When enabled, removes event bindings from providers that don't support
@@ -58,12 +59,6 @@ enum SyncAction {
     Deregistered,
     /// Error occurred.
     Error(String),
-}
-
-fn event_name_pascal(slug: &str) -> String {
-    AgenticEvent::from_slug(slug)
-        .map(|event| event.as_pascal_case().to_string())
-        .unwrap_or_else(|| slug.to_string())
 }
 
 /// Format a prose for an added hook.
@@ -190,7 +185,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
         Err(e) => return Err(e.into()),
     };
 
-    let filter_provider = args.provider.as_deref().map(parse_provider).transpose()?;
+    let filter_provider = args.provider;
 
     // Get providers to sync:
     // - If config exists, sync all providers configured in it
@@ -466,17 +461,4 @@ pub async fn run(args: SyncArgs) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn parse_provider(name: &str) -> color_eyre::eyre::Result<Provider> {
-    if let Some(provider) = Provider::parse_cli_name(name) {
-        return Ok(provider);
-    }
-
-    let supported = PROVIDERS_DISPLAY_ORDER
-        .iter()
-        .map(Provider::as_slug)
-        .collect::<Vec<_>>()
-        .join(", ");
-    color_eyre::eyre::bail!("Unknown provider: {name}. Supported: {supported}")
 }

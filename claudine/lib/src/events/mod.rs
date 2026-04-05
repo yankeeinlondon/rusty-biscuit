@@ -16,7 +16,7 @@ pub use environment::{
     EnvironmentContext, GitContext, HardwareContext, OsContext, RepoContext, detect_environment,
     detect_environment_fast,
 };
-pub use event_meta::EventMeta;
+pub use event_meta::{EventMeta, ToolName};
 pub use init_defaults::{
     INIT_EVENT_DISPLAY_ORDER, INIT_RECOMMENDED_EVENTS, INIT_TTS_PROVIDERS, TtsProviderOption,
     default_speak_template, quick_start_supported_providers, recommended_sound,
