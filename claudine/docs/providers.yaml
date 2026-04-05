@@ -10,7 +10,7 @@ list:
       file: ./codex.md
       site: https://developers.openai.com/codex/cli
       best_practices: https://developers.openai.com/codex/learn/best-practices
-      repo:
+      repo: https://github.com/openai/codex
     - name: Gemini CLI
       file: gemini.md
     - name: Goose CLI
