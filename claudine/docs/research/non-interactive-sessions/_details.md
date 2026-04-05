@@ -45,6 +45,13 @@ When {{state.desc}} is run as a **non-interactive** session, it can be instructe
     - While the **main** focus needs to stay focused on things relating to structured output, other major timeline events can add context to the timeline and they should be added where they help a user to understand but keep these events to less than 5
     - Write this timeline info to the `## Timeline` section of "{{state.file}}"
 
+1. **TOOLS (`## Tools`)
+
+    - Document all the built-in tools which {{state.name}} provides out of the box
+    - Express what sort of visibility and metadata the JSON stream in a non-interactive session will be provided when these tools are called (before/after)
+    - Give several examples
+    - Write this to the `## Tools` section of "{{state.file}}"
+
 1. **USE CASES** (`## Use Cases`)
 
     - in the `## Use Cases` section of the document we will dig into details around how certain use cases can be detected and worked with in {{state.name}}'s unstructured data
@@ -83,6 +90,13 @@ When {{state.desc}} is run as a **non-interactive** session, it can be instructe
             - Are there events which indicate which model the agent is using?
             - Do these events always get fired or only under certain circumstances?
             - What is the nomenclature that is used for these models? Model abbreviations? Full model names with release date? Is the underlying provider of the model also mentioned?
+        - **Human in the Loop**
+            - Can we detect attempts to prompt/ask the user questions or for permissions during a non-interactive session?
+                - if so, can we get the question being asked, ideally as structured data?
+            - Can we detect attempts to prompt/ask the user questions or for permissions in a subagent?
+        - **Injecting into Subagent Prompt**
+            - Can we inject some additional context into the subagent's prompt? 
+            - This could be handy for non-interactive sessions as we could warn all sub-agents that they are running in a non-interactive mode and should not ask for user input.
 
     - for every use case:
        - indicate whether the event that is being exposed is also exposed as a hook
