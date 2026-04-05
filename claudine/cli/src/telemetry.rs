@@ -7,9 +7,7 @@ use chrono::Local;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Span, Subscriber, info_span};
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::fmt::format::{
-    FmtSpan, FormatEvent, FormatFields, Writer,
-};
+use tracing_subscriber::fmt::format::{FmtSpan, FormatEvent, FormatFields, Writer};
 use tracing_subscriber::fmt::{FmtContext, FormattedFields};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::registry::LookupSpan;
@@ -28,10 +26,7 @@ pub(crate) fn init_tracing(debug_level: Option<DebugLevel>) {
     };
 
     let cwd = std::env::current_dir().ok();
-    let source_base_dir = cwd
-        .as_deref()
-        .and_then(find_repo_root)
-        .or(cwd.clone());
+    let source_base_dir = cwd.as_deref().and_then(find_repo_root).or(cwd.clone());
 
     tracing_subscriber::registry()
         .with(build_env_filter(rust_log.as_deref(), debug_level))
@@ -39,7 +34,7 @@ pub(crate) fn init_tracing(debug_level: Option<DebugLevel>) {
             tracing_subscriber::fmt::layer()
                 .with_span_events(span_events)
                 .event_format(RelativePathEventFormat::new(source_base_dir))
-                .with_writer(std::io::stderr)
+                .with_writer(std::io::stderr),
         )
         .init();
 }
@@ -229,6 +224,11 @@ where
             .or_else(|| event_fields.get("tool_name"))
             .map(String::as_str)
             .filter(|value| !value.is_empty());
+        let detail_tool_detail = event_fields
+            .get("tool_detail")
+            .or_else(|| scope_fields.get("tool_detail"))
+            .map(String::as_str)
+            .filter(|value| !value.is_empty());
         let busy = event_fields
             .get("time.busy")
             .or_else(|| event_fields.get("busy"))
@@ -248,9 +248,21 @@ where
         write!(writer, " ")?;
         write_message(&mut writer, message)?;
 
-        if detail_event.is_some() || detail_tool.is_some() || busy.is_some() || idle.is_some() {
+        if detail_event.is_some()
+            || detail_tool.is_some()
+            || detail_tool_detail.is_some()
+            || busy.is_some()
+            || idle.is_some()
+        {
             write!(writer, " ")?;
-            write_details(&mut writer, detail_event, detail_tool, busy, idle)?;
+            write_details(
+                &mut writer,
+                detail_event,
+                detail_tool,
+                detail_tool_detail,
+                busy,
+                idle,
+            )?;
         }
 
         if let Some(file) = meta.file() {
@@ -385,7 +397,7 @@ impl Visit for EventFieldVisitor {
 }
 
 fn write_timestamp(writer: &mut Writer<'_>) -> fmt::Result {
-    let value = Local::now().format("%H:%M:%S");
+    let value = Local::now().format("%H:%M:%S%.3f");
     if writer.has_ansi_escapes() {
         write!(writer, "\x1b[2m{value}\x1b[0m")
     } else {
@@ -417,13 +429,14 @@ fn write_details(
     writer: &mut Writer<'_>,
     event: Option<&str>,
     tool_name: Option<&str>,
+    tool_detail: Option<&str>,
     busy: Option<&str>,
     idle: Option<&str>,
 ) -> fmt::Result {
     write!(writer, "(")?;
 
     let mut wrote_any = false;
-    if event.is_some() || tool_name.is_some() {
+    if event.is_some() || tool_name.is_some() || tool_detail.is_some() {
         if writer.has_ansi_escapes() {
             write!(writer, "\x1b[2m")?;
         }
@@ -436,6 +449,13 @@ fn write_details(
                 write!(writer, ", ")?;
             }
             write!(writer, "{tool_name}")?;
+            wrote_any = true;
+        }
+        if let Some(tool_detail) = tool_detail {
+            if wrote_any {
+                write!(writer, " ")?;
+            }
+            write!(writer, "{tool_detail}")?;
             wrote_any = true;
         }
         if writer.has_ansi_escapes() {
@@ -524,10 +544,8 @@ mod tests {
 
     #[test]
     fn shorten_source_path_keeps_relative_paths() {
-        let shortened = shorten_source_path(
-            "claudine/cli/src/telemetry.rs",
-            Some(Path::new("/repo")),
-        );
+        let shortened =
+            shorten_source_path("claudine/cli/src/telemetry.rs", Some(Path::new("/repo")));
         assert_eq!(shortened, "claudine/cli/src/telemetry.rs");
     }
 
@@ -540,8 +558,43 @@ mod tests {
     }
 
     #[test]
+    fn write_timestamp_plain_includes_millis() {
+        let mut rendered = String::new();
+        let mut writer = Writer::new(&mut rendered);
+        write_timestamp(&mut writer).unwrap();
+
+        assert_eq!(rendered.len(), 12);
+        assert_eq!(rendered.chars().nth(8), Some('.'));
+        assert!(
+            rendered[..8]
+                .chars()
+                .all(|ch| ch.is_ascii_digit() || ch == ':')
+        );
+        assert!(rendered[9..].chars().all(|ch| ch.is_ascii_digit()));
+    }
+
+    #[test]
+    fn write_details_renders_tool_detail_inline() {
+        let mut rendered = String::new();
+        let mut writer = Writer::new(&mut rendered);
+        write_details(
+            &mut writer,
+            Some("before_tool"),
+            Some("shell"),
+            Some(r#"{"cmd":"git status"}"#),
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(rendered, r#"(before_tool, shell {"cmd":"git status"})"#);
+    }
+
+    #[test]
     fn parse_formatted_fields_handles_quotes() {
-        let parsed = parse_formatted_fields(r#"provider=OpenCode, event=before_tool, tool_name="bash", can_block=true"#);
+        let parsed = parse_formatted_fields(
+            r#"provider=OpenCode, event=before_tool, tool_name="bash", can_block=true"#,
+        );
         assert_eq!(
             parsed,
             vec![

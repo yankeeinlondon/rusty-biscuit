@@ -94,6 +94,16 @@ pub trait StreamEventSink: Send {
     /// notification or play an alert sound so the user can intervene.
     fn on_permission_request(&mut self, _meta: &EventMeta) {}
 
+    /// Called when the provider spawns a sub-agent (e.g. OpenCode `task`
+    /// tool). This is distinct from [`on_before_tool`](Self::on_before_tool)
+    /// so sinks can track sub-agent lifecycles separately from ordinary tool
+    /// calls.
+    fn on_subagent_start(&mut self, _meta: &EventMeta) {}
+
+    /// Called when a sub-agent finishes execution. This is the counterpart to
+    /// [`on_subagent_start`](Self::on_subagent_start).
+    fn on_subagent_stop(&mut self, _meta: &EventMeta) {}
+
     /// Called when the parser encounters a non-fatal issue, such as a
     /// malformed JSON line, a rate-limit warning from the provider, or
     /// degraded behavior that does not halt the stream.

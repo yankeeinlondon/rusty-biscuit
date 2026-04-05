@@ -184,6 +184,68 @@ async fn dispatch_preparsed(
     dispatch_preparsed_with_config(provider, event, meta, Some(&config)).await
 }
 
+fn tool_detail_for_log(event: AgenticEvent, meta: &EventMeta) -> Option<String> {
+    match event {
+        AgenticEvent::BeforeTool | AgenticEvent::PermissionRequest => meta
+            .tool_input
+            .as_ref()
+            .map(|value| compact_value_for_log(value, 120)),
+        AgenticEvent::AfterTool => {
+            let mut parts = Vec::new();
+
+            if let Some(tool_id) = meta.extra.get("tool_id").and_then(|value| value.as_str()) {
+                parts.push(format!("id={tool_id}"));
+            }
+            if let Some(status) = meta.extra.get("status").and_then(|value| value.as_str()) {
+                parts.push(format!("status={status}"));
+            }
+            let error = meta.error.clone().or_else(|| {
+                meta.extra
+                    .get("error")
+                    .and_then(|value| compact_scalar_for_log(value, 80))
+            });
+            if let Some(error) = error {
+                parts.push(format!("error={error}"));
+            }
+            if let Some(response) = meta.tool_response.as_ref() {
+                parts.push(format!("result={}", compact_value_for_log(response, 120)));
+            }
+
+            (!parts.is_empty()).then(|| parts.join(" "))
+        }
+        AgenticEvent::ToolError => meta
+            .error
+            .as_deref()
+            .map(|error| format!("error={}", truncate_for_log(error, 80))),
+        _ => None,
+    }
+}
+
+fn compact_value_for_log(value: &Value, max_chars: usize) -> String {
+    let rendered = serde_json::to_string(value).unwrap_or_else(|_| value.to_string());
+    truncate_for_log(&rendered, max_chars)
+}
+
+fn compact_scalar_for_log(value: &Value, max_chars: usize) -> Option<String> {
+    match value {
+        Value::String(text) => Some(truncate_for_log(text, max_chars)),
+        Value::Null | Value::Bool(_) | Value::Number(_) => {
+            Some(compact_value_for_log(value, max_chars))
+        }
+        _ => None,
+    }
+}
+
+fn truncate_for_log(value: &str, max_chars: usize) -> String {
+    let count = value.chars().count();
+    if count <= max_chars {
+        return value.to_string();
+    }
+
+    let truncated: String = value.chars().take(max_chars.saturating_sub(3)).collect();
+    format!("{truncated}...")
+}
+
 async fn dispatch_preparsed_with_config(
     provider: Provider,
     event: AgenticEvent,
@@ -197,6 +259,7 @@ async fn dispatch_preparsed_with_config(
         .unwrap_or_default();
     let session_id = meta.session_id.clone().unwrap_or_default();
     let tool_name = meta.tool_name.clone().unwrap_or_default();
+    let tool_detail = tool_detail_for_log(event, &meta);
     let _dispatch_span = info_span!(
         "dispatch_event",
         provider = %provider,
@@ -208,7 +271,13 @@ async fn dispatch_preparsed_with_config(
     )
     .entered();
 
-    info!(%provider, %event, "Dispatching event");
+    info!(
+        %provider,
+        %event,
+        tool_name = %tool_name,
+        tool_detail = tool_detail.as_deref().unwrap_or(""),
+        "Dispatching event"
+    );
 
     let Some(config) = config else {
         debug!("No cached .claudine config found, skipping dispatch");
@@ -304,6 +373,8 @@ async fn dispatch_preparsed_with_config(
     info!(
         event = %resolved_hook.event,
         provider = %resolved_hook.provider,
+        tool_name = resolved_hook.meta.tool_name.as_deref().unwrap_or(""),
+        tool_detail = tool_detail.as_deref().unwrap_or(""),
         action_count = resolved_hook.actions.len(),
         can_block = resolved_hook.can_block,
         "Executing resolved hook"
@@ -663,6 +734,32 @@ mod tests {
         });
 
         assert_eq!(value.as_deref(), Some("true"));
+    }
+
+    #[test]
+    fn tool_detail_for_log_formats_before_tool_input() {
+        let mut meta = EventMeta::new(Provider::Codex, AgenticEvent::BeforeTool);
+        meta.tool_name = Some("shell".into());
+        meta.tool_input = Some(json!({"cmd": "git status"}));
+
+        assert_eq!(
+            tool_detail_for_log(AgenticEvent::BeforeTool, &meta).as_deref(),
+            Some(r#"{"cmd":"git status"}"#)
+        );
+    }
+
+    #[test]
+    fn tool_detail_for_log_formats_after_tool_metadata() {
+        let mut meta = EventMeta::new(Provider::Gemini, AgenticEvent::AfterTool);
+        meta.tool_name = Some("search".into());
+        meta.tool_response = Some(json!({"hits": 3}));
+        meta.extra.insert("tool_id".into(), json!("tool-1"));
+        meta.extra.insert("status".into(), json!("success"));
+
+        assert_eq!(
+            tool_detail_for_log(AgenticEvent::AfterTool, &meta).as_deref(),
+            Some(r#"id=tool-1 status=success result={"hits":3}"#)
+        );
     }
 
     #[tokio::test]
