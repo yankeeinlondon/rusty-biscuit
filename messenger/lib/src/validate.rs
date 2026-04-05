@@ -55,6 +55,7 @@ pub fn validate_dispatch(
 }
 
 /// Normalize a message/dispatch pair for a specific provider.
+#[tracing::instrument(skip_all, fields(provider = %provider, mode = ?dispatch.options.compatibility))]
 pub fn normalize_dispatch(
     dispatch: &Dispatch,
     message: &Message,
@@ -66,6 +67,11 @@ pub fn normalize_dispatch(
         let target_provider = target_provider_kind(&dispatch.target);
         let reply_provider = reply_ref.provider_kind();
         if target_provider != reply_provider {
+            tracing::warn!(
+                target_provider = %target_provider,
+                reply_provider = %reply_provider,
+                "reply reference provider does not match target"
+            );
             return Err(MessengerError::InvalidMessage(format!(
                 "reply_to provider ({reply_provider}) does not match target provider ({target_provider})"
             )));
@@ -82,11 +88,19 @@ pub fn normalize_dispatch(
     );
     if has_markdown && !capabilities.supports_markdown_rendering {
         if dispatch.options.compatibility == CompatibilityMode::Strict {
+            tracing::warn!(
+                feature = "markdown rendering",
+                "strict mode rejected unsupported feature"
+            );
             return Err(MessengerError::UnsupportedFeature {
                 provider,
                 feature: "markdown rendering",
             });
         }
+        tracing::debug!(
+            feature = "markdown rendering",
+            "provider does not support native markdown rendering"
+        );
         warnings.push(CompatibilityWarning {
             provider,
             feature: "markdown rendering",
@@ -95,11 +109,16 @@ pub fn normalize_dispatch(
 
     if !normalized_message.attachments.is_empty() && !capabilities.supports_attachments {
         if dispatch.options.compatibility == CompatibilityMode::Strict {
+            tracing::warn!(
+                feature = "attachments",
+                "strict mode rejected unsupported feature"
+            );
             return Err(MessengerError::UnsupportedFeature {
                 provider,
                 feature: "attachments",
             });
         }
+        tracing::debug!(feature = "attachments", "dropping unsupported feature");
         normalized_message.attachments.clear();
         warnings.push(CompatibilityWarning {
             provider,
@@ -109,11 +128,16 @@ pub fn normalize_dispatch(
 
     if normalized_message.location.is_some() && !capabilities.supports_location {
         if dispatch.options.compatibility == CompatibilityMode::Strict {
+            tracing::warn!(
+                feature = "location",
+                "strict mode rejected unsupported feature"
+            );
             return Err(MessengerError::UnsupportedFeature {
                 provider,
                 feature: "location",
             });
         }
+        tracing::debug!(feature = "location", "dropping unsupported feature");
         normalized_message.location = None;
         warnings.push(CompatibilityWarning {
             provider,
@@ -123,11 +147,16 @@ pub fn normalize_dispatch(
 
     if normalized_dispatch.reply_to.is_some() && !capabilities.supports_reply {
         if dispatch.options.compatibility == CompatibilityMode::Strict {
+            tracing::warn!(
+                feature = "replies",
+                "strict mode rejected unsupported feature"
+            );
             return Err(MessengerError::UnsupportedFeature {
                 provider,
                 feature: "replies",
             });
         }
+        tracing::debug!(feature = "replies", "dropping unsupported feature");
         normalized_dispatch.reply_to = None;
         warnings.push(CompatibilityWarning {
             provider,
@@ -137,11 +166,16 @@ pub fn normalize_dispatch(
 
     if normalized_dispatch.options.silent && !capabilities.supports_silent_delivery {
         if dispatch.options.compatibility == CompatibilityMode::Strict {
+            tracing::warn!(
+                feature = "silent delivery",
+                "strict mode rejected unsupported feature"
+            );
             return Err(MessengerError::UnsupportedFeature {
                 provider,
                 feature: "silent delivery",
             });
         }
+        tracing::debug!(feature = "silent delivery", "dropping unsupported feature");
         normalized_dispatch.options.silent = false;
         warnings.push(CompatibilityWarning {
             provider,
@@ -153,11 +187,19 @@ pub fn normalize_dispatch(
         && !capabilities.supports_link_preview_control
     {
         if dispatch.options.compatibility == CompatibilityMode::Strict {
+            tracing::warn!(
+                feature = "link preview control",
+                "strict mode rejected unsupported feature"
+            );
             return Err(MessengerError::UnsupportedFeature {
                 provider,
                 feature: "link preview control",
             });
         }
+        tracing::debug!(
+            feature = "link preview control",
+            "dropping unsupported feature"
+        );
         normalized_dispatch.options.disable_link_preview = false;
         warnings.push(CompatibilityWarning {
             provider,
@@ -165,11 +207,17 @@ pub fn normalize_dispatch(
         });
     }
 
-    for attachment in &normalized_message.attachments {
+    tracing::trace!(
+        attachment_count = normalized_message.attachments.len(),
+        "validating attachment sources"
+    );
+    for (index, attachment) in normalized_message.attachments.iter().enumerate() {
+        tracing::trace!(attachment_index = index, kind = ?attachment.kind, "validating attachment");
         validate_attachment_source(attachment, provider)?;
     }
 
     if normalized_message.is_empty() {
+        tracing::warn!("normalization dropped all deliverable content");
         return Err(MessengerError::InvalidMessage(format!(
             "{provider} cannot deliver this message after dropping unsupported features"
         )));

@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{ArgAction, CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Result, eyre};
 use secrecy::SecretString;
+use tracing_subscriber::EnvFilter;
 
 const COMPLETIONS_HELP: &str = r#"
 SHELL COMPLETIONS
@@ -34,6 +35,10 @@ use config::{Config, RouteConfig, RouteProvider};
 #[command(name = "messenger", about = "Send messages to any platform")]
 #[command(disable_help_subcommand = true)]
 struct Cli {
+    /// Enable developer tracing output. Repeat for more detail.
+    #[arg(long, action = ArgAction::Count, global = true)]
+    debug: u8,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -112,9 +117,8 @@ async fn main() -> Result<()> {
     CompleteEnv::with_factory(Cli::command).complete();
 
     color_eyre::install()?;
-    tracing_subscriber::fmt::init();
-
     let cli = Cli::parse();
+    init_tracing(cli.debug)?;
 
     match cli.command {
         Commands::Send {
@@ -147,7 +151,51 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn init_tracing(debug_level: u8) -> Result<()> {
+    let env_log = std::env::var("RUST_LOG").ok();
+    if debug_level == 0 && env_log.is_none() {
+        return Ok(());
+    }
+
+    let default_filter = match debug_level {
+        0 | 1 => "messenger=info,messenger_cli=info",
+        2 => "messenger=debug,messenger_cli=debug",
+        _ => "messenger=trace,messenger_cli=trace",
+    };
+
+    let (filter, invalid_env) = match env_log.as_deref() {
+        Some(value) => match value.parse::<EnvFilter>() {
+            Ok(filter) => (filter, None),
+            Err(error) => (
+                default_filter.parse::<EnvFilter>()?,
+                Some((value.to_owned(), error.to_string())),
+            ),
+        },
+        None => (default_filter.parse::<EnvFilter>()?, None),
+    };
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .compact()
+        .with_target(true)
+        .try_init()
+        .map_err(|error| eyre!(error.to_string()))?;
+
+    if let Some((value, error)) = invalid_env {
+        tracing::warn!(
+            env = %value,
+            error = %error,
+            fallback = %default_filter,
+            "invalid RUST_LOG value; using default filter"
+        );
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip_all, fields(route = tracing::field::Empty, provider = tracing::field::Empty))]
 async fn send_message(
     message_text: &str,
     provider_opt: Option<RouteProvider>,
@@ -163,6 +211,21 @@ async fn send_message(
 ) -> Result<()> {
     let config = Config::load()?;
     let resolved_route = resolve_route(provider_opt, channel_opt, route_opt, &config)?;
+    let route_label = resolved_route.name.as_deref().unwrap_or("<ad-hoc>");
+    let provider_kind = resolved_route.route.provider();
+    tracing::Span::current().record("route", tracing::field::display(route_label));
+    tracing::Span::current().record("provider", tracing::field::display(provider_kind));
+    tracing::info!(provider = %provider_kind, route = route_label, "starting CLI send");
+    tracing::debug!(
+        has_reply = reply_to.is_some(),
+        has_image = image.is_some(),
+        has_file = file.is_some(),
+        silent,
+        strict,
+        plain,
+        has_location = location.is_some(),
+        "building message from CLI arguments"
+    );
 
     let mut messenger = messenger::Messenger::new();
     register_provider(&mut messenger, &resolved_route.route)?;
@@ -202,6 +265,12 @@ async fn send_message(
 
     let receipt = messenger.send_planned(plan).await?;
     let receipt_path = receipt_store::save_receipt(&receipt, resolved_route.name.as_deref())?;
+    tracing::info!(
+        provider = %receipt.provider,
+        raw_id = %receipt.raw_id,
+        receipt_path = %receipt_path.display(),
+        "CLI send complete"
+    );
     eprintln!(
         "Sent via {} (id: {})\nReceipt: {}",
         receipt.provider,
@@ -228,6 +297,7 @@ fn resolve_route(
         let channel = channel_opt
             .as_deref()
             .ok_or_else(|| eyre!("--channel is required when using --provider"))?;
+        tracing::debug!(provider = %provider, channel = %channel, "using ad-hoc route");
         return Ok(ResolvedRoute {
             name: None,
             route: RouteConfig::from_provider_and_target(provider, channel),
@@ -240,6 +310,7 @@ fn resolve_route(
             .get(&route_name)
             .cloned()
             .ok_or_else(|| eyre!("route '{route_name}' not found in config"))?;
+        tracing::debug!(route = %route_name, "using named route");
         return Ok(ResolvedRoute {
             name: Some(route_name),
             route,
@@ -252,6 +323,7 @@ fn resolve_route(
             .get(default_name)
             .cloned()
             .ok_or_else(|| eyre!("default route '{default_name}' not found in config"))?;
+        tracing::debug!(route = %default_name, "using default route");
         return Ok(ResolvedRoute {
             name: Some(default_name.clone()),
             route,
@@ -264,6 +336,7 @@ fn resolve_route(
 }
 
 fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) -> Result<()> {
+    tracing::debug!(provider = %route.provider(), "registering provider from CLI route");
     match route {
         RouteConfig::Discord {
             bot_token,
@@ -345,6 +418,7 @@ fn register_provider(messenger: &mut messenger::Messenger, route: &RouteConfig) 
 }
 
 fn build_target(route: &RouteConfig) -> Result<messenger::Target> {
+    tracing::debug!(provider = %route.provider(), "building provider target");
     match route {
         RouteConfig::Discord { channel_id, .. } => {
             Ok(messenger::Target::discord_channel(channel_id))
@@ -376,8 +450,10 @@ fn build_target(route: &RouteConfig) -> Result<messenger::Target> {
 /// Resolve a secret: use the direct value if present, otherwise look up the env var.
 fn resolve_secret(value: Option<&str>, env_name: &str) -> Result<String> {
     if let Some(v) = value {
+        tracing::trace!("using direct config value");
         return Ok(v.to_string());
     }
+    tracing::trace!(env = %env_name, "resolving secret from environment");
     std::env::var(env_name).map_err(|_| {
         eyre!(
             "no value configured and environment variable {env_name} is not set. \
