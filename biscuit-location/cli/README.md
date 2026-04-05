@@ -23,6 +23,7 @@ where distance 34.05,-118.24 40.71,-74.01    # Distance between points
 ## Per-Command Flags
 
 - `where gps --timeout <SECONDS>` — GPS fix timeout (default: 10)
+- `where reverse --timeout <SECONDS>` — HTTP request timeout for reverse geocoding (default: 10)
 - `where distance --unit <UNIT>` — distance unit: `meters`/`m`, `kilometers`/`km` (default), `miles`/`mi`, `nautical-miles`/`nm`
 
 ## Distance Inputs
@@ -109,7 +110,7 @@ mode. Set `FORCE_COLOR=1` to keep styled output even when piping (useful for CI)
 Requires a MaxMind GeoLite2-City database at one of:
 
 - the path given by `--db-path`
-- the path from the `MAXMIND_DB_PATH` environment variable
+- the path from the `BISCUIT_LOCATION_MAXMIND_DB` environment variable
 - the default location used by `biscuit-location` (see the library README)
 
 Download the free GeoLite2-City database from

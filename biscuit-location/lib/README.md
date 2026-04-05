@@ -4,7 +4,7 @@ Location services library for the biscuit ecosystem.
 
 ## Features
 
-- **Host GPS** — one-shot GPS fix from macOS CoreLocation (Windows/Linux stubs)
+- **Host GPS** — one-shot GPS fix from macOS CoreLocation, Windows `Geolocator`, or Linux GeoClue2
 - **IP to Location** — resolve IP addresses via local MaxMind GeoLite2 database
 - **Reverse Geocoding** — coordinates to city-level place name via Nominatim
 - **Distance** — geodesic distance between two points (WGS-84 ellipsoid)
