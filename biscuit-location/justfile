@@ -1,8 +1,15 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
 BOLD := '\033[1m'
 DIM := '\033[2m'
 ITALIC := '\033[3m'
 RESET := '\033[0m'
 RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
 
 default:
     @echo "biscuit-location Library & CLI"
@@ -43,3 +50,21 @@ docs:
 # run CLI in development mode
 cli *args="":
     @cargo run -p biscuit-location-cli -- {{args}}
+
+# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
+commit:
+    @echo ""
+    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
+    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
+    @echo ""
+    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
+    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
+    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
+    @just _speak "git commits completed in rusty-biscuit monorepo"
+    @sniff repo git-status 2>/dev/null || exit 0
+    @echo
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true
