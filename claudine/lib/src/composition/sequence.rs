@@ -8,9 +8,7 @@
 use std::path::Path;
 
 use super::error::CompositionError;
-use super::types::{
-    SequencePlan, SequenceSource, SequenceStep, SequenceStepOverlay,
-};
+use super::types::{SequencePlan, SequenceSource, SequenceStep, SequenceStepOverlay};
 
 /// Detect and resolve a sequence plan from a resolved composition source.
 ///
@@ -114,12 +112,12 @@ fn normalize_inline_list(
                 let name = map
                     .get("name")
                     .ok_or(CompositionError::SequenceStepNameMissing { index })?;
-                let name_str = name.as_str().ok_or_else(|| {
-                    CompositionError::SequenceStepNameWrongType {
-                        index,
-                        found: json_type_name(name).to_string(),
-                    }
-                })?;
+                let name_str =
+                    name.as_str()
+                        .ok_or_else(|| CompositionError::SequenceStepNameWrongType {
+                            index,
+                            found: json_type_name(name).to_string(),
+                        })?;
                 Ok(SequenceStep {
                     index,
                     name: name_str.to_string(),
@@ -148,22 +146,16 @@ fn load_external_sequence(
             yaml_path.display()
         ))
     })?;
-    let root = json_value
-        .as_object()
-        .ok_or_else(|| {
-            CompositionError::SequenceExternalWrongType(
-                "root must be an object".to_string(),
-            )
-        })?;
+    let root = json_value.as_object().ok_or_else(|| {
+        CompositionError::SequenceExternalWrongType("root must be an object".to_string())
+    })?;
 
     // Detect which external form is used:
     // Form 1: { sequence: [...] }
     // Form 2: { kind: "sequence", list: [...], template?: {...} }
     if let Some(list_value) = root.get("sequence") {
         let items = list_value.as_array().ok_or_else(|| {
-            CompositionError::SequenceExternalWrongType(
-                "`sequence` must be a list".to_string(),
-            )
+            CompositionError::SequenceExternalWrongType("`sequence` must be a list".to_string())
         })?;
         let steps = normalize_inline_list(items)?;
         return Ok(SequencePlan {
@@ -178,9 +170,7 @@ fn load_external_sequence(
     // Form 2: kind/list/template
     if let Some(kind_value) = root.get("kind") {
         let kind_str = kind_value.as_str().ok_or_else(|| {
-            CompositionError::SequenceExternalWrongType(
-                "`kind` must be a string".to_string(),
-            )
+            CompositionError::SequenceExternalWrongType("`kind` must be a string".to_string())
         })?;
         if kind_str != "sequence" {
             return Err(CompositionError::SequenceExternalWrongType(format!(
@@ -204,9 +194,7 @@ fn load_external_sequence(
     if let Some(tmpl) = template {
         for key in tmpl.keys() {
             if SequenceStepOverlay::RESERVED_KEYS.contains(&key.as_str()) {
-                return Err(CompositionError::SequenceReservedTemplateKey(
-                    key.clone(),
-                ));
+                return Err(CompositionError::SequenceReservedTemplateKey(key.clone()));
             }
         }
         // Validate template values are all strings
@@ -234,7 +222,9 @@ fn load_external_sequence(
             for (tmpl_key, tmpl_value) in tmpl {
                 let template_str = tmpl_value.as_str().unwrap(); // validated above
                 let rendered = render_simple_template(template_str, step_map);
-                new_map.entry(tmpl_key.clone()).or_insert(serde_json::Value::String(rendered));
+                new_map
+                    .entry(tmpl_key.clone())
+                    .or_insert(serde_json::Value::String(rendered));
             }
 
             step.raw_state = serde_json::Value::Object(new_map);
@@ -269,9 +259,7 @@ fn render_simple_template(
 
             match fields.get(key) {
                 Some(serde_json::Value::String(s)) if !s.is_empty() => s.clone(),
-                Some(serde_json::Value::Null) | None => {
-                    default.unwrap_or("").to_string()
-                }
+                Some(serde_json::Value::Null) | None => default.unwrap_or("").to_string(),
                 Some(other) => other.to_string(),
             }
         })
@@ -382,11 +370,7 @@ mod tests {
     #[test]
     fn inline_object_step_missing_name_fails() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            &[("sequence", json!([{"color": "red"}]))],
-            "Prompt",
-        );
+        let source = make_source(&dir, &[("sequence", json!([{"color": "red"}]))], "Prompt");
         let err = resolve_sequence_plan(&source).unwrap_err();
         assert!(
             matches!(err, CompositionError::SequenceStepNameMissing { index: 0 }),
@@ -397,11 +381,7 @@ mod tests {
     #[test]
     fn inline_object_step_name_wrong_type_fails() {
         let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            &[("sequence", json!([{"name": 42}]))],
-            "Prompt",
-        );
+        let source = make_source(&dir, &[("sequence", json!([{"name": 42}]))], "Prompt");
         let err = resolve_sequence_plan(&source).unwrap_err();
         assert!(
             matches!(
@@ -533,11 +513,7 @@ list:
         )
         .unwrap();
 
-        let source = make_source(
-            &dir,
-            &[("sequence", json!("items.yaml"))],
-            "Prompt",
-        );
+        let source = make_source(&dir, &[("sequence", json!("items.yaml"))], "Prompt");
         let plan = resolve_sequence_plan(&source).unwrap().unwrap();
         let summary0 = plan.steps[0]
             .raw_state
@@ -575,11 +551,7 @@ list:
         )
         .unwrap();
 
-        let source = make_source(
-            &dir,
-            &[("sequence", json!("bad.yaml"))],
-            "Prompt",
-        );
+        let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
         let err = resolve_sequence_plan(&source).unwrap_err();
         assert!(
             matches!(err, CompositionError::SequenceReservedTemplateKey(ref k) if k == "state"),
@@ -597,11 +569,7 @@ list:
         )
         .unwrap();
 
-        let source = make_source(
-            &dir,
-            &[("sequence", json!("bad.yaml"))],
-            "Prompt",
-        );
+        let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
         let err = resolve_sequence_plan(&source).unwrap_err();
         assert!(
             matches!(err, CompositionError::SequenceTemplateWrongType { .. }),
@@ -636,9 +604,21 @@ list:
         let plan = SequencePlan {
             source: SequenceSource::Inline,
             steps: vec![
-                SequenceStep { index: 0, name: "a".into(), raw_state: json!("a") },
-                SequenceStep { index: 1, name: "b".into(), raw_state: json!("b") },
-                SequenceStep { index: 2, name: "c".into(), raw_state: json!("c") },
+                SequenceStep {
+                    index: 0,
+                    name: "a".into(),
+                    raw_state: json!("a"),
+                },
+                SequenceStep {
+                    index: 1,
+                    name: "b".into(),
+                    raw_state: json!("b"),
+                },
+                SequenceStep {
+                    index: 2,
+                    name: "c".into(),
+                    raw_state: json!("c"),
+                },
             ],
             document_fail_fast: true,
         };

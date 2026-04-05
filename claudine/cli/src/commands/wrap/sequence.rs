@@ -2,12 +2,12 @@
 
 use std::collections::HashSet;
 
-use claudine::composition::{
-    self, CompositionExecutionRequest, CompositionMode, PrepareOptions,
-    ResolvedCompositionSource, SequenceExecutionOptions, SequencePlan, SequenceRunSummary,
-    SequenceStepResult, SystemPromptInput,
-};
 use claudine::composition::sequence::build_step_overlay;
+use claudine::composition::{
+    self, CompositionExecutionRequest, CompositionMode, PrepareOptions, ResolvedCompositionSource,
+    SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceStepResult,
+    SystemPromptInput,
+};
 use color_eyre::eyre::{Result, eyre};
 
 use crate::commands::compose::SharedComposeArgs;
@@ -74,11 +74,8 @@ pub(crate) fn execute_sequence(
             opts
         };
 
-        let approval_options = super::build_harness_shell_options(
-            &source.resolved_path,
-            None,
-            shared.interactive,
-        );
+        let approval_options =
+            super::build_harness_shell_options(&source.resolved_path, None, shared.interactive);
 
         let preflight = composition::resolve_shell_approvals(
             Some(&source.markdown),
