@@ -107,6 +107,30 @@ impl FileReference {
         self
     }
 
+    /// Prepend the current Cargo workspace package area as a magic search root.
+    ///
+    /// When the current working directory lives inside a Cargo workspace member
+    /// (or at a workspace area root), magic (`@`) lookups will first search the
+    /// package area before falling back to the git repository root and HOME.
+    /// This is useful for monorepos where prompts or config files live alongside
+    /// the package, e.g. `@prompts/commit.md` resolving to
+    /// `<workspace>/<area>/prompts/commit.md` when invoked from inside that area.
+    ///
+    /// If the current directory is not inside a Cargo workspace (or metadata
+    /// cannot be loaded), this is a no-op.
+    pub fn with_package_area_magic_path(self) -> Self {
+        let Ok(cwd) = std::env::current_dir() else {
+            return self;
+        };
+        let Ok(Some(git_root)) = context::find_git_root(&cwd) else {
+            return self;
+        };
+        match context::find_package_area(&git_root, &cwd) {
+            Ok(Some(area)) => self.add_magic_path(area, PathPosition::Start),
+            _ => self,
+        }
+    }
+
     /// Add a vault root for `vault:` references.
     pub fn add_vault(mut self, path: impl Into<PathBuf>) -> Self {
         self.vault_roots.push(path.into());
@@ -114,6 +138,10 @@ impl FileReference {
     }
 
     /// Resolve the reference to an absolute filesystem path.
+    ///
+    /// Uses the ambient process working directory for relative, `@`, and
+    /// `!` lookups. When the reference comes from a document or file whose
+    /// own location should drive resolution, prefer [`resolve_from`].
     ///
     /// ## Returns
     ///
@@ -124,8 +152,35 @@ impl FileReference {
     ///
     /// Returns an error if resolution requires state that cannot be determined
     /// (e.g. missing environment variable, vault not configured).
+    ///
+    /// [`resolve_from`]: Self::resolve_from
     pub fn resolve(&self) -> Result<Option<PathBuf>, FileReferenceError> {
         let ctx = context::ResolutionContext::from_ambient()?;
+        resolve::resolve(&self.parsed, &self.magic_paths, &self.vault_roots, &ctx)
+    }
+
+    /// Resolve the reference treating `base` as the working directory.
+    ///
+    /// This overrides the ambient process CWD used for relative, `@`
+    /// (magic), and `!` (package) lookups. Use this when a reference
+    /// appears inside a document or file and should be resolved relative
+    /// to *that file's* location rather than wherever the current process
+    /// happens to be running.
+    ///
+    /// HOME and environment variables are still read from the live
+    /// process state.
+    ///
+    /// ## Returns
+    ///
+    /// - `Ok(Some(path))` -- the reference resolved to an existing file
+    /// - `Ok(None)` -- the reference is well-formed but no matching file was found
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if resolution requires state that cannot be
+    /// determined (e.g. missing environment variable, vault not configured).
+    pub fn resolve_from(&self, base: &Path) -> Result<Option<PathBuf>, FileReferenceError> {
+        let ctx = context::ResolutionContext::from_base(base)?;
         resolve::resolve(&self.parsed, &self.magic_paths, &self.vault_roots, &ctx)
     }
 
