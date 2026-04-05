@@ -192,15 +192,16 @@ where
         mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
-        write!(writer, "{}", Local::now().format("%H:%M:%S"))?;
+        write_timestamp(&mut writer)?;
         write!(writer, " ")?;
 
         let meta = event.metadata();
-        write!(writer, "{} {}:", meta.level(), meta.target())?;
+        write_level(&mut writer, *meta.level())?;
+        write!(writer, " ")?;
 
         if let Some(file) = meta.file() {
             let file = shorten_source_path(file, self.base_dir.as_deref());
-            write!(writer, " {}", file)?;
+            write_path(&mut writer, &file)?;
             if let Some(line) = meta.line() {
                 write!(writer, ":{line}")?;
             }
@@ -223,6 +224,39 @@ where
         write!(writer, " ")?;
         ctx.field_format().format_fields(writer.by_ref(), event)?;
         writeln!(writer)
+    }
+}
+
+fn write_timestamp(writer: &mut Writer<'_>) -> fmt::Result {
+    let value = Local::now().format("%H:%M:%S");
+    if writer.has_ansi_escapes() {
+        write!(writer, "\x1b[2m{value}\x1b[0m")
+    } else {
+        write!(writer, "{value}")
+    }
+}
+
+fn write_level(writer: &mut Writer<'_>, level: tracing::Level) -> fmt::Result {
+    let label = level.as_str();
+    if !writer.has_ansi_escapes() {
+        return write!(writer, "{label}");
+    }
+
+    let color = match level {
+        tracing::Level::TRACE => "35",
+        tracing::Level::DEBUG => "34",
+        tracing::Level::INFO => "32",
+        tracing::Level::WARN => "33",
+        tracing::Level::ERROR => "31",
+    };
+    write!(writer, "\x1b[1;{color}m{label}\x1b[0m")
+}
+
+fn write_path(writer: &mut Writer<'_>, path: &str) -> fmt::Result {
+    if writer.has_ansi_escapes() {
+        write!(writer, "\x1b[2;36m{path}\x1b[0m")
+    } else {
+        write!(writer, "{path}")
     }
 }
 
@@ -278,5 +312,13 @@ mod tests {
             Some(Path::new("/repo")),
         );
         assert_eq!(shortened, "claudine/cli/src/telemetry.rs");
+    }
+
+    #[test]
+    fn write_level_plain_has_no_ansi_sequences() {
+        let mut rendered = String::new();
+        let mut writer = Writer::new(&mut rendered);
+        write_level(&mut writer, tracing::Level::INFO).unwrap();
+        assert_eq!(rendered, "INFO");
     }
 }
