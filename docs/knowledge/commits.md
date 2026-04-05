@@ -28,4 +28,6 @@
 
 - When using `git commit -m "message" -- path1 path2`, the `--` separator before paths combined with `-m` can cause git to source the commit message from a cached staged template instead of the inline message. To avoid this, place paths before `-m` (e.g., `git commit file1 file2 -m "message"`) or use `git commit --only -- path1 path2 -m "message"` for explicit path-limited commits with a custom message.
 
+- The `--only` flag in `git commit --only -- path -m "message"` only works with already-tracked files. For new (untracked) files, `--only` will fail with "fatal: you must specify path to commit with -c or -C". For new files, ensure they are staged via `git add` before committing, then use `git commit file1 file2 -m "message"` with paths before `-m`.
+
 - When multiple subagents commit concurrently to the same branch, they may create overlapping or duplicate commits. The orchestrator can use `git reset --soft <before-subagents>` to restore all changes to staging, then re-commit them properly in separate atomic commits. Always verify the final state with `git log --oneline` and `git diff <parent> --stat` before assuming the job is complete.
