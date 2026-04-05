@@ -41,6 +41,16 @@ use super::{
 };
 use crate::log;
 
+/// Result of executing a single composition step through the wrapper pipeline.
+pub(crate) struct SingleCompositionOutcome {
+    /// The process exit code.
+    pub exit_code: i32,
+    /// The provider that ran the step.
+    pub provider: Provider,
+    /// Why this provider was selected.
+    pub selection_reason: SelectionReason,
+}
+
 fn composition_dispatch_context(
     request: &CompositionExecutionRequest,
     selection_reason: &SelectionReason,
@@ -78,6 +88,19 @@ pub(crate) fn execute_composition_request(
     request: CompositionExecutionRequest,
     verbose: u8,
 ) -> Result<i32> {
+    let outcome = execute_composition_request_inner(request, verbose)?;
+    Ok(outcome.exit_code)
+}
+
+/// Inner implementation that returns the full [`SingleCompositionOutcome`].
+///
+/// The public [`execute_composition_request`] wraps this to return just
+/// the exit code; callers that need provider/reason metadata (e.g. the
+/// sequence orchestrator) can call this directly.
+pub(crate) fn execute_composition_request_inner(
+    request: CompositionExecutionRequest,
+    verbose: u8,
+) -> Result<SingleCompositionOutcome> {
     let term = wrap_terminal();
     let launch_cwd = std::env::current_dir()?;
     let detail_requested = verbose > 0;
@@ -128,6 +151,7 @@ pub(crate) fn execute_composition_request(
     };
 
     let provider = selected.provider;
+    let selection_reason = selected.reason;
     let is_inline = matches!(request.prepared.closure, CompositionClosurePlan::Inline(_));
 
     // -- Profile, binary, arguments, environment --------------------------
@@ -440,7 +464,11 @@ pub(crate) fn execute_composition_request(
             child_cwd,
             &term,
         );
-        return Ok(0);
+        return Ok(SingleCompositionOutcome {
+            exit_code: 0,
+            provider,
+            selection_reason,
+        });
     }
 
     switch_process_cwd(child_cwd)?;
@@ -590,7 +618,7 @@ pub(crate) fn execute_composition_request(
 
     // -- Execution --------------------------------------------------------
 
-    let dispatch_context = composition_dispatch_context(&request, &selected.reason);
+    let dispatch_context = composition_dispatch_context(&request, &selection_reason);
 
     if harness_enabled {
         let harness_mode = if is_inline {
@@ -618,7 +646,7 @@ pub(crate) fn execute_composition_request(
 
         // Harness loop manages the guard internally; defuse ours.
         guard.defuse();
-        run_harness_loop(
+        let exit_code = run_harness_loop(
             provider,
             profile,
             binary_path.as_path(),
@@ -645,7 +673,12 @@ pub(crate) fn execute_composition_request(
             lifecycle,
             &lifecycle_ctx,
             &emitter,
-        )
+        )?;
+        Ok(SingleCompositionOutcome {
+            exit_code,
+            provider,
+            selection_reason,
+        })
     } else if is_inline {
         guard.emit_start_once();
 
@@ -692,7 +725,11 @@ pub(crate) fn execute_composition_request(
             guard.emit_terminal(LifecycleSignal::Failure);
         }
 
-        Ok(exit_code)
+        Ok(SingleCompositionOutcome {
+            exit_code,
+            provider,
+            selection_reason,
+        })
     } else {
         guard.emit_start_once();
 
@@ -730,7 +767,11 @@ pub(crate) fn execute_composition_request(
             guard.emit_terminal(LifecycleSignal::Failure);
         }
 
-        Ok(exit_code)
+        Ok(SingleCompositionOutcome {
+            exit_code,
+            provider,
+            selection_reason,
+        })
     }
 }
 
