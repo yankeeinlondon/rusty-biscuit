@@ -1,5 +1,9 @@
+use serde::de::{self, Deserializer};
+use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::services::ProtectOutcome;
 
 /// Unified response that a hook can return to influence agent behavior.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -49,16 +53,76 @@ pub enum HookDecision {
 }
 
 /// Context attached to responses when Protect influenced call action execution.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProtectCallContext {
-    /// Protect outcome label (snake_case string).
-    pub outcome: String,
+    /// Protect outcome.
+    pub outcome: ProtectOutcome,
     /// Protect reason code or message.
     pub reason: String,
     /// Whether execution was short-circuited before running the call action.
-    #[serde(default)]
     pub short_circuited: bool,
+}
+
+impl Serialize for ProtectCallContext {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("ProtectCallContext", 3)?;
+        state.serialize_field("outcome", protect_outcome_slug(&self.outcome))?;
+        state.serialize_field("reason", &self.reason)?;
+        state.serialize_field("short_circuited", &self.short_circuited)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ProtectCallContext {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ProtectCallContextWire {
+            outcome: String,
+            reason: String,
+            #[serde(default)]
+            short_circuited: bool,
+        }
+
+        let wire = ProtectCallContextWire::deserialize(deserializer)?;
+        let outcome =
+            protect_outcome_from_slug(&wire.outcome, &wire.reason).map_err(de::Error::custom)?;
+        Ok(Self {
+            outcome,
+            reason: wire.reason,
+            short_circuited: wire.short_circuited,
+        })
+    }
+}
+
+fn protect_outcome_slug(outcome: &ProtectOutcome) -> &'static str {
+    match outcome {
+        ProtectOutcome::Allow => "allow",
+        ProtectOutcome::AskThenAllowOrStop { .. } => "ask_then_allow_or_stop",
+        ProtectOutcome::StopCurrent { .. } => "stop_current",
+        ProtectOutcome::StopSession { .. } => "stop_session",
+        ProtectOutcome::AllowWithRedaction { .. } => "allow_with_redaction",
+        ProtectOutcome::AdvisoryOnly { .. } => "advisory_only",
+    }
+}
+
+fn protect_outcome_from_slug(slug: &str, reason: &str) -> Result<ProtectOutcome, String> {
+    let reason = reason.to_string();
+    match slug {
+        "allow" => Ok(ProtectOutcome::Allow),
+        "ask_then_allow_or_stop" => Ok(ProtectOutcome::AskThenAllowOrStop { reason }),
+        "stop_current" => Ok(ProtectOutcome::StopCurrent { reason }),
+        "stop_session" => Ok(ProtectOutcome::StopSession { reason }),
+        "allow_with_redaction" => Ok(ProtectOutcome::AllowWithRedaction { reason }),
+        "advisory_only" => Ok(ProtectOutcome::AdvisoryOnly { reason }),
+        _ => Err(format!("unknown protect outcome `{slug}`")),
+    }
 }
 
 #[cfg(test)]
@@ -80,5 +144,21 @@ mod tests {
     fn decision_serializes_snake_case() {
         let json = serde_json::to_value(HookDecision::Continue).unwrap();
         assert_eq!(json, serde_json::json!("continue"));
+    }
+
+    #[test]
+    fn protect_context_serializes_as_outcome_slug() {
+        let context = ProtectCallContext {
+            outcome: ProtectOutcome::StopCurrent {
+                reason: "blocked".to_string(),
+            },
+            reason: "blocked".to_string(),
+            short_circuited: true,
+        };
+
+        let json = serde_json::to_value(&context).unwrap();
+        assert_eq!(json["outcome"], "stop_current");
+        assert_eq!(json["reason"], "blocked");
+        assert_eq!(json["short_circuited"], true);
     }
 }

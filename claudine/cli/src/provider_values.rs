@@ -1,8 +1,10 @@
-use clap::builder::{PossibleValue, PossibleValuesParser};
-use claudine::events::PROVIDERS_DISPLAY_ORDER;
+use clap::builder::{PossibleValue, PossibleValuesParser, TypedValueParser};
+use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
+
+use crate::cli_utils::parse_provider_clap;
 
 /// Return a Clap parser that advertises supported provider values and aliases.
-pub(crate) fn provider_value_parser() -> PossibleValuesParser {
+pub(crate) fn provider_value_parser() -> impl TypedValueParser<Value = Provider> {
     let values = PROVIDERS_DISPLAY_ORDER
         .iter()
         .map(|provider| {
@@ -16,7 +18,7 @@ pub(crate) fn provider_value_parser() -> PossibleValuesParser {
         })
         .collect::<Vec<_>>();
 
-    PossibleValuesParser::new(values)
+    PossibleValuesParser::new(values).try_map(|value| parse_provider_clap(&value))
 }
 
 #[cfg(test)]

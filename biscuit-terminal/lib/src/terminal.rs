@@ -63,7 +63,10 @@ fn new_terminal() -> Terminal {
         locale: TerminalLocale::default(),
         fixed_width: None,
         fixed_height: None,
-        cell_size: cell_size(),
+        // Keep live terminal queries lazy. Eager CSI 14t probing here leaks
+        // raw tty responses into normal CLI rendering paths before a caller
+        // has asked for image or geometry-aware output.
+        cell_size: None,
     };
 
     tracing::debug!(
@@ -227,8 +230,9 @@ pub struct Terminal {
     pub fixed_height: Option<u32>,
 
     /// Cached cell size in pixels. When `Some`, `cell_size()` returns this value
-    /// instead of querying the terminal via CSI 14t. Prevents `/dev/tty` races
-    /// when multiple threads need cell dimensions simultaneously.
+    /// instead of querying the terminal via CSI 14t. This starts as `None` for
+    /// normal detection so ordinary rendering does not perform live `/dev/tty`
+    /// queries unless a caller explicitly asks for cell dimensions.
     pub cell_size: Option<CellSize>,
 }
 
@@ -699,6 +703,15 @@ mod tests {
         let _font = &term.font;
         let _font_size = &term.font_size;
         let _font_ligatures = &term.font_ligatures;
+    }
+
+    #[test]
+    fn test_terminal_new_does_not_eagerly_cache_cell_size() {
+        let term = Terminal::new();
+        assert!(
+            term.cell_size.is_none(),
+            "Terminal::new should not issue eager CSI 14t cell-size probes"
+        );
     }
 
     #[test]

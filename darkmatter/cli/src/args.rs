@@ -406,12 +406,7 @@ pub struct Cli {
 
     /// Enable developer debug logging (1=INFO, 2=DEBUG, 3=TRACE, 4=TRACE+locations).
     /// Alternatively, set RUST_LOG environment variable.
-    #[arg(
-        long = "debug",
-        value_name = "LEVEL",
-        global = true,
-        hide = true,
-    )]
+    #[arg(long = "debug", value_name = "LEVEL", global = true, hide = true)]
     pub debug_level: Option<u8>,
 
     /// Generate shell completions for the specified shell

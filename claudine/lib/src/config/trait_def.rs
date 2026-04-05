@@ -48,7 +48,7 @@ pub trait AgentConfigurator {
     /// or fails.
     fn create_minimal_config(&self, _config_dir: Option<&Path>) -> Result<()> {
         Err(crate::error::ClaudineError::ConfigCreationNotSupported {
-            provider: self.provider().to_string(),
+            provider: self.provider(),
         })
     }
 

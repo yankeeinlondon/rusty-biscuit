@@ -693,7 +693,10 @@ impl Markdown {
             .map(|item| self.resolve_prepared_transclusion(item, state, options, &runtime_mutex))
             .collect::<Vec<_>>();
 
-        debug!(resolved = results.len(), "compose: transclusion resolution complete");
+        debug!(
+            resolved = results.len(),
+            "compose: transclusion resolution complete"
+        );
         if let Some(start) = resolve_start {
             perf_collector.record(perf::PerfMetricKind::TransclusionResolve, start.elapsed());
         }
@@ -873,7 +876,10 @@ impl Markdown {
         if result.replacements > 0 {
             self.content = result.output;
         }
-        debug!(count = result.replacements, "compose: interpolations applied");
+        debug!(
+            count = result.replacements,
+            "compose: interpolations applied"
+        );
         Ok(result.replacements)
     }
 
@@ -898,7 +904,10 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         let directives = shell_expansion::parse_directives(&self.content)?;
-        debug!(directive_count = directives.len(), "compose: shell expansion directives found");
+        debug!(
+            directive_count = directives.len(),
+            "compose: shell expansion directives found"
+        );
         if directives.is_empty() {
             return Ok(());
         }

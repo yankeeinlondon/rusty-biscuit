@@ -118,7 +118,7 @@ pub async fn execute_actions(
                             "call action short-circuited by protect: {outcome_reason}"
                         )),
                         protect: Some(ProtectCallContext {
-                            outcome: protect_outcome_slug(&decision.outcome).to_string(),
+                            outcome: decision.outcome.clone(),
                             reason: decision.reason.clone(),
                             short_circuited: true,
                         }),
@@ -267,7 +267,7 @@ fn attach_protect_context(
 ) -> HookResponse {
     if let Some(decision) = protect_decision {
         response.protect = Some(ProtectCallContext {
-            outcome: protect_outcome_slug(&decision.outcome).to_string(),
+            outcome: decision.outcome.clone(),
             reason: decision.reason.clone(),
             short_circuited: false,
         });

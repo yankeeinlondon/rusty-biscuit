@@ -346,6 +346,7 @@ impl<S: StreamEventSink + Send> StreamParser for GeminiStreamParser<S> {
 mod tests {
     use super::*;
     use crate::stream::parser::NullSink;
+    use crate::stream::test_support::{ToolContractExpectation, assert_tool_event_contract};
 
     fn make_parser() -> Box<GeminiStreamParser<NullSink>> {
         Box::new(GeminiStreamParser::new(NullSink))
@@ -469,17 +470,28 @@ mod tests {
             .unwrap();
 
         let after_tool = parser.sink.tools.lock().unwrap().clone();
-        assert_eq!(
-            after_tool[0].extra["tool_name"],
-            Value::String("search".into())
-        );
-        assert_eq!(
-            after_tool[0].extra["tool_input"]["query"],
-            Value::String("rust".into())
-        );
-        assert_eq!(
-            after_tool[0].extra["tool_response"]["hits"],
-            Value::Number(3.into())
+        let before_tool = EventMeta {
+            extra: [
+                ("tool_name".to_string(), Value::String("search".into())),
+                ("tool_id".to_string(), Value::String("tool-1".into())),
+                (
+                    "tool_input".to_string(),
+                    serde_json::json!({"query":"rust"}),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        assert_tool_event_contract(
+            &before_tool,
+            Some(&after_tool[0]),
+            ToolContractExpectation {
+                name: "search",
+                id: Some("tool-1"),
+                input_field: Some(("query", "rust")),
+                status: Some("success"),
+                response: Some(serde_json::json!({"hits": 3})),
+            },
         );
     }
 

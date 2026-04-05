@@ -1,9 +1,21 @@
 //! Prompt preparation for composition workflows.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+
+/// Options for composition preparation.
+#[derive(Debug, Default)]
+pub struct PrepareOptions {
+    /// Frontmatter `--set` overrides (JSON object).
+    pub set_overrides: Option<serde_json::Value>,
+    /// Commands pre-approved during pre-flight shell discovery.
+    pub pre_approved_commands: Option<std::collections::HashSet<String>>,
+    /// Extra environment variables to inject into the composition context.
+    pub env_overrides: BTreeMap<String, String>,
+}
 
 /// Walk up from a file path to find the nearest `.git` directory.
 fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
@@ -32,19 +44,23 @@ use super::types::{
 /// [`CompositionClosurePlan::Direct`] — no file mutation occurs.
 pub fn prepare_direct(
     source: &ResolvedCompositionSource,
-    set_overrides: Option<serde_json::Value>,
-    pre_approved_commands: Option<std::collections::HashSet<String>>,
+    options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
-    let mut options = ComposeOptions::new().with_source_file(&source.resolved_path);
-    if let Some(overrides) = set_overrides {
-        options = options.with_set_overrides(overrides);
+    let mut ctx = ComposeContext::capture();
+    for (key, value) in &options.env_overrides {
+        ctx.env_mut().insert(key.clone(), value.clone());
     }
-    if let Some(approved) = pre_approved_commands {
-        options = options.with_pre_approved_commands(approved);
+    let mut compose_opts =
+        ComposeOptions::new_with_context(ctx).with_source_file(&source.resolved_path);
+    if let Some(overrides) = options.set_overrides {
+        compose_opts = compose_opts.with_set_overrides(overrides);
+    }
+    if let Some(approved) = options.pre_approved_commands {
+        compose_opts = compose_opts.with_pre_approved_commands(approved);
     }
     let (composed, _report) = source
         .markdown
-        .compose_with(options)
+        .compose_with(compose_opts)
         .map_err(|e| CompositionError::ComposeFailed(e.to_string()))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
@@ -72,8 +88,7 @@ pub fn prepare_direct(
 /// for deterministic post-execution rewrite.
 pub fn prepare_inline(
     source: &ResolvedCompositionSource,
-    set_overrides: Option<serde_json::Value>,
-    pre_approved_commands: Option<std::collections::HashSet<String>>,
+    options: PrepareOptions,
 ) -> Result<PreparedComposition, CompositionError> {
     let fm = source.markdown.frontmatter();
 
@@ -93,15 +108,20 @@ pub fn prepare_inline(
 
     // Build temporary markdown (frontmatter + prompt as body) and compose
     let temp_md = Markdown::with_frontmatter(fm.clone(), &prompt_text);
-    let mut options = ComposeOptions::new().with_source_file(&source.resolved_path);
-    if let Some(overrides) = set_overrides {
-        options = options.with_set_overrides(overrides);
+    let mut ctx = ComposeContext::capture();
+    for (key, value) in &options.env_overrides {
+        ctx.env_mut().insert(key.clone(), value.clone());
     }
-    if let Some(approved) = pre_approved_commands {
-        options = options.with_pre_approved_commands(approved);
+    let mut compose_opts =
+        ComposeOptions::new_with_context(ctx).with_source_file(&source.resolved_path);
+    if let Some(overrides) = options.set_overrides {
+        compose_opts = compose_opts.with_set_overrides(overrides);
+    }
+    if let Some(approved) = options.pre_approved_commands {
+        compose_opts = compose_opts.with_pre_approved_commands(approved);
     }
     let (composed, _report) = temp_md
-        .compose_with(options)
+        .compose_with(compose_opts)
         .map_err(|e| CompositionError::ComposeFailed(e.to_string()))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
@@ -197,7 +217,7 @@ mod tests {
             "# Research\n\nDo the research.",
         );
 
-        let prepared = prepare_direct(&source, None, None).unwrap();
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
         assert_eq!(prepared.mode, CompositionMode::ChainedDocument);
         assert!(prepared.prompt.contains("Research"));
         // Effective frontmatter should be a JSON object with the keys
@@ -220,7 +240,7 @@ mod tests {
             "Old content",
         );
 
-        let prepared = prepare_inline(&source, None, None).unwrap();
+        let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
         assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
         assert!(prepared.prompt.contains("List three colors"));
         assert!(
@@ -251,7 +271,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("title", json!("Test"))], "Content");
 
-        let err = prepare_inline(&source, None, None).unwrap_err();
+        let err = prepare_inline(&source, PrepareOptions::default()).unwrap_err();
         assert!(matches!(err, CompositionError::PromptPropertyMissing));
     }
 
@@ -260,7 +280,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("prompt", json!(42))], "Content");
 
-        let err = prepare_inline(&source, None, None).unwrap_err();
+        let err = prepare_inline(&source, PrepareOptions::default()).unwrap_err();
         assert!(matches!(err, CompositionError::PromptPropertyWrongType(_)));
     }
 
@@ -277,7 +297,7 @@ mod tests {
             "Do the work.",
         );
 
-        let prepared = prepare_direct(&source, None, None).unwrap();
+        let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
         assert!(prepared.lifecycle.start.is_some());
         assert!(prepared.lifecycle.success.is_some());
         assert!(prepared.lifecycle.blocked.is_none());
@@ -296,7 +316,7 @@ mod tests {
             "Old content",
         );
 
-        let prepared = prepare_inline(&source, None, None).unwrap();
+        let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
         assert!(prepared.lifecycle.failure.is_some());
         assert!(prepared.lifecycle.start.is_none());
     }
@@ -316,7 +336,28 @@ mod tests {
             "Content",
         );
 
-        let err = prepare_direct(&source, None, None).unwrap_err();
+        let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
         assert!(matches!(err, CompositionError::LifecycleSpeakConflict(_)));
+    }
+
+    #[test]
+    fn direct_composition_with_env_overrides() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[("title", json!("Test"))],
+            "FAIL_FAST is {{env.FAIL_FAST}}",
+        );
+
+        let options = PrepareOptions {
+            env_overrides: std::collections::BTreeMap::from([(
+                "FAIL_FAST".to_string(),
+                "false".to_string(),
+            )]),
+            ..Default::default()
+        };
+
+        let prepared = prepare_direct(&source, options).unwrap();
+        assert!(prepared.prompt.contains("FAIL_FAST is false"));
     }
 }

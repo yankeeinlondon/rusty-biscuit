@@ -11,7 +11,7 @@
 //! - **Agents**: Subagent/persona definitions for task delegation
 //! - **Scripts**: Executable scripts that can be invoked by skills/agents
 
-use crate::events::Provider;
+use crate::events::{PROVIDERS_DISPLAY_ORDER, Provider};
 use std::path::PathBuf;
 
 /// Types of linkable resources across providers.
@@ -428,16 +428,7 @@ pub fn all_capabilities() -> Vec<ProviderCapabilities> {
 }
 
 /// All providers in display order.
-pub const ALL_PROVIDERS: [Provider; 8] = [
-    Provider::Claude,
-    Provider::Codex,
-    Provider::Gemini,
-    Provider::Goose,
-    Provider::KimiCode,
-    Provider::OpenCode,
-    Provider::QwenCode,
-    Provider::RooCode,
-];
+pub const ALL_PROVIDERS: [Provider; 8] = PROVIDERS_DISPLAY_ORDER;
 
 // ============================================================================
 // Provider-specific capability definitions

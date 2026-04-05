@@ -3,13 +3,30 @@ use claudine::events::Provider;
 use color_eyre::eyre::Result;
 
 mod args;
+mod cli_utils;
 mod commands;
 mod log;
 mod output;
 mod provider_values;
+mod table_utils;
 mod telemetry;
 
 use args::{Cli, Commands};
+
+fn wrapper_command(
+    command: Commands,
+) -> std::result::Result<(Provider, commands::wrap::WrapperArgs), Commands> {
+    match command {
+        Commands::Claude(args) => Ok((Provider::Claude, args)),
+        Commands::Codex(args) => Ok((Provider::Codex, args)),
+        Commands::Gemini(args) => Ok((Provider::Gemini, args)),
+        Commands::Kimi(args) => Ok((Provider::KimiCode, args)),
+        Commands::Qwen(args) => Ok((Provider::QwenCode, args)),
+        Commands::Opencode(args) => Ok((Provider::OpenCode, args)),
+        Commands::Goose(args) => Ok((Provider::Goose, args)),
+        other => Err(other),
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,7 +49,14 @@ async fn main() -> Result<()> {
         return commands::help::run();
     }
 
-    match cli.command.unwrap() {
+    let command = match wrapper_command(cli.command.unwrap()) {
+        Ok((provider, args)) => {
+            return commands::wrap::run_provider_wrapper(provider, args, cli.verbose);
+        }
+        Err(command) => command,
+    };
+
+    match command {
         Commands::Handle(args) => commands::handle::run(args).await,
         Commands::Completions(args) => commands::completions::run(args),
         Commands::Init(args) => commands::init::run(args).await,
@@ -46,28 +70,15 @@ async fn main() -> Result<()> {
         Commands::Logs(args) => commands::logs::run(args).await,
         Commands::Uninstall(args) => commands::uninstall::run(args),
         Commands::Mcp(args) => commands::mcp::run(args),
-        Commands::Claude(args) => {
-            commands::wrap::run_provider_wrapper(Provider::Claude, args, cli.verbose)
-        }
-        Commands::Codex(args) => {
-            commands::wrap::run_provider_wrapper(Provider::Codex, args, cli.verbose)
-        }
-        Commands::Gemini(args) => {
-            commands::wrap::run_provider_wrapper(Provider::Gemini, args, cli.verbose)
-        }
-        Commands::Kimi(args) => {
-            commands::wrap::run_provider_wrapper(Provider::KimiCode, args, cli.verbose)
-        }
-        Commands::Qwen(args) => {
-            commands::wrap::run_provider_wrapper(Provider::QwenCode, args, cli.verbose)
-        }
-        Commands::Opencode(args) => {
-            commands::wrap::run_provider_wrapper(Provider::OpenCode, args, cli.verbose)
-        }
-        Commands::Goose(args) => {
-            commands::wrap::run_provider_wrapper(Provider::Goose, args, cli.verbose)
-        }
+        Commands::Claude(_)
+        | Commands::Codex(_)
+        | Commands::Gemini(_)
+        | Commands::Kimi(_)
+        | Commands::Qwen(_)
+        | Commands::Opencode(_)
+        | Commands::Goose(_) => unreachable!("wrapper commands are handled before this match"),
         Commands::Compose(args) => commands::compose::run_compose(args, cli.verbose),
         Commands::InlineCompose(args) => commands::compose::run_inline_compose(args, cli.verbose),
+        Commands::Sequence(args) => commands::sequence::run_sequence(args, cli.verbose),
     }
 }

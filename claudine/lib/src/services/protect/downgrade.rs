@@ -55,3 +55,45 @@ pub(crate) fn capability_for_phase(
         ProtectPhase::Runtime => GateCapability::Influence,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subagent_visibility_maps_to_gate_capability() {
+        let partial = ProviderProtectCapabilities {
+            subagent_visibility: VisibilityLevel::Partial,
+            ..ProviderProtectCapabilities::default()
+        };
+        let full = ProviderProtectCapabilities {
+            subagent_visibility: VisibilityLevel::Full,
+            ..ProviderProtectCapabilities::default()
+        };
+
+        assert_eq!(
+            capability_for_phase(ProtectPhase::SubagentStart, &partial),
+            GateCapability::Influence
+        );
+        assert_eq!(
+            capability_for_phase(ProtectPhase::SubagentStop, &full),
+            GateCapability::Guarantee
+        );
+    }
+
+    #[test]
+    fn stop_session_downgrades_when_capability_cannot_stop_session() {
+        let downgraded = downgrade_for_capability(
+            ProtectOutcome::StopSession {
+                reason: "policy.deny".to_string(),
+            },
+            ProtectPhase::BeforeTool,
+            ProviderProtectCapabilities::default(),
+        );
+
+        assert!(matches!(
+            downgraded,
+            Some(ProtectOutcome::AdvisoryOnly { reason }) if reason == "capability.no-stop-session"
+        ));
+    }
+}

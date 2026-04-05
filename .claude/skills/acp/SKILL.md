@@ -4,31 +4,31 @@ description: Detailed information on the Agent Client Protocol (ACP), libraries 
 argument-hint: "[--deploy]"
 
 prompt: |-
-	The first thing we must do is refresh the metadata for this document.
+  The first thing we must do is refresh the metadata for this document.
 
-	- set the `last_updated` property to today's date in the format YYYY-MM-DD
-	- make sure that the `md` (darkmatter CLI) is in the host's executable path
-    	- if it is NOT in the path then just exit this prompt and tell the user that they must install the darkmatter CLI before running this prompt
-	- check if the current value for the `hash` frontmatter of this document is equal to `md hash @claudine/docs/acp/SKILL.md --body`
-    	- tell the user that "the SKILL.md has not changed since the last time"
+  - set the `last_updated` property to today's date in the format YYYY-MM-DD
+  - make sure that the `md` (darkmatter CLI) is in the host's executable path
+    - if it is NOT in the path then just exit this prompt and tell the user that they must install the darkmatter CLI before running this prompt
+  - check if the current value for the `hash` frontmatter of this document is equal to `md hash @claudine/docs/acp/SKILL.md --body`
+    - tell the user that "the SKILL.md has not changed since the last time"
 
 
-	If `$ARGUMENTS` contains `--deploy`:
+  If `$ARGUMENTS` contains `--deploy`:
 
-	1. Create the directory `~/.claude/skills/acp/` if it does not exist
-	2. Create the directory `@.claude/skills/acp/` in this repo if it does not exist
-	3. Copy all `.md` files from the directory containing this SKILL.md (`@claudine/docs/acp/`) to `~/.claude/skills/acp/`, preserving filenames
-	4. Copy all `.md` files from the directory containing this SKILL.md (`@claudine/docs/acp/`) to `@.claude/skills/acp/`, preserving filenames
-	5. Remove the `prompt` property from ~/.claude/skills/acp/SKILL.md
-	6. Remove the `prompt` property from @.claude/skills/acp/SKILL.md
-	7. Inform the user that the 'acp' skill has been deployed to both the user scope _and_ the repo scope
+  1. Create the directory `~/.claude/skills/acp/` if it does not exist
+  2. Create the directory `@.claude/skills/acp/` in this repo if it does not exist
+  3. Copy all `.md` files from the directory containing this SKILL.md (`@claudine/docs/acp/`) to `~/.claude/skills/acp/`, preserving filenames
+  4. Copy all `.md` files from the directory containing this SKILL.md (`@claudine/docs/acp/`) to `@.claude/skills/acp/`, preserving filenames
+  5. Remove the `prompt` property from ~/.claude/skills/acp/SKILL.md
+  6. Remove the `prompt` property from @.claude/skills/acp/SKILL.md
+  7. Inform the user that the 'acp' skill has been deployed to both the user scope _and_ the repo scope
 
-	If `$ARGUMENTS` does not contain `--deploy`:
+  If `$ARGUMENTS` does not contain `--deploy`:
 
-	8. Create the directory `@.claude/skills/acp/` in this repo if it does not exist
-	9. Copy all `.md` files from the directory containing this SKILL.md (`@claudine/docs/acp/`) to `@.claude/skills/acp/`, preserving filenames
-	10. Remove the `prompt` property from @.claude/skills/acp/SKILL.md
-	11. Inform the user that the 'acp' skill has been deployed to both the repo scope (but not the User scope)
+  8. Create the directory `@.claude/skills/acp/` in this repo if it does not exist
+  9. Copy all `.md` files from the directory containing this SKILL.md (`@claudine/docs/acp/`) to `@.claude/skills/acp/`, preserving filenames
+  10. Remove the `prompt` property from @.claude/skills/acp/SKILL.md
+  11. Inform the user that the 'acp' skill has been deployed to both the repo scope (but not the User scope)
 
 last_updated: 2026-02-24
 ---
