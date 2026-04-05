@@ -37,6 +37,7 @@ use super::{
     StructuredSummaryDetails, WrapperHarnessPermissionProbe, build_harness_shell_options,
     emit_stream_summary_no_separator_with_context, emit_stream_summary_with_context,
     materialized_harness_prompt_from_prepared, resolve_binary_path, run_harness_loop,
+    switch_process_cwd,
     strip_prompt_from_args, structured_verbosity, wrap_terminal,
 };
 use crate::log;
@@ -442,6 +443,8 @@ pub(crate) fn execute_composition_request(
         );
         return Ok(0);
     }
+
+    switch_process_cwd(child_cwd)?;
 
     // -- Harness detection from effective frontmatter ---------------------
     // THE key architectural fix: harness properties are read from the
@@ -962,6 +965,7 @@ fn run_structured_inline(
         LiveStreamSink::new(
             provider,
             env_context.clone(),
+            child_cwd,
             stream_verbosity,
             summary_details.clone(),
         )
@@ -1214,6 +1218,7 @@ fn execute_direct_without_harness(
             LiveStreamSink::new(
                 provider,
                 env_context.clone(),
+                child_cwd,
                 stream_verbosity,
                 summary_details.clone(),
             )

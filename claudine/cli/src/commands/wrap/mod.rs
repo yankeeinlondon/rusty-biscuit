@@ -336,6 +336,7 @@ impl CachedHarnessLoopContext {
 pub(crate) struct LiveStreamSink {
     provider: Provider,
     env: EnvironmentContext,
+    cwd: PathBuf,
     verbosity: Verbosity,
     session_id: Option<String>,
     model: Option<String>,
@@ -349,6 +350,7 @@ impl LiveStreamSink {
     pub(crate) fn new(
         provider: Provider,
         env: EnvironmentContext,
+        cwd: &Path,
         verbosity: Verbosity,
         summary_details: Arc<Mutex<StructuredSummaryDetails>>,
     ) -> Self {
@@ -368,6 +370,7 @@ impl LiveStreamSink {
         Self::with_dispatcher(
             provider,
             env,
+            cwd,
             verbosity,
             summary_details,
             move |event, meta| {
@@ -397,6 +400,7 @@ impl LiveStreamSink {
     fn with_dispatcher<F>(
         provider: Provider,
         env: EnvironmentContext,
+        cwd: &Path,
         verbosity: Verbosity,
         summary_details: Arc<Mutex<StructuredSummaryDetails>>,
         dispatch: F,
@@ -407,6 +411,7 @@ impl LiveStreamSink {
         Self {
             provider,
             env,
+            cwd: cwd.to_path_buf(),
             verbosity,
             session_id: None,
             model: None,
@@ -492,9 +497,7 @@ impl LiveStreamSink {
             timestamp: chrono::Utc::now(),
             session_id: string_from_extra(&meta.extra, &["session_id", "thread_id", "id"])
                 .or_else(|| self.session_id.clone()),
-            cwd: std::env::current_dir()
-                .ok()
-                .map(|cwd| cwd.display().to_string()),
+            cwd: Some(self.cwd.display().to_string()),
             tool_name: string_from_extra(&meta.extra, &["tool_name", "name"]),
             tool_input: value_from_extra(
                 &meta.extra,
@@ -636,6 +639,14 @@ pub(crate) fn structured_verbosity(silent: bool, quiet: bool) -> Verbosity {
 
 pub(crate) fn wrap_terminal() -> Terminal {
     crate::log::terminal()
+}
+
+pub(crate) fn switch_process_cwd(child_cwd: &Path) -> Result<()> {
+    let current = std::env::current_dir()?;
+    if current != child_cwd {
+        std::env::set_current_dir(child_cwd)?;
+    }
+    Ok(())
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
@@ -1125,6 +1136,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         return Ok(0);
     }
 
+    switch_process_cwd(child_cwd)?;
+
     let prompt_display = extract_user_prompt(&args.passthrough);
     let dispatch_context = HashMap::new();
 
@@ -1329,6 +1342,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             LiveStreamSink::new(
                 provider,
                 env_context.clone(),
+                child_cwd,
                 stream_verbosity,
                 summary_details.clone(),
             )
@@ -1775,6 +1789,7 @@ fn execute_harness_attempt(
             LiveStreamSink::new(
                 provider,
                 env_context.clone(),
+                child_cwd,
                 stream_verbosity,
                 summary_details.clone(),
             )
@@ -3645,6 +3660,7 @@ mod tests {
         let mut sink = LiveStreamSink::with_dispatcher(
             Provider::Codex,
             EnvironmentContext::default(),
+            Path::new("/tmp/repo"),
             Verbosity::Silent,
             Arc::new(Mutex::new(StructuredSummaryDetails::default())),
             move |_event, meta| {
@@ -3706,6 +3722,7 @@ mod tests {
 
         assert_eq!(metas[1].event, AgenticEvent::BeforePrompt);
         assert_eq!(metas[1].session_id.as_deref(), Some("thread-1"));
+        assert_eq!(metas[1].cwd.as_deref(), Some("/tmp/repo"));
 
         assert_eq!(metas[2].event, AgenticEvent::BeforeTool);
         assert_eq!(metas[2].tool_name.as_deref(), Some("search"));
@@ -3728,6 +3745,7 @@ mod tests {
         let mut sink = LiveStreamSink::with_dispatcher(
             Provider::OpenCode,
             EnvironmentContext::default(),
+            Path::new("/tmp/repo"),
             Verbosity::Silent,
             Arc::new(Mutex::new(StructuredSummaryDetails::default())),
             move |_event, meta| {
@@ -3758,6 +3776,7 @@ mod tests {
         let mut sink = LiveStreamSink::with_dispatcher(
             Provider::Codex,
             EnvironmentContext::default(),
+            Path::new("/tmp/repo"),
             Verbosity::Silent,
             Arc::new(Mutex::new(StructuredSummaryDetails::default())),
             move |_event, meta| {
