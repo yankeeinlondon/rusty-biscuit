@@ -14,6 +14,7 @@ pub mod preflight;
 mod prepare;
 mod resolve;
 mod select;
+pub mod sequence;
 mod types;
 
 pub use error::CompositionError;
@@ -27,8 +28,10 @@ pub use preflight::{PreFlightResult, resolve_shell_approvals};
 pub use prepare::{prepare_direct, prepare_inline};
 pub use resolve::{resolve_composition_source, validate_file_permissions};
 pub use select::{build_candidate_set, select_provider};
+pub use sequence::{build_step_overlay, resolve_sequence_plan};
 pub use types::{
     CompositionClosurePlan, CompositionExecutionRequest, CompositionMode, InlineClosurePlan,
     OutputFormat, PreparedComposition, ResolvedCompositionSource, SelectedProvider,
-    SelectionReason, SystemPromptInput,
+    SelectionReason, SequenceExecutionOptions, SequencePlan, SequenceRunSummary,
+    SequenceSource, SequenceStep, SequenceStepOverlay, SequenceStepResult, SystemPromptInput,
 };
