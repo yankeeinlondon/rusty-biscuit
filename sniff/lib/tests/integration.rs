@@ -814,11 +814,9 @@ fn test_os_timezone_without_ntp() {
     use sniff::request::*;
 
     let plan = DetectionPlan::new()
-        .os(
-            OsRequest::summary()
-                .include_timezone(true)
-                .include_ntp_status(false),
-        )
+        .os(OsRequest::summary()
+            .include_timezone(true)
+            .include_ntp_status(false))
         .without_hardware()
         .without_network()
         .without_filesystem();
@@ -827,11 +825,10 @@ fn test_os_timezone_without_ntp() {
     let os = result.os.expect("os should be present");
 
     // Timezone data should be populated
-    let time = os.time.expect("time should be present when timezone is enabled");
-    assert!(
-        time.timezone.is_some(),
-        "timezone name should be detected"
-    );
+    let time = os
+        .time
+        .expect("time should be present when timezone is enabled");
+    assert!(time.timezone.is_some(), "timezone name should be detected");
 
     // NTP should NOT have been probed — expect Unknown (the default)
     assert!(
@@ -855,10 +852,7 @@ fn test_os_summary_has_no_time_data() {
     let os = result.os.expect("os should be present");
 
     // Summary mode disables both timezone and NTP
-    assert!(
-        os.time.is_none(),
-        "summary() should not include time data"
-    );
+    assert!(os.time.is_none(), "summary() should not include time data");
 }
 
 #[test]

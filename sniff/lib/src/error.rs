@@ -142,3 +142,85 @@ pub enum SniffInstallationError {
 
 /// Convenience Result type for Sniff operations.
 pub type Result<T> = std::result::Result<T, SniffError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shorthand_not_found_display() {
+        let err = SniffError::ShorthandNotFound {
+            owner: "user".to_string(),
+            repo: "repo".to_string(),
+            providers_tried: "GitHub, GitLab".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("user/repo"));
+        assert!(msg.contains("GitHub, GitLab"));
+    }
+
+    #[test]
+    fn test_invalid_credentials_display() {
+        let err = SniffError::InvalidCredentials {
+            provider: "GitHub".to_string(),
+            message: "token expired".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("GitHub"));
+        assert!(msg.contains("token expired"));
+    }
+
+    #[test]
+    fn test_rate_limited_display_with_retry() {
+        let err = SniffError::RateLimited {
+            provider: "GitHub".to_string(),
+            retry_after: Some(60),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("rate limited"));
+        assert!(msg.contains("60s"));
+    }
+
+    #[test]
+    fn test_rate_limited_display_without_retry() {
+        let err = SniffError::RateLimited {
+            provider: "GitHub".to_string(),
+            retry_after: None,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("rate limited"));
+    }
+
+    #[test]
+    fn test_installation_error_display() {
+        let err = SniffInstallationError::InstallationError {
+            pkg: "vim".to_string(),
+            cmd: "brew install vim".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("vim"));
+        assert!(msg.contains("brew install vim"));
+    }
+
+    #[test]
+    fn test_not_installable_on_os_display() {
+        let err = SniffInstallationError::NotInstallableOnOs {
+            pkg: "winget".to_string(),
+            os: "macos".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("winget"));
+        assert!(msg.contains("macos"));
+    }
+
+    #[test]
+    fn test_missing_package_manager_display() {
+        let err = SniffInstallationError::MissingPackageManager {
+            pkg: "ripgrep".to_string(),
+            manager: "brew".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("ripgrep"));
+        assert!(msg.contains("brew"));
+    }
+}

@@ -3,6 +3,17 @@ use biscuit_terminal::utils::layout;
 use clap::{Args as ClapArgs, Parser, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
 
+/// Shell type for completion script generation.
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum ShellType {
+    Bash,
+    Elvish,
+    Fish,
+    #[value(alias = "pwsh")]
+    Powershell,
+    Zsh,
+}
+
 /// Shared layout arguments for image and diagram commands.
 #[derive(ClapArgs, Debug, Clone, Default)]
 pub struct LayoutArgs {
@@ -71,9 +82,8 @@ pub struct Args {
     ///
     /// Outputs completion scripts for the specified shell to stdout.
     /// Redirect the output to the appropriate file for your shell.
-    /// Use --completions help for setup instructions.
     #[arg(long, value_name = "SHELL", global = true, display_order = 102)]
-    pub completions: Option<String>,
+    pub completions: Option<ShellType>,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -102,7 +112,7 @@ pub enum Command {
         ///
         /// Overrides inline width spec (e.g., "file.jpg|50%"). Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -170,7 +180,7 @@ pub enum Command {
         ///
         /// Default is 50% of terminal width. Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -297,7 +307,7 @@ pub enum Command {
         ///
         /// Default is 50% of terminal width. Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -322,19 +332,19 @@ pub enum Command {
 
         /// Top-right quadrant (q1) fill color (hex, e.g., "#e8f5e9")
         #[arg(long = "q1-fill")]
-        q1_fill: Option<String>,
+        q1_fill: Option<crate::types::HexColor>,
 
         /// Top-left quadrant (q2) fill color (hex, e.g., "#ffffff")
         #[arg(long = "q2-fill")]
-        q2_fill: Option<String>,
+        q2_fill: Option<crate::types::HexColor>,
 
         /// Bottom-left quadrant (q3) fill color (hex, e.g., "#ffebee")
         #[arg(long = "q3-fill")]
-        q3_fill: Option<String>,
+        q3_fill: Option<crate::types::HexColor>,
 
         /// Bottom-right quadrant (q4) fill color (hex, e.g., "#ffffff")
         #[arg(long = "q4-fill")]
-        q4_fill: Option<String>,
+        q4_fill: Option<crate::types::HexColor>,
 
         /// Render an example diagram and show the command used
         #[arg(long, short = 'e')]
@@ -421,7 +431,7 @@ pub enum Command {
         ///
         /// Default is 50% of terminal width. Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -506,7 +516,7 @@ pub enum Command {
         ///
         /// Default is 50% of terminal width. Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -587,7 +597,7 @@ pub enum Command {
 
         /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -602,7 +612,7 @@ pub enum Command {
 
         /// Aspect ratio (width/height). Default: 1.5
         #[arg(long)]
-        aspect_ratio: Option<f32>,
+        aspect_ratio: Option<crate::types::PositiveF32>,
 
         /// Also render data as a line
         #[arg(long)]
@@ -676,7 +686,7 @@ pub enum Command {
 
         /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -691,7 +701,7 @@ pub enum Command {
 
         /// Aspect ratio (width/height). Default: 1.5
         #[arg(long)]
-        aspect_ratio: Option<f32>,
+        aspect_ratio: Option<crate::types::PositiveF32>,
 
         /// Also render data as bars
         #[arg(long)]
@@ -752,9 +762,9 @@ pub enum Command {
         #[arg(long, short = 't')]
         title: Option<String>,
 
-        /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -818,9 +828,9 @@ pub enum Command {
         #[arg(long, short = 't')]
         title: Option<String>,
 
-        /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -904,7 +914,7 @@ pub enum Command {
 
         /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         /// Use inverted colors with solid background
         #[arg(long)]
@@ -969,9 +979,9 @@ pub enum Command {
         #[arg(long, short = 't')]
         title: Option<String>,
 
-        /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch"), or "fill"
         #[arg(long, short = 'w')]
-        width: Option<String>,
+        width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,
@@ -1272,7 +1282,7 @@ pub enum Command {
 
         /// Left column width (e.g., "20", "20ch", "40%")
         #[arg(long = "left", value_name = "WIDTH")]
-        left_width: Option<String>,
+        left_width: Option<crate::types::WidthSpec>,
 
         #[command(flatten)]
         layout: LayoutArgs,

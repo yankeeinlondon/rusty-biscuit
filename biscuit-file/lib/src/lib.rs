@@ -91,6 +91,7 @@
 
 mod detect;
 mod error;
+mod format;
 
 #[cfg(feature = "toml")]
 pub mod toml_impl;
@@ -112,6 +113,9 @@ pub use error::BiscuitFileError;
 
 // Re-export file type detection
 pub use detect::{FileType, detect_file_type, detect_file_type_from_bytes};
+
+// Re-export data format enum
+pub use format::DataFormat;
 
 // Re-export format-specific types
 #[cfg(feature = "toml")]

@@ -107,7 +107,9 @@ impl ExecutableIndex {
                             let name = name.to_string();
 
                             // First occurrence wins (matches PATH precedence)
-                            path_executables.entry(name.clone()).or_insert_with(|| path.clone());
+                            path_executables
+                                .entry(name.clone())
+                                .or_insert_with(|| path.clone());
 
                             // On Windows, also index without the extension so that
                             // a lookup for "git" can match "git.exe"

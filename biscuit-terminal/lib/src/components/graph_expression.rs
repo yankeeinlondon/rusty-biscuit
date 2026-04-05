@@ -362,38 +362,8 @@ pub struct GraphRenderResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     use biscuit_visualized::artifact::{OutputFormat, RenderRequest};
-    use serial_test::serial;
-
-    struct ScopedEnv {
-        key: &'static str,
-        old_value: Option<String>,
-    }
-
-    impl ScopedEnv {
-        fn set(key: &'static str, value: &str) -> Self {
-            let old_value = env::var(key).ok();
-            // SAFETY: Tests using ScopedEnv are marked with #[serial] so they do
-            // not mutate process environment concurrently.
-            unsafe { env::set_var(key, value) };
-            Self { key, old_value }
-        }
-    }
-
-    impl Drop for ScopedEnv {
-        fn drop(&mut self) {
-            // SAFETY: Tests using ScopedEnv are marked with #[serial] so they do
-            // not mutate process environment concurrently.
-            unsafe {
-                match &self.old_value {
-                    Some(value) => env::set_var(self.key, value),
-                    None => env::remove_var(self.key),
-                }
-            }
-        }
-    }
 
     #[test]
     fn test_parse() {
@@ -450,11 +420,11 @@ mod tests {
     }
 
     #[test]
-    #[serial]
-    fn test_inverted_for_terminal_uses_opaque_opposite_theme_surface_color() {
-        let dark_mode = ScopedEnv::set("DARK_MODE", "1");
-        let graph =
-            GraphExpression::inverted_for_terminal("a -> b", GraphInputSyntax::Auto).unwrap();
+    fn test_inverted_uses_opposite_theme_surface_color() {
+        // Dark mode → inverted uses light theme
+        let graph = GraphExpression::parse("a -> b", GraphInputSyntax::Auto)
+            .unwrap()
+            .inverted(true);
         assert!(!graph.transparent_background);
 
         let artifact = graph
@@ -472,11 +442,10 @@ mod tests {
             GraphColorTheme::light().surface_color
         )));
 
-        drop(dark_mode);
-
-        let light_mode = ScopedEnv::set("DARK_MODE", "0");
-        let graph =
-            GraphExpression::inverted_for_terminal("a -> b", GraphInputSyntax::Auto).unwrap();
+        // Light mode → inverted uses dark theme
+        let graph = GraphExpression::parse("a -> b", GraphInputSyntax::Auto)
+            .unwrap()
+            .inverted(false);
         assert!(!graph.transparent_background);
 
         let artifact = graph
@@ -493,7 +462,5 @@ mod tests {
             "fill=\"{}\"",
             GraphColorTheme::dark().surface_color
         )));
-
-        drop(light_mode);
     }
 }

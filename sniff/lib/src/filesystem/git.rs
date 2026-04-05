@@ -1829,29 +1829,29 @@ fn get_remotes(repo: &Repository, include_remote_details: bool) -> Vec<RemoteInf
                         })
                         .ok()
                         .map(|remote| {
-                        let url = remote.url().map(String::from);
-                        let provider = url
-                            .as_ref()
-                            .map(|u| GitHostingProvider::from_url(u))
-                            .unwrap_or(GitHostingProvider::Unknown);
+                            let url = remote.url().map(String::from);
+                            let provider = url
+                                .as_ref()
+                                .map(|u| GitHostingProvider::from_url(u))
+                                .unwrap_or(GitHostingProvider::Unknown);
 
-                        let (branches, default_branch) = if include_remote_details {
-                            (
-                                get_remote_branches(repo, name),
-                                get_remote_default_branch(repo, name),
-                            )
-                        } else {
-                            (None, None)
-                        };
+                            let (branches, default_branch) = if include_remote_details {
+                                (
+                                    get_remote_branches(repo, name),
+                                    get_remote_default_branch(repo, name),
+                                )
+                            } else {
+                                (None, None)
+                            };
 
-                        RemoteInfo {
-                            name: name.to_string(),
-                            url,
-                            provider,
-                            branches,
-                            default_branch,
-                        }
-                    })
+                            RemoteInfo {
+                                name: name.to_string(),
+                                url,
+                                provider,
+                                branches,
+                                default_branch,
+                            }
+                        })
                 })
                 .collect()
         })
@@ -2221,16 +2221,14 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
 fn resolve_base_branch(repo: &Repository) -> (String, Option<git2::Oid>) {
     // If we're in a worktree, open the base repo to get its HEAD branch
     let base_repo = if repo.is_worktree() {
-        repo.commondir()
-            .parent()
-            .and_then(|p| {
-                Repository::open(p)
-                    .map_err(|e| {
-                        debug!(error = %e, "could not open base repository");
-                        e
-                    })
-                    .ok()
-            })
+        repo.commondir().parent().and_then(|p| {
+            Repository::open(p)
+                .map_err(|e| {
+                    debug!(error = %e, "could not open base repository");
+                    e
+                })
+                .ok()
+        })
     } else {
         None
     };
