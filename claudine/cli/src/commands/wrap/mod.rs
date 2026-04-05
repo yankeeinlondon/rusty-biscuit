@@ -183,7 +183,20 @@ pub(crate) fn build_harness_shell_options(
     repo_root: Option<&Path>,
     interactive: bool,
 ) -> claudine::harness::ShellApprovalOptions {
-    claudine::harness::ShellApprovalOptions {
+    build_harness_shell_options_with_cache(source_path, repo_root, interactive, None)
+}
+
+/// Build shell approval options, optionally reusing a shared approval
+/// cache. Callers like the sequence orchestrator pass a shared cache so
+/// that "allow once" approvals from earlier steps carry over to later
+/// ones for the duration of the sequence run.
+pub(crate) fn build_harness_shell_options_with_cache(
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    interactive: bool,
+    shared_cache: Option<claudine::composition::SharedApprovalCache>,
+) -> claudine::harness::ShellApprovalOptions {
+    let mut opts = claudine::harness::ShellApprovalOptions {
         policy_root: harness_policy_root(source_path, repo_root),
         approval_handler: if interactive {
             Some(std::sync::Arc::new(
@@ -193,7 +206,11 @@ pub(crate) fn build_harness_shell_options(
             None
         },
         ..Default::default()
+    };
+    if let Some(cache) = shared_cache {
+        opts.approval_cache = cache;
     }
+    opts
 }
 
 #[derive(Debug, Clone)]

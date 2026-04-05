@@ -34,10 +34,11 @@ use super::exec;
 use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, LiveStreamSink, StructuredCodexOutput,
-    StructuredSummaryDetails, WrapperHarnessPermissionProbe, build_harness_shell_options,
-    emit_stream_summary_no_separator_with_context, emit_stream_summary_with_context,
-    materialized_harness_prompt_from_prepared, resolve_binary_path, run_harness_loop,
-    strip_prompt_from_args, structured_verbosity, switch_process_cwd, wrap_terminal,
+    StructuredSummaryDetails, WrapperHarnessPermissionProbe,
+    build_harness_shell_options_with_cache, emit_stream_summary_no_separator_with_context,
+    emit_stream_summary_with_context, materialized_harness_prompt_from_prepared,
+    resolve_binary_path, run_harness_loop, strip_prompt_from_args, structured_verbosity,
+    switch_process_cwd, wrap_terminal,
 };
 use crate::log;
 
@@ -47,8 +48,6 @@ pub(crate) struct SingleCompositionOutcome {
     pub exit_code: i32,
     /// The provider that ran the step.
     pub provider: Provider,
-    /// Why this provider was selected.
-    pub selection_reason: SelectionReason,
 }
 
 fn composition_dispatch_context(
@@ -221,6 +220,16 @@ pub(crate) fn execute_composition_request_inner(
 
     if let Some(ref op) = request.operation {
         env_plan.env.insert("OPERATION".into(), op.clone().into());
+    }
+
+    // -- Request-level env overrides ------------------------------------------
+    // These cover execution-time env vars that must also be visible during
+    // composition (preflight, prompt interpolation). Sequence execution uses
+    // this to propagate `FAIL_FAST` into the child process env.
+    for (key, value) in &request.env_overrides {
+        env_plan
+            .env
+            .insert(key.clone().into(), value.clone().into());
     }
 
     let mut effective_prompt = request.prepared.prompt.clone();
@@ -467,7 +476,6 @@ pub(crate) fn execute_composition_request_inner(
         return Ok(SingleCompositionOutcome {
             exit_code: 0,
             provider,
-            selection_reason,
         });
     }
 
@@ -480,10 +488,11 @@ pub(crate) fn execute_composition_request_inner(
     let harness_enabled =
         claudine::harness::has_harness_properties(&request.prepared.effective_frontmatter);
 
-    let shell_options = build_harness_shell_options(
+    let shell_options = build_harness_shell_options_with_cache(
         &request.prepared.resolved_path,
         effective_repo_root,
         request.session_interactive,
+        request.shared_approval_cache.clone(),
     );
 
     // --- Lifecycle notification setup ---
@@ -677,7 +686,6 @@ pub(crate) fn execute_composition_request_inner(
         Ok(SingleCompositionOutcome {
             exit_code,
             provider,
-            selection_reason,
         })
     } else if is_inline {
         guard.emit_start_once();
@@ -728,7 +736,6 @@ pub(crate) fn execute_composition_request_inner(
         Ok(SingleCompositionOutcome {
             exit_code,
             provider,
-            selection_reason,
         })
     } else {
         guard.emit_start_once();
@@ -770,7 +777,6 @@ pub(crate) fn execute_composition_request_inner(
         Ok(SingleCompositionOutcome {
             exit_code,
             provider,
-            selection_reason,
         })
     }
 }

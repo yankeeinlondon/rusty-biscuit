@@ -1,6 +1,7 @@
 //! Serial sequence orchestrator.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
@@ -31,7 +32,7 @@ pub(crate) fn execute_sequence(
     let total_steps = plan.steps.len();
 
     if !silent {
-        log::info(&format!(
+        log::message(&format!(
             "Sequence: {} step(s), fail_fast={}",
             total_steps, effective_fail_fast
         ));
@@ -46,12 +47,19 @@ pub(crate) fn execute_sequence(
 
     let mut cumulative_approved: HashSet<String> = HashSet::new();
 
+    // Shared approval cache lives for the whole sequence run so that
+    // "allow once" decisions from earlier steps survive into later
+    // steps for both template `::shell` directives and harness shell
+    // commands.
+    let shared_approval_cache: composition::SharedApprovalCache =
+        Arc::new(Mutex::new(HashMap::new()));
+
     for step_index in 0..total_steps {
         let step = &plan.steps[step_index];
         let overlay = build_step_overlay(&plan, step_index);
 
         if !silent {
-            log::info(&format!(
+            log::message(&format!(
                 "[{}/{}] {}",
                 step_index + 1,
                 total_steps,
@@ -63,19 +71,32 @@ pub(crate) fn execute_sequence(
 
         let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
 
-        let mut env_overrides = std::collections::BTreeMap::new();
+        let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
         env_overrides.insert("FAIL_FAST".to_string(), effective_fail_fast.to_string());
 
-        // Pre-flight shell approval for this step
+        // Pre-flight shell approval for this step.
+        //
+        // The compose context used for ::shell discovery must see the same
+        // `FAIL_FAST` value the child process will see, otherwise the
+        // template interpolation used for pre-flight may diverge from
+        // runtime. Build a context explicitly and inject env overrides.
         let compose_options = {
-            let mut opts = darkmatter::markdown::compose::ComposeOptions::new()
+            let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+            for (key, value) in &env_overrides {
+                ctx.env_mut().insert(key.clone(), value.clone());
+            }
+            let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
                 .with_source_file(&source.resolved_path);
             opts = opts.with_set_overrides(step_set_overrides.clone());
             opts
         };
 
-        let approval_options =
-            super::build_harness_shell_options(&source.resolved_path, None, shared.interactive);
+        let approval_options = super::build_harness_shell_options_with_cache(
+            &source.resolved_path,
+            None,
+            shared.interactive,
+            Some(Arc::clone(&shared_approval_cache)),
+        );
 
         let preflight = composition::resolve_shell_approvals(
             Some(&source.markdown),
@@ -90,7 +111,7 @@ pub(crate) fn execute_sequence(
         let prepare_options = PrepareOptions {
             set_overrides: Some(step_set_overrides),
             pre_approved_commands: Some(cumulative_approved.clone()),
-            env_overrides,
+            env_overrides: env_overrides.clone(),
         };
 
         let prepared = match composition::prepare_direct(source, prepare_options) {
@@ -156,14 +177,16 @@ pub(crate) fn execute_sequence(
             session_interactive: shared.interactive,
             quiet: shared.quiet,
             silent: shared.silent,
+            env_overrides: env_overrides.clone(),
+            shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
         };
 
-        let step_result = super::composition::execute_composition_request(request, verbose);
+        let step_result = super::composition::execute_composition_request_inner(request, verbose);
 
         let duration = start.elapsed();
 
         match step_result {
-            Ok(exit_code) if exit_code == 0 => {
+            Ok(outcome) if outcome.exit_code == 0 => {
                 summary.succeeded += 1;
                 summary.steps.push(SequenceStepResult {
                     step: step_index + 1,
@@ -173,15 +196,19 @@ pub(crate) fn execute_sequence(
                     duration,
                 });
                 if !silent {
-                    log::info(&format!(
-                        "step {}/{} succeeded",
+                    log::message(&format!(
+                        "step {}/{} succeeded (via {})",
                         step_index + 1,
-                        total_steps
+                        total_steps,
+                        outcome.provider
                     ));
                 }
             }
-            Ok(exit_code) => {
-                let error_msg = format!("provider exited with code {exit_code}");
+            Ok(outcome) => {
+                let error_msg = format!(
+                    "provider {} exited with code {}",
+                    outcome.provider, outcome.exit_code
+                );
                 summary.failed += 1;
                 summary.steps.push(SequenceStepResult {
                     step: step_index + 1,
@@ -231,7 +258,7 @@ pub(crate) fn execute_sequence(
     if !silent {
         eprintln!();
         if summary.failed == 0 {
-            log::info(&format!(
+            log::message(&format!(
                 "Sequence finished: {} succeeded, 0 failed",
                 summary.succeeded
             ));

@@ -5,7 +5,9 @@
 //! [`SequencePlan`]. Also provides [`build_step_overlay`] to construct the
 //! per-step variable overlay for each composition run.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use biscuit_file::FileReference;
 
 use super::error::CompositionError;
 use super::types::{SequencePlan, SequenceSource, SequenceStep, SequenceStepOverlay};
@@ -28,11 +30,16 @@ pub fn resolve_sequence_plan(
         None => return Ok(None),
     };
 
-    let fail_fast = fm
-        .as_map()
-        .get("fail_fast")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
+    let fail_fast = match fm.as_map().get("fail_fast") {
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(other) => {
+            return Err(CompositionError::SequenceInvalid(format!(
+                "`fail_fast` must be a boolean, got {}",
+                json_type_name(other)
+            )));
+        }
+        None => true,
+    };
 
     match sequence_value {
         serde_json::Value::Array(items) => {
@@ -44,11 +51,7 @@ pub fn resolve_sequence_plan(
             }))
         }
         serde_json::Value::String(ref path_str) => {
-            let base_dir = source
-                .resolved_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
-            let yaml_path = base_dir.join(path_str);
+            let yaml_path = resolve_sequence_reference(path_str, &source.resolved_path)?;
             let plan = load_external_sequence(&yaml_path, fail_fast)?;
             Ok(Some(plan))
         }
@@ -57,6 +60,68 @@ pub fn resolve_sequence_plan(
             json_type_name(&other)
         ))),
     }
+}
+
+/// Resolve an external sequence reference string to an absolute path.
+///
+/// Mirrors Darkmatter's transclusion resolution behaviour:
+/// - `@`, `!`, `vault:`, `%`, and `{{ENV}}` references go through
+///   [`FileReference`] so that magic, package-relative, and vault
+///   references all work the same way they do in composed documents.
+/// - `~`-prefixed paths are expanded against `$HOME`.
+/// - Absolute paths are used as-is.
+/// - Plain relative paths (including `./` and `../`) are resolved
+///   relative to the composition source file's directory.
+fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, CompositionError> {
+    // Expand ~ to HOME directly, since FileReference treats `@` as the
+    // magic-search prefix and there is no dedicated tilde form.
+    if let Some(rest) = raw.strip_prefix('~') {
+        let home = std::env::var("HOME").map_err(|_| {
+            CompositionError::SequenceExternalLoad(format!(
+                "`{raw}`: HOME environment variable is not set"
+            ))
+        })?;
+        let suffix = rest.trim_start_matches('/');
+        return Ok(Path::new(&home).join(suffix));
+    }
+
+    if is_file_reference_target(raw) {
+        let normalized;
+        let ref_input = if let Some(rest) = raw.strip_prefix("@/") {
+            normalized = format!("@{rest}");
+            &normalized
+        } else {
+            raw
+        };
+
+        let file_ref = FileReference::new(ref_input)
+            .map_err(|e| CompositionError::SequenceExternalLoad(format!("`{raw}`: {e}")))?;
+        let resolved = file_ref
+            .resolve()
+            .map_err(|e| CompositionError::SequenceExternalLoad(format!("`{raw}`: {e}")))?
+            .ok_or_else(|| {
+                CompositionError::SequenceExternalLoad(format!("`{raw}`: file not found"))
+            })?;
+        return Ok(resolved);
+    }
+
+    let raw_path = PathBuf::from(raw);
+    if raw_path.is_absolute() {
+        return Ok(raw_path);
+    }
+
+    let base_dir = source_path.parent().unwrap_or_else(|| Path::new("."));
+    Ok(base_dir.join(raw_path))
+}
+
+/// Returns `true` if the raw reference should be routed through
+/// [`FileReference`] rather than treated as a plain relative path.
+fn is_file_reference_target(raw: &str) -> bool {
+    raw.starts_with('@')
+        || raw.starts_with('!')
+        || raw.starts_with("vault:")
+        || raw.starts_with('%')
+        || raw.contains("{{")
 }
 
 /// Build a step overlay for the given step index within a plan.
@@ -154,6 +219,13 @@ fn load_external_sequence(
     // Form 1: { sequence: [...] }
     // Form 2: { kind: "sequence", list: [...], template?: {...} }
     if let Some(list_value) = root.get("sequence") {
+        if root.contains_key("template") {
+            return Err(CompositionError::SequenceExternalWrongType(
+                "`template` is only supported alongside `list` (use `kind: sequence` + `list:` \
+                 form when you need templates)"
+                    .to_string(),
+            ));
+        }
         let items = list_value.as_array().ok_or_else(|| {
             CompositionError::SequenceExternalWrongType("`sequence` must be a list".to_string())
         })?;
@@ -188,7 +260,17 @@ fn load_external_sequence(
         CompositionError::SequenceExternalWrongType("`list` must be a list".to_string())
     })?;
 
-    let template = root.get("template").and_then(|v| v.as_object());
+    // `template` is optional, but when present it must be an object.
+    let template = match root.get("template") {
+        Some(serde_json::Value::Object(map)) => Some(map),
+        Some(other) => {
+            return Err(CompositionError::SequenceExternalWrongType(format!(
+                "`template` must be an object, got {}",
+                json_type_name(other)
+            )));
+        }
+        None => None,
+    };
 
     // Validate template keys don't collide with reserved overlay keys
     if let Some(tmpl) = template {
@@ -557,6 +639,121 @@ list:
             matches!(err, CompositionError::SequenceReservedTemplateKey(ref k) if k == "state"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn external_template_non_object_fails() {
+        let dir = TempDir::new().unwrap();
+        let yaml_path = dir.path().join("bad.yaml");
+        fs::write(
+            &yaml_path,
+            "kind: sequence\ntemplate: not-an-object\nlist:\n  - name: One\n",
+        )
+        .unwrap();
+
+        let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
+        let err = resolve_sequence_plan(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::SequenceExternalWrongType(ref msg) if msg.contains("`template`")),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn external_template_rejected_in_plain_sequence_form() {
+        let dir = TempDir::new().unwrap();
+        let yaml_path = dir.path().join("bad.yaml");
+        fs::write(
+            &yaml_path,
+            r#"sequence:
+  - name: One
+template:
+  desc: "{{name}}"
+"#,
+        )
+        .unwrap();
+
+        let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
+        let err = resolve_sequence_plan(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::SequenceExternalWrongType(ref msg) if msg.contains("template")),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn fail_fast_wrong_type_fails() {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("sequence", json!(["one", "two"])),
+                ("fail_fast", json!("false")),
+            ],
+            "Prompt",
+        );
+        let err = resolve_sequence_plan(&source).unwrap_err();
+        assert!(
+            matches!(err, CompositionError::SequenceInvalid(ref msg) if msg.contains("fail_fast")),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn relative_path_resolves_from_source_dir() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("subdir");
+        fs::create_dir(&sub).unwrap();
+        let yaml_path = sub.join("steps.yaml");
+        fs::write(&yaml_path, "sequence:\n  - alpha\n  - beta\n").unwrap();
+
+        // Source file lives in subdir; sequence reference is relative.
+        let file = sub.join("doc.md");
+        let md_text = "---\nsequence: steps.yaml\n---\nBody\n";
+        fs::write(&file, md_text).unwrap();
+
+        let markdown = darkmatter::markdown::Markdown::try_from(file.as_path()).unwrap();
+        let original_text = fs::read_to_string(&file).unwrap();
+        let source = ResolvedCompositionSource {
+            original_ref: file.to_str().unwrap().to_string(),
+            resolved_path: file,
+            original_text,
+            markdown,
+        };
+
+        let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+        assert_eq!(plan.steps.len(), 2);
+        assert_eq!(plan.steps[0].name, "alpha");
+    }
+
+    #[test]
+    fn absolute_path_is_honored() {
+        let dir = TempDir::new().unwrap();
+        let yaml_path = dir.path().join("abs.yaml");
+        fs::write(&yaml_path, "sequence:\n  - one\n").unwrap();
+
+        // Source file lives in a DIFFERENT directory from the YAML.
+        let other = dir.path().join("elsewhere");
+        fs::create_dir(&other).unwrap();
+        let file = other.join("doc.md");
+        let md_text = format!(
+            "---\nsequence: {}\n---\nBody\n",
+            yaml_path.to_str().unwrap()
+        );
+        fs::write(&file, &md_text).unwrap();
+
+        let markdown = darkmatter::markdown::Markdown::try_from(file.as_path()).unwrap();
+        let original_text = fs::read_to_string(&file).unwrap();
+        let source = ResolvedCompositionSource {
+            original_ref: file.to_str().unwrap().to_string(),
+            resolved_path: file,
+            original_text,
+            markdown,
+        };
+
+        let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.steps[0].name, "one");
     }
 
     #[test]

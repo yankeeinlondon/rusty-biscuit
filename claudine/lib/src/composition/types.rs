@@ -1,15 +1,22 @@
 //! Core types for composition workflows.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::Markdown;
 use serde::{Deserialize, Serialize};
 
 use super::lifecycle::LifecycleConfig;
 use crate::events::Provider;
+use crate::harness::shell::CachedApprovalDecision;
+
+/// Shared approval cache that can be reused across composition runs
+/// (e.g. steps of one sequence) so that previously approved commands
+/// do not prompt again.
+pub type SharedApprovalCache = Arc<Mutex<HashMap<String, CachedApprovalDecision>>>;
 
 /// Which composition mode to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -192,6 +199,16 @@ pub struct CompositionExecutionRequest {
     pub quiet: bool,
     /// Suppress all preflight output.
     pub silent: bool,
+    /// Extra environment variables to inject into both the composition
+    /// context (used for preflight and prompt interpolation) and the
+    /// spawned child process. Currently used by sequence execution to
+    /// propagate `FAIL_FAST`.
+    pub env_overrides: BTreeMap<String, String>,
+    /// Optional shared shell-approval cache. When provided, harness
+    /// shell preflight reuses previously approved commands from this
+    /// cache instead of prompting again. Used by sequence execution to
+    /// honour "allow once" for the whole run, not just one step.
+    pub shared_approval_cache: Option<SharedApprovalCache>,
 }
 
 /// Describes where the sequence definition was found.
