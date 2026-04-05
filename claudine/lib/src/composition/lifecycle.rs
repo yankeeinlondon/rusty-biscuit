@@ -608,17 +608,22 @@ fn play_effect_blocking(name: &str) {
 }
 
 /// Speak text synchronously using the Tokio runtime.
+///
+/// Uses `block_in_place` to avoid panicking when called from within a
+/// Tokio async context (e.g. `#[tokio::main]`).
 fn speak_blocking(text: &str, config: TtsConfig) {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         let text = text.to_string();
-        handle.block_on(async move {
-            if let Err(e) = biscuit_speaks::Speak::new(text)
-                .with_config(config)
-                .play()
-                .await
-            {
-                warn!(%e, "Lifecycle TTS playback failed");
-            }
+        tokio::task::block_in_place(|| {
+            handle.block_on(async move {
+                if let Err(e) = biscuit_speaks::Speak::new(text)
+                    .with_config(config)
+                    .play()
+                    .await
+                {
+                    warn!(%e, "Lifecycle TTS playback failed");
+                }
+            });
         });
     } else {
         warn!("No Tokio runtime available for lifecycle TTS");
