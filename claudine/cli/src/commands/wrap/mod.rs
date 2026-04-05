@@ -1438,6 +1438,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             .with_context_extra(dispatch_context.clone()),
             parser_config,
         );
+        let mut _spawned = false;
         let stream_result = exec::run_child_stream(
             binary_path.as_path(),
             &child_args,
@@ -1448,6 +1449,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             profile.suppress_structured_stderr_on_success(),
             stdin_seed.as_deref(),
             parser,
+            &mut _spawned,
         )?;
         let mut summary = stream_result.data;
         if let Some(codex_output) = structured_codex_output.as_ref() {
@@ -1482,6 +1484,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         summary.exit_code
     } else {
         // Legacy path: forward I/O to terminal
+        let mut _spawned = false;
         let result = exec::run_child(
             binary_path.as_path(),
             &child_args,
@@ -1493,6 +1496,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed: stdin_seed.as_deref(),
             },
+            &mut _spawned,
         )?;
         result.data
     };
@@ -1860,6 +1864,7 @@ fn execute_harness_attempt(
     env_context: &EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
+    child_spawned: &mut bool,
 ) -> Result<claudine::harness::AttemptOutcome> {
     let _attempt_span = info_span!(
         "harness_attempt",
@@ -1895,6 +1900,7 @@ fn execute_harness_attempt(
             suppress_stderr_on_success,
             launch.stdin_seed.as_deref(),
             parser,
+            child_spawned,
         )?;
         let termination = stream_result.termination;
         let mut summary = stream_result.data;
@@ -1946,6 +1952,7 @@ fn execute_harness_attempt(
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed: launch.stdin_seed.as_deref(),
             },
+            child_spawned,
         )?;
         let termination = capture.termination;
         let stdout = capture.data.stdout;
@@ -2514,7 +2521,8 @@ pub(crate) fn run_harness_loop(
                 attempt,
                 source_path = %prompt_state.source_path.display(),
             )
-            .in_scope(|| materialize_harness_prompt(prompt_state, repo_root))?
+            .in_scope(|| materialize_harness_prompt(prompt_state, repo_root))
+            .map_err(|e| guard.emit_blocked_or_err(e))?
         };
         let resolve_ctx = harness_context.resolve_context();
         let mut plan = info_span!(
@@ -2528,7 +2536,8 @@ pub(crate) fn run_harness_loop(
                 &prompt_state.source_path,
                 &resolve_ctx,
             )
-        })?;
+        })
+        .map_err(|e| guard.emit_blocked_or_err(e))?;
 
         // Source-file existence reporting
         if show_checks {
@@ -2747,6 +2756,7 @@ pub(crate) fn run_harness_loop(
             )
         })?;
 
+        let mut child_spawned = false;
         let outcome = execute_harness_attempt(
             attempt,
             provider,
@@ -2768,11 +2778,16 @@ pub(crate) fn run_harness_loop(
             env_context,
             dispatch_context,
             term,
-        )?;
+            &mut child_spawned,
+        );
 
-        // Child process actually ran — mark launched so subsequent failures
-        // are classified as `Failure` rather than `Blocked`.
-        guard.mark_provider_launched();
+        // Mark launched as soon as spawn succeeded — before propagating
+        // any post-spawn error — so the guard correctly classifies
+        // subsequent failures as `Failure` rather than `Blocked`.
+        if child_spawned {
+            guard.mark_provider_launched();
+        }
+        let outcome = outcome?;
 
         if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
             guard.emit_terminal(LifecycleSignal::Failure);

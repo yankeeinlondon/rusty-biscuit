@@ -264,6 +264,7 @@ pub(crate) fn run_child(
     cwd: &Path,
     timeout: Option<u64>,
     io: ChildIoOptions<'_>,
+    child_spawned: &mut bool,
 ) -> Result<ProcessResult<i32>> {
     // Debug assertion: critical variables must be present.
     debug_assert!(
@@ -303,6 +304,7 @@ pub(crate) fn run_child(
         });
 
     let mut child = command.spawn()?;
+    *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
 
     // Spawn stdout/stderr reader threads BEFORE writing stdin to avoid a
@@ -579,6 +581,7 @@ pub(crate) fn run_child_capture(
     cwd: &Path,
     timeout: Option<u64>,
     io: ChildIoOptions<'_>,
+    child_spawned: &mut bool,
 ) -> Result<ProcessResult<CapturedChildOutput>> {
     debug_assert!(
         env.contains_key(&OsString::from("PATH")),
@@ -606,6 +609,7 @@ pub(crate) fn run_child_capture(
         .stderr(Stdio::piped());
 
     let mut child = command.spawn()?;
+    *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
@@ -700,6 +704,7 @@ pub(crate) fn run_child_stream(
     suppress_stderr_on_success: bool,
     stdin_seed: Option<&str>,
     parser: Box<dyn StreamParser>,
+    child_spawned: &mut bool,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
@@ -728,6 +733,7 @@ pub(crate) fn run_child_stream(
         .stderr(Stdio::piped());
 
     let mut child = command.spawn()?;
+    *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
@@ -1094,6 +1100,7 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
 "#;
         let args = vec!["-c".to_string(), script.to_string()];
 
+        let mut spawned = false;
         let result = run_child_stream(
             Path::new("/bin/sh"),
             &args,
@@ -1104,10 +1111,12 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
             false,
             None,
             parser,
+            &mut spawned,
         )
         .unwrap();
         let summary = result.data;
 
+        assert!(spawned);
         assert_eq!(summary.exit_code, 0);
         assert_eq!(summary.assistant_text, "hello");
         assert!(summary.duration_ms.is_some());
@@ -1215,6 +1224,7 @@ cat >/dev/null
 "#;
         let args = vec!["-c".to_string(), script.to_string()];
 
+        let mut spawned = false;
         let result = run_child_stream(
             Path::new("/bin/sh"),
             &args,
@@ -1225,6 +1235,7 @@ cat >/dev/null
             false,
             None,
             parser,
+            &mut spawned,
         )
         .unwrap();
 

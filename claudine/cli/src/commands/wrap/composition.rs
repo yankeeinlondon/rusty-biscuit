@@ -653,7 +653,8 @@ pub(crate) fn execute_composition_request(
             CompositionClosurePlan::Inline(plan) => plan,
             _ => unreachable!("is_inline is true but closure is not Inline"),
         };
-        let exit_code = execute_inline_without_harness(
+        let mut child_spawned = false;
+        let exit_result = execute_inline_without_harness(
             provider,
             profile,
             &binary_path,
@@ -674,10 +675,16 @@ pub(crate) fn execute_composition_request(
             &env_context,
             &dispatch_context,
             &term,
-        )?;
+            &mut child_spawned,
+        );
 
-        // Child ran — mark launched so Drop would use Failure, not Blocked.
-        guard.mark_provider_launched();
+        // Mark launched as soon as spawn succeeded — before propagating
+        // any post-spawn error — so the guard correctly classifies
+        // subsequent failures as `Failure` rather than `Blocked`.
+        if child_spawned {
+            guard.mark_provider_launched();
+        }
+        let exit_code = exit_result?;
 
         if exit_code == 0 {
             guard.emit_terminal(LifecycleSignal::Success);
@@ -689,7 +696,8 @@ pub(crate) fn execute_composition_request(
     } else {
         guard.emit_start_once();
 
-        let exit_code = execute_direct_without_harness(
+        let mut child_spawned = false;
+        let exit_result = execute_direct_without_harness(
             provider,
             profile,
             &binary_path,
@@ -705,10 +713,16 @@ pub(crate) fn execute_composition_request(
             detail_requested,
             &env_context,
             &dispatch_context,
-        )?;
+            &mut child_spawned,
+        );
 
-        // Child ran — mark launched so Drop would use Failure, not Blocked.
-        guard.mark_provider_launched();
+        // Mark launched as soon as spawn succeeded — before propagating
+        // any post-spawn error — so the guard correctly classifies
+        // subsequent failures as `Failure` rather than `Blocked`.
+        if child_spawned {
+            guard.mark_provider_launched();
+        }
+        let exit_code = exit_result?;
 
         if exit_code == 0 {
             guard.emit_terminal(LifecycleSignal::Success);
@@ -751,6 +765,7 @@ fn execute_inline_without_harness(
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
+    child_spawned: &mut bool,
 ) -> Result<i32> {
     // Run the provider and capture output.
     let (agent_exit, _agent_termination, final_response, deferred_summary) = if use_structured {
@@ -768,6 +783,7 @@ fn execute_inline_without_harness(
             env_context,
             dispatch_context,
             term,
+            child_spawned,
         )?
     } else {
         run_legacy_inline(
@@ -783,6 +799,7 @@ fn execute_inline_without_harness(
             stdout_noise,
             stderr_noise,
             term,
+            child_spawned,
         )?
     };
 
@@ -976,6 +993,7 @@ fn run_structured_inline(
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
+    child_spawned: &mut bool,
 ) -> Result<InlineRunResult> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig::default();
@@ -1001,6 +1019,7 @@ fn run_structured_inline(
         profile.suppress_structured_stderr_on_success(),
         stdin_seed,
         parser,
+        child_spawned,
     )?;
     let termination = stream_result.termination;
     let mut summary = stream_result.data;
@@ -1055,6 +1074,7 @@ fn run_legacy_inline(
     stdout_noise: &[&str],
     stderr_noise: &[&str],
     term: &Terminal,
+    child_spawned: &mut bool,
 ) -> Result<InlineRunResult> {
     if session_interactive {
         let result = exec::run_child(
@@ -1068,6 +1088,7 @@ fn run_legacy_inline(
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
             },
+            child_spawned,
         )?;
         let final_response = if provider == Provider::Codex {
             if let Some(output) = structured_codex_output {
@@ -1095,6 +1116,7 @@ fn run_legacy_inline(
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
             },
+            child_spawned,
         )?;
         let response = profile.parse_captured_output(&capture.data.stdout);
         if !response.trim().is_empty() {
@@ -1228,6 +1250,7 @@ fn execute_direct_without_harness(
     detail_requested: bool,
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
+    child_spawned: &mut bool,
 ) -> Result<i32> {
     if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
@@ -1254,6 +1277,7 @@ fn execute_direct_without_harness(
             profile.suppress_structured_stderr_on_success(),
             stdin_seed,
             parser,
+            child_spawned,
         )?;
         let mut summary = stream_result.data;
         if let Some(codex_output) = structured_codex_output {
@@ -1302,6 +1326,7 @@ fn execute_direct_without_harness(
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
             },
+            child_spawned,
         )?;
 
         // Emit a synthetic session-end event for non-structured composition
