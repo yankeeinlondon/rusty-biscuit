@@ -329,7 +329,10 @@ impl CargoLockVersions {
     /// Parse a Cargo.lock file and extract package versions.
     pub fn parse(lock_path: &Path) -> Option<Self> {
         let content = std::fs::read_to_string(lock_path)
-            .map_err(|e| { debug!(path = %lock_path.display(), error = %e, "could not read file"); e })
+            .map_err(|e| {
+                debug!(path = %lock_path.display(), error = %e, "could not read file");
+                e
+            })
             .ok()?;
         let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
 
@@ -724,7 +727,10 @@ fn parse_cargo_dependencies(
     Vec<DependencyEntry>,
 )> {
     let content = std::fs::read_to_string(toml_path)
-        .map_err(|e| { debug!(path = %toml_path.display(), error = %e, "could not read file"); e })
+        .map_err(|e| {
+            debug!(path = %toml_path.display(), error = %e, "could not read file");
+            e
+        })
         .ok()?;
     let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
 
@@ -859,7 +865,10 @@ fn parse_package_json_dependencies(
     Vec<DependencyEntry>,
 )> {
     let content = std::fs::read_to_string(package_json_path)
-        .map_err(|e| { debug!(path = %package_json_path.display(), error = %e, "could not read file"); e })
+        .map_err(|e| {
+            debug!(path = %package_json_path.display(), error = %e, "could not read file");
+            e
+        })
         .ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
 
@@ -945,7 +954,10 @@ fn parse_pyproject_dependencies(
     pyproject_path: &Path,
 ) -> Option<(Vec<DependencyEntry>, Vec<DependencyEntry>)> {
     let content = std::fs::read_to_string(pyproject_path)
-        .map_err(|e| { debug!(path = %pyproject_path.display(), error = %e, "could not read file"); e })
+        .map_err(|e| {
+            debug!(path = %pyproject_path.display(), error = %e, "could not read file");
+            e
+        })
         .ok()?;
     let parsed: toml_crate::Value = toml_crate::from_str(&content).ok()?;
     let project = parsed.get("project")?;
@@ -1007,7 +1019,10 @@ fn parse_pyproject_dependencies(
 /// Parses requirements.txt dependency lines.
 fn parse_requirements_txt_dependencies(requirements_path: &Path) -> Option<Vec<DependencyEntry>> {
     let content = std::fs::read_to_string(requirements_path)
-        .map_err(|e| { debug!(path = %requirements_path.display(), error = %e, "could not read file"); e })
+        .map_err(|e| {
+            debug!(path = %requirements_path.display(), error = %e, "could not read file");
+            e
+        })
         .ok()?;
     let mut deps = Vec::new();
 
@@ -1042,7 +1057,10 @@ fn parse_requirements_txt_dependencies(requirements_path: &Path) -> Option<Vec<D
 /// Parses go.mod `require` entries.
 fn parse_go_mod_dependencies(go_mod_path: &Path) -> Option<Vec<DependencyEntry>> {
     let content = std::fs::read_to_string(go_mod_path)
-        .map_err(|e| { debug!(path = %go_mod_path.display(), error = %e, "could not read file"); e })
+        .map_err(|e| {
+            debug!(path = %go_mod_path.display(), error = %e, "could not read file");
+            e
+        })
         .ok()?;
     let mut deps = Vec::new();
     let mut in_require_block = false;
@@ -1422,7 +1440,10 @@ fn parse_package_json_workspace_patterns(package_json_path: &Path) -> Result<Opt
 
 fn parse_lerna_workspace_patterns(lerna_json_path: &Path) -> Option<Vec<String>> {
     let content = std::fs::read_to_string(lerna_json_path)
-        .map_err(|e| { debug!(path = %lerna_json_path.display(), error = %e, "could not read file"); e })
+        .map_err(|e| {
+            debug!(path = %lerna_json_path.display(), error = %e, "could not read file");
+            e
+        })
         .ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
 

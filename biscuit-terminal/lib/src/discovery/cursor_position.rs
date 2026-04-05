@@ -43,6 +43,7 @@ pub fn cursor_position_with_timeout(timeout: Duration) -> Option<CursorPosition>
 /// Internal DSR query implementation.
 #[cfg(unix)]
 fn query_cursor_position(timeout: Duration) -> Result<CursorPosition, String> {
+    use super::raw_mode::{RawModeGuard, TERMINAL_QUERY_MUTEX};
     use crate::discovery::detection::is_tty;
     use crate::discovery::os_detection::is_ci;
     use std::io::{Read, Write};
@@ -56,41 +57,13 @@ fn query_cursor_position(timeout: Duration) -> Result<CursorPosition, String> {
         return Err("CI environment".into());
     }
 
-    // RAII guard for raw mode
-    struct RawModeGuard {
-        original: libc::termios,
-        fd: libc::c_int,
-    }
+    // Serialize terminal access to prevent race conditions
+    let _lock = TERMINAL_QUERY_MUTEX
+        .lock()
+        .map_err(|_| "terminal query mutex poisoned".to_string())?;
 
-    impl RawModeGuard {
-        fn new() -> Result<Self, String> {
-            let fd = libc::STDIN_FILENO;
-            let mut original: libc::termios = unsafe { std::mem::zeroed() };
-            if unsafe { libc::tcgetattr(fd, &mut original) } != 0 {
-                tracing::trace!("DSR cursor position query failed: tcgetattr error");
-                return Err("failed to get terminal attributes".into());
-            }
-            let mut raw = original;
-            raw.c_lflag &= !(libc::ICANON | libc::ECHO);
-            raw.c_cc[libc::VMIN] = 0;
-            raw.c_cc[libc::VTIME] = 1;
-            if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } != 0 {
-                tracing::trace!("DSR cursor position query failed: tcsetattr error");
-                return Err("failed to set raw mode".into());
-            }
-            Ok(Self { original, fd })
-        }
-    }
-
-    impl Drop for RawModeGuard {
-        fn drop(&mut self) {
-            unsafe {
-                libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
-            }
-        }
-    }
-
-    let _guard = RawModeGuard::new()?;
+    // Enter raw mode (RAII guard restores on drop)
+    let _guard = RawModeGuard::stdin()?;
 
     // Send DSR: ESC[6n
     let mut stdout = std::io::stdout();

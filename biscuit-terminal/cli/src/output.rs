@@ -1,5 +1,9 @@
 use crate::*;
-use biscuit_terminal::discovery::detection::{Connection, MultiplexSupport, multiplex_support};
+use biscuit_terminal::discovery::detection::{
+    ColorDepth, ColorMode, Connection, ImageSupport, MultiplexSupport, multiplex_support,
+};
+use biscuit_terminal::discovery::fonts::FontLigature;
+use biscuit_terminal::discovery::locale::CharEncoding;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -44,14 +48,14 @@ pub struct TerminalMetadata {
     pub is_nerd_font: Option<bool>,
     /// Font ligatures (if detectable)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub font_ligatures: Option<Vec<String>>,
+    pub font_ligatures: Option<Vec<FontLigature>>,
     /// Whether the terminal likely supports font ligatures (heuristic)
     pub ligatures_likely: bool,
 
     /// Supported color depth
-    pub color_depth: String,
+    pub color_depth: ColorDepth,
     /// Light/dark mode
-    pub color_mode: String,
+    pub color_mode: ColorMode,
     /// Background color (if detectable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bg_color: Option<ColorInfo>,
@@ -65,7 +69,7 @@ pub struct TerminalMetadata {
     /// Whether italics are supported
     pub supports_italic: bool,
     /// Image rendering support
-    pub image_support: String,
+    pub image_support: ImageSupport,
     /// Underline style support
     pub underline_support: UnderlineInfo,
     /// OSC8 hyperlink support
@@ -82,7 +86,7 @@ pub struct TerminalMetadata {
     pub mode_2027_graphemes: bool,
 
     /// Multiplexer type
-    pub multiplex: String,
+    pub multiplex: MultiplexSupport,
 
     /// Connection type (Local, SSH, Mosh)
     pub connection: ConnectionInfo,
@@ -93,7 +97,7 @@ pub struct TerminalMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locale_tag: Option<String>,
     /// Character encoding
-    pub char_encoding: String,
+    pub char_encoding: CharEncoding,
 
     /// Path to terminal config file
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -175,6 +179,17 @@ pub struct ColorInfo {
     pub hex: Option<String>,
 }
 
+impl From<biscuit_terminal::discovery::osc_queries::RgbValue> for ColorInfo {
+    fn from(c: biscuit_terminal::discovery::osc_queries::RgbValue) -> Self {
+        Self {
+            r: c.r,
+            g: c.g,
+            b: c.b,
+            hex: Some(format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)),
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct UnderlineInfo {
     /// Straight/single underline
@@ -195,26 +210,9 @@ pub fn collect_metadata() -> TerminalMetadata {
     let terminal = Terminal::new();
 
     // Get colors
-    let bg_color = osc_queries::bg_color().map(|c| ColorInfo {
-        r: c.r,
-        g: c.g,
-        b: c.b,
-        hex: Some(format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)),
-    });
-
-    let text_color = osc_queries::text_color().map(|c| ColorInfo {
-        r: c.r,
-        g: c.g,
-        b: c.b,
-        hex: Some(format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)),
-    });
-
-    let cursor_color = osc_queries::cursor_color().map(|c| ColorInfo {
-        r: c.r,
-        g: c.g,
-        b: c.b,
-        hex: Some(format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)),
-    });
+    let bg_color = osc_queries::bg_color().map(ColorInfo::from);
+    let text_color = osc_queries::text_color().map(ColorInfo::from);
+    let cursor_color = osc_queries::cursor_color().map(ColorInfo::from);
 
     // Get distro info
     let distro = terminal.distro.as_ref().map(|d| DistroInfo {
@@ -226,7 +224,7 @@ pub fn collect_metadata() -> TerminalMetadata {
     });
 
     TerminalMetadata {
-        app: format!("{:?}", terminal.app),
+        app: terminal.app.to_string(),
         os: terminal.os.to_string(),
         distro,
         width: terminal.width(),
@@ -237,22 +235,19 @@ pub fn collect_metadata() -> TerminalMetadata {
         in_monorepo: terminal.in_monorepo,
         repo_root: terminal.repo_root.as_ref().map(|p| p.display().to_string()),
         package_root: terminal.package_root.clone(),
-        color_depth: format!("{:?}", terminal.color_depth),
-        color_mode: format!("{:?}", Terminal::color_mode()),
+        color_depth: terminal.color_depth.clone(),
+        color_mode: Terminal::color_mode(),
         bg_color,
         text_color,
         cursor_color,
         font: terminal.font.clone(),
         font_size: terminal.font_size,
         is_nerd_font: terminal.is_nerd_font,
-        font_ligatures: terminal
-            .font_ligatures
-            .as_ref()
-            .map(|ligatures| ligatures.iter().map(|l| format!("{:?}", l)).collect()),
+        font_ligatures: terminal.font_ligatures.clone(),
         ligatures_likely: fonts::ligature_support_likely(),
 
         supports_italic: terminal.supports_italic,
-        image_support: format!("{:?}", terminal.image_support),
+        image_support: terminal.image_support.clone(),
         underline_support: UnderlineInfo {
             straight: terminal.underline_support.straight,
             double: terminal.underline_support.double,
@@ -267,11 +262,11 @@ pub fn collect_metadata() -> TerminalMetadata {
         osc12_cursor_color: osc_queries::osc12_support(),
         osc52_clipboard: clipboard::osc52_support(),
         mode_2027_graphemes: mode_2027::supports_mode_2027(),
-        multiplex: format_multiplex(multiplex_support()),
+        multiplex: multiplex_support(),
         connection: format_connection(&terminal.remote),
         locale_raw: terminal.locale.raw().map(|s| s.to_string()),
         locale_tag: terminal.locale.tag().map(|s| s.to_string()),
-        char_encoding: format!("{:?}", terminal.char_encoding),
+        char_encoding: terminal.char_encoding.clone(),
         config_file: terminal
             .config_file
             .as_ref()
@@ -298,14 +293,10 @@ pub fn analyze_content(content: &str) -> ContentAnalysis {
 }
 
 pub fn print_content_analysis(analysis: &ContentAnalysis) {
-    let no_color = std::env::var("NO_COLOR").is_ok();
-    let bold = if no_color { "" } else { "\x1b[1m" };
-    let dim = if no_color { "" } else { "\x1b[2m" };
-    let reset = if no_color { "" } else { "\x1b[0m" };
-    let green = if no_color { "" } else { "\x1b[32m" };
+    let s = crate::types::CliStyles::detect();
 
-    let yes = format!("{}yes{}", green, reset);
-    let no_mark = format!("{}no{}", dim, reset);
+    let yes = format!("{}yes{}", s.green, s.reset);
+    let no_mark = format!("{}no{}", s.dim, s.reset);
     let check = |b: bool| if b { &yes } else { &no_mark };
 
     let line_lengths = analysis
@@ -316,8 +307,8 @@ pub fn print_content_analysis(analysis: &ContentAnalysis) {
         .join(", ");
 
     println!();
-    println!("{}Content Analysis{}", bold, reset);
-    println!("{}══════════════════{}", dim, reset);
+    println!("{}Content Analysis{}", s.bold, s.reset);
+    println!("{}══════════════════{}", s.dim, s.reset);
     println!("  Lines:        {}", analysis.line_count);
     println!("  Line lengths: {}", line_lengths);
     println!("  Total length: {}", analysis.total_length);
@@ -344,32 +335,18 @@ pub fn format_connection(conn: &Connection) -> ConnectionInfo {
     }
 }
 
-pub fn format_multiplex(m: MultiplexSupport) -> String {
-    match m {
-        MultiplexSupport::None => "None".to_string(),
-        MultiplexSupport::Native { .. } => "Native".to_string(),
-        MultiplexSupport::Tmux { .. } => "tmux".to_string(),
-        MultiplexSupport::Zellij { .. } => "Zellij".to_string(),
-    }
-}
-
 pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
-    // Respect NO_COLOR environment variable
-    let no_color = std::env::var("NO_COLOR").is_ok();
-
-    let bold = if no_color { "" } else { "\x1b[1m" };
-    let dim = if no_color { "" } else { "\x1b[2m" };
-    let reset = if no_color { "" } else { "\x1b[0m" };
-    let green = if no_color { "" } else { "\x1b[32m" };
-    let yellow = if no_color { "" } else { "\x1b[33m" };
-    let blue = if no_color { "" } else { "\x1b[34m" };
+    let s = crate::types::CliStyles::detect();
 
     println!();
-    println!("{}Terminal Metadata{}", bold, reset);
-    println!("{}═══════════════════════════════════════{}", dim, reset);
+    println!("{}Terminal Metadata{}", s.bold, s.reset);
+    println!(
+        "{}═══════════════════════════════════════{}",
+        s.dim, s.reset
+    );
 
     // Basic info section
-    println!("\n{}{}Basic Info{}", bold, blue, reset);
+    println!("\n{}{}Basic Info{}", s.bold, s.blue, s.reset);
     println!("  App:        {}", metadata.app);
     println!("  OS:         {}", metadata.os);
     if let Some(distro) = &metadata.distro {
@@ -379,7 +356,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     println!(
         "  Is TTY:     {}",
         if metadata.is_tty {
-            format!("{}yes{}", green, reset)
+            format!("{}yes{}", s.green, s.reset)
         } else {
             "no".to_string()
         }
@@ -387,17 +364,17 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     println!(
         "  In CI:      {}",
         if metadata.is_ci {
-            format!("{}yes{}", yellow, reset)
+            format!("{}yes{}", s.yellow, s.reset)
         } else {
             "no".to_string()
         }
     );
 
-    println!("\n{}{}Repository{}", bold, blue, reset);
+    println!("\n{}{}Repository{}", s.bold, s.blue, s.reset);
     println!(
         "  In Repo:    {}",
         if metadata.in_repo {
-            format!("{}yes{}", green, reset)
+            format!("{}yes{}", s.green, s.reset)
         } else {
             "no".to_string()
         }
@@ -405,7 +382,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     println!(
         "  Monorepo:   {}",
         if metadata.in_monorepo {
-            format!("{}yes{}", green, reset)
+            format!("{}yes{}", s.green, s.reset)
         } else {
             "no".to_string()
         }
@@ -418,38 +395,38 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     }
 
     // Font section (always displayed)
-    println!("\n{}{}Fonts{}", bold, blue, reset);
+    println!("\n{}{}Fonts{}", s.bold, s.blue, s.reset);
     if let Some(font) = &metadata.font {
         println!("  Name:       {}", font);
     } else {
-        println!("  Name:       {}n/a{}", dim, reset);
+        println!("  Name:       {}n/a{}", s.dim, s.reset);
     }
     if let Some(size) = metadata.font_size {
         println!("  Size:       {}pt", size);
     } else {
-        println!("  Size:       {}n/a{}", dim, reset);
+        println!("  Size:       {}n/a{}", s.dim, s.reset);
     }
     println!(
         "  Nerd Font:  {}",
         match metadata.is_nerd_font {
-            Some(true) => format!("{}yes{}", green, reset),
+            Some(true) => format!("{}yes{}", s.green, s.reset),
             Some(false) => "no".to_string(),
-            None => format!("{}unknown{}", dim, reset),
+            None => format!("{}unknown{}", s.dim, s.reset),
         }
     );
     println!(
         "  Ligatures:  {}",
         if metadata.ligatures_likely {
-            format!("{}likely{}", green, reset)
+            format!("{}likely{}", s.green, s.reset)
         } else {
-            format!("{}unlikely{}", dim, reset)
+            format!("{}unlikely{}", s.dim, s.reset)
         }
     );
 
     // Color section
-    println!("\n{}{}Colors{}", bold, blue, reset);
-    println!("  Depth:      {}", metadata.color_depth);
-    println!("  Mode:       {}", metadata.color_mode);
+    println!("\n{}{}Colors{}", s.bold, s.blue, s.reset);
+    println!("  Depth:      {:?}", metadata.color_depth);
+    println!("  Mode:       {:?}", metadata.color_mode);
     if let Some(bg) = &metadata.bg_color {
         println!(
             "  Background: {} ({}, {}, {})",
@@ -479,13 +456,13 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     }
 
     // Features section
-    println!("\n{}{}Features{}", bold, blue, reset);
-    let yes = format!("{}yes{}", green, reset);
-    let no_mark = format!("{}no{}", dim, reset);
+    println!("\n{}{}Features{}", s.bold, s.blue, s.reset);
+    let yes = format!("{}yes{}", s.green, s.reset);
+    let no_mark = format!("{}no{}", s.dim, s.reset);
     let check = |b: bool| if b { &yes } else { &no_mark };
 
     println!("  Italics:      {}", check(metadata.supports_italic));
-    println!("  Images:       {}", metadata.image_support);
+    println!("  Images:       {:?}", metadata.image_support);
     println!("  OSC8 Links:   {}", check(metadata.osc_link_support));
     println!("  OSC10 FG:     {}", check(metadata.osc10_fg_color));
     println!("  OSC11 BG:     {}", check(metadata.osc11_bg_color));
@@ -494,7 +471,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     println!("  Mode 2027:    {}", check(metadata.mode_2027_graphemes));
 
     // Underline section
-    println!("\n{}{}Underline Support{}", bold, blue, reset);
+    println!("\n{}{}Underline Support{}", s.bold, s.blue, s.reset);
     println!(
         "  Straight:   {}",
         check(metadata.underline_support.straight)
@@ -512,14 +489,14 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     let _ = verbose;
 
     // Multiplexing
-    println!("\n{}{}Multiplexing{}", bold, blue, reset);
-    println!("  Type:       {}", metadata.multiplex);
+    println!("\n{}{}Multiplexing{}", s.bold, s.blue, s.reset);
+    println!("  Type:       {:?}", metadata.multiplex);
 
     // Connection
-    println!("\n{}{}Connection{}", bold, blue, reset);
+    println!("\n{}{}Connection{}", s.bold, s.blue, s.reset);
     match &metadata.connection {
         ConnectionInfo::Local => {
-            println!("  Type:       {}Local{}", green, reset);
+            println!("  Type:       {}Local{}", s.green, s.reset);
         }
         ConnectionInfo::Ssh {
             host,
@@ -527,7 +504,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
             server_port,
             tty_path,
         } => {
-            println!("  Type:       {}SSH{}", yellow, reset);
+            println!("  Type:       {}SSH{}", s.yellow, s.reset);
             println!("  Host:       {}", host);
             println!("  Ports:      {} -> {}", source_port, server_port);
             if let Some(tty) = tty_path {
@@ -535,14 +512,14 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
             }
         }
         ConnectionInfo::Mosh { connection } => {
-            println!("  Type:       {}Mosh{}", yellow, reset);
+            println!("  Type:       {}Mosh{}", s.yellow, s.reset);
             println!("  Connection: {}", connection);
         }
     }
 
     // Locale & Encoding
-    println!("\n{}{}Locale{}", bold, blue, reset);
-    let na = format!("{}n/a{}", dim, reset);
+    println!("\n{}{}Locale{}", s.bold, s.blue, s.reset);
+    let na = format!("{}n/a{}", s.dim, s.reset);
     println!(
         "  Raw:        {}",
         metadata.locale_raw.as_deref().unwrap_or(&na)
@@ -551,11 +528,11 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
         "  Tag:        {}",
         metadata.locale_tag.as_deref().unwrap_or(&na)
     );
-    println!("  Encoding:   {}", metadata.char_encoding);
+    println!("  Encoding:   {:?}", metadata.char_encoding);
 
     // Config
     if let Some(config) = &metadata.config_file {
-        println!("\n{}{}Config{}", bold, blue, reset);
+        println!("\n{}{}Config{}", s.bold, s.blue, s.reset);
         println!("  File:       {}", config);
     }
 
@@ -565,7 +542,10 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use biscuit_terminal::discovery::detection::MultiplexSupport;
+    use biscuit_terminal::discovery::detection::{
+        ColorDepth, ColorMode, ImageSupport, MultiplexSupport, TerminalApp,
+    };
+    use biscuit_terminal::discovery::locale::CharEncoding;
 
     #[test]
     fn test_analyze_content() {
@@ -583,30 +563,17 @@ mod tests {
     }
 
     #[test]
-    fn test_format_multiplex() {
-        assert_eq!(format_multiplex(MultiplexSupport::None), "None");
+    fn test_terminal_app_display() {
+        assert_eq!(TerminalApp::Kitty.to_string(), "Kitty");
+        assert_eq!(TerminalApp::Ghostty.to_string(), "Ghostty");
+        assert_eq!(TerminalApp::ITerm2.to_string(), "ITerm2");
         assert_eq!(
-            format_multiplex(MultiplexSupport::Tmux {
-                split_window: true,
-                resize_pane: true,
-                focus_pane: true,
-                multiple_windows: true,
-                session_persistence: true,
-                detach_session: true,
-            }),
-            "tmux"
+            TerminalApp::Other("xterm".to_string()).to_string(),
+            "xterm"
         );
         assert_eq!(
-            format_multiplex(MultiplexSupport::Zellij {
-                split_window: true,
-                resize_pane: true,
-                focus_pane: true,
-                multiple_tabs: true,
-                session_resurrection: true,
-                floating_panes: true,
-                detach_session: true,
-            }),
-            "Zellij"
+            TerminalApp::Other("Windows Terminal".to_string()).to_string(),
+            "Windows Terminal"
         );
     }
 
@@ -624,8 +591,8 @@ mod tests {
             in_monorepo: false,
             repo_root: None,
             package_root: None,
-            color_depth: "TrueColor".to_string(),
-            color_mode: "Dark".to_string(),
+            color_depth: ColorDepth::TrueColor,
+            color_mode: ColorMode::Dark,
             bg_color: None,
             text_color: None,
             cursor_color: None,
@@ -635,7 +602,7 @@ mod tests {
             font_ligatures: None,
             ligatures_likely: false,
             supports_italic: true,
-            image_support: "Kitty".to_string(),
+            image_support: ImageSupport::Kitty,
             underline_support: UnderlineInfo {
                 curly: true,
                 dashed: false,
@@ -650,11 +617,11 @@ mod tests {
             osc12_cursor_color: true,
             osc52_clipboard: true,
             mode_2027_graphemes: false,
-            multiplex: "None".to_string(),
+            multiplex: MultiplexSupport::None,
             connection: ConnectionInfo::Local,
             locale_raw: None,
             locale_tag: None,
-            char_encoding: "UTF-8".to_string(),
+            char_encoding: CharEncoding::Utf8,
             config_file: None,
         };
 
@@ -664,5 +631,11 @@ mod tests {
         assert!(json.contains("\"width\":80"));
         assert!(json.contains("\"height\":24"));
         assert!(json.contains("\"curly\":true"));
+        // Verify enum fields serialize as expected PascalCase strings
+        assert!(json.contains("\"color_depth\":\"TrueColor\""));
+        assert!(json.contains("\"color_mode\":\"Dark\""));
+        assert!(json.contains("\"image_support\":\"Kitty\""));
+        assert!(json.contains("\"multiplex\":\"None\""));
+        assert!(json.contains("\"char_encoding\":\"Utf8\""));
     }
 }

@@ -17,7 +17,7 @@ use unicode_width::UnicodeWidthStr;
 /// - CSI sequences: `\x1b[` followed by parameter bytes, intermediate bytes, and final byte
 /// - OSC sequences: `\x1b]` followed by content until BEL (\x07) or ST (\x1b\\)
 /// - Other escape sequences: `\x1b` followed by single character
-static ANSI_ESCAPE_RE: LazyLock<Regex> = LazyLock::new(|| {
+pub static ANSI_ESCAPE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]", // CSI sequences
         r"|\x1b\].*?(?:\x07|\x1b\\)",                 // OSC sequences (BEL or ST terminator)
@@ -41,7 +41,7 @@ static OSC8_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// - CSI sequences (Control Sequence Introducer): `\x1b[...`
 /// - OSC sequences (Operating System Command): `\x1b]...`
 /// - Other escape sequences
-fn strip_ansi_codes(text: &str) -> String {
+pub fn strip_ansi_codes(text: &str) -> String {
     ANSI_ESCAPE_RE.replace_all(text, "").into_owned()
 }
 

@@ -113,8 +113,8 @@ use tracing::{info_span, instrument};
 pub use ai_cli::InstalledAiClients;
 pub use editors::InstalledEditors;
 pub use enums::{
-    AiCli, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager, TerminalApp, TtsClient,
-    Utility,
+    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager,
+    TerminalApp, TtsClient, Utility,
 };
 pub use find_program::{
     ExecutableIndex, find_program, find_program_with_source, find_programs_parallel,
@@ -125,13 +125,13 @@ pub use installer::{
     InstallOptions, InstallResult, execute_install, execute_versioned_install, get_install_command,
     get_versioned_install_command,
 };
-pub use inventory::{PROGRAM_LOOKUP, Program};
+pub use inventory::Program;
 pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
 pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;
 pub use tts_clients::InstalledTtsClients;
-pub use types::{ExecutableSource, InstallationMethod, ProgramDetails, ProgramDetector};
+pub use types::{CategoryDetector, ExecutableSource, InstallationMethod, ProgramDetector};
 pub use utilities::InstalledUtilities;
 
 /// Complete programs detection result.
@@ -139,7 +139,7 @@ pub use utilities::InstalledUtilities;
 /// Contains detection results for all supported program categories:
 /// editors, utilities, package managers, TTS clients, terminal apps, headless audio players,
 /// and AI CLI tools.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ProgramsInfo {
     /// Text editors and IDEs installed on the system.
     pub editors: InstalledEditors,

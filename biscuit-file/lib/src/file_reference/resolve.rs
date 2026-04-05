@@ -121,78 +121,16 @@ fn resolve_recursive(
     Ok(matches.into_iter().next())
 }
 
-/// Build candidate file paths for non-recursive resolution.
-fn build_candidates(
-    parsed: &ParsedReference,
-    interpolated: &str,
+/// Collect search root directories for a given reference kind.
+fn collect_roots(
+    kind: &ReferenceKind,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
     ctx: &ResolutionContext,
 ) -> Result<Vec<PathBuf>, FileReferenceError> {
-    match &parsed.kind {
-        ReferenceKind::Relative(_) => Ok(vec![ctx.cwd.join(interpolated)]),
-        ReferenceKind::Absolute(_) => {
-            let path = PathBuf::from(interpolated);
-            if !path.is_absolute() {
-                return Err(FileReferenceError::InvalidSyntax(format!(
-                    "absolute reference resolved to non-absolute path: {interpolated}"
-                )));
-            }
-            Ok(vec![path])
-        }
-        ReferenceKind::Magic(_) => {
-            let mut roots = Vec::new();
-            roots.extend(magic_paths.prepend.iter().cloned());
-            if let Some(git_root) = find_git_root(&ctx.cwd)? {
-                roots.push(git_root);
-            }
-            if let Some(ref home) = ctx.home_dir {
-                roots.push(home.clone());
-            }
-            roots.extend(magic_paths.append.iter().cloned());
-
-            Ok(roots.into_iter().map(|r| r.join(interpolated)).collect())
-        }
-        ReferenceKind::Package(_) => {
-            let git_root = match find_git_root(&ctx.cwd)? {
-                Some(root) => root,
-                None => return Ok(vec![]),
-            };
-
-            let area = find_package_area(&git_root, &ctx.cwd)?;
-            let base = area.unwrap_or(git_root);
-            Ok(vec![base.join(interpolated)])
-        }
-        ReferenceKind::Vault(_) => {
-            let mut roots: Vec<PathBuf> = vault_roots.to_vec();
-
-            // Add roots from VAULT env var
-            if let Some(vault_env) = ctx.env.get("VAULT") {
-                roots.extend(std::env::split_paths(vault_env));
-            }
-
-            if roots.is_empty() {
-                return Err(FileReferenceError::VaultNotConfigured);
-            }
-
-            Ok(roots.into_iter().map(|r| r.join(interpolated)).collect())
-        }
-    }
-}
-
-/// Build search roots for recursive resolution.
-fn build_search_roots(
-    parsed: &ParsedReference,
-    magic_paths: &MagicPathList,
-    vault_roots: &[PathBuf],
-    ctx: &ResolutionContext,
-) -> Result<Vec<PathBuf>, FileReferenceError> {
-    match &parsed.kind {
+    match kind {
         ReferenceKind::Relative(_) => Ok(vec![ctx.cwd.clone()]),
-        ReferenceKind::Absolute(_) => {
-            // Recursive absolute doesn't make much sense, but search from root
-            Ok(vec![PathBuf::from("/")])
-        }
+        ReferenceKind::Absolute(_) => Ok(vec![PathBuf::from("/")]),
         ReferenceKind::Magic(_) => {
             let mut roots = Vec::new();
             roots.extend(magic_paths.prepend.iter().cloned());
@@ -224,6 +162,38 @@ fn build_search_roots(
             Ok(roots)
         }
     }
+}
+
+/// Build candidate file paths for non-recursive resolution.
+fn build_candidates(
+    parsed: &ParsedReference,
+    interpolated: &str,
+    magic_paths: &MagicPathList,
+    vault_roots: &[PathBuf],
+    ctx: &ResolutionContext,
+) -> Result<Vec<PathBuf>, FileReferenceError> {
+    if let ReferenceKind::Absolute(_) = &parsed.kind {
+        let path = PathBuf::from(interpolated);
+        if !path.is_absolute() {
+            return Err(FileReferenceError::InvalidSyntax(format!(
+                "absolute reference resolved to non-absolute path: {interpolated}"
+            )));
+        }
+        return Ok(vec![path]);
+    }
+
+    let roots = collect_roots(&parsed.kind, magic_paths, vault_roots, ctx)?;
+    Ok(roots.into_iter().map(|r| r.join(interpolated)).collect())
+}
+
+/// Build search roots for recursive resolution.
+fn build_search_roots(
+    parsed: &ParsedReference,
+    magic_paths: &MagicPathList,
+    vault_roots: &[PathBuf],
+    ctx: &ResolutionContext,
+) -> Result<Vec<PathBuf>, FileReferenceError> {
+    collect_roots(&parsed.kind, magic_paths, vault_roots, ctx)
 }
 
 /// Interpolate template segments using the resolution context's env vars.
@@ -345,5 +315,64 @@ mod tests {
     fn normalize_dotdot() {
         let result = normalize_components(Path::new("/a/b/../c/./d"));
         assert_eq!(result, PathBuf::from("/a/c/d"));
+    }
+
+    #[test]
+    fn interpolate_literal_only() {
+        let ctx = ResolutionContext {
+            cwd: PathBuf::from("/tmp"),
+            home_dir: Some(PathBuf::from("/home/test")),
+            env: std::collections::HashMap::new(),
+        };
+        let template = PathTemplate {
+            segments: vec![TemplateSegment::Literal("foo/bar.md".to_string())],
+        };
+        let result = interpolate(&template, &ctx).unwrap();
+        assert_eq!(result, "foo/bar.md");
+    }
+
+    #[test]
+    fn interpolate_with_env_var() {
+        let mut env = std::collections::HashMap::new();
+        env.insert("PROJECT".to_string(), "myproject".to_string());
+        let ctx = ResolutionContext {
+            cwd: PathBuf::from("/tmp"),
+            home_dir: None,
+            env,
+        };
+        let template = PathTemplate {
+            segments: vec![
+                TemplateSegment::EnvVar("PROJECT".to_string()),
+                TemplateSegment::Literal("/README.md".to_string()),
+            ],
+        };
+        let result = interpolate(&template, &ctx).unwrap();
+        assert_eq!(result, "myproject/README.md");
+    }
+
+    #[test]
+    fn interpolate_missing_env_var() {
+        let ctx = ResolutionContext {
+            cwd: PathBuf::from("/tmp"),
+            home_dir: None,
+            env: std::collections::HashMap::new(),
+        };
+        let template = PathTemplate {
+            segments: vec![TemplateSegment::EnvVar("MISSING".to_string())],
+        };
+        let result = interpolate(&template, &ctx);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn normalize_absolute_relative_path() {
+        let result = normalize_absolute(Path::new("foo/bar.txt"), Path::new("/home/user"));
+        assert_eq!(result, PathBuf::from("/home/user/foo/bar.txt"));
+    }
+
+    #[test]
+    fn normalize_absolute_already_absolute() {
+        let result = normalize_absolute(Path::new("/etc/config.toml"), Path::new("/home/user"));
+        assert_eq!(result, PathBuf::from("/etc/config.toml"));
     }
 }
