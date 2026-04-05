@@ -95,7 +95,8 @@ pub enum LifecycleSignal {
 
 /// Runtime state tracking for lifecycle events.
 ///
-/// Used to track which lifecycle signals have been emitted during execution.
+/// Superseded by [`LifecycleRunGuard`] which enforces transitions mechanically.
+/// Retained for backward compatibility.
 #[derive(Debug, Clone, Default)]
 pub struct LifecycleRuntimeState {
     /// Whether the `start` signal has been emitted.
@@ -103,6 +104,220 @@ pub struct LifecycleRuntimeState {
 
     /// Whether the provider launch has started (used for start signal timing).
     pub provider_launch_started: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Emitter trait + default implementation
+// ---------------------------------------------------------------------------
+
+/// Trait for emitting lifecycle notification side effects.
+///
+/// Injectable to allow test doubles that capture emissions without hitting
+/// real stderr, messaging, TTS, or sound playback.
+pub trait LifecycleEmitter {
+    /// Write a styled status line to stderr.
+    fn emit_stderr(&self, signal: LifecycleSignal, text: &str, term: &Terminal);
+
+    /// Dispatch a message via the configured messaging route.
+    fn emit_message(
+        &self,
+        text: &str,
+        source_path: &Path,
+        repo_root: Option<&Path>,
+        messaging: &RuntimeMessagingSettings,
+    );
+
+    /// Speak text via TTS.
+    fn emit_speech(&self, text: &str, tts_config: TtsConfig);
+
+    /// Play a named sound effect.
+    fn emit_effect(&self, name: &str);
+}
+
+/// Production emitter that performs real side effects.
+pub struct DefaultLifecycleEmitter;
+
+impl LifecycleEmitter for DefaultLifecycleEmitter {
+    fn emit_stderr(&self, signal: LifecycleSignal, text: &str, term: &Terminal) {
+        let rendered = Status::from_prose(text)
+            .state(signal.status_state())
+            .theme(StatusTheme::Circular)
+            .render(term);
+        eprintln!("{rendered}");
+    }
+
+    fn emit_message(
+        &self,
+        text: &str,
+        source_path: &Path,
+        repo_root: Option<&Path>,
+        messaging: &RuntimeMessagingSettings,
+    ) {
+        crate::messaging::execute_resolved_message(text, None, Some(source_path), repo_root, messaging);
+    }
+
+    fn emit_speech(&self, text: &str, tts_config: TtsConfig) {
+        speak_blocking(text, tts_config);
+    }
+
+    fn emit_effect(&self, name: &str) {
+        play_effect_blocking(name);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LifecycleRunGuard
+// ---------------------------------------------------------------------------
+
+/// RAII guard that centralizes lifecycle state transitions and guarantees a
+/// terminal signal (`blocked` or `failure`) is emitted when a run exits
+/// after `start` without an explicit terminal signal.
+///
+/// ## Drop behaviour
+///
+/// | `start_emitted` | `provider_launched` | Drop emits |
+/// |-----------------|---------------------|------------|
+/// | `false`         | —                   | nothing    |
+/// | `true`          | `false`             | `Blocked`  |
+/// | `true`          | `true`              | `Failure`  |
+///
+/// Explicit calls to [`emit_terminal`](Self::emit_terminal),
+/// [`emit_blocked_or_failure`](Self::emit_blocked_or_failure), or
+/// [`defuse`](Self::defuse) suppress the Drop emission.
+pub struct LifecycleRunGuard<'a> {
+    config: &'a LifecycleConfig,
+    ctx: &'a LifecycleRuntimeContext<'a>,
+    emitter: &'a dyn LifecycleEmitter,
+    start_emitted: bool,
+    provider_launched: bool,
+    terminal_emitted: bool,
+}
+
+impl<'a> LifecycleRunGuard<'a> {
+    /// Create a new guard.
+    pub fn new(
+        config: &'a LifecycleConfig,
+        ctx: &'a LifecycleRuntimeContext<'a>,
+        emitter: &'a dyn LifecycleEmitter,
+    ) -> Self {
+        Self {
+            config,
+            ctx,
+            emitter,
+            start_emitted: false,
+            provider_launched: false,
+            terminal_emitted: false,
+        }
+    }
+
+    /// Emit the `Start` signal (idempotent — only emits on the first call).
+    pub fn emit_start_once(&mut self) {
+        if !self.start_emitted {
+            self.emit_signal(LifecycleSignal::Start);
+            self.start_emitted = true;
+        }
+    }
+
+    /// Record that the provider child process has actually been spawned.
+    ///
+    /// Call this **after** `execute_harness_attempt` returns `Ok`, not before.
+    pub fn mark_provider_launched(&mut self) {
+        self.provider_launched = true;
+    }
+
+    /// Emit a specific terminal signal and suppress the Drop safety-net.
+    pub fn emit_terminal(&mut self, signal: LifecycleSignal) {
+        self.emit_signal(signal);
+        self.terminal_emitted = true;
+    }
+
+    /// Emit `Blocked` (pre-launch) or `Failure` (post-launch) and return
+    /// the original error unchanged. Convenient for wrapping `?` returns.
+    pub fn emit_blocked_or_err(&mut self, err: eyre::Report) -> eyre::Report {
+        self.emit_blocked_or_failure();
+        err
+    }
+
+    /// Emit `Blocked` (pre-launch) or `Failure` (post-launch) and suppress
+    /// the Drop safety-net.
+    pub fn emit_blocked_or_failure(&mut self) {
+        let signal = if self.provider_launched {
+            LifecycleSignal::Failure
+        } else {
+            LifecycleSignal::Blocked
+        };
+        self.emit_signal(signal);
+        self.terminal_emitted = true;
+    }
+
+    /// Suppress the Drop emission without emitting any signal.
+    ///
+    /// Use when transferring lifecycle responsibility elsewhere.
+    pub fn defuse(&mut self) {
+        self.terminal_emitted = true;
+    }
+
+    /// Whether `Start` has been emitted.
+    pub fn start_emitted(&self) -> bool {
+        self.start_emitted
+    }
+
+    /// Whether the provider child has actually been spawned.
+    pub fn provider_launched(&self) -> bool {
+        self.provider_launched
+    }
+
+    /// Emit a single lifecycle signal through the injected emitter.
+    fn emit_signal(&self, signal: LifecycleSignal) {
+        let Some(notification) = self.config.get(signal) else {
+            return;
+        };
+
+        // --- Non-audio fan-out (immediate) ---
+        if let Some(stderr_text) = &notification.stderr {
+            self.emitter
+                .emit_stderr(signal, stderr_text, self.ctx.term);
+        }
+        if let Some(message_text) = &notification.message {
+            self.emitter.emit_message(
+                message_text,
+                self.ctx.source_path,
+                self.ctx.repo_root,
+                self.ctx.messaging,
+            );
+        }
+
+        // --- Audio phases (sequential, blocking, lazy TTS config) ---
+        let phases = audio_phases(notification);
+        let mut tts_config: Option<TtsConfig> = None;
+
+        for phase in phases {
+            match phase {
+                AudioPhase::Speak(text) => {
+                    let config = tts_config
+                        .get_or_insert_with(|| {
+                            tts_config_from_settings(self.ctx.settings.tts.as_ref())
+                        })
+                        .clone();
+                    self.emitter.emit_speech(&text, config);
+                }
+                AudioPhase::Effect(name) => self.emitter.emit_effect(&name),
+            }
+        }
+    }
+}
+
+impl Drop for LifecycleRunGuard<'_> {
+    fn drop(&mut self) {
+        if self.start_emitted && !self.terminal_emitted {
+            let signal = if self.provider_launched {
+                LifecycleSignal::Failure
+            } else {
+                LifecycleSignal::Blocked
+            };
+            self.emit_signal(signal);
+        }
+    }
 }
 
 /// Runtime context required for emitting lifecycle notifications.
@@ -411,6 +626,9 @@ fn speak_blocking(text: &str, config: TtsConfig) {
 /// Dispatches non-audio targets (stderr, message) immediately, then
 /// plays audio phases in order. All errors are logged as warnings and
 /// never propagated.
+///
+/// Prefer [`LifecycleRunGuard`] for new code — it uses this same
+/// emission logic but adds mechanical state-transition enforcement.
 pub fn emit_lifecycle_signal(
     config: &LifecycleConfig,
     signal: LifecycleSignal,
@@ -442,14 +660,19 @@ pub fn emit_lifecycle_signal(
         );
     }
 
-    // --- Audio phases (sequential, blocking) ---
+    // --- Audio phases (sequential, blocking, lazy TTS config) ---
 
     let phases = audio_phases(notification);
-    let tts_config = tts_config_from_settings(ctx.settings.tts.as_ref());
+    let mut tts_config: Option<TtsConfig> = None;
 
     for phase in phases {
         match phase {
-            AudioPhase::Speak(text) => speak_blocking(&text, tts_config.clone()),
+            AudioPhase::Speak(text) => {
+                let config = tts_config
+                    .get_or_insert_with(|| tts_config_from_settings(ctx.settings.tts.as_ref()))
+                    .clone();
+                speak_blocking(&text, config);
+            }
             AudioPhase::Effect(name) => play_effect_blocking(&name),
         }
     }
