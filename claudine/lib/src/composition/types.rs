@@ -193,3 +193,239 @@ pub struct CompositionExecutionRequest {
     /// Suppress all preflight output.
     pub silent: bool,
 }
+
+/// Describes where the sequence definition was found.
+#[derive(Debug, Clone)]
+pub enum SequenceSource {
+    /// The sequence was defined inline in the document's frontmatter.
+    Inline,
+    /// The sequence was loaded from an external YAML file.
+    External { path: PathBuf },
+}
+
+/// A single step in a sequence.
+#[derive(Debug, Clone)]
+pub struct SequenceStep {
+    /// Zero-based index in the sequence list.
+    pub index: usize,
+    /// Display name for the step (scalar value or the `name` field of an object).
+    pub name: String,
+    /// The full state value: a JSON string for scalar steps, a JSON object for object steps.
+    pub raw_state: serde_json::Value,
+}
+
+/// A validated, normalized sequence plan ready for execution.
+#[derive(Debug, Clone)]
+pub struct SequencePlan {
+    /// Where the sequence definition came from.
+    pub source: SequenceSource,
+    /// Ordered list of steps.
+    pub steps: Vec<SequenceStep>,
+    /// The document's `fail_fast` setting (defaults to `true`).
+    pub document_fail_fast: bool,
+}
+
+/// Per-step overlay values injected into each composition run.
+#[derive(Debug, Clone)]
+pub struct SequenceStepOverlay {
+    /// Current step's state value.
+    pub state: serde_json::Value,
+    /// Previous step's state value, or `null` for the first step.
+    pub previous_state: serde_json::Value,
+    /// Next step's state value, or `null` for the last step.
+    pub next_state: serde_json::Value,
+    /// `true` if this is the first step.
+    pub is_first: bool,
+    /// `true` if this is the last step.
+    pub is_last: bool,
+    /// 1-based step number.
+    pub step: usize,
+    /// Total number of steps in the sequence.
+    pub total_steps: usize,
+}
+
+impl SequenceStepOverlay {
+    /// Reserved overlay keys that must always win over user `--set` values.
+    pub const RESERVED_KEYS: &[&str] = &[
+        "state",
+        "previous_state",
+        "next_state",
+        "is_first",
+        "is_last",
+        "step",
+        "total_steps",
+    ];
+
+    /// Build a `serde_json::Value::Object` suitable for `set_overrides`.
+    ///
+    /// Merge order: user `--set` first, then overlay (overlay wins on conflict).
+    pub fn as_set_overrides(&self, user_set: Option<serde_json::Value>) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+
+        // 1. Start with user --set values
+        if let Some(serde_json::Value::Object(user_map)) = user_set {
+            for (key, value) in user_map {
+                map.insert(key, value);
+            }
+        }
+
+        // 2. Overlay reserved keys (always win)
+        map.insert("state".into(), self.state.clone());
+        map.insert("previous_state".into(), self.previous_state.clone());
+        map.insert("next_state".into(), self.next_state.clone());
+        map.insert("is_first".into(), serde_json::Value::Bool(self.is_first));
+        map.insert("is_last".into(), serde_json::Value::Bool(self.is_last));
+        map.insert(
+            "step".into(),
+            serde_json::Value::Number(self.step.into()),
+        );
+        map.insert(
+            "total_steps".into(),
+            serde_json::Value::Number(self.total_steps.into()),
+        );
+
+        serde_json::Value::Object(map)
+    }
+}
+
+/// Options for sequence execution at the CLI level.
+#[derive(Debug, Clone)]
+pub struct SequenceExecutionOptions {
+    /// CLI `--fail-fast` override. `None` means use the document default.
+    pub fail_fast_override: Option<bool>,
+}
+
+/// Summary of a completed sequence run.
+#[derive(Debug, Clone)]
+pub struct SequenceRunSummary {
+    /// Total steps in the sequence.
+    pub total_steps: usize,
+    /// Number of steps that succeeded.
+    pub succeeded: usize,
+    /// Number of steps that failed.
+    pub failed: usize,
+    /// Per-step results.
+    pub steps: Vec<SequenceStepResult>,
+}
+
+/// Result of a single sequence step.
+#[derive(Debug, Clone)]
+pub struct SequenceStepResult {
+    /// 1-based step number.
+    pub step: usize,
+    /// Display name of the step.
+    pub name: String,
+    /// Whether the step succeeded (exit code 0).
+    pub success: bool,
+    /// Error message if the step failed.
+    pub error: Option<String>,
+    /// Wall-clock duration of the step.
+    pub duration: std::time::Duration,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn sequence_step_overlay_first_step() {
+        let overlay = SequenceStepOverlay {
+            state: json!("one"),
+            previous_state: serde_json::Value::Null,
+            next_state: json!("two"),
+            is_first: true,
+            is_last: false,
+            step: 1,
+            total_steps: 3,
+        };
+        assert!(overlay.is_first);
+        assert!(!overlay.is_last);
+        assert_eq!(overlay.step, 1);
+        assert_eq!(overlay.total_steps, 3);
+        assert!(overlay.previous_state.is_null());
+    }
+
+    #[test]
+    fn sequence_step_overlay_last_step() {
+        let overlay = SequenceStepOverlay {
+            state: json!("three"),
+            previous_state: json!("two"),
+            next_state: serde_json::Value::Null,
+            is_first: false,
+            is_last: true,
+            step: 3,
+            total_steps: 3,
+        };
+        assert!(!overlay.is_first);
+        assert!(overlay.is_last);
+        assert_eq!(overlay.step, 3);
+        assert!(overlay.next_state.is_null());
+    }
+
+    #[test]
+    fn sequence_step_overlay_as_overrides_reserves_keys() {
+        let overlay = SequenceStepOverlay {
+            state: json!("one"),
+            previous_state: serde_json::Value::Null,
+            next_state: json!("two"),
+            is_first: true,
+            is_last: false,
+            step: 1,
+            total_steps: 3,
+        };
+        let overrides = overlay.as_set_overrides(None);
+        let obj = overrides.as_object().unwrap();
+        assert_eq!(obj.get("state"), Some(&json!("one")));
+        assert_eq!(obj.get("is_first"), Some(&json!(true)));
+        assert_eq!(obj.get("is_last"), Some(&json!(false)));
+        assert_eq!(obj.get("step"), Some(&json!(1)));
+        assert_eq!(obj.get("total_steps"), Some(&json!(3)));
+        assert!(obj.get("previous_state").unwrap().is_null());
+        assert_eq!(obj.get("next_state"), Some(&json!("two")));
+    }
+
+    #[test]
+    fn sequence_step_overlay_merges_user_set_but_reserved_wins() {
+        let overlay = SequenceStepOverlay {
+            state: json!("one"),
+            previous_state: serde_json::Value::Null,
+            next_state: json!("two"),
+            is_first: true,
+            is_last: false,
+            step: 1,
+            total_steps: 3,
+        };
+        let user_set = json!({
+            "color": "red",
+            "state": "should-be-overridden",
+            "step": 99
+        });
+        let overrides = overlay.as_set_overrides(Some(user_set));
+        let obj = overrides.as_object().unwrap();
+        // User key preserved
+        assert_eq!(obj.get("color"), Some(&json!("red")));
+        // Reserved keys overwritten by overlay
+        assert_eq!(obj.get("state"), Some(&json!("one")));
+        assert_eq!(obj.get("step"), Some(&json!(1)));
+    }
+
+    #[test]
+    fn sequence_plan_display_source() {
+        let plan = SequencePlan {
+            source: SequenceSource::Inline,
+            steps: vec![],
+            document_fail_fast: true,
+        };
+        assert!(matches!(plan.source, SequenceSource::Inline));
+
+        let plan2 = SequencePlan {
+            source: SequenceSource::External {
+                path: std::path::PathBuf::from("data.yaml"),
+            },
+            steps: vec![],
+            document_fail_fast: false,
+        };
+        assert!(!plan2.document_fail_fast);
+    }
+}
