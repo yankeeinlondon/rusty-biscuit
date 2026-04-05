@@ -1,14 +1,14 @@
 ---
 name: claudine
 description: Details on the Claudine library and CLI, including deep research into Agentic CLI platforms such as Claude Code, Codex CLI, Goose, Opencode CLI, and all other Agentic CLI's supported by the Claudine library.
-last_updated: 2026-03-30
+last_updated: 2026-04-05
 ---
 
 ## Claudine Library
 
-Claudine is a universal event handler, skill linker, and MCP catalog manager for agentic CLIs. It normalizes 16 lifecycle events across 8 providers (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code) into a single configuration model, executes 6 action types -- TTS, sound effects, logging, shell commands, reports, and blocking calls -- when those events fire, synchronizes skills/commands/agents/scripts between providers, and manages provider-agnostic MCP storage plus provider-specific import/sync/runtime behavior.
+Claudine is a universal event handler, shared-resource linker, MCP catalog manager, and composition harness for agentic CLIs. It normalizes 16 lifecycle events across 8 providers (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code) into a single configuration model, executes 6 action types -- TTS, sound effects, logging, shell commands, reports, and blocking calls -- when those events fire, synchronizes skills/commands/agents/scripts between providers, manages provider-agnostic MCP storage plus provider-specific import/sync/runtime behavior, and provides three Markdown composition commands (`compose`, `inline-compose`, `sequence`) that flow through the same wrapper-grade execution pipeline as the provider wrappers.
 
-The library is organized into fifteen modules plus the shared error type: `actions` (hook action types and responses), `adapters` (provider-specific event parsers), `agents` (capability catalog for all 8 CLIs), `badges` (styled terminal badge constants), `composition` (markdown frontmatter composition for inline and chained prompt pipelines), `config` (agent detection, hook registration, atomic writes, backups), `dispatch` (event processing pipeline), `events` (the normalized 16-event lifecycle model), `harness` (typed pre/post validations, timeouts, handler resolution, shell policy adapter, and recovery actions for composed prompt pipelines), `linking` (cross-provider skill synchronization with portability classification), `mcp` (catalog, defaults, provider-state, import/export, session composition, runtime injectors), `permissions` (provider-agnostic policy engine for permission queries and mutation planning), `reporting` (JSONL-to-SQLite metrics index), `services` (cross-provider runtime policy services such as ProtectService), and `stream` (structured stream parsing for 6 providers with summary/reporting).
+The library is organized into seventeen modules plus the shared error type: `actions` (hook action types and responses), `adapters` (provider-specific event parsers), `agents` (capability catalog for all 8 CLIs), `badges` (styled terminal badge constants), `composition` (markdown frontmatter composition for direct, inline, and sequence prompt pipelines with lifecycle emitters, preflight shell approval, and closure write-back), `config` (agent detection, hook registration, atomic writes, backups), `dispatch` (event processing pipeline), `events` (the normalized 16-event lifecycle model), `harness` (typed pre/post validations, timeouts, handler resolution, shell policy adapter, and recovery actions for composed prompt pipelines), `linking` (cross-provider skill/command/agent/script synchronization with portability classification), `mcp` (catalog, defaults, provider-state, import/export, session composition, runtime injectors), `messaging` (outbound messaging routes for Discord/Slack/Signal/WhatsApp with secret and recipient resolution), `permissions` (provider-agnostic policy engine for permission queries, canonical modeling, and mutation planning), `reporting` (JSONL-to-SQLite metrics index), `services` (cross-provider runtime policy services such as ProtectService), `stream` (structured stream parsing for 6 providers with summary/reporting), and `system_prompt` (system prompt discovery, CLI switch resolution, and wrapper preparation).
 
 The dispatch pipeline supports a Handlebars-style template engine with 28 variables across 5 categories (event, OS, hardware, git, and project), shell environment variable interpolation with optional defaults, and precompiled regex matchers for event filtering. Configuration merges user-scope and repo-scope configs with an intentionally asymmetric strategy: repo provider configs fully replace user-level configs, while global settings merge field-by-field.
 
@@ -20,33 +20,66 @@ The dispatch pipeline supports a Handlebars-style template engine with 28 variab
 - [PolicyEngine](policy-engine.md)
 - [Validations and Handlers](validations-and-handlers.md)
 
+For deeper topic references in the repo (not duplicated here), see:
+
+- [Composition](../../../claudine/docs/topics/composition.md) — `compose`, `inline-compose`, `sequence`, harness validations, handlers, provider selection
+- [System Prompt](../../../claudine/docs/topics/system-prompt.md) — discovery, CLI switches, `system-prompt.md` conventions
+- [MCP Catalog](../../../claudine/docs/topics/mcp-catalog.md) and [MCP Mode](../../../claudine/docs/topics/mcp-mode.md)
+- [Traces and Logging](../../../claudine/docs/topics/traces-and-logging.md), [Log Reporting](../../../claudine/docs/topics/log-reporting.md)
+
 
 ## Claudine CLI
 
-The `claudine` binary provides interactive setup, hook inspection, event handling, skill linking, MCP management, log reporting, and provider wrapping for agentic CLIs. It includes an `init` wizard that walks through 4 phases (agent discovery, provider preferences, action defaults, and write & register), with a `--quick` flag for sensible defaults and a `--repo` flag for project-scoped configuration. All user-facing output flows through a structured logging system that separates pipeable data (stdout) from status messages (stderr), with rich formatting via biscuit-terminal components including tables, prose markup, and OSC8 hyperlinks.
+The `claudine` binary provides interactive setup, hook inspection, event handling, shared-resource management (skills/commands/agents), MCP management, log reporting, provider wrapping, and Markdown composition pipelines for agentic CLIs. It includes an `init` wizard that walks through 4 phases (agent discovery, provider preferences, action defaults, and write & register), with a `--quick` flag for sensible defaults and a `--repo` flag for project-scoped configuration. All user-facing output flows through a structured logging system that separates pipeable data (stdout) from status messages (stderr), with rich formatting via biscuit-terminal components including tables, prose markup, and OSC8 hyperlinks.
 
-The CLI uses fuzzy provider matching (exact, prefix, and contains resolution) so users can type shorthand like `cl` for `claude`. The `dry-run` command accepts event names in multiple formats (canonical snake_case, native provider names, PascalCase, and kebab-case) and generates realistic mock payloads when no stdin is provided, making it easy to test hook configurations without triggering real events.
+The CLI uses fuzzy provider matching (exact, prefix, and contains resolution) so users can type shorthand like `cl` for `claude`. The `handle` command accepts event names in multiple formats (canonical snake_case, native provider names, PascalCase, and kebab-case) and is normally invoked from hook registrations wired up by `claudine init`.
+
+**Shared Resources**
 
 | Command | Description |
 |---------|-------------|
-| `claudine init [--quick] [--repo]` | Interactive setup wizard (or quick defaults) |
+| `claudine skills` | List available skills across providers and show link/sync state |
+| `claudine commands` | List slash commands across providers and show link/sync state |
+| `claudine agents` | List agent/subagent definitions across providers and show link/sync state |
+| `claudine mcp [list\|init\|show\|default\|alias\|remove\|sync] [--json]` | Manage the normalized MCP catalog, defaults, validation, refresh, and sync state |
+
+**Hook Events and Actions**
+
+| Command | Description |
+|---------|-------------|
 | `claudine hooks [provider]` | Show registered hooks for all or one provider |
 | `claudine hooks --support` | Provider event support matrix |
 | `claudine hooks --mapping` | Native event name mappings per provider |
 | `claudine hooks --describe` | Event descriptions and payload schemas |
 | `claudine hooks --variables` | Template variables with current values |
-| `claudine link [provider] [--scope <user\|repo>] [--apply] [--filter] [--detailed]` | Analyze resource link states and optionally fix auto-repairable issues |
-| `claudine link --support` | Provider resource support matrix |
-| `claudine mcp [list\|init\|add\|config\|default\|alias\|remove\|check\|sync\|export] [--json]` | Manage the normalized MCP catalog, defaults, validation, refresh, and export state |
-| `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|sync]` | Reporting and sync for Claudine JSONL logs |
-| `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
+| `claudine actions` | Show which actions are configured and for which events |
+| `claudine handle <event> [--provider]` | Process event from stdin (hidden; called by hook registrations) |
+
+**Wrapped Execution**
+
+| Command | Description |
+|---------|-------------|
+| `claudine claude\|codex\|gemini\|goose\|kimi\|opencode\|qwen` | Wrap a provider CLI with preflight checks, env sanitization, system prompt resolution, MCP injection, and structured streaming |
+
+**Composition**
+
+| Command | Description |
+|---------|-------------|
+| `claudine compose <file>` | Compose a Markdown file and send the result as a prompt (no file mutation) |
+| `claudine inline-compose <file>` | Use frontmatter `prompt` to generate content and replace the body; preserves frontmatter and updates `last_updated` |
+| `claudine sequence <file>` | Run a serial sequence of composition steps with shared shell approval cache and `FAIL_FAST` propagation |
+
+**Administration**
+
+| Command | Description |
+|---------|-------------|
+| `claudine init [--quick] [--repo]` | Interactive setup wizard (or quick defaults) |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
-| `claudine handle <event> [--provider]` | Process event from stdin (called by hooks) |
-| `claudine dry-run <event> [--provider]` | Test event handling without side effects |
-| `claudine about` | Rich help documentation |
-| `claudine claude\|codex\|gemini\|...` | Wrap a provider CLI with preflight checks, env sanitization, and structured streaming |
-| `claudine completions <shell>` | Generate shell completions |
 | `claudine uninstall [--keep-config]` | Remove hooks from all agents |
+| `claudine providers` | Provider capability matrix (skill/slash/agent/hooks) |
+| `claudine logs [today\|week\|month\|sessions\|tools\|errors\|repos\|trends\|sync]` | Reporting and sync for Claudine JSONL logs |
+| `claudine completions <shell>` | Generate shell completions |
+| `claudine` *(no subcommand)* | Render rich grouped help (replaces retired `about` command) |
 
 ## MCP Support
 
