@@ -40,10 +40,11 @@ pub fn render_toc_links(
 mod tests {
     use super::*;
     use crate::markdown::compose::toc_linking::types::CleanupService;
+    use crate::markdown::normalize::HeadingLevel;
     use crate::markdown::toc::MarkdownTocNode;
 
     fn make_heading(level: u8, title: &str, slug: &str) -> MarkdownTocNode {
-        MarkdownTocNode::new(level, title.to_string(), slug.to_string(), (0, 0), (0, 0))
+        MarkdownTocNode::new(HeadingLevel::new(level).unwrap(), title.to_string(), slug.to_string(), (0, 0), (0, 0))
     }
 
     fn default_filter() -> HeadingFilter {
@@ -71,7 +72,7 @@ mod tests {
         let headings: Vec<&MarkdownTocNode> = vec![&h2, &h3];
 
         let mut options = TocLinkingOptions::default();
-        options.levels.levels.insert(2);
+        options.levels.levels.insert(HeadingLevel::H2);
 
         let result = render_toc_links(&headings, "./doc.md", &options, &default_filter());
         assert_eq!(result, "- [Section](./doc.md#section)");

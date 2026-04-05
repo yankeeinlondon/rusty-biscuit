@@ -287,11 +287,8 @@ impl Toml {
         Ok(yaml_value)
     }
 
-    /// Convert to a `serde_yaml_ng::Value`.
-    #[cfg(not(feature = "yaml"))]
-    pub fn as_yaml_value(&self) -> Result<(), TomlError> {
-        Err(TomlError::YamlFeatureDisabled)
-    }
+    // When yaml is disabled, as_yaml_value() is not provided.
+    // This matches the pattern used by Json5 for disabled features.
 
     /// Validate the TOML document.
     ///
@@ -783,6 +780,15 @@ name = "test"
 
         let yaml_value = toml.as_yaml_value().unwrap();
         assert!(yaml_value.is_mapping());
+    }
+
+    #[cfg(feature = "yaml")]
+    #[test]
+    fn as_yaml_value_returns_yaml_value_type() {
+        let toml = Toml::from_str("[foo]\nbar = 1").unwrap();
+        let result = toml.as_yaml_value();
+        assert!(result.is_ok());
+        let _val: serde_yaml_ng::Value = result.unwrap();
     }
 
     #[cfg(feature = "yaml")]

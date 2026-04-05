@@ -124,6 +124,19 @@ enum InputFormat {
     Pdf,
 }
 
+impl From<InputFormat> for FileType {
+    fn from(fmt: InputFormat) -> Self {
+        match fmt {
+            InputFormat::Toml => FileType::Toml,
+            InputFormat::Yaml => FileType::Yaml,
+            InputFormat::Json => FileType::Json,
+            InputFormat::Json5 => FileType::Json5,
+            InputFormat::Markdown => FileType::Markdown,
+            InputFormat::Pdf => FileType::Pdf,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// Resolve a file reference to its filesystem path
@@ -191,14 +204,7 @@ fn main() -> Result<()> {
 
     // Detect input format
     let input_format = if let Some(fmt) = cli.input_format {
-        match fmt {
-            InputFormat::Toml => FileType::Toml,
-            InputFormat::Yaml => FileType::Yaml,
-            InputFormat::Json => FileType::Json,
-            InputFormat::Json5 => FileType::Json5,
-            InputFormat::Markdown => FileType::Markdown,
-            InputFormat::Pdf => FileType::Pdf,
-        }
+        FileType::from(fmt)
     } else if from_stdin {
         bail!("--input-format is required when reading from STDIN");
     } else {
@@ -224,12 +230,23 @@ fn main() -> Result<()> {
         std::fs::read(cli.file.as_ref().unwrap()).wrap_err("Failed to read input file")?
     };
 
+    // Validate UTF-8 upfront for text-based formats
+    let text_content = match input_format {
+        FileType::Toml | FileType::Json5 | FileType::Markdown => {
+            Some(
+                std::str::from_utf8(&content)
+                    .wrap_err(format!("{input_format:?} input is not valid UTF-8"))?,
+            )
+        }
+        _ => None,
+    };
+
     match input_format {
-        FileType::Toml => process_toml(&content, format, compact)?,
+        FileType::Toml => process_toml(text_content.unwrap(), format, compact)?,
         FileType::Yaml => process_yaml(&content, format, compact)?,
         FileType::Json => process_json(&content, format, compact)?,
-        FileType::Json5 => process_json5(&content, format, compact)?,
-        FileType::Markdown => process_markdown(&content, format, compact)?,
+        FileType::Json5 => process_json5(text_content.unwrap(), format, compact)?,
+        FileType::Markdown => process_markdown(text_content.unwrap(), format, compact)?,
         FileType::Pdf => process_pdf(&content, format, compact)?,
         FileType::Unknown => {
             bail!(
@@ -310,128 +327,87 @@ fn format_json5(value: &serde_json::Value, compact: bool) -> String {
     }
 }
 
-/// Process TOML content.
-fn process_toml(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
-    let input = std::str::from_utf8(content).wrap_err("TOML input is not valid UTF-8")?;
-    let toml = Toml::from_str(input).wrap_err("Failed to parse TOML")?;
-
+/// Emit a structured value in the requested output format.
+fn emit_structured(
+    json_value: &serde_json::Value,
+    format: Option<OutputFormat>,
+    compact: bool,
+) -> Result<()> {
     let output = match format.unwrap_or(OutputFormat::Json) {
-        OutputFormat::Json => {
-            let json_value = toml.as_json_value().wrap_err("Failed to convert to JSON")?;
-            format_json(&json_value, compact)?
-        }
-        OutputFormat::Json5 => {
-            let json_value = toml.as_json_value().wrap_err("Failed to convert to JSON")?;
-            format_json5(&json_value, compact)
-        }
-        OutputFormat::Yaml => toml.as_yaml().wrap_err("Failed to convert to YAML")?,
-        OutputFormat::Toml => toml.raw().to_string(),
-        OutputFormat::Text | OutputFormat::Markdown => {
-            bail!("--text and --md are only supported for PDF files");
-        }
-    };
-
-    println!("{output}");
-    Ok(())
-}
-
-/// Process YAML content.
-fn process_yaml(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
-    let yaml = Yaml::from_bytes(content).wrap_err("Failed to parse YAML")?;
-
-    let output = match format.unwrap_or(OutputFormat::Json) {
-        OutputFormat::Json => {
-            let value = yaml.as_json().wrap_err("Failed to convert to JSON")?;
-            format_json(&value, compact)?
-        }
-        OutputFormat::Json5 => {
-            let value = yaml.as_json().wrap_err("Failed to convert to JSON")?;
-            format_json5(&value, compact)
-        }
+        OutputFormat::Json => format_json(json_value, compact)?,
+        OutputFormat::Json5 => format_json5(json_value, compact),
         OutputFormat::Yaml => {
-            serde_yaml_ng::to_string(yaml.value()).wrap_err("Failed to serialize YAML")?
+            serde_yaml_ng::to_string(json_value).wrap_err("Failed to convert to YAML")?
         }
         OutputFormat::Toml => {
-            let toml_value = yaml.as_toml().wrap_err("Failed to convert to TOML")?;
+            let toml_value: toml::Value = serde_json::from_value(
+                serde_json::to_value(json_value).wrap_err("Failed to convert JSON value")?,
+            )
+            .wrap_err("Failed to convert to TOML (input may contain types unsupported by TOML)")?;
             toml::to_string_pretty(&toml_value).wrap_err("Failed to serialize TOML")?
         }
         OutputFormat::Text | OutputFormat::Markdown => {
             bail!("--text and --md are only supported for PDF files");
         }
     };
-
     println!("{output}");
     Ok(())
+}
+
+/// Process TOML content.
+fn process_toml(input: &str, format: Option<OutputFormat>, compact: bool) -> Result<()> {
+    let toml = Toml::from_str(input).wrap_err("Failed to parse TOML")?;
+    if matches!(format, Some(OutputFormat::Toml)) {
+        println!("{}", toml.raw());
+        return Ok(());
+    }
+    let json_value = toml.as_json_value().wrap_err("Failed to convert to JSON")?;
+    emit_structured(&json_value, format, compact)
+}
+
+/// Process YAML content.
+fn process_yaml(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
+    let yaml = Yaml::from_bytes(content).wrap_err("Failed to parse YAML")?;
+    if matches!(format, Some(OutputFormat::Yaml)) {
+        let output =
+            serde_yaml_ng::to_string(yaml.value()).wrap_err("Failed to serialize YAML")?;
+        println!("{output}");
+        return Ok(());
+    }
+    let json_value = yaml.as_json().wrap_err("Failed to convert to JSON")?;
+    emit_structured(&json_value, format, compact)
 }
 
 /// Process JSON content.
 fn process_json(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
     let value: serde_json::Value =
         serde_json::from_slice(content).wrap_err("Failed to parse JSON")?;
-
-    let output = match format.unwrap_or(OutputFormat::Json) {
-        OutputFormat::Json => format_json(&value, compact)?,
-        OutputFormat::Json5 => format_json5(&value, compact),
-        OutputFormat::Yaml => {
-            serde_yaml_ng::to_string(&value).wrap_err("Failed to convert to YAML")?
-        }
-        OutputFormat::Toml => {
-            let toml_value: toml::Value = serde_json::from_value(
-                serde_json::to_value(&value).wrap_err("Failed to convert JSON value")?,
-            )
-            .wrap_err("Failed to convert to TOML (JSON may contain types unsupported by TOML)")?;
-            toml::to_string_pretty(&toml_value).wrap_err("Failed to serialize TOML")?
-        }
-        OutputFormat::Text | OutputFormat::Markdown => {
-            bail!("--text and --md are only supported for PDF files");
-        }
-    };
-
-    println!("{output}");
-    Ok(())
+    emit_structured(&value, format, compact)
 }
 
 /// Process JSON5 content.
-fn process_json5(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
-    let input = std::str::from_utf8(content).wrap_err("JSON5 input is not valid UTF-8")?;
+fn process_json5(input: &str, format: Option<OutputFormat>, compact: bool) -> Result<()> {
     let json5 = Json5::from_str(input).wrap_err("Failed to parse JSON5")?;
-
-    let output = match format.unwrap_or(OutputFormat::Json) {
-        OutputFormat::Json => {
-            if compact {
-                json5
-                    .as_json_compact()
-                    .wrap_err("Failed to convert to JSON")?
-            } else {
-                json5.as_json().wrap_err("Failed to convert to JSON")?
-            }
-        }
-        OutputFormat::Json5 => {
-            if compact {
-                json5.as_json5_compact()
-            } else {
-                json5.as_json5()
-            }
-        }
-        OutputFormat::Yaml => json5.as_yaml().wrap_err("Failed to convert to YAML")?,
-        OutputFormat::Toml => json5.as_toml().wrap_err("Failed to convert to TOML")?,
-        OutputFormat::Text | OutputFormat::Markdown => {
-            bail!("--text and --md are only supported for PDF files");
-        }
-    };
-
-    println!("{output}");
-    Ok(())
+    if matches!(format, Some(OutputFormat::Json5)) {
+        let output = if compact {
+            json5.as_json5_compact()
+        } else {
+            json5.as_json5()
+        };
+        println!("{output}");
+        return Ok(());
+    }
+    let json_value = json5.as_json_value().clone();
+    emit_structured(&json_value, format, compact)
 }
 
 /// Process Markdown content by extracting frontmatter and converting it.
-fn process_markdown(content: &[u8], format: Option<OutputFormat>, compact: bool) -> Result<()> {
-    let input = std::str::from_utf8(content).wrap_err("Markdown input is not valid UTF-8")?;
+fn process_markdown(input: &str, format: Option<OutputFormat>, compact: bool) -> Result<()> {
     let (frontmatter, fm_format) = extract_frontmatter(input)?;
 
     match fm_format {
         FrontmatterFormat::Yaml => process_yaml(frontmatter.as_bytes(), format, compact),
-        FrontmatterFormat::Toml => process_toml(frontmatter.as_bytes(), format, compact),
+        FrontmatterFormat::Toml => process_toml(frontmatter, format, compact),
     }
 }
 
@@ -503,4 +479,86 @@ fn process_pdf(content: &[u8], format: Option<OutputFormat>, _compact: bool) -> 
 
     println!("{output}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── extract_frontmatter tests ──────────────────────────────────
+
+    #[test]
+    fn extract_yaml_frontmatter() {
+        let input = "---\ntitle: Hello\n---\nBody text";
+        let (fm, fmt) = extract_frontmatter(input).unwrap();
+        assert!(matches!(fmt, FrontmatterFormat::Yaml));
+        assert_eq!(fm.trim(), "title: Hello");
+    }
+
+    #[test]
+    fn extract_toml_frontmatter() {
+        let input = "+++\ntitle = \"Hello\"\n+++\nBody text";
+        let (fm, fmt) = extract_frontmatter(input).unwrap();
+        assert!(matches!(fmt, FrontmatterFormat::Toml));
+        assert_eq!(fm.trim(), "title = \"Hello\"");
+    }
+
+    #[test]
+    fn extract_empty_frontmatter() {
+        let input = "---\n---\nBody text";
+        let (fm, _fmt) = extract_frontmatter(input).unwrap();
+        assert!(fm.is_empty() || fm.chars().all(|c| c.is_whitespace()));
+    }
+
+    #[test]
+    fn extract_frontmatter_with_blank_lines() {
+        let input = "---\ntitle: Hello\n\nauthor: World\n---\nBody";
+        let (fm, _fmt) = extract_frontmatter(input).unwrap();
+        assert!(fm.contains("title: Hello"));
+        assert!(fm.contains("author: World"));
+    }
+
+    #[test]
+    fn extract_frontmatter_triple_dash_in_body() {
+        let input = "---\ntitle: Hello\n---\nBody with --- dashes";
+        let (fm, _fmt) = extract_frontmatter(input).unwrap();
+        assert_eq!(fm.trim(), "title: Hello");
+    }
+
+    #[test]
+    fn extract_frontmatter_leading_whitespace() {
+        let input = "  ---\ntitle: Hello\n---\nBody";
+        let (fm, _fmt) = extract_frontmatter(input).unwrap();
+        assert_eq!(fm.trim(), "title: Hello");
+    }
+
+    #[test]
+    fn extract_frontmatter_no_frontmatter() {
+        let input = "Just a regular markdown document";
+        let result = extract_frontmatter(input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_frontmatter_unclosed() {
+        let input = "---\ntitle: Hello\nNo closing delimiter";
+        let result = extract_frontmatter(input);
+        assert!(result.is_err());
+    }
+
+    // ── format helper tests ────────────────────────────────────────
+
+    #[test]
+    fn format_json_compact_output() {
+        let value = serde_json::json!({"a": 1, "b": 2});
+        let result = format_json(&value, true).unwrap();
+        assert!(!result.contains('\n'));
+    }
+
+    #[test]
+    fn format_json_pretty_output() {
+        let value = serde_json::json!({"a": 1});
+        let result = format_json(&value, false).unwrap();
+        assert!(result.contains('\n'));
+    }
 }

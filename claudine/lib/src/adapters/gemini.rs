@@ -1,16 +1,16 @@
-use std::collections::HashMap;
-
-use chrono::Utc;
 use serde_json::{Value, json};
 
 use crate::actions::{HookDecision, HookResponse};
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::events::{AgenticEvent, EventMeta, Provider};
 use crate::permissions::query::{CommandQuery, DomainQuery, PathQuery};
 use crate::services::ProtectObservation;
 use crate::services::protect::intent::ProtectIntent;
 use crate::services::protect::observe::default_observe_protect;
 
-use super::{AdapterError, ProviderAdapter};
+use super::{
+    AdapterError, ProviderAdapter, extract_tool_input_path, replace_intents_preserving_completion,
+    str_field,
+};
 
 pub(crate) struct GeminiAdapter;
 
@@ -28,31 +28,25 @@ impl ProviderAdapter for GeminiAdapter {
             .ok_or(AdapterError::MissingField("hook_event_name"))?;
 
         let event = map_event(event_name)?;
-        let mut meta = EventMeta {
-            provider: Provider::Gemini,
-            event,
-            timestamp: Utc::now(),
-            session_id: str_field(raw, "session_id"),
-            cwd: str_field(raw, "cwd"),
-            tool_name: str_field(raw, "tool_name").or_else(|| str_field(raw, "toolName")),
-            tool_input: raw.get("tool_input").cloned(),
-            tool_response: raw.get("tool_response").cloned(),
-            error: str_field(raw, "error"),
-            prompt: str_field(raw, "prompt"),
-            agent_type: str_field(raw, "agent_type"),
-            notification_type: raw
-                .get("notification")
-                .and_then(|value| value.get("type"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned),
-            notification_message: raw
-                .get("notification")
-                .and_then(|value| value.get("message"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned),
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
-        };
+        let mut meta = EventMeta::new(Provider::Gemini, event);
+        meta.session_id = str_field(raw, "session_id");
+        meta.cwd = str_field(raw, "cwd");
+        meta.tool_name = str_field(raw, "tool_name").or_else(|| str_field(raw, "toolName"));
+        meta.tool_input = raw.get("tool_input").cloned();
+        meta.tool_response = raw.get("tool_response").cloned();
+        meta.error = str_field(raw, "error");
+        meta.prompt = str_field(raw, "prompt");
+        meta.agent_type = str_field(raw, "agent_type");
+        meta.notification_type = raw
+            .get("notification")
+            .and_then(|value| value.get("type"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        meta.notification_message = raw
+            .get("notification")
+            .and_then(|value| value.get("message"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
 
         for key in [
             "llm_request",
@@ -96,12 +90,12 @@ impl ProviderAdapter for GeminiAdapter {
                     }
                 }
                 "write_file" | "edit_file" | "create_file" | "patch_file" => {
-                    if let Some(path) = tool_input_path(meta) {
+                    if let Some(path) = extract_tool_input_path(meta) {
                         intents.push(ProtectIntent::WritePath(PathQuery::file(&path)));
                     }
                 }
                 "read_file" | "list_directory" => {
-                    if let Some(path) = tool_input_path(meta) {
+                    if let Some(path) = extract_tool_input_path(meta) {
                         intents.push(ProtectIntent::ReadPath(PathQuery::unknown(&path)));
                     }
                 }
@@ -138,15 +132,7 @@ impl ProviderAdapter for GeminiAdapter {
         }
 
         if replaced {
-            // Preserve completion scan intent if present.
-            if obs
-                .intents
-                .iter()
-                .any(|i| matches!(i, ProtectIntent::CompletionOutputScan))
-            {
-                intents.push(ProtectIntent::CompletionOutputScan);
-            }
-            obs.intents = intents;
+            replace_intents_preserving_completion(&mut obs, intents);
         }
 
         Some(obs)
@@ -244,23 +230,6 @@ fn map_event(event_name: &str) -> Result<AgenticEvent, AdapterError> {
     Provider::Gemini
         .event_from_shared_native_name(event_name)
         .ok_or_else(|| AdapterError::UnknownEvent(event_name.to_string()))
-}
-
-fn str_field(raw: &Value, key: &str) -> Option<String> {
-    raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
-}
-
-fn tool_input_path(meta: &EventMeta) -> Option<String> {
-    meta.tool_input
-        .as_ref()
-        .and_then(|v| v.as_object())
-        .and_then(|map| {
-            map.get("file_path")
-                .or_else(|| map.get("path"))
-                .or_else(|| map.get("file"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
 }
 
 #[cfg(test)]

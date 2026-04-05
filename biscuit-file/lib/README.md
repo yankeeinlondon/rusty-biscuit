@@ -51,7 +51,7 @@ let file_ref = FileReference::new("vault:notes/today.md")?
     .add_magic_path("/extra/search/path", PathPosition::Start);
 ```
 
-For more details refer to [FileResolution Design](../docs/file-resolution.md).
+For more details refer to [File References](../docs/topics/file-references.md).
 
 ### `FileType` / `detect_file_type`
 

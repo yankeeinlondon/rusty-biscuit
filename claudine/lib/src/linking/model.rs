@@ -9,8 +9,6 @@ use crate::events::Provider;
 pub enum ResourceScope {
     /// Resource exists in repository scope.
     Repo,
-    /// Resource exists in both scopes, and repo scope masks user scope.
-    RepoMasked,
     /// Resource exists in user scope.
     User,
 }

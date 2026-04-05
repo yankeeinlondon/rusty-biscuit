@@ -16,11 +16,12 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::prelude::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::{
-    LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal, emit_lifecycle_signal,
+    DefaultLifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal,
 };
 use claudine::composition::{
     CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
-    InlineClosurePlan, SelectedProvider, SelectionReason, build_candidate_set, select_provider,
+    InlineClosurePlan, SelectedProvider, SelectionReason, SystemPromptInput, build_candidate_set,
+    select_provider,
 };
 use claudine::events::Provider;
 use claudine::stream::stderr::Verbosity;
@@ -33,12 +34,21 @@ use super::exec;
 use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, LiveStreamSink, StructuredCodexOutput,
-    StructuredSummaryDetails, WrapperHarnessPermissionProbe, build_harness_shell_options,
-    emit_stream_summary_no_separator_with_context, emit_stream_summary_with_context,
-    materialized_harness_prompt_from_prepared, resolve_binary_path, run_harness_loop,
-    strip_prompt_from_args, structured_verbosity, wrap_terminal,
+    StructuredSummaryDetails, WrapperHarnessPermissionProbe,
+    build_harness_shell_options_with_cache, emit_stream_summary_no_separator_with_context,
+    emit_stream_summary_with_context, materialized_harness_prompt_from_prepared,
+    resolve_binary_path, run_harness_loop, strip_prompt_from_args, structured_verbosity,
+    switch_process_cwd, wrap_terminal,
 };
 use crate::log;
+
+/// Result of executing a single composition step through the wrapper pipeline.
+pub(crate) struct SingleCompositionOutcome {
+    /// The process exit code.
+    pub exit_code: i32,
+    /// The provider that ran the step.
+    pub provider: Provider,
+}
 
 fn composition_dispatch_context(
     request: &CompositionExecutionRequest,
@@ -77,8 +87,21 @@ pub(crate) fn execute_composition_request(
     request: CompositionExecutionRequest,
     verbose: u8,
 ) -> Result<i32> {
+    let outcome = execute_composition_request_inner(request, verbose)?;
+    Ok(outcome.exit_code)
+}
+
+/// Inner implementation that returns the full [`SingleCompositionOutcome`].
+///
+/// The public [`execute_composition_request`] wraps this to return just
+/// the exit code; callers that need provider/reason metadata (e.g. the
+/// sequence orchestrator) can call this directly.
+pub(crate) fn execute_composition_request_inner(
+    request: CompositionExecutionRequest,
+    verbose: u8,
+) -> Result<SingleCompositionOutcome> {
     let term = wrap_terminal();
-    let cwd = std::env::current_dir()?;
+    let launch_cwd = std::env::current_dir()?;
     let detail_requested = verbose > 0;
     let quiet = request.quiet;
     let silent = request.silent;
@@ -101,7 +124,7 @@ pub(crate) fn execute_composition_request(
     .collect();
 
     let source_repo_root = request.prepared.source_repo_root.as_deref();
-    let favorite = load_config_favorite(source_repo_root.unwrap_or(&cwd));
+    let favorite = load_config_favorite(source_repo_root.unwrap_or(&launch_cwd));
 
     let selected = match select_provider(
         request.explicit_provider,
@@ -127,6 +150,7 @@ pub(crate) fn execute_composition_request(
     };
 
     let provider = selected.provider;
+    let selection_reason = selected.reason;
     let is_inline = matches!(request.prepared.closure, CompositionClosurePlan::Inline(_));
 
     // -- Profile, binary, arguments, environment --------------------------
@@ -185,7 +209,7 @@ pub(crate) fn execute_composition_request(
         yolo_enabled,
         request.session_interactive,
         &raw_agent_params,
-        &cwd,
+        &launch_cwd,
         &[],
         needs_repo_shadow_home,
         needs_mcp_shadow_home || needs_repo_shadow_home,
@@ -196,6 +220,16 @@ pub(crate) fn execute_composition_request(
 
     if let Some(ref op) = request.operation {
         env_plan.env.insert("OPERATION".into(), op.clone().into());
+    }
+
+    // -- Request-level env overrides ------------------------------------------
+    // These cover execution-time env vars that must also be visible during
+    // composition (preflight, prompt interpolation). Sequence execution uses
+    // this to propagate `FAIL_FAST` into the child process env.
+    for (key, value) in &request.env_overrides {
+        env_plan
+            .env
+            .insert(key.clone().into(), value.clone().into());
     }
 
     let mut effective_prompt = request.prepared.prompt.clone();
@@ -276,9 +310,11 @@ pub(crate) fn execute_composition_request(
         if let Some(injector) = injector_for_provider(provider) {
             if !session.servers.is_empty() {
                 if needs_mcp_shadow_home && env_plan.shadow_home_path.is_none() {
-                    let effective_root = source_repo_root.unwrap_or(&cwd);
-                    let (shadow_env, shadow_path) =
-                        super::repo_home::build_repo_home_env(provider, effective_root, false)?;
+                    let (shadow_env, shadow_path) = super::repo_home::build_repo_home_env(
+                        provider,
+                        env_plan.child_cwd.as_path(),
+                        false,
+                    )?;
                     for (key, value) in shadow_env {
                         env_plan.env.insert(key, value);
                     }
@@ -306,14 +342,6 @@ pub(crate) fn execute_composition_request(
     }
 
     let mut child_args = Vec::new();
-    let mut stdin_seed: Option<String> = None;
-
-    profile.apply_prompt_body(
-        &mut child_args,
-        &mut stdin_seed,
-        &effective_prompt,
-        effective_non_interactive,
-    )?;
 
     // -- Yolo ----------------------------------------------------------------
 
@@ -359,8 +387,7 @@ pub(crate) fn execute_composition_request(
 
     // Universal --output flag
     if let Some(ref output_str) = request.output {
-        use super::profile::OutputFormat;
-        let format: OutputFormat = output_str.parse().map_err(|e: String| eyre!(e))?;
+        let format: super::profile::OutputFormat = (*output_str).into();
         if let Some(warn) = profile.apply_output_format(&mut child_args, format)
             && !silent
             && !quiet
@@ -371,7 +398,7 @@ pub(crate) fn execute_composition_request(
 
     // Universal --system-prompt flag
     if let Some(ref prompt) = request.system_prompt {
-        let resolved = super::resolve_system_prompt(prompt)?;
+        let resolved = resolve_system_prompt_input(prompt)?;
         if let Some(warn) = profile.apply_system_prompt(&mut child_args, &resolved)
             && !silent
             && !quiet
@@ -395,128 +422,6 @@ pub(crate) fn execute_composition_request(
     }
 
     child_args.extend(mcp_extra_args);
-
-    let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
-    let child_cwd = effective_repo_root.unwrap_or(&cwd);
-
-    profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
-
-    // --dry-run: print what would be executed and exit
-    if request.dry_run {
-        crate::output::log_dry_run(
-            profile,
-            &binary_path,
-            &child_args,
-            request.repo,
-            &env_plan,
-            None,
-            child_cwd,
-            &term,
-        );
-        return Ok(0);
-    }
-
-    // -- Harness detection from effective frontmatter ---------------------
-    // THE key architectural fix: harness properties are read from the
-    // composed frontmatter, not from raw source state.
-
-    let harness_enabled =
-        claudine::harness::has_harness_properties(&request.prepared.effective_frontmatter);
-
-    let shell_options = build_harness_shell_options(
-        &request.prepared.resolved_path,
-        effective_repo_root,
-        request.session_interactive,
-    );
-
-    // --- Lifecycle notification setup ---
-    let lifecycle = &request.prepared.lifecycle;
-    let mut lifecycle_state = LifecycleRuntimeState::default();
-
-    let (lifecycle_settings, lifecycle_messaging) =
-        match claudine::dispatch::loader::load_runtime_config(None, effective_repo_root) {
-            Ok(config) => (config.settings().clone(), config.messaging().clone()),
-            Err(_) => (
-                claudine::events::GlobalSettings::default(),
-                claudine::messaging::RuntimeMessagingSettings {
-                    user: None,
-                    repo: None,
-                },
-            ),
-        };
-
-    let lifecycle_ctx = LifecycleRuntimeContext {
-        settings: &lifecycle_settings,
-        messaging: &lifecycle_messaging,
-        term: &term,
-        source_path: &request.prepared.resolved_path,
-        repo_root: effective_repo_root,
-    };
-
-    if harness_enabled {
-        let resolve_ctx = claudine::harness::HarnessResolutionContext {
-            source_path: &request.prepared.resolved_path,
-            repo_root: effective_repo_root,
-        };
-        // Validate that the harness plan can be parsed before proceeding.
-        let mut plan = claudine::harness::parse_harness_plan(
-            &request.prepared.effective_frontmatter,
-            &request.prepared.resolved_path,
-            &resolve_ctx,
-        )
-        .map_err(|e| {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
-            eyre!("{e}")
-        })?;
-
-        // For inline composition, prepend a system-owned writability check
-        // so that handler recovery paths can respond to permission failures
-        // instead of hard-failing before the handler system exists.
-        if is_inline {
-            plan.pre_checks.insert(
-                0,
-                claudine::harness::inline_writability_pre_check(&request.prepared.resolved_path),
-            );
-        }
-
-        // ── Pre-flight shell approval for harness commands ───────────
-        let harness_preflight = claudine::composition::resolve_shell_approvals(
-            None, // template commands already approved during compose
-            None,
-            Some(&plan),
-            &shell_options,
-        )
-        .map_err(|e| {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
-            eyre!("{e}")
-        })?;
-
-        if !request.quiet && !request.silent && harness_preflight.total_discovered > 0 {
-            log::info(&format!(
-                "Pre-flight: {} harness shell command(s) approved",
-                harness_preflight.total_discovered,
-            ));
-        }
-
-        // Plan is validated; the harness loop will re-parse if needed.
-        drop(plan);
-    } else if is_inline {
-        // Non-harness inline: validate writability using the same OS +
-        // provider-policy check that the harness path uses. Without harness
-        // frontmatter there is no handler system to recover, so a failure
-        // here is fatal.
-        let permission_probe =
-            WrapperHarnessPermissionProbe::new(provider, child_args.clone(), effective_repo_root);
-        claudine::harness::check_write_permission(
-            &request.prepared.resolved_path,
-            &request.prepared.resolved_path,
-            Some(&permission_probe),
-        )
-        .map_err(|reason| {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
-            eyre!("{reason}")
-        })?;
-    }
 
     // -- Structured streaming decision ------------------------------------
 
@@ -542,6 +447,155 @@ pub(crate) fn execute_composition_request(
         None
     };
 
+    // Deliver the prompt after provider-specific flags have been assembled.
+    // Some CLIs, notably OpenCode, treat the first positional argument as the
+    // task body and may stop parsing subsequent flags. Appending the prompt too
+    // early can silently disable structured-output flags, leaving Claudine
+    // waiting forever for a stream the provider never enters.
+    let stdin_seed = profile
+        .prompt_delivery(&child_args, &effective_prompt, effective_non_interactive)?
+        .apply_to(&mut child_args);
+
+    let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
+    let child_cwd = env_plan.child_cwd.as_path();
+
+    profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
+
+    // --dry-run: print what would be executed and exit
+    if request.dry_run {
+        crate::output::log_dry_run(
+            profile,
+            &binary_path,
+            &child_args,
+            request.repo,
+            &env_plan,
+            None,
+            child_cwd,
+            &term,
+        );
+        return Ok(SingleCompositionOutcome {
+            exit_code: 0,
+            provider,
+        });
+    }
+
+    switch_process_cwd(child_cwd)?;
+
+    // -- Harness detection from effective frontmatter ---------------------
+    // THE key architectural fix: harness properties are read from the
+    // composed frontmatter, not from raw source state.
+
+    let harness_enabled =
+        claudine::harness::has_harness_properties(&request.prepared.effective_frontmatter);
+
+    let shell_options = build_harness_shell_options_with_cache(
+        &request.prepared.resolved_path,
+        effective_repo_root,
+        request.session_interactive,
+        request.shared_approval_cache.clone(),
+    );
+
+    // --- Lifecycle notification setup ---
+    let lifecycle = &request.prepared.lifecycle;
+    let emitter = DefaultLifecycleEmitter;
+
+    // Skip runtime config loading when no lifecycle notifications are configured.
+    let (lifecycle_settings, lifecycle_messaging) = if lifecycle.is_empty() {
+        (
+            claudine::events::GlobalSettings::default(),
+            claudine::messaging::RuntimeMessagingSettings {
+                user: None,
+                repo: None,
+            },
+        )
+    } else {
+        match claudine::dispatch::loader::load_runtime_config(None, effective_repo_root) {
+            Ok(config) => (config.settings().clone(), config.messaging().clone()),
+            Err(_) => (
+                claudine::events::GlobalSettings::default(),
+                claudine::messaging::RuntimeMessagingSettings {
+                    user: None,
+                    repo: None,
+                },
+            ),
+        }
+    };
+
+    let lifecycle_ctx = LifecycleRuntimeContext {
+        settings: &lifecycle_settings,
+        messaging: &lifecycle_messaging,
+        term: &term,
+        source_path: &request.prepared.resolved_path,
+        repo_root: effective_repo_root,
+    };
+
+    let mut guard = LifecycleRunGuard::new(lifecycle, &lifecycle_ctx, &emitter);
+
+    if harness_enabled {
+        let resolve_ctx = claudine::harness::HarnessResolutionContext {
+            source_path: &request.prepared.resolved_path,
+            repo_root: effective_repo_root,
+        };
+        // Validate that the harness plan can be parsed before proceeding.
+        let mut plan = claudine::harness::parse_harness_plan(
+            &request.prepared.effective_frontmatter,
+            &request.prepared.resolved_path,
+            &resolve_ctx,
+        )
+        .map_err(|e| {
+            guard.emit_blocked_or_failure();
+            eyre!("{e}")
+        })?;
+
+        // For inline composition, prepend a system-owned writability check
+        // so that handler recovery paths can respond to permission failures
+        // instead of hard-failing before the handler system exists.
+        if is_inline {
+            plan.pre_checks.insert(
+                0,
+                claudine::harness::inline_writability_pre_check(&request.prepared.resolved_path),
+            );
+        }
+
+        // ── Pre-flight shell approval for harness commands ───────────
+        let harness_preflight = claudine::composition::resolve_shell_approvals(
+            None, // template commands already approved during compose
+            None,
+            Some(&plan),
+            &shell_options,
+        )
+        .map_err(|e| {
+            guard.emit_blocked_or_failure();
+            eyre!("{e}")
+        })?;
+
+        if !request.quiet && !request.silent && harness_preflight.total_discovered > 0 {
+            log::info(&format!(
+                "Pre-flight: {} harness shell command(s) approved",
+                harness_preflight.total_discovered,
+            ));
+        }
+
+        // Plan is validated; the harness loop will re-parse if needed.
+        drop(plan);
+    } else if is_inline {
+        // Non-harness inline: validate writability using the same OS +
+        // provider-policy check that the harness path uses. Without harness
+        // frontmatter there is no handler system to recover, so a failure
+        // here is fatal.
+        let permission_probe =
+            WrapperHarnessPermissionProbe::new(provider, child_args.clone(), effective_repo_root);
+        claudine::harness::check_write_permission(
+            &request.prepared.resolved_path,
+            &request.prepared.resolved_path,
+            Some(&permission_probe),
+        )
+        .map_err(|reason| {
+            guard.emit_blocked_or_failure();
+            eyre!("{reason}")
+        })?;
+    }
+
     // -- Preflight output (env details + prompt block) ---------------------
     // The header was already emitted early (right after profile lookup).
     // Now emit the env details and prompt block with full env_plan.
@@ -549,7 +603,7 @@ pub(crate) fn execute_composition_request(
     // Detect the environment from the source repo root when available so
     // that git/repo metadata reflects the composition source, not the
     // caller's CWD (which may be in a different repo entirely).
-    let env_detect_root = effective_repo_root.unwrap_or(&cwd);
+    let env_detect_root = effective_repo_root.unwrap_or(&launch_cwd);
     let env_context = claudine::events::detect_environment_fast(env_detect_root);
 
     if !silent {
@@ -573,7 +627,7 @@ pub(crate) fn execute_composition_request(
 
     // -- Execution --------------------------------------------------------
 
-    let dispatch_context = composition_dispatch_context(&request, &selected.reason);
+    let dispatch_context = composition_dispatch_context(&request, &selection_reason);
 
     if harness_enabled {
         let harness_mode = if is_inline {
@@ -599,7 +653,9 @@ pub(crate) fn execute_composition_request(
             profile.prepare_captured_output(&mut harness_base_args);
         }
 
-        run_harness_loop(
+        // Harness loop manages the guard internally; defuse ours.
+        guard.defuse();
+        let exit_code = run_harness_loop(
             provider,
             profile,
             binary_path.as_path(),
@@ -624,17 +680,22 @@ pub(crate) fn execute_composition_request(
             Some(materialized_harness_prompt_from_prepared(&request.prepared)),
             &term,
             lifecycle,
-            &mut lifecycle_state,
             &lifecycle_ctx,
-        )
+            &emitter,
+        )?;
+        Ok(SingleCompositionOutcome {
+            exit_code,
+            provider,
+        })
     } else if is_inline {
-        emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, &lifecycle_ctx);
+        guard.emit_start_once();
 
         let closure_plan = match &request.prepared.closure {
             CompositionClosurePlan::Inline(plan) => plan,
             _ => unreachable!("is_inline is true but closure is not Inline"),
         };
-        let exit_code = execute_inline_without_harness(
+        let mut child_spawned = false;
+        let exit_result = execute_inline_without_harness(
             provider,
             profile,
             &binary_path,
@@ -655,19 +716,32 @@ pub(crate) fn execute_composition_request(
             &env_context,
             &dispatch_context,
             &term,
-        )?;
+            &mut child_spawned,
+        );
+
+        // Mark launched as soon as spawn succeeded — before propagating
+        // any post-spawn error — so the guard correctly classifies
+        // subsequent failures as `Failure` rather than `Blocked`.
+        if child_spawned {
+            guard.mark_provider_launched();
+        }
+        let exit_code = exit_result?;
 
         if exit_code == 0 {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Success, &lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Success);
         } else {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, &lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Failure);
         }
 
-        Ok(exit_code)
+        Ok(SingleCompositionOutcome {
+            exit_code,
+            provider,
+        })
     } else {
-        emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, &lifecycle_ctx);
+        guard.emit_start_once();
 
-        let exit_code = execute_direct_without_harness(
+        let mut child_spawned = false;
+        let exit_result = execute_direct_without_harness(
             provider,
             profile,
             &binary_path,
@@ -683,15 +757,34 @@ pub(crate) fn execute_composition_request(
             detail_requested,
             &env_context,
             &dispatch_context,
-        )?;
+            &mut child_spawned,
+        );
+
+        // Mark launched as soon as spawn succeeded — before propagating
+        // any post-spawn error — so the guard correctly classifies
+        // subsequent failures as `Failure` rather than `Blocked`.
+        if child_spawned {
+            guard.mark_provider_launched();
+        }
+        let exit_code = exit_result?;
 
         if exit_code == 0 {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Success, &lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Success);
         } else {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, &lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Failure);
         }
 
-        Ok(exit_code)
+        Ok(SingleCompositionOutcome {
+            exit_code,
+            provider,
+        })
+    }
+}
+
+fn resolve_system_prompt_input(input: &SystemPromptInput) -> Result<String> {
+    match input {
+        SystemPromptInput::Inline { prompt } => Ok(prompt.clone()),
+        SystemPromptInput::File { path } => Ok(std::fs::read_to_string(path)?),
     }
 }
 
@@ -719,6 +812,7 @@ fn execute_inline_without_harness(
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
+    child_spawned: &mut bool,
 ) -> Result<i32> {
     // Run the provider and capture output.
     let (agent_exit, _agent_termination, final_response, deferred_summary) = if use_structured {
@@ -736,6 +830,7 @@ fn execute_inline_without_harness(
             env_context,
             dispatch_context,
             term,
+            child_spawned,
         )?
     } else {
         run_legacy_inline(
@@ -751,6 +846,7 @@ fn execute_inline_without_harness(
             stdout_noise,
             stderr_noise,
             term,
+            child_spawned,
         )?
     };
 
@@ -944,6 +1040,7 @@ fn run_structured_inline(
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
+    child_spawned: &mut bool,
 ) -> Result<InlineRunResult> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig::default();
@@ -952,6 +1049,7 @@ fn run_structured_inline(
         LiveStreamSink::new(
             provider,
             env_context.clone(),
+            child_cwd,
             stream_verbosity,
             summary_details.clone(),
         )
@@ -968,6 +1066,7 @@ fn run_structured_inline(
         profile.suppress_structured_stderr_on_success(),
         stdin_seed,
         parser,
+        child_spawned,
     )?;
     let termination = stream_result.termination;
     let mut summary = stream_result.data;
@@ -1022,6 +1121,7 @@ fn run_legacy_inline(
     stdout_noise: &[&str],
     stderr_noise: &[&str],
     term: &Terminal,
+    child_spawned: &mut bool,
 ) -> Result<InlineRunResult> {
     if session_interactive {
         let result = exec::run_child(
@@ -1035,6 +1135,7 @@ fn run_legacy_inline(
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
             },
+            child_spawned,
         )?;
         let final_response = if provider == Provider::Codex {
             if let Some(output) = structured_codex_output {
@@ -1062,6 +1163,7 @@ fn run_legacy_inline(
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
             },
+            child_spawned,
         )?;
         let response = profile.parse_captured_output(&capture.data.stdout);
         if !response.trim().is_empty() {
@@ -1195,6 +1297,7 @@ fn execute_direct_without_harness(
     detail_requested: bool,
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
+    child_spawned: &mut bool,
 ) -> Result<i32> {
     if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
@@ -1204,6 +1307,7 @@ fn execute_direct_without_harness(
             LiveStreamSink::new(
                 provider,
                 env_context.clone(),
+                child_cwd,
                 stream_verbosity,
                 summary_details.clone(),
             )
@@ -1220,6 +1324,7 @@ fn execute_direct_without_harness(
             profile.suppress_structured_stderr_on_success(),
             stdin_seed,
             parser,
+            child_spawned,
         )?;
         let mut summary = stream_result.data;
         if let Some(codex_output) = structured_codex_output {
@@ -1268,6 +1373,7 @@ fn execute_direct_without_harness(
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed,
             },
+            child_spawned,
         )?;
 
         // Emit a synthetic session-end event for non-structured composition

@@ -1,0 +1,37 @@
+[package]
+name = "biscuit-location"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dirs = "6"
+geo = "0.29"
+maxminddb = { version = "0.27", features = ["mmap"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
+url = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-core-location = "0.3"
+objc2-foundation = "0.3"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+    "Devices_Geolocation",
+    "Foundation",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+futures-util = { version = "0.3", default-features = false }
+
+[features]
+default = ["reverse"]
+reverse = ["dep:reqwest"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+wiremock = "0.6"

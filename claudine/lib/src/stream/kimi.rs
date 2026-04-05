@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
@@ -29,6 +31,7 @@ pub struct KimiStreamParser<S: StreamEventSink> {
     error_kind: Option<String>,
     error_message: Option<String>,
     context_usage: Option<ContextUsage>,
+    tool_uses: HashMap<String, (Option<String>, Option<Value>)>,
 }
 
 impl<S: StreamEventSink> KimiStreamParser<S> {
@@ -49,6 +52,7 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             error_kind: None,
             error_message: None,
             context_usage: None,
+            tool_uses: HashMap::new(),
         }
     }
 
@@ -203,6 +207,30 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
         let meta = EventMeta::default();
         self.sink.on_turn_error(&meta);
     }
+
+    fn tool_id(obj: &Value) -> Option<String> {
+        obj.get("id")
+            .or_else(|| obj.get("tool_id"))
+            .or_else(|| obj.get("tool_use_id"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+    }
+
+    fn tool_input(obj: &Value) -> Option<Value> {
+        obj.get("input")
+            .or_else(|| obj.get("parameters"))
+            .or_else(|| obj.get("arguments"))
+            .or_else(|| obj.get("args"))
+            .or_else(|| obj.get("params"))
+            .cloned()
+    }
+
+    fn tool_output(obj: &Value) -> Option<Value> {
+        obj.get("output")
+            .or_else(|| obj.get("result"))
+            .or_else(|| obj.get("content"))
+            .cloned()
+    }
 }
 
 impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
@@ -242,27 +270,59 @@ impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
             }
             "tool_use" => {
                 self.tool_calls += 1;
-                super::trace_tool_event(
-                    Provider::KimiCode,
-                    self.tool_calls,
-                    obj.get("name")
-                        .or_else(|| obj.get("tool_name"))
-                        .and_then(|value| value.as_str()),
-                );
-                let mut meta = EventMeta::default();
-                if let Some(tool_name) = obj
+                let tool_name = obj
                     .get("name")
                     .or_else(|| obj.get("tool_name"))
-                    .and_then(|v| v.as_str())
-                {
+                    .and_then(|value| value.as_str())
+                    .map(ToOwned::to_owned);
+                let tool_id = Self::tool_id(&obj);
+                let tool_input = Self::tool_input(&obj);
+                super::trace_tool_event(Provider::KimiCode, self.tool_calls, tool_name.as_deref());
+                let mut meta = EventMeta::default();
+                if let Some(tool_id) = &tool_id {
                     meta.extra
-                        .insert("tool_name".into(), Value::String(tool_name.to_string()));
+                        .insert("tool_id".into(), Value::String(tool_id.clone()));
+                }
+                if let Some(tool_name) = &tool_name {
+                    meta.extra
+                        .insert("tool_name".into(), Value::String(tool_name.clone()));
+                }
+                if let Some(tool_input) = &tool_input {
+                    meta.extra.insert("tool_input".into(), tool_input.clone());
+                }
+                if let Some(tool_id) = tool_id {
+                    self.tool_uses.insert(tool_id, (tool_name, tool_input));
                 }
                 self.sink.on_before_tool(&meta);
                 Ok(None)
             }
             "tool_result" => {
-                let meta = EventMeta::default();
+                let tool_id = Self::tool_id(&obj);
+                let (tool_name, tool_input) = tool_id
+                    .as_ref()
+                    .and_then(|id| self.tool_uses.remove(id))
+                    .unwrap_or((None, None));
+                let mut meta = EventMeta::default();
+                if let Some(tool_id) = tool_id {
+                    meta.extra.insert("tool_id".into(), Value::String(tool_id));
+                }
+                if let Some(tool_name) = tool_name {
+                    meta.extra
+                        .insert("tool_name".into(), Value::String(tool_name));
+                }
+                if let Some(tool_input) = tool_input {
+                    meta.extra.insert("tool_input".into(), tool_input);
+                }
+                if let Some(tool_output) = Self::tool_output(&obj) {
+                    meta.extra.insert("tool_response".into(), tool_output);
+                }
+                if let Some(status) = obj.get("status").and_then(Value::as_str) {
+                    meta.extra
+                        .insert("status".into(), Value::String(status.to_string()));
+                }
+                if let Some(error) = obj.get("error") {
+                    meta.extra.insert("error".into(), error.clone());
+                }
                 self.sink.on_after_tool(&meta);
                 Ok(None)
             }
@@ -305,6 +365,7 @@ mod tests {
 
     use super::*;
     use crate::stream::parser::NullSink;
+    use crate::stream::test_support::{ToolContractExpectation, assert_tool_event_contract};
 
     struct WarningSink {
         warnings: Mutex<Vec<String>>,
@@ -321,6 +382,22 @@ mod tests {
     impl StreamEventSink for WarningSink {
         fn on_warning(&mut self, message: &str) {
             self.warnings.lock().unwrap().push(message.into());
+        }
+    }
+
+    #[derive(Default)]
+    struct ToolRecordingSink {
+        before_tool: Vec<EventMeta>,
+        after_tool: Vec<EventMeta>,
+    }
+
+    impl StreamEventSink for ToolRecordingSink {
+        fn on_before_tool(&mut self, meta: &EventMeta) {
+            self.before_tool.push(meta.clone());
+        }
+
+        fn on_after_tool(&mut self, meta: &EventMeta) {
+            self.after_tool.push(meta.clone());
         }
     }
 
@@ -408,5 +485,36 @@ mod tests {
         let summary = parser.finish(0);
         assert!(summary.model.is_none());
         assert!(summary.cost_usd.is_none());
+    }
+
+    #[test]
+    fn tool_events_preserve_parameters_and_results() {
+        let mut parser = Box::new(KimiStreamParser::new(ToolRecordingSink::default()));
+
+        parser
+            .feed_line(
+                r#"{"type":"tool_use","id":"k1","name":"bash","input":{"command":"git status"}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_result","tool_use_id":"k1","status":"success","content":"clean"}"#,
+            )
+            .unwrap();
+
+        let sink = parser.sink;
+        assert_eq!(sink.before_tool.len(), 1);
+        assert_eq!(sink.after_tool.len(), 1);
+        assert_tool_event_contract(
+            &sink.before_tool[0],
+            Some(&sink.after_tool[0]),
+            ToolContractExpectation {
+                name: "bash",
+                id: Some("k1"),
+                input_field: Some(("command", "git status")),
+                status: Some("success"),
+                response: Some(Value::String("clean".into())),
+            },
+        );
     }
 }

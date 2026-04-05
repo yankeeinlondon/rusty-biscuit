@@ -20,14 +20,16 @@ use claudine::services::{GateCapability, ProtectPosture, ProviderProtectProfiles
 use playa::SoundEffect;
 use sniff::programs::InstalledAiClients;
 
+use crate::cli_utils::{bool_indicator, event_name_pascal};
 use crate::log;
+use crate::provider_values::provider_value_parser;
 
 /// Arguments for the hooks command.
 #[derive(Args)]
 pub struct HooksArgs {
     /// Optional provider name for detailed view (fuzzy matching supported)
-    #[arg(value_name = "PROVIDER")]
-    pub provider: Option<String>,
+    #[arg(value_name = "PROVIDER", value_parser = provider_value_parser())]
+    pub provider: Option<Provider>,
 
     /// Show provider event support matrix (✅ hook / ⛔️ non-hook / ❌ none)
     #[arg(long)]
@@ -62,20 +64,6 @@ fn provider_column() -> TableColumn {
     TableColumn::new(bold("Provider"))
         .with_min_width(PROVIDER_COLUMN_MIN_WIDTH)
         .with_word_wrap(WordWrap::None)
-}
-
-fn bool_indicator(value: bool) -> TableCellContent {
-    if value {
-        "\u{2705}".into()
-    } else {
-        "\u{274C}".into()
-    }
-}
-
-fn event_name_pascal(slug: &str) -> String {
-    AgenticEvent::from_slug(slug)
-        .map(|event| event.as_pascal_case().to_string())
-        .unwrap_or_else(|| slug.to_string())
 }
 
 /// Get the expected events for a provider from the claudine config.
@@ -676,28 +664,15 @@ pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
     render_protect_visibility(config.as_ref());
 
     // If a provider is specified, show detailed view for that provider
-    if let Some(ref provider_input) = args.provider {
-        match Provider::fuzzy_match_cli_name(provider_input) {
-            Some(provider) => {
-                let result = run_provider_detail(provider, config.as_ref());
+    if let Some(provider) = args.provider {
+        let result = run_provider_detail(provider, config.as_ref());
 
-                // Validate sound effects for this provider only
-                if let Some(cfg) = config.as_ref() {
-                    validate_sound_effects(cfg);
-                }
-
-                return result;
-            }
-            None => {
-                let available: Vec<String> = ALL_PROVIDERS.iter().map(|p| p.to_string()).collect();
-                log::error(&format!(
-                    "Unknown provider '{}'. Available: {}",
-                    provider_input,
-                    available.join(", ")
-                ));
-                return Ok(());
-            }
+        // Validate sound effects for this provider only
+        if let Some(cfg) = config.as_ref() {
+            validate_sound_effects(cfg);
         }
+
+        return result;
     }
 
     let agents = detect_agents();

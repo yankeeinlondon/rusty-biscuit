@@ -19,8 +19,32 @@ impl ResolutionContext {
         let home_dir = home_dir();
         let env: HashMap<String, String> = std::env::vars().collect();
 
-        debug!(?cwd, home_dir_set = home_dir.is_some(), env_var_count = env.len(),
-               "built resolution context");
+        debug!(
+            ?cwd,
+            home_dir_set = home_dir.is_some(),
+            env_var_count = env.len(),
+            "built resolution context"
+        );
+
+        Ok(Self { cwd, home_dir, env })
+    }
+
+    /// Build a context that treats `base` as the working directory, while
+    /// still reading HOME and environment variables from the live process
+    /// state.
+    ///
+    /// If `base` is a relative path, it is joined onto the ambient CWD so
+    /// that git and workspace discovery always operate on an absolute
+    /// location.
+    pub fn from_base(base: &Path) -> Result<Self, FileReferenceError> {
+        let cwd = if base.is_absolute() {
+            base.to_path_buf()
+        } else {
+            let ambient = std::env::current_dir().map_err(FileReferenceError::CurrentDirectory)?;
+            ambient.join(base)
+        };
+        let home_dir = home_dir();
+        let env = std::env::vars().collect();
 
         Ok(Self { cwd, home_dir, env })
     }
@@ -101,6 +125,23 @@ pub(crate) fn find_package_area(
         }
     }
 
+    // Fallback: CWD may sit at the area root itself (between workspace_root and
+    // the package manifest directory), e.g. `repo/claudine` when packages are at
+    // `repo/claudine/lib` and `repo/claudine/cli`. Match against area dirs.
+    let workspace_root_normalized = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+
+    for (_, area) in &members {
+        if area.as_os_str().is_empty() {
+            continue;
+        }
+        let area_root = workspace_root_normalized.join(area);
+        if cwd_normalized.starts_with(&area_root) {
+            return Ok(Some(workspace_root.join(area)));
+        }
+    }
+
     trace!("no package area found");
     Ok(None)
 }
@@ -118,6 +159,20 @@ mod tests {
     fn from_ambient_succeeds() {
         let ctx = ResolutionContext::from_ambient().unwrap();
         assert!(ctx.cwd.is_absolute());
+    }
+
+    #[test]
+    fn from_base_absolute_path_is_preserved() {
+        let abs = Path::new("/tmp");
+        let ctx = ResolutionContext::from_base(abs).unwrap();
+        assert_eq!(ctx.cwd, PathBuf::from("/tmp"));
+    }
+
+    #[test]
+    fn from_base_relative_path_is_joined_to_ambient_cwd() {
+        let ctx = ResolutionContext::from_base(Path::new("sub/dir")).unwrap();
+        assert!(ctx.cwd.is_absolute());
+        assert!(ctx.cwd.ends_with("sub/dir"));
     }
 
     #[test]

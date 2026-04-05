@@ -3,7 +3,7 @@
 //! When `ComposeOptions::perf_enabled` is `true`, a `PerfCollector`
 //! records per-stage timings. When disabled, all methods are no-ops.
 
-use super::types::{ComposePerfMetric, ComposePerfReport};
+use super::types::{ComposePerfMetric, ComposePerfReport, ComposeStage};
 use std::time::{Duration, Instant};
 
 /// Metric kinds corresponding to compose pipeline stages.
@@ -27,21 +27,21 @@ pub(crate) enum PerfMetricKind {
 }
 
 impl PerfMetricKind {
-    /// Human-readable label used in the report output.
-    pub(crate) fn label(self) -> &'static str {
+    /// Convert to the public `ComposeStage` enum.
+    fn stage(self) -> ComposeStage {
         match self {
-            Self::FrontmatterInterpolation => "frontmatter interpolation",
-            Self::EffectiveStateBuild => "effective state build",
-            Self::TextReplacement => "text replacement",
-            Self::PageBlocks => "page blocks",
-            Self::Interpolation => "interpolation",
-            Self::ShellExpansion => "shell expansion",
-            Self::TransclusionParse => "transclusion parse",
-            Self::TransclusionPrepare => "transclusion prepare",
-            Self::TransclusionResolve => "transclusion resolve",
-            Self::TransclusionApply => "transclusion apply",
-            Self::Cleanup => "cleanup",
-            Self::Normalization => "normalization",
+            Self::FrontmatterInterpolation => ComposeStage::FrontmatterInterpolation,
+            Self::EffectiveStateBuild => ComposeStage::EffectiveStateBuild,
+            Self::TextReplacement => ComposeStage::TextReplacement,
+            Self::PageBlocks => ComposeStage::PageBlocks,
+            Self::Interpolation => ComposeStage::Interpolation,
+            Self::ShellExpansion => ComposeStage::ShellExpansion,
+            Self::TransclusionParse => ComposeStage::TransclusionParse,
+            Self::TransclusionPrepare => ComposeStage::TransclusionPrepare,
+            Self::TransclusionResolve => ComposeStage::TransclusionResolve,
+            Self::TransclusionApply => ComposeStage::TransclusionApply,
+            Self::Cleanup => ComposeStage::Cleanup,
+            Self::Normalization => ComposeStage::Normalization,
         }
     }
 
@@ -131,7 +131,7 @@ impl PerfCollector {
                 let idx = *kind as usize;
                 let (elapsed, calls) = self.durations[idx];
                 ComposePerfMetric {
-                    name: kind.label().to_string(),
+                    stage: kind.stage(),
                     elapsed,
                     calls,
                 }
@@ -165,14 +165,18 @@ mod tests {
         let report = collector.finish().unwrap();
         assert!(report.total >= Duration::ZERO);
 
-        let cleanup = report.metrics.iter().find(|m| m.name == "cleanup").unwrap();
+        let cleanup = report
+            .metrics
+            .iter()
+            .find(|m| m.stage == ComposeStage::Cleanup)
+            .unwrap();
         assert_eq!(cleanup.elapsed, Duration::from_millis(8));
         assert_eq!(cleanup.calls, 2);
 
         let interp = report
             .metrics
             .iter()
-            .find(|m| m.name == "interpolation")
+            .find(|m| m.stage == ComposeStage::Interpolation)
             .unwrap();
         assert_eq!(interp.elapsed, Duration::from_millis(10));
         assert_eq!(interp.calls, 1);
@@ -188,7 +192,7 @@ mod tests {
         let metric = report
             .metrics
             .iter()
-            .find(|m| m.name == "text replacement")
+            .find(|m| m.stage == ComposeStage::TextReplacement)
             .unwrap();
         assert_eq!(metric.calls, 1);
     }
@@ -212,9 +216,11 @@ mod tests {
         );
 
         let report = collector.finish().unwrap();
-        let names: Vec<_> = report.metrics.iter().map(|m| m.name.as_str()).collect();
-        let esb_idx = names.iter().position(|n| *n == "effective state build");
-        let norm_idx = names.iter().position(|n| *n == "normalization");
+        let stages: Vec<_> = report.metrics.iter().map(|m| m.stage).collect();
+        let esb_idx = stages
+            .iter()
+            .position(|s| *s == ComposeStage::EffectiveStateBuild);
+        let norm_idx = stages.iter().position(|s| *s == ComposeStage::Normalization);
         assert!(esb_idx < norm_idx);
     }
 }

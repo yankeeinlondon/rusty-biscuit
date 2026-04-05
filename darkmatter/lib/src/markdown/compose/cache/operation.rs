@@ -179,7 +179,7 @@ impl TocLinkingOperation {
     pub fn split_params(options: &TocLinkingOptions) -> ParamBuckets {
         let mut buckets = ParamBuckets::default();
 
-        let mut levels: Vec<u8> = options.levels.levels.iter().copied().collect();
+        let mut levels: Vec<u8> = options.levels.levels.iter().map(|l| l.as_u8()).collect();
         levels.sort();
         buckets
             .variant

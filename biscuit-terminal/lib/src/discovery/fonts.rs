@@ -577,6 +577,7 @@ pub fn detect_nerd_font() -> Option<bool> {
 /// ```
 #[cfg(unix)]
 pub fn window_size_pixels() -> Option<WindowSizePixels> {
+    use super::raw_mode::{RawModeGuard, TERMINAL_QUERY_MUTEX};
     use std::io::{Read, Write};
     use std::os::unix::io::AsRawFd;
     use std::time::{Duration, Instant};
@@ -608,34 +609,16 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
 
     let fd = tty.as_raw_fd();
 
-    // Save current terminal attributes
-    let mut orig_termios: libc::termios = unsafe { std::mem::zeroed() };
-    if unsafe { libc::tcgetattr(fd, &mut orig_termios) } != 0 {
-        tracing::trace!("window_size_pixels(): tcgetattr failed");
-        return None;
-    }
+    // Serialize terminal access to prevent race conditions
+    let _lock = TERMINAL_QUERY_MUTEX.lock().ok()?;
 
-    // Set raw mode
-    let mut raw_termios = orig_termios;
-    raw_termios.c_lflag &= !(libc::ICANON | libc::ECHO);
-    raw_termios.c_cc[libc::VMIN] = 0;
-    raw_termios.c_cc[libc::VTIME] = 1; // 100ms timeout
-
-    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw_termios) } != 0 {
-        tracing::trace!("window_size_pixels(): tcsetattr failed");
-        return None;
-    }
-
-    // Helper to restore terminal mode
-    let restore = |fd: i32, termios: &libc::termios| {
-        unsafe { libc::tcsetattr(fd, libc::TCSANOW, termios) };
-    };
+    // Enter raw mode on /dev/tty fd (RAII guard restores on drop)
+    let _guard = RawModeGuard::new(fd).ok()?;
 
     // Write CSI 14 t query
     let query = b"\x1b[14t";
     if tty.write_all(query).is_err() {
         tracing::trace!("window_size_pixels(): failed to write query");
-        restore(fd, &orig_termios);
         return None;
     }
     let _ = tty.flush();
@@ -667,9 +650,6 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
             Err(_) => break,
         }
     }
-
-    // Restore terminal mode
-    restore(fd, &orig_termios);
 
     // Parse response: \x1b[4;height;widtht
     let result = parse_csi_14t_response(&buffer);

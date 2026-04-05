@@ -47,7 +47,10 @@ impl LaunchContext {
             .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(e.to_string()))?;
 
         let fs = result.filesystem;
-        let git_root = fs.as_ref().and_then(|f| f.git.as_ref()).map(|g| g.repo_root.clone());
+        let git_root = fs
+            .as_ref()
+            .and_then(|f| f.git.as_ref())
+            .map(|g| g.repo_root.clone());
         let repo = fs.and_then(|f| f.repo);
 
         let (package_root, package_area_root) = match repo {

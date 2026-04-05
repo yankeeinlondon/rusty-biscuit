@@ -81,21 +81,12 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Duration;
 use thiserror::Error;
 
-/// Global mutex to serialize terminal queries.
-///
-/// OSC queries require exclusive access to the terminal because they:
-/// 1. Modify terminal mode (raw mode for reading responses)
-/// 2. Write to stdout and read from stdin
-///
-/// Without serialization, concurrent queries can:
-/// - Corrupt terminal mode state
-/// - Consume each other's responses
-/// - Cause hangs waiting for responses that were already read
-static TERMINAL_QUERY_MUTEX: Mutex<()> = Mutex::new(());
+#[cfg(unix)]
+use super::raw_mode::{RawModeGuard, TERMINAL_QUERY_MUTEX};
 
 use crate::discovery::detection::{TerminalApp, get_terminal_app, is_tty};
 use crate::discovery::os_detection::is_ci;
@@ -622,49 +613,8 @@ pub fn query_osc_actual(code: u8, timeout: Duration) -> Result<RgbValue, OscQuer
         .lock()
         .map_err(|_| OscQueryError::IoError("terminal query mutex poisoned".into()))?;
 
-    // RAII guard for terminal state
-    struct RawModeGuard {
-        original: libc::termios,
-        fd: libc::c_int,
-    }
-
-    impl RawModeGuard {
-        fn new() -> Result<Self, OscQueryError> {
-            let fd = libc::STDIN_FILENO;
-            let mut original: libc::termios = unsafe { std::mem::zeroed() };
-
-            if unsafe { libc::tcgetattr(fd, &mut original) } != 0 {
-                return Err(OscQueryError::IoError(
-                    "failed to get terminal attributes".into(),
-                ));
-            }
-
-            let mut raw = original;
-            // Disable canonical mode and echo
-            raw.c_lflag &= !(libc::ICANON | libc::ECHO);
-            // Set minimum characters and timeout for read
-            raw.c_cc[libc::VMIN] = 0;
-            raw.c_cc[libc::VTIME] = 1; // 100ms timeout per read
-
-            if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } != 0 {
-                return Err(OscQueryError::IoError("failed to set raw mode".into()));
-            }
-
-            Ok(Self { original, fd })
-        }
-    }
-
-    impl Drop for RawModeGuard {
-        fn drop(&mut self) {
-            // Always restore original terminal state
-            unsafe {
-                libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
-            }
-        }
-    }
-
-    // Enter raw mode
-    let _guard = RawModeGuard::new()?;
+    // Enter raw mode (RAII guard restores on drop)
+    let _guard = RawModeGuard::stdin().map_err(OscQueryError::IoError)?;
 
     // Send the OSC query: \x1b]<code>;?\x07
     let query = format!("\x1b]{};?\x07", code);

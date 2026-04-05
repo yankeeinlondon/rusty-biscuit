@@ -46,3 +46,34 @@ impl ProtectIntent {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completion_scan_does_not_map_to_policy_query() {
+        assert!(
+            ProtectIntent::CompletionOutputScan
+                .to_policy_query()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn mcp_tool_intent_maps_to_policy_query() {
+        let query = ProtectIntent::UseMcpTool {
+            server: "filesystem".to_string(),
+            tool: "read_file".to_string(),
+        }
+        .to_policy_query();
+
+        match query {
+            Some(PolicyQuery::UseMcpTool { server, tool }) => {
+                assert_eq!(server, "filesystem");
+                assert_eq!(tool, "read_file");
+            }
+            other => panic!("expected MCP tool query, got {other:?}"),
+        }
+    }
+}

@@ -13,11 +13,17 @@ use super::types::ResolvedCompositionSource;
 ///
 /// Uses `biscuit-file::FileReference` for all path resolution. Validates
 /// that the resolved file has a `.md` or `.markdown` extension.
+///
+/// When invoked from inside a Cargo workspace package area (common for
+/// monorepo prompts like `@prompts/commit.md`), the package area is added
+/// as a prepended magic search root so package-local prompts are found
+/// before repo-wide or HOME-scoped ones.
 pub fn resolve_composition_source(
     file_ref: &str,
 ) -> Result<ResolvedCompositionSource, CompositionError> {
     let reference = FileReference::new(file_ref)
-        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?;
+        .map_err(|e| CompositionError::InvalidReference(format!("{file_ref}: {e}")))?
+        .with_package_area_magic_path();
 
     let resolved_path = reference
         .resolve()

@@ -116,6 +116,10 @@ pub fn execute_command(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
+    if shell_opts.strip_ansi {
+        cmd.env("NO_COLOR", "1");
+    }
+
     // 4. Spawn
     let mut child = cmd
         .spawn()
@@ -170,14 +174,31 @@ pub fn execute_command(
                         }
                         output.push_str(&stderr_str);
                     }
-                    debug!(exit_code = 0, output_len = output.len(), "shell: command succeeded");
+
+                    if shell_opts.strip_ansi {
+                        output = biscuit_terminal::prelude::strip_escape_codes(output);
+                    }
+
+                    debug!(
+                        exit_code = 0,
+                        output_len = output.len(),
+                        "shell: command succeeded"
+                    );
                     return Ok(output);
                 } else {
+                    let mut stdout = stdout_str;
+                    let mut stderr = stderr_str;
+
+                    if shell_opts.strip_ansi {
+                        stdout = biscuit_terminal::prelude::strip_escape_codes(stdout);
+                        stderr = biscuit_terminal::prelude::strip_escape_codes(stderr);
+                    }
+
                     return Err(ShellExpansionError::ExecutionFailed {
                         command: directive.raw_command.clone(),
                         code: status.code().unwrap_or(-1),
-                        stdout: stdout_str,
-                        stderr: stderr_str,
+                        stdout,
+                        stderr,
                         line: directive.line,
                     });
                 }
@@ -511,5 +532,60 @@ mod tests {
         if let Some(path) = find_python() {
             assert_ne!(path.as_os_str(), OsStr::new(""));
         }
+    }
+
+    #[test]
+    fn execute_command_strips_ansi_by_default() {
+        let d = ShellDirective {
+            raw_command: "echo ...".to_string(),
+            executable: "echo".to_string(),
+            args: vec!["\x1b[31mhello\x1b[0m".to_string()],
+            span: 0..0,
+            line: 1,
+            error_handling: ErrorHandling::default(),
+        };
+        let options = ShellExpansionOptions::default(); // strip_ansi: true by default
+        let source = ComposeSource::Unknown;
+
+        let output = execute_command(&d, &options, &source).unwrap();
+        assert_eq!(output.trim(), "hello");
+    }
+
+    #[test]
+    fn execute_command_keeps_ansi_when_opt_out() {
+        let d = ShellDirective {
+            raw_command: "echo ...".to_string(),
+            executable: "echo".to_string(),
+            args: vec!["\x1b[31mhello\x1b[0m".to_string()],
+            span: 0..0,
+            line: 1,
+            error_handling: ErrorHandling::default(),
+        };
+        let options = ShellExpansionOptions {
+            strip_ansi: false,
+            ..Default::default()
+        };
+        let source = ComposeSource::Unknown;
+
+        let output = execute_command(&d, &options, &source).unwrap();
+        assert_eq!(output.trim(), "\x1b[31mhello\x1b[0m");
+    }
+
+    #[test]
+    fn execute_command_sets_no_color_env() {
+        // On macOS/Linux, 'env' will show the environment
+        let d = ShellDirective {
+            raw_command: "env".to_string(),
+            executable: "env".to_string(),
+            args: vec![],
+            span: 0..0,
+            line: 1,
+            error_handling: ErrorHandling::default(),
+        };
+        let options = ShellExpansionOptions::default(); // strip_ansi: true by default
+        let source = ComposeSource::Unknown;
+
+        let output = execute_command(&d, &options, &source).unwrap();
+        assert!(output.contains("NO_COLOR=1"));
     }
 }

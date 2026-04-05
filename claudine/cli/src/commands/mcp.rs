@@ -4,11 +4,10 @@ use std::path::{Path, PathBuf};
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::table::table::{Table, TableColumn};
+use biscuit_terminal::components::table::table::TableColumn;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::{Alignment, Margin};
 use chrono::Utc;
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::linking::resolve_repo_root;
 use claudine::mcp::catalog::McpCatalogStore;
@@ -28,6 +27,8 @@ use inquire::{Confirm, MultiSelect, Select, Text};
 use serde_json::{Value, json};
 
 use crate::log;
+use crate::provider_values::provider_value_parser;
+use crate::table_utils::base_table;
 
 /// MCP (Model Context Protocol) server management.
 #[derive(Debug, Args)]
@@ -150,15 +151,22 @@ pub struct SyncArgs {}
 #[derive(Debug, Args)]
 pub struct ExportArgs {
     /// Provider to export to (e.g. claude, codex, gemini).
-    pub provider: String,
+    #[arg(value_parser = provider_value_parser())]
+    pub provider: Provider,
 
     /// Scope: user or repo.
-    #[arg(long, default_value = "user")]
-    pub scope: String,
+    #[arg(long, value_enum, default_value_t = ExportScopeArg::User)]
+    pub scope: ExportScopeArg,
 
     /// Actually apply changes (default: dry run).
     #[arg(long)]
     pub apply: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ExportScopeArg {
+    User,
+    Repo,
 }
 
 pub fn run(args: McpArgs) -> Result<()> {
@@ -643,17 +651,14 @@ fn run_sync(_args: SyncArgs, json_output: bool) -> Result<()> {
 }
 
 fn run_export(args: ExportArgs, json_output: bool) -> Result<()> {
-    let provider = Provider::fuzzy_match_cli_name(&args.provider)
-        .ok_or_else(|| eyre!("unknown provider: {}", args.provider))?;
     let catalog = McpCatalogStore::load()?;
     let mut state = McpProviderStateStore::load()?;
 
-    let scope = match args.scope.as_str() {
-        "repo" => {
+    let scope = match args.scope {
+        ExportScopeArg::Repo => {
             Scope::Repo(current_repo_root()?.ok_or_else(|| eyre!("failed to resolve repo root"))?)
         }
-        "user" => Scope::User,
-        other => return Err(eyre!("unknown scope `{other}`; expected user or repo")),
+        ExportScopeArg::User => Scope::User,
     };
 
     let repo_root = match &scope {
@@ -673,14 +678,14 @@ fn run_export(args: ExportArgs, json_output: bool) -> Result<()> {
     }
 
     let mut exporter = McpExporter::new(&catalog, &mut state);
-    let report = exporter.sync_provider(provider, &scope, &servers, args.apply)?;
+    let report = exporter.sync_provider(args.provider, &scope, &servers, args.apply)?;
     if args.apply {
         state.save()?;
     }
 
     if json_output {
         log::data(&serde_json::to_string_pretty(&json!({
-            "provider": provider.as_slug(),
+            "provider": args.provider.as_slug(),
             "scope": scope_name(&scope),
             "applied": args.apply,
             "written": report.written,
@@ -692,11 +697,11 @@ fn run_export(args: ExportArgs, json_output: bool) -> Result<()> {
     }
 
     if args.apply {
-        log::data(&format!("Export applied to {}.", provider.as_slug()));
+        log::data(&format!("Export applied to {}.", args.provider.as_slug()));
     } else {
         log::data(&format!(
             "Export dry run for {} (use --apply to write).",
-            provider.as_slug()
+            args.provider.as_slug()
         ));
     }
     if !report.written.is_empty() {
@@ -1201,11 +1206,4 @@ fn scope_name(scope: &Scope) -> &'static str {
         Scope::User => "user",
         Scope::Repo(_) => "repo",
     }
-}
-
-fn base_table(columns: Vec<TableColumn>) -> Table {
-    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
-    table.layout_mut().left_margin = Margin::Chars(1);
-    let _ = Alignment::Right;
-    table
 }

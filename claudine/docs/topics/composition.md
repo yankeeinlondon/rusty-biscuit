@@ -134,6 +134,7 @@ handle_file_exists:
 ```
 
 Four handler actions are available:
+
 - **retry** — re-run the same prompt with optional modifications
 - **resume** — continue from the previous session (provider must support session resume)
 - **redirect** — switch to a different source document
@@ -162,6 +163,135 @@ The following interfaces have been removed and replaced by the two canonical com
 | Removed | Reason |
 |---------|--------|
 | `claudine <agent> --prompt-file <file>` | Sent file content verbatim as a prompt. `claudine compose` performs full Markdown composition (frontmatter, template substitution, `::shell` directives) so it is not a drop-in replacement. Callers that need raw prompt delivery should use the provider CLI directly. |
+
+## Sequence Composition
+
+Sequence composition runs a single source document multiple times, once per step in a defined list, with step-specific state injected into the composition context on each run.
+
+```sh
+claudine sequence @deploy.md
+claudine sequence --fail-fast false @batch.md
+```
+
+### When to Use Sequence
+
+Use `claudine sequence` when you have a fixed list of items and need to compose the same template document against each item independently. Each step is a full one-shot composition run — with its own provider selection, harness evaluation, lifecycle notifications, and pre-flight shell approval. The sequence command is serial; steps do not run in parallel.
+
+### Inline Sequence Definition
+
+Sequences can be defined directly in the source document's frontmatter as a scalar list or an object list.
+
+**Scalar list** — each step value is a plain string:
+
+```yaml
+sequence:
+  - one
+  - two
+  - three
+fail_fast: false
+```
+
+**Object list** — each step value is an object; `name` is required:
+
+```yaml
+sequence:
+  - name: one
+    color: red
+  - name: two
+    color: blue
+```
+
+### External YAML Sequence Definition
+
+When the `sequence` frontmatter property is a string, Claudine resolves it as a file reference relative to the source document.
+
+**Plain list form** — the external file contains a `sequence:` key:
+
+```yaml
+# steps.yaml
+sequence:
+  - name: Codex CLI
+    site: https://developers.openai.com/codex/cli
+  - name: Claude Code
+    site: https://claude.ai/code
+```
+
+**Template form** — the external file uses `kind/list/template` to apply a shared template across all items:
+
+```yaml
+# steps.yaml
+kind: sequence
+template:
+  desc: "{{name}} (_site: {{site}}, repo: {{repo || 'n/a'}}_)"
+list:
+  - name: Codex CLI
+    site: https://developers.openai.com/codex/cli
+    repo: https://github.com/openai/codex
+  - name: Claude Code
+    site: https://claude.ai/code
+```
+
+Template rules:
+
+- `kind: sequence` is optional; when present it must equal `sequence`
+- `list` must be a non-empty list of objects, each with `name`
+- `template` is only supported in the `kind/list/template` external-file form
+- Template values must be strings; each template string is rendered against the item's own fields
+- Rendered template fields are merged into the item; they may not overwrite reserved step keys
+
+### Template Evaluation
+
+Each step runs the source document through Darkmatter's composition pipeline with a set of reserved variables injected as overrides. These variables are always set by the sequence runner and cannot be overridden by `--set`:
+
+| Variable | Type | Description |
+|---|---|---|
+| `state` | string or object | The current step value (scalar string or full object) |
+| `previous_state` | string, object, or null | The previous step's value, or null for the first step |
+| `next_state` | string, object, or null | The next step's value, or null for the last step |
+| `is_first` | boolean | `true` when this is the first step |
+| `is_last` | boolean | `true` when this is the last step |
+| `step` | integer | One-based index of the current step |
+| `total_steps` | integer | Total number of steps in the sequence |
+
+For object steps, fields are accessed through `state`: `{{state.name}}`, `{{state.color}}`, etc. Field values are not promoted to top-level variables to avoid collisions with reserved keys or other frontmatter properties such as `agent` or `timeout`.
+
+The `FAIL_FAST` environment variable is also injected per step so that `{{env.FAIL_FAST}}` and `::shell` directives see the same policy as the child provider process.
+
+### Fail-Fast Behavior
+
+By default, a sequence stops on the first failed step. Failure means any of: pre-flight failure, preparation failure, non-zero provider exit, or harness resolution failure.
+
+The effective fail-fast policy is determined by:
+
+1. **`--fail-fast` CLI flag** — overrides the document default for this invocation
+2. **`fail_fast` frontmatter property** — document-level default; must be a boolean
+3. **Built-in default** — `true` when neither is specified
+
+```yaml
+# document default: continue on failure
+fail_fast: false
+```
+
+```sh
+# CLI override: stop on first failure regardless of document default
+claudine sequence --fail-fast true @batch.md
+```
+
+The `--fail-fast` flag accepts boolish values: `true`, `false`, `1`, `0`, `yes`, `no`.
+
+### The `FAIL_FAST` Environment Variable
+
+Claudine injects `FAIL_FAST=true` or `FAIL_FAST=false` into the composition environment for each step. This makes the effective policy visible to `{{env.FAIL_FAST}}` interpolation inside the template and to any `::shell` directives that inspect the environment.
+
+### Error Handling Semantics
+
+When `fail_fast` is `true` (the default), Claudine stops immediately after the first failed step and exits with code `1`. Steps after the failure are not executed.
+
+When `fail_fast` is `false`, Claudine records each step's result and continues through all steps regardless of failures. After the last step, Claudine exits with `0` if all steps succeeded, or `1` if one or more steps failed.
+
+Harness recovery actions (`retry`, `resume`, `redirect`, `deviate`) apply within a single step only. There is no cross-step recovery mechanism.
+
+> **Note:** The `fail_fast` frontmatter key is reserved for sequence control. It is not passed to Darkmatter's internal compose options.
 
 ## Architecture
 

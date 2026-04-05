@@ -226,7 +226,7 @@ fn compare_sections(
             if orig_node.prelude_hash() == upd_node.prelude_hash() && orig_node.prelude_hash() != 0
             {
                 // Same content, different path = moved
-                let level_delta = upd_node.level as i8 - orig_node.level as i8;
+                let level_delta = orig_node.level.delta_to(upd_node.level);
 
                 delta.moved.push(MovedSection::new(
                     orig_node.prelude_hash(),
