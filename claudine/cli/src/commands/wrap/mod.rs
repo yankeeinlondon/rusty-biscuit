@@ -420,8 +420,15 @@ impl LiveStreamSink {
     fn merge_state(&mut self, meta: &StreamEventMeta) {
         if let Some(session_id) = string_from_extra(&meta.extra, &["session_id", "thread_id", "id"])
         {
-            Span::current().record("session_id", tracing::field::display(&session_id));
-            self.session_id = Some(session_id);
+            if self.session_id.as_deref() != Some(session_id.as_str()) {
+                tracing::info!(
+                    provider = %self.provider,
+                    session_id = %session_id,
+                    model = self.model.as_deref().unwrap_or(""),
+                    "identified wrapped provider session"
+                );
+                self.session_id = Some(session_id);
+            }
         }
         if let Some(model) = string_from_extra(&meta.extra, &["model"]) {
             self.model = Some(model);
@@ -820,14 +827,12 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     };
     let wrapper_span = info_span!(
         "wrapper_session",
-        provider = %provider,
         binary_path = %binary_path.display(),
         structured_mode = tracing::field::Empty,
         has_prompt,
         interactive_requested,
         yolo_requested,
         model_override = %args.model.as_deref().unwrap_or(""),
-        session_id = tracing::field::Empty,
         child_pid = tracing::field::Empty,
     );
     let _wrapper_guard = wrapper_span.enter();
@@ -1100,6 +1105,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     }
 
     let child_cwd = env_plan.child_cwd.as_path();
+
+    if effective_non_interactive && !silent_requested {
+        log::info(&crate::output::format_launch_directory(child_cwd));
+    }
 
     // --dry-run: print what would be executed and exit
     if args.dry_run {
