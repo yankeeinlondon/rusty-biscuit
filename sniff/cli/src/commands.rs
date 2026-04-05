@@ -482,8 +482,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .without_file_inventory()
                     .without_formatting(),
             ),
-        OutputFilter::All => DetectionPlan::new()
-            .filesystem(FilesystemRequest::new().git(git_request.clone())),
+        OutputFilter::All => {
+            DetectionPlan::new().filesystem(FilesystemRequest::new().git(git_request.clone()))
+        }
         OutputFilter::Programs
         | OutputFilter::Editors
         | OutputFilter::Utilities

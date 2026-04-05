@@ -9,8 +9,8 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::actions::HookAction;
 use claudine::dispatch::loader::load_config;
-use claudine::events::AgenticEvent;
 
+use crate::cli_utils::event_name_pascal;
 use crate::log;
 
 #[derive(Args)]
@@ -36,12 +36,6 @@ pub fn run(_args: ActionsArgs, verbose: bool) -> Result<()> {
 
 fn action_type_name(action: &HookAction) -> &'static str {
     action.type_pascal_case()
-}
-
-fn event_name_pascal(slug: &str) -> String {
-    AgenticEvent::from_slug(slug)
-        .map(|event| event.as_pascal_case().to_string())
-        .unwrap_or_else(|| slug.to_string())
 }
 
 fn run_simple(config: &claudine::events::HookerConfig, term: &Terminal) -> Result<()> {

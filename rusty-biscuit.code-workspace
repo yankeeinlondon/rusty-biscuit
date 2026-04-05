@@ -2,8 +2,16 @@
     "folders": [
 
         {
-            "name": "skills",
+            "name": "Agent Skills",
             "path": ".claude/skills"
+        },
+        {
+            "name": "Prompts",
+            "path": "prompts"
+        },
+        {
+            "name": "Claudine",
+            "path": ".claudine"
         },
         {
             "name": "~ monorepo",

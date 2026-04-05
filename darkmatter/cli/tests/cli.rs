@@ -7,6 +7,14 @@ fn md_cmd() -> assert_cmd::Command {
     cargo_bin_cmd!("md")
 }
 
+/// Creates a temporary markdown file with the given content.
+fn md_file(content: &str) -> tempfile::NamedTempFile {
+    use std::io::Write;
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    write!(tmp, "{}", content).unwrap();
+    tmp
+}
+
 // =============================================================================
 //                          BASIC FUNCTIONALITY TESTS
 // =============================================================================
@@ -51,9 +59,7 @@ fn test_stdin_rendering_auto_non_tty_outputs_markdown() {
 
 #[test]
 fn test_file_rendering() {
-    // Create a temporary markdown file and render it
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "# Test File\n\nSome content here.").unwrap();
+    let tmp = md_file("# Test File\n\nSome content here.\n");
 
     md_cmd()
         .arg(tmp.path())
@@ -238,8 +244,7 @@ fn test_clean_subcommand_stdin() {
 
 #[test]
 fn test_clean_subcommand_file() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "# Hello \n\nWorld  \n").unwrap();
+    let tmp = md_file("# Hello \n\nWorld  \n");
 
     md_cmd()
         .arg("clean")
@@ -863,8 +868,7 @@ fn test_hash_strict_frontmatter_differs_from_normalized() {
 
 #[test]
 fn test_hash_from_file() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "---\ntitle: File Test\n---\n# Hello\n\nWorld").unwrap();
+    let tmp = md_file("---\ntitle: File Test\n---\n# Hello\n\nWorld\n");
 
     md_cmd()
         .arg("hash")
@@ -1124,8 +1128,7 @@ fn test_get_toml_output() {
 
 #[test]
 fn test_get_from_file() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "---\nversion: 2\n---\n# Doc").unwrap();
+    let tmp = md_file("---\nversion: 2\n---\n# Doc\n");
 
     md_cmd()
         .args(["get"])
@@ -1367,6 +1370,172 @@ fn test_get_requires_at_least_one_prop() {
     md_cmd()
         .args(["get", "-"])
         .write_stdin(FM_DOC)
+        .assert()
+        .failure();
+}
+
+// =============================================================================
+//                      RM SUBCOMMAND TESTS
+// =============================================================================
+
+#[test]
+fn test_rm_removes_single_property() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.md");
+    std::fs::write(
+        &file,
+        "---\ntitle: Hello\nauthor: Alice\ndate: 2024-01-01\n---\n\n# Content\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .args(["rm", file.to_str().unwrap(), "author"])
+        .assert()
+        .success();
+
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(!content.contains("author:"));
+    assert!(content.contains("title: Hello"));
+    assert!(content.contains("date: 2024-01-01"));
+    assert!(content.contains("# Content"));
+}
+
+#[test]
+fn test_rm_removes_multiple_properties() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.md");
+    std::fs::write(
+        &file,
+        "---\ntitle: Hello\nauthor: Alice\ndate: 2024-01-01\ntags: [rust, cli]\n---\n\n# Content\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .args(["rm", file.to_str().unwrap(), "author", "tags"])
+        .assert()
+        .success();
+
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(!content.contains("author:"));
+    assert!(!content.contains("tags:"));
+    assert!(content.contains("title: Hello"));
+    assert!(content.contains("date: 2024-01-01"));
+    assert!(content.contains("# Content"));
+}
+
+#[test]
+fn test_rm_nonexistent_key_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.md");
+    std::fs::write(
+        &file,
+        "---\ntitle: Hello\nauthor: Alice\n---\n\n# Content\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .args(["rm", file.to_str().unwrap(), "missing"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found in frontmatter"));
+}
+
+#[test]
+fn test_rm_partial_nonexistent_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.md");
+    std::fs::write(
+        &file,
+        "---\ntitle: Hello\nauthor: Alice\n---\n\n# Content\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .args(["rm", file.to_str().unwrap(), "title", "missing"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found in frontmatter"));
+
+    // File should be unchanged when command fails
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(content.contains("title: Hello"));
+    assert!(content.contains("author: Alice"));
+}
+
+#[test]
+fn test_rm_with_json_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.md");
+    std::fs::write(
+        &file,
+        "---\ntitle: Hello\nauthor: Alice\ndate: 2024-01-01\n---\n\n# Content\n",
+    )
+    .unwrap();
+
+    let output = md_cmd()
+        .args(["rm", file.to_str().unwrap(), "author", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json_str = String::from_utf8_lossy(&output);
+    assert!(json_str.contains("\"removed\""));
+    assert!(json_str.contains("\"remaining\""));
+    assert!(json_str.contains("\"filename\""));
+    assert!(json_str.contains("\"author\""));
+    assert!(json_str.contains("\"title\""));
+    assert!(json_str.contains("\"date\""));
+}
+
+#[test]
+fn test_rm_with_verbose_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.md");
+    std::fs::write(
+        &file,
+        "---\ntitle: Hello\nauthor: Alice\ndate: 2024-01-01\n---\n\n# Content\n",
+    )
+    .unwrap();
+
+    md_cmd()
+        .args(["rm", file.to_str().unwrap(), "author", "-v"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("removed"));
+}
+
+#[test]
+fn test_rm_preserves_body_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.md");
+    let body = "# Heading\n\nParagraph with **bold** text.\n\n- list item\n";
+    std::fs::write(
+        &file,
+        format!("---\ntitle: Test\nauthor: Alice\n---\n\n{}", body),
+    )
+    .unwrap();
+
+    md_cmd()
+        .args(["rm", file.to_str().unwrap(), "author"])
+        .assert()
+        .success();
+
+    let content = std::fs::read_to_string(&file).unwrap();
+    assert!(content.contains("# Heading"));
+    assert!(content.contains("**bold**"));
+    assert!(content.contains("- list item"));
+}
+
+#[test]
+fn test_rm_requires_at_least_one_prop() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("test.md");
+    std::fs::write(&file, "---\ntitle: Hello\n---\n\n# Content\n").unwrap();
+
+    md_cmd()
+        .args(["rm", file.to_str().unwrap()])
         .assert()
         .failure();
 }
@@ -1654,8 +1823,7 @@ fn test_graph_validate_valid() {
 
 #[test]
 fn test_graph_validate_invalid() {
-    let mut tmp = tempfile::NamedTempFile::new().unwrap();
-    writeln!(tmp, "# Test\n\n[broken](./nonexistent.md)").unwrap();
+    let tmp = md_file("# Test\n\n[broken](./nonexistent.md)\n");
 
     let output = md_cmd()
         .arg("graph")
@@ -1798,4 +1966,96 @@ fn test_graph_help() {
         .success()
         .stdout(predicate::str::contains("--follow"))
         .stdout(predicate::str::contains("--validate"));
+}
+
+// =============================================================================
+//                          UNTESTED FLAG COVERAGE
+// =============================================================================
+
+#[test]
+fn test_list_themes() {
+    md_cmd()
+        .arg("--list-themes")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Available themes"))
+        .stdout(predicate::str::contains("github"))
+        .stdout(predicate::str::contains("solarized"));
+}
+
+#[test]
+fn test_completions_bash() {
+    md_cmd()
+        .args(["--completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty().not());
+}
+
+#[test]
+fn test_completions_zsh() {
+    md_cmd()
+        .args(["--completions", "zsh"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty().not());
+}
+
+#[test]
+fn test_completions_fish() {
+    md_cmd()
+        .args(["--completions", "fish"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty().not());
+}
+
+#[test]
+fn test_line_numbers_html_output() {
+    let input = "```rust\nfn main() {}\n```";
+    md_cmd()
+        .args(["--output", "html", "--line-numbers", "-"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<style>"))
+        .stdout(predicate::str::contains("main"));
+}
+
+#[test]
+fn test_compose_compact() {
+    let input = "---\n---\n\n- item 1\n\n- item 2\n\n- item 3";
+    md_cmd()
+        .args(["compose", "--compact", "-"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("- item 1\n- item 2\n- item 3"));
+}
+
+#[test]
+fn test_compose_loose() {
+    let input = "---\n---\n\n- item 1\n- item 2\n- item 3";
+    md_cmd()
+        .args(["compose", "--loose", "-"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("- item 1\n\n- item 2\n\n- item 3"));
+}
+
+#[test]
+fn test_graph_json_output() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("test.md");
+    std::fs::write(&file, "# Test\n\n[link](https://example.com)").unwrap();
+
+    md_cmd()
+        .args(["graph", "--json"])
+        .arg(&file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("{"))
+        .stdout(predicate::str::contains("\"references\""))
+        .stdout(predicate::str::contains("example.com"));
 }

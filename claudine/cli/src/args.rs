@@ -102,4 +102,6 @@ pub(crate) enum Commands {
     /// Inline composition: use frontmatter prompt to generate and replace body.
     #[command(name = "inline-compose")]
     InlineCompose(commands::compose::InlineComposeArgs),
+    /// Run a serial sequence of composition steps from a single document.
+    Sequence(commands::sequence::SequenceArgs),
 }

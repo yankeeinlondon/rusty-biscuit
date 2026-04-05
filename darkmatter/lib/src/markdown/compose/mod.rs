@@ -64,7 +64,8 @@ pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
     ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePerfMetric,
-    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeWarning, SourceRange,
+    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeStage, ComposeWarning,
+    SourceRange,
 };
 
 // Internal re-exports for crate modules that still use TransclusionOptions
@@ -692,7 +693,10 @@ impl Markdown {
             .map(|item| self.resolve_prepared_transclusion(item, state, options, &runtime_mutex))
             .collect::<Vec<_>>();
 
-        debug!(resolved = results.len(), "compose: transclusion resolution complete");
+        debug!(
+            resolved = results.len(),
+            "compose: transclusion resolution complete"
+        );
         if let Some(start) = resolve_start {
             perf_collector.record(perf::PerfMetricKind::TransclusionResolve, start.elapsed());
         }
@@ -872,7 +876,10 @@ impl Markdown {
         if result.replacements > 0 {
             self.content = result.output;
         }
-        debug!(count = result.replacements, "compose: interpolations applied");
+        debug!(
+            count = result.replacements,
+            "compose: interpolations applied"
+        );
         Ok(result.replacements)
     }
 
@@ -897,7 +904,10 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<()> {
         let directives = shell_expansion::parse_directives(&self.content)?;
-        debug!(directive_count = directives.len(), "compose: shell expansion directives found");
+        debug!(
+            directive_count = directives.len(),
+            "compose: shell expansion directives found"
+        );
         if directives.is_empty() {
             return Ok(());
         }
@@ -3411,10 +3421,10 @@ Rounded: {{ round(pi) }}"#;
         assert!(perf.total > std::time::Duration::ZERO);
         assert!(!perf.metrics.is_empty(), "Should have at least one metric");
 
-        // Verify expected metric names are present
-        let names: Vec<&str> = perf.metrics.iter().map(|m| m.name.as_str()).collect();
-        assert!(names.contains(&"effective state build"));
-        assert!(names.contains(&"cleanup"));
+        // Verify expected stages are present
+        let stages: Vec<_> = perf.metrics.iter().map(|m| m.stage).collect();
+        assert!(stages.contains(&ComposeStage::EffectiveStateBuild));
+        assert!(stages.contains(&ComposeStage::Cleanup));
     }
 
     #[test]
@@ -3430,7 +3440,7 @@ Rounded: {{ round(pi) }}"#;
         let interp = perf
             .metrics
             .iter()
-            .find(|m| m.name == "interpolation")
+            .find(|m| m.stage == ComposeStage::Interpolation)
             .unwrap();
         assert_eq!(interp.calls, 1);
     }

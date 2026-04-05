@@ -1,13 +1,22 @@
 //! Core types for composition workflows.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::Markdown;
-use serde_json;
+use serde::{Deserialize, Serialize};
 
 use super::lifecycle::LifecycleConfig;
 use crate::events::Provider;
+use crate::harness::shell::CachedApprovalDecision;
+
+/// Shared approval cache that can be reused across composition runs
+/// (e.g. steps of one sequence) so that previously approved commands
+/// do not prompt again.
+pub type SharedApprovalCache = Arc<Mutex<HashMap<String, CachedApprovalDecision>>>;
 
 /// Which composition mode to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +111,48 @@ pub struct InlineClosurePlan {
     pub original_body_hash: u64,
 }
 
+/// Universal output format for composed provider execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputFormat {
+    Json,
+    Text,
+    Stream,
+}
+
+impl fmt::Display for OutputFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json => write!(f, "json"),
+            Self::Text => write!(f, "text"),
+            Self::Stream => write!(f, "stream"),
+        }
+    }
+}
+
+impl FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "json" => Ok(Self::Json),
+            "text" => Ok(Self::Text),
+            "stream" | "stream-json" => Ok(Self::Stream),
+            _ => Err(format!(
+                "unknown output format '{value}'; expected json, text, or stream"
+            )),
+        }
+    }
+}
+
+/// Explicit system prompt input source for composition execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SystemPromptInput {
+    Inline { prompt: String },
+    File { path: PathBuf },
+}
+
 /// A fully-specified request to execute a composition through the
 /// wrapper-grade pipeline.
 #[derive(Debug, Clone)]
@@ -123,9 +174,9 @@ pub struct CompositionExecutionRequest {
     /// Override the model used by the provider.
     pub model: Option<String>,
     /// Set the output format (json, text, stream).
-    pub output: Option<String>,
-    /// Set or append a system prompt (string or file path).
-    pub system_prompt: Option<String>,
+    pub output: Option<OutputFormat>,
+    /// Set or append a system prompt from either inline content or a file.
+    pub system_prompt: Option<SystemPromptInput>,
     /// Timeout in seconds for non-interactive mode.
     pub timeout: Option<u64>,
     /// OPERATION env var value for the composed session.
@@ -148,4 +199,247 @@ pub struct CompositionExecutionRequest {
     pub quiet: bool,
     /// Suppress all preflight output.
     pub silent: bool,
+    /// Extra environment variables to inject into both the composition
+    /// context (used for preflight and prompt interpolation) and the
+    /// spawned child process. Currently used by sequence execution to
+    /// propagate `FAIL_FAST`.
+    pub env_overrides: BTreeMap<String, String>,
+    /// Optional shared shell-approval cache. When provided, harness
+    /// shell preflight reuses previously approved commands from this
+    /// cache instead of prompting again. Used by sequence execution to
+    /// honour "allow once" for the whole run, not just one step.
+    pub shared_approval_cache: Option<SharedApprovalCache>,
+}
+
+/// Describes where the sequence definition was found.
+#[derive(Debug, Clone)]
+pub enum SequenceSource {
+    /// The sequence was defined inline in the document's frontmatter.
+    Inline,
+    /// The sequence was loaded from an external YAML file.
+    External { path: PathBuf },
+}
+
+/// A single step in a sequence.
+#[derive(Debug, Clone)]
+pub struct SequenceStep {
+    /// Zero-based index in the sequence list.
+    pub index: usize,
+    /// Display name for the step (scalar value or the `name` field of an object).
+    pub name: String,
+    /// The full state value: a JSON string for scalar steps, a JSON object for object steps.
+    pub raw_state: serde_json::Value,
+}
+
+/// A validated, normalized sequence plan ready for execution.
+#[derive(Debug, Clone)]
+pub struct SequencePlan {
+    /// Where the sequence definition came from.
+    pub source: SequenceSource,
+    /// Ordered list of steps.
+    pub steps: Vec<SequenceStep>,
+    /// The document's `fail_fast` setting (defaults to `true`).
+    pub document_fail_fast: bool,
+}
+
+/// Per-step overlay values injected into each composition run.
+#[derive(Debug, Clone)]
+pub struct SequenceStepOverlay {
+    /// Current step's state value.
+    pub state: serde_json::Value,
+    /// Previous step's state value, or `null` for the first step.
+    pub previous_state: serde_json::Value,
+    /// Next step's state value, or `null` for the last step.
+    pub next_state: serde_json::Value,
+    /// `true` if this is the first step.
+    pub is_first: bool,
+    /// `true` if this is the last step.
+    pub is_last: bool,
+    /// 1-based step number.
+    pub step: usize,
+    /// Total number of steps in the sequence.
+    pub total_steps: usize,
+}
+
+impl SequenceStepOverlay {
+    /// Reserved overlay keys that must always win over user `--set` values.
+    pub const RESERVED_KEYS: &[&str] = &[
+        "state",
+        "previous_state",
+        "next_state",
+        "is_first",
+        "is_last",
+        "step",
+        "total_steps",
+    ];
+
+    /// Build a `serde_json::Value::Object` suitable for `set_overrides`.
+    ///
+    /// Merge order: user `--set` first, then overlay (overlay wins on conflict).
+    pub fn as_set_overrides(&self, user_set: Option<serde_json::Value>) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+
+        // 1. Start with user --set values
+        if let Some(serde_json::Value::Object(user_map)) = user_set {
+            for (key, value) in user_map {
+                map.insert(key, value);
+            }
+        }
+
+        // 2. Overlay reserved keys (always win)
+        map.insert("state".into(), self.state.clone());
+        map.insert("previous_state".into(), self.previous_state.clone());
+        map.insert("next_state".into(), self.next_state.clone());
+        map.insert("is_first".into(), serde_json::Value::Bool(self.is_first));
+        map.insert("is_last".into(), serde_json::Value::Bool(self.is_last));
+        map.insert("step".into(), serde_json::Value::Number(self.step.into()));
+        map.insert(
+            "total_steps".into(),
+            serde_json::Value::Number(self.total_steps.into()),
+        );
+
+        serde_json::Value::Object(map)
+    }
+}
+
+/// Options for sequence execution at the CLI level.
+#[derive(Debug, Clone)]
+pub struct SequenceExecutionOptions {
+    /// CLI `--fail-fast` override. `None` means use the document default.
+    pub fail_fast_override: Option<bool>,
+}
+
+/// Summary of a completed sequence run.
+#[derive(Debug, Clone)]
+pub struct SequenceRunSummary {
+    /// Total steps in the sequence.
+    pub total_steps: usize,
+    /// Number of steps that succeeded.
+    pub succeeded: usize,
+    /// Number of steps that failed.
+    pub failed: usize,
+    /// Per-step results.
+    pub steps: Vec<SequenceStepResult>,
+}
+
+/// Result of a single sequence step.
+#[derive(Debug, Clone)]
+pub struct SequenceStepResult {
+    /// 1-based step number.
+    pub step: usize,
+    /// Display name of the step.
+    pub name: String,
+    /// Whether the step succeeded (exit code 0).
+    pub success: bool,
+    /// Error message if the step failed.
+    pub error: Option<String>,
+    /// Wall-clock duration of the step.
+    pub duration: std::time::Duration,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn sequence_step_overlay_first_step() {
+        let overlay = SequenceStepOverlay {
+            state: json!("one"),
+            previous_state: serde_json::Value::Null,
+            next_state: json!("two"),
+            is_first: true,
+            is_last: false,
+            step: 1,
+            total_steps: 3,
+        };
+        assert!(overlay.is_first);
+        assert!(!overlay.is_last);
+        assert_eq!(overlay.step, 1);
+        assert_eq!(overlay.total_steps, 3);
+        assert!(overlay.previous_state.is_null());
+    }
+
+    #[test]
+    fn sequence_step_overlay_last_step() {
+        let overlay = SequenceStepOverlay {
+            state: json!("three"),
+            previous_state: json!("two"),
+            next_state: serde_json::Value::Null,
+            is_first: false,
+            is_last: true,
+            step: 3,
+            total_steps: 3,
+        };
+        assert!(!overlay.is_first);
+        assert!(overlay.is_last);
+        assert_eq!(overlay.step, 3);
+        assert!(overlay.next_state.is_null());
+    }
+
+    #[test]
+    fn sequence_step_overlay_as_overrides_reserves_keys() {
+        let overlay = SequenceStepOverlay {
+            state: json!("one"),
+            previous_state: serde_json::Value::Null,
+            next_state: json!("two"),
+            is_first: true,
+            is_last: false,
+            step: 1,
+            total_steps: 3,
+        };
+        let overrides = overlay.as_set_overrides(None);
+        let obj = overrides.as_object().unwrap();
+        assert_eq!(obj.get("state"), Some(&json!("one")));
+        assert_eq!(obj.get("is_first"), Some(&json!(true)));
+        assert_eq!(obj.get("is_last"), Some(&json!(false)));
+        assert_eq!(obj.get("step"), Some(&json!(1)));
+        assert_eq!(obj.get("total_steps"), Some(&json!(3)));
+        assert!(obj.get("previous_state").unwrap().is_null());
+        assert_eq!(obj.get("next_state"), Some(&json!("two")));
+    }
+
+    #[test]
+    fn sequence_step_overlay_merges_user_set_but_reserved_wins() {
+        let overlay = SequenceStepOverlay {
+            state: json!("one"),
+            previous_state: serde_json::Value::Null,
+            next_state: json!("two"),
+            is_first: true,
+            is_last: false,
+            step: 1,
+            total_steps: 3,
+        };
+        let user_set = json!({
+            "color": "red",
+            "state": "should-be-overridden",
+            "step": 99
+        });
+        let overrides = overlay.as_set_overrides(Some(user_set));
+        let obj = overrides.as_object().unwrap();
+        // User key preserved
+        assert_eq!(obj.get("color"), Some(&json!("red")));
+        // Reserved keys overwritten by overlay
+        assert_eq!(obj.get("state"), Some(&json!("one")));
+        assert_eq!(obj.get("step"), Some(&json!(1)));
+    }
+
+    #[test]
+    fn sequence_plan_display_source() {
+        let plan = SequencePlan {
+            source: SequenceSource::Inline,
+            steps: vec![],
+            document_fail_fast: true,
+        };
+        assert!(matches!(plan.source, SequenceSource::Inline));
+
+        let plan2 = SequencePlan {
+            source: SequenceSource::External {
+                path: std::path::PathBuf::from("data.yaml"),
+            },
+            steps: vec![],
+            document_fail_fast: false,
+        };
+        assert!(!plan2.document_fail_fast);
+    }
 }

@@ -121,7 +121,7 @@ impl<'a> McpExporter<'a> {
             Provider::RooCode => write_roo_mcp(&export_servers, &config_path, &managed_names)?,
             _ => {
                 return Err(ClaudineError::McpProviderNotSupported {
-                    provider: provider.as_slug().into(),
+                    provider,
                     reason: "export not implemented".into(),
                 });
             }
@@ -174,7 +174,7 @@ fn native_config_path(provider: Provider, scope: &Scope) -> Result<PathBuf> {
         (Provider::OpenCode, Scope::Repo(root)) => Ok(root.join("opencode.json")),
         (Provider::RooCode, Scope::Repo(root)) => Ok(root.join(".roo").join("mcp.json")),
         _ => Err(ClaudineError::McpProviderNotSupported {
-            provider: provider.as_slug().into(),
+            provider,
             reason: "no config path for scope".into(),
         }),
     }

@@ -36,8 +36,7 @@ fn init_tracing(debug_level: Option<u8>) {
         _ => return,
     };
 
-    let filter =
-        EnvFilter::try_new(&filter_str).unwrap_or_else(|_| EnvFilter::new("warn"));
+    let filter = EnvFilter::try_new(&filter_str).unwrap_or_else(|_| EnvFilter::new("warn"));
     let show_locations = debug_level.unwrap_or(0) >= 4;
 
     tracing_subscriber::registry()

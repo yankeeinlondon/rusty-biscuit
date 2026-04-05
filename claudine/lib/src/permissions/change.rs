@@ -118,3 +118,33 @@ impl PolicyChange {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persistent_change_uses_auto_target_and_persistent_mode() {
+        let change =
+            PolicyChange::persistent(vec![PolicyChangeOp::AllowDomain("example.com".to_string())]);
+
+        assert!(matches!(change.target, PolicyChangeTarget::Auto));
+        assert!(matches!(change.persistence, PolicyPersistence::Persistent));
+        assert_eq!(change.operations.len(), 1);
+    }
+
+    #[test]
+    fn one_shot_change_uses_one_shot_mode() {
+        let change =
+            PolicyChange::one_shot(vec![PolicyChangeOp::DenyDomain("example.com".to_string())]);
+
+        assert!(matches!(change.persistence, PolicyPersistence::OneShot));
+    }
+
+    #[test]
+    fn command_pattern_new_preserves_raw_string() {
+        let pattern = CommandPattern::new("git push");
+
+        assert_eq!(pattern.raw, "git push");
+    }
+}

@@ -77,14 +77,31 @@ pub struct EventMeta {
     pub env: EnvironmentContext,
 }
 
+/// Structured wrapper for provider tool names.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ToolName(pub String);
+
+impl ToolName {
+    /// Returns whether this tool name follows the `mcp__<server>__<tool>` pattern.
+    pub fn is_mcp_tool(&self) -> bool {
+        self.0.starts_with("mcp__")
+    }
+
+    /// Returns the `(server, tool)` segments for MCP tools.
+    pub fn mcp_components(&self) -> Option<(&str, &str)> {
+        let remainder = self.0.strip_prefix("mcp__")?;
+        let (server, tool) = remainder.split_once("__")?;
+        Some((server, tool))
+    }
+}
+
 impl EventMeta {
-    /// Create a minimal EventMeta with only environment context populated.
-    ///
-    /// Useful for resolving context variables without a real event.
-    pub fn dummy_with_env(env: EnvironmentContext) -> Self {
+    /// Create a new event metadata record with all optional fields empty.
+    pub fn new(provider: Provider, event: AgenticEvent) -> Self {
         Self {
-            provider: Provider::Claude,
-            event: AgenticEvent::SessionStart,
+            provider,
+            event,
             timestamp: Utc::now(),
             session_id: None,
             cwd: None,
@@ -97,8 +114,17 @@ impl EventMeta {
             notification_type: None,
             notification_message: None,
             extra: HashMap::new(),
-            env,
+            env: EnvironmentContext::default(),
         }
+    }
+
+    /// Create a minimal EventMeta with only environment context populated.
+    ///
+    /// Useful for resolving context variables without a real event.
+    pub fn dummy_with_env(env: EnvironmentContext) -> Self {
+        let mut meta = Self::new(Provider::Claude, AgenticEvent::SessionStart);
+        meta.env = env;
+        meta
     }
 }
 

@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
-use crate::message::MessageBody;
 use crate::prepared::PreparedMessage;
 use crate::receipt::{MessageRef, ProviderKind, SendReceipt};
 use crate::target::Target;
@@ -68,16 +67,18 @@ impl super::Provider for SlackProvider {
     }
 
     fn capabilities(&self) -> CapabilitySet {
-        CapabilitySet {
+        const SLACK_CAPABILITIES: CapabilitySet = CapabilitySet {
             supports_markdown_rendering: true,
             supports_reply: true,
-            supports_attachments: false, // Deferred: Slack file upload is complex
+            supports_attachments: false,
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: true,
-        }
+        };
+        SLACK_CAPABILITIES
     }
 
+    #[tracing::instrument(skip_all, fields(provider = "slack", channel = tracing::field::Empty))]
     async fn send_prepared(
         &self,
         dispatch: &Dispatch,
@@ -91,17 +92,10 @@ impl super::Provider for SlackProvider {
                 ));
             }
         };
+        tracing::Span::current().record("channel", tracing::field::display(channel_id));
 
         // Render the message body to Slack mrkdwn (with location text fallback)
-        let text = match message.body() {
-            Some(MessageBody::Plain(_)) | Some(MessageBody::Markdown(_)) => {
-                message.render_body_with_location(ProviderKind::Slack)
-            }
-            None if message.location().is_some() => {
-                message.render_body_with_location(ProviderKind::Slack)
-            }
-            None => String::new(),
-        };
+        let text = message.render_body_with_location(ProviderKind::Slack);
 
         // Build the thread_ts from reply_to
         let thread_ts = match &dispatch.reply_to {
@@ -115,6 +109,12 @@ impl super::Provider for SlackProvider {
         } else {
             (None, None)
         };
+        tracing::debug!(
+            has_reply = thread_ts.is_some(),
+            disable_link_preview = dispatch.options.disable_link_preview,
+            text_len = text.len(),
+            "sending Slack message"
+        );
 
         let body = ChatPostMessageRequest {
             channel: channel_id,
@@ -136,50 +136,23 @@ impl super::Provider for SlackProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| MessengerError::Transport {
-                provider: ProviderKind::Slack,
-                message: e.to_string(),
-            })?;
+            .map_err(|e| ProviderKind::Slack.transport_error(e))?;
 
-        let status = response.status();
-
-        if status.as_u16() == 429 {
-            let retry_after = response
-                .headers()
-                .get("Retry-After")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse::<u64>().ok())
-                .map(|s| s * 1000);
-            return Err(MessengerError::RateLimited {
-                provider: ProviderKind::Slack,
-                retry_after_ms: retry_after,
-            });
-        }
-
-        if status.is_server_error() {
-            return Err(MessengerError::Transport {
-                provider: ProviderKind::Slack,
-                message: format!("server error: {status}"),
-            });
-        }
+        tracing::debug!(status = %response.status(), "received Slack response");
 
         let resp: ChatPostMessageResponse =
-            response
-                .json()
-                .await
-                .map_err(|e| MessengerError::Transport {
-                    provider: ProviderKind::Slack,
-                    message: e.to_string(),
-                })?;
+            super::http_helpers::handle_http_response(response, ProviderKind::Slack).await?;
 
         if !resp.ok {
             let error = resp.error.unwrap_or_else(|| "unknown error".into());
             if error == "invalid_auth" || error == "not_authed" || error == "token_revoked" {
+                tracing::warn!(code = %error, "Slack authentication failed");
                 return Err(MessengerError::Authentication {
                     provider: ProviderKind::Slack,
                     message: error,
                 });
             }
+            tracing::warn!(code = %error, "Slack provider returned error");
             return Err(MessengerError::Provider {
                 provider: ProviderKind::Slack,
                 code: Some(error.clone()),
@@ -189,6 +162,7 @@ impl super::Provider for SlackProvider {
 
         let channel = resp.channel.unwrap_or_default();
         let ts = resp.ts.unwrap_or_default();
+        tracing::debug!(raw_id = %ts, "Slack message sent");
 
         Ok(SendReceipt {
             provider: ProviderKind::Slack,

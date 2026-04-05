@@ -75,6 +75,7 @@ diagnostic value.
 ```
 
 Key fields to surface:
+
 - **`model`** — which model is actually being used
 - **`apiKeySource`** — `"ANTHROPIC_API_KEY"` vs `"none"` (subscription) — critical
   for diagnosing billing errors
@@ -105,6 +106,7 @@ on stderr with actionable guidance.
 ```
 
 Key fields to surface:
+
 - **`duration_ms`** / **`duration_api_ms`** — total vs API time shows hook/overhead
 - **`num_turns`** — how many model turns the session used
 - **`total_cost_usd`** — the cost (0 on error, real cost on success)
@@ -239,6 +241,7 @@ rejected" and give precise feedback.
 ### Claude Profile Changes
 
 Claude's `prepare_captured_output` should inject:
+
 ```
 --verbose --output-format stream-json
 ```
@@ -249,6 +252,7 @@ version, and plugin details.
 ### Gemini Comparison
 
 Gemini's stream-json is simpler:
+
 ```json
 {"type":"message","role":"assistant","content":"...","delta":true}
 {"type":"result","status":"success","stats":{"total_tokens":33646,...}}

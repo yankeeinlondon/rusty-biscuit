@@ -8,13 +8,14 @@
 //!
 //! ```rust
 //! use darkmatter::markdown::Markdown;
+//! use darkmatter::markdown::normalize::HeadingLevel;
 //!
 //! let content = "# Introduction\n\nWelcome.\n\n## Getting Started\n\nFirst steps.";
 //! let md: Markdown = content.into();
 //! let toc = md.toc();
 //!
 //! assert_eq!(toc.heading_count(), 2);
-//! assert_eq!(toc.root_level(), Some(1));
+//! assert_eq!(toc.root_level(), Some(HeadingLevel::H1));
 //! assert_eq!(toc.title, Some("Introduction".to_string()));
 //! ```
 
@@ -22,10 +23,11 @@ mod types;
 
 pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode, PreludeNode};
 
+use crate::markdown::normalize::HeadingLevel as OurHeadingLevel;
 use crate::markdown::Markdown;
 use biscuit_file::serde_yaml_ng;
 use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
-use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, HeadingLevel as PulldownHeadingLevel, Parser, Tag, TagEnd};
 
 /// Generates a URL-safe slug from heading text.
 ///
@@ -47,14 +49,14 @@ fn generate_slug(text: &str) -> String {
 }
 
 /// Converts pulldown_cmark HeadingLevel to u8.
-fn heading_level_to_u8(level: HeadingLevel) -> u8 {
+fn heading_level_to_u8(level: PulldownHeadingLevel) -> u8 {
     match level {
-        HeadingLevel::H1 => 1,
-        HeadingLevel::H2 => 2,
-        HeadingLevel::H3 => 3,
-        HeadingLevel::H4 => 4,
-        HeadingLevel::H5 => 5,
-        HeadingLevel::H6 => 6,
+        PulldownHeadingLevel::H1 => 1,
+        PulldownHeadingLevel::H2 => 2,
+        PulldownHeadingLevel::H3 => 3,
+        PulldownHeadingLevel::H4 => 4,
+        PulldownHeadingLevel::H5 => 5,
+        PulldownHeadingLevel::H6 => 6,
     }
 }
 
@@ -99,7 +101,7 @@ fn extract_elements(
     let mut code_blocks = Vec::new();
     let mut internal_links = Vec::new();
 
-    let mut current_heading: Option<(HeadingLevel, String, usize)> = None;
+    let mut current_heading: Option<(PulldownHeadingLevel, String, usize)> = None;
     // (language, info_string, content, start_line)
     let mut current_code_block: Option<(Option<String>, String, String, usize)> = None;
     let mut current_link: Option<(String, String, usize)> = None;
@@ -221,7 +223,7 @@ fn build_hierarchy(headings: &[HeadingInfo], content: &str) -> (Vec<MarkdownTocN
         };
 
         let mut node = MarkdownTocNode::new(
-            heading.level,
+            OurHeadingLevel::new(heading.level).unwrap_or(OurHeadingLevel::H1),
             heading.title.clone(),
             heading.slug.clone(),
             (start_byte, end_byte),
@@ -343,7 +345,7 @@ impl From<&Markdown> for MarkdownToc {
             .flatten()
             .or_else(|| {
                 // Check for single H1
-                let h1s: Vec<_> = toc.structure.iter().filter(|n| n.level == 1).collect();
+                let h1s: Vec<_> = toc.structure.iter().filter(|n| n.level == OurHeadingLevel::H1).collect();
                 if h1s.len() == 1 {
                     Some(h1s[0].title.clone())
                 } else {
@@ -467,7 +469,7 @@ mod tests {
         let toc = MarkdownToc::from(&md);
 
         assert_eq!(toc.heading_count(), 2);
-        assert_eq!(toc.root_level(), Some(1));
+        assert_eq!(toc.root_level(), Some(OurHeadingLevel::H1));
         assert_eq!(toc.title, Some("Hello".to_string()));
     }
 
@@ -615,7 +617,7 @@ See [nonexistent](#nonexistent).
         let md: Markdown = content.into();
         let toc = MarkdownToc::from(&md);
 
-        assert_eq!(toc.max_level(), Some(5));
+        assert_eq!(toc.max_level(), Some(OurHeadingLevel::H5));
     }
 
     #[test]

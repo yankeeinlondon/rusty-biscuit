@@ -114,6 +114,7 @@ pub fn validate_and_approve_command_parts(
         policy_root: options.policy_root.clone(),
         working_directory: options.policy_root.clone(),
         approval_handler: options.approval_handler.clone(),
+        ..Default::default()
     };
 
     let policy_paths = resolve_policy_paths(&shell_opts, &policy_source).map_err(|_| {

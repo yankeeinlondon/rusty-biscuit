@@ -26,6 +26,7 @@ pipeline (Prose, Status, styled terminal output). Verbose output should be indis
 quality from the CLI's normal output -- it's just *more* of it.
 
 Examples of verbose output:
+
 - A summary line after `md rm` showing which properties were removed
 - Extra detail in `md delta` showing per-section change counts
 - A progress indicator during long compose operations
@@ -76,6 +77,7 @@ custom `tracing_subscriber::Layer` that renders events using the CLI's own style
 ### Tracing Coverage by Module
 
 Files with **some** tracing (sparse but present):
+
 - `lib/src/markdown/output/terminal.rs` -- Best instrumented: `#[instrument]` on `render_table_row` and `resolve_image`, `debug!`/`warn!` for image handling, terminal width
 - `lib/src/markdown/highlighting/themes.rs` -- `info!` for theme detection results (5 calls)
 - `lib/src/markdown/inline_html.rs` -- `trace!` for HTML extraction fallbacks (8 calls)
@@ -87,6 +89,7 @@ Files with **some** tracing (sparse but present):
 - `cli/src/output.rs` -- `warn!` for invalid TERMINAL_IMAGES env var (1 call)
 
 Files with **zero** tracing (significant gaps):
+
 - `lib/src/markdown/compose/mod.rs` -- **Pipeline orchestrator** (500+ lines, 3 phases, 10+ operations)
 - `lib/src/markdown/compose/shell_expansion/executor.rs` -- **Shell command execution** (225 lines)
 - `lib/src/markdown/compose/shell_expansion/policy.rs` -- **Security policy checks**

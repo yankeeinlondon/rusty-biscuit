@@ -714,3 +714,66 @@ fn save_state(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use chrono::TimeZone;
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::events::{AgenticEvent, EventMeta, Provider};
+
+    fn sample_meta() -> EventMeta {
+        let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
+        meta.timestamp = Utc.with_ymd_and_hms(2026, 4, 3, 10, 0, 0).unwrap();
+        meta
+    }
+
+    #[test]
+    fn count_lines_before_counts_newlines_up_to_offset() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        fs::write(&path, "one\ntwo\nthree\n").unwrap();
+
+        let count = count_lines_before(&path, 8).unwrap();
+
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn session_key_prefers_session_id_and_falls_back_to_extra_context() {
+        let mut meta = sample_meta();
+        meta.session_id = Some("session-123".to_string());
+        assert_eq!(
+            session_key(&meta, "/tmp/2026-04-03.jsonl", 0),
+            ("claude:session-123".to_string(), false)
+        );
+
+        meta.session_id = None;
+        meta.extra.insert(
+            "plugin_context".to_string(),
+            serde_json::json!({ "session_id": "plugin-456" }),
+        );
+        assert_eq!(
+            session_key(&meta, "/tmp/2026-04-03.jsonl", 0),
+            ("claude:plugin-456".to_string(), false)
+        );
+    }
+
+    #[test]
+    fn extra_path_string_reads_nested_values() {
+        let mut extra = std::collections::HashMap::new();
+        extra.insert(
+            "plugin_context".to_string(),
+            serde_json::json!({ "sessionId": "abc" }),
+        );
+
+        assert_eq!(
+            extra_path_string(&extra, &["plugin_context", "sessionId"]),
+            Some("abc".to_string())
+        );
+        assert_eq!(extra_path_string(&extra, &["missing"]), None);
+    }
+}

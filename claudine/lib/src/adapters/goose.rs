@@ -1,15 +1,12 @@
-use std::collections::HashMap;
-
-use chrono::Utc;
 use serde_json::Value;
 
 use crate::actions::HookResponse;
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
+use crate::events::{AgenticEvent, EventMeta, Provider};
+use crate::services::ProtectObservation;
 use crate::services::protect::intent::ProtectIntent;
 use crate::services::protect::observe::default_observe_protect;
-use crate::services::{ProtectDecision, ProtectObservation, ProtectOutcome};
 
-use super::{AdapterError, ProviderAdapter};
+use super::{AdapterError, ProviderAdapter, str_field};
 
 pub(crate) struct GooseAdapter;
 
@@ -26,23 +23,17 @@ impl ProviderAdapter for GooseAdapter {
             .ok_or(AdapterError::MissingField("type"))?;
 
         let event = map_event(kind, raw)?;
-        let mut meta = EventMeta {
-            provider: Provider::Goose,
-            event,
-            timestamp: Utc::now(),
-            session_id: str_field(raw, "session_id"),
-            cwd: str_field(raw, "cwd"),
-            tool_name: str_field(raw, "tool_name"),
-            tool_input: raw.get("tool_input").cloned(),
-            tool_response: raw.get("tool_response").cloned(),
-            error: str_field(raw, "error"),
-            prompt: str_field(raw, "prompt"),
-            agent_type: str_field(raw, "agent_type"),
-            notification_type: str_field(raw, "notification_type"),
-            notification_message: str_field(raw, "message"),
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
-        };
+        let mut meta = EventMeta::new(Provider::Goose, event);
+        meta.session_id = str_field(raw, "session_id");
+        meta.cwd = str_field(raw, "cwd");
+        meta.tool_name = str_field(raw, "tool_name");
+        meta.tool_input = raw.get("tool_input").cloned();
+        meta.tool_response = raw.get("tool_response").cloned();
+        meta.error = str_field(raw, "error");
+        meta.prompt = str_field(raw, "prompt");
+        meta.agent_type = str_field(raw, "agent_type");
+        meta.notification_type = str_field(raw, "notification_type");
+        meta.notification_message = str_field(raw, "message");
 
         for key in [
             "goose_mode",
@@ -98,29 +89,12 @@ impl ProviderAdapter for GooseAdapter {
     fn map_protect_outcome(
         &self,
         _event: &AgenticEvent,
-        decision: &ProtectDecision,
+        decision: &crate::services::ProtectDecision,
     ) -> Result<HookResponse, AdapterError> {
-        let mut reason = match &decision.outcome {
-            ProtectOutcome::Allow => None,
-            ProtectOutcome::AskThenAllowOrStop { reason }
-            | ProtectOutcome::StopCurrent { reason }
-            | ProtectOutcome::StopSession { reason }
-            | ProtectOutcome::AllowWithRedaction { reason }
-            | ProtectOutcome::AdvisoryOnly { reason } => Some(reason.clone()),
-        };
-
-        if decision.degraded {
-            reason = Some(format!(
-                "{} (goose: no blocking hook channel, advisory fallback)",
-                reason.unwrap_or_else(|| "protect decision".to_string())
-            ));
-        }
-
-        Ok(HookResponse {
-            decision: Some(crate::actions::HookDecision::Continue),
-            reason,
-            ..HookResponse::default()
-        })
+        Ok(self.map_non_blocking_protect_outcome(
+            decision,
+            "goose: no blocking hook channel, advisory fallback",
+        ))
     }
 }
 
@@ -145,10 +119,6 @@ fn map_event(kind: &str, raw: &Value) -> Result<AgenticEvent, AdapterError> {
         "Complete" | "complete" => Ok(AgenticEvent::SessionEnd),
         other => Err(AdapterError::UnknownEvent(other.to_string())),
     }
-}
-
-fn str_field(raw: &Value, key: &str) -> Option<String> {
-    raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
 #[cfg(test)]
