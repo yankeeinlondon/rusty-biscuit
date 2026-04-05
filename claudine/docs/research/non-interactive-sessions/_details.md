@@ -1,5 +1,5 @@
 ---
-sequence: "@claudine/providers"
+sequence: "@claudine/providers.yaml"
 ---
 
 # Non-Interactive Sessions with Agents in Claudine

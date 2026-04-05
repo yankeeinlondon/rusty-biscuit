@@ -121,6 +121,3 @@ list:
 ```
 
 In this example configuration, we define distinct values for the `name`, `file`, `site`, and `repo` information but we also provide a Template called `desc`. Having this template means that _every_ state in the sequence will be provided the `desc` property and the content for this property can leverage Darkmatter's interpolation engine to integrate the other state properties into a summary property composed from various other pieces of "state".
-
-
-
