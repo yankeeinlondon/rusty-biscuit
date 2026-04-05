@@ -16,7 +16,7 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::prelude::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::lifecycle::{
-    LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal, emit_lifecycle_signal,
+    DefaultLifecycleEmitter, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleSignal,
 };
 use claudine::composition::{
     CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
@@ -460,9 +460,18 @@ pub(crate) fn execute_composition_request(
 
     // --- Lifecycle notification setup ---
     let lifecycle = &request.prepared.lifecycle;
-    let mut lifecycle_state = LifecycleRuntimeState::default();
+    let emitter = DefaultLifecycleEmitter;
 
-    let (lifecycle_settings, lifecycle_messaging) =
+    // Skip runtime config loading when no lifecycle notifications are configured.
+    let (lifecycle_settings, lifecycle_messaging) = if lifecycle.is_empty() {
+        (
+            claudine::events::GlobalSettings::default(),
+            claudine::messaging::RuntimeMessagingSettings {
+                user: None,
+                repo: None,
+            },
+        )
+    } else {
         match claudine::dispatch::loader::load_runtime_config(None, effective_repo_root) {
             Ok(config) => (config.settings().clone(), config.messaging().clone()),
             Err(_) => (
@@ -472,7 +481,8 @@ pub(crate) fn execute_composition_request(
                     repo: None,
                 },
             ),
-        };
+        }
+    };
 
     let lifecycle_ctx = LifecycleRuntimeContext {
         settings: &lifecycle_settings,
@@ -481,6 +491,8 @@ pub(crate) fn execute_composition_request(
         source_path: &request.prepared.resolved_path,
         repo_root: effective_repo_root,
     };
+
+    let mut guard = LifecycleRunGuard::new(lifecycle, &lifecycle_ctx, &emitter);
 
     if harness_enabled {
         let resolve_ctx = claudine::harness::HarnessResolutionContext {
@@ -494,7 +506,7 @@ pub(crate) fn execute_composition_request(
             &resolve_ctx,
         )
         .map_err(|e| {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
+            guard.emit_blocked_or_failure();
             eyre!("{e}")
         })?;
 
@@ -516,7 +528,7 @@ pub(crate) fn execute_composition_request(
             &shell_options,
         )
         .map_err(|e| {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
+            guard.emit_blocked_or_failure();
             eyre!("{e}")
         })?;
 
@@ -542,7 +554,7 @@ pub(crate) fn execute_composition_request(
             Some(&permission_probe),
         )
         .map_err(|reason| {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, &lifecycle_ctx);
+            guard.emit_blocked_or_failure();
             eyre!("{reason}")
         })?;
     }
@@ -604,6 +616,8 @@ pub(crate) fn execute_composition_request(
             profile.prepare_captured_output(&mut harness_base_args);
         }
 
+        // Harness loop manages the guard internally; defuse ours.
+        guard.defuse();
         run_harness_loop(
             provider,
             profile,
@@ -629,11 +643,11 @@ pub(crate) fn execute_composition_request(
             Some(materialized_harness_prompt_from_prepared(&request.prepared)),
             &term,
             lifecycle,
-            &mut lifecycle_state,
             &lifecycle_ctx,
+            &emitter,
         )
     } else if is_inline {
-        emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, &lifecycle_ctx);
+        guard.emit_start_once();
 
         let closure_plan = match &request.prepared.closure {
             CompositionClosurePlan::Inline(plan) => plan,
@@ -662,15 +676,18 @@ pub(crate) fn execute_composition_request(
             &term,
         )?;
 
+        // Child ran — mark launched so Drop would use Failure, not Blocked.
+        guard.mark_provider_launched();
+
         if exit_code == 0 {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Success, &lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Success);
         } else {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, &lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Failure);
         }
 
         Ok(exit_code)
     } else {
-        emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, &lifecycle_ctx);
+        guard.emit_start_once();
 
         let exit_code = execute_direct_without_harness(
             provider,
@@ -690,10 +707,13 @@ pub(crate) fn execute_composition_request(
             &dispatch_context,
         )?;
 
+        // Child ran — mark launched so Drop would use Failure, not Blocked.
+        guard.mark_provider_launched();
+
         if exit_code == 0 {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Success, &lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Success);
         } else {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, &lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Failure);
         }
 
         Ok(exit_code)
