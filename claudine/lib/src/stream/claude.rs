@@ -67,7 +67,7 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         }
     }
 
-    fn tool_use_payload<'a>(obj: &'a Value) -> &'a Value {
+    fn tool_use_payload(obj: &Value) -> &Value {
         obj.get("content_block").unwrap_or(obj)
     }
 

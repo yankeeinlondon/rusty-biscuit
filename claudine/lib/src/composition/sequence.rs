@@ -96,8 +96,14 @@ fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, 
 
         let file_ref = FileReference::new(ref_input)
             .map_err(|e| CompositionError::SequenceExternalLoad(format!("`{raw}`: {e}")))?;
+        // Magic (`@`), package (`!`), and other special references must be
+        // resolved relative to the source document's directory, not the
+        // process CWD. Without this, `claudine sequence /abs/path/to/seq.md`
+        // run from an unrelated directory would search the wrong git repo
+        // or workspace for `@fixtures/steps.yaml`.
+        let base_dir = source_path.parent().unwrap_or_else(|| Path::new("."));
         let resolved = file_ref
-            .resolve()
+            .resolve_from(base_dir)
             .map_err(|e| CompositionError::SequenceExternalLoad(format!("`{raw}`: {e}")))?
             .ok_or_else(|| {
                 CompositionError::SequenceExternalLoad(format!("`{raw}`: file not found"))

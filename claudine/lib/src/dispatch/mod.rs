@@ -694,13 +694,20 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_returns_default_when_no_config() {
+        // Exercises the "no runtime config" branch in `dispatch_preparsed_with_config`
+        // without depending on the absence of a user-level `~/.claudine/config.json`
+        // on the machine running the test.
         let raw = json!({
             "hook_event_name": "SessionStart",
             "session_id": "test-123"
         });
-        let env = EnvironmentContext::default();
+        let adapter = adapters::adapter_for(Provider::Claude);
+        let (event, mut meta) = adapter.parse_event(&raw).unwrap();
+        meta.env = EnvironmentContext::default();
 
-        let outcome = dispatch(&raw, Provider::Claude, &env).await.unwrap();
+        let outcome = dispatch_preparsed_with_config(Provider::Claude, event, meta, None)
+            .await
+            .unwrap();
         assert_eq!(outcome, DispatchOutcome::default());
     }
 
