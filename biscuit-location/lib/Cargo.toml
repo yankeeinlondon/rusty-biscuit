@@ -6,8 +6,8 @@ edition = "2024"
 [dependencies]
 dirs = "6"
 geo = "0.29"
-maxminddb = "0.27"
-reqwest = { version = "0.12", features = ["json"], default-features = false, optional = true }
+maxminddb = { version = "0.27", features = ["mmap"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
@@ -17,6 +17,16 @@ url = "2"
 objc2 = "0.6"
 objc2-core-location = "0.3"
 objc2-foundation = "0.3"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+    "Devices_Geolocation",
+    "Foundation",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+futures-util = { version = "0.3", default-features = false }
 
 [features]
 default = ["reverse"]

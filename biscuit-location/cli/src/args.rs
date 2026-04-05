@@ -63,6 +63,9 @@ pub enum Commands {
         /// Longitude (-180 to 180)
         #[arg(value_name = "LON", allow_hyphen_values = true)]
         lon: f64,
+        /// HTTP request timeout in seconds
+        #[arg(long, default_value_t = 10, value_name = "SECONDS")]
+        timeout: u64,
     },
 
     /// Calculate distance between two locations
@@ -181,10 +184,20 @@ mod tests {
     fn parses_reverse_with_negative_longitude() {
         let cli = parse(&["reverse", "34.0522", "-118.2437"]).unwrap();
         match cli.command {
-            Commands::Reverse { lat, lon } => {
+            Commands::Reverse { lat, lon, timeout } => {
                 assert!((lat - 34.0522).abs() < 1e-6);
                 assert!((lon - (-118.2437)).abs() < 1e-6);
+                assert_eq!(timeout, 10);
             }
+            _ => panic!("expected reverse command"),
+        }
+    }
+
+    #[test]
+    fn parses_reverse_with_custom_timeout() {
+        let cli = parse(&["reverse", "34.0522", "-118.2437", "--timeout", "30"]).unwrap();
+        match cli.command {
+            Commands::Reverse { timeout, .. } => assert_eq!(timeout, 30),
             _ => panic!("expected reverse command"),
         }
     }

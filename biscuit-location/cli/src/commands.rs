@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use biscuit_location::{Coordinates, LocationConfig, LocationService};
+use biscuit_location::{Coordinates, LocationConfig, LocationService, ReverseGeocodeConfig};
 use tracing::{debug, info_span, Instrument};
 
 use crate::args::{Cli, Commands};
@@ -25,10 +25,18 @@ pub async fn run(cli: Cli, mode: OutputMode) -> color_eyre::Result<()> {
         _ => Duration::from_secs(10),
     };
 
+    let reverse_config = match &cli.command {
+        Commands::Reverse { timeout, .. } => ReverseGeocodeConfig {
+            timeout: Duration::from_secs(*timeout),
+            ..ReverseGeocodeConfig::default()
+        },
+        _ => ReverseGeocodeConfig::default(),
+    };
+
     let config = LocationConfig {
         maxmind_db_path: cli.db_path,
         gps_timeout,
-        ..LocationConfig::default()
+        reverse: reverse_config,
     };
 
     let svc = LocationService::new(config)?;
@@ -49,7 +57,7 @@ pub async fn run(cli: Cli, mode: OutputMode) -> color_eyre::Result<()> {
             emit_location(&svc, &location, cli.maps, cli.quiet, mode)?;
         }
 
-        Commands::Reverse { lat, lon } => {
+        Commands::Reverse { lat, lon, .. } => {
             let coords = Coordinates::new(lat, lon)?;
             let span = info_span!("reverse", %lat, %lon);
             let location = svc.reverse(coords).instrument(span).await?;

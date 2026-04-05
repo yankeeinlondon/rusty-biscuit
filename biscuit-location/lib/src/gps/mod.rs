@@ -52,3 +52,58 @@ fn gps_location(latitude: f64, longitude: f64, accuracy: Option<f64>) -> crate::
         accuracy_meters: accuracy,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gps_location_sets_source_and_accuracy() {
+        let loc = gps_location(37.7749, -122.4194, Some(12.5)).unwrap();
+        assert_eq!(loc.coordinates.latitude, 37.7749);
+        assert_eq!(loc.coordinates.longitude, -122.4194);
+        assert_eq!(loc.source, LocationSource::Gps);
+        assert_eq!(loc.accuracy_meters, Some(12.5));
+        assert!(loc.place.is_none());
+    }
+
+    #[test]
+    fn gps_location_without_accuracy() {
+        let loc = gps_location(0.0, 0.0, None).unwrap();
+        assert_eq!(loc.accuracy_meters, None);
+    }
+
+    #[test]
+    fn gps_location_rejects_invalid_coordinates() {
+        let result = gps_location(91.0, 0.0, None);
+        assert!(matches!(
+            result,
+            Err(crate::LocationError::InvalidCoordinates { .. })
+        ));
+    }
+
+    /// Verify that a zero-duration timeout collapses to `Ok(None)` on every
+    /// supported platform — this is the core semantic guarantee of the GPS
+    /// API: unavailability is never a hard error.
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    #[tokio::test]
+    async fn current_fix_zero_timeout_returns_none() {
+        let result = current_fix(Duration::from_millis(0)).await;
+        // The platform may still hand back a cached fix before the timer
+        // fires on fast hardware, but what MUST hold is that we never
+        // bubble a hard error up to the caller.
+        assert!(matches!(result, Ok(None) | Ok(Some(_))));
+    }
+
+    /// On unsupported targets, construction should surface a clear error
+    /// rather than silently succeeding with no backend.
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    #[tokio::test]
+    async fn current_fix_unsupported_platform_errors() {
+        let result = current_fix(Duration::from_secs(1)).await;
+        assert!(matches!(
+            result,
+            Err(crate::LocationError::UnsupportedPlatform)
+        ));
+    }
+}

@@ -18,7 +18,7 @@ pub struct LocationService {
     ip_lookup: Option<IpLookup>,
     config: LocationConfig,
     #[cfg(feature = "reverse")]
-    reverse_geocoder: Option<crate::reverse::ReverseGeocoder>,
+    reverse_geocoder: crate::reverse::ReverseGeocoder,
 }
 
 impl LocationService {
@@ -35,9 +35,7 @@ impl LocationService {
         };
 
         #[cfg(feature = "reverse")]
-        let reverse_geocoder = Some(crate::reverse::ReverseGeocoder::new(
-            config.reverse.clone(),
-        )?);
+        let reverse_geocoder = crate::reverse::ReverseGeocoder::new(config.reverse.clone())?;
 
         Ok(Self {
             ip_lookup,
@@ -71,12 +69,7 @@ impl LocationService {
     /// Reverse geocode coordinates into a location with place metadata.
     #[cfg(feature = "reverse")]
     pub async fn reverse(&self, coordinates: Coordinates) -> crate::Result<Location> {
-        match &self.reverse_geocoder {
-            Some(geocoder) => geocoder.reverse(&coordinates).await,
-            None => Err(LocationError::Internal(
-                "reverse geocoder not configured".to_string(),
-            )),
-        }
+        self.reverse_geocoder.reverse(&coordinates).await
     }
 
     /// Calculate the distance between two coordinates.
@@ -99,12 +92,14 @@ impl LocationService {
     ///
     /// This dispatches to GPS, IP lookup, or returns a literal coordinate location
     /// depending on the input variant.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`LocationError::NoGpsFix`] when the input is `Gps` and the host
+    /// has no fix available (permission denied, services disabled, timeout).
     pub async fn resolve_input(&self, input: LocationInput) -> crate::Result<Location> {
         match input {
-            LocationInput::Gps => self
-                .gps()
-                .await?
-                .ok_or_else(|| LocationError::Internal("no GPS fix available".to_string())),
+            LocationInput::Gps => self.gps().await?.ok_or(LocationError::NoGpsFix),
             LocationInput::Ip(ip) => self.ip(ip),
             LocationInput::Coordinates(coords) => Ok(Location {
                 coordinates: coords,
@@ -145,6 +140,24 @@ mod tests {
         let coords = Coordinates::new(34.0522, -118.2437).unwrap();
         let url = svc.google_maps_url(coords).unwrap();
         assert!(url.as_str().contains("google.com/maps"));
+    }
+
+    #[test]
+    fn no_gps_fix_error_message() {
+        let err = LocationError::NoGpsFix;
+        assert_eq!(err.to_string(), "no GPS fix available");
+    }
+
+    #[tokio::test]
+    async fn resolve_ip_input_without_db_returns_path_error() {
+        let config = LocationConfig::default();
+        let svc = LocationService::new(config).unwrap();
+        let input = LocationInput::Ip("8.8.8.8".parse().unwrap());
+        let result = svc.resolve_input(input).await;
+        assert!(matches!(
+            result,
+            Err(LocationError::DatabasePathNotFound(_))
+        ));
     }
 
     #[tokio::test]

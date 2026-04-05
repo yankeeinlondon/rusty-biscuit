@@ -33,6 +33,9 @@ pub enum LocationError {
     #[error("GPS not supported on this platform")]
     UnsupportedPlatform,
 
+    #[error("no GPS fix available")]
+    NoGpsFix,
+
     #[error("internal error: {0}")]
     Internal(String),
 }
