@@ -97,6 +97,10 @@ pub enum LifecycleSignal {
 ///
 /// Superseded by [`LifecycleRunGuard`] which enforces transitions mechanically.
 /// Retained for backward compatibility.
+#[deprecated(
+    since = "0.1.0",
+    note = "use LifecycleRunGuard instead, which enforces transitions mechanically"
+)]
 #[derive(Debug, Clone, Default)]
 pub struct LifecycleRuntimeState {
     /// Whether the `start` signal has been emitted.
@@ -233,7 +237,7 @@ impl<'a> LifecycleRunGuard<'a> {
 
     /// Emit `Blocked` (pre-launch) or `Failure` (post-launch) and return
     /// the original error unchanged. Convenient for wrapping `?` returns.
-    pub fn emit_blocked_or_err(&mut self, err: eyre::Report) -> eyre::Report {
+    pub fn emit_blocked_or_err<E>(&mut self, err: E) -> E {
         self.emit_blocked_or_failure();
         err
     }
@@ -629,6 +633,10 @@ fn speak_blocking(text: &str, config: TtsConfig) {
 ///
 /// Prefer [`LifecycleRunGuard`] for new code — it uses this same
 /// emission logic but adds mechanical state-transition enforcement.
+#[deprecated(
+    since = "0.1.0",
+    note = "use LifecycleRunGuard instead, which enforces state transitions and emits signals via the LifecycleEmitter trait"
+)]
 pub fn emit_lifecycle_signal(
     config: &LifecycleConfig,
     signal: LifecycleSignal,
@@ -946,9 +954,405 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn lifecycle_runtime_state_defaults() {
         let state = LifecycleRuntimeState::default();
         assert!(!state.start_emitted);
         assert!(!state.provider_launch_started);
+    }
+
+    // -- RecordingEmitter + LifecycleRunGuard tests -------------------------
+
+    use std::sync::Mutex;
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum EmittedAction {
+        Stderr {
+            signal: LifecycleSignal,
+            text: String,
+        },
+        Message {
+            text: String,
+        },
+        Speech {
+            text: String,
+        },
+        Effect {
+            name: String,
+        },
+    }
+
+    struct RecordingEmitter {
+        actions: Mutex<Vec<EmittedAction>>,
+    }
+
+    impl RecordingEmitter {
+        fn new() -> Self {
+            Self {
+                actions: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn actions(&self) -> Vec<EmittedAction> {
+            self.actions.lock().unwrap().clone()
+        }
+
+        fn signals(&self) -> Vec<LifecycleSignal> {
+            self.actions
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|a| match a {
+                    EmittedAction::Stderr { signal, .. } => Some(*signal),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    impl LifecycleEmitter for RecordingEmitter {
+        fn emit_stderr(&self, signal: LifecycleSignal, text: &str, _term: &Terminal) {
+            self.actions.lock().unwrap().push(EmittedAction::Stderr {
+                signal,
+                text: text.to_string(),
+            });
+        }
+
+        fn emit_message(
+            &self,
+            text: &str,
+            _source_path: &Path,
+            _repo_root: Option<&Path>,
+            _messaging: &RuntimeMessagingSettings,
+        ) {
+            self.actions.lock().unwrap().push(EmittedAction::Message {
+                text: text.to_string(),
+            });
+        }
+
+        fn emit_speech(&self, text: &str, _tts_config: TtsConfig) {
+            self.actions.lock().unwrap().push(EmittedAction::Speech {
+                text: text.to_string(),
+            });
+        }
+
+        fn emit_effect(&self, name: &str) {
+            self.actions.lock().unwrap().push(EmittedAction::Effect {
+                name: name.to_string(),
+            });
+        }
+    }
+
+    fn test_config() -> LifecycleConfig {
+        parse_lifecycle_config(&json!({
+            "start":   { "stderr": "starting" },
+            "success": { "stderr": "done" },
+            "blocked": { "stderr": "blocked" },
+            "failure": { "stderr": "failed" },
+        }))
+        .unwrap()
+    }
+
+    fn test_ctx() -> (GlobalSettings, RuntimeMessagingSettings, Terminal) {
+        (
+            GlobalSettings::default(),
+            RuntimeMessagingSettings {
+                user: None,
+                repo: None,
+            },
+            Terminal::default(),
+        )
+    }
+
+    fn make_guard<'a>(
+        config: &'a LifecycleConfig,
+        ctx: &'a LifecycleRuntimeContext<'a>,
+        emitter: &'a RecordingEmitter,
+    ) -> LifecycleRunGuard<'a> {
+        LifecycleRunGuard::new(config, ctx, emitter)
+    }
+
+    #[test]
+    fn guard_emits_start_once() {
+        let config = test_config();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+
+        guard.emit_start_once();
+        guard.emit_start_once(); // second call is idempotent
+        guard.defuse();
+
+        assert_eq!(emitter.signals(), vec![LifecycleSignal::Start]);
+    }
+
+    #[test]
+    fn guard_drop_emits_blocked_before_launch() {
+        let config = test_config();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+
+        {
+            let mut guard = make_guard(&config, &ctx, &emitter);
+            guard.emit_start_once();
+            // drop without terminal signal, not launched
+        }
+
+        assert_eq!(
+            emitter.signals(),
+            vec![LifecycleSignal::Start, LifecycleSignal::Blocked]
+        );
+    }
+
+    #[test]
+    fn guard_drop_emits_failure_after_launch() {
+        let config = test_config();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+
+        {
+            let mut guard = make_guard(&config, &ctx, &emitter);
+            guard.emit_start_once();
+            guard.mark_provider_launched();
+            // drop without terminal signal, but launched
+        }
+
+        assert_eq!(
+            emitter.signals(),
+            vec![LifecycleSignal::Start, LifecycleSignal::Failure]
+        );
+    }
+
+    #[test]
+    fn guard_drop_silent_without_start() {
+        let config = test_config();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+
+        {
+            let _guard = make_guard(&config, &ctx, &emitter);
+            // drop without ever emitting start
+        }
+
+        assert!(emitter.signals().is_empty());
+    }
+
+    #[test]
+    fn guard_emit_terminal_prevents_drop_emission() {
+        let config = test_config();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+
+        {
+            let mut guard = make_guard(&config, &ctx, &emitter);
+            guard.emit_start_once();
+            guard.mark_provider_launched();
+            guard.emit_terminal(LifecycleSignal::Success);
+            // drop after explicit terminal — no double emission
+        }
+
+        assert_eq!(
+            emitter.signals(),
+            vec![LifecycleSignal::Start, LifecycleSignal::Success]
+        );
+    }
+
+    #[test]
+    fn guard_defuse_prevents_drop_emission() {
+        let config = test_config();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+
+        {
+            let mut guard = make_guard(&config, &ctx, &emitter);
+            guard.emit_start_once();
+            guard.defuse();
+        }
+
+        // Only start, no terminal from Drop
+        assert_eq!(emitter.signals(), vec![LifecycleSignal::Start]);
+    }
+
+    #[test]
+    fn guard_emit_blocked_or_failure_pre_launch() {
+        let config = test_config();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+
+        {
+            let mut guard = make_guard(&config, &ctx, &emitter);
+            guard.emit_start_once();
+            guard.emit_blocked_or_failure(); // pre-launch → Blocked
+        }
+
+        assert_eq!(
+            emitter.signals(),
+            vec![LifecycleSignal::Start, LifecycleSignal::Blocked]
+        );
+    }
+
+    #[test]
+    fn guard_emit_blocked_or_failure_post_launch() {
+        let config = test_config();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+
+        {
+            let mut guard = make_guard(&config, &ctx, &emitter);
+            guard.emit_start_once();
+            guard.mark_provider_launched();
+            guard.emit_blocked_or_failure(); // post-launch → Failure
+        }
+
+        assert_eq!(
+            emitter.signals(),
+            vec![LifecycleSignal::Start, LifecycleSignal::Failure]
+        );
+    }
+
+    #[test]
+    fn guard_state_accessors() {
+        let config = test_config();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+
+        assert!(!guard.start_emitted());
+        assert!(!guard.provider_launched());
+
+        guard.emit_start_once();
+        assert!(guard.start_emitted());
+        assert!(!guard.provider_launched());
+
+        guard.mark_provider_launched();
+        assert!(guard.provider_launched());
+
+        guard.defuse();
+    }
+
+    #[test]
+    fn guard_non_audio_before_audio() {
+        let config = parse_lifecycle_config(&json!({
+            "start": {
+                "stderr": "starting",
+                "message": "msg",
+                "speak": "hello",
+                "effect": "confirmation",
+            }
+        }))
+        .unwrap();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+        guard.emit_start_once();
+        guard.defuse();
+
+        let actions = emitter.actions();
+        assert_eq!(actions.len(), 4);
+        // Non-audio first
+        assert!(matches!(actions[0], EmittedAction::Stderr { .. }));
+        assert!(matches!(actions[1], EmittedAction::Message { .. }));
+        // Audio: effect before speak (default order)
+        assert!(matches!(actions[2], EmittedAction::Effect { .. }));
+        assert!(matches!(actions[3], EmittedAction::Speech { .. }));
+    }
+
+    #[test]
+    fn guard_speak_first_ordering() {
+        let config = parse_lifecycle_config(&json!({
+            "start": {
+                "speak_first": "hello",
+                "effect": "confirmation",
+            }
+        }))
+        .unwrap();
+        let (settings, messaging, term) = test_ctx();
+        let ctx = LifecycleRuntimeContext {
+            settings: &settings,
+            messaging: &messaging,
+            term: &term,
+            source_path: Path::new("/tmp/test.md"),
+            repo_root: None,
+        };
+        let emitter = RecordingEmitter::new();
+        let mut guard = make_guard(&config, &ctx, &emitter);
+        guard.emit_start_once();
+        guard.defuse();
+
+        let actions = emitter.actions();
+        assert_eq!(actions.len(), 2);
+        // speak_first → speech before effect
+        assert!(matches!(actions[0], EmittedAction::Speech { .. }));
+        assert!(matches!(actions[1], EmittedAction::Effect { .. }));
     }
 }
