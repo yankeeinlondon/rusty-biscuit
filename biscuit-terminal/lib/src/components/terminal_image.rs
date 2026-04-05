@@ -266,7 +266,17 @@ impl Renderable for TerminalImage {
     ///
     /// Attempts inline rendering; if unsupported, returns an empty string (no alt text).
     fn render(&self, term: &Terminal) -> String {
-        self.render_to_terminal(term).unwrap_or_default()
+        match self.render_to_terminal(term) {
+            Ok(output) => output,
+            Err(e) => {
+                tracing::warn!(
+                    file = %self.relative,
+                    error = %e,
+                    "Image render failed, returning empty string"
+                );
+                String::new()
+            }
+        }
     }
 
     /// Render the image as a string of Kitty escape sequences.
@@ -482,6 +492,12 @@ impl TerminalImage {
             let img = ImageReader::open(&self.filename)?
                 .with_guessed_format()?
                 .decode()?;
+            tracing::debug!(
+                file = %self.filename,
+                width = img.width(),
+                height = img.height(),
+                "Loaded raster image"
+            );
             Ok(img)
         }
     }
@@ -532,11 +548,20 @@ impl TerminalImage {
                 chunk[2] = ((chunk[2] as u16 * 255 + a / 2) / a).min(255) as u8;
             }
         }
-        image::RgbaImage::from_raw(w, h, rgba)
+        let result = image::RgbaImage::from_raw(w, h, rgba)
             .map(DynamicImage::ImageRgba8)
             .ok_or_else(|| TerminalImageError::EncodingError {
                 message: "Failed to create image from SVG rasterization".to_string(),
-            })
+            });
+        if result.is_ok() {
+            tracing::debug!(
+                file = %self.filename,
+                width = w,
+                height = h,
+                "Loaded SVG image"
+            );
+        }
+        result
     }
 
     /// Encode a DynamicImage as PNG bytes.
@@ -634,6 +659,17 @@ impl TerminalImage {
             String::new()
         };
 
+        tracing::trace!(
+            file = %self.relative,
+            protocol = "kitty",
+            width_cells = target_cells,
+            height_cells,
+            raw_height,
+            x_offset = dims.x_offset,
+            cell_size = ?format!("{}x{}", cell_pixel_width, cell_pixel_height),
+            "Kitty image render"
+        );
+
         Ok((
             format!("\x1b[s{}{}\x1b[u", prefix, image_seq),
             height_cells,
@@ -681,6 +717,17 @@ impl TerminalImage {
             String::new()
         };
 
+        tracing::trace!(
+            file = %self.relative,
+            protocol = "iterm2",
+            width_cells = target_cells,
+            height_cells,
+            raw_height,
+            x_offset = dims.x_offset,
+            cell_size = ?format!("{}x{}", cell_pixel_width, cell_pixel_height),
+            "iTerm2 image render"
+        );
+
         Ok((
             format!("\x1b[s{}{}\x1b[u", prefix, image),
             height_cells,
@@ -706,11 +753,22 @@ impl TerminalImage {
     /// ## Errors
     ///
     /// Returns error if image loading or encoding fails.
+    #[tracing::instrument(skip(self, term), fields(file = %self.relative))]
     fn render_to_terminal(
         &self,
         term: &crate::terminal::Terminal,
     ) -> Result<String, TerminalImageError> {
         use crate::discovery::detection::ImageSupport;
+
+        let protocol = match term.image_support {
+            ImageSupport::Kitty if matches!(term.app, TerminalApp::ITerm2) => "iterm2",
+            ImageSupport::Kitty => "kitty",
+            ImageSupport::ITerm => "iterm2",
+            ImageSupport::None => {
+                tracing::trace!(file = %self.relative, "No image support, returning empty");
+                return Ok(String::new());
+            }
+        };
 
         let (sequence, height_cells, raw_height) = match term.image_support {
             // iTerm2 can advertise Kitty, but native OSC 1337 handling is
@@ -720,7 +778,7 @@ impl TerminalImage {
             }
             ImageSupport::Kitty => self.render_kitty_for_terminal(term),
             ImageSupport::ITerm => self.render_iterm2_for_terminal(term),
-            ImageSupport::None => return Ok(String::new()),
+            ImageSupport::None => unreachable!(),
         }?;
 
         // Terminal-specific cursor row calculation.
@@ -761,11 +819,23 @@ impl TerminalImage {
                     let term_height = term.height();
                     pos.row + cursor_rows > term_height
                 } else {
+                    tracing::trace!(
+                        file = %self.relative,
+                        "cursor_position() returned None, scroll compensation disabled"
+                    );
                     false
                 }
             };
 
         let suffix = if needs_scroll_compensation { "\n" } else { "" };
+
+        tracing::debug!(
+            file = %self.relative,
+            protocol,
+            cursor_rows,
+            needs_scroll_compensation,
+            "Image rendered to terminal"
+        );
 
         if cursor_rows > 0 {
             Ok(format!("{}\x1b[{}B\r{}", sequence, cursor_rows, suffix))

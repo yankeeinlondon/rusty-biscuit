@@ -15,10 +15,10 @@ use crate::utils::{
 ///     - if `plain_text_length(line)` fits into the available width we're done ...
 ///       the content does not need to be wrapped, truncated, etc.
 ///     - if we're
-pub fn word_wrap<T: Into<String>>(content: T, strategy: WordWrap, width: u32) {
+pub fn word_wrap<T: Into<String>>(content: T, strategy: WordWrap, width: u32) -> Vec<String> {
     let lines = split_lines(content);
 
-    let _ = wrap_lines(lines, &strategy, width);
+    wrap_lines(lines, &strategy, width)
 }
 
 /// truncates the line with the `truncate_indicator` string used as the closing

@@ -42,7 +42,7 @@ We keep a permanent "memory file" of important things we've discovered that woul
 - Do not try to group commits together by unstaging and restaging one group at a time! You should simply commit the group files explicitly!
     - this will result in potential corruption
     - you should expect that developers are actively working on this code base while you're working. that means staging and unstaging files can have unexpected consequences!
-- NEVER use commands like `git reset *`!
+- NEVER use commands like `git reset`!
 
 The lessons learned are found in {{lessons_learned}}
 

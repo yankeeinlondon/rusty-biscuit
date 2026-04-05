@@ -328,4 +328,60 @@ mod tests {
         assert!(!is_valid_identifier("has-hyphen"));
         assert!(!is_valid_identifier("has.dot"));
     }
+
+    // ── Edge cases ──────────────────────────────────────────────────
+
+    #[test]
+    fn empty_string_value() {
+        let value = serde_json::json!({"key": ""});
+        let result = to_json5_pretty(&value);
+        assert!(result.contains("''"), "empty string should render as ''");
+    }
+
+    #[test]
+    fn unicode_beyond_bmp() {
+        let value = serde_json::json!({"emoji": "Hello 🌍🎉"});
+        let result = to_json5_pretty(&value);
+        assert!(result.contains("🌍"));
+        assert!(result.contains("🎉"));
+    }
+
+    #[test]
+    fn string_with_null_byte() {
+        let value = serde_json::json!({"data": "before\u{0000}after"});
+        let result = to_json5_pretty(&value);
+        // Should produce valid output (escaped or raw)
+        assert!(result.contains("data"));
+    }
+
+    #[test]
+    fn very_large_number() {
+        let value = serde_json::json!({"big": 1e100});
+        let result = to_json5_pretty(&value);
+        assert!(result.contains("big"));
+        // The number should be present in some representation
+        let compact = to_json5_compact(&value);
+        assert!(compact.contains("big"));
+    }
+
+    #[test]
+    fn very_small_float() {
+        let value = serde_json::json!({"tiny": 1e-300});
+        let result = to_json5_pretty(&value);
+        assert!(result.contains("tiny"));
+    }
+
+    #[test]
+    fn deeply_nested_structure() {
+        // 50 levels deep - should not stack overflow
+        let mut value = serde_json::json!("leaf");
+        for _ in 0..50 {
+            value = serde_json::json!({"nested": value});
+        }
+        let result = to_json5_pretty(&value);
+        assert!(result.contains("nested"));
+
+        let compact = to_json5_compact(&value);
+        assert!(compact.contains("nested"));
+    }
 }

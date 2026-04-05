@@ -86,10 +86,17 @@ pub fn emit_vertical_margins(
     Ok(())
 }
 
+/// Output render metadata to stderr as JSON.
+fn output_render_meta(render_meta: &RenderMeta) -> color_eyre::Result<()> {
+    eprintln!("{}", serde_json::to_string(render_meta)?);
+    Ok(())
+}
+
 /// Render an image to the terminal.
 ///
 /// Supports width specification syntax: "file.jpg|50%" or "file.jpg|80"
 /// CLI `--width` flag takes precedence over inline spec.
+#[tracing::instrument(skip(layout, debug))]
 pub fn render_image(
     image_spec: &str,
     cli_width: Option<&str>,
@@ -132,13 +139,7 @@ pub fn render_image(
     let output = term_image.render(&terminal);
 
     // Output the result with vertical margins
-    for _ in 0..layout.margin_top.unwrap_or(0) {
-        println!();
-    }
-    emit_image_output(&output)?;
-    for _ in 0..layout.margin_bottom.unwrap_or(0) {
-        println!();
-    }
+    emit_vertical_margins(layout, || emit_image_output(&output))?;
 
     // Debug: query cursor position AFTER image render + output
     if debug {
@@ -242,7 +243,7 @@ pub fn render_image(
             render_time_ms,
         };
 
-        eprintln!("{}", serde_json::to_string(&render_meta)?);
+        output_render_meta(&render_meta)?;
     }
 
     Ok(())
@@ -318,14 +319,9 @@ pub fn display_mermaid(
 
     let render_time_ms = start_time.elapsed().as_millis() as u64;
 
-    // Top margin
-    for _ in 0..layout.margin_top.unwrap_or(0) {
-        println!();
-    }
+    emit_vertical_margins(layout, || emit_image_output(&result.output))?;
 
-    emit_image_output(&result.output)?;
-
-    // Output metadata if requested
+    // Output metadata if requested (goes to stderr, outside layout margins)
     if meta {
         let file_size_bytes = std::fs::metadata(&result.png_path)
             .map(|m| m.len())
@@ -338,12 +334,7 @@ pub fn display_mermaid(
             render_time_ms,
         };
 
-        eprintln!("{}", serde_json::to_string(&render_meta)?);
-    }
-
-    // Bottom margin
-    for _ in 0..layout.margin_bottom.unwrap_or(0) {
-        println!();
+        output_render_meta(&render_meta)?;
     }
 
     // Let terminal settle after image rendering
@@ -369,13 +360,10 @@ pub fn display_graph(
     let result = match graph.try_render(&terminal) {
         Ok(result) => result,
         Err(GraphRenderError::NoImageSupport) => {
-            for _ in 0..layout.margin_top.unwrap_or(0) {
-                println!();
-            }
-            print!("{}", graph.render(&terminal));
-            for _ in 0..layout.margin_bottom.unwrap_or(0) {
-                println!();
-            }
+            emit_vertical_margins(layout, || {
+                print!("{}", graph.render(&terminal));
+                Ok(())
+            })?;
             return Ok(());
         }
         Err(error) => return handle_graph_error(error, &graph.fallback_code_block(), source),
@@ -383,12 +371,9 @@ pub fn display_graph(
 
     let render_time_ms = start_time.elapsed().as_millis() as u64;
 
-    for _ in 0..layout.margin_top.unwrap_or(0) {
-        println!();
-    }
+    emit_vertical_margins(layout, || emit_image_output(&result.output))?;
 
-    emit_image_output(&result.output)?;
-
+    // Output metadata if requested (goes to stderr, outside layout margins)
     if meta {
         let file_size_bytes = std::fs::metadata(&result.png_path)
             .map(|m| m.len())
@@ -401,11 +386,7 @@ pub fn display_graph(
             render_time_ms,
         };
 
-        eprintln!("{}", serde_json::to_string(&render_meta)?);
-    }
-
-    for _ in 0..layout.margin_bottom.unwrap_or(0) {
-        println!();
+        output_render_meta(&render_meta)?;
     }
 
     settle_terminal();
@@ -419,6 +400,7 @@ pub fn display_graph(
 /// using the MermaidRenderer. Default direction is left-right (LR),
 /// use `vertical` for top-down (TD).
 #[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip(layout, content))]
 pub fn render_flowchart(
     vertical: bool,
     inverse: bool,
@@ -1636,38 +1618,33 @@ pub fn handle_mermaid_error(
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::mermaid::MermaidRenderError;
 
-    // Check for NO_COLOR
-    let no_color = std::env::var("NO_COLOR").is_ok();
-    let red = if no_color { "" } else { "\x1b[31m" };
-    let bold = if no_color { "" } else { "\x1b[1m" };
-    let dim = if no_color { "" } else { "\x1b[2m" };
-    let reset = if no_color { "" } else { "\x1b[0m" };
+    let s = crate::types::CliStyles::detect();
 
     match error {
         MermaidRenderError::NoImageSupport => {
             // Graceful degradation: output the diagram as a fenced code block
             // so piped/non-TTY consumers still get useful output.
             println!("```mermaid\n{}\n```", instructions);
-            return Ok(());
+            Ok(())
         }
         MermaidRenderError::Visualization(ref viz_err) => {
             eprintln!();
-            eprintln!("{}{}Error:{} {}", red, bold, reset, viz_err);
+            eprintln!("{}{}Error:{} {}", s.red, s.bold, s.reset, viz_err);
             eprintln!(
                 "\n{}Mermaid {} was defined as:{}\n",
-                dim, diagram_type, reset
+                s.dim, diagram_type, s.reset
             );
             eprintln!("```mermaid\n{}\n```", instructions);
+            Err(color_eyre::eyre::eyre!("{}", viz_err))
         }
         MermaidRenderError::DisplayError(ref msg) => {
             eprintln!(
                 "{}{}Error:{} Failed to display image: {}",
-                red, bold, reset, msg
+                s.red, s.bold, s.reset, msg
             );
+            Err(color_eyre::eyre::eyre!("Failed to display image: {}", msg))
         }
     }
-
-    std::process::exit(1);
 }
 
 /// Handle graph rendering errors with user-friendly output.
@@ -1678,34 +1655,30 @@ pub fn handle_graph_error(
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::graph_expression::GraphRenderError;
 
-    let no_color = std::env::var("NO_COLOR").is_ok();
-    let red = if no_color { "" } else { "\x1b[31m" };
-    let bold = if no_color { "" } else { "\x1b[1m" };
-    let dim = if no_color { "" } else { "\x1b[2m" };
-    let reset = if no_color { "" } else { "\x1b[0m" };
+    let s = crate::types::CliStyles::detect();
 
     match error {
         GraphRenderError::NoImageSupport => {
             println!("{fallback}");
-            return Ok(());
+            Ok(())
         }
         GraphRenderError::Visualization(ref viz_err) => {
             eprintln!();
-            eprintln!("{}{}Error:{} {}", red, bold, reset, viz_err);
-            eprintln!("\n{}Graph expression was defined as:{}\n", dim, reset);
+            eprintln!("{}{}Error:{} {}", s.red, s.bold, s.reset, viz_err);
+            eprintln!("\n{}Graph expression was defined as:{}\n", s.dim, s.reset);
             eprintln!("{fallback}");
+            Err(color_eyre::eyre::eyre!("{}", viz_err))
         }
         GraphRenderError::DisplayError(ref msg) => {
             eprintln!(
                 "{}{}Error:{} Failed to display image: {}",
-                red, bold, reset, msg
+                s.red, s.bold, s.reset, msg
             );
-            eprintln!("\n{}Graph expression source was:{}\n", dim, reset);
+            eprintln!("\n{}Graph expression source was:{}\n", s.dim, s.reset);
             eprintln!("{source}");
+            Err(color_eyre::eyre::eyre!("Failed to display image: {}", msg))
         }
     }
-
-    std::process::exit(1);
 }
 
 /// Render prose content with styling tokens to the terminal.
@@ -1728,10 +1701,7 @@ pub fn render_prose(
     }
 
     // Unescape common escape sequences (shell passes literal \n, \t, etc.)
-    let text = text
-        .replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace("\\r", "\r");
+    let text = crate::types::unescape_shell_escapes(&text);
 
     // Build the Prose component
     let mut prose = Prose::new(&text);
@@ -1836,10 +1806,7 @@ pub fn render_quote(
     }
 
     // Unescape common escape sequences (shell passes literal \n, \t, etc.)
-    let text = text
-        .replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace("\\r", "\r");
+    let text = crate::types::unescape_shell_escapes(&text);
 
     // Build the Prose component for the content
     let prose = Prose::new(&text);
@@ -1894,10 +1861,7 @@ pub fn render_list(
         .iter()
         .map(|item| {
             // Unescape common escape sequences (shell passes literal \n, \t, etc.)
-            let text = item
-                .replace("\\n", "\n")
-                .replace("\\t", "\t")
-                .replace("\\r", "\r");
+            let text = crate::types::unescape_shell_escapes(item);
 
             let prose = Prose::new(&text);
             RenderableContent::Component(Rc::new(prose))
@@ -1946,14 +1910,8 @@ pub fn render_columns(
     use biscuit_terminal::components::renderable::Renderable;
     use biscuit_terminal::utils::layout::Margin;
 
-    let left_text = left
-        .replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace("\\r", "\r");
-    let right_text = right
-        .replace("\\n", "\n")
-        .replace("\\t", "\t")
-        .replace("\\r", "\r");
+    let left_text = crate::types::unescape_shell_escapes(left);
+    let right_text = crate::types::unescape_shell_escapes(right);
 
     let mut columns = TwoColumn::new(left_text, right_text).with_gap(gap);
 

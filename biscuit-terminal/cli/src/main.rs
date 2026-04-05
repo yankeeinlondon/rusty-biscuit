@@ -24,6 +24,7 @@ use biscuit_terminal::{
 pub mod args;
 pub mod commands;
 pub mod output;
+pub mod types;
 use args::*;
 use commands::*;
 use output::*;
@@ -61,23 +62,10 @@ fn emit_image_output(output: &str) -> color_eyre::Result<()> {
 /// Uses bold text for header and dim text for command.
 /// Avoids terminal color mode queries which can interfere with Kitty graphics protocol.
 fn print_example_command(cmd: &str) {
-    // Check NO_COLOR environment variable
-    let no_color = std::env::var("NO_COLOR").is_ok();
-
-    if no_color {
-        println!();
-        println!("Command:");
-        println!("{}", cmd);
-    } else {
-        // Use bold for header - terminal's default foreground color is already appropriate
-        let bold = "\x1b[1m";
-        let dim = "\x1b[2m";
-        let reset = "\x1b[0m";
-
-        println!();
-        println!("{}Command:{}", bold, reset);
-        println!("{}{}{}", dim, cmd, reset);
-    }
+    let s = crate::types::CliStyles::detect();
+    println!();
+    println!("{}Command:{}", s.bold, s.reset);
+    println!("{}{}{}", s.dim, cmd, s.reset);
 }
 
 fn main() -> color_eyre::Result<()> {
@@ -110,7 +98,9 @@ fn main() -> color_eyre::Result<()> {
             meta,
             debug,
         }) => {
-            return render_image(filepath, width.as_deref(), layout, meta, debug);
+            tracing::debug!(command = "image", filepath, width = ?width, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
+            return render_image(filepath, width_str.as_deref(), layout, meta, debug);
         }
         Some(Command::Flowchart {
             vertical,
@@ -122,11 +112,19 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref content,
         }) => {
+            tracing::debug!(
+                command = "flowchart",
+                vertical,
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_flowchart(
                 vertical,
                 inverse,
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 example,
                 meta,
@@ -156,6 +154,13 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref points,
         }) => {
+            tracing::debug!(
+                command = "quadrant",
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_quadrant(
                 x_axis.as_deref(),
                 y_axis.as_deref(),
@@ -165,15 +170,15 @@ fn main() -> color_eyre::Result<()> {
                 bottom_left.as_deref(),
                 bottom_right.as_deref(),
                 inverse,
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 point_radius,
                 label_size,
                 *theme,
-                q1_fill.as_deref(),
-                q2_fill.as_deref(),
-                q3_fill.as_deref(),
-                q4_fill.as_deref(),
+                q1_fill.as_ref().map(|c| c.as_str()),
+                q2_fill.as_ref().map(|c| c.as_str()),
+                q3_fill.as_ref().map(|c| c.as_str()),
+                q4_fill.as_ref().map(|c| c.as_str()),
                 example,
                 meta,
                 points,
@@ -190,10 +195,17 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref data,
         }) => {
+            tracing::debug!(
+                command = "pie-chart",
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_pie_chart(
                 inverse,
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 show_data,
                 example,
@@ -211,10 +223,17 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref commands,
         }) => {
+            tracing::debug!(
+                command = "git-graph",
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_git_graph(
                 inverse,
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 example,
                 meta,
@@ -237,16 +256,24 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref data,
         }) => {
+            tracing::debug!(
+                command = "bar-chart",
+                inverse,
+                horizontal,
+                example,
+                "Dispatching subcommand"
+            );
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_xy_chart(
                 XyChartType::Bar,
                 title.as_deref(),
                 x_axis.as_deref(),
                 y_axis.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 horizontal,
                 show_data_label,
-                aspect_ratio,
+                aspect_ratio.map(|a| a.value()),
                 line,  // add_line for bar chart
                 false, // add_bar is false since we're a bar chart
                 inverse,
@@ -271,16 +298,24 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref data,
         }) => {
+            tracing::debug!(
+                command = "line-chart",
+                inverse,
+                horizontal,
+                example,
+                "Dispatching subcommand"
+            );
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_xy_chart(
                 XyChartType::Line,
                 title.as_deref(),
                 x_axis.as_deref(),
                 y_axis.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 horizontal,
                 show_data_label,
-                aspect_ratio,
+                aspect_ratio.map(|a| a.value()),
                 false, // add_line is false since we're a line chart
                 bar,   // add_bar for line chart
                 inverse,
@@ -300,9 +335,16 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref events,
         }) => {
+            tracing::debug!(
+                command = "timeline",
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_timeline(
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 section,
                 inverse,
@@ -321,9 +363,16 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref transitions,
         }) => {
+            tracing::debug!(
+                command = "state-diagram",
+                inverse,
+                example,
+                "Dispatching subcommand"
+            );
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_state_diagram(
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 inverse,
                 example,
@@ -344,11 +393,13 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref content,
         }) => {
+            tracing::debug!(command = "graph-expression", inverse, example, syntax = ?syntax, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_graph_expression(
                 example,
                 syntax.clone(),
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 inverse,
                 font.as_deref(),
                 orientation.clone(),
@@ -368,9 +419,11 @@ fn main() -> color_eyre::Result<()> {
             meta,
             ref relationships,
         }) => {
+            tracing::debug!(command = "erd", inverse, example, "Dispatching subcommand");
+            let width_str = width.as_ref().map(|w| w.to_string());
             return render_erd(
                 title.as_deref(),
-                width.as_deref(),
+                width_str.as_deref(),
                 layout,
                 entity,
                 inverse,
@@ -385,6 +438,12 @@ fn main() -> color_eyre::Result<()> {
             ref text,
             truncate,
         }) => {
+            tracing::debug!(
+                command = "pad-left",
+                width,
+                truncate,
+                "Dispatching subcommand"
+            );
             return render_pad_left(text, width, truncate);
         }
         Some(Command::PadRight {
@@ -392,6 +451,12 @@ fn main() -> color_eyre::Result<()> {
             ref text,
             truncate,
         }) => {
+            tracing::debug!(
+                command = "pad-right",
+                width,
+                truncate,
+                "Dispatching subcommand"
+            );
             return render_pad_right(text, width, truncate);
         }
         Some(Command::Prose {
@@ -399,6 +464,7 @@ fn main() -> color_eyre::Result<()> {
             no_wrap,
             ref layout,
         }) => {
+            tracing::debug!(command = "prose", no_wrap, "Dispatching subcommand");
             return render_prose(content, no_wrap, layout);
         }
         Some(Command::Quote {
@@ -406,6 +472,7 @@ fn main() -> color_eyre::Result<()> {
             ref attribution,
             ref layout,
         }) => {
+            tracing::debug!(command = "quote", "Dispatching subcommand");
             return render_quote(content, attribution.as_deref(), layout);
         }
         Some(Command::List {
@@ -414,6 +481,11 @@ fn main() -> color_eyre::Result<()> {
             no_hanging_indent,
             ref layout,
         }) => {
+            tracing::debug!(
+                command = "list",
+                items = items.len(),
+                "Dispatching subcommand"
+            );
             return render_list(items, bullet, no_hanging_indent, layout);
         }
         Some(Command::Columns {
@@ -423,7 +495,9 @@ fn main() -> color_eyre::Result<()> {
             ref left_width,
             ref layout,
         }) => {
-            return render_columns(left, right, gap, left_width.as_deref(), layout);
+            tracing::debug!(command = "columns", gap, left_width = ?left_width, "Dispatching subcommand");
+            let left_width_str = left_width.as_ref().map(|w| w.to_string());
+            return render_columns(left, right, gap, left_width_str.as_deref(), layout);
         }
         Some(Command::Dir {
             ref path,
@@ -442,10 +516,17 @@ fn main() -> color_eyre::Result<()> {
                 show_modified: modified,
                 show_updated: updated,
             };
+            tracing::debug!(
+                command = "dir",
+                ?path,
+                depth,
+                ?filter,
+                "Dispatching subcommand"
+            );
             return render_dir(path, depth, filter, skip_root, layout, &options);
         }
         None => {
-            // Default behavior: content analysis or terminal metadata
+            tracing::debug!(json = args.json, "No subcommand, showing terminal metadata");
         }
     }
 
@@ -475,31 +556,14 @@ fn main() -> color_eyre::Result<()> {
     Ok(())
 }
 
-/// Handles the --completions flag.
-///
-/// If "help" is provided, shows setup instructions.
-/// Otherwise, generates shell completion scripts.
-fn handle_completions(shell_arg: &str) -> color_eyre::Result<()> {
-    let shell_lower = shell_arg.to_lowercase();
-
-    if shell_lower == "help" {
-        print_completions_help();
-        return Ok(());
-    }
-
-    let shell = match shell_lower.as_str() {
-        "bash" => Shell::Bash,
-        "elvish" => Shell::Elvish,
-        "fish" => Shell::Fish,
-        "powershell" | "pwsh" => Shell::PowerShell,
-        "zsh" => Shell::Zsh,
-        _ => {
-            eprintln!(
-                "error: invalid shell '{}'\n\nValid shells: bash, elvish, fish, powershell, zsh\n\nUse 'bt --completions help' for setup instructions.",
-                shell_arg
-            );
-            std::process::exit(1);
-        }
+/// Handles the --completions flag by generating shell completion scripts.
+fn handle_completions(shell_type: &ShellType) -> color_eyre::Result<()> {
+    let shell = match shell_type {
+        ShellType::Bash => Shell::Bash,
+        ShellType::Elvish => Shell::Elvish,
+        ShellType::Fish => Shell::Fish,
+        ShellType::Powershell => Shell::PowerShell,
+        ShellType::Zsh => Shell::Zsh,
     };
 
     print_completions(shell);
@@ -510,39 +574,6 @@ fn handle_completions(shell_arg: &str) -> color_eyre::Result<()> {
 fn print_completions(shell: Shell) {
     let mut cmd = Args::command();
     clap_complete::generate(shell, &mut cmd, "bt", &mut std::io::stdout());
-}
-
-/// Prints help about setting up shell completions.
-fn print_completions_help() {
-    println!(
-        r#"bt Shell Completions Setup
-
-Two methods are available for enabling tab completion:
-
-DYNAMIC COMPLETIONS (recommended)
-=================================
-Dynamic completions call bt at completion time, providing:
-- Image file filtering (only *.png, *.jpg, *.jpeg, *.gif)
-- Always up-to-date with current bt version
-
-Setup:
-  Bash:  echo 'source <(COMPLETE=bash bt)' >> ~/.bashrc
-  Zsh:   echo 'source <(COMPLETE=zsh bt)' >> ~/.zshrc
-  Fish:  echo 'COMPLETE=fish bt | source' >> ~/.config/fish/config.fish
-
-STATIC COMPLETIONS
-==================
-Static completions generate a script once. Faster but less features.
-
-Setup:
-  Bash:       bt --completions bash >> ~/.bashrc
-  Zsh:        bt --completions zsh > ~/.zfunc/_bt
-  Fish:       bt --completions fish > ~/.config/fish/completions/bt.fish
-  PowerShell: bt --completions powershell >> $PROFILE
-
-After setup, restart your shell or source the file to activate completions.
-"#
-    );
 }
 
 /// Completes font family names from system fonts available to resvg.

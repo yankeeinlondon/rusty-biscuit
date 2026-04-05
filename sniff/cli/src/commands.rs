@@ -7,8 +7,10 @@ use sniff::filesystem::blast_radius::{
 use sniff::package::{enrich_dependency, is_major_update, is_owner_repo_shorthand};
 use sniff::programs::ProgramsInfo;
 use sniff::remote::{DocumentCategory, GitRemote, RemoteRepoProvider, RemoteReport};
+use sniff::request::*;
 use sniff::services::{ServiceState, detect_services};
-use sniff::{SniffConfig, SniffResult, detect_with_config};
+use sniff::{SniffResult, detect_with_plan};
+use tracing::info_span;
 
 use crate::args::{
     BlastRadiusScopeArg, COMPLETIONS_HELP, Cli, Commands, DEFAULT_COMMIT_COUNT, DocsFilter,
@@ -33,6 +35,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let cli = Cli::parse();
+
+    crate::init_tracing(cli.verbose);
+
+    let _root = info_span!("sniff",
+        command = ?cli.command.as_ref().map(|c| format!("{c:?}")),
+        json = cli.json,
+        plain = cli.plain,
+    ).entered();
 
     // Handle --completions first (prints setup instructions)
     if let Some(shell) = cli.completions {
@@ -69,7 +79,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
 
-            let programs = ProgramsInfo::detect();
+            let programs = detect_programs_for_filter(output_filter);
             if cli.json {
                 output::print_programs_json(&programs, output_filter)?;
             } else {
@@ -295,11 +305,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => unreachable!(),
                 };
                 // Use the existing file-list logic
-                let mut config = SniffConfig::new().skip_os().skip_hardware().skip_network();
+                let mut plan = DetectionPlan::new()
+                    .without_os()
+                    .without_hardware()
+                    .without_network();
                 if let Some(ref base) = base_dir {
-                    config = config.base_dir(base.clone());
+                    plan = plan.base_dir(base.clone());
                 }
-                let result = sniff::detect_with_config(config)?;
+                let result = detect_with_plan(plan)?;
                 if let Some(ref fs) = result.filesystem
                     && let Some(ref git) = fs.git
                 {
@@ -369,12 +382,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut config = SniffConfig::new();
-
-    if let Some(ref base) = base_dir {
-        config = config.base_dir(base.clone());
-    }
-
     let refresh_remotes_enabled = match &repo_action {
         Some(crate::args::RepoAction::GitStatus {
             refresh_remotes: true,
@@ -385,9 +392,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .as_ref()
             .is_some_and(|command| command.refresh_remotes()),
     };
-    if refresh_remotes_enabled {
-        config = config.deep(true);
-    }
 
     // Set commit count from history flag
     let history_count = match &repo_action {
@@ -397,35 +401,89 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .as_ref()
             .map_or(DEFAULT_COMMIT_COUNT, |c| c.history()),
     };
-    config = config.commit_count(history_count);
 
-    // Apply skip logic based on filter mode
-    match output_filter {
-        OutputFilter::Os => {
-            config = config.skip_hardware().skip_network().skip_filesystem();
-        }
-        OutputFilter::Hardware => {
-            config = config.skip_os().skip_network().skip_filesystem();
-        }
-        OutputFilter::Network => {
-            config = config.skip_os().skip_hardware().skip_filesystem();
-        }
-        OutputFilter::Filesystem => {
-            config = config.skip_os().skip_hardware().skip_network();
-        }
-        OutputFilter::Cpu
-        | OutputFilter::Gpu
-        | OutputFilter::Memory
-        | OutputFilter::Storage
-        | OutputFilter::AudioDevices => {
-            config = config.skip_os().skip_network().skip_filesystem();
-        }
-        OutputFilter::Repo | OutputFilter::Language | OutputFilter::Files | OutputFilter::Docs => {
-            config = config.skip_os().skip_hardware().skip_network();
-        }
-        OutputFilter::All => {
-            // No filtering - detect everything
-        }
+    // Build git request based on deep/commit_count flags
+    let git_request = if refresh_remotes_enabled {
+        GitRequest::deep().commit_count(history_count)
+    } else {
+        GitRequest::full().commit_count(history_count)
+    };
+
+    // Build a targeted DetectionPlan based on the output filter
+    let plan = match output_filter {
+        OutputFilter::Os => DetectionPlan::new()
+            .without_hardware()
+            .without_network()
+            .without_filesystem(),
+        OutputFilter::Hardware => DetectionPlan::new()
+            .without_os()
+            .without_network()
+            .without_filesystem(),
+        OutputFilter::Network => DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_filesystem(),
+        OutputFilter::Filesystem => DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_network()
+            .filesystem(FilesystemRequest::new().git(git_request.clone())),
+        OutputFilter::Cpu | OutputFilter::Memory => DetectionPlan::new()
+            .without_os()
+            .without_network()
+            .without_filesystem()
+            .hardware(HardwareRequest::summary()),
+        OutputFilter::Gpu => DetectionPlan::new()
+            .without_os()
+            .without_network()
+            .without_filesystem()
+            .hardware(HardwareRequest::summary().include_gpu(true)),
+        OutputFilter::Storage => DetectionPlan::new()
+            .without_os()
+            .without_network()
+            .without_filesystem()
+            .hardware(HardwareRequest::summary().include_storage(true)),
+        OutputFilter::AudioDevices => DetectionPlan::new()
+            .without_os()
+            .without_network()
+            .without_filesystem()
+            .hardware(HardwareRequest::summary().include_audio(true)),
+        OutputFilter::Repo => DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_network()
+            .filesystem(
+                FilesystemRequest::new()
+                    .git(git_request.clone())
+                    .without_file_inventory(),
+            ),
+        OutputFilter::Language => DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_network()
+            .filesystem(
+                FilesystemRequest::new()
+                    .git(git_request.clone())
+                    .without_docs()
+                    .without_formatting(),
+            ),
+        OutputFilter::Files => DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_network()
+            .filesystem(FilesystemRequest::new().git(git_request.clone())),
+        OutputFilter::Docs => DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_network()
+            .filesystem(
+                FilesystemRequest::new()
+                    .git(git_request.clone())
+                    .without_file_inventory()
+                    .without_formatting(),
+            ),
+        OutputFilter::All => DetectionPlan::new()
+            .filesystem(FilesystemRequest::new().git(git_request.clone())),
         OutputFilter::Programs
         | OutputFilter::Editors
         | OutputFilter::Utilities
@@ -442,9 +500,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "Programs, Services, Just, and BlastRadius mode should be handled before this point"
             )
         }
-    }
+    };
 
-    let mut result = detect_with_config(config)?;
+    let plan = if let Some(ref base) = base_dir {
+        plan.base_dir(base.clone())
+    } else {
+        plan
+    };
+
+    let mut result = detect_with_plan(plan)?;
 
     // Handle package scoping for git actions
     let package_for_git = match &repo_action {
@@ -959,6 +1023,51 @@ fn handle_file_list_command(
     }
 
     Ok(())
+}
+
+/// Detect only the program category needed for the given output filter.
+///
+/// Builds the shared executable index once, then detects only the requested
+/// category instead of all 8. Falls back to full detection for `OutputFilter::Programs`.
+fn detect_programs_for_filter(filter: OutputFilter) -> ProgramsInfo {
+    use sniff::programs::*;
+    use std::sync::Arc;
+
+    if filter == OutputFilter::Programs {
+        return ProgramsInfo::detect();
+    }
+
+    let index = Arc::new(ExecutableIndex::build());
+    let mut programs = ProgramsInfo::default();
+    match filter {
+        OutputFilter::Editors => {
+            programs.editors = InstalledEditors::new_with_index(&index);
+        }
+        OutputFilter::Utilities => {
+            programs.utilities = InstalledUtilities::new_with_index(&index);
+        }
+        OutputFilter::LanguagePackageManagers => {
+            programs.language_package_managers =
+                InstalledLanguagePackageManagers::new_with_index(&index);
+        }
+        OutputFilter::OsPackageManagers => {
+            programs.os_package_managers = InstalledOsPackageManagers::new_with_index(&index);
+        }
+        OutputFilter::TtsClients => {
+            programs.tts_clients = InstalledTtsClients::new_with_index(&index);
+        }
+        OutputFilter::TerminalApps => {
+            programs.terminal_apps = InstalledTerminalApps::new_with_index(&index);
+        }
+        OutputFilter::HeadlessAudio => {
+            programs.headless_audio = InstalledHeadlessAudio::new_with_index(&index);
+        }
+        OutputFilter::AiClients => {
+            programs.ai_clients = InstalledAiClients::new_with_index(&index);
+        }
+        _ => return ProgramsInfo::detect(),
+    }
+    programs
 }
 
 #[cfg(test)]

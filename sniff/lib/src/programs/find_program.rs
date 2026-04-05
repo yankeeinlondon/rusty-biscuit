@@ -2,6 +2,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use tracing::{debug, instrument, trace};
 use which::which;
 
 /// Finds a program by name in the system PATH.
@@ -29,6 +30,7 @@ pub fn find_program<P: AsRef<OsStr>>(program: P) -> Option<PathBuf> {
 
 /// Checks for the existence of multiple programs in parallel.
 /// Returns a HashMap where keys are program names and values are paths (if found).
+#[instrument(skip_all, fields(program_count = programs.len()))]
 pub fn find_programs_parallel(programs: &[&str]) -> HashMap<String, Option<PathBuf>> {
     programs
         .par_iter() // 1. Convert to a parallel iterator
@@ -85,23 +87,45 @@ impl ExecutableIndex {
     /// ## Returns
     ///
     /// A fully populated index ready for O(1) lookups.
+    #[instrument(skip_all)]
     pub fn build() -> Self {
         let mut path_executables = HashMap::new();
 
         if let Some(path_var) = std::env::var_os("PATH") {
             for dir in std::env::split_paths(&path_var) {
+                trace!(dir = %dir.display(), "scanning PATH directory");
                 if let Ok(entries) = std::fs::read_dir(&dir) {
                     for entry in entries.filter_map(|e| e.ok()) {
+                        let path = entry.path();
+
+                        // Only index executable files (matches `which` semantics)
+                        if !is_executable(&path) {
+                            continue;
+                        }
+
                         if let Some(name) = entry.file_name().to_str() {
+                            let name = name.to_string();
+
                             // First occurrence wins (matches PATH precedence)
                             path_executables
-                                .entry(name.to_string())
-                                .or_insert_with(|| entry.path());
+                                .entry(name.clone())
+                                .or_insert_with(|| path.clone());
+
+                            // On Windows, also index without the extension so that
+                            // a lookup for "git" can match "git.exe"
+                            #[cfg(windows)]
+                            if let Some(normalized) = strip_windows_ext(&name) {
+                                path_executables
+                                    .entry(normalized)
+                                    .or_insert_with(|| path.clone());
+                            }
                         }
                     }
                 }
             }
         }
+
+        debug!(path_count = path_executables.len(), "PATH scan complete");
 
         Self {
             path_executables,
@@ -141,6 +165,64 @@ impl ExecutableIndex {
     pub fn find(&self, program: &str) -> Option<PathBuf> {
         self.path_executables.get(program).cloned()
     }
+}
+
+/// Checks whether a path is an executable file.
+///
+/// On Unix, verifies both that the path is a regular file and that at least
+/// one execute bit is set. On Windows, checks that the file has a PATHEXT
+/// extension (read from the environment, falling back to a standard set).
+fn is_executable(path: &std::path::Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        path.is_file()
+            && path
+                .metadata()
+                .map(|m| m.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false)
+    }
+
+    #[cfg(windows)]
+    {
+        if !path.is_file() {
+            return false;
+        }
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            return false;
+        };
+        let dot_ext = format!(".{}", ext.to_ascii_lowercase());
+        get_pathext_extensions().iter().any(|pe| *pe == dot_ext)
+    }
+}
+
+/// Returns the lowercased PATHEXT extensions from the environment.
+///
+/// Falls back to `.exe;.cmd;.bat;.com` when the variable is unset.
+#[cfg(windows)]
+fn get_pathext_extensions() -> Vec<String> {
+    let pathext = std::env::var_os("PATHEXT").unwrap_or(".EXE;.CMD;.BAT;.COM".into());
+    pathext
+        .to_string_lossy()
+        .split(';')
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .collect()
+}
+
+/// Strips a Windows executable extension, returning the normalized name.
+///
+/// Returns `Some(stem)` if the filename ends with a PATHEXT extension
+/// (read from the environment). Returns `None` if no match.
+#[cfg(windows)]
+fn strip_windows_ext(name: &str) -> Option<String> {
+    let lower = name.to_lowercase();
+    for ext in &get_pathext_extensions() {
+        if lower.ends_with(ext.as_str()) {
+            return Some(name[..name.len() - ext.len()].to_string());
+        }
+    }
+    None
 }
 
 /// Builds the macOS app bundle index by checking known app mappings.
@@ -246,17 +328,11 @@ fn check_bundle_executable(bundle_path: &Path, binary_name: &str) -> Option<Path
 }
 
 /// Checks if a path is an executable file (macOS only).
+///
+/// Delegates to the shared [`is_executable`] helper.
 #[cfg(target_os = "macos")]
 fn is_executable_file(path: &std::path::Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-
-    if !path.is_file() {
-        return false;
-    }
-
-    path.metadata()
-        .map(|m| m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
+    is_executable(path)
 }
 
 /// Finds multiple programs using a pre-built index.
@@ -636,5 +712,114 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ============================================
+    // ExecutableIndex parity tests
+    // ============================================
+
+    /// Verifies that `ExecutableIndex::find_with_source()` agrees with
+    /// `find_program_with_source()` (which delegates to `which`) for
+    /// representative programs found on every platform.
+    #[test]
+    fn test_executable_index_parity_with_which() {
+        let index = ExecutableIndex::build();
+
+        // Programs that should exist on every CI / dev machine
+        #[cfg(unix)]
+        let programs = &["ls", "cat", "sh", "env"];
+        #[cfg(windows)]
+        let programs = &["cmd", "powershell"];
+
+        for &prog in programs {
+            let which_result = find_program_with_source(prog);
+            let index_result = index.find_with_source(prog);
+
+            match (&which_result, &index_result) {
+                (Some(_), Some(_)) => {
+                    // Both found — good
+                }
+                (None, None) => {
+                    // Both agree it's missing — acceptable on exotic systems
+                }
+                (Some((which_path, _)), None) => {
+                    panic!(
+                        "which found '{}' at {} but ExecutableIndex missed it",
+                        prog,
+                        which_path.display()
+                    );
+                }
+                (None, Some((idx_path, _))) => {
+                    panic!(
+                        "ExecutableIndex found '{}' at {} but which did not — \
+                         likely a non-executable file was indexed",
+                        prog,
+                        idx_path.display()
+                    );
+                }
+            }
+        }
+    }
+
+    /// Verifies the index does not include non-executable files.
+    #[test]
+    fn test_executable_index_excludes_non_executable() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let non_exec = dir.path().join("not-a-program");
+        fs::write(&non_exec, "data").unwrap();
+
+        // Set permissions to non-executable on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&non_exec, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+
+        // Temporarily prepend our dir to PATH and build the index
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut new_path = std::ffi::OsString::from(dir.path());
+        new_path.push(":");
+        new_path.push(&original_path);
+
+        // Safety: single-threaded test; restored immediately
+        unsafe { std::env::set_var("PATH", &new_path) };
+        let index = ExecutableIndex::build();
+        unsafe { std::env::set_var("PATH", &original_path) };
+
+        assert!(
+            index.find("not-a-program").is_none(),
+            "Non-executable file should not appear in the index"
+        );
+    }
+
+    /// Verifies the index *does* include executable files.
+    #[cfg(unix)]
+    #[test]
+    fn test_executable_index_includes_executable() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let exec = dir.path().join("test-exec-prog");
+        fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
+        fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let original_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut new_path = std::ffi::OsString::from(dir.path());
+        new_path.push(":");
+        new_path.push(&original_path);
+
+        unsafe { std::env::set_var("PATH", &new_path) };
+        let index = ExecutableIndex::build();
+        unsafe { std::env::set_var("PATH", &original_path) };
+
+        assert!(
+            index.find("test-exec-prog").is_some(),
+            "Executable file should appear in the index"
+        );
     }
 }

@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use sniff::filesystem::git::detect_git;
-use sniff::filesystem::repo::{Package, detect_repo};
+use sniff::filesystem::repo::Package;
+use sniff::request::*;
 
 /// Filesystem roots resolved from the directory the user launched Claudine in.
 ///
@@ -26,16 +26,29 @@ pub struct LaunchContext {
 impl LaunchContext {
     /// Build a launch context from the given working directory.
     ///
-    /// Uses `sniff::filesystem::git::detect_git` and
-    /// `sniff::filesystem::repo::detect_repo` under the hood.
+    /// Uses a single `sniff::detect_with_plan` call with git summary
+    /// and repo structure detection.
     pub fn from_cwd(cwd: &Path) -> Result<Self, crate::error::ClaudineError> {
-        let git_root = detect_git(cwd, false, 1)
-            .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(e.to_string()))?
-            .map(|info| info.repo_root);
+        let plan = DetectionPlan::new()
+            .base_dir(cwd.to_path_buf())
+            .without_os()
+            .without_hardware()
+            .without_network()
+            .filesystem(
+                FilesystemRequest::new()
+                    .git(GitRequest::summary())
+                    .repo(RepoRequest::structure())
+                    .without_file_inventory()
+                    .without_docs()
+                    .without_formatting(),
+            );
 
-        let repo_probe_root = git_root.clone().unwrap_or_else(|| cwd.to_path_buf());
-        let repo = detect_repo(&repo_probe_root)
+        let result = sniff::detect_with_plan(plan)
             .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(e.to_string()))?;
+
+        let fs = result.filesystem;
+        let git_root = fs.as_ref().and_then(|f| f.git.as_ref()).map(|g| g.repo_root.clone());
+        let repo = fs.and_then(|f| f.repo);
 
         let (package_root, package_area_root) = match repo {
             Some(ref repo) if repo.is_monorepo => {

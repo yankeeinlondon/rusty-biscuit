@@ -1,4 +1,5 @@
 use sniff::filesystem::ProgrammingLanguage;
+use sniff::os::NtpStatus;
 use sniff::{SniffConfig, detect, detect_with_config};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -677,4 +678,200 @@ fn test_detect_with_plan_summary_mode() {
         "Summary detection took too long: {:?}",
         elapsed
     );
+}
+
+// ============================================================================
+// Selective-cost behavior regression tests (review-3 item 3)
+// ============================================================================
+
+/// Creates a temporary git repo with a committed file and an uncommitted modification,
+/// suitable for testing file_changes vs diff payload behavior.
+fn create_dirty_git_repo() -> (tempfile::TempDir, PathBuf) {
+    use git2::{Repository, Signature};
+    use std::fs;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+
+    // Create and commit a file
+    let file_path = dir.path().join("hello.txt");
+    fs::write(&file_path, "hello world\n").unwrap();
+
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("hello.txt")).unwrap();
+    index.write().unwrap();
+
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = Signature::now("Test", "test@test.com").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+        .unwrap();
+
+    // Now modify the file (unstaged change) to make the repo dirty
+    fs::write(&file_path, "hello world\nmodified line\n").unwrap();
+
+    // Also create an untracked file
+    fs::write(dir.path().join("untracked.txt"), "new file\n").unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+#[test]
+fn test_git_full_has_file_changes_but_no_diff_payloads() {
+    use sniff::request::*;
+
+    let (_dir, path) = create_dirty_git_repo();
+
+    let plan = DetectionPlan::new()
+        .base_dir(path)
+        .without_os()
+        .without_hardware()
+        .without_network()
+        .filesystem(
+            FilesystemRequest::new()
+                .git(GitRequest::full())
+                .without_repo()
+                .without_docs()
+                .without_formatting()
+                .without_file_inventory(),
+        );
+
+    let result = sniff::detect_with_plan(plan).unwrap();
+    let fs = result.filesystem.expect("filesystem should be present");
+    let git = fs.git.expect("git should be present");
+
+    // GitRequest::full() includes file_changes (paths, status, line counts)
+    assert!(
+        !git.file_changes.is_empty(),
+        "full() should populate file_changes"
+    );
+
+    // But does NOT include unified diff payloads
+    assert!(
+        git.status.dirty.is_empty(),
+        "full() should NOT populate dirty diff payloads"
+    );
+    assert!(
+        git.status.untracked.is_empty(),
+        "full() should NOT populate untracked file details"
+    );
+
+    // Verify the counts are correct
+    assert!(git.status.is_dirty);
+    assert!(git.status.unstaged_count > 0);
+    assert!(git.status.untracked_count > 0);
+}
+
+#[test]
+fn test_git_deep_includes_diff_payloads() {
+    use sniff::request::*;
+
+    let (_dir, path) = create_dirty_git_repo();
+
+    let plan = DetectionPlan::new()
+        .base_dir(path)
+        .without_os()
+        .without_hardware()
+        .without_network()
+        .filesystem(
+            FilesystemRequest::new()
+                .git(GitRequest::deep())
+                .without_repo()
+                .without_docs()
+                .without_formatting()
+                .without_file_inventory(),
+        );
+
+    let result = sniff::detect_with_plan(plan).unwrap();
+    let fs = result.filesystem.expect("filesystem should be present");
+    let git = fs.git.expect("git should be present");
+
+    // deep() includes both file_changes AND diff payloads
+    assert!(
+        !git.file_changes.is_empty(),
+        "deep() should populate file_changes"
+    );
+    assert!(
+        !git.status.dirty.is_empty(),
+        "deep() should populate dirty diff payloads"
+    );
+    assert!(
+        !git.status.untracked.is_empty(),
+        "deep() should populate untracked file details"
+    );
+
+    // Verify the diff payload contains actual content
+    let dirty_file = &git.status.dirty[0];
+    assert!(
+        !dirty_file.diff.is_empty(),
+        "dirty file should have a non-empty diff"
+    );
+}
+
+#[test]
+fn test_os_timezone_without_ntp() {
+    use sniff::request::*;
+
+    let plan = DetectionPlan::new()
+        .os(OsRequest::summary()
+            .include_timezone(true)
+            .include_ntp_status(false))
+        .without_hardware()
+        .without_network()
+        .without_filesystem();
+
+    let result = sniff::detect_with_plan(plan).unwrap();
+    let os = result.os.expect("os should be present");
+
+    // Timezone data should be populated
+    let time = os
+        .time
+        .expect("time should be present when timezone is enabled");
+    assert!(time.timezone.is_some(), "timezone name should be detected");
+
+    // NTP should NOT have been probed — expect Unknown (the default)
+    assert!(
+        matches!(time.ntp_status, NtpStatus::Unknown),
+        "NTP status should be Unknown when NTP probing is disabled, got {:?}",
+        time.ntp_status
+    );
+}
+
+#[test]
+fn test_os_summary_has_no_time_data() {
+    use sniff::request::*;
+
+    let plan = DetectionPlan::new()
+        .os(OsRequest::summary())
+        .without_hardware()
+        .without_network()
+        .without_filesystem();
+
+    let result = sniff::detect_with_plan(plan).unwrap();
+    let os = result.os.expect("os should be present");
+
+    // Summary mode disables both timezone and NTP
+    assert!(os.time.is_none(), "summary() should not include time data");
+}
+
+#[test]
+fn test_executable_index_parity_with_which_for_common_programs() {
+    use sniff::programs::{ExecutableIndex, find_program_with_source};
+
+    let index = ExecutableIndex::build();
+
+    // Test a broader set of programs that are commonly available
+    let programs = ["git", "bash", "sh", "env", "ls", "cat"];
+
+    for prog in &programs {
+        let which_found = find_program_with_source(prog).is_some();
+        let index_found = index.find_with_source(prog).is_some();
+
+        assert_eq!(
+            which_found, index_found,
+            "Parity mismatch for '{}': which={}, index={}",
+            prog, which_found, index_found
+        );
+    }
 }

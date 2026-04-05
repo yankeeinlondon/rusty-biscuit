@@ -31,13 +31,14 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
+#[tracing::instrument(name = "Terminal::new")]
 fn new_terminal() -> Terminal {
     let app = get_terminal_app();
     let config_file = get_terminal_config_path(&app);
     let repo_root = find_git_root(Path::new("."));
     let in_repo = repo_root.is_some();
 
-    Terminal {
+    let terminal = Terminal {
         app,
         supports_italic: italics_support(),
         image_support: image_support(),
@@ -63,7 +64,19 @@ fn new_terminal() -> Terminal {
         fixed_width: None,
         fixed_height: None,
         cell_size: cell_size(),
-    }
+    };
+
+    tracing::debug!(
+        app = ?terminal.app,
+        image_support = ?terminal.image_support,
+        color_depth = ?terminal.color_depth,
+        is_tty = terminal.is_tty,
+        is_ci = terminal.is_ci,
+        os = ?terminal.os,
+        "Terminal detected"
+    );
+
+    terminal
 }
 
 /// Represents a detected terminal environment with its capabilities.

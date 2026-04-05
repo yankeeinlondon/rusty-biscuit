@@ -2,6 +2,7 @@ use crate::Result;
 use crate::request::{FilesystemRequest, GitRequest};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tracing::instrument;
 
 pub mod blast_radius;
 pub mod docs;
@@ -57,6 +58,12 @@ pub struct FilesystemInfo {
 ///
 /// Controls which subsections are collected: git, repo, file inventory,
 /// formatting, and document discovery.
+#[instrument(skip(request), fields(
+    git = request.git.is_some(),
+    repo = request.repo.is_some(),
+    files = request.include_file_inventory,
+    docs = request.include_docs,
+))]
 pub fn detect_filesystem_with_request(
     root: &Path,
     request: &FilesystemRequest,
@@ -68,19 +75,24 @@ pub fn detect_filesystem_with_request(
     };
 
     // Stage 2: Repo detection
+    // When full repo detection is requested, also capture the shared file
+    // inventory it already builds so Stage 3 can reuse it instead of
+    // rescanning the tree.
     let repo_root_path = git.as_ref().map(|g| g.repo_root.as_path()).unwrap_or(root);
-    let repo = match &request.repo {
+    let (repo, repo_inventory) = match &request.repo {
         Some(repo_request) => {
             if repo_request.structure_only {
-                detect_repo_structure(repo_root_path)?
+                (detect_repo_structure(repo_root_path)?, None)
             } else {
-                detect_repo(repo_root_path)?
+                repo::detect_repo_with_inventory(repo_root_path)?
             }
         }
-        None => None,
+        None => (None, None),
     };
 
     // Stage 3: File inventory and language breakdown
+    // When full repo detection already scanned the tree, reuse that
+    // inventory (filtered to the target scope) instead of walking again.
     let (files, languages) = if request.include_file_inventory {
         let inventory = match repo.as_ref().and_then(|r| r.package_for_dir(root)) {
             Some(package) => {
@@ -96,9 +108,19 @@ pub fn detect_filesystem_with_request(
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                file_types::scan_file_inventory_with_exclusions(&package.path, &exclude_roots).ok()
+                match repo_inventory {
+                    Some(ref inv) => Some(filter_inventory(inv, &package.path, &exclude_roots)),
+                    None => file_types::scan_file_inventory_with_exclusions(
+                        &package.path,
+                        &exclude_roots,
+                    )
+                    .ok(),
+                }
             }
-            None => file_types::scan_file_inventory(root).ok(),
+            None => match repo_inventory {
+                Some(ref inv) if inv.scope.root == root => Some(inv.clone()),
+                _ => file_types::scan_file_inventory(root).ok(),
+            },
         };
 
         match inventory {
@@ -162,4 +184,49 @@ pub fn detect_filesystem(root: &Path, deep: bool, commit_count: usize) -> Result
         GitRequest::full().commit_count(commit_count)
     };
     detect_filesystem_with_request(root, &FilesystemRequest::new().git(git_request))
+}
+
+/// Creates a filtered subset of a repo-wide inventory scoped to `target_root`,
+/// excluding files under any of `exclude_roots`.
+///
+/// Inventory paths are relative to the source scan root, so all comparisons
+/// use the relative prefix of `target_root` within that root.
+fn filter_inventory(
+    source: &file_types::FileInventory,
+    target_root: &Path,
+    exclude_roots: &[PathBuf],
+) -> file_types::FileInventory {
+    let source_root = &source.scope.root;
+
+    // Convert absolute target/exclude paths to relative prefixes within the inventory
+    let target_prefix = target_root
+        .strip_prefix(source_root)
+        .unwrap_or(Path::new(""));
+    let exclude_prefixes: Vec<&Path> = exclude_roots
+        .iter()
+        .filter_map(|ex| ex.strip_prefix(source_root).ok())
+        .collect();
+
+    let classifications: Vec<_> = source
+        .classifications
+        .iter()
+        .filter(|c| {
+            if target_prefix == Path::new("") {
+                true
+            } else {
+                c.path.starts_with(target_prefix)
+            }
+        })
+        .filter(|c| !exclude_prefixes.iter().any(|ex| c.path.starts_with(ex)))
+        .cloned()
+        .collect();
+    let total = classifications.len();
+    file_types::FileInventory {
+        scope: file_types::FileScanScope {
+            root: target_root.to_path_buf(),
+            exclude_roots: exclude_roots.to_vec(),
+        },
+        total_files_scanned: total,
+        classifications,
+    }
 }

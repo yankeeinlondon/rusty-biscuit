@@ -32,6 +32,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
+use tracing::{debug, instrument, warn};
 
 // =============================================================================
 // Host OS Detection
@@ -204,6 +205,10 @@ fn detect_init_linux_with_evidence() -> DetectInitResult {
     }
 
     let exe = fs::read_link("/proc/1/exe")
+        .map_err(|e| {
+            debug!(error = %e, path = "/proc/1/exe", "could not read service file");
+            e
+        })
         .ok()
         .and_then(|p| canonicalish(p).ok());
 
@@ -342,6 +347,7 @@ pub struct ServiceManager {
 
 impl ServiceManager {
     /// Detect the service manager for the current host.
+    #[instrument(skip_all)]
     pub fn detect() -> Self {
         let host_os = detect_host_os();
         let result = detect_init_with_evidence(host_os);
@@ -408,6 +414,7 @@ pub fn host_services_detailed(state: ServiceState) -> Vec<Service> {
 }
 
 /// Detect services and return a complete `ServicesInfo` structure.
+#[instrument(skip_all)]
 pub fn detect_services() -> ServicesInfo {
     let manager = ServiceManager::detect();
     let services = manager.services_detailed(ServiceState::All);
@@ -437,7 +444,13 @@ pub struct ServicesInfo {
 // =============================================================================
 
 fn read_trimmed(path: &str) -> Option<String> {
-    fs::read_to_string(path).ok().map(|s| s.trim().to_string())
+    fs::read_to_string(path)
+        .map_err(|e| {
+            debug!(path = %path, error = %e, "could not read service file");
+            e
+        })
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 /// Like canonicalize(), but doesn't fail just because resolution is restricted.
@@ -512,7 +525,10 @@ fn has_in_path(exe_name: &str) -> bool {
 /// 123     0       com.apple.example.running
 /// ```
 fn list_launchd_services() -> Vec<Service> {
-    let output = match Command::new("launchctl").arg("list").output() {
+    let output = match Command::new("launchctl").arg("list").output().map_err(|e| {
+        warn!(error = %e, cmd = "launchctl", "service detection subprocess failed");
+        e
+    }) {
         Ok(o) if o.status.success() => o,
         _ => return Vec::new(),
     };
@@ -553,7 +569,10 @@ fn list_systemd_services() -> Vec<Service> {
             "--plain",
         ])
         .output()
-    {
+        .map_err(|e| {
+            warn!(error = %e, cmd = "systemctl", "service detection subprocess failed");
+            e
+        }) {
         Ok(o) if o.status.success() => o,
         _ => return Vec::new(),
     };
@@ -604,6 +623,10 @@ fn get_systemd_service_pid(service_name: &str) -> Option<u32> {
             "--property=MainPID",
         ])
         .output()
+        .map_err(|e| {
+            warn!(error = %e, cmd = "systemctl", "service detection subprocess failed");
+            e
+        })
         .ok()?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -619,7 +642,13 @@ fn get_systemd_service_pid(service_name: &str) -> Option<u32> {
 ///
 /// Parses output from `rc-status --all`
 fn list_openrc_services() -> Vec<Service> {
-    let output = match Command::new("rc-status").arg("--all").output() {
+    let output = match Command::new("rc-status")
+        .arg("--all")
+        .output()
+        .map_err(|e| {
+            warn!(error = %e, cmd = "rc-status", "service detection subprocess failed");
+            e
+        }) {
         Ok(o) if o.status.success() => o,
         _ => return Vec::new(),
     };
@@ -664,7 +693,10 @@ fn list_runit_services() -> Vec<Service> {
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/var/service"));
 
-    let entries = match fs::read_dir(&sv_dir) {
+    let entries = match fs::read_dir(&sv_dir).map_err(|e| {
+        debug!(path = %sv_dir.display(), error = %e, "could not read service file");
+        e
+    }) {
         Ok(e) => e,
         Err(_) => return Vec::new(),
     };
@@ -698,7 +730,13 @@ fn list_runit_services() -> Vec<Service> {
 
 /// Check runit service status using `sv status`.
 fn check_runit_service_status(service_name: &str) -> (bool, Option<u32>) {
-    let output = match Command::new("sv").args(["status", service_name]).output() {
+    let output = match Command::new("sv")
+        .args(["status", service_name])
+        .output()
+        .map_err(|e| {
+            warn!(error = %e, cmd = "sv", "service detection subprocess failed");
+            e
+        }) {
         Ok(o) => o,
         Err(_) => return (false, None),
     };

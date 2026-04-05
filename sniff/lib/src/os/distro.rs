@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use tracing::debug;
 
 use super::OsType;
 use super::detect_os_type;
@@ -286,7 +287,12 @@ pub(crate) fn detect_linux_distro_from_paths(
 /// VERSION_CODENAME=jammy
 /// ```
 fn parse_os_release(path: &Path) -> Option<LinuxDistro> {
-    let content = fs::read_to_string(path).ok()?;
+    let content = fs::read_to_string(path)
+        .map_err(|e| {
+            debug!(path = %path.display(), error = %e, "could not read distro file");
+            e
+        })
+        .ok()?;
     parse_os_release_content(&content)
 }
 
@@ -352,7 +358,12 @@ pub fn parse_os_release_content(content: &str) -> Option<LinuxDistro> {
 /// DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
 /// ```
 fn parse_lsb_release(path: &Path) -> Option<LinuxDistro> {
-    let content = fs::read_to_string(path).ok()?;
+    let content = fs::read_to_string(path)
+        .map_err(|e| {
+            debug!(path = %path.display(), error = %e, "could not read distro file");
+            e
+        })
+        .ok()?;
     parse_lsb_release_content(&content)
 }
 
@@ -420,7 +431,12 @@ pub fn parse_lsb_release_content(content: &str) -> Option<LinuxDistro> {
 /// CentOS Linux release 7.9.2009 (Core)
 /// ```
 fn parse_system_release(path: &Path) -> Option<LinuxDistro> {
-    let content = fs::read_to_string(path).ok()?;
+    let content = fs::read_to_string(path)
+        .map_err(|e| {
+            debug!(path = %path.display(), error = %e, "could not read distro file");
+            e
+        })
+        .ok()?;
     parse_system_release_content(&content)
 }
 

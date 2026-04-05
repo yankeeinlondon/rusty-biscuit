@@ -37,8 +37,32 @@ pub struct ImageSupportResult {
     pub support: ImageSupport,
     /// Human-readable reason for the detection result
     pub reason: String,
-    /// The detection method used (e.g., "viuer", "env_heuristic", "tty_check")
-    pub method: String,
+    /// The detection method used
+    pub method: DetectionMethod,
+}
+
+/// The method used to detect image support.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DetectionMethod {
+    /// Direct TTY capability check
+    TtyCheck,
+    /// Detection via viuer library probing
+    Viuer,
+    /// Heuristic based on environment variables
+    EnvHeuristic,
+    /// Known terminal application lookup
+    KnownTerminal,
+}
+
+impl std::fmt::Display for DetectionMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TtyCheck => write!(f, "tty_check"),
+            Self::Viuer => write!(f, "viuer"),
+            Self::EnvHeuristic => write!(f, "env_heuristic"),
+            Self::KnownTerminal => write!(f, "known_terminal"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +81,15 @@ pub enum TerminalApp {
     Wast,
     VsCode,
     Other(String),
+}
+
+impl std::fmt::Display for TerminalApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Other(name) => write!(f, "{}", name),
+            other => write!(f, "{:?}", other),
+        }
+    }
 }
 
 /// Client information for a host which was established over an SSH connection.
@@ -142,10 +175,11 @@ pub struct UnderlineSupport {
     pub colored: bool,
 }
 
-/// Represents the type of terminal multiplexing support available.
+/// Type of terminal multiplexing support available.
 ///
-/// Terminal multiplexers allow splitting terminal windows into multiple panes,
-/// managing persistent sessions, and providing advanced navigation features.
+/// All detected multiplexers support their full capability set (split, resize,
+/// focus, tabs). Individual capability fields were removed because every variant
+/// always returned `true` for all fields — no version-based detection exists.
 ///
 /// ## Detection
 ///
@@ -153,78 +187,16 @@ pub struct UnderlineSupport {
 /// - `TMUX` - Set when running inside tmux
 /// - `ZELLIJ` - Set when running inside Zellij
 /// - `TERM_PROGRAM` - Identifies terminals with native multiplexing (Kitty, WezTerm, Ghostty)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MultiplexSupport {
     /// No multiplexing support available
     None,
-    /// Native multiplexing built into the terminal emulator
-    ///
-    /// Supported by:
-    /// - Kitty (GPU-accelerated layouts: splits, stack, grid, tall, fat)
-    /// - WezTerm (multiplexer domains with SSH, WSL, local support)
-    /// - Ghostty (native platform integration)
-    ///
-    /// Note: Native multiplexing typically loses sessions on terminal close,
-    /// unlike tmux which provides persistent sessions.
-    Native {
-        /// Whether the terminal can split the current window/pane horizontally or vertically
-        split_window: bool,
-        /// Whether the terminal can resize panes
-        resize_pane: bool,
-        /// Whether the terminal can change focus to another pane
-        focus_pane: bool,
-        /// Whether the terminal supports multiple tabs or windows
-        multiple_tabs: bool,
-    },
+    /// Native multiplexing built into the terminal emulator (Kitty, WezTerm, Ghostty)
+    Native,
     /// tmux multiplexer detected
-    ///
-    /// tmux is the standard terminal multiplexer for persistent sessions.
-    /// Features include:
-    /// - Horizontal/vertical splits
-    /// - Pane resizing
-    /// - Session persistence (detaches survive terminal close)
-    /// - Multiple windows per session
-    ///
-    /// Configuration: `~/.tmux.conf`
-    Tmux {
-        /// Whether tmux can split windows horizontally or vertically
-        split_window: bool,
-        /// Whether tmux can resize panes
-        resize_pane: bool,
-        /// Whether tmux can change focus to another pane
-        focus_pane: bool,
-        /// Whether tmux supports multiple windows (tabs) within a session
-        multiple_windows: bool,
-        /// Whether tmux sessions persist after closing the terminal
-        session_persistence: bool,
-        /// Whether tmux supports detaching and reattaching to sessions
-        detach_session: bool,
-    },
+    Tmux,
     /// Zellij multiplexer detected
-    ///
-    /// Modern multiplexer written in Rust with advanced features:
-    /// - Layout system with KDL configuration
-    /// - Session resurrection
-    /// - WebAssembly plugins
-    /// - Floating panes
-    ///
-    /// Configuration: `~/.config/zellij/config.kdl`
-    Zellij {
-        /// Whether Zellij can split windows horizontally or vertically
-        split_window: bool,
-        /// Whether Zellij can resize panes
-        resize_pane: bool,
-        /// Whether Zellij can change focus to another pane
-        focus_pane: bool,
-        /// Whether Zellij supports multiple tabs
-        multiple_tabs: bool,
-        /// Whether Zellij sessions can be resurrected after closing
-        session_resurrection: bool,
-        /// Whether Zellij supports floating panes
-        floating_panes: bool,
-        /// Whether Zellij supports detaching and reattaching to sessions
-        detach_session: bool,
-    },
+    Zellij,
 }
 
 /// Detect the terminal's color depth capability.
@@ -252,7 +224,7 @@ pub fn color_depth() -> ColorDepth {
     if let Ok(colorterm) = env::var("COLORTERM") {
         let colorterm_lower = colorterm.to_lowercase();
         if colorterm_lower == "truecolor" || colorterm_lower == "24bit" {
-            tracing::info!(
+            tracing::debug!(
                 color_depth = ?ColorDepth::TrueColor,
                 source = "COLORTERM",
                 colorterm = %colorterm,
@@ -279,7 +251,7 @@ pub fn color_depth() -> ColorDepth {
                 _ => ColorDepth::None,
             };
 
-            tracing::info!(
+            tracing::debug!(
                 ?color_depth,
                 source = "terminfo",
                 "Detected color depth from terminfo"
@@ -287,7 +259,7 @@ pub fn color_depth() -> ColorDepth {
             color_depth
         }
         Err(e) => {
-            tracing::info!(
+            tracing::warn!(
                 color_depth = ?ColorDepth::None,
                 source = "fallback",
                 error = %e,
@@ -564,7 +536,7 @@ pub fn image_support_with_reason() -> ImageSupportResult {
         return ImageSupportResult {
             support: ImageSupport::None,
             reason: "stdout is not a TTY (piped or redirected)".to_string(),
-            method: "tty_check".to_string(),
+            method: DetectionMethod::TtyCheck,
         };
     }
 
@@ -596,7 +568,7 @@ pub fn image_support_with_reason() -> ImageSupportResult {
                 return ImageSupportResult {
                     support: ImageSupport::Kitty,
                     reason: format!("viuer detected Kitty graphics protocol ({})", support_type),
-                    method: "viuer".to_string(),
+                    method: DetectionMethod::Viuer,
                 };
             }
             KittySupport::None => {
@@ -617,7 +589,7 @@ pub fn image_support_with_reason() -> ImageSupportResult {
             return ImageSupportResult {
                 support: ImageSupport::ITerm,
                 reason: "viuer detected iTerm2 inline images support".to_string(),
-                method: "viuer".to_string(),
+                method: DetectionMethod::Viuer,
             };
         }
 
@@ -668,7 +640,7 @@ fn image_support_from_known_terminals() -> Option<ImageSupportResult> {
                         "{} is known to support Kitty graphics protocol",
                         term_program
                     ),
-                    method: "known_terminal".to_string(),
+                    method: DetectionMethod::KnownTerminal,
                 });
             }
         }
@@ -684,7 +656,7 @@ fn image_support_from_known_terminals() -> Option<ImageSupportResult> {
             return Some(ImageSupportResult {
                 support: ImageSupport::ITerm,
                 reason: format!("{} is known to support iTerm2 inline images", term_program),
-                method: "known_terminal".to_string(),
+                method: DetectionMethod::KnownTerminal,
             });
         }
     }
@@ -702,7 +674,7 @@ fn image_support_from_known_terminals() -> Option<ImageSupportResult> {
         return Some(ImageSupportResult {
             support: ImageSupport::Kitty,
             reason: format!("TERM={} indicates Kitty terminal", term),
-            method: "known_terminal".to_string(),
+            method: DetectionMethod::KnownTerminal,
         });
     }
 
@@ -716,7 +688,7 @@ fn image_support_from_known_terminals() -> Option<ImageSupportResult> {
         return Some(ImageSupportResult {
             support: ImageSupport::ITerm,
             reason: "iTerm2 detected from ITERM_SESSION_ID or ITERM_PROFILE".to_string(),
-            method: "known_terminal".to_string(),
+            method: DetectionMethod::KnownTerminal,
         });
     }
 
@@ -746,7 +718,7 @@ fn image_support_from_env() -> ImageSupportResult {
                         "TERM_PROGRAM={} indicates Kitty graphics protocol support",
                         term_program
                     ),
-                    method: "env_heuristic".to_string(),
+                    method: DetectionMethod::EnvHeuristic,
                 };
             }
             // iTerm2 - can use either protocol, but prefer its native protocol
@@ -764,7 +736,7 @@ fn image_support_from_env() -> ImageSupportResult {
                         "TERM_PROGRAM={} indicates iTerm2 inline images support",
                         term_program
                     ),
-                    method: "env_heuristic".to_string(),
+                    method: DetectionMethod::EnvHeuristic,
                 };
             }
             _ => {}
@@ -781,7 +753,7 @@ fn image_support_from_env() -> ImageSupportResult {
         return ImageSupportResult {
             support: ImageSupport::ITerm,
             reason: "ITERM_SESSION_ID or ITERM_PROFILE indicates iTerm2".to_string(),
-            method: "env_heuristic".to_string(),
+            method: DetectionMethod::EnvHeuristic,
         };
     }
 
@@ -797,7 +769,7 @@ fn image_support_from_env() -> ImageSupportResult {
         return ImageSupportResult {
             support: ImageSupport::Kitty,
             reason: format!("TERM={} indicates Kitty graphics protocol support", term),
-            method: "env_heuristic".to_string(),
+            method: DetectionMethod::EnvHeuristic,
         };
     }
 
@@ -810,7 +782,7 @@ fn image_support_from_env() -> ImageSupportResult {
     ImageSupportResult {
         support: ImageSupport::None,
         reason: "No image protocol support detected from environment".to_string(),
-        method: "env_heuristic".to_string(),
+        method: DetectionMethod::EnvHeuristic,
     }
 }
 
@@ -885,90 +857,35 @@ pub fn osc8_link_support() -> bool {
 /// use biscuit_terminal::discovery::detection::{multiplex_support, MultiplexSupport};
 ///
 /// match multiplex_support() {
-///     MultiplexSupport::Tmux { split_window: true, .. } => {
-///         println!("Running inside tmux with split support");
-///     }
-///     MultiplexSupport::Native { .. } => {
-///         println!("Terminal has native multiplexing");
-///     }
-///     MultiplexSupport::None => {
-///         println!("No multiplexing support detected");
-///     }
-///     _ => {}
+///     MultiplexSupport::Tmux => println!("Running inside tmux"),
+///     MultiplexSupport::Zellij => println!("Running inside Zellij"),
+///     MultiplexSupport::Native => println!("Terminal has native multiplexing"),
+///     MultiplexSupport::None => println!("No multiplexing support detected"),
 /// }
 /// ```
 pub fn multiplex_support() -> MultiplexSupport {
-    // Check for tmux first (most common persistent multiplexer)
     if env::var("TMUX").is_ok() {
-        return MultiplexSupport::Tmux {
-            split_window: true,
-            resize_pane: true,
-            focus_pane: true,
-            multiple_windows: true,
-            session_persistence: true,
-            detach_session: true,
-        };
+        return MultiplexSupport::Tmux;
     }
 
-    // Check for Zellij
     if env::var("ZELLIJ").is_ok() {
-        return MultiplexSupport::Zellij {
-            split_window: true,
-            resize_pane: true,
-            focus_pane: true,
-            multiple_tabs: true,
-            session_resurrection: true,
-            floating_panes: true,
-            detach_session: true,
-        };
+        return MultiplexSupport::Zellij;
     }
 
-    // Check for native multiplexing in terminal emulators
     if let Ok(term_program) = env::var("TERM_PROGRAM") {
         match term_program.as_str() {
-            // Kitty has native multiplexing with layouts
-            "kitty" => {
-                return MultiplexSupport::Native {
-                    split_window: true,
-                    resize_pane: true,
-                    focus_pane: true,
-                    multiple_tabs: true,
-                };
-            }
-            // WezTerm has multiplexer domains (SSH, WSL, local)
-            "WezTerm" => {
-                return MultiplexSupport::Native {
-                    split_window: true,
-                    resize_pane: true,
-                    focus_pane: true,
-                    multiple_tabs: true,
-                };
-            }
-            // Ghostty has native multiplexing
-            "ghostty" => {
-                return MultiplexSupport::Native {
-                    split_window: true,
-                    resize_pane: true,
-                    focus_pane: true,
-                    multiple_tabs: true,
-                };
+            "kitty" | "WezTerm" | "ghostty" => {
+                return MultiplexSupport::Native;
             }
             _ => {}
         }
     }
 
-    // Check TERM variable for terminals with native multiplexing
     let term = env::var("TERM").unwrap_or_default();
     if term.contains("kitty") || term.contains("wezterm") || term.contains("ghostty") {
-        return MultiplexSupport::Native {
-            split_window: true,
-            resize_pane: true,
-            focus_pane: true,
-            multiple_tabs: true,
-        };
+        return MultiplexSupport::Native;
     }
 
-    // No multiplexing detected
     MultiplexSupport::None
 }
 
@@ -1357,12 +1274,12 @@ mod tests {
         let result = ImageSupportResult {
             support: ImageSupport::Kitty,
             reason: "test reason".to_string(),
-            method: "test_method".to_string(),
+            method: DetectionMethod::TtyCheck,
         };
 
         assert_eq!(result.support, ImageSupport::Kitty);
         assert_eq!(result.reason, "test reason");
-        assert_eq!(result.method, "test_method");
+        assert_eq!(result.method, DetectionMethod::TtyCheck);
     }
 
     #[test]
@@ -1370,7 +1287,7 @@ mod tests {
         let result = ImageSupportResult {
             support: ImageSupport::ITerm,
             reason: "viuer detected iTerm2".to_string(),
-            method: "viuer".to_string(),
+            method: DetectionMethod::Viuer,
         };
 
         let debug = format!("{:?}", result);
@@ -1383,7 +1300,7 @@ mod tests {
         let result = ImageSupportResult {
             support: ImageSupport::None,
             reason: "not a tty".to_string(),
-            method: "tty_check".to_string(),
+            method: DetectionMethod::TtyCheck,
         };
 
         let cloned = result.clone();
@@ -1407,7 +1324,7 @@ mod tests {
         let result = image_support_from_env();
         assert_eq!(result.support, ImageSupport::Kitty);
         assert!(result.reason.contains("TERM_PROGRAM"));
-        assert_eq!(result.method, "env_heuristic");
+        assert_eq!(result.method, DetectionMethod::EnvHeuristic);
     }
 
     #[test]
@@ -1527,14 +1444,16 @@ mod tests {
         // Reason should always be non-empty
         assert!(!result.reason.is_empty(), "Reason should not be empty");
 
-        // Method should always be non-empty
-        assert!(!result.method.is_empty(), "Method should not be empty");
-
-        // Method should be one of the expected values
-        let valid_methods = ["tty_check", "viuer", "env_heuristic", "known_terminal"];
+        // Method should be one of the expected variants
+        let valid_methods = [
+            DetectionMethod::TtyCheck,
+            DetectionMethod::Viuer,
+            DetectionMethod::EnvHeuristic,
+            DetectionMethod::KnownTerminal,
+        ];
         assert!(
-            valid_methods.contains(&result.method.as_str()),
-            "Method '{}' should be one of {:?}",
+            valid_methods.contains(&result.method),
+            "Method '{:?}' should be one of {:?}",
             result.method,
             valid_methods
         );
