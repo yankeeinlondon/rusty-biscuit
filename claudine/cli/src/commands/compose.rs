@@ -251,9 +251,15 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
     )
     .map_err(|e| eyre!("{e}"))?;
 
-    let prepared =
-        composition::prepare_direct(&source, set_overrides, Some(preflight.approved_commands))
-            .map_err(|e| eyre!("{e}"))?;
+    let prepared = composition::prepare_direct(
+        &source,
+        composition::PrepareOptions {
+            set_overrides,
+            pre_approved_commands: Some(preflight.approved_commands),
+            ..Default::default()
+        },
+    )
+    .map_err(|e| eyre!("{e}"))?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::ChainedDocument,
@@ -349,9 +355,15 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
     )
     .map_err(|e| eyre!("{e}"))?;
 
-    let prepared =
-        composition::prepare_inline(&source, set_overrides, Some(preflight.approved_commands))
-            .map_err(|e| eyre!("{e}"))?;
+    let prepared = composition::prepare_inline(
+        &source,
+        composition::PrepareOptions {
+            set_overrides,
+            pre_approved_commands: Some(preflight.approved_commands),
+            ..Default::default()
+        },
+    )
+    .map_err(|e| eyre!("{e}"))?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,

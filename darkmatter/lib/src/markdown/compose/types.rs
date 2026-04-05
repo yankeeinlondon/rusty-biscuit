@@ -1146,9 +1146,9 @@ impl ComposeContext {
 
     /// Returns a mutable reference to the inner env map.
     ///
-    /// Clones the `Arc` on write if shared. This is intentionally
-    /// test-only since production code should not mutate a captured context.
-    #[cfg(test)]
+    /// Clones the `Arc` on write if shared. Use this to inject
+    /// environment overrides before passing the context to
+    /// [`ComposeOptions::new_with_context`].
     pub fn env_mut(&mut self) -> &mut HashMap<String, String> {
         &mut std::sync::Arc::make_mut(&mut self.inner).env
     }
