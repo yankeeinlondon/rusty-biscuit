@@ -1,6 +1,6 @@
 # Claudine CLI
 
-Binary: `claudine` — interactive setup, hook inspection, event handling, skill linking, and MCP management for agentic CLIs.
+Binary: `claudine` — interactive setup, hook inspection, event handling, shared-resource management (skills, slash commands, agents), MCP management, provider wrapping, and composition pipelines for agentic CLIs.
 
 ## Commands
 
@@ -55,11 +55,23 @@ Re-apply hook registrations to match the current config.
 
 ### `claudine handle <event> [--provider <name>]`
 
-Process an incoming event from a provider hook. Reads JSON payload from stdin, auto-detects the provider from payload structure (or accepts `--provider` override), resolves environment context, and dispatches through the event pipeline.
+Process an incoming event from a provider hook (hidden from help). Reads JSON payload from stdin, auto-detects the provider from payload structure (or accepts `--provider` override), resolves environment context, and dispatches through the event pipeline.
 
-### `claudine dry-run <event> [--provider <name>]`
+### `claudine actions`
 
-Test what would happen for an event without side effects. Accepts event names in multiple formats: canonical (`turn_complete`), native (`Stop`), PascalCase (`TurnComplete`), kebab-case (`turn-complete`) — all case-insensitive. When no stdin is provided, generates realistic mock payloads for the selected provider.
+Show which actions are configured and for which events across the user and repo configs.
+
+### `claudine skills`
+
+List shared skills across providers with their scopes. Displays link/sync state per resource using the four-type linking model (Skill, Command, Agent, Script). Replaces the retired `claudine link skills` subcommand.
+
+### `claudine commands`
+
+List slash commands across providers with their scopes and link/sync state.
+
+### `claudine agents`
+
+List agent/subagent definitions across providers with their scopes and link/sync state.
 
 ### `claudine logs [subcommand] [flags]`
 
@@ -83,9 +95,9 @@ Manage Claudine's normalized MCP catalog and provider sync state.
 
 Storage lives in `~/.claudine/mcp/catalog.json`, `~/.claudine/mcp/defaults.json`, `~/.claudine/mcp/provider-state.json`, and optional repo defaults at `<repo>/.claudine/mcp.json`. Repo defaults replace user defaults.
 
-### `claudine about`
+### `claudine` (no subcommand) or `claudine --help`
 
-Renders rich help documentation using darkmatter markdown rendering with biscuit-terminal fallback.
+Renders rich help documentation grouped by category (Shared Resources, Hook Events and Actions, Wrapped Execution, Composition, Administration) using biscuit-terminal Prose rendering. This replaces the retired `claudine about` command.
 
 ### `claudine completions <shell>`
 
@@ -148,34 +160,59 @@ Wrapper behavior:
 - Runs child process with inherited stdio/cwd and propagates child exit code.
 - Writes a synthetic JSONL summary event per session for reporting completeness.
 
+### Composition commands
+
+Composition turns a Markdown document with frontmatter into a provider session, optionally merging the result back into the source file or running a sequence of steps. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, handler-driven recovery).
+
+- **`claudine compose <file-ref> [flags]`** — compose a Markdown file (Darkmatter transclusion/interpolation/conditionals/`::shell`) and send the result as a prompt. No file mutation.
+- **`claudine inline-compose <file-ref> [flags]`** — compose the frontmatter `prompt` property and replace the document body with the provider's response. Original frontmatter is preserved byte-for-byte; `last_updated` is set to today's date; new frontmatter keys added by the provider are merged in.
+- **`claudine sequence <file-ref> [flags]`** — run a serial sequence of composition steps declared in a single document, with a shared approval cache across steps and `FAIL_FAST` propagation on failure.
+
+Shared composition flags include provider selectors (`--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`), `--exclude <provider>`, `-i` / `--interactive`, `-m` / `--model`, `-s` / `--system-prompt`, `-t` / `--timeout`, `--dry-run`, `-q` / `--quiet`, and `--silent`. The file reference supports `@` magic paths, repo-relative, monorepo-package-relative, and absolute paths via `biscuit-file::FileReference`.
+
+Provider selection precedence: explicit flag → single installed remaining after `--exclude` → `agent` frontmatter hint (fuzzy-matched) → `settings.linking.preference[0]` config favorite → interactive chooser (TTY only).
+
 ## Module Structure
 
 ```
 cli/src/
-├── main.rs              → Entry point, clap parser, command dispatch
-├── log.rs               → Output formatting (message/data/info/warn/error)
-├── output.rs            → Execution line, badges, env details, prompt display
+├── main.rs                → Entry point, clap parser, command dispatch
+├── args.rs                → Cli struct and Commands subcommand enum
+├── log.rs                 → Output formatting (message/data/info/warn/error)
+├── output.rs              → Execution line, badges, env details, prompt display
+├── telemetry.rs           → Tracing subscriber configuration and root span
+├── cli_utils.rs           → Shared CLI helpers
+├── provider_values.rs     → Provider enum value parsing and fuzzy matching
+├── table_utils.rs         → Shared table rendering helpers
 └── commands/
-    ├── about.rs         → Rich help rendering
-    ├── completions.rs   → Shell completion generation
-    ├── dry_run.rs       → Event simulation with mock payloads
-    ├── handle.rs        → Event processing from stdin
-    ├── hooks.rs         → Hook inspection and validation
-    ├── logs.rs          → JSONL log reporting queries
-    ├── mcp.rs           → MCP catalog, defaults, aliasing, import, and sync commands
-    ├── providers.rs     → Provider capability matrix (skill/slash/agent/hooks)
-    ├── sync.rs          → Hook re-registration
-    ├── uninstall.rs     → Hook removal
+    ├── help.rs            → Rich grouped help rendering (replaces `about`)
+    ├── completions.rs     → Shell completion generation
+    ├── handle.rs          → Event processing from stdin (hidden)
+    ├── hooks.rs           → Hook inspection and validation
+    ├── actions.rs         → Configured actions per event
+    ├── skills.rs          → Shared skills listing with link state
+    ├── agents.rs          → Shared agent definitions listing with link state
+    ├── slash_commands.rs  → Shared slash commands listing with link state
+    ├── link_display.rs    → Shared rendering helpers for link state tables
+    ├── logs.rs            → JSONL log reporting queries
+    ├── mcp.rs             → MCP catalog, defaults, aliasing, import, and sync commands
+    ├── providers.rs       → Provider capability matrix (skill/slash/agent/hooks)
+    ├── sync.rs            → Hook re-registration
+    ├── uninstall.rs       → Hook removal
+    ├── compose.rs         → `compose` and `inline-compose` command entry points
+    ├── sequence.rs        → `sequence` command entry point
     ├── wrap/
-    │   ├── mod.rs       → Shared wrapper pipeline, args, interactivity logic, stream summary
-    │   ├── profile.rs   → Provider mapping profiles (yolo/non-interactive/model/output)
-    │   ├── env.rs       → Env sanitization + injected context vars
-    │   ├── exec.rs      → Child process execution, structured stream capture, timeout
-    │   ├── prompt_file.rs → Prompt file resolution and Darkmatter composition
-    │   └── repo_home.rs → Shadow HOME for repo-scoped resource isolation
+    │   ├── mod.rs         → Shared wrapper pipeline, args, interactivity, stream summary
+    │   ├── profile.rs     → Provider mapping profiles (yolo/non-interactive/model/output)
+    │   ├── env.rs         → Env sanitization + injected context vars
+    │   ├── exec.rs        → Child process execution, structured stream capture, timeout
+    │   ├── composition.rs → Composition preparation, shell approval, closure write-back
+    │   ├── sequence.rs    → Per-step sequence execution loop with shared approval cache
+    │   ├── system_prompt.rs → System prompt resolution and wrapper injection
+    │   └── repo_home.rs   → Shadow HOME for repo-scoped resource isolation
     └── init/
-        ├── mod.rs       → Wizard orchestration (interactive + quick modes, default configs)
-        └── prompts.rs   → inquire-based interactive prompts
+        ├── mod.rs         → Wizard orchestration (interactive + quick modes, default configs)
+        └── prompts.rs     → inquire-based interactive prompts
 ```
 
 ## Output System
@@ -197,10 +234,11 @@ Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` /
 
 | Crate | Purpose |
 |-------|---------|
-| `claudine` (lib) | Core event model, dispatch, config, linking |
+| `claudine` (lib) | Core event model, dispatch, config, linking, composition, harness |
 | `clap` + `clap_complete` | CLI parsing and shell completions |
 | `biscuit-terminal` | Rich terminal output (tables, prose, lists) |
-| `darkmatter` | Markdown rendering for `about` command |
+| `biscuit-file` | File reference resolution (`@` magic paths) for composition commands |
+| `darkmatter` | Markdown rendering and composition pipeline (transclusion, interpolation, `::shell`) |
 | `playa` | Sound effect names for validation |
 | `sniff` | AI client detection for agent discovery |
 | `inquire` | Interactive multi-select prompts for `init` wizard |
@@ -210,6 +248,7 @@ Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` /
 ## Lessons Learned
 
 - **Provider fuzzy matching**: commands that accept a provider name use a 3-tier resolution: exact match → prefix match → contains match. This lets users type `cl` instead of `claude`.
-- **Event name normalization in dry-run**: the event parser handles canonical snake_case, native provider names (e.g., `Stop` for Claude's `turn_complete`), PascalCase, kebab-case, and is case-insensitive. This makes testing easier.
+- **Event name normalization in handle**: the event parser handles canonical snake_case, native provider names (e.g., `Stop` for Claude's `turn_complete`), PascalCase, kebab-case, and is case-insensitive. This makes hook wiring resilient.
 - **Sound effect suggestion engine**: Sound effect validation runs automatically when viewing hooks and uses 5 matching heuristics (exact, normalized, prefix, contains, Levenshtein-like) to suggest replacements for invalid effect names.
 - **Stdin auto-detection in handle**: the provider is detected from JSON payload structure (`hook_event_name` → Claude, `type` + `thread_id` → Codex, etc.) so hooks don't need to pass `--provider` explicitly.
+- **Composition reuses the wrapper**: `compose`, `inline-compose`, and `sequence` all flow through the same execution pipeline as `claudine claude`/`codex`/... — including env sanitization, system prompt resolution, structured streaming, harness pre/post checks, and synthetic JSONL summary events. A shared approval cache lets `sequence` approve shell commands once per run.
