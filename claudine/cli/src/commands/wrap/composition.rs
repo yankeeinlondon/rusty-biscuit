@@ -37,8 +37,7 @@ use super::{
     StructuredSummaryDetails, WrapperHarnessPermissionProbe, build_harness_shell_options,
     emit_stream_summary_no_separator_with_context, emit_stream_summary_with_context,
     materialized_harness_prompt_from_prepared, resolve_binary_path, run_harness_loop,
-    switch_process_cwd,
-    strip_prompt_from_args, structured_verbosity, wrap_terminal,
+    strip_prompt_from_args, structured_verbosity, switch_process_cwd, wrap_terminal,
 };
 use crate::log;
 

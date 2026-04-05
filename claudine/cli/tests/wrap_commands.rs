@@ -2568,8 +2568,10 @@ fi
         .stdout("Recovered answer\n");
 
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-    assert!(stderr_plain.contains("tool: shell"));
+    assert!(stderr_plain.contains(r#"tool: shell {"cmd":"git status"}"#));
+    assert!(stderr_plain.contains(r#"tool result: shell id=t1 result="ok""#));
     assert!(stderr_plain.contains("tool: view_image"));
+    assert!(stderr_plain.contains(r#"tool result: view_image id=t2 result="ok""#));
 }
 
 #[cfg(unix)]

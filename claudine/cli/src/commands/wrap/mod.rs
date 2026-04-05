@@ -465,9 +465,19 @@ impl LiveStreamSink {
         }
     }
 
-    fn emit_tool_progress_line(&self, tool_name: &str) {
-        if self.verbosity != Verbosity::Silent {
-            eprintln!("tool: {tool_name}");
+    fn emit_tool_progress_line(&self, meta: &StreamEventMeta) {
+        if self.verbosity != Verbosity::Silent
+            && let Some(line) = format_tool_progress_line(meta)
+        {
+            eprintln!("{line}");
+        }
+    }
+
+    fn emit_tool_result_line(&self, meta: &StreamEventMeta) {
+        if self.verbosity != Verbosity::Silent
+            && let Some(line) = format_tool_result_line(meta)
+        {
+            eprintln!("{line}");
         }
     }
 
@@ -533,10 +543,11 @@ impl LiveStreamSink {
         if event == AgenticEvent::SessionStart {
             self.emit_agent_session_id();
         }
-        if event == AgenticEvent::BeforeTool
-            && let Some(tool_name) = dispatch_meta.tool_name.as_deref()
-        {
-            self.emit_tool_progress_line(tool_name);
+        if event == AgenticEvent::BeforeTool {
+            self.emit_tool_progress_line(meta);
+        }
+        if event == AgenticEvent::AfterTool {
+            self.emit_tool_result_line(meta);
         }
         if event == AgenticEvent::TurnError
             && let Some(message) = dispatch_meta.error.as_deref()
@@ -586,6 +597,14 @@ impl StreamEventSink for LiveStreamSink {
         self.dispatch_event(AgenticEvent::AfterTool, meta);
     }
 
+    fn on_subagent_start(&mut self, meta: &StreamEventMeta) {
+        self.dispatch_event(AgenticEvent::SubagentStart, meta);
+    }
+
+    fn on_subagent_stop(&mut self, meta: &StreamEventMeta) {
+        self.dispatch_event(AgenticEvent::SubagentStop, meta);
+    }
+
     fn on_permission_request(&mut self, meta: &StreamEventMeta) {
         self.dispatch_event(AgenticEvent::PermissionRequest, meta);
     }
@@ -625,6 +644,76 @@ fn value_to_string(value: &serde_json::Value) -> Option<String> {
         .as_str()
         .map(ToOwned::to_owned)
         .or_else(|| serde_json::to_string(value).ok())
+}
+
+fn compact_value_for_log(value: &serde_json::Value, max_chars: usize) -> String {
+    let rendered = serde_json::to_string(value).unwrap_or_else(|_| value.to_string());
+    truncate_for_log(&rendered, max_chars)
+}
+
+fn truncate_for_log(value: &str, max_chars: usize) -> String {
+    let count = value.chars().count();
+    if count <= max_chars {
+        return value.to_string();
+    }
+
+    let truncated: String = value.chars().take(max_chars.saturating_sub(3)).collect();
+    format!("{truncated}...")
+}
+
+fn format_tool_progress_line(meta: &StreamEventMeta) -> Option<String> {
+    let tool_name = string_from_extra(&meta.extra, &["tool_name", "name"]);
+    let tool_input = value_from_extra(
+        &meta.extra,
+        &["tool_input", "parameters", "input", "arguments"],
+    );
+
+    match (tool_name, tool_input) {
+        (Some(tool_name), Some(tool_input)) => Some(format!(
+            "tool: {tool_name} {}",
+            compact_value_for_log(&tool_input, 120)
+        )),
+        (Some(tool_name), None) => Some(format!("tool: {tool_name}")),
+        (None, Some(tool_input)) => {
+            Some(format!("tool: {}", compact_value_for_log(&tool_input, 120)))
+        }
+        (None, None) => None,
+    }
+}
+
+fn format_tool_result_line(meta: &StreamEventMeta) -> Option<String> {
+    let tool_name = string_from_extra(&meta.extra, &["tool_name", "name"]);
+    let tool_id = string_from_extra(&meta.extra, &["tool_id", "id"]);
+    let status = string_from_extra(&meta.extra, &["status"]);
+    let error = string_from_extra(&meta.extra, &["error_message", "message"]).or_else(|| {
+        value_from_extra(&meta.extra, &["error"]).and_then(|value| value_to_string(&value))
+    });
+    let tool_response = value_from_extra(
+        &meta.extra,
+        &["tool_response", "output", "result", "content"],
+    );
+
+    let mut parts = Vec::new();
+    if let Some(tool_name) = tool_name {
+        parts.push(tool_name);
+    }
+    if let Some(tool_id) = tool_id {
+        parts.push(format!("id={tool_id}"));
+    }
+    if let Some(status) = status {
+        parts.push(format!("status={status}"));
+    }
+    if let Some(error) = error {
+        parts.push(format!("error={}", truncate_for_log(&error, 80)));
+    }
+    if let Some(tool_response) = tool_response {
+        parts.push(format!(
+            "result={}",
+            compact_value_for_log(&tool_response, 120)
+        ));
+    }
+
+    (!parts.is_empty()).then(|| format!("tool result: {}", parts.join(" ")))
 }
 
 pub(crate) fn structured_verbosity(silent: bool, quiet: bool) -> Verbosity {
@@ -3736,6 +3825,44 @@ mod tests {
 
         assert_eq!(metas[5].event, AgenticEvent::TurnComplete);
         assert_eq!(metas[5].session_id.as_deref(), Some("thread-1"));
+    }
+
+    #[test]
+    fn tool_progress_line_includes_compact_parameters() {
+        let mut meta = StreamEventMeta::default();
+        meta.extra.insert(
+            "tool_name".into(),
+            serde_json::Value::String("shell".into()),
+        );
+        meta.extra.insert(
+            "tool_input".into(),
+            serde_json::json!({"cmd": "git status"}),
+        );
+
+        assert_eq!(
+            format_tool_progress_line(&meta).as_deref(),
+            Some(r#"tool: shell {"cmd":"git status"}"#)
+        );
+    }
+
+    #[test]
+    fn tool_result_line_surfaces_status_and_result() {
+        let mut meta = StreamEventMeta::default();
+        meta.extra.insert(
+            "tool_name".into(),
+            serde_json::Value::String("search".into()),
+        );
+        meta.extra
+            .insert("tool_id".into(), serde_json::Value::String("tool-1".into()));
+        meta.extra
+            .insert("status".into(), serde_json::Value::String("success".into()));
+        meta.extra
+            .insert("tool_response".into(), serde_json::json!({"hits": 3}));
+
+        assert_eq!(
+            format_tool_result_line(&meta).as_deref(),
+            Some(r#"tool result: search id=tool-1 status=success result={"hits":3}"#)
+        );
     }
 
     #[test]
