@@ -68,6 +68,7 @@ These flags apply to all `sniff repo` subcommands:
 |------------|-------------|
 | [`is-current-package-area-dirty`](./repo_is-current-package-area-dirty.md) | Exit 0 if package area has uncommitted changes |
 | [`package-area-has-source-code-changes`](./repo_package-area-has-source-code-changes.md) | Exit 0 if package area has source code file changes |
+| [`has-merge-conflict`](./repo_has-merge-conflict.md) | Exit 0 if there are merge conflicts, otherwise 1, `-v` lists conflict files |
 
 ## Package Filtering
 

@@ -375,6 +375,23 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     base_dir.as_deref(),
                 );
             }
+            crate::args::RepoAction::HasMergeConflict => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let repo = git2::Repository::discover(dir)
+                    .map_err(|e| format!("Not a git repository: {}", e))?;
+                let conflicted = sniff::filesystem::git::detect_merge_conflicts(&repo);
+                if cli.verbose > 0 {
+                    for path in &conflicted {
+                        eprintln!("{}", path.display());
+                    }
+                }
+                if conflicted.is_empty() {
+                    std::process::exit(1);
+                }
+                std::process::exit(0);
+            }
             _ => {
                 // Other RepoAction variants (Structure, GitStatus, Deps, etc.)
                 // are handled after full detection below
