@@ -2,6 +2,7 @@ use crate::Result;
 use crate::request::{FilesystemRequest, GitRequest};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tracing::instrument;
 
 pub mod blast_radius;
 pub mod docs;
@@ -57,6 +58,12 @@ pub struct FilesystemInfo {
 ///
 /// Controls which subsections are collected: git, repo, file inventory,
 /// formatting, and document discovery.
+#[instrument(skip(request), fields(
+    git = request.git.is_some(),
+    repo = request.repo.is_some(),
+    files = request.include_file_inventory,
+    docs = request.include_docs,
+))]
 pub fn detect_filesystem_with_request(
     root: &Path,
     request: &FilesystemRequest,

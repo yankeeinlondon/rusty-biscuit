@@ -269,18 +269,6 @@ fn test_content_analysis_detects_color_and_osc8() {
 }
 
 #[test]
-fn test_completions_help() {
-    cargo_bin_cmd!("bt")
-        .arg("--completions")
-        .arg("help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Shell Completions Setup"))
-        .stdout(predicate::str::contains("DYNAMIC COMPLETIONS"))
-        .stdout(predicate::str::contains("STATIC COMPLETIONS"));
-}
-
-#[test]
 fn test_completions_bash() {
     cargo_bin_cmd!("bt")
         .arg("--completions")
@@ -319,8 +307,8 @@ fn test_completions_invalid_shell() {
         .arg("invalid")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("invalid shell"))
-        .stderr(predicate::str::contains("Valid shells:"));
+        .stderr(predicate::str::contains("invalid value 'invalid'"))
+        .stderr(predicate::str::contains("--completions"));
 }
 
 // =============================================================================

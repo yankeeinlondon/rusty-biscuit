@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use tracing::instrument;
 
 use crate::Result;
 use crate::request::HardwareRequest;
@@ -54,6 +55,11 @@ pub struct HardwareInfo {
 /// Use `HardwareRequest::summary()` for CPU and memory only (fast),
 /// or `HardwareRequest::full()` for everything including storage,
 /// GPU, and audio devices.
+#[instrument(skip(request), fields(
+    storage = request.include_storage,
+    gpu = request.include_gpu,
+    audio = request.include_audio,
+))]
 pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<HardwareInfo> {
     // Audio must be detected first. On macOS, linking against extra
     // CoreAudio sub-frameworks (AudioUnit, OpenAL, CoreMIDI) caused

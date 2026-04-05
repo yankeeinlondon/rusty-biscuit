@@ -1,5 +1,6 @@
 //! Type definitions for Markdown Table of Contents.
 
+use crate::markdown::normalize::HeadingLevel;
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -10,8 +11,8 @@ use std::collections::HashMap;
 /// organization.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MarkdownTocNode {
-    /// The level of the heading node (1-6).
-    pub level: u8,
+    /// The heading level (H1-H6).
+    pub level: HeadingLevel,
 
     /// The text content of this heading, minus the leading `#` markers.
     /// Preserves inline formatting (bold, code, etc.) as raw markdown.
@@ -73,7 +74,7 @@ impl MarkdownTocNode {
     /// Creates a new TOC node with the given heading information.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        level: u8,
+        level: HeadingLevel,
         title: String,
         slug: String,
         source_span: (usize, usize),
@@ -433,20 +434,18 @@ impl MarkdownToc {
     }
 
     /// Returns the root level of the document (level of first heading).
-    pub fn root_level(&self) -> Option<u8> {
+    pub fn root_level(&self) -> Option<HeadingLevel> {
         self.structure.first().map(|n| n.level)
     }
 
     /// Returns the maximum (deepest) heading level in the document.
-    pub fn max_level(&self) -> Option<u8> {
-        fn max_level_recursive(node: &MarkdownTocNode) -> u8 {
-            let child_max = node
-                .children
+    pub fn max_level(&self) -> Option<HeadingLevel> {
+        fn max_level_recursive(node: &MarkdownTocNode) -> HeadingLevel {
+            node.children
                 .iter()
                 .map(max_level_recursive)
                 .max()
-                .unwrap_or(0);
-            node.level.max(child_max)
+                .map_or(node.level, |child_max| node.level.max(child_max))
         }
 
         self.structure.iter().map(max_level_recursive).max()
@@ -514,14 +513,14 @@ mod tests {
     #[test]
     fn test_toc_node_new() {
         let node = MarkdownTocNode::new(
-            2,
+            HeadingLevel::H2,
             "Test Heading".to_string(),
             "test-heading".to_string(),
             (0, 100),
             (1, 10),
         );
 
-        assert_eq!(node.level, 2);
+        assert_eq!(node.level, HeadingLevel::H2);
         assert_eq!(node.title, "Test Heading");
         assert_eq!(node.slug, "test-heading");
         assert!(node.title_hash > 0);
@@ -530,8 +529,13 @@ mod tests {
 
     #[test]
     fn test_toc_node_set_prelude() {
-        let mut node =
-            MarkdownTocNode::new(2, "Test".to_string(), "test".to_string(), (0, 100), (1, 10));
+        let mut node = MarkdownTocNode::new(
+            HeadingLevel::H2,
+            "Test".to_string(),
+            "test".to_string(),
+            (0, 100),
+            (1, 10),
+        );
 
         node.set_prelude(Some("Hello world".to_string()), (10, 21), (2, 3));
         assert!(node.prelude.is_some());
@@ -544,8 +548,13 @@ mod tests {
 
     #[test]
     fn test_toc_node_set_prelude_empty() {
-        let mut node =
-            MarkdownTocNode::new(2, "Test".to_string(), "test".to_string(), (0, 100), (1, 10));
+        let mut node = MarkdownTocNode::new(
+            HeadingLevel::H2,
+            "Test".to_string(),
+            "test".to_string(),
+            (0, 100),
+            (1, 10),
+        );
 
         // Empty or whitespace-only content should result in None
         node.set_prelude(Some("   \n  ".to_string()), (10, 17), (2, 3));
@@ -563,17 +572,22 @@ mod tests {
 
     #[test]
     fn test_toc_node_count() {
-        let mut root =
-            MarkdownTocNode::new(1, "Root".to_string(), "root".to_string(), (0, 100), (1, 10));
+        let mut root = MarkdownTocNode::new(
+            HeadingLevel::H1,
+            "Root".to_string(),
+            "root".to_string(),
+            (0, 100),
+            (1, 10),
+        );
         let child1 = MarkdownTocNode::new(
-            2,
+            HeadingLevel::H2,
             "Child1".to_string(),
             "child1".to_string(),
             (10, 50),
             (2, 5),
         );
         let child2 = MarkdownTocNode::new(
-            2,
+            HeadingLevel::H2,
             "Child2".to_string(),
             "child2".to_string(),
             (50, 100),
@@ -587,10 +601,15 @@ mod tests {
 
     #[test]
     fn test_toc_node_find_by_slug() {
-        let mut root =
-            MarkdownTocNode::new(1, "Root".to_string(), "root".to_string(), (0, 100), (1, 10));
+        let mut root = MarkdownTocNode::new(
+            HeadingLevel::H1,
+            "Root".to_string(),
+            "root".to_string(),
+            (0, 100),
+            (1, 10),
+        );
         let child = MarkdownTocNode::new(
-            2,
+            HeadingLevel::H2,
             "Child".to_string(),
             "child".to_string(),
             (10, 50),
@@ -645,9 +664,9 @@ mod tests {
     fn test_markdown_toc_heading_count() {
         let mut toc = MarkdownToc::new();
         let mut root =
-            MarkdownTocNode::new(1, "Root".to_string(), "root".to_string(), (0, 100), (1, 10));
+            MarkdownTocNode::new(HeadingLevel::H1, "Root".to_string(), "root".to_string(), (0, 100), (1, 10));
         root.children.push(MarkdownTocNode::new(
-            2,
+            HeadingLevel::H2,
             "Child".to_string(),
             "child".to_string(),
             (10, 50),
@@ -662,23 +681,23 @@ mod tests {
     fn test_markdown_toc_root_level() {
         let mut toc = MarkdownToc::new();
         toc.structure.push(MarkdownTocNode::new(
-            2,
+            HeadingLevel::H2,
             "H2".to_string(),
             "h2".to_string(),
             (0, 100),
             (1, 10),
         ));
 
-        assert_eq!(toc.root_level(), Some(2));
+        assert_eq!(toc.root_level(), Some(HeadingLevel::H2));
     }
 
     #[test]
     fn test_markdown_toc_max_level() {
         let mut toc = MarkdownToc::new();
-        let mut h1 = MarkdownTocNode::new(1, "H1".to_string(), "h1".to_string(), (0, 100), (1, 10));
-        let mut h2 = MarkdownTocNode::new(2, "H2".to_string(), "h2".to_string(), (10, 50), (2, 5));
+        let mut h1 = MarkdownTocNode::new(HeadingLevel::H1, "H1".to_string(), "h1".to_string(), (0, 100), (1, 10));
+        let mut h2 = MarkdownTocNode::new(HeadingLevel::H2, "H2".to_string(), "h2".to_string(), (10, 50), (2, 5));
         h2.children.push(MarkdownTocNode::new(
-            4,
+            HeadingLevel::H4,
             "H4".to_string(),
             "h4".to_string(),
             (20, 40),
@@ -687,7 +706,7 @@ mod tests {
         h1.children.push(h2);
         toc.structure.push(h1);
 
-        assert_eq!(toc.max_level(), Some(4));
+        assert_eq!(toc.max_level(), Some(HeadingLevel::H4));
     }
 
     #[test]

@@ -4,6 +4,9 @@
 //! based on its content (magic bytes) and file extension.
 
 use std::path::Path;
+use tracing::{debug, trace};
+
+use crate::format::DataFormat;
 
 /// Detected file type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +55,47 @@ impl FileType {
             Self::Unknown => None,
         }
     }
+
+    /// Convert to a `DataFormat` if this is a known type.
+    ///
+    /// ## Returns
+    ///
+    /// Returns `Some(DataFormat)` for all known types, or `None` for `Unknown`.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_file::{FileType, DataFormat};
+    ///
+    /// assert_eq!(FileType::Toml.as_data_format(), Some(DataFormat::Toml));
+    /// assert_eq!(FileType::Unknown.as_data_format(), None);
+    /// ```
+    #[must_use]
+    pub fn as_data_format(&self) -> Option<DataFormat> {
+        match self {
+            Self::Toml => Some(DataFormat::Toml),
+            Self::Yaml => Some(DataFormat::Yaml),
+            Self::Json => Some(DataFormat::Json),
+            Self::Json5 => Some(DataFormat::Json5),
+            Self::Markdown => Some(DataFormat::Markdown),
+            Self::Pdf => Some(DataFormat::Pdf),
+            Self::Unknown => None,
+        }
+    }
+}
+
+impl From<DataFormat> for FileType {
+    fn from(fmt: DataFormat) -> Self {
+        match fmt {
+            DataFormat::Toml => Self::Toml,
+            DataFormat::Yaml => Self::Yaml,
+            DataFormat::Json => Self::Json,
+            DataFormat::Json5 => Self::Json5,
+            DataFormat::Markdown => Self::Markdown,
+            DataFormat::Pdf => Self::Pdf,
+            DataFormat::Text => Self::Unknown,
+        }
+    }
 }
 
 /// Detect file type from a file path using extension and magic bytes.
@@ -63,18 +107,26 @@ impl FileType {
 ///
 /// Returns an IO error if the file cannot be read.
 pub fn detect_file_type(path: impl AsRef<Path>) -> std::io::Result<FileType> {
-    let path = path.as_ref();
+    use std::io::Read;
 
-    // Read first few bytes for magic detection
-    let bytes = std::fs::read(path)?;
-    let from_bytes = detect_file_type_from_bytes(&bytes);
+    let path = path.as_ref();
+    trace!(?path, "detecting file type");
+
+    // Read only first 512 bytes for magic byte detection
+    let mut file = std::fs::File::open(path)?;
+    let mut buf = [0u8; 512];
+    let n = file.read(&mut buf)?;
+    let from_bytes = detect_file_type_from_bytes(&buf[..n]);
 
     if from_bytes != FileType::Unknown {
+        debug!(?from_bytes, "detected via magic bytes");
         return Ok(from_bytes);
     }
 
     // Fall back to extension-based detection
-    Ok(detect_from_extension(path))
+    let from_ext = detect_from_extension(path);
+    debug!(?from_ext, "detected via extension");
+    Ok(from_ext)
 }
 
 /// Detect file type from raw bytes using magic bytes.
@@ -194,5 +246,92 @@ mod tests {
             detect_from_extension(Path::new("file.txt")),
             FileType::Unknown
         );
+    }
+
+    #[test]
+    fn test_detect_file_type_from_filesystem() {
+        let dir = std::env::temp_dir().join("biscuit-file-test-detect");
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml_path = dir.join("test.toml");
+        std::fs::write(&toml_path, "key = \"value\"").unwrap();
+        assert_eq!(detect_file_type(&toml_path).unwrap(), FileType::Toml);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_detect_pdf_by_magic_bytes_wrong_extension() {
+        let dir = std::env::temp_dir().join("biscuit-file-test-detect-magic");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("document.txt");
+        std::fs::write(&path, b"%PDF-1.7\nsome content here").unwrap();
+        assert_eq!(detect_file_type(&path).unwrap(), FileType::Pdf);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_detect_file_type_no_extension() {
+        let dir = std::env::temp_dir().join("biscuit-file-test-detect-noext");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config");
+        std::fs::write(&path, "key = \"value\"").unwrap();
+        assert_eq!(detect_file_type(&path).unwrap(), FileType::Unknown);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn all_known_variants_have_extension() {
+        let variants = [
+            FileType::Toml,
+            FileType::Yaml,
+            FileType::Json,
+            FileType::Json5,
+            FileType::Markdown,
+            FileType::Pdf,
+        ];
+        for v in variants {
+            assert!(
+                v.extension().is_some(),
+                "{v:?} should have a file extension"
+            );
+        }
+        assert!(FileType::Unknown.extension().is_none());
+    }
+
+    #[test]
+    fn all_known_variants_have_mime_type() {
+        let variants = [
+            FileType::Toml,
+            FileType::Yaml,
+            FileType::Json,
+            FileType::Json5,
+            FileType::Markdown,
+            FileType::Pdf,
+        ];
+        for v in variants {
+            assert!(
+                v.mime_type().is_some(),
+                "{v:?} should have a MIME type"
+            );
+        }
+        assert!(FileType::Unknown.mime_type().is_none());
+    }
+
+    #[test]
+    fn all_known_variants_have_data_format() {
+        let variants = [
+            FileType::Toml,
+            FileType::Yaml,
+            FileType::Json,
+            FileType::Json5,
+            FileType::Markdown,
+            FileType::Pdf,
+        ];
+        for v in variants {
+            assert!(
+                v.as_data_format().is_some(),
+                "{v:?} should convert to DataFormat"
+            );
+        }
+        assert!(FileType::Unknown.as_data_format().is_none());
     }
 }

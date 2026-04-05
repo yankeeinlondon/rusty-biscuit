@@ -64,7 +64,8 @@ pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;
 pub use types::{
     ComposeContext, ComposeOperation, ComposeOperationSet, ComposeOptions, ComposePerfMetric,
-    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeWarning, SourceRange,
+    ComposePerfReport, ComposePhase, ComposeReport, ComposeSource, ComposeStage, ComposeWarning,
+    SourceRange,
 };
 
 // Internal re-exports for crate modules that still use TransclusionOptions
@@ -3420,10 +3421,10 @@ Rounded: {{ round(pi) }}"#;
         assert!(perf.total > std::time::Duration::ZERO);
         assert!(!perf.metrics.is_empty(), "Should have at least one metric");
 
-        // Verify expected metric names are present
-        let names: Vec<&str> = perf.metrics.iter().map(|m| m.name.as_str()).collect();
-        assert!(names.contains(&"effective state build"));
-        assert!(names.contains(&"cleanup"));
+        // Verify expected stages are present
+        let stages: Vec<_> = perf.metrics.iter().map(|m| m.stage).collect();
+        assert!(stages.contains(&ComposeStage::EffectiveStateBuild));
+        assert!(stages.contains(&ComposeStage::Cleanup));
     }
 
     #[test]
@@ -3439,7 +3440,7 @@ Rounded: {{ round(pi) }}"#;
         let interp = perf
             .metrics
             .iter()
-            .find(|m| m.name == "interpolation")
+            .find(|m| m.stage == ComposeStage::Interpolation)
             .unwrap();
         assert_eq!(interp.calls, 1);
     }

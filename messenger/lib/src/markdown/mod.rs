@@ -10,13 +10,17 @@ use ast::RichNode;
 use parse::parse_markdown;
 
 /// Render a Markdown string for a specific provider.
+#[tracing::instrument(skip_all, fields(provider = %provider, input_len = markdown.len()))]
 pub fn render_for_provider(markdown: &str, provider: ProviderKind) -> String {
+    tracing::trace!("rendering markdown");
     let nodes = parse_markdown(markdown);
     render_nodes_for_provider(&nodes, provider)
 }
 
 /// Render a pre-parsed Markdown AST for a specific provider.
+#[tracing::instrument(skip_all, fields(provider = %provider, node_count = nodes.len()))]
 pub fn render_nodes_for_provider(nodes: &[RichNode], provider: ProviderKind) -> String {
+    tracing::trace!("rendering markdown AST");
     match provider {
         ProviderKind::Discord => discord::render_discord(nodes),
         ProviderKind::Slack => slack_mrkdwn::render_slack_mrkdwn(nodes),

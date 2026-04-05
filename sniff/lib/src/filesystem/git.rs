@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tracing::{debug, instrument, warn};
 
 use crate::request::GitRequest;
 use crate::{Result, SniffError};
@@ -524,10 +525,14 @@ impl GitRepo {
     /// Discover a repository containing `path`.
     ///
     /// Returns `Ok(None)` when `path` is not inside a git repository.
+    #[instrument(skip_all, fields(path = %path.display()))]
     pub fn discover(path: &Path) -> Result<Option<Self>> {
         let repo = match Repository::discover(path) {
             Ok(r) => r,
-            Err(_) => return Ok(None),
+            Err(e) => {
+                debug!(error = %e, "not a git repository");
+                return Ok(None);
+            }
         };
         let repo_root = repo
             .workdir()
@@ -545,6 +550,10 @@ impl GitRepo {
     pub fn current_branch(&self) -> Option<String> {
         self.repo
             .head()
+            .map_err(|e| {
+                debug!(error = %e, "could not read HEAD");
+                e
+            })
             .ok()
             .as_ref()
             .and_then(|h| h.shorthand())
@@ -1144,6 +1153,7 @@ pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option
 }
 
 /// Detect git information for a path according to the given request.
+#[instrument(skip_all, fields(path = %path.display()))]
 pub fn detect_git_with_request(path: &Path, request: &GitRequest) -> Result<Option<GitInfo>> {
     match GitRepo::discover(path)? {
         Some(git) => Ok(Some(git.detect_with_request(request)?)),
@@ -1158,13 +1168,20 @@ fn collect_ref_decorations(repo: &Repository) -> HashMap<git2::Oid, Vec<RefDecor
     let mut decorations: HashMap<git2::Oid, Vec<RefDecoration>> = HashMap::new();
 
     // Get current HEAD target to mark the active branch
-    let head_target = repo.head().ok().and_then(|h| {
-        if h.is_branch() {
-            h.shorthand().map(String::from)
-        } else {
-            None
-        }
-    });
+    let head_target = repo
+        .head()
+        .map_err(|e| {
+            debug!(error = %e, "could not read HEAD for decorations");
+            e
+        })
+        .ok()
+        .and_then(|h| {
+            if h.is_branch() {
+                h.shorthand().map(String::from)
+            } else {
+                None
+            }
+        });
 
     // Iterate all references
     let Ok(refs) = repo.references() else {
@@ -1426,8 +1443,19 @@ fn get_commit_refs(repo: &Repository) -> (String, Option<String>) {
     // Get HEAD commit SHA
     let head_sha = repo
         .head()
+        .map_err(|e| {
+            debug!(error = %e, "could not read HEAD for commit refs");
+            e
+        })
         .ok()
-        .and_then(|h| h.peel_to_commit().ok())
+        .and_then(|h| {
+            h.peel_to_commit()
+                .map_err(|e| {
+                    debug!(error = %e, "could not peel HEAD to commit");
+                    e
+                })
+                .ok()
+        })
         .map(|c| c.id().to_string())
         .unwrap_or_default();
 
@@ -1439,7 +1467,13 @@ fn get_commit_refs(repo: &Repository) -> (String, Option<String>) {
 
 /// Gets the upstream tracking branch commit SHA using dynamic remote discovery.
 fn get_upstream_commit(repo: &Repository) -> Option<String> {
-    let head = repo.head().ok()?;
+    let head = repo
+        .head()
+        .map_err(|e| {
+            debug!(error = %e, "could not read HEAD for upstream commit");
+            e
+        })
+        .ok()?;
 
     // Only works for branch references, not detached HEAD
     if !head.is_branch() {
@@ -1449,11 +1483,28 @@ fn get_upstream_commit(repo: &Repository) -> Option<String> {
     let branch_name = head.shorthand()?;
     let branch = repo
         .find_branch(branch_name, git2::BranchType::Local)
+        .map_err(|e| {
+            debug!(branch = branch_name, error = %e, "could not find local branch");
+            e
+        })
         .ok()?;
 
     // Get the upstream branch (this handles dynamic remote discovery)
-    let upstream = branch.upstream().ok()?;
-    let upstream_commit = upstream.get().peel_to_commit().ok()?;
+    let upstream = branch
+        .upstream()
+        .map_err(|e| {
+            debug!(error = %e, "branch has no upstream");
+            e
+        })
+        .ok()?;
+    let upstream_commit = upstream
+        .get()
+        .peel_to_commit()
+        .map_err(|e| {
+            debug!(error = %e, "could not peel upstream to commit");
+            e
+        })
+        .ok()?;
 
     Some(upstream_commit.id().to_string())
 }
@@ -1643,8 +1694,19 @@ fn get_local_branches(repo: &Repository, current_branch: Option<&str>) -> Vec<Lo
     // Resolve HEAD commit OID for ahead/behind calculations
     let head_oid = repo
         .head()
+        .map_err(|e| {
+            debug!(error = %e, "could not read HEAD for branch comparisons");
+            e
+        })
         .ok()
-        .and_then(|h| h.peel_to_commit().ok())
+        .and_then(|h| {
+            h.peel_to_commit()
+                .map_err(|e| {
+                    debug!(error = %e, "could not peel HEAD to commit for branch comparisons");
+                    e
+                })
+                .ok()
+        })
         .map(|c| c.id());
 
     if let Ok(branch_iter) = repo.branches(Some(git2::BranchType::Local)) {
@@ -1658,6 +1720,10 @@ fn get_local_branches(repo: &Repository, current_branch: Option<&str>) -> Vec<Lo
                 let short_hash = branch
                     .get()
                     .peel_to_commit()
+                    .map_err(|e| {
+                        debug!(branch = name, error = %e, "could not peel branch to commit");
+                        e
+                    })
                     .ok()
                     .map(|c| {
                         let id = c.id().to_string();
@@ -1672,8 +1738,19 @@ fn get_local_branches(repo: &Repository, current_branch: Option<&str>) -> Vec<Lo
                     branch
                         .get()
                         .peel_to_commit()
+                        .map_err(|e| {
+                            debug!(branch = name, error = %e, "could not peel branch for ahead/behind");
+                            e
+                        })
                         .ok()
-                        .and_then(|c| repo.graph_ahead_behind(c.id(), head_id).ok())
+                        .and_then(|c| {
+                            repo.graph_ahead_behind(c.id(), head_id)
+                                .map_err(|e| {
+                                    debug!(branch = name, error = %e, "could not compute ahead/behind");
+                                    e
+                                })
+                                .ok()
+                        })
                         .unwrap_or((0, 0))
                 } else {
                     (0, 0)
@@ -1745,30 +1822,36 @@ fn get_remotes(repo: &Repository, include_remote_details: bool) -> Vec<RemoteInf
                 .iter()
                 .flatten()
                 .filter_map(|name| {
-                    repo.find_remote(name).ok().map(|remote| {
-                        let url = remote.url().map(String::from);
-                        let provider = url
-                            .as_ref()
-                            .map(|u| GitHostingProvider::from_url(u))
-                            .unwrap_or(GitHostingProvider::Unknown);
+                    repo.find_remote(name)
+                        .map_err(|e| {
+                            debug!(remote = name, error = %e, "could not find remote");
+                            e
+                        })
+                        .ok()
+                        .map(|remote| {
+                            let url = remote.url().map(String::from);
+                            let provider = url
+                                .as_ref()
+                                .map(|u| GitHostingProvider::from_url(u))
+                                .unwrap_or(GitHostingProvider::Unknown);
 
-                        let (branches, default_branch) = if include_remote_details {
-                            (
-                                get_remote_branches(repo, name),
-                                get_remote_default_branch(repo, name),
-                            )
-                        } else {
-                            (None, None)
-                        };
+                            let (branches, default_branch) = if include_remote_details {
+                                (
+                                    get_remote_branches(repo, name),
+                                    get_remote_default_branch(repo, name),
+                                )
+                            } else {
+                                (None, None)
+                            };
 
-                        RemoteInfo {
-                            name: name.to_string(),
-                            url,
-                            provider,
-                            branches,
-                            default_branch,
-                        }
-                    })
+                            RemoteInfo {
+                                name: name.to_string(),
+                                url,
+                                provider,
+                                branches,
+                                default_branch,
+                            }
+                        })
                 })
                 .collect()
         })
@@ -1793,7 +1876,11 @@ fn refresh_remote_tracking_refs(repo: &Repository) {
             .current_dir(repo_root)
             .env("GIT_TERMINAL_PROMPT", "0")
             .args(["fetch", "--quiet", "--prune", remote_name])
-            .status();
+            .status()
+            .map_err(|e| {
+                warn!(remote = remote_name, error = %e, "git fetch failed");
+                e
+            });
     }
 }
 
@@ -1864,7 +1951,13 @@ fn remote_branch_tips(repo: &Repository) -> Vec<(String, git2::Oid)> {
             }
 
             let (remote_name, _) = branch.split_once('/')?;
-            let target = reference.peel_to_commit().ok()?;
+            let target = reference
+                .peel_to_commit()
+                .map_err(|e| {
+                    debug!(branch = name, error = %e, "could not peel remote ref to commit");
+                    e
+                })
+                .ok()?;
             Some((remote_name.to_string(), target.id()))
         })
         .collect()
@@ -1875,7 +1968,13 @@ fn remote_branch_tips(repo: &Repository) -> Vec<(String, git2::Oid)> {
 /// Returns the branch name (e.g., "main") if the symbolic ref exists and can be resolved.
 fn get_remote_default_branch(repo: &Repository, remote_name: &str) -> Option<String> {
     let ref_name = format!("refs/remotes/{}/HEAD", remote_name);
-    let reference = repo.find_reference(&ref_name).ok()?;
+    let reference = repo
+        .find_reference(&ref_name)
+        .map_err(|e| {
+            debug!(remote = remote_name, error = %e, "could not find remote HEAD reference");
+            e
+        })
+        .ok()?;
     let target = reference.symbolic_target()?;
     let prefix = format!("refs/remotes/{}/", remote_name);
     target.strip_prefix(&prefix).map(String::from)
@@ -1887,7 +1986,13 @@ fn get_remote_default_branch(repo: &Repository, remote_name: &str) -> Option<Str
 /// No network access required.
 fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<String>> {
     let pattern = format!("refs/remotes/{}/*", remote_name);
-    let refs = repo.references_glob(&pattern).ok()?;
+    let refs = repo
+        .references_glob(&pattern)
+        .map_err(|e| {
+            debug!(remote = remote_name, error = %e, "could not glob remote branches");
+            e
+        })
+        .ok()?;
     let prefix = format!("refs/remotes/{}/", remote_name);
 
     let mut branches: Vec<String> = refs
@@ -2012,6 +2117,10 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
         // Get branch name from worktree's HEAD
         let branch = worktree_repo
             .head()
+            .map_err(|e| {
+                debug!(worktree = name, error = %e, "could not read worktree HEAD");
+                e
+            })
             .ok()
             .and_then(|h| h.shorthand().map(String::from))
             .unwrap_or_else(|| name.to_string());
@@ -2019,8 +2128,19 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
         // Get HEAD commit SHA and OID
         let head_commit = worktree_repo
             .head()
+            .map_err(|e| {
+                debug!(worktree = name, error = %e, "could not read worktree HEAD for commit");
+                e
+            })
             .ok()
-            .and_then(|h| h.peel_to_commit().ok());
+            .and_then(|h| {
+                h.peel_to_commit()
+                    .map_err(|e| {
+                        debug!(worktree = name, error = %e, "could not peel worktree HEAD to commit");
+                        e
+                    })
+                    .ok()
+            });
         let sha = head_commit
             .as_ref()
             .map(|c| c.id().to_string())
@@ -2029,7 +2149,14 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
         // Compute ahead/behind relative to base branch
         let (ahead, behind) = base_oid
             .zip(head_commit.as_ref())
-            .and_then(|(base, wt_commit)| repo.graph_ahead_behind(wt_commit.id(), base).ok())
+            .and_then(|(base, wt_commit)| {
+                repo.graph_ahead_behind(wt_commit.id(), base)
+                    .map_err(|e| {
+                        debug!(worktree = name, error = %e, "could not compute worktree ahead/behind");
+                        e
+                    })
+                    .ok()
+            })
             .unwrap_or((0, 0));
 
         // Check if worktree branch is fully merged into base (ancestor of base HEAD)
@@ -2045,8 +2172,20 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
         let has_conflicts = base_oid
             .zip(head_commit.as_ref())
             .and_then(|(base_id, wt_commit)| {
-                let base_commit = repo.find_commit(base_id).ok()?;
-                let index = repo.merge_commits(wt_commit, &base_commit, None).ok()?;
+                let base_commit = repo
+                    .find_commit(base_id)
+                    .map_err(|e| {
+                        debug!(worktree = name, error = %e, "could not find base commit");
+                        e
+                    })
+                    .ok()?;
+                let index = repo
+                    .merge_commits(wt_commit, &base_commit, None)
+                    .map_err(|e| {
+                        debug!(worktree = name, error = %e, "could not perform merge check");
+                        e
+                    })
+                    .ok()?;
                 Some(index.has_conflicts())
             })
             .unwrap_or(false);
@@ -2082,9 +2221,14 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
 fn resolve_base_branch(repo: &Repository) -> (String, Option<git2::Oid>) {
     // If we're in a worktree, open the base repo to get its HEAD branch
     let base_repo = if repo.is_worktree() {
-        repo.commondir()
-            .parent()
-            .and_then(|p| Repository::open(p).ok())
+        repo.commondir().parent().and_then(|p| {
+            Repository::open(p)
+                .map_err(|e| {
+                    debug!(error = %e, "could not open base repository");
+                    e
+                })
+                .ok()
+        })
     } else {
         None
     };
@@ -2094,7 +2238,14 @@ fn resolve_base_branch(repo: &Repository) -> (String, Option<git2::Oid>) {
     if let Ok(head) = effective_repo.head()
         && let Some(name) = head.shorthand()
     {
-        let oid = head.peel_to_commit().ok().map(|c| c.id());
+        let oid = head
+            .peel_to_commit()
+            .map_err(|e| {
+                debug!(error = %e, "could not peel base branch HEAD to commit");
+                e
+            })
+            .ok()
+            .map(|c| c.id());
         return (name.to_string(), oid);
     }
 
@@ -2102,7 +2253,14 @@ fn resolve_base_branch(repo: &Repository) -> (String, Option<git2::Oid>) {
     for candidate in &["main", "master"] {
         let refname = format!("refs/heads/{candidate}");
         if let Ok(reference) = repo.find_reference(&refname) {
-            let oid = reference.peel_to_commit().ok().map(|c| c.id());
+            let oid = reference
+                .peel_to_commit()
+                .map_err(|e| {
+                    debug!(branch = candidate, error = %e, "could not peel fallback branch to commit");
+                    e
+                })
+                .ok()
+                .map(|c| c.id());
             return (candidate.to_string(), oid);
         }
     }
@@ -2157,8 +2315,20 @@ impl DeltaKind {
 ///
 /// Returns `None` if the SHA doesn't resolve to a valid commit.
 pub fn get_commit_by_sha(repo: &Repository, sha_prefix: &str) -> Option<CommitInfo> {
-    let obj = repo.revparse_single(sha_prefix).ok()?;
-    let commit = obj.peel_to_commit().ok()?;
+    let obj = repo
+        .revparse_single(sha_prefix)
+        .map_err(|e| {
+            debug!(sha = sha_prefix, error = %e, "could not resolve SHA");
+            e
+        })
+        .ok()?;
+    let commit = obj
+        .peel_to_commit()
+        .map_err(|e| {
+            debug!(sha = sha_prefix, error = %e, "could not peel object to commit");
+            e
+        })
+        .ok()?;
 
     let ref_decorations = collect_ref_decorations(repo);
     let oid = commit.id();
@@ -2192,9 +2362,27 @@ pub fn get_commit_files(repo: &Repository, full_sha: &str) -> Vec<(PathBuf, Delt
         return Vec::new();
     };
 
-    let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+    let parent_tree = commit
+        .parent(0)
+        .map_err(|e| {
+            debug!(sha = full_sha, error = %e, "could not get parent commit");
+            e
+        })
+        .ok()
+        .and_then(|p| {
+            p.tree()
+                .map_err(|e| {
+                    debug!(sha = full_sha, error = %e, "could not get parent tree");
+                    e
+                })
+                .ok()
+        });
     let diff = repo
         .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
+        .map_err(|e| {
+            debug!(sha = full_sha, error = %e, "could not create diff");
+            e
+        })
         .ok();
 
     let Some(diff) = diff else {
@@ -2245,7 +2433,21 @@ pub fn get_commits_for_path(repo: &Repository, path_prefix: &str, count: usize) 
             continue;
         };
 
-        let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+        let parent_tree = commit
+            .parent(0)
+            .map_err(|e| {
+                debug!(sha = %oid, error = %e, "could not get parent for path commit");
+                e
+            })
+            .ok()
+            .and_then(|p| {
+                p.tree()
+                    .map_err(|e| {
+                        debug!(sha = %oid, error = %e, "could not get parent tree for path commit");
+                        e
+                    })
+                    .ok()
+            });
         let Ok(diff) = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None) else {
             continue;
         };

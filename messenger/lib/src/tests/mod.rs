@@ -1,4 +1,5 @@
 mod builders;
+mod receipts;
 #[cfg(feature = "signal")]
 mod signal_integration;
 #[cfg(feature = "slack")]

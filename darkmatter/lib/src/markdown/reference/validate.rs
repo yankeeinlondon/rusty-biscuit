@@ -193,7 +193,8 @@ pub(crate) fn validate(
         match &record.target {
             ReferenceTarget::LocalPath { raw } => {
                 // Check for fragment in local path (e.g., "./other.md#section")
-                let (path_part, fragment) = split_path_fragment(raw);
+                let raw_str = raw.to_string_lossy();
+                let (path_part, fragment) = split_path_fragment(&raw_str);
                 validate_local_path(
                     &path_part,
                     ref_source,

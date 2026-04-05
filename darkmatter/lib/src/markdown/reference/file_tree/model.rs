@@ -7,9 +7,10 @@
 use std::collections::HashMap;
 
 use crate::markdown::compose::ComposeSource;
+use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::reference::types::{
-    ReferenceGraph, ReferenceGraphNode, ReferenceInsertionContext, ReferenceKind, ReferenceRecord,
-    ReferenceSyntax, ReferenceTarget,
+    NodeId, ReferenceGraph, ReferenceGraphNode, ReferenceInsertionContext, ReferenceKind,
+    ReferenceRecord, ReferenceSyntax, ReferenceTarget,
 };
 use crate::markdown::reference::validate::{
     ReferenceIssueCode, ReferenceSeverity, ReferenceValidationReport,
@@ -160,7 +161,7 @@ pub struct FileTreeTransclusionEdge {
     pub caption: String,
     pub directive_line: usize,
     pub followable: bool,
-    pub child_node_id: Option<String>,
+    pub child_node_id: Option<NodeId>,
     pub validation: Option<FileTreeReferenceValidation>,
 }
 
@@ -185,9 +186,9 @@ pub fn build_file_tree_model(
     // during recursive model construction (avoids O(n²) linear scans).
     let mut node_map: HashMap<&str, &ReferenceGraphNode> =
         HashMap::with_capacity(graph.nodes.len() + 1);
-    node_map.insert(&graph.root.node_id, &graph.root);
+    node_map.insert(graph.root.node_id.as_ref(), &graph.root);
     for node in &graph.nodes {
-        node_map.insert(&node.node_id, node);
+        node_map.insert(node.node_id.as_ref(), node);
     }
 
     let root = build_node_model(&graph.root, &node_map, &issue_map, follow);
@@ -342,7 +343,7 @@ fn build_node_model(
         if follow
             && followable
             && let Some(ref cid) = child_node_id
-            && let Some(child_graph_node) = node_map.get(cid.as_str())
+            && let Some(child_graph_node) = node_map.get(cid.as_ref())
         {
             children.push(build_node_model(
                 child_graph_node,
@@ -433,7 +434,7 @@ pub fn transclusion_caption(context: &ReferenceInsertionContext) -> String {
         .section_heading_text
         .as_deref()
         .map(|h| {
-            let hashes = "#".repeat(context.section_heading_level.unwrap_or(2) as usize);
+            let hashes = "#".repeat(context.section_heading_level.unwrap_or(HeadingLevel::H2).hash_count());
             format!(" into the '{hashes} {h}' section")
         })
         .unwrap_or_default();
@@ -511,7 +512,7 @@ mod tests {
         let ctx = ReferenceInsertionContext {
             directive_kind: Some(ReferenceSyntax::DirectiveFile),
             section_heading_text: Some("Intro".to_string()),
-            section_heading_level: Some(2),
+            section_heading_level: Some(HeadingLevel::H2),
         };
         assert_eq!(
             transclusion_caption(&ctx),
@@ -524,7 +525,7 @@ mod tests {
         let ctx = ReferenceInsertionContext {
             directive_kind: Some(ReferenceSyntax::DirectiveTocLinking),
             section_heading_text: Some("Links".to_string()),
-            section_heading_level: Some(2),
+            section_heading_level: Some(HeadingLevel::H2),
         };
         assert_eq!(
             transclusion_caption(&ctx),
@@ -547,7 +548,7 @@ mod tests {
         let ctx = ReferenceInsertionContext {
             directive_kind: Some(ReferenceSyntax::DirectiveUrl),
             section_heading_text: Some("Summary".to_string()),
-            section_heading_level: Some(2),
+            section_heading_level: Some(HeadingLevel::H2),
         };
         assert_eq!(
             transclusion_caption(&ctx),
@@ -614,7 +615,7 @@ mod tests {
         let ctx = ReferenceInsertionContext {
             directive_kind: Some(ReferenceSyntax::DirectiveFile),
             section_heading_text: Some("Details".to_string()),
-            section_heading_level: Some(3),
+            section_heading_level: Some(HeadingLevel::H3),
         };
         assert_eq!(
             transclusion_caption(&ctx),
@@ -627,7 +628,7 @@ mod tests {
         let ctx = ReferenceInsertionContext {
             directive_kind: Some(ReferenceSyntax::DirectiveFile),
             section_heading_text: Some("Sub".to_string()),
-            section_heading_level: Some(4),
+            section_heading_level: Some(HeadingLevel::H4),
         };
         assert_eq!(
             transclusion_caption(&ctx),

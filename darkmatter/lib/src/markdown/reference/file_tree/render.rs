@@ -551,7 +551,7 @@ mod tests {
             caption: "inserted into the '## Details' section".to_string(),
             directive_line: 10,
             followable: true,
-            child_node_id: Some("child_1".to_string()),
+            child_node_id: Some("child_1".into()),
             validation: None,
         }];
 
@@ -646,7 +646,7 @@ mod tests {
             caption: String::new(),
             directive_line: 5,
             followable: true,
-            child_node_id: Some("child_1".to_string()),
+            child_node_id: Some("child_1".into()),
             validation: None,
         }];
         model.root.children = vec![child_node("child.md")];
@@ -859,7 +859,7 @@ mod tests {
             caption: "inserted".to_string(),
             directive_line: 10,
             followable: true,
-            child_node_id: Some("child_1".to_string()),
+            child_node_id: Some("child_1".into()),
             validation: None,
         }];
         model.root.children = vec![child_node("child.md")];
@@ -891,7 +891,7 @@ mod tests {
             caption: String::new(),
             directive_line: 10,
             followable: true,
-            child_node_id: Some("child_1".to_string()),
+            child_node_id: Some("child_1".into()),
             validation: None,
         }];
         model.root.children = vec![child];

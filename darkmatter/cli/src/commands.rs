@@ -10,7 +10,7 @@ use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::cleanup::ListSpacingMode;
 use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::highlighting::{
-    detect_code_theme, detect_color_mode, detect_prose_theme,
+    ColorMode, ThemePair, detect_code_theme, detect_color_mode, detect_prose_theme,
 };
 use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
 use rayon::prelude::*;
@@ -18,6 +18,23 @@ use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
 use std::process::Command;
 use tracing::{debug, info, instrument};
+
+/// Resolved theme configuration for terminal rendering.
+struct ResolvedTheme {
+    prose: ThemePair,
+    code: ThemePair,
+    color_mode: ColorMode,
+}
+
+impl ResolvedTheme {
+    /// Resolves theme from CLI options, falling back to auto-detection.
+    fn from_cli(cli: &Cli) -> Self {
+        let prose = cli.theme.unwrap_or_else(detect_prose_theme);
+        let code = cli.code_theme.unwrap_or_else(|| detect_code_theme(prose));
+        let color_mode = detect_color_mode();
+        Self { prose, code, color_mode }
+    }
+}
 
 /// Resolved allow flags for compose validation.
 pub struct ComposeAllowFlags {
@@ -279,17 +296,13 @@ pub fn run_render(
     let indent_size = indent.unwrap_or(darkmatter::markdown::cleanup::DEFAULT_INDENT);
     md.cleanup_with_indent(indent_size);
 
-    let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
-    let code_theme = cli
-        .code_theme
-        .unwrap_or_else(|| detect_code_theme(prose_theme));
-    let color_mode = detect_color_mode();
+    let theme = ResolvedTheme::from_cli(cli);
     let stdout_is_tty = io::stdout().is_terminal();
 
     match output {
         OutputFormat::Auto => {
             if stdout_is_tty {
-                render_terminal_output(&md, input, cli, prose_theme, code_theme, color_mode)?;
+                render_terminal_output(&md, input, cli, theme.prose, theme.code, theme.color_mode)?;
                 if show {
                     open_output_artifact(&markdown_artifact(&md))?;
                 }
@@ -301,7 +314,7 @@ pub fn run_render(
             emit_or_show_artifact(markdown_artifact(&md), show)?;
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&md, prose_theme, code_theme, color_mode)?;
+            let artifact = html_artifact(&md, theme.prose, theme.code, theme.color_mode)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
@@ -574,18 +587,14 @@ pub fn run_compose(
         for metric in &perf_report.metrics {
             let status = Status::from_prose(format!(
                 "<dim>{:20}</dim> {:>8.2}ms",
-                metric.name,
+                metric.stage.to_string(),
                 metric.elapsed.as_secs_f64() * 1000.0
             ));
             eprintln!("{}", status.render(&terminal));
         }
     }
 
-    let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
-    let code_theme = cli
-        .code_theme
-        .unwrap_or_else(|| detect_code_theme(prose_theme));
-    let color_mode = detect_color_mode();
+    let theme = ResolvedTheme::from_cli(cli);
 
     match output {
         OutputFormat::Auto | OutputFormat::Markdown => {
@@ -608,7 +617,7 @@ pub fn run_compose(
             }
         }
         OutputFormat::Html => {
-            let artifact = html_artifact(&composed, prose_theme, code_theme, color_mode)?;
+            let artifact = html_artifact(&composed, theme.prose, theme.code, theme.color_mode)?;
             emit_or_show_artifact(artifact, show)?;
         }
         OutputFormat::Json => {
@@ -1339,7 +1348,7 @@ mod tests {
 
     #[test]
     fn format_compose_perf_report_contains_sections() {
-        use darkmatter::markdown::compose::{ComposePerfMetric, ComposePerfReport};
+        use darkmatter::markdown::compose::{ComposePerfMetric, ComposePerfReport, ComposeStage};
 
         let cli_perf = CliComposePerfReport {
             load_input: std::time::Duration::from_millis(8),
@@ -1359,12 +1368,12 @@ mod tests {
             total: std::time::Duration::from_millis(54),
             metrics: vec![
                 ComposePerfMetric {
-                    name: "cleanup".to_string(),
+                    stage: ComposeStage::Cleanup,
                     elapsed: std::time::Duration::from_millis(3),
                     calls: 1,
                 },
                 ComposePerfMetric {
-                    name: "normalization".to_string(),
+                    stage: ComposeStage::Normalization,
                     elapsed: std::time::Duration::from_millis(5),
                     calls: 1,
                 },
@@ -1799,7 +1808,7 @@ fn insertion_to_json(
         .unwrap_or("unknown");
 
     // Find the target path from the child node
-    let child_node = graph.node_by_id(&insertion.child_node_id);
+    let child_node = graph.node_by_id(insertion.child_node_id.as_ref());
     let target = child_node
         .map(|n| source_to_json(&n.source))
         .unwrap_or(serde_json::Value::Null);
@@ -1817,7 +1826,7 @@ fn insertion_to_json(
         obj["section"] = serde_json::Value::String(heading.clone());
     }
     if let Some(level) = insertion.context.section_heading_level {
-        obj["section_level"] = serde_json::Value::Number(level.into());
+        obj["section_level"] = serde_json::Value::Number(level.as_u8().into());
     }
 
     // Recursively expand child node when following
@@ -2077,7 +2086,7 @@ fn format_compose_perf_report(
         );
         for metric in &perf.metrics {
             col.push_str(&format_metric_line(
-                &metric.name,
+                &metric.stage.to_string(),
                 metric.elapsed,
                 metric.calls,
             ));

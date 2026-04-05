@@ -145,3 +145,353 @@ impl ComposedDocumentManifest {
             .unwrap_or(false)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markdown::compose::cache::types::ArtifactClass;
+    use std::time::Duration;
+
+    #[test]
+    fn document_snapshot_is_fresh_when_unchanged() {
+        let modified_time = SystemTime::now();
+        let size = 1024;
+
+        let manifest = DocumentSnapshotManifest {
+            cache_version: CACHE_VERSION,
+            source_kind: SourceKind::LocalFile,
+            canonical_source: "/path/to/file.md".to_string(),
+            source_id_hash: 12345,
+            raw_bytes_hash: 67890,
+            frontmatter_hash: 11111,
+            body_semantic_hash: 22222,
+            body_template_hash: 33333,
+            modified_at: modified_time,
+            size_bytes: size,
+        };
+
+        assert!(manifest.is_fresh(modified_time, size));
+    }
+
+    #[test]
+    fn document_snapshot_stale_when_modified_time_changes() {
+        let original_time = SystemTime::now();
+        let later_time = original_time + Duration::from_secs(60);
+        let size = 1024;
+
+        let manifest = DocumentSnapshotManifest {
+            cache_version: CACHE_VERSION,
+            source_kind: SourceKind::LocalFile,
+            canonical_source: "/path/to/file.md".to_string(),
+            source_id_hash: 12345,
+            raw_bytes_hash: 67890,
+            frontmatter_hash: 11111,
+            body_semantic_hash: 22222,
+            body_template_hash: 33333,
+            modified_at: original_time,
+            size_bytes: size,
+        };
+
+        assert!(!manifest.is_fresh(later_time, size));
+    }
+
+    #[test]
+    fn document_snapshot_stale_when_size_changes() {
+        let modified_time = SystemTime::now();
+        let original_size = 1024;
+        let new_size = 2048;
+
+        let manifest = DocumentSnapshotManifest {
+            cache_version: CACHE_VERSION,
+            source_kind: SourceKind::LocalFile,
+            canonical_source: "/path/to/file.md".to_string(),
+            source_id_hash: 12345,
+            raw_bytes_hash: 67890,
+            frontmatter_hash: 11111,
+            body_semantic_hash: 22222,
+            body_template_hash: 33333,
+            modified_at: modified_time,
+            size_bytes: original_size,
+        };
+
+        assert!(!manifest.is_fresh(modified_time, new_size));
+    }
+
+    #[test]
+    fn document_snapshot_stale_when_both_change() {
+        let original_time = SystemTime::now();
+        let later_time = original_time + Duration::from_secs(60);
+        let original_size = 1024;
+        let new_size = 2048;
+
+        let manifest = DocumentSnapshotManifest {
+            cache_version: CACHE_VERSION,
+            source_kind: SourceKind::LocalFile,
+            canonical_source: "/path/to/file.md".to_string(),
+            source_id_hash: 12345,
+            raw_bytes_hash: 67890,
+            frontmatter_hash: 11111,
+            body_semantic_hash: 22222,
+            body_template_hash: 33333,
+            modified_at: original_time,
+            size_bytes: original_size,
+        };
+
+        assert!(!manifest.is_fresh(later_time, new_size));
+    }
+
+    #[test]
+    fn composed_document_touch_updates_timestamp() {
+        let initial_time = SystemTime::now() - Duration::from_secs(3600);
+
+        let mut manifest = ComposedDocumentManifest {
+            cache_version: CACHE_VERSION,
+            entry_key: 12345,
+            source_id_hash: 67890,
+            source_body_semantic_hash: 11111,
+            self_hash: 22222,
+            closure_hash: 33333,
+            dependency_count: 2,
+            dependencies: vec![],
+            payload_blob_hash: 44444,
+            warnings_hash: 55555,
+            created_at: initial_time,
+            last_accessed_at: initial_time,
+            expires_at: None,
+        };
+
+        let before_touch = manifest.last_accessed_at;
+        manifest.touch();
+        let after_touch = manifest.last_accessed_at;
+
+        assert!(after_touch > before_touch);
+    }
+
+    #[test]
+    fn composed_document_not_expired_without_expiration() {
+        let manifest = ComposedDocumentManifest {
+            cache_version: CACHE_VERSION,
+            entry_key: 12345,
+            source_id_hash: 67890,
+            source_body_semantic_hash: 11111,
+            self_hash: 22222,
+            closure_hash: 33333,
+            dependency_count: 0,
+            dependencies: vec![],
+            payload_blob_hash: 44444,
+            warnings_hash: 55555,
+            created_at: SystemTime::now(),
+            last_accessed_at: SystemTime::now(),
+            expires_at: None,
+        };
+
+        assert!(!manifest.is_expired());
+    }
+
+    #[test]
+    fn composed_document_not_expired_when_future_expiration() {
+        let future_time = SystemTime::now() + Duration::from_secs(3600);
+
+        let manifest = ComposedDocumentManifest {
+            cache_version: CACHE_VERSION,
+            entry_key: 12345,
+            source_id_hash: 67890,
+            source_body_semantic_hash: 11111,
+            self_hash: 22222,
+            closure_hash: 33333,
+            dependency_count: 0,
+            dependencies: vec![],
+            payload_blob_hash: 44444,
+            warnings_hash: 55555,
+            created_at: SystemTime::now(),
+            last_accessed_at: SystemTime::now(),
+            expires_at: Some(future_time),
+        };
+
+        assert!(!manifest.is_expired());
+    }
+
+    #[test]
+    fn composed_document_expired_when_past_expiration() {
+        let past_time = SystemTime::now() - Duration::from_secs(3600);
+
+        let manifest = ComposedDocumentManifest {
+            cache_version: CACHE_VERSION,
+            entry_key: 12345,
+            source_id_hash: 67890,
+            source_body_semantic_hash: 11111,
+            self_hash: 22222,
+            closure_hash: 33333,
+            dependency_count: 0,
+            dependencies: vec![],
+            payload_blob_hash: 44444,
+            warnings_hash: 55555,
+            created_at: past_time,
+            last_accessed_at: past_time,
+            expires_at: Some(past_time),
+        };
+
+        assert!(manifest.is_expired());
+    }
+
+    #[test]
+    fn operation_result_touch_updates_timestamp() {
+        let initial_time = SystemTime::now() - Duration::from_secs(3600);
+
+        let mut manifest = OperationResultManifest {
+            cache_version: CACHE_VERSION,
+            entry_key: 12345,
+            op_kind: "code".to_string(),
+            self_hash: 22222,
+            closure_hash: 33333,
+            payload_blob_hash: 44444,
+            canonical_source: "/path/to/source.rs".to_string(),
+            source_id_hash: 67890,
+            source_content_hash: 11111,
+            created_at: initial_time,
+            last_accessed_at: initial_time,
+            expires_at: None,
+        };
+
+        let before_touch = manifest.last_accessed_at;
+        manifest.touch();
+        let after_touch = manifest.last_accessed_at;
+
+        assert!(after_touch > before_touch);
+    }
+
+    #[test]
+    fn operation_result_not_expired_without_expiration() {
+        let manifest = OperationResultManifest {
+            cache_version: CACHE_VERSION,
+            entry_key: 12345,
+            op_kind: "toc-linking".to_string(),
+            self_hash: 22222,
+            closure_hash: 33333,
+            payload_blob_hash: 44444,
+            canonical_source: "/path/to/source.md".to_string(),
+            source_id_hash: 67890,
+            source_content_hash: 11111,
+            created_at: SystemTime::now(),
+            last_accessed_at: SystemTime::now(),
+            expires_at: None,
+        };
+
+        assert!(!manifest.is_expired());
+    }
+
+    #[test]
+    fn operation_result_not_expired_when_future_expiration() {
+        let future_time = SystemTime::now() + Duration::from_secs(3600);
+
+        let manifest = OperationResultManifest {
+            cache_version: CACHE_VERSION,
+            entry_key: 12345,
+            op_kind: "code".to_string(),
+            self_hash: 22222,
+            closure_hash: 33333,
+            payload_blob_hash: 44444,
+            canonical_source: "/path/to/source.rs".to_string(),
+            source_id_hash: 67890,
+            source_content_hash: 11111,
+            created_at: SystemTime::now(),
+            last_accessed_at: SystemTime::now(),
+            expires_at: Some(future_time),
+        };
+
+        assert!(!manifest.is_expired());
+    }
+
+    #[test]
+    fn operation_result_expired_when_past_expiration() {
+        let past_time = SystemTime::now() - Duration::from_secs(3600);
+
+        let manifest = OperationResultManifest {
+            cache_version: CACHE_VERSION,
+            entry_key: 12345,
+            op_kind: "code".to_string(),
+            self_hash: 22222,
+            closure_hash: 33333,
+            payload_blob_hash: 44444,
+            canonical_source: "/path/to/source.rs".to_string(),
+            source_id_hash: 67890,
+            source_content_hash: 11111,
+            created_at: past_time,
+            last_accessed_at: past_time,
+            expires_at: Some(past_time),
+        };
+
+        assert!(manifest.is_expired());
+    }
+
+    #[test]
+    fn different_source_kinds_supported() {
+        let modified_time = SystemTime::now();
+
+        let local_manifest = DocumentSnapshotManifest {
+            cache_version: CACHE_VERSION,
+            source_kind: SourceKind::LocalFile,
+            canonical_source: "/path/to/file.md".to_string(),
+            source_id_hash: 12345,
+            raw_bytes_hash: 67890,
+            frontmatter_hash: 11111,
+            body_semantic_hash: 22222,
+            body_template_hash: 33333,
+            modified_at: modified_time,
+            size_bytes: 1024,
+        };
+
+        let remote_manifest = DocumentSnapshotManifest {
+            cache_version: CACHE_VERSION,
+            source_kind: SourceKind::RemoteUrl,
+            canonical_source: "https://example.com/doc.md".to_string(),
+            source_id_hash: 54321,
+            raw_bytes_hash: 98765,
+            frontmatter_hash: 44444,
+            body_semantic_hash: 55555,
+            body_template_hash: 66666,
+            modified_at: modified_time,
+            size_bytes: 2048,
+        };
+
+        assert!(local_manifest.is_fresh(modified_time, 1024));
+        assert!(remote_manifest.is_fresh(modified_time, 2048));
+    }
+
+    #[test]
+    fn composed_document_with_dependencies() {
+        let dep1 = DependencyRef {
+            artifact_class: ArtifactClass::DocumentSnapshot,
+            entry_key: 111,
+            source_id_hash: 222,
+            closure_hash: 333,
+        };
+
+        let dep2 = DependencyRef {
+            artifact_class: ArtifactClass::ComposeDocumentCore,
+            entry_key: 444,
+            source_id_hash: 555,
+            closure_hash: 666,
+        };
+
+        let manifest = ComposedDocumentManifest {
+            cache_version: CACHE_VERSION,
+            entry_key: 12345,
+            source_id_hash: 67890,
+            source_body_semantic_hash: 11111,
+            self_hash: 22222,
+            closure_hash: 33333,
+            dependency_count: 2,
+            dependencies: vec![dep1, dep2],
+            payload_blob_hash: 44444,
+            warnings_hash: 55555,
+            created_at: SystemTime::now(),
+            last_accessed_at: SystemTime::now(),
+            expires_at: None,
+        };
+
+        assert_eq!(manifest.dependency_count, 2);
+        assert_eq!(manifest.dependencies.len(), 2);
+        assert!(!manifest.is_expired());
+    }
+}

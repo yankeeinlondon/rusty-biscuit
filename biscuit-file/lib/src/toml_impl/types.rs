@@ -4,6 +4,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use tracing::{debug, instrument};
 
 /// Source tracking for TOML content.
 #[derive(Debug, Clone)]
@@ -133,6 +134,7 @@ impl Toml {
     /// ## Errors
     ///
     /// Returns an error if the file cannot be read or contains invalid TOML.
+    #[instrument(level = "debug", skip_all, fields(path = %path.as_ref().display()))]
     pub fn new(path: impl AsRef<Path>) -> Result<Self, TomlError> {
         let path = path.as_ref();
         let raw = std::fs::read_to_string(path)?;
@@ -150,6 +152,7 @@ impl Toml {
     /// ## Errors
     ///
     /// Returns an error if the string contains invalid TOML.
+    #[instrument(level = "trace", skip_all, fields(input_len = input.as_ref().len()))]
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(input: impl AsRef<str>) -> Result<Self, TomlError> {
         let raw = input.as_ref().to_string();
@@ -232,9 +235,11 @@ impl Toml {
     /// ## Errors
     ///
     /// Returns an error if JSON serialization fails.
+    #[instrument(level = "trace", skip(self), fields(source = ?self.source))]
     pub fn as_json(&self) -> Result<String, TomlError> {
         let json_value = self.as_json_value()?;
         let json = serde_json::to_string_pretty(&json_value)?;
+        debug!(output_len = json.len(), "TOML → JSON conversion complete");
         Ok(json)
     }
 
@@ -254,9 +259,11 @@ impl Toml {
     ///
     /// Returns an error if YAML serialization fails or the feature is disabled.
     #[cfg(feature = "yaml")]
+    #[instrument(level = "trace", skip(self), fields(source = ?self.source))]
     pub fn as_yaml(&self) -> Result<String, TomlError> {
         let json_value = self.as_json_value()?;
         let yaml = serde_yaml_ng::to_string(&json_value)?;
+        debug!(output_len = yaml.len(), "TOML → YAML conversion complete");
         Ok(yaml)
     }
 
@@ -280,11 +287,8 @@ impl Toml {
         Ok(yaml_value)
     }
 
-    /// Convert to a `serde_yaml_ng::Value`.
-    #[cfg(not(feature = "yaml"))]
-    pub fn as_yaml_value(&self) -> Result<(), TomlError> {
-        Err(TomlError::YamlFeatureDisabled)
-    }
+    // When yaml is disabled, as_yaml_value() is not provided.
+    // This matches the pattern used by Json5 for disabled features.
 
     /// Validate the TOML document.
     ///
@@ -776,6 +780,15 @@ name = "test"
 
         let yaml_value = toml.as_yaml_value().unwrap();
         assert!(yaml_value.is_mapping());
+    }
+
+    #[cfg(feature = "yaml")]
+    #[test]
+    fn as_yaml_value_returns_yaml_value_type() {
+        let toml = Toml::from_str("[foo]\nbar = 1").unwrap();
+        let result = toml.as_yaml_value();
+        assert!(result.is_ok());
+        let _val: serde_yaml_ng::Value = result.unwrap();
     }
 
     #[cfg(feature = "yaml")]

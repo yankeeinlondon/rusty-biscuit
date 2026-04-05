@@ -209,6 +209,34 @@ impl ComposeOperation {
     }
 }
 
+impl std::fmt::Display for ComposeOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FrontmatterInterpolation => write!(f, "FrontmatterInterpolation"),
+            Self::TextReplacement => write!(f, "TextReplacement"),
+            Self::PageBlocks => write!(f, "PageBlocks"),
+            Self::Interpolation => write!(f, "Interpolation"),
+            Self::ShellExpansion => write!(f, "ShellExpansion"),
+            Self::BlockTransclusion => write!(f, "BlockTransclusion"),
+            Self::FrontmatterTransclusion => write!(f, "FrontmatterTransclusion"),
+            Self::CodeTransclusion => write!(f, "CodeTransclusion"),
+            Self::TocLinking => write!(f, "TocLinking"),
+            Self::Cleanup => write!(f, "Cleanup"),
+            Self::Normalization => write!(f, "Normalization"),
+        }
+    }
+}
+
+impl std::fmt::Display for ComposePhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InlinePre => write!(f, "InlinePre"),
+            Self::Transclusion => write!(f, "Transclusion"),
+            Self::InlinePost => write!(f, "InlinePost"),
+        }
+    }
+}
+
 /// Configuration for the compose pipeline.
 ///
 /// Controls which operations run, how transclusion resolves references,
@@ -243,102 +271,102 @@ pub struct ComposeOptions {
     ///
     /// Defaults to all operations. Use `disable()` or `only()` to
     /// restrict which operations run.
-    pub enabled_operations: ComposeOperationSet,
+    pub(crate) enabled_operations: ComposeOperationSet,
 
     // ── Error handling ─────────────────────────────────────────────
     /// When `true`, the pipeline returns an error on the first failure.
     /// When `false` (default), failures are recorded as warnings and
     /// the pipeline continues with remaining operations.
-    pub fail_fast: bool,
+    pub(crate) fail_fast: bool,
 
     // ── Context override ──────────────────────────────────────────
     /// When `true`, non-object `ctx` frontmatter is downgraded from an error
     /// to a warning and the runtime context is used instead.
-    pub allow_ctx_override: bool,
+    pub(crate) allow_ctx_override: bool,
 
     // ── Source context ─────────────────────────────────────────────
     /// Source location of the document being composed.
     ///
     /// Required for transclusion to resolve relative `::file` paths.
     /// Set via `with_source_file()` or `with_source_url()`.
-    pub source: ComposeSource,
+    pub(crate) source: ComposeSource,
 
     // ── State and data ─────────────────────────────────────────────
     /// External state merged with frontmatter for interpolation and
     /// replacement. Missing or null frontmatter keys are filled from
     /// this value using deep-merge semantics.
-    pub external_state: Option<serde_json::Value>,
+    pub(crate) external_state: Option<serde_json::Value>,
 
     /// Override values that unconditionally overwrite frontmatter keys.
     ///
     /// Unlike `external_state` which only fills missing/null keys,
     /// these values always win regardless of what the frontmatter says.
-    pub set_overrides: Option<serde_json::Value>,
+    pub(crate) set_overrides: Option<serde_json::Value>,
 
     // ── Transclusion ───────────────────────────────────────────────
     /// Maximum recursive transclusion depth before the pipeline
     /// returns an error. Prevents infinite `::file` chains.
     /// Default: 16.
-    pub max_transclusion_depth: usize,
+    pub(crate) max_transclusion_depth: usize,
 
     /// Whether `::url` remote transclusion is allowed.
     ///
     /// Disabled by default for security. When false, `::url` directives
     /// are skipped (or error if `fail_fast` is true).
-    pub allow_remote_transclusion: bool,
+    pub(crate) allow_remote_transclusion: bool,
 
     /// Whether `::file` can include local markdown documents.
     /// Default: true.
-    pub allow_local_markdown: bool,
+    pub(crate) allow_local_markdown: bool,
 
     /// Whether `::code` can include local text files as code blocks.
     /// Default: true.
-    pub allow_local_code: bool,
+    pub(crate) allow_local_code: bool,
 
     /// Language tag applied to `::code` blocks when the file extension
     /// is unknown or unmapped. Default: `"txt"`.
-    pub code_fallback_language: String,
+    pub(crate) code_fallback_language: String,
 
     /// Overrides the default behavior for invalid transclusion references.
     ///
     /// - `None`: use the document's frontmatter `ignore_invalid` setting
     /// - `Some(true)`: silently skip invalid references
     /// - `Some(false)`: treat invalid references as errors
-    pub ignore_invalid_references: Option<bool>,
+    pub(crate) ignore_invalid_references: Option<bool>,
 
     /// Whether `@`-prefixed paths resolve to the git repository root.
     /// Default: true.
-    pub resolve_repo_root: bool,
+    pub(crate) resolve_repo_root: bool,
 
     /// Custom search roots for `@`-prefixed (magic) file references.
     ///
     /// Each entry is a `(path, position)` pair where `position` controls
     /// whether the path is searched before (`Start`) or after (`End`) the
     /// default roots (git repo root, HOME).
-    pub magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
+    pub(crate) magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
 
     // ── Shell expansion ────────────────────────────────────────────
     /// Maximum execution time for a single `::shell` command.
     /// Default: 10 seconds.
-    pub shell_timeout: std::time::Duration,
+    pub(crate) shell_timeout: std::time::Duration,
 
     /// Root directory for shell expansion policy files.
     ///
     /// When set, only commands matching an approval policy in this
     /// directory (or its ancestors) are allowed to execute.
-    pub shell_policy_root: Option<PathBuf>,
+    pub(crate) shell_policy_root: Option<PathBuf>,
 
     /// Working directory for `::shell` command execution.
     ///
     /// When `None`, commands run in the directory of the source file
     /// (if known) or the current working directory.
-    pub shell_working_directory: Option<PathBuf>,
+    pub(crate) shell_working_directory: Option<PathBuf>,
 
     /// Callback for interactive shell command approval.
     ///
     /// When set, commands that require approval call this handler
     /// before execution. When `None`, unapproved commands are skipped.
-    pub shell_approval_handler:
+    pub(crate) shell_approval_handler:
         Option<std::sync::Arc<dyn super::shell_expansion::ShellApprovalHandler>>,
 
     /// Pre-approved shell commands (normalized forms).
@@ -351,7 +379,7 @@ pub struct ComposeOptions {
     ///
     /// Mutually exclusive with `shell_approval_handler`. When this field
     /// is `Some`, the approval handler is ignored.
-    pub pre_approved_commands: Option<std::collections::HashSet<String>>,
+    pub(crate) pre_approved_commands: Option<std::collections::HashSet<String>>,
 
     /// Whether to strip ANSI escape codes and set `NO_COLOR=1` for shell commands.
     /// Default: true.
@@ -360,35 +388,35 @@ pub struct ComposeOptions {
     // ── Cleanup ────────────────────────────────────────────────────
     /// Controls how blank lines between list items are handled
     /// during the cleanup operation. Default: `Normal`.
-    pub list_spacing: crate::markdown::cleanup::ListSpacingMode,
+    pub(crate) list_spacing: crate::markdown::cleanup::ListSpacingMode,
 
     /// Number of spaces per nesting level for list indentation
     /// during cleanup. Default: 4.
-    pub indent_size: usize,
+    pub(crate) indent_size: usize,
 
     // ── Caching ───────────────────────────────────────────────────
     /// Controls whether and how caching is used during compose.
     /// Default: `ReadWrite` (full caching with single-flight dedup).
-    pub cache_access_mode: CacheAccessMode,
+    pub(crate) cache_access_mode: CacheAccessMode,
 
     /// Controls staleness tolerance for persistent cache entries.
     /// Default: `Strict` (only accept entries whose closure hash matches).
-    pub cache_freshness_mode: CacheFreshnessMode,
+    pub(crate) cache_freshness_mode: CacheFreshnessMode,
 
     /// Root directory for persistent cache storage.
     /// When `None`, persistent caching is disabled. Set to a path
     /// (typically `<workspace>/.darkmatter/cache/v1/`) to enable.
-    pub cache_root: Option<PathBuf>,
+    pub(crate) cache_root: Option<PathBuf>,
 
     /// Namespace for cache isolation (e.g., branch name, profile).
     /// When set, cache entries are stored under this namespace to
     /// prevent cross-contamination between different contexts.
-    pub cache_namespace: Option<String>,
+    pub(crate) cache_namespace: Option<String>,
 
     // ── Performance ─────────────────────────────────────────────────
     /// When `true`, the pipeline collects per-stage timing metrics
     /// and populates `ComposeReport::perf`. Default: `false`.
-    pub perf_enabled: bool,
+    pub(crate) perf_enabled: bool,
 
     // ── Internal (crate-private) ───────────────────────────────────
     /// Runtime context captured at construction time (timestamps,
@@ -414,7 +442,7 @@ pub struct ComposeOptions {
     /// should still be interpolated.
     ///
     /// Can also be set via frontmatter: `interpolate_code_spans: true`.
-    pub interpolate_code_spans: bool,
+    pub(crate) interpolate_code_spans: bool,
 }
 
 impl std::fmt::Debug for ComposeOptions {
@@ -832,6 +860,14 @@ impl ComposeOptions {
         self.perf_enabled = enabled;
         self
     }
+
+    // ── Getters ────────────────────────────────────────────────────
+
+    /// Returns the maximum transclusion depth.
+    #[must_use]
+    pub fn max_transclusion_depth(&self) -> usize {
+        self.max_transclusion_depth
+    }
 }
 
 impl Default for ComposeOptions {
@@ -1207,10 +1243,10 @@ impl ComposeContext {
 }
 
 /// A single timing metric from the compose pipeline.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComposePerfMetric {
-    /// Human-readable stage name (e.g., "text replacement").
-    pub name: String,
+    /// Pipeline stage this metric represents.
+    pub stage: ComposeStage,
     /// Accumulated elapsed time for this metric.
     pub elapsed: Duration,
     /// Number of times this metric was recorded.
@@ -1224,6 +1260,45 @@ pub struct ComposePerfReport {
     pub total: Duration,
     /// Per-stage metrics in deterministic order.
     pub metrics: Vec<ComposePerfMetric>,
+}
+
+/// Named compose pipeline stages for type-safe metric identification.
+///
+/// Variants are listed in pipeline execution order so reports have
+/// a deterministic, intuitive ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ComposeStage {
+    FrontmatterInterpolation,
+    EffectiveStateBuild,
+    TextReplacement,
+    PageBlocks,
+    Interpolation,
+    ShellExpansion,
+    TransclusionParse,
+    TransclusionPrepare,
+    TransclusionResolve,
+    TransclusionApply,
+    Cleanup,
+    Normalization,
+}
+
+impl std::fmt::Display for ComposeStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::FrontmatterInterpolation => "frontmatter interpolation",
+            Self::EffectiveStateBuild => "effective state build",
+            Self::TextReplacement => "text replacement",
+            Self::PageBlocks => "page blocks",
+            Self::Interpolation => "interpolation",
+            Self::ShellExpansion => "shell expansion",
+            Self::TransclusionParse => "transclusion parse",
+            Self::TransclusionPrepare => "transclusion prepare",
+            Self::TransclusionResolve => "transclusion resolve",
+            Self::TransclusionApply => "transclusion apply",
+            Self::Cleanup => "cleanup",
+            Self::Normalization => "normalization",
+        })
+    }
 }
 
 impl ComposePerfReport {
@@ -1244,12 +1319,12 @@ impl ComposePerfReport {
             if let Some(existing) = self
                 .metrics
                 .iter_mut()
-                .find(|m| m.name == other_metric.name)
+                .find(|m| m.stage == other_metric.stage)
             {
                 existing.elapsed += other_metric.elapsed;
                 existing.calls += other_metric.calls;
             } else {
-                self.metrics.push(other_metric.clone());
+                self.metrics.push(*other_metric);
             }
         }
     }
@@ -1889,12 +1964,12 @@ mod tests {
             total: Duration::from_millis(10),
             metrics: vec![
                 ComposePerfMetric {
-                    name: "cleanup".to_string(),
+                    stage: ComposeStage::Cleanup,
                     elapsed: Duration::from_millis(3),
                     calls: 1,
                 },
                 ComposePerfMetric {
-                    name: "interpolation".to_string(),
+                    stage: ComposeStage::Interpolation,
                     elapsed: Duration::from_millis(5),
                     calls: 2,
                 },
@@ -1904,12 +1979,12 @@ mod tests {
             total: Duration::from_millis(7),
             metrics: vec![
                 ComposePerfMetric {
-                    name: "cleanup".to_string(),
+                    stage: ComposeStage::Cleanup,
                     elapsed: Duration::from_millis(2),
                     calls: 1,
                 },
                 ComposePerfMetric {
-                    name: "normalization".to_string(),
+                    stage: ComposeStage::Normalization,
                     elapsed: Duration::from_millis(4),
                     calls: 1,
                 },
@@ -1920,14 +1995,18 @@ mod tests {
 
         assert_eq!(parent.total, Duration::from_millis(17));
 
-        let cleanup = parent.metrics.iter().find(|m| m.name == "cleanup").unwrap();
+        let cleanup = parent
+            .metrics
+            .iter()
+            .find(|m| m.stage == ComposeStage::Cleanup)
+            .unwrap();
         assert_eq!(cleanup.elapsed, Duration::from_millis(5));
         assert_eq!(cleanup.calls, 2);
 
         let interp = parent
             .metrics
             .iter()
-            .find(|m| m.name == "interpolation")
+            .find(|m| m.stage == ComposeStage::Interpolation)
             .unwrap();
         assert_eq!(interp.elapsed, Duration::from_millis(5));
         assert_eq!(interp.calls, 2);
@@ -1935,7 +2014,7 @@ mod tests {
         let norm = parent
             .metrics
             .iter()
-            .find(|m| m.name == "normalization")
+            .find(|m| m.stage == ComposeStage::Normalization)
             .unwrap();
         assert_eq!(norm.elapsed, Duration::from_millis(4));
         assert_eq!(norm.calls, 1);
@@ -1950,7 +2029,7 @@ mod tests {
         report_b.perf = Some(ComposePerfReport {
             total: Duration::from_millis(5),
             metrics: vec![ComposePerfMetric {
-                name: "cleanup".to_string(),
+                stage: ComposeStage::Cleanup,
                 elapsed: Duration::from_millis(5),
                 calls: 1,
             }],
@@ -1970,7 +2049,7 @@ mod tests {
         report_a.perf = Some(ComposePerfReport {
             total: Duration::from_millis(10),
             metrics: vec![ComposePerfMetric {
-                name: "cleanup".to_string(),
+                stage: ComposeStage::Cleanup,
                 elapsed: Duration::from_millis(3),
                 calls: 1,
             }],
@@ -1980,7 +2059,7 @@ mod tests {
         report_b.perf = Some(ComposePerfReport {
             total: Duration::from_millis(7),
             metrics: vec![ComposePerfMetric {
-                name: "cleanup".to_string(),
+                stage: ComposeStage::Cleanup,
                 elapsed: Duration::from_millis(2),
                 calls: 1,
             }],
