@@ -9,18 +9,6 @@
             "path": "claudine"
         },
         {
-            "name": "Monorepo Docs",
-            "path": "docs"
-        },
-        {
-            "name": "Monorepo Prompts",
-            "path": "prompts"
-        },
-        {
-            "name": ".claudine Config",
-            "path": ".claudine"
-        },
-        {
             "name": "~ monorepo",
             "path": "."
         }
@@ -81,6 +69,7 @@
             "proptest",
             "ptyprocess",
             "qwen",
+            "raml",
             "rmcp",
             "rodio",
             "rustls",
