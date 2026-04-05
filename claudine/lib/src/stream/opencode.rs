@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
@@ -25,6 +27,7 @@ pub struct OpenCodeStreamParser<S: StreamEventSink> {
     is_error: bool,
     error_kind: Option<String>,
     error_message: Option<String>,
+    tool_uses: HashMap<String, (Option<String>, Option<Value>)>,
 }
 
 impl<S: StreamEventSink> OpenCodeStreamParser<S> {
@@ -48,6 +51,7 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
             is_error: false,
             error_kind: None,
             error_message: None,
+            tool_uses: HashMap::new(),
         }
     }
 
@@ -232,6 +236,37 @@ fn opencode_tool_name(obj: &Value) -> Option<&str> {
         })
 }
 
+fn opencode_value<'a>(obj: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+    keys.iter().find_map(|key| obj.get(*key)).or_else(|| {
+        obj.get("part")
+            .and_then(|part| keys.iter().find_map(|key| part.get(*key)))
+    })
+}
+
+fn opencode_tool_id(obj: &Value) -> Option<String> {
+    opencode_value(obj, &["id", "tool_id", "toolUseId", "tool_use_id"])
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn opencode_tool_input(obj: &Value) -> Option<Value> {
+    opencode_value(obj, &["input", "parameters", "arguments", "args", "params"]).cloned()
+}
+
+fn opencode_tool_output(obj: &Value) -> Option<Value> {
+    opencode_value(obj, &["output", "result", "content"]).cloned()
+}
+
+fn opencode_tool_status(obj: &Value) -> Option<String> {
+    opencode_value(obj, &["status"])
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn opencode_tool_error(obj: &Value) -> Option<Value> {
+    opencode_value(obj, &["error"]).cloned()
+}
+
 impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
     fn feed_line(&mut self, line: &str) -> Result<Option<StreamChunk>, StreamParseError> {
         self.line_num += 1;
@@ -280,15 +315,53 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
                 let tool_name = opencode_tool_name(&obj);
                 super::trace_tool_event(Provider::OpenCode, self.tool_calls, tool_name);
                 let mut meta = EventMeta::default();
+                let tool_id = opencode_tool_id(&obj);
+                let tool_input = opencode_tool_input(&obj);
+
+                if let Some(tool_id) = &tool_id {
+                    meta.extra
+                        .insert("tool_id".into(), Value::String(tool_id.clone()));
+                }
                 if let Some(tool_name) = tool_name {
                     meta.extra
                         .insert("tool_name".into(), Value::String(tool_name.to_string()));
+                }
+                if let Some(tool_input) = &tool_input {
+                    meta.extra.insert("tool_input".into(), tool_input.clone());
+                }
+                if let Some(tool_id) = tool_id {
+                    self.tool_uses
+                        .insert(tool_id, (tool_name.map(ToOwned::to_owned), tool_input));
                 }
                 self.sink.on_before_tool(&meta);
                 Ok(None)
             }
             "tool_result" | "tool_end" => {
-                let meta = EventMeta::default();
+                let tool_id = opencode_tool_id(&obj);
+                let (tool_name, tool_input) = tool_id
+                    .as_ref()
+                    .and_then(|id| self.tool_uses.remove(id))
+                    .unwrap_or((opencode_tool_name(&obj).map(ToOwned::to_owned), None));
+                let mut meta = EventMeta::default();
+                if let Some(tool_id) = tool_id {
+                    meta.extra.insert("tool_id".into(), Value::String(tool_id));
+                }
+                if let Some(tool_name) = tool_name {
+                    meta.extra
+                        .insert("tool_name".into(), Value::String(tool_name));
+                }
+                if let Some(tool_input) = tool_input {
+                    meta.extra.insert("tool_input".into(), tool_input);
+                }
+                if let Some(tool_output) = opencode_tool_output(&obj) {
+                    meta.extra.insert("tool_response".into(), tool_output);
+                }
+                if let Some(status) = opencode_tool_status(&obj) {
+                    meta.extra.insert("status".into(), Value::String(status));
+                }
+                if let Some(error) = opencode_tool_error(&obj) {
+                    meta.extra.insert("error".into(), error);
+                }
                 self.sink.on_after_tool(&meta);
                 Ok(None)
             }
@@ -349,6 +422,7 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
 mod tests {
     use super::*;
     use crate::stream::parser::{EventMeta, NullSink, StreamEventSink};
+    use crate::stream::test_support::{ToolContractExpectation, assert_tool_event_contract};
 
     #[derive(Default)]
     struct RecordingSink {
@@ -358,6 +432,7 @@ mod tests {
         step_finish: usize,
         turn_complete: usize,
         before_tool: Vec<EventMeta>,
+        after_tool: Vec<EventMeta>,
     }
 
     impl StreamEventSink for RecordingSink {
@@ -383,6 +458,10 @@ mod tests {
 
         fn on_before_tool(&mut self, meta: &EventMeta) {
             self.before_tool.push(meta.clone());
+        }
+
+        fn on_after_tool(&mut self, meta: &EventMeta) {
+            self.after_tool.push(meta.clone());
         }
     }
 
@@ -505,6 +584,37 @@ mod tests {
         assert_eq!(sink.before_tool.len(), 2);
         assert_eq!(sink.before_tool[0].extra["tool_name"], "search");
         assert_eq!(sink.before_tool[1].extra["tool_name"], "write_file");
+    }
+
+    #[test]
+    fn tool_events_preserve_opencode_parameters_and_results() {
+        let mut parser = OpenCodeStreamParser::new(RecordingSink::default(), None);
+
+        parser
+            .feed_line(
+                r#"{"type":"tool_start","part":{"id":"tool-1","tool_name":"bash","input":{"command":"git status"}}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_end","part":{"tool_use_id":"tool-1","status":"success","content":"working tree clean"}}"#,
+            )
+            .unwrap();
+
+        let sink = parser.sink;
+        assert_eq!(sink.before_tool.len(), 1);
+        assert_eq!(sink.after_tool.len(), 1);
+        assert_tool_event_contract(
+            &sink.before_tool[0],
+            Some(&sink.after_tool[0]),
+            ToolContractExpectation {
+                name: "bash",
+                id: Some("tool-1"),
+                input_field: Some(("command", "git status")),
+                status: Some("success"),
+                response: Some(Value::String("working tree clean".into())),
+            },
+        );
     }
 
     #[test]
