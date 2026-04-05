@@ -1,9 +1,16 @@
+use std::borrow::Cow;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
-use tracing::{Span, info_span};
+use chrono::Local;
+use tracing::{Event, Span, Subscriber, info_span};
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::fmt::format::{
+    FmtSpan, FormatEvent, FormatFields, Writer,
+};
+use tracing_subscriber::fmt::{FmtContext, FormattedFields};
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::registry::LookupSpan;
 
 use crate::args::{Cli, Commands, DebugLevel};
 
@@ -18,15 +25,19 @@ pub(crate) fn init_tracing(debug_level: Option<DebugLevel>) {
         FmtSpan::NONE
     };
 
+    let cwd = std::env::current_dir().ok();
+    let source_base_dir = cwd
+        .as_deref()
+        .and_then(find_repo_root)
+        .or(cwd.clone());
+
     tracing_subscriber::registry()
         .with(build_env_filter(rust_log.as_deref(), debug_level))
         .with(
             tracing_subscriber::fmt::layer()
+                .with_span_events(span_events)
+                .event_format(RelativePathEventFormat::new(source_base_dir))
                 .with_writer(std::io::stderr)
-                .with_target(true)
-                .with_file(true)
-                .with_line_number(true)
-                .with_span_events(span_events),
         )
         .init();
 }
@@ -53,7 +64,6 @@ pub(crate) fn root_span(cli: &Cli) -> Span {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let repo_root = find_repo_root(&cwd);
     let command = cli.command.as_ref().map(command_name).unwrap_or("help");
-    let subcommand = cli.command.as_ref().map(subcommand_name).unwrap_or("help");
     let cwd_display = cwd.display().to_string();
     let repo_root_display = repo_root
         .as_ref()
@@ -73,12 +83,11 @@ pub(crate) fn root_span(cli: &Cli) -> Span {
         ) => info_span!(
             "cli_invocation",
             command,
-            subcommand,
+            subcommand = provider_subcommand_name(cli.command.as_ref()).unwrap_or(command),
             plain = cli.plain,
             cwd = %cwd_display,
             repo_root = %repo_root_display,
             pid,
-            provider = subcommand,
             interactive = args.interactive,
             quiet = args.quiet,
             silent = args.silent,
@@ -88,7 +97,6 @@ pub(crate) fn root_span(cli: &Cli) -> Span {
         _ => info_span!(
             "cli_invocation",
             command,
-            subcommand,
             plain = cli.plain,
             cwd = %cwd_display,
             repo_root = %repo_root_display,
@@ -124,16 +132,16 @@ fn command_name(command: &Commands) -> &'static str {
     }
 }
 
-fn subcommand_name(command: &Commands) -> &'static str {
-    match command {
-        Commands::Claude(_) => "claude",
-        Commands::Codex(_) => "codex",
-        Commands::Gemini(_) => "gemini",
-        Commands::Kimi(_) => "kimi",
-        Commands::Qwen(_) => "qwen",
-        Commands::Opencode(_) => "opencode",
-        Commands::Goose(_) => "goose",
-        _ => command_name(command),
+fn provider_subcommand_name(command: Option<&Commands>) -> Option<&'static str> {
+    match command? {
+        Commands::Claude(_) => Some("claude"),
+        Commands::Codex(_) => Some("codex"),
+        Commands::Gemini(_) => Some("gemini"),
+        Commands::Kimi(_) => Some("kimi"),
+        Commands::Qwen(_) => Some("qwen"),
+        Commands::Opencode(_) => Some("opencode"),
+        Commands::Goose(_) => Some("goose"),
+        _ => None,
     }
 }
 
@@ -146,4 +154,129 @@ fn find_repo_root(start: &Path) -> Option<PathBuf> {
         current = path.parent();
     }
     None
+}
+
+fn shorten_source_path<'a>(file: &'a str, base_dir: Option<&Path>) -> Cow<'a, str> {
+    let path = Path::new(file);
+    if !path.is_absolute() {
+        return Cow::Borrowed(file);
+    }
+
+    if let Some(base_dir) = base_dir
+        && let Ok(relative) = path.strip_prefix(base_dir)
+    {
+        return Cow::Owned(relative.display().to_string());
+    }
+
+    Cow::Borrowed(file)
+}
+
+struct RelativePathEventFormat {
+    base_dir: Option<PathBuf>,
+}
+
+impl RelativePathEventFormat {
+    fn new(base_dir: Option<PathBuf>) -> Self {
+        Self { base_dir }
+    }
+}
+
+impl<S, N> FormatEvent<S, N> for RelativePathEventFormat
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+    N: for<'writer> FormatFields<'writer> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> fmt::Result {
+        write!(writer, "{}", Local::now().format("%H:%M:%S"))?;
+        write!(writer, " ")?;
+
+        let meta = event.metadata();
+        write!(writer, "{} {}:", meta.level(), meta.target())?;
+
+        if let Some(file) = meta.file() {
+            let file = shorten_source_path(file, self.base_dir.as_deref());
+            write!(writer, " {}", file)?;
+            if let Some(line) = meta.line() {
+                write!(writer, ":{line}")?;
+            }
+            write!(writer, ":")?;
+        }
+
+        if let Some(scope) = ctx.event_scope() {
+            for span in scope.from_root() {
+                write!(writer, " {}", span.metadata().name())?;
+                let extensions = span.extensions();
+                if let Some(fields) = extensions.get::<FormattedFields<N>>()
+                    && !fields.is_empty()
+                {
+                    write!(writer, "{{{fields}}}")?;
+                }
+                write!(writer, ":")?;
+            }
+        }
+
+        write!(writer, " ")?;
+        ctx.field_format().format_fields(writer.by_ref(), event)?;
+        writeln!(writer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_wrapper_args() -> crate::commands::wrap::WrapperArgs {
+        crate::commands::wrap::WrapperArgs {
+            help: false,
+            yolo: false,
+            include: Vec::new(),
+            interactive: false,
+            model: None,
+            output: None,
+            system_prompt: None,
+            timeout: None,
+            dry_run: false,
+            quiet: false,
+            silent: false,
+            operation: None,
+            sandbox: false,
+            repo: false,
+            mcp: false,
+            mcp_use: Vec::new(),
+            strict: false,
+            passthrough: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn provider_subcommand_only_exists_for_wrapper_commands() {
+        assert_eq!(provider_subcommand_name(Some(&Commands::Providers)), None);
+        assert_eq!(
+            provider_subcommand_name(Some(&Commands::Codex(minimal_wrapper_args()))),
+            Some("codex")
+        );
+    }
+
+    #[test]
+    fn shorten_source_path_strips_repo_root_prefix() {
+        let shortened = shorten_source_path(
+            "/repo/claudine/cli/src/telemetry.rs",
+            Some(Path::new("/repo")),
+        );
+        assert_eq!(shortened, "claudine/cli/src/telemetry.rs");
+    }
+
+    #[test]
+    fn shorten_source_path_keeps_relative_paths() {
+        let shortened = shorten_source_path(
+            "claudine/cli/src/telemetry.rs",
+            Some(Path::new("/repo")),
+        );
+        assert_eq!(shortened, "claudine/cli/src/telemetry.rs");
+    }
 }
