@@ -442,16 +442,15 @@ impl LiveStreamSink {
 
     fn merge_state(&mut self, meta: &StreamEventMeta) {
         if let Some(session_id) = string_from_extra(&meta.extra, &["session_id", "thread_id", "id"])
+            && self.session_id.as_deref() != Some(session_id.as_str())
         {
-            if self.session_id.as_deref() != Some(session_id.as_str()) {
-                tracing::info!(
-                    provider = %self.provider,
-                    session_id = %session_id,
-                    model = self.model.as_deref().unwrap_or(""),
-                    "identified wrapped provider session"
-                );
-                self.session_id = Some(session_id);
-            }
+            tracing::info!(
+                provider = %self.provider,
+                session_id = %session_id,
+                model = self.model.as_deref().unwrap_or(""),
+                "identified wrapped provider session"
+            );
+            self.session_id = Some(session_id);
         }
         if let Some(model) = string_from_extra(&meta.extra, &["model"]) {
             self.model = Some(model);

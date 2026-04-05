@@ -179,6 +179,7 @@ pub(crate) fn build_provider_header(provider_name: &str, resource: LinkableResou
     format!("<b>{provider_name} [ user:</b> {user_display}<b>, repo:</b> {repo_display} ]")
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_footer(
     term: &Terminal,
     has_exceptions: bool,

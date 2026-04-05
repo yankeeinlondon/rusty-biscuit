@@ -15,7 +15,7 @@ use args::{Cli, Commands};
 
 fn wrapper_command(
     command: Commands,
-) -> std::result::Result<(Provider, commands::wrap::WrapperArgs), Commands> {
+) -> std::result::Result<(Provider, commands::wrap::WrapperArgs), Box<Commands>> {
     match command {
         Commands::Claude(args) => Ok((Provider::Claude, args)),
         Commands::Codex(args) => Ok((Provider::Codex, args)),
@@ -24,7 +24,7 @@ fn wrapper_command(
         Commands::Qwen(args) => Ok((Provider::QwenCode, args)),
         Commands::Opencode(args) => Ok((Provider::OpenCode, args)),
         Commands::Goose(args) => Ok((Provider::Goose, args)),
-        other => Err(other),
+        other => Err(Box::new(other)),
     }
 }
 
@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
         Ok((provider, args)) => {
             return commands::wrap::run_provider_wrapper(provider, args, cli.verbose);
         }
-        Err(command) => command,
+        Err(command) => *command,
     };
 
     match command {

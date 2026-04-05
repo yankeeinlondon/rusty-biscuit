@@ -47,13 +47,14 @@ fn create_claudine_monorepo(workspace: &Path) -> Option<(PathBuf, PathBuf, PathB
     let lib_dir = repo_root.join("claudine/lib");
     let bin_dir = repo_root.join("bin");
 
-    fs::create_dir_all(&launch_dir).unwrap();
-    fs::create_dir_all(&lib_dir).unwrap();
+    fs::create_dir_all(launch_dir.join("src")).unwrap();
+    fs::create_dir_all(lib_dir.join("src")).unwrap();
     fs::create_dir_all(&bin_dir).unwrap();
 
     write_file(
         &repo_root.join("Cargo.toml"),
         r#"[workspace]
+resolver = "2"
 members = ["claudine/lib", "claudine/cli"]
 "#,
     );
@@ -65,6 +66,7 @@ version = "0.1.0"
 edition = "2024"
 "#,
     );
+    write_file(&lib_dir.join("src/lib.rs"), "");
     write_file(
         &launch_dir.join("Cargo.toml"),
         r#"[package]
@@ -73,6 +75,7 @@ version = "0.1.0"
 edition = "2024"
 "#,
     );
+    write_file(&launch_dir.join("src/main.rs"), "fn main() {}\n");
 
     if !init_git_repo(&repo_root) {
         return None;
