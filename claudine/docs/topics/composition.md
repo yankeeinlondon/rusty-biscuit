@@ -134,6 +134,7 @@ handle_file_exists:
 ```
 
 Four handler actions are available:
+
 - **retry** — re-run the same prompt with optional modifications
 - **resume** — continue from the previous session (provider must support session resume)
 - **redirect** — switch to a different source document
