@@ -253,13 +253,7 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<InlineCssBlock>> {
-        let refs = self.composed_references(options)?;
-        Ok(refs
-            .records
-            .into_iter()
-            .filter(|r| r.kind == ReferenceKind::InlineCss)
-            .map(InlineCssBlock::from)
-            .collect())
+        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::InlineCss))
     }
 
     /// Returns CSS `@import` references across the composed document graph.
@@ -267,13 +261,7 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<ImportReference>> {
-        let refs = self.composed_references(options)?;
-        Ok(refs
-            .records
-            .into_iter()
-            .filter(|r| r.kind == ReferenceKind::CssImport)
-            .map(ImportReference::from)
-            .collect())
+        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::CssImport))
     }
 
     /// Returns inline script blocks across the composed document graph.
@@ -281,13 +269,7 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<InlineScriptBlock>> {
-        let refs = self.composed_references(options)?;
-        Ok(refs
-            .records
-            .into_iter()
-            .filter(|r| r.kind == ReferenceKind::InlineScript)
-            .map(InlineScriptBlock::from)
-            .collect())
+        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::InlineScript))
     }
 
     /// Returns `<script src="...">` import references across the composed document graph.
@@ -295,13 +277,7 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<ImportReference>> {
-        let refs = self.composed_references(options)?;
-        Ok(refs
-            .records
-            .into_iter()
-            .filter(|r| r.kind == ReferenceKind::ScriptImport)
-            .map(ImportReference::from)
-            .collect())
+        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::ScriptImport))
     }
 
     /// Returns font import references across the composed document graph.
@@ -309,13 +285,7 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<ImportReference>> {
-        let refs = self.composed_references(options)?;
-        Ok(refs
-            .records
-            .into_iter()
-            .filter(|r| r.kind == ReferenceKind::FontImport)
-            .map(ImportReference::from)
-            .collect())
+        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::FontImport))
     }
 
     // ── Phase 2: Extended extraction (local, single-document) ──────
@@ -452,14 +422,9 @@ impl Markdown {
 
 /// Converts `BlockOptions` to `TransclusionRefOptions`.
 fn block_options_to_ref_options(opts: &BlockOptions) -> TransclusionRefOptions {
-    use crate::markdown::compose::transclusion::ReplaceOption;
     TransclusionRefOptions {
         when_expr: opts.when_expr.clone(),
-        replace: match &opts.replace {
-            ReplaceOption::InheritDefault => None,
-            ReplaceOption::ParentWins => Some("parent-wins".into()),
-            ReplaceOption::OneOff(map) => Some(serde_json::to_string(map).unwrap_or_default()),
-        },
+        replace: opts.replace.clone(),
         quotation: opts.quotation.clone(),
         disclosure: opts.disclosure.clone(),
         exclude: opts.exclude.clone(),
