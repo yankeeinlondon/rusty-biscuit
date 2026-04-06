@@ -36,6 +36,7 @@ When no explicit flags are given, Claudine searches for `system-prompt.md` in pr
 
 ## Provider-Specific Application
 Each provider translates the prepared system prompt into provider-specific CLI arguments and env vars via the `apply_system_prompt()` on the `WrapperProfile`:
+
 ```rust
 fn apply_system_prompt(
     &self,
@@ -48,6 +49,7 @@ fn apply_system_prompt(
 The default implementation returns a warning. Providers that support it override the method.
 
 ### Provider Support Matrix
+
 | Provider    | Append | Replace | Strategy                                                              |
 |-------------|--------|---------|----------------------------------------------------------------------|
 | Claude Code | Yes    | Yes     | Native CLI flags (`--append-system-prompt`, `--system-prompt`)             |
@@ -57,6 +59,7 @@ The default implementation returns a warning. Providers that support it override
 | Kimi Code   | No     | Yes     | Replace: temp agent YAML + `--agent-file`. Append: warn + skip     |
 | OpenCode    | Yes    | Yes     | Append: temp file + `OPENCODE_CONFIG_CONTENT`. Replace: `--system` |
 | Qwen CLI   | Yes    | No      | Append: ephemeral home + `QWEN.md`. Replace: warn + skip                |
+
 ### Ephemeral Overlay Home
 For providers that need HOME override (Codex, Gemini, Qwen append), Claudine creates a temporary home directory with the provider config overlay file. If the user already has an overlay file (e.g. `AGENTS.override.md`), its existing content is preserved and the Claudine prompt is appended after it.
 
@@ -65,6 +68,7 @@ Temp files and temp directories created during system prompt application must ke
 
 ## Agent Capability Model
 Each agent descriptor in `claudine/lib/src/agents/` declares a `SystemPromptCapabilities` struct:
+
 ```rust
 pub struct SystemPromptCapabilities {
     pub supplement_sources: Vec<&'static str>,
@@ -73,10 +77,12 @@ pub struct SystemPromptCapabilities {
     pub memory_files: Vec<&'static str>,
 }
 ```
+
 ## Harness Integration
 The system prompt capability model is used at runtime by the harness to locate provider-specific memory files.
 ### Memory File Discovery
 `find_wrapper_harness_source()` searches for the first existing non-home memory file from the agent's `system_prompt.memory_files` list:
+
 1. Maps the provider to its `AgentId`
 2. Reads `agent.capabilities().runtime.system_prompt.memory_files`
 3. Filters out home-relative paths (those starting with `~`)

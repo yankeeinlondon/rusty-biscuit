@@ -2,10 +2,10 @@ kind: sequence
 template:
     desc: "{{name}} (_site: {{site}}, repo: {{ repo || 'n/a' }}_)"
 list:
-    # - name: Claude Code
-    #   file: ./claude.md
-    #   site: https://code.claude.com/docs/en/overview
-    #   repo:
+    - name: Claude Code
+      file: ./claude.md
+      site: https://code.claude.com/docs/en/overview
+      repo:
     - name: Codex CLI
       file: ./codex.md
       site: https://developers.openai.com/codex/cli
