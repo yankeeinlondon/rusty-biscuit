@@ -69,6 +69,7 @@ pub enum RepoAction {
     StagedSourceCode(FileListArgs),
     UnstagedSourceCode(FileListArgs),
     DirtyFiles(FileListArgs),
+    HasMergeConflict,
 }
 
 // ---------------------------------------------------------------------------
@@ -205,10 +206,8 @@ macro_rules! define_program_action {
 
             <$program_enum>::iter()
                 .flat_map(|p| {
-                    let mut candidates = vec![
-                        CompletionCandidate::new(p.binary_name())
-                            .help(Some(p.description().into())),
-                    ];
+                    let mut candidates = vec![CompletionCandidate::new(p.binary_name())
+                        .help(Some(p.description().into()))];
                     let snake = p.to_string();
                     if snake != p.binary_name() {
                         candidates.push(
@@ -616,6 +615,9 @@ pub enum RepoSubcommand {
     IsCurrentPackageAreaDirty,
     /// Exit 0 if the current package area has source code changes, exit 1 otherwise
     PackageAreaHasSourceCodeChanges,
+    /// Exit 0 if merge conflicts are detected, exit 1 otherwise
+    #[command(name = "has-merge-conflict")]
+    HasMergeConflict,
 }
 
 impl Commands {
@@ -932,6 +934,7 @@ impl Commands {
                 Some(RepoSubcommand::PackageAreaHasSourceCodeChanges) => {
                     RepoAction::PackageAreaHasSourceCodeChanges
                 }
+                Some(RepoSubcommand::HasMergeConflict) => RepoAction::HasMergeConflict,
                 Some(RepoSubcommand::DirtySourceCode(args)) => {
                     RepoAction::DirtySourceCode(args.clone())
                 }
