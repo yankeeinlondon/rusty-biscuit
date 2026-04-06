@@ -5,6 +5,16 @@ success:
 error:
     speak: "Error during research of {{state.name}}"
 operation: "research"
+skip_when:
+    file_exists:
+        file: "{{state.file}}"
+        say: "The research on non-interactive sessions for {{state.name}} is already in place. Skipping."
+        stderr: "The research on non-interactive sessions for <b>{{state.name}}</b> is already in place. Skipping."
+post_checks:
+    file_exists:
+        name: "{{state.file}}"
+        say: "The research on {{state.name}} was completed but the file is missing!"
+        stderr: ""
 ---
 
 # Non-Interactive Sessions with Agents in Claudine
