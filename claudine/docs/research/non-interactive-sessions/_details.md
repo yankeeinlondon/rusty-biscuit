@@ -14,7 +14,7 @@ post_checks:
     file_exists:
         name: "{{state.file}}"
         say: "The research on {{state.name}} was completed but the file is missing!"
-        stderr: ""
+        stderr: "The research on {{state.name}} was completed but the file is missing! Expected results to be saved to <b>{{state.file}}</b>."
 ---
 
 # Non-Interactive Sessions with Agents in Claudine
