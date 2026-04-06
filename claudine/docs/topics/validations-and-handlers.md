@@ -30,14 +30,11 @@ Without validations, those concerns end up either undocumented or duplicated in 
 
 The harness is intentionally scoped to the two canonical composition commands:
 
-1. `claudine compose --<provider> <file>` — chained prompt pipelines
-2. `claudine inline-compose --<provider> <file>` — deterministic document rewrite
+1. `claudine compose <file>` — converts the referenced file into an Agent prompt
+2. `claudine inline-compose <file>` — converts the referenced file's `prompt` property into an Agent prompt designed to update the body of the same file
+3. `claudine sequence <file>` - a **sequence** builds on top of the `compose` functionality by allowing a define set of "state" be executed serially to solve a multi-prompt based solution
 
-It also activates when a wrapper passthrough prompt resolves to a Markdown file with harness frontmatter properties (e.g., `claudine claude prompt.md` where `prompt.md` contains `pre_checks` or `post_checks`).
-
-This is a deliberate boundary. These flows already have a resolved source file, composed frontmatter, and a clear place to store validations and handler rules. Raw positional prompts do not.
-
-That means the feature is best understood as "document-driven execution" rather than "every Claudine run now has a harness."
+All three of these primitives provide a "document driven execution" concept which allows the Markdown document to provide all the instructions necessary to execute one or more agentic processes while also allowing each document to define "what done is" in such a way that the document can not only self-validate but also try to recover from any failures.
 
 ## Think In Three Phases
 
@@ -45,11 +42,87 @@ Claudine evaluates a harnessed run in three phases.
 
 ### Before The Provider Starts
 
-Before the pre-check phase, Claudine runs a pre-flight scan that discovers and approves all shell commands that might be executed during the session — including those in pre-checks, post-checks, and handlers. See [Pre-Flight Shell Approval](pre-flight-checks.md) for details.
+The first stage of the process is intended to determine if the process _is ready_ to start.
 
-`pre_checks` answer a simple question: should this run even start?
+```mermaid title="Pre Validation"
+flowchart LR
+Markdown@{shape: "doc"}
+Claudine([Claudine])
+Preflight
+PreValid(PRE Validation Stage)
 
-This is where you check for prerequisites such as files, directories, clean repo state, or shell-based setup checks. A pre-check failure is treated as a real failure event, not as a warning. That matters because handlers can recover from pre-check failures just like they recover from agent failures or post-check failures.
+Claudine -->|read| Markdown
+Failure@{}
+Ok@{}
+Skip@{}
+
+Markdown -->|authorize| Preflight
+Preflight -->|validate| PreValid
+
+Preflight -->|"not auth | broken links"| Failure
+
+PreValid --> Ok
+PreValid --> Skip
+PreValid --> Failure
+```
+
+When Claudine is provided a document to _compose_, it's first step is to run through a two-step process to ensure we're ready to start the agentic harness:
+
+1. **Preflight Authorization**
+
+    We will evaluate not only the _referenced file_ but the entire graph of files which will be involved in the "composition". This process will focus on the following things:
+
+   - ensure all image references, file hyperlinks, and [transclusion]() references are valid
+   - if any of these are broken then **Claudine** will immediately exit with a well formed message about what needs to be fixed
+   - then we evaluate all of the files across the document graph for [shell expansion](pre-flight-checks.md) directives
+   - every **shell expansion** requires that the user **explicitly** include a rule in their shell expansion _whitelist_ to allow it's execution
+       - this _whitelist_ is persisted so that over time most scripts will become pre-approved
+   - if all shell commands in the graph are already included in the _whitelist_ then execution immediately proceeds
+   - but if there are any shell commands which have not been approved we will move into an interactive process of confirming with the caller if they would like to approve the outstanding shell commands.
+   - if there is a command that the user is not comfortable approving, the process will exit in failure
+
+1. **Pre Validation**
+
+    Once the preflight checks have successfully completed, we are ready to start the **pre-validation** process:
+
+    - a document uses the `pre_checks` Frontmatter property to define the rules they want to put in place to validate that the agentic process be allowed to start
+    - if there is no `pre_checks` property then the document automatically passes
+    - configuring the [Pre Validation](./pre-validation.md) process involves adding one or more rules in place that can resolve in one of three states:
+        - `pass` - _the validation passes_
+        - `skip` - _the validation expresses that it's utility is not needed and can be safely skipped_
+        - `fail` - _the process is not ready to start_
+
+```mermaid
+flowchart LR
+V1@{ label: "validation" }
+V2@{ label: "validation" }
+VX@{ label: "..."}
+
+Pass@{ shape: "circle" }
+Skip@{ shape: "circle" }
+Fail@{ shape: "circle" }
+
+
+V1 --> V2 --> VX
+
+V1 ==> Pass
+V1 --> Skip
+V1 --> Fail
+
+V2 ==> Pass
+V2 --> Skip
+V2 --> Fail
+
+VX ==> Pass -->|start| continue@{shape: "circle", label: " "}
+VX --> Skip
+VX --> Fail
+
+style Pass fill:#004100,stroke:#004100,color:#ffffff
+style Skip fill:#FFA900,stroke:#FFA900,color:#ffffff
+style Fail fill:#7B0C00,stroke:#7B0C00,color:#ffffff
+```
+
+If all validations pass then we're ready to start.
 
 ### While The Provider Is Running
 
