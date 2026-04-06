@@ -33,16 +33,19 @@ The maintainers have indicated this should ideally be solved by the Markdown ext
 **How it works:** Install the `ocmrz/vscode-yaml` fork, which extends `yaml-language-server` to also activate for Markdown-family files. It extracts the frontmatter region and applies standard YAML schema validation, completion, and hover to it.
 
 **Pros:**
+
 - Near-zero configuration — reuses standard `yaml.schemas` settings
 - Full autocomplete, hover, validation, and diagnostics
 - Auto-rebases on upstream
 
 **Cons:**
+
 - VSCode only (not a language server change, so Neovim gets nothing)
 - Requires installing a third-party forked `.vsix`
 - May drift from upstream if the fork is abandoned
 
 **VSCode setup:**
+
 1. Download the `.vsix` from [ocmrz/vscode-yaml releases](https://github.com/ocmrz/vscode-yaml/releases)
 2. Install: `code --install-extension vscode-yaml-*.vsix`
 3. Configure `yaml.schemas` in `.vscode/settings.json`:
@@ -66,17 +69,20 @@ Two sub-approaches:
 #### B1: Language Services (recommended for cross-editor)
 
 Embed the YAML language service library directly in a custom language server. The server:
+
 1. Parses Markdown to detect frontmatter bounds (lines between opening and closing `---`)
 2. Creates a virtual YAML document from the frontmatter
 3. Delegates completion, hover, and validation to the embedded YAML language service
 4. Maps diagnostics/positions back to the original Markdown document offsets
 
 **Pros:**
+
 - Works in any LSP-compliant editor (Neovim, Helix, etc.) since it's a standalone language server
 - Full control over the user experience
 - Can be published as its own extension and LSP server
 
 **Cons:**
+
 - More development effort
 - Must keep the embedded YAML language service updated
 
@@ -85,10 +91,12 @@ Embed the YAML language service library directly in a custom language server. Th
 Use VSCode's `middleware` API to intercept LSP requests for Markdown files and forward frontmatter-region requests to the installed YAML extension.
 
 **Pros:**
+
 - Less code to maintain
 - Automatically benefits from YAML extension updates
 
 **Cons:**
+
 - VSCode-specific — does not help Neovim users
 - Cannot pull diagnostics (VSCode API limitation)
 
@@ -97,11 +105,13 @@ Use VSCode's `middleware` API to intercept LSP requests for Markdown files and f
 **How it works:** Use the `estruyf.front-matter` extension, which added JSON Schema validation in v10.10.0. Define content types with associated schemas in the extension's configuration.
 
 **Pros:**
+
 - Purpose-built for frontmatter editing
 - Includes tag management, snippets, preview panel
 - Now has schema validation built in
 
 **Cons:**
+
 - VSCode only
 - Heavier extension with a full CMS panel — may be overkill if you only want schema validation
 - Schema configuration is extension-specific, not standard `yaml.schemas`
@@ -111,11 +121,13 @@ Use VSCode's `middleware` API to intercept LSP requests for Markdown files and f
 **How it works:** Use `remark-lint-frontmatter-schema` as part of a `remark` lint pipeline. Can run in CI, as a pre-commit hook, or via an editor integration.
 
 **Pros:**
+
 - Works in any editor that can display lint output (both VSCode and Neovim)
 - Can enforce validation in CI
 - Standard JSON Schema input
 
 **Cons:**
+
 - No autocomplete or hover — only validation diagnostics
 - Requires Node.js toolchain and remark setup
 - Configuration is more involved
@@ -123,19 +135,23 @@ Use VSCode's `middleware` API to intercept LSP requests for Markdown files and f
 ### Approach E: Custom Neovim Setup (Neovim-only)
 
 **How it works:** Write a Neovim Lua plugin or configuration that:
+
 1. Detects when a Markdown buffer has frontmatter
 2. Extracts the frontmatter YAML into a temporary virtual buffer or file
 3. Triggers `yaml-language-server` against that virtual content
 4. Maps diagnostics back to the original buffer
 
 Alternatively, use `nvim-lspconfig` to configure yamlls with a custom `on_attach` that:
+
 - Overrides `textDocument/completion` to extract frontmatter and delegate to yamlls
 - Uses `vim.diagnostic` to display schema validation errors
 
 **Pros:**
+
 - Tailored Neovim experience
 
 **Cons:**
+
 - Significant custom code
 - No autocomplete without deep LSP hacking
 - Must be maintained alongside Neovim updates
@@ -176,6 +192,7 @@ Regardless of approach, the schema itself is a standard JSON Schema (Draft 7) do
 ```
 
 Schema files can be:
+
 - Local paths (e.g., `./schemas/frontmatter.json`) — committed to the repo
 - Remote URLs (e.g., hosted on a website or raw GitHub)
 - Registered with [SchemaStore](https://www.schemastore.org/) for automatic discovery
@@ -196,6 +213,7 @@ This gives VSCode users full autocomplete/validation and Neovim users at least v
 ### Long Term (proper solution)
 
 Build a standalone Markdown Frontmatter Language Server that:
+
 1. Is a standard LSP server (works in any editor)
 2. Extracts YAML frontmatter from Markdown
 3. Delegates to `yaml-language-server` internals for completion, hover, validation
@@ -203,6 +221,7 @@ Build a standalone Markdown Frontmatter Language Server that:
 5. Reads schema configuration from a standard location (e.g., `.vscode/settings.json` `yaml.schemas`, or a `.frontmatter-schema` file)
 
 This is Approach B1 above. It would provide:
+
 - **VSCode**: Full schema support via an extension wrapping the language server
 - **Neovim**: Full schema support via `nvim-lspconfig` pointing to the language server binary
 - **Other editors**: Any LSP-compliant editor benefits

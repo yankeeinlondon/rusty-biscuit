@@ -1,3 +1,5 @@
+In building the Protect service, we will make heavy use of **regexp** patterns to block dangerous commands or prompt injections attacks.
+
 ## Dangerous RegExp Patterns for Tool Calling
 
 ### 1. Mass File Deletion
@@ -264,11 +266,6 @@ Regex is a "Swiss cheese" defense for MCP. The most effective way to protect an 
 2. **Writer Agent:** A second, isolated agent receives the *processed summary* from the first and only has permission to call `write_file` or `git_commit`.
 3. **Human-In-The-Loop (HITL):** For any tool call involving a "Write" or "Delete" operation, your Rust hook should pause execution and wait for a `stdin` confirmation or a Signal.
 
-
-
-Would you like a sample of how to implement a **Human-in-the-loop** gate for your Rust CLI agent?
-
-
 ## Contextual Awareness
 
 If you are building this for an AI Agent, **Regex alone will eventually fail** because an Agent can write a Python script that performs these actions via a library (like `shutil.rmtree('/')`) instead of a shell command. 
@@ -280,8 +277,6 @@ To be truly safe, your "hook" system should:
 3. **Human-in-the-loop:** Any command matching these patterns should require a manual "Yes/No" from a human supervisor.
 
 Are you planning to implement these in a specific language, or would you like to see how to wrap these into a Python-based execution guard?
-
-
 
 ## Implementation Tips for your RegEx
 When converting these to actual code, consider the following:
