@@ -1,5 +1,10 @@
 ---
-sequence: "@claudine/providers.yaml"
+sequence: "@claudine/docs/providers.yaml"
+success: 
+    speak: "Completed research for {{state.name}}"
+error:
+    speak: "Error during research of {{state.name}}"
+operation: "research"
 ---
 
 # Non-Interactive Sessions with Agents in Claudine
@@ -124,3 +129,4 @@ You will create/update the Markdown file "{{state.file}}" with the **research** 
         - if you came into an existing document which you updated then leave the `created` property 'as is'
 
 > **IMPORTANT:** keep the caller/user informed by providing updates to your progress whenever possible
+> **IMPORTANT:** the final output to "{{state.file}}" should be idiomatic CommonMark + GFM Markdown. Tables are Markdown Tables. Links are Markdown Links. If you want to provide a data visualization then use Mermaid code blocks.
