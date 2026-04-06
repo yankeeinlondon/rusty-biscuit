@@ -189,6 +189,7 @@ pub(crate) fn execute_composition_request_inner(
             detail_requested,
             request.repo,
             compose_display.as_ref(),
+            request.sequence,
             request.operation.as_deref(),
             None, // no inline prompt text for compose
             Some(&compose_source_hint),

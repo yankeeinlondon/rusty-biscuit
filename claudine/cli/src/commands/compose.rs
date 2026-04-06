@@ -285,6 +285,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         silent: shared.silent,
         env_overrides: std::collections::BTreeMap::new(),
         shared_approval_cache: None,
+        sequence: false,
     };
 
     execute_composition_request(request, verbose)
@@ -391,6 +392,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         silent: shared.silent,
         env_overrides: std::collections::BTreeMap::new(),
         shared_approval_cache: None,
+        sequence: false,
     };
 
     execute_composition_request(request, verbose)

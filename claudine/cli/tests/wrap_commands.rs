@@ -352,6 +352,7 @@ exit 0
         .env("HOME", &fake_home)
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
+        .env("TERM", "dumb")
         .env("TERM_WIDTH", "80")
         .env("OPENAI_API_KEY", "keep")
         .env("INTERNAL_TOKEN", "remove")

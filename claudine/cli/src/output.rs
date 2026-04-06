@@ -5,7 +5,7 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
-use claudine::badges::{COMPOSE, INLINE_COMPOSE, INTERACTIVE, REPO_FLAG, VERBOSE, YOLO};
+use claudine::badges::{COMPOSE, INLINE_COMPOSE, INTERACTIVE, REPO_FLAG, SEQUENCE, VERBOSE, YOLO};
 use claudine::events::Provider;
 use std::path::Path;
 
@@ -33,6 +33,7 @@ pub(crate) fn log_wrapper_header(
     detail_requested: bool,
     repo_requested: bool,
     compose_display: Option<&ComposeDisplay>,
+    sequence: bool,
     operation: Option<&str>,
     prompt_display: Option<&str>,
     compose_source_hint: Option<&str>,
@@ -66,6 +67,10 @@ pub(crate) fn log_wrapper_header(
         Some(ComposeDisplay::Compose) => header_parts.push(COMPOSE.to_string()),
         Some(ComposeDisplay::InlineCompose) => header_parts.push(INLINE_COMPOSE.to_string()),
         None => {}
+    }
+
+    if sequence {
+        header_parts.push(SEQUENCE.to_string());
     }
 
     if repo_requested {

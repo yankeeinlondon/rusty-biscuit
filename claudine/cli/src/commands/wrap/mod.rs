@@ -2,6 +2,7 @@ pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod profile;
 pub(crate) mod repo_home;
+pub(crate) mod system_prompt;
 
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
@@ -828,9 +829,23 @@ pub struct WrapperArgs {
     #[arg(short = 'o', long = "output", value_name = "FORMAT")]
     pub output: Option<String>,
 
-    /// Set or append a system prompt (string or file path).
-    #[arg(short = 's', long = "system-prompt", value_name = "PROMPT|FILE")]
-    pub system_prompt: Option<String>,
+    /// Append a system prompt from a file.
+    #[arg(
+        long = "append-system-prompt",
+        visible_alias = "asp",
+        value_name = "FILE",
+        conflicts_with = "replace_system_prompt",
+    )]
+    pub append_system_prompt: Option<String>,
+
+    /// Replace the provider's system prompt with contents from a file.
+    #[arg(
+        long = "replace-system-prompt",
+        visible_alias = "rsp",
+        value_name = "FILE",
+        conflicts_with = "append_system_prompt",
+    )]
+    pub replace_system_prompt: Option<String>,
 
     /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
     #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
@@ -1014,13 +1029,54 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         }
     }
 
-    // Universal --system-prompt flag
-    if let Some(ref prompt) = args.system_prompt {
-        let resolved = resolve_system_prompt(prompt)?;
-        if let Some(warn) = profile.apply_system_prompt(&mut child_args, &resolved) {
-            deferred_warnings.push(warn);
+    let sp_args = claudine::system_prompt::SystemPromptArgs {
+        append_file: args.append_system_prompt.clone(),
+        replace_file: args.replace_system_prompt.clone(),
+    };
+    let launch_context =
+        claudine::system_prompt::LaunchContext::from_cwd(&cwd).unwrap_or_else(|_| {
+            claudine::system_prompt::LaunchContext {
+                cwd: cwd.clone(),
+                repo_root: None,
+                package_area_root: None,
+                package_root: None,
+            }
+        });
+    let effective_sp = claudine::system_prompt::resolve_and_prepare(&sp_args, &launch_context)
+        .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+
+    let mut sp_artifacts: Vec<super::wrap::system_prompt::SystemPromptArtifact> = Vec::new();
+
+    match &effective_sp {
+        claudine::system_prompt::EffectiveSystemPrompt::None => {}
+        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source } => {
+            if !args.quiet && !args.silent {
+                log::info(&format!(
+                    "system prompt disabled by empty {}",
+                    super::wrap::system_prompt::describe_source(source),
+                ));
+            }
+        }
+        claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
+            let application = profile.apply_system_prompt(
+                prepared,
+                !non_interactive_requested,
+                &cwd,
+            )?;
+            child_args.extend(application.args);
+            env_overrides.extend(
+                application
+                    .env
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string_lossy().into(), v.to_string_lossy().into())),
+            );
+            sp_artifacts = application.artifacts;
+            for warn in application.warnings {
+                deferred_warnings.push(warn);
+            }
         }
     }
+    let _ = &sp_artifacts;
 
     // Universal --operation flag (clap-parsed or extracted from passthrough)
     let effective_operation = args.operation.clone().or(extracted.operation);
@@ -1261,6 +1317,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             detail_requested,
             repo_requested,
             None,
+            false, // not a sequence
             effective_operation.as_deref(),
             prompt_display.as_deref(),
             None, // no compose source hint for direct wrapper
@@ -3570,17 +3627,6 @@ fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWr
     }
 
     extracted
-}
-
-/// Resolve the `--system-prompt` value: if it looks like a file path and exists,
-/// read its contents; otherwise treat it as a literal prompt string.
-pub(crate) fn resolve_system_prompt(prompt_or_file: &str) -> Result<String> {
-    let path = std::path::Path::new(prompt_or_file);
-    if path.exists() && path.is_file() {
-        Ok(std::fs::read_to_string(path)?)
-    } else {
-        Ok(prompt_or_file.to_string())
-    }
 }
 
 #[cfg(test)]

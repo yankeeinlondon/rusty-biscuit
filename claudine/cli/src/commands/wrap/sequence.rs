@@ -3,6 +3,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
     self, CompositionExecutionRequest, CompositionMode, PrepareOptions, ResolvedCompositionSource,
@@ -32,10 +34,13 @@ pub(crate) fn execute_sequence(
     let total_steps = plan.steps.len();
 
     if !silent {
-        log::message(&format!(
-            "Sequence: {} step(s), fail_fast={}",
+        let term = log::terminal();
+        let status = Status::from_prose(format!(
+            "<b>Sequence:</b> <yellow>{}</yellow> step(s), <i>fail_fast</i> is set to <blue>{}</blue>",
             total_steps, effective_fail_fast
-        ));
+        ))
+        .state(StatusState::Info);
+        log::message(&status.render(&term));
     }
 
     let mut summary = SequenceRunSummary {
@@ -161,6 +166,7 @@ pub(crate) fn execute_sequence(
             prepared,
             explicit_provider: shared.explicit_provider(),
             excluded: shared.excluded(),
+            sequence: true,
             yolo: shared.yolo,
             include: shared.include.clone(),
             model: shared.model.clone(),
