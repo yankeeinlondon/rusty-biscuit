@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+use darkmatter::markdown::Markdown;
 
 /// Options for composition preparation.
 #[derive(Debug, Default)]
@@ -243,11 +243,9 @@ mod tests {
         let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
         assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
         assert!(prepared.prompt.contains("List three colors"));
-        assert!(
-            prepared
-                .prompt
-                .contains("Return the replacement Markdown body content only")
-        );
+        assert!(prepared
+            .prompt
+            .contains("Return the replacement Markdown body content only"));
 
         // Effective frontmatter should contain composed keys
         assert!(prepared.effective_frontmatter.is_object());
@@ -292,7 +290,7 @@ mod tests {
             &[
                 ("title", json!("Test")),
                 ("start", json!({"stderr": "Starting", "effect": "doorbell"})),
-                ("success", json!({"speak": "All done"})),
+                ("success", json!({"say": "All done"})),
             ],
             "Do the work.",
         );
@@ -328,16 +326,13 @@ mod tests {
             &dir,
             &[
                 ("title", json!("Test")),
-                (
-                    "start",
-                    json!({"speak": "Hello", "speak_first": "Also hello"}),
-                ),
+                ("start", json!({"say": "Hello", "say_first": "Also hello"})),
             ],
             "Content",
         );
 
         let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
-        assert!(matches!(err, CompositionError::LifecycleSpeakConflict(_)));
+        assert!(matches!(err, CompositionError::LifecycleSayConflict(_)));
     }
 
     #[test]

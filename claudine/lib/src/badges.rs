@@ -101,3 +101,11 @@ pub static PROMPT_FILE: LazyLock<String> = LazyLock::new(|| {
     .render_optimistic(None)
     .to_string()
 });
+
+pub static SEQUENCE: LazyLock<String> = LazyLock::new(|| {
+    Prose::new(
+        "<bg-yellow-900><bold><yellow-100><bold> Sequence </bold></yellow-100></bold></bg-yellow-900>",
+    )
+    .render_optimistic(None)
+    .to_string()
+});

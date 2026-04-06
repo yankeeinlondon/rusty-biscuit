@@ -2,7 +2,7 @@
 //!
 //! This module provides support for `start`, `success`, `blocked`, and `failure`
 //! lifecycle notifications in composition frontmatter. Each notification can
-//! specify optional fields like `speak`, `effect`, `message`, etc.
+//! specify optional fields like `say`, `effect`, `message`, etc.
 
 // rustfmt doesn't support let-chains yet, so nested ifs are required
 #![allow(clippy::collapsible_if)]
@@ -26,17 +26,17 @@ use crate::messaging::RuntimeMessagingSettings;
 ///
 /// ```yaml
 /// start:
-///   speak: "Starting composition workflow"
+///   say: "Starting composition workflow"
 ///   effect: "confirmation"
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LifecycleNotification {
-    /// Text to speak using TTS (mutually exclusive with `speak_first`).
-    pub speak: Option<String>,
+    /// Text to say using TTS (mutually exclusive with `say_first`).
+    pub say: Option<String>,
 
-    /// Text to speak before other actions (mutually exclusive with `speak`).
-    pub speak_first: Option<String>,
+    /// Text to say before other actions (mutually exclusive with `say`).
+    pub say_first: Option<String>,
 
     /// Sound effect to play (kebab-case name like "confirmation").
     pub effect: Option<String>,
@@ -58,7 +58,7 @@ pub struct LifecycleNotification {
 /// start:
 ///   message: "Starting..."
 /// success:
-///   speak: "Composition complete"
+///   say: "Composition complete"
 ///   effect: "crowd-applause"
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -167,7 +167,7 @@ impl LifecycleEmitter for DefaultLifecycleEmitter {
     }
 
     fn emit_speech(&self, text: &str, tts_config: TtsConfig) {
-        speak_blocking(text, tts_config);
+        say_blocking(text, tts_config);
     }
 
     fn emit_effect(&self, name: &str) {
@@ -362,18 +362,18 @@ enum AudioPhase {
 /// Compute the ordered audio phases for a notification.
 ///
 /// When both speech and effect are present:
-/// - `speak` + `effect` → effect first, then speech
-/// - `speak_first` + `effect` → speech first, then effect
+/// - `say` + `effect` → effect first, then speech
+/// - `say_first` + `effect` → speech first, then effect
 ///
 /// When only one audio output is present, it is the sole phase.
 fn audio_phases(n: &LifecycleNotification) -> Vec<AudioPhase> {
     let speech_text = n
-        .speak
+        .say
         .as_deref()
-        .or(n.speak_first.as_deref())
+        .or(n.say_first.as_deref())
         .filter(|s| !s.is_empty());
     let effect_name = n.effect.as_deref().filter(|s| !s.is_empty());
-    let speech_first = n.speak_first.is_some();
+    let speech_first = n.say_first.is_some();
 
     match (speech_text, effect_name) {
         (Some(text), Some(effect)) if speech_first => {
@@ -473,8 +473,8 @@ impl LifecycleConfig {
 /// Parses lifecycle configuration from composition frontmatter.
 ///
 /// Extracts only the lifecycle properties (`start`, `success`, `blocked`, `failure`)
-/// and ignores all other frontmatter keys. Validates mutual exclusivity of `speak`
-/// and `speak_first`, and validates sound effect names.
+/// and ignores all other frontmatter keys. Validates mutual exclusivity of `say`
+/// and `say_first`, and validates sound effect names.
 ///
 /// ## Returns
 ///
@@ -482,7 +482,7 @@ impl LifecycleConfig {
 ///
 /// ## Errors
 ///
-/// - `LifecycleSpeakConflict`: Both `speak` and `speak_first` are present
+/// - `LifecycleSayConflict`: Both `say` and `say_first` are present
 /// - `LifecycleUnknownEffect`: An unknown sound effect name is referenced
 ///
 /// ## Examples
@@ -532,15 +532,15 @@ pub fn parse_lifecycle_config(
             })?;
 
         // Normalize empty strings to None
-        normalize_empty_string(&mut notification.speak);
-        normalize_empty_string(&mut notification.speak_first);
+        normalize_empty_string(&mut notification.say);
+        normalize_empty_string(&mut notification.say_first);
         normalize_empty_string(&mut notification.effect);
         normalize_empty_string(&mut notification.message);
         normalize_empty_string(&mut notification.stderr);
 
-        // Validate mutual exclusivity of speak and speak_first
-        if notification.speak.is_some() && notification.speak_first.is_some() {
-            return Err(CompositionError::LifecycleSpeakConflict(
+        // Validate mutual exclusivity of say and say_first
+        if notification.say.is_some() && notification.say_first.is_some() {
+            return Err(CompositionError::LifecycleSayConflict(
                 property_name.to_string(),
             ));
         }
@@ -616,7 +616,7 @@ fn play_effect_blocking(name: &str) {
 ///
 /// Uses `block_in_place` to avoid panicking when called from within a
 /// Tokio async context (e.g. `#[tokio::main]`).
-fn speak_blocking(text: &str, config: TtsConfig) {
+fn say_blocking(text: &str, config: TtsConfig) {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         let text = text.to_string();
         tokio::task::block_in_place(|| {
@@ -689,7 +689,7 @@ pub fn emit_lifecycle_signal(
                 let config = tts_config
                     .get_or_insert_with(|| tts_config_from_settings(ctx.settings.tts.as_ref()))
                     .clone();
-                speak_blocking(&text, config);
+                say_blocking(&text, config);
             }
             AudioPhase::Effect(name) => play_effect_blocking(&name),
         }
@@ -708,7 +708,7 @@ mod tests {
                 "message": "Starting composition..."
             },
             "success": {
-                "speak": "All done!",
+                "say": "All done!",
                 "effect": "confirmation"
             }
         });
@@ -722,23 +722,23 @@ mod tests {
 
         assert!(config.success.is_some());
         let success = config.success.as_ref().unwrap();
-        assert_eq!(success.speak.as_deref(), Some("All done!"));
+        assert_eq!(success.say.as_deref(), Some("All done!"));
         assert_eq!(success.effect.as_deref(), Some("confirmation"));
     }
 
     #[test]
-    fn rejects_both_speak_and_speak_first() {
+    fn rejects_both_say_and_say_first() {
         let frontmatter = json!({
             "start": {
-                "speak": "Starting",
-                "speak_first": "Also starting"
+                "say": "Starting",
+                "say_first": "Also starting"
             }
         });
 
         let result = parse_lifecycle_config(&frontmatter);
         assert!(matches!(
             result,
-            Err(CompositionError::LifecycleSpeakConflict(_))
+            Err(CompositionError::LifecycleSayConflict(_))
         ));
     }
 
@@ -747,14 +747,14 @@ mod tests {
         let frontmatter = json!({
             "start": {
                 "message": "   ",
-                "speak": ""
+                "say": ""
             }
         });
 
         let config = parse_lifecycle_config(&frontmatter).unwrap();
         let start = config.start.as_ref().unwrap();
         assert!(start.message.is_none());
-        assert!(start.speak.is_none());
+        assert!(start.say.is_none());
     }
 
     #[test]
@@ -786,32 +786,32 @@ mod tests {
     }
 
     #[test]
-    fn speak_plus_effect_is_valid() {
+    fn say_plus_effect_is_valid() {
         let frontmatter = json!({
             "success": {
-                "speak": "Done!",
+                "say": "Done!",
                 "effect": "confirmation"
             }
         });
 
         let config = parse_lifecycle_config(&frontmatter).unwrap();
         let success = config.success.as_ref().unwrap();
-        assert_eq!(success.speak.as_deref(), Some("Done!"));
+        assert_eq!(success.say.as_deref(), Some("Done!"));
         assert_eq!(success.effect.as_deref(), Some("confirmation"));
     }
 
     #[test]
-    fn speak_first_plus_effect_is_valid() {
+    fn say_first_plus_effect_is_valid() {
         let frontmatter = json!({
             "success": {
-                "speak_first": "Starting now",
+                "say_first": "Starting now",
                 "effect": "confirmation"
             }
         });
 
         let config = parse_lifecycle_config(&frontmatter).unwrap();
         let success = config.success.as_ref().unwrap();
-        assert_eq!(success.speak_first.as_deref(), Some("Starting now"));
+        assert_eq!(success.say_first.as_deref(), Some("Starting now"));
         assert_eq!(success.effect.as_deref(), Some("confirmation"));
     }
 
@@ -858,9 +858,9 @@ mod tests {
     }
 
     #[test]
-    fn audio_order_speak_plus_effect() {
+    fn audio_order_say_plus_effect() {
         let n = LifecycleNotification {
-            speak: Some("Hello".into()),
+            say: Some("Hello".into()),
             effect: Some("doorbell".into()),
             ..Default::default()
         };
@@ -871,9 +871,9 @@ mod tests {
     }
 
     #[test]
-    fn audio_order_speak_first_plus_effect() {
+    fn audio_order_say_first_plus_effect() {
         let n = LifecycleNotification {
-            speak_first: Some("Hello".into()),
+            say_first: Some("Hello".into()),
             effect: Some("doorbell".into()),
             ..Default::default()
         };
@@ -886,7 +886,7 @@ mod tests {
     #[test]
     fn audio_order_speech_only() {
         let n = LifecycleNotification {
-            speak: Some("Hello".into()),
+            say: Some("Hello".into()),
             ..Default::default()
         };
         let phases = audio_phases(&n);
@@ -1309,7 +1309,7 @@ mod tests {
             "start": {
                 "stderr": "starting",
                 "message": "msg",
-                "speak": "hello",
+                "say": "hello",
                 "effect": "confirmation",
             }
         }))
@@ -1332,16 +1332,16 @@ mod tests {
         // Non-audio first
         assert!(matches!(actions[0], EmittedAction::Stderr { .. }));
         assert!(matches!(actions[1], EmittedAction::Message { .. }));
-        // Audio: effect before speak (default order)
+        // Audio: effect before say (default order)
         assert!(matches!(actions[2], EmittedAction::Effect { .. }));
         assert!(matches!(actions[3], EmittedAction::Speech { .. }));
     }
 
     #[test]
-    fn guard_speak_first_ordering() {
+    fn guard_say_first_ordering() {
         let config = parse_lifecycle_config(&json!({
             "start": {
-                "speak_first": "hello",
+                "say_first": "hello",
                 "effect": "confirmation",
             }
         }))
@@ -1361,7 +1361,7 @@ mod tests {
 
         let actions = emitter.actions();
         assert_eq!(actions.len(), 2);
-        // speak_first → speech before effect
+        // say_first → speech before effect
         assert!(matches!(actions[0], EmittedAction::Speech { .. }));
         assert!(matches!(actions[1], EmittedAction::Effect { .. }));
     }
