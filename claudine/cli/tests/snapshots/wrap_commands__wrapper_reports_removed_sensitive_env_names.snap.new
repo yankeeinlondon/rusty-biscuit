@@ -1,5 +1,6 @@
 ---
 source: claudine/cli/tests/wrap_commands.rs
+assertion_line: 364
 expression: redact_session_id(&strip_ansi(&stderr))
 ---
 
@@ -11,7 +12,7 @@ Environment Variables:
 • AGENT=codex
 • AGENT_PARAMS=["--include","OPENAI_API_KEY","--","--version"]
 • CLAUDINE_SESSION_ID=<redacted>
-• HOME=/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/.tmphYOFXs
+• HOME=/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/.tmpmLk4o1
 • INTERACTIVE=true
 • PACKAGE=claudine-cli
 • PACKAGE_AREA=claudine
