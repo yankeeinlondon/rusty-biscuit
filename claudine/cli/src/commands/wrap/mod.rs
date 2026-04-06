@@ -834,7 +834,7 @@ pub struct WrapperArgs {
         long = "append-system-prompt",
         visible_alias = "asp",
         value_name = "FILE",
-        conflicts_with = "replace_system_prompt",
+        conflicts_with = "replace_system_prompt"
     )]
     pub append_system_prompt: Option<String>,
 
@@ -843,7 +843,7 @@ pub struct WrapperArgs {
         long = "replace-system-prompt",
         visible_alias = "rsp",
         value_name = "FILE",
-        conflicts_with = "append_system_prompt",
+        conflicts_with = "append_system_prompt"
     )]
     pub replace_system_prompt: Option<String>,
 
@@ -1058,11 +1058,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             }
         }
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
-            let application = profile.apply_system_prompt(
-                prepared,
-                !non_interactive_requested,
-                &cwd,
-            )?;
+            let application =
+                profile.apply_system_prompt(prepared, !non_interactive_requested, &cwd)?;
             child_args.extend(application.args);
             env_overrides.extend(
                 application
@@ -1284,6 +1281,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     }
 
     // --dry-run: print what would be executed and exit
+    let sp_display_lines = crate::commands::wrap::system_prompt::describe_effective(&effective_sp);
     if args.dry_run {
         crate::output::log_dry_run(
             profile,
@@ -1294,6 +1292,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             mcp_runtime.as_ref(),
             child_cwd,
             &term,
+            sp_display_lines.as_deref(),
         );
         return Ok(0);
     }
@@ -3812,12 +3811,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_system_prompt_returns_literal_for_non_file() {
-        let result = resolve_system_prompt("You are a helpful assistant.").unwrap();
-        assert_eq!(result, "You are a helpful assistant.");
-    }
-
-    #[test]
     fn live_stream_sink_maps_coarse_events_into_dispatch_meta() {
         let recorded: Arc<Mutex<Vec<DispatchEventMeta>>> = Arc::new(Mutex::new(Vec::new()));
         let sink_events = recorded.clone();
@@ -4063,11 +4056,6 @@ mod tests {
         use proptest::prelude::*;
 
         proptest! {
-            #[test]
-            fn proptest_resolve_system_prompt_never_panics(s in "\\PC*") {
-                let _ = resolve_system_prompt(&s);
-            }
-
             #[test]
             fn proptest_extract_wrapper_flags_preserves_others(
                 flags in prop::collection::vec("-y|--yolo|-i|--interactive|-q|--quiet|--silent", 0..5),

@@ -250,6 +250,7 @@ pub(crate) fn log_dry_run(
     mcp_runtime: Option<&McpRuntimeInfo>,
     child_cwd: &Path,
     term: &Terminal,
+    sp_lines: Option<&[String]>,
 ) {
     let mut header = format!(
         "\n<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold> <dim>[DRY RUN]</dim>",
@@ -309,6 +310,16 @@ pub(crate) fn log_dry_run(
 
     if let Some(mcp_runtime) = mcp_runtime {
         log_mcp_runtime(term, mcp_runtime);
+    }
+
+    if let Some(lines) = sp_lines {
+        log::message(&Prose::new("<bold>System prompt:</bold>").render(term));
+        let items: Vec<RenderableContent> = lines
+            .iter()
+            .map(|l| RenderableContent::from(Prose::new(format!("<dim>{l}</dim>"))))
+            .collect();
+        let rendered = UnorderedList::from(items).with_bullet("• ").render(term);
+        log::message(&rendered);
     }
 }
 

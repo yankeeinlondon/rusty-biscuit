@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
 
 /// Options for composition preparation.
 #[derive(Debug, Default)]
@@ -243,9 +243,11 @@ mod tests {
         let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
         assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
         assert!(prepared.prompt.contains("List three colors"));
-        assert!(prepared
-            .prompt
-            .contains("Return the replacement Markdown body content only"));
+        assert!(
+            prepared
+                .prompt
+                .contains("Return the replacement Markdown body content only")
+        );
 
         // Effective frontmatter should contain composed keys
         assert!(prepared.effective_frontmatter.is_object());

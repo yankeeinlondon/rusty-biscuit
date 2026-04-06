@@ -33,5 +33,5 @@ pub use types::{
     CompositionClosurePlan, CompositionExecutionRequest, CompositionMode, InlineClosurePlan,
     OutputFormat, PreparedComposition, ResolvedCompositionSource, SelectedProvider,
     SelectionReason, SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource,
-    SequenceStep, SequenceStepOverlay, SequenceStepResult, SharedApprovalCache, SystemPromptInput,
+    SequenceStep, SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
 };

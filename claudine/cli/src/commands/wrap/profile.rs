@@ -1,5 +1,9 @@
+use std::io::Write;
+use std::path::Path;
+
 use claudine::events::Provider;
 use claudine::stream::StreamProtocol;
+use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail};
 
 // ---------------------------------------------------------------------------
@@ -148,14 +152,30 @@ pub(crate) trait WrapperProfile: Send + Sync {
 
     // -- Universal --system-prompt flag --------------------------------------
 
-    /// Map the universal `--system-prompt <value>` to provider-specific flags.
+    /// Map a resolved system prompt to provider-specific flags, env, and
+    /// temp artifacts.
     ///
-    /// Default: returns a warning that the provider doesn't support it.
-    fn apply_system_prompt(&self, _args: &mut Vec<String>, _prompt: &str) -> Option<String> {
-        Some(format!(
-            "{} does not support --system-prompt; this flag was skipped",
-            self.provider()
-        ))
+    /// Default: returns a warning that the provider doesn't support the
+    /// given mode.
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        Ok(super::system_prompt::SystemPromptApplication {
+            args: vec![],
+            env: vec![],
+            artifacts: vec![],
+            warnings: vec![format!(
+                "{} does not support {} system prompt; this flag was skipped",
+                self.provider(),
+                match prompt.mode {
+                    SystemPromptMode::Append => "append",
+                    SystemPromptMode::Replace => "replace",
+                },
+            )],
+        })
     }
 
     // -- Universal --sandbox flag --------------------------------------------
@@ -416,10 +436,43 @@ impl WrapperProfile for ClaudeWrapper {
         None
     }
 
-    fn apply_system_prompt(&self, args: &mut Vec<String>, prompt: &str) -> Option<String> {
-        args.push("--system-prompt".to_string());
-        args.push(prompt.to_string());
-        None
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+        use std::io::Write as _;
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                if interactive {
+                    app.args.push("--append-system-prompt".to_string());
+                    app.args.push(prompt.composed_markdown.clone());
+                } else {
+                    let mut tmp = tempfile::NamedTempFile::new()?;
+                    tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                    app.args.push("--append-system-prompt-file".to_string());
+                    app.args.push(tmp.path().display().to_string());
+                    app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+                }
+            }
+            SystemPromptMode::Replace => {
+                if interactive {
+                    app.args.push("--system-prompt".to_string());
+                    app.args.push(prompt.composed_markdown.clone());
+                } else {
+                    let mut tmp = tempfile::NamedTempFile::new()?;
+                    tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                    app.args.push("--system-prompt-file".to_string());
+                    app.args.push(tmp.path().display().to_string());
+                    app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+                }
+            }
+        }
+        Ok(app)
     }
 
     fn prompt_delivery(
@@ -537,6 +590,41 @@ impl WrapperProfile for CodexWrapper {
                 "Codex only supports --output json; {format} was skipped"
             )),
         }
+    }
+
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let (tmp_home, _overlay_path) =
+                    super::system_prompt::create_ephemeral_overlay_home(
+                        ".codex",
+                        "AGENTS.override.md",
+                        &prompt.composed_markdown,
+                    )?;
+                app.env.push((
+                    std::ffi::OsString::from("HOME"),
+                    tmp_home.path().as_os_str().to_owned(),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
+            }
+            SystemPromptMode::Replace => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                app.args.push("-c".to_string());
+                app.args
+                    .push(format!("model_instructions_file={}", tmp.path().display()));
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+        }
+        Ok(app)
     }
 
     fn apply_sandbox(&self, args: &mut Vec<String>) -> Option<String> {
@@ -775,6 +863,42 @@ impl WrapperProfile for GeminiWrapper {
         }
     }
 
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let (tmp_home, _overlay_path) =
+                    super::system_prompt::create_ephemeral_overlay_home(
+                        ".gemini",
+                        "GEMINI.md",
+                        &prompt.composed_markdown,
+                    )?;
+                app.env.push((
+                    std::ffi::OsString::from("HOME"),
+                    tmp_home.path().as_os_str().to_owned(),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
+            }
+            SystemPromptMode::Replace => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                app.env.push((
+                    std::ffi::OsString::from("GEMINI_SYSTEM_MD"),
+                    std::ffi::OsString::from(tmp.path().display().to_string()),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+        }
+        Ok(app)
+    }
+
     fn prompt_delivery(
         &self,
         _args: &[String],
@@ -852,6 +976,44 @@ impl WrapperProfile for KimiWrapper {
             args.push("--print".to_string());
         }
         Ok(())
+    }
+
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                app.warnings.push(
+                    "Kimi does not support append-mode system prompts; this flag was skipped"
+                        .to_string(),
+                );
+            }
+            SystemPromptMode::Replace => {
+                let mut prompt_tmp = tempfile::NamedTempFile::new()?;
+                prompt_tmp.write_all(prompt.composed_markdown.as_bytes())?;
+
+                let agent_yaml = format!(
+                    "extend: default\nsystem_prompt_path: {}\n",
+                    prompt_tmp.path().display()
+                );
+                let mut agent_tmp = tempfile::NamedTempFile::new()?;
+                agent_tmp.write_all(agent_yaml.as_bytes())?;
+
+                app.args.push("--agent-file".to_string());
+                app.args.push(agent_tmp.path().display().to_string());
+                app.artifacts
+                    .push(SystemPromptArtifact::TempFile(prompt_tmp));
+                app.artifacts
+                    .push(SystemPromptArtifact::TempFile(agent_tmp));
+            }
+        }
+        Ok(app)
     }
 
     fn prompt_delivery(
@@ -972,6 +1134,39 @@ impl WrapperProfile for QwenWrapper {
         &["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
     }
 
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let (tmp_home, _overlay_path) =
+                    super::system_prompt::create_ephemeral_overlay_home(
+                        ".qwen",
+                        "QWEN.md",
+                        &prompt.composed_markdown,
+                    )?;
+                app.env.push((
+                    std::ffi::OsString::from("HOME"),
+                    tmp_home.path().as_os_str().to_owned(),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
+            }
+            SystemPromptMode::Replace => {
+                app.warnings.push(
+                    "Qwen does not support replace-mode system prompts; this flag was skipped"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(app)
+    }
+
     fn apply_sandbox(&self, args: &mut Vec<String>) -> Option<String> {
         if !has_flag(args, "--sandbox") {
             args.push("--sandbox".to_string());
@@ -1052,6 +1247,40 @@ impl WrapperProfile for OpencodeWrapper {
 
     fn reject_direct_yolo(&self, _args: &[String]) -> Result<()> {
         Ok(())
+    }
+
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+
+                let config = serde_json::json!({
+                    "instructions": [tmp.path().display().to_string()]
+                });
+                app.env.push((
+                    std::ffi::OsString::from("OPENCODE_CONFIG_CONTENT"),
+                    std::ffi::OsString::from(config.to_string()),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+            SystemPromptMode::Replace => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                app.args.push("--system".to_string());
+                app.args.push(tmp.path().display().to_string());
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+        }
+        Ok(app)
     }
 
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
@@ -1213,6 +1442,30 @@ impl WrapperProfile for GooseWrapper {
     fn reject_direct_yolo(&self, _args: &[String]) -> Result<()> {
         // Goose YOLO is via env var, not a CLI flag. Nothing to reject.
         Ok(())
+    }
+
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::SystemPromptApplication;
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                app.args.push("--system".to_string());
+                app.args.push(prompt.composed_markdown.clone());
+            }
+            SystemPromptMode::Replace => {
+                app.warnings.push(
+                    "Goose does not support replace-mode system prompts; this flag was skipped"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(app)
     }
 
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {

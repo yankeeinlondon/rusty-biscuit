@@ -9,7 +9,6 @@ use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
     self, CompositionExecutionRequest, CompositionMode, PrepareOptions, ResolvedCompositionSource,
     SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceStepResult,
-    SystemPromptInput,
 };
 use color_eyre::eyre::{Result, eyre};
 
@@ -147,18 +146,10 @@ pub(crate) fn execute_sequence(
             }
         };
 
-        let system_prompt = shared
-            .system_prompt
-            .as_ref()
-            .map(|prompt| SystemPromptInput::Inline {
-                prompt: prompt.clone(),
-            })
-            .or_else(|| {
-                shared
-                    .system_prompt_file
-                    .as_ref()
-                    .map(|path| SystemPromptInput::File { path: path.clone() })
-            });
+        let system_prompt_args = claudine::system_prompt::SystemPromptArgs {
+            append_file: shared.append_system_prompt.clone(),
+            replace_file: shared.replace_system_prompt.clone(),
+        };
 
         let request = CompositionExecutionRequest {
             mode: CompositionMode::ChainedDocument,
@@ -171,7 +162,7 @@ pub(crate) fn execute_sequence(
             include: shared.include.clone(),
             model: shared.model.clone(),
             output: shared.output,
-            system_prompt,
+            system_prompt_args,
             timeout: shared.timeout,
             operation: shared.operation.clone(),
             sandbox: shared.sandbox,
