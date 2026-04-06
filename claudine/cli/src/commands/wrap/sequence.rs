@@ -63,12 +63,14 @@ pub(crate) fn execute_sequence(
         let overlay = build_step_overlay(&plan, step_index);
 
         if !silent {
-            log::message(&format!(
-                "[{}/{}] {}",
+            let status = Status::from_prose(format!(
+                "[<yellow>{}/{}</yellow>] <i>starting</i> <b>{}</b>",
                 step_index + 1,
                 total_steps,
                 step.name
-            ));
+            ))
+            .state(StatusState::Info);
+            log::message(&status.render(&log::terminal()));
         }
 
         let start = std::time::Instant::now();
@@ -124,12 +126,14 @@ pub(crate) fn execute_sequence(
                 let duration = start.elapsed();
                 let error_msg = e.to_string();
                 if !silent {
-                    log::error(&format!(
-                        "step {}/{} failed: {}",
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> failed: {}",
                         step_index + 1,
                         total_steps,
                         error_msg
-                    ));
+                    ))
+                    .state(StatusState::Failure);
+                    log::message(&status.render(&log::terminal()));
                 }
                 summary.failed += 1;
                 summary.steps.push(SequenceStepResult {
@@ -193,12 +197,14 @@ pub(crate) fn execute_sequence(
                     duration,
                 });
                 if !silent {
-                    log::message(&format!(
-                        "step {}/{} succeeded (via {})",
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> succeeded (<dim><i>via {}</i></dim>)",
                         step_index + 1,
                         total_steps,
                         outcome.provider
-                    ));
+                    ))
+                    .state(StatusState::Success);
+                    log::message(&status.render(&log::terminal()));
                 }
             }
             Ok(outcome) => {
@@ -215,12 +221,14 @@ pub(crate) fn execute_sequence(
                     duration,
                 });
                 if !silent {
-                    log::error(&format!(
-                        "step {}/{} failed: {}",
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> failed: {}",
                         step_index + 1,
                         total_steps,
                         error_msg
-                    ));
+                    ))
+                    .state(StatusState::Failure);
+                    log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
                     break;
@@ -237,12 +245,14 @@ pub(crate) fn execute_sequence(
                     duration,
                 });
                 if !silent {
-                    log::error(&format!(
-                        "step {}/{} failed: {}",
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> failed: {}",
                         step_index + 1,
                         total_steps,
                         error_msg
-                    ));
+                    ))
+                    .state(StatusState::Failure);
+                    log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
                     break;
@@ -255,15 +265,19 @@ pub(crate) fn execute_sequence(
     if !silent {
         eprintln!();
         if summary.failed == 0 {
-            log::message(&format!(
-                "Sequence finished: {} succeeded, 0 failed",
+            let status = Status::from_prose(format!(
+                "Sequence finished: <green>{}</green> succeeded, 0 failed",
                 summary.succeeded
-            ));
+            ))
+            .state(StatusState::Success);
+            log::message(&status.render(&log::terminal()));
         } else {
-            log::error(&format!(
-                "Sequence finished: {} succeeded, {} failed",
+            let status = Status::from_prose(format!(
+                "Sequence finished: <green>{}</green> succeeded, <red>{}</red> failed",
                 summary.succeeded, summary.failed
-            ));
+            ))
+            .state(StatusState::Failure);
+            log::message(&status.render(&log::terminal()));
         }
     }
 

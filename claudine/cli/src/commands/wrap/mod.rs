@@ -3529,8 +3529,9 @@ fn print_wrapper_help(provider: Provider) {
          \x20 -i, --interactive         Force interactive mode even when a prompt string is provided\n\
          \x20 -m, --model <MODEL>       Override the model used by the provider\n\
          \x20 -o, --output <FORMAT>     Set the output format (json, text, stream)\n\
-         \x20 -s, --system-prompt <PROMPT|FILE>  Set or append a system prompt\n\
-         \x20 -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)\n\
+          \x20     --asp <FILE>             Append a system prompt from a file\n\
+          \x20     --rsp <FILE>             Replace the provider's system prompt with contents from a file\n\
+          \x20 -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)\n\
          \x20     --dry-run             Show what would be executed without launching the child\n\
          \x20 -q, --quiet              Show only the header line; suppress env details and info\n\
          \x20     --silent              Suppress all Claudine preflight output\n\

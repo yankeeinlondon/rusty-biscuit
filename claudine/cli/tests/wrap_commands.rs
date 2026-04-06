@@ -85,19 +85,30 @@ edition = "2024"
 }
 
 fn redact_session_id(input: &str) -> String {
+    let result = redact_temp_home(input);
     const PREFIX: &str = "CLAUDINE_SESSION_ID=";
-    let Some(start) = input.find(PREFIX) else {
-        return input.to_string();
+    let Some(start) = result.find(PREFIX) else {
+        return result;
     };
     let value_start = start + PREFIX.len();
-    // UUID is 36 chars: 8-4-4-4-12
-    let value_end = (value_start + 36).min(input.len());
+    let value_end = (value_start + 36).min(result.len());
     format!(
         "{}{}<redacted>{}",
-        &input[..start],
+        &result[..start],
         PREFIX,
-        &input[value_end..]
+        &result[value_end..]
     )
+}
+
+fn redact_temp_home(input: &str) -> String {
+    const MARKER: &str = "HOME=/var/folders/";
+    let Some(start) = input.find(MARKER) else {
+        return input.to_string();
+    };
+    let value_start = start + 5;
+    let after = &input[value_start..];
+    let end = after.find('\n').unwrap_or(after.len());
+    format!("{}HOME=<redacted>{}", &input[..start], &after[end..])
 }
 
 fn strip_ansi(input: &str) -> String {
@@ -361,7 +372,7 @@ exit 0
         .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    insta::assert_snapshot!(redact_session_id(&strip_ansi(&stderr)));
+    insta::assert_snapshot!(redact_temp_home(&redact_session_id(&strip_ansi(&stderr))));
 }
 
 #[cfg(unix)]
