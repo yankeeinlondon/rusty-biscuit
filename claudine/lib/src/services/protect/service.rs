@@ -57,22 +57,22 @@ impl ProtectService {
         for group in &self.catalog.command_groups {
             if let Some((m, rule_supports_allow_paths)) = group.find_match(command) {
                 // Check allow_paths suppression (per-rule, not per-group)
-                if rule_supports_allow_paths {
-                    if let Some(allow_paths) = self.config.get_allow_paths(group.group) {
-                        let targets = extract_target_paths(command);
-                        if all_targets_allowed(&targets, allow_paths) {
-                            continue;
-                        }
+                if rule_supports_allow_paths
+                    && let Some(allow_paths) = self.config.get_allow_paths(group.group)
+                {
+                    let targets = extract_target_paths(command);
+                    if all_targets_allowed(&targets, allow_paths) {
+                        continue;
                     }
                 }
                 return ProtectDecision::blocked(m);
             }
         }
 
-        if let Some(custom) = &self.catalog.custom_group {
-            if let Some((m, _)) = custom.find_match(command) {
-                return ProtectDecision::blocked(m);
-            }
+        if let Some(custom) = &self.catalog.custom_group
+            && let Some((m, _)) = custom.find_match(command)
+        {
+            return ProtectDecision::blocked(m);
         }
 
         ProtectDecision::allow()
@@ -94,18 +94,16 @@ impl ProtectService {
 
         if self.path_checker.is_sensitive(&resolved_str) {
             // Check allow_paths suppression
-            if let Some(allow_paths) = self.config.get_allow_paths(RuleGroup::SensitivePaths) {
-                if allow_paths.iter().any(|allowed| {
+            if let Some(allow_paths) = self.config.get_allow_paths(RuleGroup::SensitivePaths)
+                && allow_paths.iter().any(|allowed| {
                     if allowed.starts_with('/') {
-                        // Absolute allow path: exact match or prefix match
                         resolved_str == *allowed || resolved_str.starts_with(&format!("{allowed}/"))
                     } else {
-                        // Relative allow path: match any path component
                         resolved_str.split('/').any(|part| part == allowed.as_str())
                     }
-                }) {
-                    return ProtectDecision::allow();
-                }
+                })
+            {
+                return ProtectDecision::allow();
             }
             return ProtectDecision::blocked(ProtectMatch {
                 group: RuleGroup::SensitivePaths,

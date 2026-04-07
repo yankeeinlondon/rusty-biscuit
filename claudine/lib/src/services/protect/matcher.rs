@@ -202,10 +202,10 @@ impl CompiledCatalog {
                 return Some(m);
             }
         }
-        if let Some(custom) = &self.custom_group {
-            if let Some((m, _)) = custom.find_match(command) {
-                return Some(m);
-            }
+        if let Some(custom) = &self.custom_group
+            && let Some((m, _)) = custom.find_match(command)
+        {
+            return Some(m);
         }
         None
     }

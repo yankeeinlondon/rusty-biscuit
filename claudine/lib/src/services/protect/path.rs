@@ -129,7 +129,7 @@ fn is_path_allowed(target: &str, allow_paths: &[String]) -> bool {
             }
         } else {
             let parts: Vec<&str> = target.split('/').collect();
-            if parts.iter().any(|p| *p == allowed.as_str()) {
+            if parts.contains(&allowed.as_str()) {
                 return true;
             }
         }

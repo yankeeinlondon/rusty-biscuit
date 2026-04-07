@@ -398,7 +398,7 @@ fn map_protect_block(decision: &ProtectDecision) -> HookResponse {
     let reason = decision
         .blocked
         .as_ref()
-        .map(|m| format_blocked_message(m))
+        .map(format_blocked_message)
         .unwrap_or_else(|| "protect: blocked".to_string());
 
     HookResponse {

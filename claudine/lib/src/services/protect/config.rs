@@ -121,12 +121,12 @@ impl ProtectConfig {
         ];
 
         for (name, toggle) in non_allow_path_groups {
-            if let Some(RuleGroupConfig::Detailed(d)) = toggle {
-                if !d.allow_paths.is_empty() {
-                    return Err(ClaudineError::ConfigValidation(format!(
-                        "allow_paths is not supported for group `{name}`"
-                    )));
-                }
+            if let Some(RuleGroupConfig::Detailed(d)) = toggle
+                && !d.allow_paths.is_empty()
+            {
+                return Err(ClaudineError::ConfigValidation(format!(
+                    "allow_paths is not supported for group `{name}`"
+                )));
             }
         }
 

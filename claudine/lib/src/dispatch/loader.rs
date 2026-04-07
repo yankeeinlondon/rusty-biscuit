@@ -238,9 +238,10 @@ fn compile_runtime_config_with_messaging(
         );
     }
 
-    let protect_service = settings.protect.as_ref().and_then(|protect| {
-        ProtectService::new(protect.clone(), ProtectPlatform::current()).ok()
-    });
+    let protect_service = settings
+        .protect
+        .as_ref()
+        .and_then(|protect| ProtectService::new(protect.clone(), ProtectPlatform::current()).ok());
 
     Ok(RuntimeConfig {
         settings,
@@ -498,10 +499,7 @@ fn merge_protect_configs(
 }
 
 /// Merge rule toggles: repo overrides user per-group.
-fn merge_rule_toggles(
-    user: &ProtectRuleToggles,
-    repo: &ProtectRuleToggles,
-) -> ProtectRuleToggles {
+fn merge_rule_toggles(user: &ProtectRuleToggles, repo: &ProtectRuleToggles) -> ProtectRuleToggles {
     ProtectRuleToggles {
         filesystem_destruction: repo
             .filesystem_destruction
@@ -603,7 +601,9 @@ mod tests {
     use crate::actions::*;
     use crate::events::*;
     use crate::services::protect::config::RuleGroupDetailedConfig;
-    use crate::services::protect::{CustomPattern, ProtectConfig, ProtectRuleToggles, RuleGroupConfig};
+    use crate::services::protect::{
+        CustomPattern, ProtectConfig, ProtectRuleToggles, RuleGroupConfig,
+    };
 
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -1464,10 +1464,11 @@ mod tests {
     #[test]
     fn merge_protect_preserves_user_allow_paths() {
         let mut user = ProtectConfig::default();
-        user.rules.filesystem_destruction = Some(RuleGroupConfig::Detailed(RuleGroupDetailedConfig {
-            enabled: true,
-            allow_paths: vec!["node_modules".to_string()],
-        }));
+        user.rules.filesystem_destruction =
+            Some(RuleGroupConfig::Detailed(RuleGroupDetailedConfig {
+                enabled: true,
+                allow_paths: vec!["node_modules".to_string()],
+            }));
         let repo = ProtectConfig::default();
         let merged = merge_protect_configs(Some(&user), Some(&repo)).unwrap();
         match &merged.rules.filesystem_destruction {

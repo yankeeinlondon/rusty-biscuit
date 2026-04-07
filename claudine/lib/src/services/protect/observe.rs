@@ -27,24 +27,23 @@ fn extract_before_tool_request<'a>(meta: &'a EventMeta) -> Option<ProtectRequest
     let lowered = tool_name.to_ascii_lowercase();
 
     // Bash command surface
-    if lowered.contains("bash") || lowered.contains("shell") || lowered.contains("exec") {
-        if let Some(command) = extract_command_string(meta.tool_input.as_ref()?) {
-            return Some(ProtectRequest::BashCommand { command });
-        }
+    if (lowered.contains("bash") || lowered.contains("shell") || lowered.contains("exec"))
+        && let Some(command) = extract_command_string(meta.tool_input.as_ref()?)
+    {
+        return Some(ProtectRequest::BashCommand { command });
     }
 
     // Write/Edit path surface
-    if lowered.contains("write")
+    if (lowered.contains("write")
         || lowered.contains("edit")
         || lowered.contains("create")
-        || lowered.contains("delete")
+        || lowered.contains("delete"))
+        && let Some(path) = extract_path_string(meta.tool_input.as_ref()?)
     {
-        if let Some(path) = extract_path_string(meta.tool_input.as_ref()?) {
-            return Some(ProtectRequest::WritePath {
-                path,
-                cwd: meta.cwd.as_deref(),
-            });
-        }
+        return Some(ProtectRequest::WritePath {
+            path,
+            cwd: meta.cwd.as_deref(),
+        });
     }
 
     None
