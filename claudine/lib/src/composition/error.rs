@@ -97,9 +97,9 @@ pub enum CompositionError {
         line: usize,
     },
 
-    /// A lifecycle notification property has both `speak` and `speak_first`.
-    #[error("lifecycle property `{0}` has both `speak` and `speak_first`; only one is allowed")]
-    LifecycleSpeakConflict(String),
+    /// A lifecycle notification property has both `say` and `say_first`.
+    #[error("lifecycle property `{0}` has both `say` and `say_first`; only one is allowed")]
+    LifecycleSayConflict(String),
 
     /// A lifecycle notification property references an unknown sound effect.
     #[error("lifecycle property `{0}` references unknown sound effect `{1}`")]

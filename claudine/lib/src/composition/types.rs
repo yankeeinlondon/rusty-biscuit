@@ -145,14 +145,6 @@ impl FromStr for OutputFormat {
     }
 }
 
-/// Explicit system prompt input source for composition execution.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SystemPromptInput {
-    Inline { prompt: String },
-    File { path: PathBuf },
-}
-
 /// A fully-specified request to execute a composition through the
 /// wrapper-grade pipeline.
 #[derive(Debug, Clone)]
@@ -175,8 +167,8 @@ pub struct CompositionExecutionRequest {
     pub model: Option<String>,
     /// Set the output format (json, text, stream).
     pub output: Option<OutputFormat>,
-    /// Set or append a system prompt from either inline content or a file.
-    pub system_prompt: Option<SystemPromptInput>,
+    /// Parsed system prompt CLI args for the session.
+    pub system_prompt_args: crate::system_prompt::SystemPromptArgs,
     /// Timeout in seconds for non-interactive mode.
     pub timeout: Option<u64>,
     /// OPERATION env var value for the composed session.
@@ -209,6 +201,9 @@ pub struct CompositionExecutionRequest {
     /// cache instead of prompting again. Used by sequence execution to
     /// honour "allow once" for the whole run, not just one step.
     pub shared_approval_cache: Option<SharedApprovalCache>,
+    /// Whether this request is part of a sequence run. When `true`, the
+    /// execution header shows a `Sequence` badge.
+    pub sequence: bool,
 }
 
 /// Describes where the sequence definition was found.

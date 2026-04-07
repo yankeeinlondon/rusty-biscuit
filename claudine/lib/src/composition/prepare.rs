@@ -292,7 +292,7 @@ mod tests {
             &[
                 ("title", json!("Test")),
                 ("start", json!({"stderr": "Starting", "effect": "doorbell"})),
-                ("success", json!({"speak": "All done"})),
+                ("success", json!({"say": "All done"})),
             ],
             "Do the work.",
         );
@@ -328,16 +328,13 @@ mod tests {
             &dir,
             &[
                 ("title", json!("Test")),
-                (
-                    "start",
-                    json!({"speak": "Hello", "speak_first": "Also hello"}),
-                ),
+                ("start", json!({"say": "Hello", "say_first": "Also hello"})),
             ],
             "Content",
         );
 
         let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
-        assert!(matches!(err, CompositionError::LifecycleSpeakConflict(_)));
+        assert!(matches!(err, CompositionError::LifecycleSayConflict(_)));
     }
 
     #[test]
