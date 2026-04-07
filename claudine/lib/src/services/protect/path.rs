@@ -1,12 +1,17 @@
 use std::path::PathBuf;
 
+/// Check if `path` is exactly `prefix` or starts with `prefix/`.
+fn is_prefix_match(path: &str, prefix: &str) -> bool {
+    path == prefix || (path.starts_with(prefix) && path.as_bytes().get(prefix.len()) == Some(&b'/'))
+}
+
 /// Prefixes for absolute sensitive paths.
 const SENSITIVE_PREFIXES: &[&str] = &[
-    "/etc/", "/var/", "/usr/", "/boot/", "/dev/", "/proc/", "/sys/", "/System/",
+    "/etc", "/var", "/usr", "/boot", "/dev", "/proc", "/sys", "/System",
 ];
 
 /// Home-relative sensitive prefixes (checked after ~ expansion).
-const SENSITIVE_HOME_PREFIXES: &[&str] = &[".ssh/", ".gnupg/"];
+const SENSITIVE_HOME_PREFIXES: &[&str] = &[".ssh", ".gnupg"];
 
 /// Checks whether a file path targets a sensitive system location.
 pub struct SensitivePathChecker {
@@ -26,7 +31,7 @@ impl SensitivePathChecker {
         let path_str = normalized.to_string_lossy();
 
         for prefix in SENSITIVE_PREFIXES {
-            if path_str.starts_with(prefix) {
+            if is_prefix_match(&path_str, prefix) {
                 return true;
             }
         }
@@ -35,7 +40,7 @@ impl SensitivePathChecker {
             let home_str = home.to_string_lossy();
             for prefix in SENSITIVE_HOME_PREFIXES {
                 let full_prefix = format!("{home_str}/{prefix}");
-                if path_str.starts_with(&full_prefix) {
+                if is_prefix_match(&path_str, &full_prefix) {
                     return true;
                 }
             }
@@ -222,5 +227,39 @@ mod tests {
     fn empty_targets_does_not_suppress() {
         let allow = vec!["node_modules".to_string()];
         assert!(!all_targets_allowed(&[], &allow));
+    }
+
+    #[test]
+    fn exact_sensitive_directory_roots_are_detected() {
+        let checker = SensitivePathChecker::new();
+        assert!(checker.is_sensitive("/etc"), "/etc should be sensitive");
+        assert!(checker.is_sensitive("/var"), "/var should be sensitive");
+        assert!(checker.is_sensitive("/usr"), "/usr should be sensitive");
+        assert!(checker.is_sensitive("/boot"), "/boot should be sensitive");
+        assert!(checker.is_sensitive("/dev"), "/dev should be sensitive");
+        assert!(checker.is_sensitive("/proc"), "/proc should be sensitive");
+        assert!(checker.is_sensitive("/sys"), "/sys should be sensitive");
+        assert!(checker.is_sensitive("/System"), "/System should be sensitive");
+    }
+
+    #[test]
+    fn exact_home_sensitive_directory_roots_are_detected() {
+        let checker = SensitivePathChecker::new();
+        let home = dirs::home_dir().unwrap();
+        assert!(
+            checker.is_sensitive(&format!("{}/.ssh", home.display())),
+            "~/.ssh should be sensitive"
+        );
+        assert!(
+            checker.is_sensitive(&format!("{}/.gnupg", home.display())),
+            "~/.gnupg should be sensitive"
+        );
+    }
+
+    #[test]
+    fn tilde_exact_sensitive_directory_roots_are_detected() {
+        let checker = SensitivePathChecker::new();
+        assert!(checker.is_sensitive("~/.ssh"), "~/.ssh should be sensitive");
+        assert!(checker.is_sensitive("~/.gnupg"), "~/.gnupg should be sensitive");
     }
 }
