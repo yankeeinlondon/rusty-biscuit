@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::Json5;
 use regex::Regex;
 use tracing::{debug, info, warn};
 
 use crate::actions::{CompiledMapper, HookAction, Mapper};
 use crate::config::atomic::atomic_write;
+use crate::config::claudine_config::ClaudineConfig;
+use crate::config::migration;
 use crate::error::{ClaudineError, Result};
 use crate::events::{
     AgenticEvent, CanonicalProviderSettings, GlobalSettings, HookerConfig, LinkingSettings,
@@ -433,6 +436,110 @@ pub fn save_config(config: &HookerConfig) -> Result<PathBuf> {
     atomic_write(&path, content.as_bytes())?;
     info!(?path, "Saved config");
     Ok(path)
+}
+
+// ==========================================================================
+// ClaudineConfig (new flat format) loading, merging, and saving
+// ==========================================================================
+
+/// Load and validate a [`ClaudineConfig`].
+///
+/// If `user_path` is `Some`, it is used directly; otherwise the default
+/// user config path is resolved via [`user_config_path()`].
+///
+/// When the file contains the old per-provider format, it is backed up to
+/// `<path>.bak` and [`ClaudineError::ConfigNotFound`] is returned so that
+/// the caller can run the interactive migration wizard.
+///
+/// If `repo_root` is provided, the repo-level config at
+/// `{repo_root}/.claudine/config.json` is loaded and merged on top of the
+/// user config.
+///
+/// ## Errors
+///
+/// Returns [`ClaudineError::ConfigNotFound`] when the config file does not
+/// exist or was detected as the old format and backed up.
+/// Returns other errors for I/O failures, parse errors, or validation
+/// failures.
+pub fn load_claudine_config(
+    user_path: Option<&Path>,
+    repo_root: Option<&Path>,
+) -> Result<ClaudineConfig> {
+    let path = user_path
+        .map(PathBuf::from)
+        .unwrap_or_else(user_config_path);
+
+    if !path.is_file() {
+        return Err(ClaudineError::ConfigNotFound(path));
+    }
+
+    let raw = std::fs::read_to_string(&path)?;
+    let value = parse_json5_to_value(&raw)?;
+
+    if migration::is_old_format(&value) {
+        migration::backup_old_config(&path)?;
+        return Err(ClaudineError::ConfigNotFound(path));
+    }
+
+    let mut config: ClaudineConfig =
+        serde_json::from_value(value).map_err(ClaudineError::JsonParse)?;
+    debug!(?path, "Loaded ClaudineConfig (user)");
+
+    // Merge repo-level config if present
+    if let Some(root) = repo_root {
+        let repo_path = root.join(REPO_CONFIG_NAME);
+        if repo_path.is_file() {
+            let repo_raw = std::fs::read_to_string(&repo_path)?;
+            let repo_value = parse_json5_to_value(&repo_raw)?;
+            let repo_config: ClaudineConfig =
+                serde_json::from_value(repo_value).map_err(ClaudineError::JsonParse)?;
+            debug!(?repo_path, "Loaded ClaudineConfig (repo)");
+            merge_claudine_configs(&mut config, &repo_config);
+        }
+    }
+
+    config.validate()?;
+    Ok(config)
+}
+
+/// Save a [`ClaudineConfig`] to disk as pretty-printed JSON.
+///
+/// Creates parent directories if they do not exist and writes atomically.
+///
+/// ## Errors
+///
+/// Returns errors if serialization fails or the file cannot be written.
+pub fn save_claudine_config(config: &ClaudineConfig, path: &Path) -> Result<()> {
+    let json = serde_json::to_string_pretty(config)?;
+    atomic_write(path, json.as_bytes())?;
+    info!(?path, "Saved ClaudineConfig");
+    Ok(())
+}
+
+/// Merge a repo-level [`ClaudineConfig`] into a user-level config.
+///
+/// Merge rules:
+/// - `canonical_provider`: repo overrides user if repo has `Some`.
+/// - `actions`: per-event replacement — if repo defines actions for an event,
+///   that vector fully replaces the user's entry for the same event.
+fn merge_claudine_configs(user: &mut ClaudineConfig, repo: &ClaudineConfig) {
+    // canonical_provider: repo overrides user if set
+    if repo.canonical_provider.is_some() {
+        user.canonical_provider = repo.canonical_provider;
+    }
+
+    // actions: per-event replacement
+    for (event, repo_actions) in &repo.actions {
+        user.actions.insert(*event, repo_actions.clone());
+    }
+}
+
+/// Parse a raw string as JSON5 and return a [`serde_json::Value`].
+fn parse_json5_to_value(raw: &str) -> Result<serde_json::Value> {
+    let json5 = Json5::from_str(raw).map_err(|e| {
+        ClaudineError::ConfigValidation(format!("JSON5 parse error: {e}"))
+    })?;
+    Ok(json5.as_json_value().clone())
 }
 
 /// Remove unsupported events from the config.
@@ -1572,5 +1679,120 @@ mod tests {
             result.is_err(),
             "should propagate ProtectService construction error, not swallow it"
         );
+    }
+
+    // =====================================================================
+    // ClaudineConfig loading / saving / merging tests
+    // =====================================================================
+
+    #[test]
+    fn load_claudine_config_from_json5() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join(".claudine");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let json5_content = r#"{
+            // TTS auto-detect
+            tts: true,
+            logging: true,
+            protect: true,
+            preferred_agent: "claude",
+            actions: {
+                human_in_the_loop: [
+                    { type: "sound_effect", effect: "doorbell", },
+                ],
+            },
+        }"#;
+        std::fs::write(config_dir.join("config.json"), json5_content).unwrap();
+
+        let config =
+            load_claudine_config(Some(&config_dir.join("config.json")), None).unwrap();
+        assert!(config.logging);
+        assert!(config
+            .actions
+            .contains_key(&crate::events::AgenticEvent::HumanInTheLoop));
+    }
+
+    #[test]
+    fn load_claudine_config_detects_old_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join(".claudine");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let old = r#"{"version":"1.0","settings":{},"providers":{}}"#;
+        let path = config_dir.join("config.json");
+        std::fs::write(&path, old).unwrap();
+
+        let result = load_claudine_config(Some(&path), None);
+        assert!(result.is_err());
+        assert!(config_dir.join("config.json.bak").exists());
+    }
+
+    #[test]
+    fn merge_repo_canonical_provider_overrides_user() {
+        let mut user = ClaudineConfig {
+            canonical_provider: Some(Provider::Claude),
+            ..ClaudineConfig::default()
+        };
+        let repo = ClaudineConfig {
+            canonical_provider: Some(Provider::Gemini),
+            ..ClaudineConfig::default()
+        };
+        merge_claudine_configs(&mut user, &repo);
+        assert_eq!(user.canonical_provider, Some(Provider::Gemini));
+    }
+
+    #[test]
+    fn merge_repo_actions_replace_user_per_event() {
+        let mut user = ClaudineConfig::default();
+        user.actions.insert(
+            AgenticEvent::SessionStart,
+            vec![HookAction::SoundEffect {
+                effect: "user-sound".to_string(),
+                volume: 1.0,
+                speed: 1.0,
+            }],
+        );
+        user.actions.insert(
+            AgenticEvent::TurnComplete,
+            vec![HookAction::Report { handler: None }],
+        );
+
+        let mut repo = ClaudineConfig::default();
+        repo.actions.insert(
+            AgenticEvent::SessionStart,
+            vec![HookAction::SoundEffect {
+                effect: "repo-sound".to_string(),
+                volume: 0.5,
+                speed: 1.0,
+            }],
+        );
+
+        merge_claudine_configs(&mut user, &repo);
+
+        // SessionStart replaced by repo
+        let session_start = &user.actions[&AgenticEvent::SessionStart];
+        assert_eq!(session_start.len(), 1);
+        if let HookAction::SoundEffect { effect, .. } = &session_start[0] {
+            assert_eq!(effect, "repo-sound");
+        } else {
+            panic!("Expected SoundEffect");
+        }
+
+        // TurnComplete untouched
+        assert!(user.actions.contains_key(&AgenticEvent::TurnComplete));
+    }
+
+    #[test]
+    fn save_and_reload_claudine_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claudine/config.json");
+
+        let config = ClaudineConfig::default();
+        save_claudine_config(&config, &path).unwrap();
+
+        let loaded = load_claudine_config(Some(&path), None).unwrap();
+        assert_eq!(loaded.preferred_agent, config.preferred_agent);
+        assert_eq!(loaded.logging, config.logging);
     }
 }
