@@ -49,9 +49,9 @@ impl ProtectService {
 
     fn evaluate_bash_command(&self, command: &str) -> ProtectDecision {
         for group in &self.catalog.command_groups {
-            if let Some(m) = group.find_match(command) {
-                // Check allow_paths suppression
-                if group.supports_allow_paths {
+            if let Some((m, rule_supports_allow_paths)) = group.find_match(command) {
+                // Check allow_paths suppression (per-rule, not per-group)
+                if rule_supports_allow_paths {
                     if let Some(allow_paths) = self.config.get_allow_paths(group.group) {
                         let targets = extract_target_paths(command);
                         if all_targets_allowed(&targets, allow_paths) {
@@ -64,7 +64,7 @@ impl ProtectService {
         }
 
         if let Some(custom) = &self.catalog.custom_group {
-            if let Some(m) = custom.find_match(command) {
+            if let Some((m, _)) = custom.find_match(command) {
                 return ProtectDecision::blocked(m);
             }
         }
@@ -211,5 +211,29 @@ mod tests {
         let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
         let decision = service.evaluate(&ProtectRequest::BashCommand { command: "rm -rf /" });
         assert!(!decision.is_blocked());
+    }
+
+    #[test]
+    fn rm_boot_blocked_even_with_boot_in_allow_paths() {
+        let mut config = ProtectConfig::default();
+        config.rules.filesystem_destruction = Some(RuleGroupConfig::Detailed(
+            RuleGroupDetailedConfig {
+                enabled: true,
+                allow_paths: vec!["boot".to_string()],
+            },
+        ));
+        let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
+        let decision = service.evaluate(&ProtectRequest::BashCommand {
+            command: "sudo rm -rf /boot",
+        });
+        assert!(
+            decision.is_blocked(),
+            "rm_boot should be blocked even with 'boot' in allow_paths"
+        );
+        assert_eq!(
+            decision.blocked.as_ref().unwrap().rule_id,
+            "rm_boot",
+            "should match the rm_boot rule specifically"
+        );
     }
 }

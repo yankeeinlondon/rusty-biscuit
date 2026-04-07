@@ -14,6 +14,7 @@ pub struct CompiledGroup {
     regexes: Vec<Regex>,
     rule_ids: Vec<String>,
     pub supports_allow_paths: bool,
+    supports_allow_paths_per_rule: Vec<bool>,
 }
 
 impl CompiledGroup {
@@ -25,6 +26,8 @@ impl CompiledGroup {
         let patterns: Vec<&str> = rules.iter().map(|r| r.pattern).collect();
         let rule_ids: Vec<String> = rules.iter().map(|r| r.rule_id.to_string()).collect();
         let supports_allow_paths = rules.iter().any(|r| r.supports_allow_paths);
+        let supports_allow_paths_per_rule: Vec<bool> =
+            rules.iter().map(|r| r.supports_allow_paths).collect();
 
         let regex_set =
             RegexSet::new(&patterns).map_err(|e| ClaudineError::ProtectRuleParse {
@@ -48,6 +51,7 @@ impl CompiledGroup {
             regexes,
             rule_ids,
             supports_allow_paths,
+            supports_allow_paths_per_rule,
         })
     }
 
@@ -77,23 +81,32 @@ impl CompiledGroup {
             regexes,
             rule_ids,
             supports_allow_paths: false,
+            supports_allow_paths_per_rule: vec![false; patterns.len()],
         })
     }
 
     /// Find the first matching rule in this group.
-    pub fn find_match(&self, input: &str) -> Option<ProtectMatch> {
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of `(ProtectMatch, bool)` where the bool indicates whether
+    /// the matched rule supports `allow_paths` bypass.
+    pub fn find_match(&self, input: &str) -> Option<(ProtectMatch, bool)> {
         let matches: Vec<usize> = self.regex_set.matches(input).into_iter().collect();
         for idx in matches {
             if let Some(m) = self.regexes[idx].find(input) {
-                return Some(ProtectMatch {
-                    group: self.group,
-                    rule_id: self.rule_ids[idx].clone(),
-                    pattern: self.regexes[idx].as_str().to_string(),
-                    matched_text: m.as_str().to_string(),
-                    surface: self.surface,
-                    target_path: None,
-                    config_key: format!("protect.rules.{}", self.group.config_key()),
-                });
+                return Some((
+                    ProtectMatch {
+                        group: self.group,
+                        rule_id: self.rule_ids[idx].clone(),
+                        pattern: self.regexes[idx].as_str().to_string(),
+                        matched_text: m.as_str().to_string(),
+                        surface: self.surface,
+                        target_path: None,
+                        config_key: format!("protect.rules.{}", self.group.config_key()),
+                    },
+                    self.supports_allow_paths_per_rule[idx],
+                ));
             }
         }
         None
@@ -185,12 +198,12 @@ impl CompiledCatalog {
     /// Returns the first match found, or `None` if the command is safe.
     pub fn evaluate_command(&self, command: &str) -> Option<ProtectMatch> {
         for group in &self.command_groups {
-            if let Some(m) = group.find_match(command) {
+            if let Some((m, _)) = group.find_match(command) {
                 return Some(m);
             }
         }
         if let Some(custom) = &self.custom_group {
-            if let Some(m) = custom.find_match(command) {
+            if let Some((m, _)) = custom.find_match(command) {
                 return Some(m);
             }
         }
@@ -202,7 +215,7 @@ impl CompiledCatalog {
     /// Returns the first match found, or `None` if the payload is clean.
     pub fn evaluate_mcp(&self, payload: &str) -> Option<ProtectMatch> {
         for group in &self.mcp_groups {
-            if let Some(m) = group.find_match(payload) {
+            if let Some((m, _)) = group.find_match(payload) {
                 return Some(m);
             }
         }
