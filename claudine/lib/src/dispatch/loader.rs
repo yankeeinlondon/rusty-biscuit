@@ -667,6 +667,8 @@ mod tests {
             enabled: true,
             actions: vec![HookAction::Speak {
                 message: msg.to_string(),
+                voice: None,
+                gender: None,
             }],
             matcher: None,
         }
@@ -745,7 +747,7 @@ mod tests {
         let claude = &loaded.providers[&Provider::Claude];
         assert_eq!(claude.events.len(), 1); // Only session_start, no turn_complete
         match &claude.events[&AgenticEvent::SessionStart].actions[0] {
-            HookAction::Speak { message } => assert_eq!(message, "repo session"),
+            HookAction::Speak { message, .. } => assert_eq!(message, "repo session"),
             _ => panic!("Expected Speak"),
         }
     }

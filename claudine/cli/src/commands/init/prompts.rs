@@ -292,7 +292,11 @@ fn prompt_input_speak_action() -> Result<HookAction> {
         .with_default(default_message)
         .with_help_message("Supports {{placeholder}} interpolation")
         .prompt()?;
-    Ok(HookAction::Speak { message })
+    Ok(HookAction::Speak {
+        message,
+        voice: None,
+        gender: None,
+    })
 }
 
 fn prompt_input_sound_effect() -> Result<HookAction> {
@@ -318,7 +322,7 @@ fn prompt_input_sound_effect() -> Result<HookAction> {
         .prompt()?;
 
     Ok(HookAction::SoundEffect {
-        name: selected.replace(" (recommended)", ""),
+        effect: selected.replace(" (recommended)", ""),
         volume: 1.0,
         speed: 1.0,
     })
@@ -328,19 +332,19 @@ fn prompt_input_run_action() -> Result<HookAction> {
     let command = Text::new("Command to run when input is needed:")
         .with_placeholder("notify-send")
         .prompt()?;
-    let args_str = Text::new("Arguments (space-separated, or leave empty):")
+    let params_str = Text::new("Parameters (template-interpolated, or leave empty):")
         .with_default("")
         .prompt()?;
-    let args = if args_str.is_empty() {
-        None
-    } else {
-        Some(args_str.split_whitespace().map(String::from).collect())
-    };
     let blocking = Confirm::new("Wait for command to complete?")
         .with_default(false)
         .prompt()?;
 
     if blocking {
+        let args = if params_str.is_empty() {
+            None
+        } else {
+            Some(params_str.split_whitespace().map(String::from).collect())
+        };
         Ok(HookAction::Call {
             command,
             args,
@@ -348,7 +352,10 @@ fn prompt_input_run_action() -> Result<HookAction> {
             mapper: None,
         })
     } else {
-        Ok(HookAction::FireAndForget { command, args })
+        Ok(HookAction::Bash {
+            command,
+            params: params_str,
+        })
     }
 }
 
@@ -422,7 +429,7 @@ fn input_action_default_indices(defaults: Option<&[HookAction]>) -> Option<Vec<u
         let index = match action {
             HookAction::Speak { .. } => 0,
             HookAction::SoundEffect { .. } => 1,
-            HookAction::FireAndForget { .. } | HookAction::Call { .. } => 2,
+            HookAction::Bash { .. } | HookAction::Call { .. } => 2,
             _ => continue,
         };
         if !indices.contains(&index) {
@@ -464,15 +471,17 @@ mod tests {
         let defaults = vec![
             HookAction::Speak {
                 message: "hello".to_string(),
+                voice: None,
+                gender: None,
             },
             HookAction::SoundEffect {
-                name: "ding".to_string(),
+                effect: "ding".to_string(),
                 volume: 1.0,
                 speed: 1.0,
             },
-            HookAction::FireAndForget {
+            HookAction::Bash {
                 command: "notify-send".to_string(),
-                args: None,
+                params: String::new(),
             },
         ];
 

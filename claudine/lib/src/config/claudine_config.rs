@@ -454,7 +454,7 @@ mod tests {
             "preferred_agent": "claude",
             "actions": {
                 "session_start": [
-                    { "type": "sound_effect", "name": "doorbell" }
+                    { "type": "sound_effect", "effect": "doorbell" }
                 ],
                 "turn_complete": [
                     { "type": "speak", "message": "Done!" }
@@ -474,6 +474,8 @@ mod tests {
             AgenticEvent::BeforeTool,
             vec![HookAction::Speak {
                 message: "tool starting".to_string(),
+                voice: None,
+                gender: None,
             }],
         );
         let config = ClaudineConfig {
@@ -873,7 +875,7 @@ mod tests {
             "canonical_provider": "gemini",
             "actions": {
                 "session_start": [
-                    { "type": "sound_effect", "name": "doorbell" }
+                    { "type": "sound_effect", "effect": "doorbell" }
                 ]
             },
             "messenger": {

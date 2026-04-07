@@ -95,11 +95,11 @@ fn run_simple(config: &claudine::events::HookerConfig, term: &Terminal) -> Resul
 fn action_with_params(action: &HookAction) -> String {
     match action {
         HookAction::SoundEffect {
-            name,
+            effect,
             volume,
             speed,
         } => {
-            let mut s = format!("{}({name}", action.type_pascal_case());
+            let mut s = format!("{}({effect}", action.type_pascal_case());
             if *volume != 1.0 {
                 s.push_str(&format!(", vol={}", volume));
             }
@@ -109,7 +109,7 @@ fn action_with_params(action: &HookAction) -> String {
             s.push(')');
             s
         }
-        HookAction::Speak { message } => {
+        HookAction::Speak { message, .. } => {
             let truncated = if message.len() > 30 {
                 format!("{}…", &message[..27])
             } else {
@@ -117,48 +117,11 @@ fn action_with_params(action: &HookAction) -> String {
             };
             format!("{}({truncated})", action.type_pascal_case())
         }
-        HookAction::Log { target } => {
-            let params = match target {
-                claudine::actions::LogTarget::File { path, rotate_daily } => {
-                    let mut p = String::new();
-                    if !*rotate_daily {
-                        p.push_str(&format!("rotate_daily: {}", rotate_daily));
-                    }
-                    if path.is_some() {
-                        if !p.is_empty() {
-                            p.push_str(", ");
-                        }
-                        p.push_str("path: ...");
-                    }
-                    p
-                }
-                claudine::actions::LogTarget::Server {
-                    url, timeout_ms, ..
-                } => {
-                    let mut p = format!("url: {}", url);
-                    if *timeout_ms != 10_000 {
-                        p.push_str(&format!(", timeout: {}ms", timeout_ms));
-                    }
-                    p
-                }
-                _ => String::new(),
-            };
+        HookAction::Bash { command, params } => {
             if params.is_empty() {
-                format!("{}()", action.type_pascal_case())
-            } else {
-                format!("{}({{{params}}})", action.type_pascal_case())
-            }
-        }
-        HookAction::FireAndForget { command, args } => {
-            if let Some(args) = args {
-                format!(
-                    "{}({} {})",
-                    action.type_pascal_case(),
-                    command,
-                    args.join(" ")
-                )
-            } else {
                 format!("{}({})", action.type_pascal_case(), command)
+            } else {
+                format!("{}({} {})", action.type_pascal_case(), command, params)
             }
         }
         HookAction::Call {

@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::time::Duration;
 
 use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
@@ -9,12 +8,10 @@ use tracing::{debug, info_span, warn};
 
 use super::template::interpolate;
 use crate::actions::{
-    CompiledMapper, HookAction, HookDecision, HookResponse, LogTarget, Mapper, ReportFormat,
-    ReportHandler,
+    CompiledMapper, HookAction, HookDecision, HookResponse, Mapper, ReportFormat, ReportHandler,
 };
 use crate::error::Result;
 use crate::events::{EventMeta, GlobalSettings};
-use crate::reporting::paths;
 use crate::services::protect::decision::ProtectDecision;
 
 /// Execute hook actions in declaration order.
@@ -33,7 +30,7 @@ pub async fn execute_actions(
 
     for (index, action) in actions.iter().enumerate() {
         match action {
-            HookAction::Speak { message } => {
+            HookAction::Speak { message, .. } => {
                 let _action_span = info_span!(
                     "hook_action",
                     action_index = index,
@@ -45,20 +42,6 @@ pub async fn execute_actions(
                 )
                 .entered();
                 execute_speak(message, meta, settings);
-            }
-            HookAction::Log { target } => {
-                let _action_span = info_span!(
-                    "hook_action",
-                    action_index = index,
-                    action_kind = "log",
-                    blocking = can_block,
-                    timeout_ms = tracing::field::Empty,
-                    target_kind = %log_target_kind(target),
-                    command = tracing::field::Empty,
-                )
-                .entered();
-                let target = resolve_log_target(target, settings);
-                execute_log(target, meta).await?
             }
             HookAction::Report { handler } => {
                 let _action_span = info_span!(
@@ -73,18 +56,18 @@ pub async fn execute_actions(
                 .entered();
                 execute_report(handler.as_ref(), meta, can_block);
             }
-            HookAction::FireAndForget { command, args } => {
+            HookAction::Bash { command, params } => {
                 let _action_span = info_span!(
                     "hook_action",
                     action_index = index,
-                    action_kind = "fire_and_forget",
+                    action_kind = "bash",
                     blocking = can_block,
                     timeout_ms = tracing::field::Empty,
                     target_kind = tracing::field::Empty,
                     command = %command,
                 )
                 .entered();
-                execute_fire_and_forget(command, args.as_deref(), meta)
+                execute_bash(command, params, meta)
             }
             HookAction::Call {
                 command,
@@ -166,7 +149,7 @@ pub async fn execute_actions(
                 }
             }
             HookAction::SoundEffect {
-                name,
+                effect,
                 volume,
                 speed,
             } => {
@@ -180,7 +163,7 @@ pub async fn execute_actions(
                     command = tracing::field::Empty,
                 )
                 .entered();
-                execute_sound_effect(name, *volume, *speed);
+                execute_sound_effect(effect, *volume, *speed);
             }
             HookAction::Message { message, image } => {
                 let _action_span = info_span!(
@@ -201,19 +184,6 @@ pub async fn execute_actions(
     Ok(selected_response)
 }
 
-fn resolve_log_target<'a>(target: &'a LogTarget, settings: &'a GlobalSettings) -> &'a LogTarget {
-    match (target, settings.default_log_target.as_ref()) {
-        (LogTarget::File { path: None, .. }, Some(default_target)) => default_target,
-        _ => target,
-    }
-}
-
-fn log_target_kind(target: &LogTarget) -> &'static str {
-    match target {
-        LogTarget::File { .. } => "file",
-        LogTarget::Server { .. } => "server",
-    }
-}
 
 fn should_replace_selected(current: Option<&HookResponse>, candidate: &HookResponse) -> bool {
     match current {
@@ -313,82 +283,35 @@ fn execute_sound_effect(name: &str, volume: f32, speed: f32) {
     });
 }
 
-fn execute_fire_and_forget(command: &str, args: Option<&[String]>, meta: &EventMeta) {
+/// Execute a shell command asynchronously via `sh -c "command params"`.
+fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
     let cmd = interpolate(command, meta);
-    let rendered_args: Option<Vec<String>> = args.map(|items| {
-        items
-            .iter()
-            .map(|arg| interpolate(arg, meta))
-            .collect::<Vec<_>>()
-    });
-
-    tokio::spawn(async move {
-        if let Err(error) = run_command_blocking(&cmd, rendered_args.as_deref()).await {
-            warn!(%cmd, %error, "Fire-and-forget command failed");
-        }
-    });
-}
-
-async fn execute_log(target: &LogTarget, meta: &EventMeta) -> Result<()> {
-    match target {
-        LogTarget::File { path, rotate_daily } => {
-            let resolved = paths::resolve_file_log_path(path.as_deref(), *rotate_daily)?;
-            write_jsonl(&resolved, meta)
-        }
-        LogTarget::Server {
-            url,
-            timeout_ms,
-            headers,
-        } => {
-            post_to_server(url, *timeout_ms, headers.as_ref(), meta).await;
-            Ok(())
-        }
-    }
-}
-
-fn write_jsonl(path: &std::path::Path, meta: &EventMeta) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let mut line = serde_json::to_string(meta)?;
-    line.push('\n');
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?
-        .write_all(line.as_bytes())?;
-
-    Ok(())
-}
-
-async fn post_to_server(
-    url: &str,
-    timeout_ms: u64,
-    headers: Option<&std::collections::HashMap<String, String>>,
-    meta: &EventMeta,
-) {
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_millis(timeout_ms))
-        .build()
-    {
-        Ok(client) => client,
-        Err(error) => {
-            warn!(%error, "Failed to build HTTP client for log target");
-            return;
-        }
+    let rendered_params = interpolate(params, meta);
+    let full_command = if rendered_params.is_empty() {
+        cmd.clone()
+    } else {
+        format!("{cmd} {rendered_params}")
     };
 
-    let mut request = client.post(url).json(meta);
-    if let Some(headers) = headers {
-        for (key, value) in headers {
-            request = request.header(key, value);
-        }
-    }
+    debug!(%full_command, "Spawning bash action");
 
-    if let Err(error) = request.send().await {
-        warn!(%error, %url, "Log server POST failed");
-    }
+    tokio::spawn(async move {
+        let result = Command::new("sh")
+            .arg("-c")
+            .arg(&full_command)
+            .output()
+            .await;
+        match result {
+            Ok(output) if !output.status.success() => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(%full_command, %stderr, "Bash action exited with non-zero status");
+            }
+            Err(error) => {
+                warn!(%full_command, %error, "Bash action failed to spawn");
+            }
+            _ => {}
+        }
+    });
 }
 
 fn execute_report(handler: Option<&ReportHandler>, meta: &EventMeta, blocking: bool) {
@@ -711,34 +634,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn log_file_writes_jsonl() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("events.jsonl");
-
-        let actions = vec![HookAction::Log {
-            target: LogTarget::File {
-                path: Some(path.clone()),
-                rotate_daily: false,
-            },
-        }];
-
-        execute_actions(
-            &actions,
-            None,
-            &meta(),
-            &GlobalSettings::default(),
-            &crate::messaging::RuntimeMessagingSettings::default(),
-            false,
-            None,
-        )
-        .await
-        .unwrap();
-
-        let content = std::fs::read_to_string(path).unwrap();
-        assert!(content.contains("before_tool"));
-    }
-
     #[test]
     fn mapper_exit_code_deny() {
         let output = CommandOutput {
@@ -892,12 +787,7 @@ mod tests {
                 message: "notify".to_string(),
                 image: None,
             },
-            HookAction::Log {
-                target: LogTarget::File {
-                    path: None,
-                    rotate_daily: false,
-                },
-            },
+            HookAction::Report { handler: None },
         ];
 
         let messaging = crate::messaging::RuntimeMessagingSettings::default();

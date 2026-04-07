@@ -292,8 +292,6 @@ fn read_config_if_exists(path: &std::path::Path) -> Option<HookerConfig> {
 
 fn infer_action_profile(config: &HookerConfig) -> Option<prompts::InitActionProfile> {
     let mut configured_events = HashSet::new();
-    let mut logged_events = HashSet::new();
-    let mut log_target: Option<claudine::actions::LogTarget> = None;
     let mut input_required_actions = Vec::new();
 
     for provider_config in config.providers.values() {
@@ -304,28 +302,13 @@ fn infer_action_profile(config: &HookerConfig) -> Option<prompts::InitActionProf
 
             configured_events.insert(*event);
 
-            if let Some(target) = binding.actions.iter().find_map(|action| match action {
-                HookAction::Log { target } => Some(target.clone()),
-                _ => None,
-            }) {
-                logged_events.insert(*event);
-                if log_target.is_none() {
-                    log_target = Some(target);
-                }
-            }
-
             if input_required_actions.is_empty()
                 && matches!(
                     event,
                     AgenticEvent::PermissionRequest | AgenticEvent::HumanInTheLoop
                 )
             {
-                input_required_actions = binding
-                    .actions
-                    .iter()
-                    .filter(|action| !matches!(action, HookAction::Log { .. }))
-                    .cloned()
-                    .collect();
+                input_required_actions = binding.actions.clone();
             }
         }
     }
@@ -334,25 +317,8 @@ fn infer_action_profile(config: &HookerConfig) -> Option<prompts::InitActionProf
         return None;
     }
 
-    let logging = if logged_events.is_empty() {
-        prompts::LoggingProfile::None
-    } else {
-        let target = log_target.unwrap_or(claudine::actions::LogTarget::File {
-            path: None,
-            rotate_daily: true,
-        });
-        if logged_events == configured_events {
-            prompts::LoggingProfile::All { target }
-        } else {
-            prompts::LoggingProfile::Some {
-                target,
-                events: logged_events,
-            }
-        }
-    };
-
     Some(prompts::InitActionProfile {
-        logging,
+        logging: prompts::LoggingProfile::None,
         input_required_actions,
     })
 }
@@ -584,22 +550,6 @@ fn actions_for_event(
 ) -> Vec<HookAction> {
     let mut actions = Vec::new();
 
-    match &action_profile.logging {
-        prompts::LoggingProfile::None => {}
-        prompts::LoggingProfile::All { target } => {
-            actions.push(HookAction::Log {
-                target: target.clone(),
-            });
-        }
-        prompts::LoggingProfile::Some { target, events } => {
-            if events.contains(&event) {
-                actions.push(HookAction::Log {
-                    target: target.clone(),
-                });
-            }
-        }
-    }
-
     if matches!(
         event,
         AgenticEvent::PermissionRequest | AgenticEvent::HumanInTheLoop
@@ -623,7 +573,7 @@ fn create_quick_provider_events(provider: Provider) -> HashMap<AgenticEvent, Eve
                     | AgenticEvent::HumanInTheLoop
             ) {
                 vec![HookAction::SoundEffect {
-                    name: recommended_sound(&event).to_string(),
+                    effect: recommended_sound(&event).to_string(),
                     volume: 1.0,
                     speed: 1.0,
                 }]
@@ -646,7 +596,6 @@ fn create_quick_provider_events(provider: Provider) -> HashMap<AgenticEvent, Eve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claudine::actions::LogTarget;
 
     fn config_with_provider_events(
         provider: Provider,
@@ -721,16 +670,11 @@ mod tests {
     }
 
     #[test]
-    fn interactive_profile_applies_logging_and_input_sound() {
+    fn interactive_profile_applies_input_sound() {
         let profile = prompts::InitActionProfile {
-            logging: prompts::LoggingProfile::All {
-                target: LogTarget::File {
-                    path: None,
-                    rotate_daily: true,
-                },
-            },
+            logging: prompts::LoggingProfile::None,
             input_required_actions: vec![HookAction::SoundEffect {
-                name: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
+                effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
                 volume: 1.0,
                 speed: 1.0,
             }],
@@ -738,47 +682,18 @@ mod tests {
 
         let bindings = build_provider_event_bindings(Provider::Claude, &profile);
 
-        // Non-input event gets logging only.
-        let session_start = bindings
-            .get(&AgenticEvent::SessionStart)
-            .expect("session_start should exist for Claude");
-        assert_eq!(session_start.actions.len(), 1);
-        assert!(matches!(session_start.actions[0], HookAction::Log { .. }));
-
-        // Input-required event gets logging + sound.
-        let hitl = bindings
-            .get(&AgenticEvent::HumanInTheLoop)
-            .expect("human_in_the_loop should exist for Claude");
-        assert_eq!(hitl.actions.len(), 2);
-        assert!(matches!(hitl.actions[0], HookAction::Log { .. }));
-        assert!(matches!(hitl.actions[1], HookAction::SoundEffect { .. }));
-    }
-
-    #[test]
-    fn interactive_profile_logs_only_selected_events_when_configured() {
-        let profile = prompts::InitActionProfile {
-            logging: prompts::LoggingProfile::Some {
-                target: LogTarget::File {
-                    path: None,
-                    rotate_daily: true,
-                },
-                events: [AgenticEvent::TurnComplete].into_iter().collect(),
-            },
-            input_required_actions: vec![],
-        };
-
-        let bindings = build_provider_event_bindings(Provider::Claude, &profile);
-
-        let turn_complete = bindings
-            .get(&AgenticEvent::TurnComplete)
-            .expect("turn_complete should exist for Claude");
-        assert_eq!(turn_complete.actions.len(), 1);
-        assert!(matches!(turn_complete.actions[0], HookAction::Log { .. }));
-
+        // Non-input event gets no actions.
         let session_start = bindings
             .get(&AgenticEvent::SessionStart)
             .expect("session_start should exist for Claude");
         assert!(session_start.actions.is_empty());
+
+        // Input-required event gets sound.
+        let hitl = bindings
+            .get(&AgenticEvent::HumanInTheLoop)
+            .expect("human_in_the_loop should exist for Claude");
+        assert_eq!(hitl.actions.len(), 1);
+        assert!(matches!(hitl.actions[0], HookAction::SoundEffect { .. }));
     }
 
     #[test]
@@ -819,74 +734,22 @@ mod tests {
     }
 
     #[test]
-    fn infer_action_profile_restores_all_event_logging() {
-        let target = LogTarget::File {
-            path: None,
-            rotate_daily: true,
-        };
-        let config = config_with_provider_events(
-            Provider::Claude,
-            vec![
-                (
-                    AgenticEvent::SessionStart,
-                    vec![HookAction::Log {
-                        target: target.clone(),
-                    }],
-                ),
-                (
-                    AgenticEvent::TurnComplete,
-                    vec![HookAction::Log {
-                        target: target.clone(),
-                    }],
-                ),
-            ],
-        );
-
-        let profile = infer_action_profile(&config).expect("profile should be inferred");
-        match profile.logging {
-            prompts::LoggingProfile::All {
-                target: inferred_target,
-            } => assert_eq!(inferred_target, target),
-            other => panic!("expected all-event logging, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn infer_action_profile_restores_some_logging_and_input_actions() {
-        let target = LogTarget::File {
-            path: None,
-            rotate_daily: true,
-        };
+    fn infer_action_profile_restores_input_actions() {
         let sound = HookAction::SoundEffect {
-            name: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
+            effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
             volume: 1.0,
             speed: 1.0,
         };
         let config = config_with_provider_events(
             Provider::Claude,
             vec![
-                (
-                    AgenticEvent::TurnComplete,
-                    vec![HookAction::Log {
-                        target: target.clone(),
-                    }],
-                ),
                 (AgenticEvent::SessionStart, vec![]),
                 (AgenticEvent::HumanInTheLoop, vec![sound.clone()]),
             ],
         );
 
         let profile = infer_action_profile(&config).expect("profile should be inferred");
-        match profile.logging {
-            prompts::LoggingProfile::Some {
-                target: inferred_target,
-                events,
-            } => {
-                assert_eq!(inferred_target, target);
-                assert_eq!(events, HashSet::from([AgenticEvent::TurnComplete]));
-            }
-            other => panic!("expected some-event logging, got {other:?}"),
-        }
+        assert!(matches!(profile.logging, prompts::LoggingProfile::None));
         assert_eq!(profile.input_required_actions, vec![sound]);
     }
 }

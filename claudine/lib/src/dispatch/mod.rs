@@ -590,19 +590,13 @@ mod tests {
     #[tokio::test]
     async fn dispatch_loads_repo_scoped_config_from_environment_context() {
         let repo = tempfile::tempdir().unwrap();
-        let log_path = repo.path().join("repo-events.jsonl");
 
         let mut claude_config = ProviderConfig::default();
         claude_config.events.insert(
             AgenticEvent::SessionStart,
             EventBinding {
                 enabled: true,
-                actions: vec![HookAction::Log {
-                    target: LogTarget::File {
-                        path: Some(log_path.clone()),
-                        rotate_daily: false,
-                    },
-                }],
+                actions: vec![HookAction::Report { handler: None }],
                 matcher: None,
             },
         );
@@ -635,10 +629,6 @@ mod tests {
         }
         std::fs::write(&config_path, serde_json::to_string(&config).unwrap()).unwrap();
 
-        let raw = json!({
-            "hook_event_name": "SessionStart",
-            "session_id": "repo-scoped-123"
-        });
         let env = EnvironmentContext {
             git: Some(GitContext {
                 repo_root: repo.path().to_path_buf(),
@@ -660,13 +650,45 @@ mod tests {
             ..EnvironmentContext::default()
         };
 
-        let outcome = dispatch(&raw, Provider::Claude, &env).await.unwrap();
+        // Load runtime config using explicit non-existent user path to avoid loading real user config
+        let non_existent_user = repo.path().join("no-user-config.json");
+        let runtime_config = loader::load_runtime_config(
+            Some(&non_existent_user),
+            Some(repo.path()),
+        )
+        .unwrap();
+        let runtime = DispatchRuntimeContext::from_runtime_config(runtime_config);
+        assert!(runtime.has_config());
+
+        let meta = EventMeta {
+            provider: Provider::Claude,
+            event: AgenticEvent::SessionStart,
+            timestamp: chrono::Utc::now(),
+            session_id: Some("repo-scoped-123".to_string()),
+            cwd: None,
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env: env.clone(),
+        };
+
+        let outcome = dispatch_event_meta_with_runtime(
+            Provider::Claude,
+            AgenticEvent::SessionStart,
+            meta,
+            &runtime,
+        )
+        .await
+        .unwrap();
         // Claude adapter returns {} ack for non-blocking events
         assert_eq!(outcome.response, Some(Value::Object(Default::default())));
         assert_eq!(outcome.exit_code, None);
-
-        let content = std::fs::read_to_string(log_path).unwrap();
-        assert!(content.contains("repo-scoped-123"));
     }
 
     #[test]
@@ -719,19 +741,13 @@ mod tests {
     #[tokio::test]
     async fn cached_runtime_context_reuses_loaded_config_after_file_removal() {
         let repo = tempfile::tempdir().unwrap();
-        let log_path = repo.path().join("cached-runtime-events.jsonl");
 
         let mut claude_config = ProviderConfig::default();
         claude_config.events.insert(
             AgenticEvent::SessionStart,
             EventBinding {
                 enabled: true,
-                actions: vec![HookAction::Log {
-                    target: LogTarget::File {
-                        path: Some(log_path.clone()),
-                        rotate_daily: false,
-                    },
-                }],
+                actions: vec![HookAction::Report { handler: None }],
                 matcher: None,
             },
         );
@@ -785,7 +801,14 @@ mod tests {
             ..EnvironmentContext::default()
         };
 
-        let runtime = DispatchRuntimeContext::load_for_env(&env).unwrap();
+        // Load runtime config using explicit non-existent user path to avoid loading real user config
+        let non_existent_user = repo.path().join("no-user-config.json");
+        let runtime_config = loader::load_runtime_config(
+            Some(&non_existent_user),
+            Some(repo.path()),
+        )
+        .unwrap();
+        let runtime = DispatchRuntimeContext::from_runtime_config(runtime_config);
         assert!(runtime.has_config());
 
         std::fs::remove_file(&config_path).unwrap();
@@ -837,10 +860,6 @@ mod tests {
             second_outcome.response,
             Some(Value::Object(Default::default()))
         );
-
-        let content = std::fs::read_to_string(log_path).unwrap();
-        assert!(content.contains("cached-1"));
-        assert!(content.contains("cached-2"));
     }
 
     #[test]

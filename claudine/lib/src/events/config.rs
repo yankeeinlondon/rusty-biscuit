@@ -199,7 +199,7 @@ mod tests {
                         "session_start": {
                             "enabled": true,
                             "actions": [
-                                { "type": "sound_effect", "name": "power-up" },
+                                { "type": "sound_effect", "effect": "power-up" },
                                 { "type": "speak", "message": "Session started" }
                             ]
                         },
@@ -212,7 +212,7 @@ mod tests {
                         "tool_error": {
                             "enabled": true,
                             "actions": [
-                                { "type": "sound_effect", "name": "error" }
+                                { "type": "sound_effect", "effect": "error" }
                             ]
                         }
                     }
@@ -232,7 +232,7 @@ mod tests {
                         "session_start": {
                             "enabled": true,
                             "actions": [
-                                { "type": "sound_effect", "name": "power-up" }
+                                { "type": "sound_effect", "effect": "power-up" }
                             ]
                         },
                         "before_tool": {
@@ -297,6 +297,8 @@ mod tests {
                 enabled: true,
                 actions: vec![HookAction::Speak {
                     message: "done".to_string(),
+                    voice: None,
+                    gender: None,
                 }],
                 matcher: None,
             },
