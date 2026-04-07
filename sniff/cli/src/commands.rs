@@ -591,6 +591,36 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Handle Package/PackageArea early returns (need detection result but not enrichment)
+    if let Some(ref action) = repo_action {
+        match action {
+            crate::args::RepoAction::Package {
+                no_error,
+                on_error,
+            } => {
+                let rendered =
+                    output::render_repo_package(&result, base_dir.as_deref(), cli.verbose);
+                if rendered.is_empty() {
+                    return handle_no_results(*no_error, on_error, cli.plain);
+                }
+                println!("{rendered}");
+                return Ok(());
+            }
+            crate::args::RepoAction::PackageArea {
+                no_error,
+                on_error,
+            } => {
+                let rendered = output::render_repo_package_area(&result, base_dir.as_deref());
+                if rendered.is_empty() {
+                    return handle_no_results(*no_error, on_error, cli.plain);
+                }
+                println!("{rendered}");
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     let latest_versions_enabled = match &repo_action {
         Some(crate::args::RepoAction::Structure {
             latest_versions: true,
@@ -987,9 +1017,9 @@ fn handle_no_results(
             rendered
         };
         if no_error {
-            print!("{text}");
+            println!("{text}");
         } else {
-            eprint!("{text}");
+            eprintln!("{text}");
         }
     }
 
