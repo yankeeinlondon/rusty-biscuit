@@ -1,5 +1,7 @@
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// Platform for which protection rules should be loaded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtectPlatform {
@@ -27,7 +29,8 @@ impl ProtectPlatform {
 }
 
 /// Surface where a protection rule can match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ScanSurface {
     /// Bash tool command strings.
     BashCommand,
@@ -38,7 +41,8 @@ pub enum ScanSurface {
 }
 
 /// Rule group identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RuleGroup {
     FilesystemDestruction,
     DiskManipulation,
