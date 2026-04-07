@@ -1,7 +1,7 @@
 ---
 name: claudine
 description: Details on the Claudine library and CLI, including deep research into Agentic CLI platforms such as Claude Code, Codex CLI, Goose, Opencode CLI, and all other Agentic CLI's supported by the Claudine library.
-last_updated: 2026-04-05
+last_updated: 2026-04-06
 ---
 
 ## Claudine Library
@@ -9,6 +9,8 @@ last_updated: 2026-04-05
 Claudine is a universal event handler, shared-resource linker, MCP catalog manager, and composition harness for agentic CLIs. It normalizes 16 lifecycle events across 8 providers (Claude Code, Codex CLI, Gemini CLI, Goose, Kimi Code, OpenCode, Qwen Code, and Roo Code) into a single configuration model, executes 6 action types -- TTS, sound effects, logging, shell commands, reports, and blocking calls -- when those events fire, synchronizes skills/commands/agents/scripts between providers, manages provider-agnostic MCP storage plus provider-specific import/sync/runtime behavior, and provides three Markdown composition commands (`compose`, `inline-compose`, `sequence`) that flow through the same wrapper-grade execution pipeline as the provider wrappers.
 
 The library is organized into seventeen modules plus the shared error type: `actions` (hook action types and responses), `adapters` (provider-specific event parsers), `agents` (capability catalog for all 8 CLIs), `badges` (styled terminal badge constants), `composition` (markdown frontmatter composition for direct, inline, and sequence prompt pipelines with lifecycle emitters, preflight shell approval, and closure write-back), `config` (agent detection, hook registration, atomic writes, backups), `dispatch` (event processing pipeline), `events` (the normalized 16-event lifecycle model), `harness` (typed pre/post validations, timeouts, handler resolution, shell policy adapter, and recovery actions for composed prompt pipelines), `linking` (cross-provider skill/command/agent/script synchronization with portability classification), `mcp` (catalog, defaults, provider-state, import/export, session composition, runtime injectors), `messaging` (outbound messaging routes for Discord/Slack/Signal/WhatsApp with secret and recipient resolution), `permissions` (provider-agnostic policy engine for permission queries, canonical modeling, and mutation planning), `reporting` (JSONL-to-SQLite metrics index), `services` (cross-provider runtime policy services such as ProtectService), `stream` (structured stream parsing for 6 providers with summary/reporting), and `system_prompt` (system prompt discovery, CLI switch resolution, and wrapper preparation).
+
+`ProtectService` was refactored on 2026-04-06 into a standalone regex-backed deny catalog. It now evaluates bash commands, write/edit paths, and MCP tool responses with a strict `Allow` or `Block` outcome, has no posture or severity model, does not depend on `PolicyEngine`, and supports per-group toggles plus command-only `custom_patterns`. Config supports shorthand `"protect": true` or an expanded object with `enabled`, `rules`, and `custom_patterns`; repo/user merge semantics are Protect-specific: `enabled` is OR-merged, repo rule toggles override user toggles per group, and custom patterns combine as repo first then user. `allow_paths` is only valid for `filesystem_destruction` and `sensitive_paths`.
 
 The dispatch pipeline supports a Handlebars-style template engine with 28 variables across 5 categories (event, OS, hardware, git, and project), shell environment variable interpolation with optional defaults, and precompiled regex matchers for event filtering. Configuration merges user-scope and repo-scope configs with an intentionally asymmetric strategy: repo provider configs fully replace user-level configs, while global settings merge field-by-field.
 
@@ -25,6 +27,7 @@ For deeper topic references in the repo (not duplicated here), see:
 - [Composition](../../../claudine/docs/topics/composition.md) — `compose`, `inline-compose`, `sequence`, harness validations, handlers, provider selection
 - [System Prompt](../../../claudine/docs/topics/system-prompt.md) — discovery, CLI switches, `system-prompt.md` conventions
 - [MCP Catalog](../../../claudine/docs/topics/mcp-catalog.md) and [MCP Mode](../../../claudine/docs/topics/mcp-mode.md)
+- [Protect Service](../../../claudine/docs/topics/protect-service.md) — standalone deny catalog, scan surfaces, rule groups, merge semantics, dispatch integration
 - [Traces and Logging](../../../claudine/docs/topics/traces-and-logging.md), [Log Reporting](../../../claudine/docs/topics/log-reporting.md)
 
 

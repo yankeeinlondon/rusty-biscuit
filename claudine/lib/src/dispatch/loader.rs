@@ -110,6 +110,25 @@ impl RuntimeEventBinding {
     pub fn compiled_mappers(&self) -> &[Option<CompiledMapper>] {
         &self.compiled_mappers
     }
+
+    /// Build a RuntimeEventBinding directly for testing.
+    #[cfg(test)]
+    pub fn new_for_test(enabled: bool, actions: Vec<HookAction>, matcher: Option<Regex>) -> Self {
+        let compiled_mappers = vec![None; actions.len()];
+        Self {
+            enabled,
+            actions,
+            matcher,
+            compiled_mappers,
+        }
+    }
+}
+
+#[cfg(test)]
+impl RuntimeProviderConfig {
+    pub fn new_for_test(events: HashMap<AgenticEvent, RuntimeEventBinding>) -> Self {
+        Self { events }
+    }
 }
 
 /// Load and merge Claudine configuration.
