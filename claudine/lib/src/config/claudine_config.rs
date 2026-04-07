@@ -46,7 +46,7 @@ fn default_whatsapp_phone_number_id() -> String {
 // ============================================================================
 
 /// Gender preference for TTS voice selection.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Gender {
     Male,
@@ -342,9 +342,10 @@ mod tests {
 
     #[test]
     fn tts_boolean_false_deserializes() {
-        let config: ClaudineConfig =
-            serde_json::from_value(serde_json::json!({ "preferred_agent": "claude", "tts": false }))
-                .unwrap();
+        let config: ClaudineConfig = serde_json::from_value(
+            serde_json::json!({ "preferred_agent": "claude", "tts": false }),
+        )
+        .unwrap();
         assert!(matches!(config.tts, TtsValue::Boolean(false)));
     }
 
@@ -679,7 +680,8 @@ mod tests {
 
     #[test]
     fn canonical_provider_deserializes() {
-        let json = serde_json::json!({ "preferred_agent": "claude", "canonical_provider": "goose" });
+        let json =
+            serde_json::json!({ "preferred_agent": "claude", "canonical_provider": "goose" });
         let config: ClaudineConfig = serde_json::from_value(json).unwrap();
         assert_eq!(config.canonical_provider, Some(Provider::Goose));
     }
