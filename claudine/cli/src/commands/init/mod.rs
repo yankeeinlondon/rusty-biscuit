@@ -21,7 +21,7 @@ use claudine::linking::{
     CanonicalSelection, LinkableResource, ResourceScope, ranked_provider_preferences,
     resolve_repo_root, select_canonical_provider, set_canonical_provider,
 };
-use claudine::services::{ProtectConfig, ProtectPosture};
+use claudine::services::ProtectConfig;
 
 use crate::log;
 
@@ -116,9 +116,13 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("");
     log::message("Phase 4: Protect Defaults");
     log::message("-------------------------");
-    let protect_posture = prompts::prompt_protect_posture_with_default(defaults.protect_posture)?;
-    let protect_defaults = protect_posture
-        .map(|posture| ProtectConfig::provider_aware_defaults(&installed_providers, posture));
+    let protect_enabled =
+        prompts::prompt_protect_enabled(defaults.protect_enabled.or(Some(true)))?;
+    let protect_defaults = if protect_enabled {
+        Some(ProtectConfig::default())
+    } else {
+        None
+    };
 
     // Build provider-specific event bindings:
     // - include every event the provider can register via native hooks
@@ -246,7 +250,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 struct InitDefaults {
     provider_preferences: Vec<Provider>,
     action_profile: Option<prompts::InitActionProfile>,
-    protect_posture: Option<Option<ProtectPosture>>,
+    protect_enabled: Option<bool>,
 }
 
 fn load_init_defaults(repo_scope: bool, repo_root: &std::path::Path) -> InitDefaults {
@@ -262,13 +266,7 @@ fn load_init_defaults(repo_scope: bool, repo_root: &std::path::Path) -> InitDefa
             .map(|linking| linking.preference.clone())
             .unwrap_or_default(),
         action_profile: infer_action_profile(&config),
-        protect_posture: Some(
-            config
-                .settings
-                .protect
-                .as_ref()
-                .map(|protect| protect.posture),
-        ),
+        protect_enabled: Some(config.settings.protect.as_ref().map_or(false, |p| p.enabled)),
     }
 }
 
@@ -482,10 +480,7 @@ fn default_config(repo_scope: bool) -> Result<HookerConfig> {
             &home_dir,
             &repo_root,
         ),
-        protect: Some(ProtectConfig::provider_aware_defaults(
-            &installed_providers,
-            ProtectPosture::Balanced,
-        )),
+        protect: Some(ProtectConfig::default()),
         ..GlobalSettings::default()
     };
 
@@ -820,7 +815,7 @@ mod tests {
         let config = default_config(false).expect("default config should build");
         let protect = config.settings.protect.expect("protect defaults missing");
 
-        assert_eq!(protect.posture, ProtectPosture::Balanced);
+        assert!(protect.enabled);
     }
 
     #[test]

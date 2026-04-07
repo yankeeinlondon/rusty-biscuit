@@ -9,7 +9,6 @@ use claudine::events::{
     default_speak_template, recommended_sound,
 };
 use claudine::linking::preference_prompt_count;
-use claudine::services::ProtectPosture;
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
 
@@ -118,36 +117,12 @@ pub fn prompt_action_profile_with_defaults(
     })
 }
 
-/// Prompt whether Protect should be enabled and which posture to use, reusing a prior answer when
-/// available.
-pub fn prompt_protect_posture_with_default(
-    default: Option<Option<ProtectPosture>>,
-) -> Result<Option<ProtectPosture>> {
-    let enabled = Confirm::new("Enable Protect policy engine?")
-        .with_default(default.unwrap_or(Some(ProtectPosture::Balanced)).is_some())
+/// Prompt to enable or disable protect.
+pub fn prompt_protect_enabled(default: Option<bool>) -> Result<bool> {
+    let enabled = inquire::Confirm::new("Enable Protect? (blocks dangerous commands)")
+        .with_default(default.unwrap_or(true))
         .prompt()?;
-
-    if !enabled {
-        return Ok(None);
-    }
-
-    let options = vec![
-        "Balanced (recommended)",
-        "Advisory (monitor-only)",
-        "Strict (aggressive blocking)",
-    ];
-
-    let selected = Select::new("Select Protect posture:", options)
-        .with_starting_cursor(protect_posture_starting_cursor(default.flatten()))
-        .prompt()?;
-
-    let posture = match selected {
-        "Advisory (monitor-only)" => ProtectPosture::Advisory,
-        "Strict (aggressive blocking)" => ProtectPosture::Strict,
-        _ => ProtectPosture::Balanced,
-    };
-
-    Ok(Some(posture))
+    Ok(enabled)
 }
 
 fn prompt_logging_profile(default: Option<&LoggingProfile>) -> Result<LoggingProfile> {
@@ -437,14 +412,6 @@ fn log_target_starting_cursor(default: Option<&LogTarget>) -> usize {
         }) => 1,
         Some(LogTarget::Server { .. }) => 2,
         _ => 0,
-    }
-}
-
-fn protect_posture_starting_cursor(default: Option<ProtectPosture>) -> usize {
-    match default.unwrap_or(ProtectPosture::Balanced) {
-        ProtectPosture::Balanced => 0,
-        ProtectPosture::Advisory => 1,
-        ProtectPosture::Strict => 2,
     }
 }
 
