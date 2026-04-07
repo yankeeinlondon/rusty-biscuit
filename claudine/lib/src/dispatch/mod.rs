@@ -3,11 +3,12 @@ mod matcher;
 mod runner;
 pub mod template;
 
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::Value;
-use tracing::{debug, info, info_span};
+use tracing::{debug, info, info_span, warn};
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
@@ -313,6 +314,11 @@ pub async fn dispatch_canonical_with_runtime(
     )
     .await?;
 
+    // --- JSONL event logging ---
+    if runtime.config().logging {
+        log_dispatch_event(&resolved_hook.meta);
+    }
+
     // --- Protect post-evaluation ---
     let protect_post = protect_service.and_then(|service| {
         if !matches!(
@@ -344,6 +350,57 @@ pub async fn dispatch_canonical_with_runtime(
         protect_pre,
         protect_post,
     )
+}
+
+/// Write a single [`EventMeta`] as a JSONL line to the given path.
+///
+/// Creates parent directories if needed. The line is appended to the file
+/// (or created if it does not exist) and terminated with `\n`.
+///
+/// ## Examples
+///
+/// ```no_run
+/// # use claudine::dispatch::write_dispatch_event_to;
+/// # use claudine::events::{EventMeta, Provider, AgenticEvent};
+/// # use std::path::Path;
+/// let meta = EventMeta::new(Provider::Claude, AgenticEvent::SessionStart);
+/// write_dispatch_event_to(&meta, Path::new("/tmp/test.jsonl")).unwrap();
+/// ```
+pub fn write_dispatch_event_to(meta: &EventMeta, path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut line = serde_json::to_string(meta)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    line.push('\n');
+
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?
+        .write_all(line.as_bytes())?;
+
+    Ok(())
+}
+
+/// Write a [`EventMeta`] to the default daily-rotated JSONL log file.
+///
+/// Resolves the path via [`crate::reporting::paths::resolve_file_log_path`].
+/// Errors are logged as warnings and swallowed so that logging failures
+/// never abort dispatch.
+pub fn log_dispatch_event(meta: &EventMeta) {
+    let path: PathBuf = match crate::reporting::paths::resolve_file_log_path(None, true) {
+        Ok(path) => path,
+        Err(e) => {
+            warn!(error = %e, "Failed to resolve dispatch log path");
+            return;
+        }
+    };
+
+    if let Err(e) = write_dispatch_event_to(meta, &path) {
+        warn!(error = %e, path = %path.display(), "Failed to write dispatch event to JSONL log");
+    }
 }
 
 fn prepare_meta_for_dispatch(meta: &mut EventMeta, env: &EnvironmentContext) {
@@ -1453,5 +1510,26 @@ mod tests {
             outcome.response.is_some(),
             "should produce provider-native deny response"
         );
+    }
+}
+
+#[cfg(test)]
+mod logging_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn log_dispatch_event_writes_jsonl_line() {
+        let tmp = TempDir::new().unwrap();
+        let log_path = tmp.path().join("test.jsonl");
+
+        let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::SessionStart);
+        meta.session_id = Some("test-sess".into());
+
+        write_dispatch_event_to(&meta, &log_path).unwrap();
+
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        assert!(content.contains("test-sess"));
+        assert!(content.ends_with('\n'));
     }
 }
