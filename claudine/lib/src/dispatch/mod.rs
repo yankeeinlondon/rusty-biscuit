@@ -11,8 +11,11 @@ use tracing::{debug, info, info_span};
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
+use crate::config::claudine_config::{ClaudineConfig, TtsValue, VoiceSelection};
 use crate::error::Result;
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook};
+use crate::events::{
+    AgenticEvent, EnvironmentContext, EventMeta, GlobalSettings, Provider, ResolvedHook, TtsSettings,
+};
 use crate::services::protect::decision::ProtectDecision;
 use crate::services::protect::observe::extract_protect_request;
 use crate::services::protect::report::format_blocked_message;
@@ -24,6 +27,7 @@ use crate::services::protect::report::format_blocked_message;
 #[derive(Debug, Clone, Default)]
 pub struct DispatchRuntimeContext {
     config: Option<Arc<loader::RuntimeConfig>>,
+    canonical_config: Option<Arc<loader::CanonicalRuntimeConfig>>,
 }
 
 impl DispatchRuntimeContext {
@@ -32,9 +36,26 @@ impl DispatchRuntimeContext {
         match loader::load_runtime_config(None, runtime_repo_root(env)) {
             Ok(config) => Ok(Self {
                 config: Some(Arc::new(config)),
+                canonical_config: None,
             }),
-            Err(crate::error::ClaudineError::ConfigNotFound(_)) => Ok(Self { config: None }),
+            Err(crate::error::ClaudineError::ConfigNotFound(_)) => Ok(Self::default()),
             Err(error) => Err(error),
+        }
+    }
+
+    /// Load and compile the canonical runtime config for a specific environment.
+    pub fn load_canonical_for_env(env: &EnvironmentContext) -> Result<Self> {
+        let repo_root = runtime_repo_root(env);
+        match loader::load_claudine_config(None, repo_root) {
+            Ok(config) => {
+                let runtime = loader::compile_canonical_runtime(config, repo_root)?;
+                Ok(Self {
+                    config: None,
+                    canonical_config: Some(Arc::new(runtime)),
+                })
+            }
+            Err(crate::error::ClaudineError::ConfigNotFound(_)) => Ok(Self::default()),
+            Err(e) => Err(e),
         }
     }
 
@@ -42,12 +63,18 @@ impl DispatchRuntimeContext {
     pub fn from_runtime_config(config: loader::RuntimeConfig) -> Self {
         Self {
             config: Some(Arc::new(config)),
+            canonical_config: None,
         }
     }
 
     /// Return true when a compiled runtime config is available.
     pub fn has_config(&self) -> bool {
         self.config.is_some()
+    }
+
+    /// Get the canonical runtime config, if loaded.
+    pub fn canonical_config(&self) -> Option<&loader::CanonicalRuntimeConfig> {
+        self.canonical_config.as_deref()
     }
 }
 
@@ -128,6 +155,221 @@ pub async fn dispatch_event_meta_with_runtime(
     let env = meta.env.clone();
     prepare_meta_for_dispatch(&mut meta, &env);
     dispatch_preparsed_with_config(provider, event, meta, runtime.config.as_deref()).await
+}
+
+/// High-level canonical dispatch entry point.
+///
+/// Parses raw provider JSON, loads the new [`ClaudineConfig`], compiles the
+/// canonical runtime, and delegates to [`dispatch_canonical_with_runtime`].
+pub async fn dispatch_canonical(
+    raw: &Value,
+    provider: Provider,
+    env: &EnvironmentContext,
+) -> Result<DispatchOutcome> {
+    let adapter = adapters::adapter_for(provider);
+
+    let (event, mut meta) = match adapter.parse_event(raw) {
+        Ok(parsed) => parsed,
+        Err(AdapterError::UnknownEvent(_)) => {
+            debug!(%provider, "Adapter returned unknown event, skipping canonical dispatch");
+            return Ok(DispatchOutcome::default());
+        }
+        Err(error) => return Err(error.into()),
+    };
+
+    prepare_meta_for_dispatch(&mut meta, env);
+
+    let repo_root = runtime_repo_root(env);
+
+    let config = match loader::load_claudine_config(None, repo_root) {
+        Ok(config) => config,
+        Err(crate::error::ClaudineError::ConfigNotFound(_)) => {
+            debug!("No .claudine config found, skipping canonical dispatch");
+            return Ok(DispatchOutcome::default());
+        }
+        Err(error) => return Err(error),
+    };
+
+    let runtime = loader::compile_canonical_runtime(config, repo_root)?;
+    dispatch_canonical_with_runtime(provider, event, meta, &runtime).await
+}
+
+/// Core canonical dispatch logic using the flat event→actions config.
+///
+/// Follows the same pipeline as [`dispatch_preparsed_with_config`] but looks
+/// up bindings by canonical event only (not provider+event).
+pub async fn dispatch_canonical_with_runtime(
+    provider: Provider,
+    event: AgenticEvent,
+    meta: EventMeta,
+    runtime: &loader::CanonicalRuntimeConfig,
+) -> Result<DispatchOutcome> {
+    let adapter = adapters::adapter_for(provider);
+    let can_block = adapter.can_block(&event);
+    let repo_root_display = meta
+        .env
+        .git
+        .as_ref()
+        .map(|g| g.repo_root.display().to_string())
+        .or_else(|| meta.env.repo.as_ref().map(|r| r.root.display().to_string()))
+        .unwrap_or_default();
+    let session_id = meta.session_id.clone().unwrap_or_default();
+    let tool_name = meta.tool_name.clone().unwrap_or_default();
+    let tool_detail = tool_detail_for_log(event, &meta);
+    let _dispatch_span = info_span!(
+        "dispatch_canonical_event",
+        provider = %provider,
+        event = %event,
+        session_id = %session_id,
+        tool_name = %tool_name,
+        can_block,
+        repo_root = %repo_root_display,
+    )
+    .entered();
+
+    info!(
+        %provider,
+        %event,
+        tool_name = %tool_name,
+        tool_detail = tool_detail.as_deref().unwrap_or(""),
+        "Dispatching canonical event"
+    );
+
+    // --- Protect pre-evaluation ---
+    let protect_service = runtime.protect_service();
+    let protect_pre = protect_service.and_then(|service| {
+        let request = extract_protect_request(&event, &meta)?;
+        let decision = service.evaluate(&request);
+        if decision.is_blocked() {
+            Some(decision)
+        } else {
+            None
+        }
+    });
+
+    if let Some(ref decision) = protect_pre {
+        let response = map_protect_block(decision);
+        return finalize_response(
+            adapter,
+            &event,
+            can_block,
+            Some(response),
+            protect_pre.clone(),
+            None,
+        );
+    }
+
+    // --- Binding lookup by canonical event only ---
+    let binding = match runtime.get_binding(&event) {
+        Some(binding) => binding,
+        None => {
+            debug!(%event, "No canonical binding found for event, skipping");
+            return Ok(DispatchOutcome::default());
+        }
+    };
+
+    if !binding.enabled() {
+        debug!(%event, "Canonical binding disabled, skipping");
+        return Ok(DispatchOutcome::default());
+    }
+
+    if binding.actions().is_empty() {
+        debug!(
+            %event,
+            "No actions configured in canonical binding; protect evaluation may still apply"
+        );
+    }
+
+    if !matcher::matches_with_regex(binding.matcher(), &meta) {
+        debug!(%event, "Matcher did not match in canonical binding, skipping");
+        return Ok(DispatchOutcome::default());
+    }
+
+    let resolved_hook = ResolvedHook {
+        event,
+        meta,
+        provider,
+        actions: binding.actions().to_vec(),
+        can_block,
+    };
+
+    info!(
+        event = %resolved_hook.event,
+        provider = %resolved_hook.provider,
+        tool_name = resolved_hook.meta.tool_name.as_deref().unwrap_or(""),
+        tool_detail = tool_detail.as_deref().unwrap_or(""),
+        action_count = resolved_hook.actions.len(),
+        can_block = resolved_hook.can_block,
+        "Executing resolved canonical hook"
+    );
+
+    let bridged_settings = bridge_settings(runtime.config());
+
+    let action_response = runner::execute_actions(
+        &resolved_hook.actions,
+        Some(binding.compiled_mappers()),
+        &resolved_hook.meta,
+        &bridged_settings,
+        runtime.messaging(),
+        resolved_hook.can_block,
+        protect_pre.as_ref(),
+    )
+    .await?;
+
+    // --- Protect post-evaluation ---
+    let protect_post = protect_service.and_then(|service| {
+        if !matches!(
+            resolved_hook.event,
+            AgenticEvent::AfterTool | AgenticEvent::TurnComplete | AgenticEvent::SubagentStop
+        ) {
+            return None;
+        }
+        let request = extract_protect_request(&resolved_hook.event, &resolved_hook.meta)?;
+        let decision = service.evaluate(&request);
+        if decision.is_blocked() {
+            Some(decision)
+        } else {
+            None
+        }
+    });
+
+    let action_response = if let Some(ref decision) = protect_post {
+        Some(map_protect_block(decision))
+    } else {
+        action_response
+    };
+
+    finalize_response(
+        adapter,
+        &resolved_hook.event,
+        resolved_hook.can_block,
+        action_response,
+        protect_pre,
+        protect_post,
+    )
+}
+
+/// Bridge [`ClaudineConfig`] settings to the legacy [`GlobalSettings`]
+/// expected by [`runner::execute_actions`].
+fn bridge_settings(config: &ClaudineConfig) -> GlobalSettings {
+    GlobalSettings {
+        default_log_target: None,
+        tts: match &config.tts {
+            TtsValue::Boolean(false) => None,
+            TtsValue::Boolean(true) => None,
+            TtsValue::Config(cfg) => Some(TtsSettings {
+                provider: Some(cfg.provider.clone()),
+                voice: match &cfg.voice {
+                    Some(VoiceSelection::Single(v)) => Some(v.clone()),
+                    _ => None,
+                },
+                rate: None,
+            }),
+        },
+        linking: None,
+        protect: Some(config.protect.clone()),
+        messaging: None,
+    }
 }
 
 fn prepare_meta_for_dispatch(meta: &mut EventMeta, env: &EnvironmentContext) {
@@ -1024,6 +1266,196 @@ mod tests {
         assert!(
             outcome.response.is_some(),
             "should produce provider-native block response"
+        );
+    }
+
+    // =========================================================================
+    // bridge_settings tests
+    // =========================================================================
+
+    #[test]
+    fn bridge_settings_from_tts_boolean_false() {
+        use crate::config::claudine_config::ClaudineConfig;
+        let config = ClaudineConfig {
+            tts: crate::config::claudine_config::TtsValue::Boolean(false),
+            ..ClaudineConfig::default()
+        };
+        let settings = bridge_settings(&config);
+        assert!(settings.tts.is_none(), "tts=false should produce None");
+    }
+
+    #[test]
+    fn bridge_settings_from_tts_boolean_true() {
+        use crate::config::claudine_config::ClaudineConfig;
+        let config = ClaudineConfig {
+            tts: crate::config::claudine_config::TtsValue::Boolean(true),
+            ..ClaudineConfig::default()
+        };
+        let settings = bridge_settings(&config);
+        assert!(
+            settings.tts.is_none(),
+            "tts=true (auto-detect) should produce None in bridge"
+        );
+    }
+
+    #[test]
+    fn bridge_settings_from_tts_config() {
+        use crate::config::claudine_config::{
+            ClaudineConfig, Gender, TtsConfigSettings, TtsValue, VoiceSelection,
+        };
+        let config = ClaudineConfig {
+            tts: TtsValue::Config(TtsConfigSettings {
+                provider: "say".to_string(),
+                voice: Some(VoiceSelection::Single("Samantha".to_string())),
+                gender: Gender::Female,
+            }),
+            ..ClaudineConfig::default()
+        };
+        let settings = bridge_settings(&config);
+        let tts = settings.tts.unwrap();
+        assert_eq!(tts.provider.as_deref(), Some("say"));
+        assert_eq!(tts.voice.as_deref(), Some("Samantha"));
+    }
+
+    #[test]
+    fn bridge_settings_from_tts_config_gendered_voice() {
+        use crate::config::claudine_config::{
+            ClaudineConfig, Gender, TtsConfigSettings, TtsValue, VoiceSelection,
+        };
+        let config = ClaudineConfig {
+            tts: TtsValue::Config(TtsConfigSettings {
+                provider: "elevenlabs".to_string(),
+                voice: Some(VoiceSelection::Gendered {
+                    male: "Alex".to_string(),
+                    female: "Samantha".to_string(),
+                }),
+                gender: Gender::Female,
+            }),
+            ..ClaudineConfig::default()
+        };
+        let settings = bridge_settings(&config);
+        let tts = settings.tts.unwrap();
+        assert_eq!(tts.provider.as_deref(), Some("elevenlabs"));
+        assert!(
+            tts.voice.is_none(),
+            "gendered voice should not map to single voice"
+        );
+    }
+
+    #[test]
+    fn bridge_settings_preserves_protect_config() {
+        use crate::config::claudine_config::ClaudineConfig;
+        let config = ClaudineConfig::default();
+        let settings = bridge_settings(&config);
+        assert!(
+            settings.protect.is_some(),
+            "protect config should always be bridged"
+        );
+    }
+
+    // =========================================================================
+    // canonical dispatch context tests
+    // =========================================================================
+
+    #[test]
+    fn dispatch_runtime_context_canonical_accessor() {
+        let context = DispatchRuntimeContext::default();
+        assert!(context.canonical_config().is_none());
+    }
+
+    #[tokio::test]
+    async fn canonical_dispatch_returns_default_when_no_binding() {
+        use crate::config::claudine_config::{ClaudineConfig, DefaultSounds};
+
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+
+        let runtime = loader::compile_canonical_runtime(config, None).unwrap();
+
+        let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::SessionStart);
+        meta.env = EnvironmentContext::default();
+
+        let outcome = dispatch_canonical_with_runtime(
+            Provider::Claude,
+            AgenticEvent::SessionStart,
+            meta,
+            &runtime,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            DispatchOutcome::default(),
+            "no binding means default outcome"
+        );
+    }
+
+    #[tokio::test]
+    async fn canonical_dispatch_executes_sound_effect_binding() {
+        use crate::config::claudine_config::{ClaudineConfig, DefaultSounds};
+
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::SessionStart,
+            vec![HookAction::Report { handler: None }],
+        );
+
+        let runtime = loader::compile_canonical_runtime(config, None).unwrap();
+
+        let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::SessionStart);
+        meta.env = EnvironmentContext::default();
+
+        let outcome = dispatch_canonical_with_runtime(
+            Provider::Claude,
+            AgenticEvent::SessionStart,
+            meta,
+            &runtime,
+        )
+        .await
+        .unwrap();
+
+        // Claude adapter returns {} ack for non-blocking events
+        assert_eq!(outcome.response, Some(Value::Object(Default::default())));
+    }
+
+    #[tokio::test]
+    async fn canonical_dispatch_protect_blocks_before_tool() {
+        use crate::config::claudine_config::{ClaudineConfig, DefaultSounds};
+
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = true;
+        config.default_sounds = DefaultSounds::default();
+
+        let runtime = loader::compile_canonical_runtime(config, None).unwrap();
+
+        let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
+        meta.tool_name = Some("Bash".to_string());
+        meta.tool_input = Some(json!({"command": "rm -rf /"}));
+        meta.env = EnvironmentContext::default();
+
+        let outcome = dispatch_canonical_with_runtime(
+            Provider::Claude,
+            AgenticEvent::BeforeTool,
+            meta,
+            &runtime,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            outcome
+                .protect_pre
+                .as_ref()
+                .map_or(false, |d| d.is_blocked()),
+            "protect should block rm -rf / in canonical dispatch"
+        );
+        assert!(
+            outcome.response.is_some(),
+            "should produce provider-native deny response"
         );
     }
 }
