@@ -258,7 +258,8 @@ fn compile_runtime_config_with_messaging(
     let protect_service = settings
         .protect
         .as_ref()
-        .and_then(|protect| ProtectService::new(protect.clone(), ProtectPlatform::current()).ok());
+        .map(|protect| ProtectService::new(protect.clone(), ProtectPlatform::current()))
+        .transpose()?;
 
     Ok(RuntimeConfig {
         settings,
@@ -1521,5 +1522,34 @@ mod tests {
     #[test]
     fn merge_protect_none_none_returns_none() {
         assert!(merge_protect_configs(None, None).is_none());
+    }
+
+    #[test]
+    fn runtime_config_propagates_protect_service_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = serde_json::json!({
+            "version": "1.0",
+            "settings": {
+                "protect": {
+                    "enabled": true,
+                    "custom_patterns": [
+                        { "name": "bad", "pattern": "[invalid(" }
+                    ]
+                }
+            },
+            "providers": {}
+        });
+
+        let path = tmp.path().join(".claudine/config.json");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, serde_json::to_string(&config).unwrap()).unwrap();
+
+        let result = load_runtime_config(Some(&path), None);
+        assert!(
+            result.is_err(),
+            "should propagate ProtectService construction error, not swallow it"
+        );
     }
 }

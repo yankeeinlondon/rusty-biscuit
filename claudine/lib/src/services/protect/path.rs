@@ -6,8 +6,23 @@ fn is_prefix_match(path: &str, prefix: &str) -> bool {
 }
 
 /// Prefixes for absolute sensitive paths.
+///
+/// On macOS, several paths are symlinks to /private/* equivalents.
+/// We include both forms to ensure canonicalized paths are caught.
+/// /System/Library is the actual macOS system directory; /System/Volumes/Data
+/// is the firmlink root for user data and should not be blocked.
 const SENSITIVE_PREFIXES: &[&str] = &[
-    "/etc", "/var", "/usr", "/boot", "/dev", "/proc", "/sys", "/System",
+    "/etc",
+    "/var",
+    "/usr",
+    "/boot",
+    "/dev",
+    "/proc",
+    "/sys",
+    "/System/Library",
+    "/System/Applications",
+    "/private/etc",
+    "/private/var",
 ];
 
 /// Home-relative sensitive prefixes (checked after ~ expansion).
@@ -83,6 +98,41 @@ pub fn normalize_path(path: &str) -> PathBuf {
     normalized
 }
 
+/// Canonicalize by resolving the deepest existing ancestor.
+///
+/// Walks from the full path toward the root, finds the deepest component
+/// that exists on the filesystem, canonicalizes that prefix, then appends
+/// the remaining (non-existent) suffix. Falls back to the input path
+/// unchanged if no ancestor can be resolved.
+pub fn canonicalize_existing_ancestor(path: &std::path::Path) -> PathBuf {
+    // Try the full path first
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+
+    // Walk ancestors until we find one that exists and can be canonicalized
+    let mut suffix_components = Vec::new();
+    let mut current = path.to_path_buf();
+
+    while let Some(parent) = current.parent() {
+        if let Some(file_name) = current.file_name() {
+            suffix_components.push(file_name.to_os_string());
+        }
+        if parent.exists()
+            && let Ok(canonical_parent) = parent.canonicalize()
+        {
+            let mut result = canonical_parent;
+            for component in suffix_components.into_iter().rev() {
+                result.push(component);
+            }
+            return result;
+        }
+        current = parent.to_path_buf();
+    }
+
+    path.to_path_buf()
+}
+
 /// Extract target path operands from a shell command string.
 ///
 /// Skips sudo, the command name, and flag arguments (starting with -).
@@ -156,7 +206,8 @@ mod tests {
     #[test]
     fn macos_system_path_is_sensitive() {
         let checker = SensitivePathChecker::new();
-        assert!(checker.is_sensitive("/System/Library/something"));
+        assert!(checker.is_sensitive("/System/Library/Extensions/something"));
+        assert!(checker.is_sensitive("/System/Applications/Safari.app"));
     }
 
     #[test]
@@ -241,8 +292,12 @@ mod tests {
         assert!(checker.is_sensitive("/proc"), "/proc should be sensitive");
         assert!(checker.is_sensitive("/sys"), "/sys should be sensitive");
         assert!(
-            checker.is_sensitive("/System"),
-            "/System should be sensitive"
+            checker.is_sensitive("/System/Library"),
+            "/System/Library should be sensitive"
+        );
+        assert!(
+            checker.is_sensitive("/System/Applications"),
+            "/System/Applications should be sensitive"
         );
     }
 
@@ -268,5 +323,29 @@ mod tests {
             checker.is_sensitive("~/.gnupg"),
             "~/.gnupg should be sensitive"
         );
+    }
+
+    #[test]
+    fn canonicalize_existing_ancestor_resolves_symlink_parent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real_dir = tmp.path().join("real");
+        std::fs::create_dir_all(&real_dir).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real_dir, &link).unwrap();
+
+        let input = link.join("nonexistent.txt");
+        let result = canonicalize_existing_ancestor(&input);
+
+        // Canonicalize the expected path too, since tmp.path() might itself
+        // be under a symlink (e.g., /var -> /private/var on macOS)
+        let expected = real_dir.canonicalize().unwrap().join("nonexistent.txt");
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn canonicalize_existing_ancestor_returns_input_when_nothing_exists() {
+        let result =
+            canonicalize_existing_ancestor(std::path::Path::new("/nonexistent/deeply/nested/path"));
+        assert!(result.to_string_lossy().contains("nonexistent"));
     }
 }

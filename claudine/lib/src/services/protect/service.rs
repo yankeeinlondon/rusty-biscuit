@@ -91,6 +91,9 @@ impl ProtectService {
             }
             _ => normalize_path(path),
         };
+
+        // Canonicalize existing ancestors to resolve symlinks
+        let resolved = super::path::canonicalize_existing_ancestor(&resolved);
         let resolved_str = resolved.to_string_lossy();
 
         if self.path_checker.is_sensitive(&resolved_str) {
@@ -98,7 +101,13 @@ impl ProtectService {
             if let Some(allow_paths) = self.config.get_allow_paths(RuleGroup::SensitivePaths)
                 && allow_paths.iter().any(|allowed| {
                     if allowed.starts_with('/') {
-                        resolved_str == *allowed || resolved_str.starts_with(&format!("{allowed}/"))
+                        // Normalize and canonicalize the allowed path for comparison
+                        let allowed_normalized = normalize_path(allowed);
+                        let allowed_canonical =
+                            super::path::canonicalize_existing_ancestor(&allowed_normalized);
+                        let allowed_str = allowed_canonical.to_string_lossy();
+                        resolved_str == allowed_str
+                            || resolved_str.starts_with(&format!("{allowed_str}/"))
                     } else {
                         resolved_str.split('/').any(|part| part == allowed.as_str())
                     }
@@ -403,6 +412,31 @@ mod tests {
         assert!(
             decision.is_blocked(),
             "non-allowed sensitive path should be blocked"
+        );
+    }
+
+    #[test]
+    fn symlinked_cwd_to_home_blocks_write_to_ssh() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = dirs::home_dir().unwrap();
+
+        // Create symlink: tmp/home-link -> $HOME
+        let home_link = tmp.path().join("home-link");
+        std::os::unix::fs::symlink(&home, &home_link).unwrap();
+
+        let service = default_service();
+        let cwd_str = home_link.to_string_lossy().to_string();
+
+        // cwd = tmp/home-link (symlink to $HOME), path = ".ssh/config" (relative)
+        // Lexical: tmp/home-link/.ssh/config — NOT under $HOME/.ssh
+        // Canonical: $HOME/.ssh/config — IS under $HOME/.ssh
+        let decision = service.evaluate(&ProtectRequest::WritePath {
+            path: ".ssh/config",
+            cwd: Some(&cwd_str),
+        });
+        assert!(
+            decision.is_blocked(),
+            "write through symlinked cwd to ~/.ssh should be blocked after canonicalization"
         );
     }
 }
