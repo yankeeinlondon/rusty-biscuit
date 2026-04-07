@@ -816,8 +816,8 @@ pub fn rules_for_platform(platform: ProtectPlatform) -> Vec<&'static RuleDefinit
         .iter()
         .filter(|rule| match rule.platforms {
             PlatformApplicability::All => true,
-            PlatformApplicability::MacOsOnlyOnly => platform == ProtectPlatform::MacOs,
-            PlatformApplicability::LinuxOnlyOnly => platform == ProtectPlatform::Linux,
+            PlatformApplicability::MacOsOnly => platform == ProtectPlatform::MacOs,
+            PlatformApplicability::LinuxOnly => platform == ProtectPlatform::Linux,
         })
         .collect()
 }
