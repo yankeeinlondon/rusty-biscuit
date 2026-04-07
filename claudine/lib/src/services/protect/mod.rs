@@ -1,3 +1,4 @@
+pub mod catalog;
 pub mod config;
 pub mod decision;
 mod downgrade;
