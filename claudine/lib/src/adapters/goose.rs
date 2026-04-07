@@ -65,7 +65,6 @@ impl ProviderAdapter for GooseAdapter {
     fn exit_code(&self, _event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
         None
     }
-
 }
 
 fn map_event(kind: &str, raw: &Value) -> Result<AgenticEvent, AdapterError> {

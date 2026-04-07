@@ -101,7 +101,6 @@ impl ProviderAdapter for CodexAdapter {
     fn exit_code(&self, _event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
         None
     }
-
 }
 
 fn map_event(kind: &str, raw: &Value) -> Result<(AgenticEvent, Option<String>), AdapterError> {

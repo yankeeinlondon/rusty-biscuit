@@ -861,7 +861,6 @@ mod tests {
         ));
     }
 
-
     #[tokio::test]
     async fn message_action_skipped_when_no_route() {
         let actions = vec![HookAction::Message {

@@ -67,7 +67,6 @@ impl ProviderAdapter for RooAdapter {
     fn exit_code(&self, _event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
         None
     }
-
 }
 
 fn map_event(event_name: &str) -> Result<AgenticEvent, AdapterError> {
