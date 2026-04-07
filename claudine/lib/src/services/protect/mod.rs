@@ -21,25 +21,18 @@ mod regression_tests {
 
     /// The concept of posture (Advisory/Balanced/Strict) no longer exists.
     ///
-    /// The expanded config form does not have a `posture` field. When a
-    /// JSON object includes `"posture"`, serde silently ignores it (untagged
-    /// enum variants do not propagate `deny_unknown_fields`). The service
-    /// constructs successfully regardless, proving posture has no effect.
+    /// Configs containing removed fields like `posture` are rejected with
+    /// an error rather than silently ignored.
     #[test]
-    fn no_posture_in_config() {
-        let config: ProtectConfig = serde_json::from_value(serde_json::json!({
+    fn posture_in_config_is_rejected() {
+        let result = serde_json::from_value::<ProtectConfig>(serde_json::json!({
             "posture": "strict",
             "rules": {}
-        }))
-        .expect("config parses — posture key is silently ignored");
-
-        // The service still initialises without any posture-aware behaviour
-        let service =
-            ProtectService::new(config, ProtectPlatform::current()).expect("service builds");
-
-        // A dangerous command is still blocked — posture never softened it
-        let decision = service.evaluate(&ProtectRequest::BashCommand { command: "rm -rf /" });
-        assert!(decision.is_blocked());
+        }));
+        assert!(
+            result.is_err(),
+            "removed 'posture' field should be rejected, not silently ignored"
+        );
     }
 
     /// YOLO mode no longer softens protect decisions.

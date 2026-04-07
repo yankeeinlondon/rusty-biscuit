@@ -28,21 +28,6 @@ impl Default for ProtectConfig {
     }
 }
 
-// Custom deserialization: accept `true`, `false`, or expanded object.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum ProtectConfigRepr {
-    Shorthand(bool),
-    Expanded {
-        #[serde(default = "default_true")]
-        enabled: bool,
-        #[serde(default)]
-        rules: ProtectRuleToggles,
-        #[serde(default)]
-        custom_patterns: Vec<CustomPattern>,
-    },
-}
-
 fn default_true() -> bool {
     true
 }
@@ -52,22 +37,49 @@ impl<'de> Deserialize<'de> for ProtectConfig {
     where
         D: serde::Deserializer<'de>,
     {
-        let repr = ProtectConfigRepr::deserialize(deserializer)?;
-        Ok(match repr {
-            ProtectConfigRepr::Shorthand(enabled) => Self {
-                enabled,
+        let value = serde_json::Value::deserialize(deserializer)
+            .map_err(serde::de::Error::custom)?;
+
+        // Shorthand: bool
+        if let Some(b) = value.as_bool() {
+            return Ok(Self {
+                enabled: b,
                 rules: ProtectRuleToggles::default(),
                 custom_patterns: Vec::new(),
-            },
-            ProtectConfigRepr::Expanded {
-                enabled,
-                rules,
-                custom_patterns,
-            } => Self {
-                enabled,
-                rules,
-                custom_patterns,
-            },
+            });
+        }
+
+        // Expanded: object — reject unknown top-level keys
+        if let Some(map) = value.as_object() {
+            let known = &["enabled", "rules", "custom_patterns"];
+            for key in map.keys() {
+                if !known.contains(&key.as_str()) {
+                    return Err(serde::de::Error::unknown_field(key, known));
+                }
+            }
+        } else {
+            return Err(serde::de::Error::custom(
+                "protect must be a boolean or object",
+            ));
+        }
+
+        #[derive(Deserialize)]
+        struct Expanded {
+            #[serde(default = "default_true")]
+            enabled: bool,
+            #[serde(default)]
+            rules: ProtectRuleToggles,
+            #[serde(default)]
+            custom_patterns: Vec<CustomPattern>,
+        }
+
+        let expanded: Expanded =
+            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+
+        Ok(Self {
+            enabled: expanded.enabled,
+            rules: expanded.rules,
+            custom_patterns: expanded.custom_patterns,
         })
     }
 }
@@ -354,5 +366,19 @@ mod tests {
         let round_tripped: ProtectConfig = serde_json::from_value(json).unwrap();
         assert!(!round_tripped.is_group_enabled(RuleGroup::GitDestructive));
         assert_eq!(round_tripped.custom_patterns.len(), 1);
+    }
+
+    #[test]
+    fn rejects_unknown_top_level_field() {
+        let result = serde_json::from_value::<ProtectConfig>(serde_json::json!({
+            "posture": "strict",
+            "rules": {}
+        }));
+        assert!(result.is_err(), "unknown field 'posture' should be rejected");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("posture"),
+            "error should mention the unknown field: {err}"
+        );
     }
 }
