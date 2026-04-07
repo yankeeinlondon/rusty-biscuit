@@ -59,7 +59,7 @@ fn default_gender() -> Gender {
 
 /// Selects a TTS voice either as a single fixed voice ID or as gendered aliases.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged, deny_unknown_fields)]
+#[serde(untagged)]
 pub enum VoiceSelection {
     /// A single fixed voice ID string.
     Single(String),
