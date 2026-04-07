@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod config;
 pub mod decision;
+pub mod matcher;
 pub mod path;
 pub mod report;
 
