@@ -12,7 +12,7 @@ use crate::events::{
     Provider,
 };
 use crate::messaging::RuntimeMessagingSettings;
-use crate::services::protect::config::ProtectConfig;
+use crate::services::protect::config::{ProtectConfig, ProtectRuleToggles};
 
 /// Candidate file names for user-level configuration.
 const USER_CONFIG_NAMES: &[&str] = &[".claudine/config.json"];
@@ -468,12 +468,76 @@ fn merge_protect_configs(
         (Some(u), None) => Some(u.clone()),
         (None, Some(r)) => Some(r.clone()),
         (Some(user_cfg), Some(repo_cfg)) => {
-            let mut merged = repo_cfg.clone();
-            if user_cfg.enabled && !merged.enabled {
-                merged.enabled = true;
-            }
-            Some(merged)
+            let enabled = user_cfg.enabled || repo_cfg.enabled;
+            let rules = merge_rule_toggles(&user_cfg.rules, &repo_cfg.rules);
+
+            // Combine custom patterns: repo first, then user
+            let mut custom_patterns = repo_cfg.custom_patterns.clone();
+            custom_patterns.extend(user_cfg.custom_patterns.iter().cloned());
+
+            Some(ProtectConfig {
+                enabled,
+                rules,
+                custom_patterns,
+            })
         }
+    }
+}
+
+/// Merge rule toggles: repo overrides user per-group.
+fn merge_rule_toggles(
+    user: &ProtectRuleToggles,
+    repo: &ProtectRuleToggles,
+) -> ProtectRuleToggles {
+    ProtectRuleToggles {
+        filesystem_destruction: repo
+            .filesystem_destruction
+            .clone()
+            .or_else(|| user.filesystem_destruction.clone()),
+        disk_manipulation: repo
+            .disk_manipulation
+            .clone()
+            .or_else(|| user.disk_manipulation.clone()),
+        remote_execution: repo
+            .remote_execution
+            .clone()
+            .or_else(|| user.remote_execution.clone()),
+        git_destructive: repo
+            .git_destructive
+            .clone()
+            .or_else(|| user.git_destructive.clone()),
+        system_sabotage: repo
+            .system_sabotage
+            .clone()
+            .or_else(|| user.system_sabotage.clone()),
+        network_sabotage: repo
+            .network_sabotage
+            .clone()
+            .or_else(|| user.network_sabotage.clone()),
+        container_cloud: repo
+            .container_cloud
+            .clone()
+            .or_else(|| user.container_cloud.clone()),
+        database_nukes: repo
+            .database_nukes
+            .clone()
+            .or_else(|| user.database_nukes.clone()),
+        obfuscated_execution: repo
+            .obfuscated_execution
+            .clone()
+            .or_else(|| user.obfuscated_execution.clone()),
+        prompt_injection: repo
+            .prompt_injection
+            .clone()
+            .or_else(|| user.prompt_injection.clone()),
+        credential_exfiltration: repo
+            .credential_exfiltration
+            .clone()
+            .or_else(|| user.credential_exfiltration.clone()),
+        sensitive_paths: repo
+            .sensitive_paths
+            .clone()
+            .or_else(|| user.sensitive_paths.clone()),
     }
 }
 
@@ -525,7 +589,9 @@ mod tests {
     use super::*;
     use crate::actions::*;
     use crate::events::*;
-    
+    use crate::services::protect::config::RuleGroupDetailedConfig;
+    use crate::services::protect::{CustomPattern, ProtectConfig, ProtectRuleToggles, RuleGroupConfig};
+
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -723,7 +789,6 @@ mod tests {
         assert_eq!(tts.provider.as_deref(), Some("espeak"));
         assert_eq!(tts.rate, Some(1.5));
     }
-
 
     #[test]
     fn merge_linking_preserves_user_canonical_when_repo_sets_repo_slots() {
@@ -1304,5 +1369,126 @@ mod tests {
             messaging.user.as_ref().unwrap().active.as_deref(),
             Some("my-slack")
         );
+    }
+
+    #[test]
+    fn merge_protect_preserves_user_custom_patterns_when_repo_has_config() {
+        let user = ProtectConfig {
+            enabled: true,
+            rules: ProtectRuleToggles::default(),
+            custom_patterns: vec![CustomPattern {
+                name: "user_pattern".to_string(),
+                pattern: "user_danger".to_string(),
+            }],
+        };
+        let repo = ProtectConfig {
+            enabled: true,
+            rules: ProtectRuleToggles::default(),
+            custom_patterns: vec![],
+        };
+        let merged = merge_protect_configs(Some(&user), Some(&repo)).unwrap();
+        assert_eq!(
+            merged.custom_patterns.len(),
+            1,
+            "user custom_patterns should be preserved"
+        );
+        assert_eq!(merged.custom_patterns[0].name, "user_pattern");
+    }
+
+    #[test]
+    fn merge_protect_combines_custom_patterns_from_both_scopes() {
+        let user = ProtectConfig {
+            enabled: true,
+            rules: ProtectRuleToggles::default(),
+            custom_patterns: vec![CustomPattern {
+                name: "user_pattern".to_string(),
+                pattern: "user_danger".to_string(),
+            }],
+        };
+        let repo = ProtectConfig {
+            enabled: true,
+            rules: ProtectRuleToggles::default(),
+            custom_patterns: vec![CustomPattern {
+                name: "repo_pattern".to_string(),
+                pattern: "repo_danger".to_string(),
+            }],
+        };
+        let merged = merge_protect_configs(Some(&user), Some(&repo)).unwrap();
+        assert_eq!(
+            merged.custom_patterns.len(),
+            2,
+            "both custom_patterns should be present"
+        );
+    }
+
+    #[test]
+    fn merge_protect_preserves_user_group_toggles() {
+        let mut user = ProtectConfig::default();
+        user.rules.git_destructive = Some(RuleGroupConfig::Toggle(false));
+        let repo = ProtectConfig::default();
+        let merged = merge_protect_configs(Some(&user), Some(&repo)).unwrap();
+        assert_eq!(
+            merged.rules.git_destructive,
+            Some(RuleGroupConfig::Toggle(false)),
+            "user group toggle should be preserved when repo doesn't set it"
+        );
+    }
+
+    #[test]
+    fn merge_protect_repo_group_toggle_overrides_user() {
+        let mut user = ProtectConfig::default();
+        user.rules.git_destructive = Some(RuleGroupConfig::Toggle(false));
+        let mut repo = ProtectConfig::default();
+        repo.rules.git_destructive = Some(RuleGroupConfig::Toggle(true));
+        let merged = merge_protect_configs(Some(&user), Some(&repo)).unwrap();
+        assert_eq!(
+            merged.rules.git_destructive,
+            Some(RuleGroupConfig::Toggle(true)),
+            "repo group toggle should override user"
+        );
+    }
+
+    #[test]
+    fn merge_protect_preserves_user_allow_paths() {
+        let mut user = ProtectConfig::default();
+        user.rules.filesystem_destruction = Some(RuleGroupConfig::Detailed(RuleGroupDetailedConfig {
+            enabled: true,
+            allow_paths: vec!["node_modules".to_string()],
+        }));
+        let repo = ProtectConfig::default();
+        let merged = merge_protect_configs(Some(&user), Some(&repo)).unwrap();
+        match &merged.rules.filesystem_destruction {
+            Some(RuleGroupConfig::Detailed(d)) => {
+                assert!(d.allow_paths.contains(&"node_modules".to_string()));
+            }
+            other => panic!("expected Detailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_protect_user_only_returns_user() {
+        let mut user = ProtectConfig::default();
+        user.custom_patterns = vec![CustomPattern {
+            name: "test".to_string(),
+            pattern: "test".to_string(),
+        }];
+        let merged = merge_protect_configs(Some(&user), None).unwrap();
+        assert_eq!(merged.custom_patterns.len(), 1);
+    }
+
+    #[test]
+    fn merge_protect_repo_only_returns_repo() {
+        let mut repo = ProtectConfig::default();
+        repo.rules.git_destructive = Some(RuleGroupConfig::Toggle(false));
+        let merged = merge_protect_configs(None, Some(&repo)).unwrap();
+        assert_eq!(
+            merged.rules.git_destructive,
+            Some(RuleGroupConfig::Toggle(false))
+        );
+    }
+
+    #[test]
+    fn merge_protect_none_none_returns_none() {
+        assert!(merge_protect_configs(None, None).is_none());
     }
 }
