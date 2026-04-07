@@ -2483,6 +2483,45 @@ pub fn get_commits_for_path(repo: &Repository, path_prefix: &str, count: usize) 
     commits
 }
 
+/// Detect unmerged (conflicted) files in the repository index.
+///
+/// Returns the relative paths of files that have merge conflict markers
+/// in the index (i.e., are in an unmerged state from a merge, rebase,
+/// cherry-pick, or revert).
+pub fn detect_merge_conflicts(repo: &Repository) -> Vec<PathBuf> {
+    let index = match repo.index() {
+        Ok(idx) => idx,
+        Err(_) => return Vec::new(),
+    };
+
+    let conflicts = match index.conflicts() {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut conflicted = Vec::new();
+    for entry in conflicts {
+        let Ok(conflict) = entry else {
+            continue;
+        };
+        let path = conflict
+            .our
+            .as_ref()
+            .or(conflict.their.as_ref())
+            .or(conflict.ancestor.as_ref());
+        if let Some(entry) = path {
+            let path = PathBuf::from(
+                std::str::from_utf8(&entry.path).unwrap_or_default(),
+            );
+            if !conflicted.contains(&path) {
+                conflicted.push(path);
+            }
+        }
+    }
+
+    conflicted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
