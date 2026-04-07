@@ -3,7 +3,7 @@ use regex::{Regex, RegexSet};
 use crate::error::{ClaudineError, Result};
 
 use super::catalog::{ProtectPlatform, RuleDefinition, RuleGroup, ScanSurface, rules_for_platform};
-use super::config::{CustomPattern, ProtectConfig, RuleGroupConfig};
+use super::config::{CustomPattern, ProtectConfig};
 use super::decision::ProtectMatch;
 
 /// A compiled group of rules sharing one `RegexSet` for fast matching.
@@ -194,6 +194,7 @@ impl CompiledCatalog {
 mod tests {
     use super::*;
     use crate::services::protect::catalog::RuleGroup;
+    use crate::services::RuleGroupConfig;
 
     #[test]
     fn compilation_succeeds_for_all_groups() {

@@ -11,7 +11,7 @@ pub enum ProtectOutcome {
 }
 
 /// Details of the matched rule when an action is blocked.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProtectMatch {
     pub group: RuleGroup,
     pub rule_id: String,
@@ -24,7 +24,7 @@ pub struct ProtectMatch {
 }
 
 /// Result of a single protect evaluation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProtectDecision {
     pub outcome: ProtectOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]

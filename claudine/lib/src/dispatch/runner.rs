@@ -9,8 +9,8 @@ use tracing::{debug, info_span, warn};
 
 use super::template::interpolate;
 use crate::actions::{
-    CompiledMapper, HookAction, HookDecision, HookResponse, LogTarget, Mapper, ProtectCallContext,
-    ReportFormat, ReportHandler,
+    CompiledMapper, HookAction, HookDecision, HookResponse, LogTarget, Mapper, ReportFormat,
+    ReportHandler,
 };
 use crate::error::Result;
 use crate::events::{EventMeta, GlobalSettings};
@@ -113,7 +113,6 @@ pub async fn execute_actions(
                     let response = HookResponse {
                         decision: Some(decision_for_short_circuit(decision)),
                         reason: Some("call action short-circuited by protect: blocked".to_string()),
-                        protect: None,
                         ..HookResponse::default()
                     };
 
@@ -862,49 +861,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn attach_protect_context_marks_response() {
-        let response = HookResponse {
-            decision: Some(HookDecision::Allow),
-            ..HookResponse::default()
-        };
-
-        let protect = crate::services::ProtectDecision {
-            outcome: crate::services::ProtectOutcome::Allow,
-            desired_outcome: crate::services::ProtectOutcome::Allow,
-            degraded: false,
-            reason: "protect.normal.balanced".to_string(),
-            capability: Some(crate::services::GateCapability::Guarantee),
-        };
-
-        let with_context = super::attach_protect_context(response, Some(&protect));
-        assert!(with_context.protect.is_some());
-        assert_eq!(
-            with_context.protect.as_ref().map(|p| p.short_circuited),
-            Some(false)
-        );
-    }
-
-    #[test]
-    fn short_circuit_call_for_stop_outcome() {
-        let protect = crate::services::ProtectDecision {
-            outcome: crate::services::ProtectOutcome::StopCurrent {
-                reason: "rules.blocked-command".to_string(),
-            },
-            desired_outcome: crate::services::ProtectOutcome::StopCurrent {
-                reason: "rules.blocked-command".to_string(),
-            },
-            degraded: false,
-            reason: "protect.normal.strict".to_string(),
-            capability: Some(crate::services::GateCapability::Guarantee),
-        };
-
-        assert!(super::should_short_circuit_call(Some(&protect)));
-        assert_eq!(
-            super::decision_for_short_circuit(&protect.outcome),
-            HookDecision::Deny
-        );
-    }
 
     #[tokio::test]
     async fn message_action_skipped_when_no_route() {

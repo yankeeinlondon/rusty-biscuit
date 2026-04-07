@@ -3,7 +3,7 @@ mod matcher;
 mod runner;
 pub mod template;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -11,10 +11,10 @@ use tracing::{debug, info, info_span};
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
-use crate::error::{ClaudineError, Result};
+use crate::error::Result;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook};
 use crate::services::protect::catalog::ProtectPlatform;
-use crate::services::protect::decision::{ProtectDecision, ProtectOutcome};
+use crate::services::protect::decision::ProtectDecision;
 use crate::services::protect::observe::extract_protect_request;
 use crate::services::protect::report::format_blocked_message;
 use crate::services::protect::service::ProtectService;
@@ -417,7 +417,6 @@ fn map_protect_block(decision: &ProtectDecision) -> HookResponse {
                 "rule_id": decision.blocked.as_ref().map(|m| &m.rule_id),
             }
         })),
-        protect: None,
     }
 }
 
@@ -871,165 +870,4 @@ mod tests {
         assert!(!matcher::matches_with_pattern(Some("Read"), &meta));
     }
 
-    #[test]
-    fn derive_trust_from_explicit_extra_field() {
-        let mut meta = EventMeta {
-            provider: Provider::Claude,
-            event: AgenticEvent::BeforeTool,
-            timestamp: chrono::Utc::now(),
-            session_id: None,
-            cwd: Some("/tmp".to_string()),
-            tool_name: None,
-            tool_input: None,
-            tool_response: None,
-            error: None,
-            prompt: None,
-            agent_type: None,
-            notification_type: None,
-            notification_message: None,
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
-        };
-
-        meta.extra.insert("is_trusted".to_string(), json!(true));
-
-        let trust = derive_trust_context(&meta);
-        assert_eq!(trust.is_trusted, Some(true));
-        assert_eq!(trust.source, TrustSource::ExplicitInput);
-    }
-
-    #[test]
-    fn derive_trust_from_permission_mode() {
-        let mut meta = EventMeta {
-            provider: Provider::Claude,
-            event: AgenticEvent::BeforeTool,
-            timestamp: chrono::Utc::now(),
-            session_id: None,
-            cwd: Some("/tmp".to_string()),
-            tool_name: None,
-            tool_input: None,
-            tool_response: None,
-            error: None,
-            prompt: None,
-            agent_type: None,
-            notification_type: None,
-            notification_message: None,
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
-        };
-
-        meta.extra
-            .insert("permission_mode".to_string(), json!("acceptEdits"));
-
-        let trust = derive_trust_context(&meta);
-        assert_eq!(trust.is_trusted, Some(true));
-        assert_eq!(trust.source, TrustSource::ProviderConfig);
-    }
-
-    #[test]
-    fn derive_trust_unknown_without_signals() {
-        let meta = EventMeta {
-            provider: Provider::Claude,
-            event: AgenticEvent::BeforeTool,
-            timestamp: chrono::Utc::now(),
-            session_id: None,
-            cwd: Some("/tmp".to_string()),
-            tool_name: None,
-            tool_input: None,
-            tool_response: None,
-            error: None,
-            prompt: None,
-            agent_type: None,
-            notification_type: None,
-            notification_message: None,
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
-        };
-
-        let trust = derive_trust_context(&meta);
-        assert_eq!(trust.is_trusted, None);
-        assert_eq!(trust.source, TrustSource::Unknown);
-    }
-
-    #[test]
-    fn apply_redaction_block_payload_sets_deny() {
-        use crate::services::ProtectRedactionPlan;
-
-        let plan = ProtectRedactionPlan::BlockPayload {
-            reason: "blocked".to_string(),
-        };
-
-        let result = apply_redaction(None, &plan);
-        assert!(result.is_some());
-        let response = result.unwrap();
-        assert_eq!(response.decision, Some(HookDecision::Deny));
-        assert_eq!(response.reason.as_deref(), Some("blocked"));
-        assert!(response.additional_context.is_none());
-        assert!(response.updated_input.is_none());
-    }
-
-    #[test]
-    fn apply_redaction_replace_text_sets_allow() {
-        use crate::services::{McpTextRedaction, ProtectRedactionPlan};
-
-        let plan = ProtectRedactionPlan::ReplaceText(McpTextRedaction {
-            text: "redacted content".to_string(),
-            redacted: true,
-            blocked_instruction_payload: false,
-            redactions_applied: 1,
-        });
-
-        let result = apply_redaction(None, &plan);
-        assert!(result.is_some());
-        let response = result.unwrap();
-        assert_eq!(response.decision, Some(HookDecision::Allow));
-        assert_eq!(
-            response.additional_context.as_deref(),
-            Some("redacted content")
-        );
-    }
-
-    #[test]
-    fn apply_redaction_replace_json_sets_allow() {
-        use crate::services::{McpJsonRedaction, ProtectRedactionPlan};
-
-        let plan = ProtectRedactionPlan::ReplaceJson(McpJsonRedaction {
-            value: json!({"key": "[REDACTED]"}),
-            redacted: true,
-            blocked_instruction_payload: false,
-            redactions_applied: 1,
-        });
-
-        let result = apply_redaction(None, &plan);
-        assert!(result.is_some());
-        let response = result.unwrap();
-        assert_eq!(response.decision, Some(HookDecision::Allow));
-        assert_eq!(response.updated_input, Some(json!({"key": "[REDACTED]"})));
-    }
-
-    #[test]
-    fn build_session_context_includes_trust() {
-        let mut meta = EventMeta {
-            provider: Provider::Claude,
-            event: AgenticEvent::BeforeTool,
-            timestamp: chrono::Utc::now(),
-            session_id: Some("s1".to_string()),
-            cwd: Some("/tmp/project".to_string()),
-            tool_name: None,
-            tool_input: None,
-            tool_response: None,
-            error: None,
-            prompt: None,
-            agent_type: None,
-            notification_type: None,
-            notification_message: None,
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
-        };
-
-        meta.extra.insert("is_trusted".to_string(), json!(true));
-
-        let ctx = build_session_context(Provider::Claude, &meta);
-        assert_eq!(ctx.policy_context.trust.is_trusted, Some(true));
-    }
 }

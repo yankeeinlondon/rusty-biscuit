@@ -30,7 +30,7 @@ My current configuration on this host is 557 lines! By the time this feature is 
 - For Logging, a user must only express:
     - Do I want to use it (yes/no)?
 - For Protect:
-    - we will offer a set of protections which can trigger one of three actions: `accept`, `reject`, and `ask`
+    - we will offer a set of protections which can trigger one of three actions: `accept` and `reject`
     - we will define a low-impact default configuration 
     - when a user runs `init` they will automatically be signed up for this default set of protections
     - in configuration, the basic setting is a boolean value: `{ protect: true }`

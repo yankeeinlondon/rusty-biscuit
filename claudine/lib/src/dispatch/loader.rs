@@ -525,7 +525,7 @@ mod tests {
     use super::*;
     use crate::actions::*;
     use crate::events::*;
-    use crate::services::protect::config::ProtectConfig;
+    
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -724,74 +724,6 @@ mod tests {
         assert_eq!(tts.rate, Some(1.5));
     }
 
-    #[test]
-    fn merge_protect_does_not_silently_weaken_strict_user_posture() {
-        let user = HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings {
-                protect: Some(ProtectConfig {
-                    enabled: true,
-                    posture: ProtectPosture::Strict,
-                    ..ProtectConfig::default()
-                }),
-                ..GlobalSettings::default()
-            },
-            providers: HashMap::new(),
-        };
-
-        let repo = HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings {
-                protect: Some(ProtectConfig {
-                    enabled: false,
-                    posture: ProtectPosture::Advisory,
-                    ..ProtectConfig::default()
-                }),
-                ..GlobalSettings::default()
-            },
-            providers: HashMap::new(),
-        };
-
-        let merged = merge_configs(user, repo);
-        let protect = merged.settings.protect.expect("missing merged protect");
-        assert!(protect.enabled);
-        assert_eq!(protect.posture, ProtectPosture::Strict);
-    }
-
-    #[test]
-    fn merge_protect_allows_explicit_repo_downgrade() {
-        let user = HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings {
-                protect: Some(ProtectConfig {
-                    enabled: true,
-                    posture: ProtectPosture::Strict,
-                    ..ProtectConfig::default()
-                }),
-                ..GlobalSettings::default()
-            },
-            providers: HashMap::new(),
-        };
-
-        let repo = HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings {
-                protect: Some(ProtectConfig {
-                    enabled: false,
-                    posture: ProtectPosture::Advisory,
-                    allow_repo_posture_downgrade: true,
-                    ..ProtectConfig::default()
-                }),
-                ..GlobalSettings::default()
-            },
-            providers: HashMap::new(),
-        };
-
-        let merged = merge_configs(user, repo);
-        let protect = merged.settings.protect.expect("missing merged protect");
-        assert!(!protect.enabled);
-        assert_eq!(protect.posture, ProtectPosture::Advisory);
-    }
 
     #[test]
     fn merge_linking_preserves_user_canonical_when_repo_sets_repo_slots() {
