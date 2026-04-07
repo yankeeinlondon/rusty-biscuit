@@ -59,8 +59,8 @@ pub(crate) enum Commands {
     Handle(commands::handle::HandleArgs),
     /// Generate shell completions.
     Completions(commands::completions::CompletionsArgs),
-    /// Interactive setup wizard.
-    Init(commands::init::InitArgs),
+    /// Manage Claudine configuration with a TUI.
+    Config(commands::config_tui::ConfigArgs),
     /// Re-sync hook registrations with detected agents.
     Sync(commands::sync::SyncArgs),
     /// Show registered hooks for all detected agents.
@@ -102,4 +102,6 @@ pub(crate) enum Commands {
     /// Inline composition: use frontmatter prompt to generate and replace body.
     #[command(name = "inline-compose")]
     InlineCompose(commands::compose::InlineComposeArgs),
+    /// Run a serial sequence of composition steps from a single document.
+    Sequence(commands::sequence::SequenceArgs),
 }

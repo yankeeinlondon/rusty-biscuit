@@ -2,10 +2,11 @@ pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod profile;
 pub(crate) mod repo_home;
+pub(crate) mod system_prompt;
 
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
-use claudine::composition::lifecycle::{LifecycleSignal, emit_lifecycle_signal};
+use claudine::composition::lifecycle::LifecycleSignal;
 use claudine::events::{
     AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta, Provider,
 };
@@ -86,6 +87,7 @@ impl StructuredSummaryDetails {
 }
 
 pub(crate) mod composition;
+pub(crate) mod sequence;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HarnessPromptMode {
@@ -182,7 +184,20 @@ pub(crate) fn build_harness_shell_options(
     repo_root: Option<&Path>,
     interactive: bool,
 ) -> claudine::harness::ShellApprovalOptions {
-    claudine::harness::ShellApprovalOptions {
+    build_harness_shell_options_with_cache(source_path, repo_root, interactive, None)
+}
+
+/// Build shell approval options, optionally reusing a shared approval
+/// cache. Callers like the sequence orchestrator pass a shared cache so
+/// that "allow once" approvals from earlier steps carry over to later
+/// ones for the duration of the sequence run.
+pub(crate) fn build_harness_shell_options_with_cache(
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    interactive: bool,
+    shared_cache: Option<claudine::composition::SharedApprovalCache>,
+) -> claudine::harness::ShellApprovalOptions {
+    let mut opts = claudine::harness::ShellApprovalOptions {
         policy_root: harness_policy_root(source_path, repo_root),
         approval_handler: if interactive {
             Some(std::sync::Arc::new(
@@ -192,7 +207,11 @@ pub(crate) fn build_harness_shell_options(
             None
         },
         ..Default::default()
+    };
+    if let Some(cache) = shared_cache {
+        opts.approval_cache = cache;
     }
+    opts
 }
 
 #[derive(Debug, Clone)]
@@ -336,6 +355,7 @@ impl CachedHarnessLoopContext {
 pub(crate) struct LiveStreamSink {
     provider: Provider,
     env: EnvironmentContext,
+    cwd: PathBuf,
     verbosity: Verbosity,
     session_id: Option<String>,
     model: Option<String>,
@@ -349,20 +369,38 @@ impl LiveStreamSink {
     pub(crate) fn new(
         provider: Provider,
         env: EnvironmentContext,
+        cwd: &Path,
         verbosity: Verbosity,
         summary_details: Arc<Mutex<StructuredSummaryDetails>>,
     ) -> Self {
         let handle = tokio::runtime::Handle::try_current().ok();
+        let runtime_context = match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                tracing::warn!(%provider, "failed to preload wrapper runtime config: {error}");
+                claudine::dispatch::DispatchRuntimeContext::default()
+            }
+        };
+        tracing::trace!(
+            provider = %provider,
+            has_cached_runtime = runtime_context.has_config(),
+            "initialized wrapper dispatch runtime cache"
+        );
         Self::with_dispatcher(
             provider,
             env,
+            cwd,
             verbosity,
             summary_details,
             move |event, meta| {
                 if let Some(handle) = handle.as_ref()
-                    && let Err(error) = handle.block_on(claudine::dispatch::dispatch_event_meta(
-                        provider, event, meta,
-                    ))
+                    && let Err(error) =
+                        handle.block_on(claudine::dispatch::dispatch_event_meta_with_runtime(
+                            provider,
+                            event,
+                            meta,
+                            &runtime_context,
+                        ))
                 {
                     tracing::warn!(%provider, %event, "live stream dispatch failed: {error}");
                 }
@@ -381,6 +419,7 @@ impl LiveStreamSink {
     fn with_dispatcher<F>(
         provider: Provider,
         env: EnvironmentContext,
+        cwd: &Path,
         verbosity: Verbosity,
         summary_details: Arc<Mutex<StructuredSummaryDetails>>,
         dispatch: F,
@@ -391,6 +430,7 @@ impl LiveStreamSink {
         Self {
             provider,
             env,
+            cwd: cwd.to_path_buf(),
             verbosity,
             session_id: None,
             model: None,
@@ -403,8 +443,14 @@ impl LiveStreamSink {
 
     fn merge_state(&mut self, meta: &StreamEventMeta) {
         if let Some(session_id) = string_from_extra(&meta.extra, &["session_id", "thread_id", "id"])
+            && self.session_id.as_deref() != Some(session_id.as_str())
         {
-            Span::current().record("session_id", tracing::field::display(&session_id));
+            tracing::info!(
+                provider = %self.provider,
+                session_id = %session_id,
+                model = self.model.as_deref().unwrap_or(""),
+                "identified wrapped provider session"
+            );
             self.session_id = Some(session_id);
         }
         if let Some(model) = string_from_extra(&meta.extra, &["model"]) {
@@ -437,6 +483,22 @@ impl LiveStreamSink {
         }
     }
 
+    fn emit_tool_progress_line(&self, meta: &StreamEventMeta) {
+        if self.verbosity != Verbosity::Silent
+            && let Some(line) = format_tool_progress_line(meta)
+        {
+            eprintln!("{line}");
+        }
+    }
+
+    fn emit_tool_result_line(&self, meta: &StreamEventMeta) {
+        if self.verbosity != Verbosity::Silent
+            && let Some(line) = format_tool_result_line(meta)
+        {
+            eprintln!("{line}");
+        }
+    }
+
     fn should_surface_warning(message: &str) -> bool {
         !message.starts_with("Malformed JSON on line ")
     }
@@ -463,9 +525,7 @@ impl LiveStreamSink {
             timestamp: chrono::Utc::now(),
             session_id: string_from_extra(&meta.extra, &["session_id", "thread_id", "id"])
                 .or_else(|| self.session_id.clone()),
-            cwd: std::env::current_dir()
-                .ok()
-                .map(|cwd| cwd.display().to_string()),
+            cwd: Some(self.cwd.display().to_string()),
             tool_name: string_from_extra(&meta.extra, &["tool_name", "name"]),
             tool_input: value_from_extra(
                 &meta.extra,
@@ -501,6 +561,12 @@ impl LiveStreamSink {
         if event == AgenticEvent::SessionStart {
             self.emit_agent_session_id();
         }
+        if event == AgenticEvent::BeforeTool {
+            self.emit_tool_progress_line(meta);
+        }
+        if event == AgenticEvent::AfterTool {
+            self.emit_tool_result_line(meta);
+        }
         if event == AgenticEvent::TurnError
             && let Some(message) = dispatch_meta.error.as_deref()
         {
@@ -519,6 +585,20 @@ impl StreamEventSink for LiveStreamSink {
         self.dispatch_event(AgenticEvent::BeforePrompt, meta);
     }
 
+    fn on_step_start(&mut self, _meta: &StreamEventMeta) {
+        tracing::trace!(
+            provider = %self.provider,
+            "observed provider step_start without high-level dispatch"
+        );
+    }
+
+    fn on_step_finish(&mut self, _meta: &StreamEventMeta) {
+        tracing::trace!(
+            provider = %self.provider,
+            "observed provider step_finish without high-level dispatch"
+        );
+    }
+
     fn on_turn_complete(&mut self, meta: &StreamEventMeta) {
         self.dispatch_event(AgenticEvent::TurnComplete, meta);
     }
@@ -533,6 +613,14 @@ impl StreamEventSink for LiveStreamSink {
 
     fn on_after_tool(&mut self, meta: &StreamEventMeta) {
         self.dispatch_event(AgenticEvent::AfterTool, meta);
+    }
+
+    fn on_subagent_start(&mut self, meta: &StreamEventMeta) {
+        self.dispatch_event(AgenticEvent::SubagentStart, meta);
+    }
+
+    fn on_subagent_stop(&mut self, meta: &StreamEventMeta) {
+        self.dispatch_event(AgenticEvent::SubagentStop, meta);
     }
 
     fn on_permission_request(&mut self, meta: &StreamEventMeta) {
@@ -576,6 +664,76 @@ fn value_to_string(value: &serde_json::Value) -> Option<String> {
         .or_else(|| serde_json::to_string(value).ok())
 }
 
+fn compact_value_for_log(value: &serde_json::Value, max_chars: usize) -> String {
+    let rendered = serde_json::to_string(value).unwrap_or_else(|_| value.to_string());
+    truncate_for_log(&rendered, max_chars)
+}
+
+fn truncate_for_log(value: &str, max_chars: usize) -> String {
+    let count = value.chars().count();
+    if count <= max_chars {
+        return value.to_string();
+    }
+
+    let truncated: String = value.chars().take(max_chars.saturating_sub(3)).collect();
+    format!("{truncated}...")
+}
+
+fn format_tool_progress_line(meta: &StreamEventMeta) -> Option<String> {
+    let tool_name = string_from_extra(&meta.extra, &["tool_name", "name"]);
+    let tool_input = value_from_extra(
+        &meta.extra,
+        &["tool_input", "parameters", "input", "arguments"],
+    );
+
+    match (tool_name, tool_input) {
+        (Some(tool_name), Some(tool_input)) => Some(format!(
+            "tool: {tool_name} {}",
+            compact_value_for_log(&tool_input, 120)
+        )),
+        (Some(tool_name), None) => Some(format!("tool: {tool_name}")),
+        (None, Some(tool_input)) => {
+            Some(format!("tool: {}", compact_value_for_log(&tool_input, 120)))
+        }
+        (None, None) => None,
+    }
+}
+
+fn format_tool_result_line(meta: &StreamEventMeta) -> Option<String> {
+    let tool_name = string_from_extra(&meta.extra, &["tool_name", "name"]);
+    let tool_id = string_from_extra(&meta.extra, &["tool_id", "id"]);
+    let status = string_from_extra(&meta.extra, &["status"]);
+    let error = string_from_extra(&meta.extra, &["error_message", "message"]).or_else(|| {
+        value_from_extra(&meta.extra, &["error"]).and_then(|value| value_to_string(&value))
+    });
+    let tool_response = value_from_extra(
+        &meta.extra,
+        &["tool_response", "output", "result", "content"],
+    );
+
+    let mut parts = Vec::new();
+    if let Some(tool_name) = tool_name {
+        parts.push(tool_name);
+    }
+    if let Some(tool_id) = tool_id {
+        parts.push(format!("id={tool_id}"));
+    }
+    if let Some(status) = status {
+        parts.push(format!("status={status}"));
+    }
+    if let Some(error) = error {
+        parts.push(format!("error={}", truncate_for_log(&error, 80)));
+    }
+    if let Some(tool_response) = tool_response {
+        parts.push(format!(
+            "result={}",
+            compact_value_for_log(&tool_response, 120)
+        ));
+    }
+
+    (!parts.is_empty()).then(|| format!("tool result: {}", parts.join(" ")))
+}
+
 pub(crate) fn structured_verbosity(silent: bool, quiet: bool) -> Verbosity {
     if silent {
         Verbosity::Silent
@@ -588,6 +746,14 @@ pub(crate) fn structured_verbosity(silent: bool, quiet: bool) -> Verbosity {
 
 pub(crate) fn wrap_terminal() -> Terminal {
     crate::log::terminal()
+}
+
+pub(crate) fn switch_process_cwd(child_cwd: &Path) -> Result<()> {
+    let current = std::env::current_dir()?;
+    if current != child_cwd {
+        std::env::set_current_dir(child_cwd)?;
+    }
+    Ok(())
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
@@ -663,9 +829,23 @@ pub struct WrapperArgs {
     #[arg(short = 'o', long = "output", value_name = "FORMAT")]
     pub output: Option<String>,
 
-    /// Set or append a system prompt (string or file path).
-    #[arg(short = 's', long = "system-prompt", value_name = "PROMPT|FILE")]
-    pub system_prompt: Option<String>,
+    /// Append a system prompt from a file.
+    #[arg(
+        long = "append-system-prompt",
+        visible_alias = "asp",
+        value_name = "FILE",
+        conflicts_with = "replace_system_prompt"
+    )]
+    pub append_system_prompt: Option<String>,
+
+    /// Replace the provider's system prompt with contents from a file.
+    #[arg(
+        long = "replace-system-prompt",
+        visible_alias = "rsp",
+        value_name = "FILE",
+        conflicts_with = "append_system_prompt"
+    )]
+    pub replace_system_prompt: Option<String>,
 
     /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
     #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
@@ -779,14 +959,12 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     };
     let wrapper_span = info_span!(
         "wrapper_session",
-        provider = %provider,
         binary_path = %binary_path.display(),
         structured_mode = tracing::field::Empty,
         has_prompt,
         interactive_requested,
         yolo_requested,
         model_override = %args.model.as_deref().unwrap_or(""),
-        session_id = tracing::field::Empty,
         child_pid = tracing::field::Empty,
     );
     let _wrapper_guard = wrapper_span.enter();
@@ -851,13 +1029,51 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         }
     }
 
-    // Universal --system-prompt flag
-    if let Some(ref prompt) = args.system_prompt {
-        let resolved = resolve_system_prompt(prompt)?;
-        if let Some(warn) = profile.apply_system_prompt(&mut child_args, &resolved) {
-            deferred_warnings.push(warn);
+    let sp_args = claudine::system_prompt::SystemPromptArgs {
+        append_file: args.append_system_prompt.clone(),
+        replace_file: args.replace_system_prompt.clone(),
+    };
+    let launch_context =
+        claudine::system_prompt::LaunchContext::from_cwd(&cwd).unwrap_or_else(|_| {
+            claudine::system_prompt::LaunchContext {
+                cwd: cwd.clone(),
+                repo_root: None,
+                package_area_root: None,
+                package_root: None,
+            }
+        });
+    let effective_sp = claudine::system_prompt::resolve_and_prepare(&sp_args, &launch_context)
+        .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+
+    let mut sp_artifacts: Vec<super::wrap::system_prompt::SystemPromptArtifact> = Vec::new();
+
+    match &effective_sp {
+        claudine::system_prompt::EffectiveSystemPrompt::None => {}
+        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source } => {
+            if !args.quiet && !args.silent {
+                log::info(&format!(
+                    "system prompt disabled by empty {}",
+                    super::wrap::system_prompt::describe_source(source),
+                ));
+            }
+        }
+        claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
+            let application =
+                profile.apply_system_prompt(prepared, !non_interactive_requested, &cwd)?;
+            child_args.extend(application.args);
+            env_overrides.extend(
+                application
+                    .env
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string_lossy().into(), v.to_string_lossy().into())),
+            );
+            sp_artifacts = application.artifacts;
+            for warn in application.warnings {
+                deferred_warnings.push(warn);
+            }
         }
     }
+    let _ = &sp_artifacts;
 
     // Universal --operation flag (clap-parsed or extracted from passthrough)
     let effective_operation = args.operation.clone().or(extracted.operation);
@@ -1058,9 +1274,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         mcp_runtime = Some(runtime);
     }
 
-    let child_cwd = env_plan.repo_root.as_deref().unwrap_or(&cwd);
+    let child_cwd = env_plan.child_cwd.as_path();
+
+    if effective_non_interactive && !silent_requested {
+        log::info(&crate::output::format_launch_directory(child_cwd));
+    }
 
     // --dry-run: print what would be executed and exit
+    let sp_display_lines = crate::commands::wrap::system_prompt::describe_effective(&effective_sp);
     if args.dry_run {
         crate::output::log_dry_run(
             profile,
@@ -1071,9 +1292,12 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             mcp_runtime.as_ref(),
             child_cwd,
             &term,
+            sp_display_lines.as_deref(),
         );
         return Ok(0);
     }
+
+    switch_process_cwd(child_cwd)?;
 
     let prompt_display = extract_user_prompt(&args.passthrough);
     let dispatch_context = HashMap::new();
@@ -1092,6 +1316,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             detail_requested,
             repo_requested,
             None,
+            false, // not a sequence
             effective_operation.as_deref(),
             prompt_display.as_deref(),
             None, // no compose source hint for direct wrapper
@@ -1227,7 +1452,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
         let source_path_for_lifecycle = prompt_state.source_path.clone();
         let default_lifecycle = claudine::composition::LifecycleConfig::default();
-        let mut default_lifecycle_state = claudine::composition::LifecycleRuntimeState::default();
         let default_lifecycle_settings = claudine::events::GlobalSettings::default();
         let default_lifecycle_messaging = claudine::messaging::RuntimeMessagingSettings {
             user: None,
@@ -1240,6 +1464,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             source_path: &source_path_for_lifecycle,
             repo_root: env_plan.repo_root.as_deref(),
         };
+        let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
 
         run_harness_loop(
             provider,
@@ -1266,8 +1491,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             Some(initial_materialized),
             &term,
             &default_lifecycle,
-            &mut default_lifecycle_state,
             &default_lifecycle_ctx,
+            &default_lifecycle_emitter,
         )?
     } else if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
@@ -1279,12 +1504,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             LiveStreamSink::new(
                 provider,
                 env_context.clone(),
+                child_cwd,
                 stream_verbosity,
                 summary_details.clone(),
             )
             .with_context_extra(dispatch_context.clone()),
             parser_config,
         );
+        let mut _spawned = false;
         let stream_result = exec::run_child_stream(
             binary_path.as_path(),
             &child_args,
@@ -1295,6 +1522,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             profile.suppress_structured_stderr_on_success(),
             stdin_seed.as_deref(),
             parser,
+            &mut _spawned,
         )?;
         let mut summary = stream_result.data;
         if let Some(codex_output) = structured_codex_output.as_ref() {
@@ -1329,6 +1557,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         summary.exit_code
     } else {
         // Legacy path: forward I/O to terminal
+        let mut _spawned = false;
         let result = exec::run_child(
             binary_path.as_path(),
             &child_args,
@@ -1340,6 +1569,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed: stdin_seed.as_deref(),
             },
+            &mut _spawned,
         )?;
         result.data
     };
@@ -1608,8 +1838,11 @@ fn materialize_harness_prompt(
                 original_text: source_text.clone(),
                 markdown: effective_markdown.clone(),
             };
-            let prepared = claudine::composition::prepare_inline(&source, None, None)
-                .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+            let prepared = claudine::composition::prepare_inline(
+                &source,
+                claudine::composition::PrepareOptions::default(),
+            )
+            .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
             (
                 prepared.prompt,
                 prepared.effective_frontmatter,
@@ -1667,13 +1900,9 @@ fn build_harness_launch(
     state.next_prompt_override = None;
 
     let prompt = strip_prompt_tags_for_provider(provider, &materialized.prompt);
-    let mut stdin_seed = None;
-    profile.apply_prompt_body(
-        &mut args,
-        &mut stdin_seed,
-        &prompt,
-        effective_non_interactive,
-    )?;
+    let stdin_seed = profile
+        .prompt_delivery(&args, &prompt, effective_non_interactive)?
+        .apply_to(&mut args);
     profile.validate_final_args(&args, effective_non_interactive, stdin_seed.is_some())?;
 
     let mut env = base_env.clone();
@@ -1711,6 +1940,7 @@ fn execute_harness_attempt(
     env_context: &EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
+    child_spawned: &mut bool,
 ) -> Result<claudine::harness::AttemptOutcome> {
     let _attempt_span = info_span!(
         "harness_attempt",
@@ -1729,6 +1959,7 @@ fn execute_harness_attempt(
             LiveStreamSink::new(
                 provider,
                 env_context.clone(),
+                child_cwd,
                 stream_verbosity,
                 summary_details.clone(),
             )
@@ -1745,6 +1976,7 @@ fn execute_harness_attempt(
             suppress_stderr_on_success,
             launch.stdin_seed.as_deref(),
             parser,
+            child_spawned,
         )?;
         let termination = stream_result.termination;
         let mut summary = stream_result.data;
@@ -1796,6 +2028,7 @@ fn execute_harness_attempt(
                 stderr_noise_prefixes: stderr_noise,
                 stdin_seed: launch.stdin_seed.as_deref(),
             },
+            child_spawned,
         )?;
         let termination = capture.termination;
         let stdout = capture.data.stdout;
@@ -2330,10 +2563,12 @@ pub(crate) fn run_harness_loop(
     initial_materialized: Option<MaterializedHarnessPrompt>,
     term: &Terminal,
     lifecycle: &claudine::composition::LifecycleConfig,
-    lifecycle_state: &mut claudine::composition::LifecycleRuntimeState,
     lifecycle_ctx: &claudine::composition::LifecycleRuntimeContext<'_>,
+    lifecycle_emitter: &dyn claudine::composition::LifecycleEmitter,
 ) -> Result<i32> {
     const DEFAULT_MAX_RETRIES: u32 = 3;
+    let mut guard =
+        claudine::composition::LifecycleRunGuard::new(lifecycle, lifecycle_ctx, lifecycle_emitter);
     let permission_probe =
         WrapperHarnessPermissionProbe::new(provider, base_args.to_vec(), repo_root);
     let mut harness_context = CachedHarnessLoopContext::with_shell_options(
@@ -2362,7 +2597,8 @@ pub(crate) fn run_harness_loop(
                 attempt,
                 source_path = %prompt_state.source_path.display(),
             )
-            .in_scope(|| materialize_harness_prompt(prompt_state, repo_root))?
+            .in_scope(|| materialize_harness_prompt(prompt_state, repo_root))
+            .map_err(|e| guard.emit_blocked_or_err(e))?
         };
         let resolve_ctx = harness_context.resolve_context();
         let mut plan = info_span!(
@@ -2376,7 +2612,8 @@ pub(crate) fn run_harness_loop(
                 &prompt_state.source_path,
                 &resolve_ctx,
             )
-        })?;
+        })
+        .map_err(|e| guard.emit_blocked_or_err(e))?;
 
         // Source-file existence reporting
         if show_checks {
@@ -2393,9 +2630,7 @@ pub(crate) fn run_harness_loop(
                     term,
                 );
             }
-            if !lifecycle_state.provider_launch_started {
-                emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
-            }
+            guard.emit_blocked_or_failure();
             return Err(eyre!(
                 "source file does not exist: {}",
                 prompt_state.source_path.display()
@@ -2458,9 +2693,7 @@ pub(crate) fn run_harness_loop(
                         term,
                     );
                 }
-                if !lifecycle_state.provider_launch_started {
-                    emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
-                }
+                guard.emit_blocked_or_failure();
                 return Err(eyre!(
                     "shell audit failed: {} denied directive(s) in source page",
                     source_failures.len()
@@ -2498,9 +2731,7 @@ pub(crate) fn run_harness_loop(
                 if show_checks {
                     claudine::harness::report::report_unhandled_failure(&msg, term);
                 }
-                if !lifecycle_state.provider_launch_started {
-                    emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
-                }
+                guard.emit_blocked_or_failure();
                 return Err(eyre!("shell audit failed"));
             }
         }
@@ -2568,18 +2799,12 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&fail_msg, term);
             }
-            if !lifecycle_state.provider_launch_started {
-                emit_lifecycle_signal(lifecycle, LifecycleSignal::Blocked, lifecycle_ctx);
-            }
+            guard.emit_blocked_or_failure();
             return Err(eyre!("{fail_msg}"));
         }
 
-        // Emit start lifecycle signal before the first provider launch
-        if !lifecycle_state.start_emitted {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Start, lifecycle_ctx);
-            lifecycle_state.start_emitted = true;
-        }
-        lifecycle_state.provider_launch_started = true;
+        // Emit start lifecycle signal before the first provider launch.
+        guard.emit_start_once();
 
         let snapshot = info_span!(
             "harness_pre_snapshot",
@@ -2607,6 +2832,7 @@ pub(crate) fn run_harness_loop(
             )
         })?;
 
+        let mut child_spawned = false;
         let outcome = execute_harness_attempt(
             attempt,
             provider,
@@ -2628,10 +2854,19 @@ pub(crate) fn run_harness_loop(
             env_context,
             dispatch_context,
             term,
-        )?;
+            &mut child_spawned,
+        );
+
+        // Mark launched as soon as spawn succeeded — before propagating
+        // any post-spawn error — so the guard correctly classifies
+        // subsequent failures as `Failure` rather than `Blocked`.
+        if child_spawned {
+            guard.mark_provider_launched();
+        }
+        let outcome = outcome?;
 
         if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Failure);
             return Ok(outcome.exit_code);
         }
 
@@ -2676,7 +2911,7 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&message, term);
             }
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Failure);
             return Err(eyre!("{message}"));
         }
 
@@ -2731,7 +2966,7 @@ pub(crate) fn run_harness_loop(
             if show_checks {
                 claudine::harness::report::report_unhandled_failure(&fail_msg, term);
             }
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Failure);
             return Err(eyre!("{fail_msg}"));
         }
 
@@ -2761,7 +2996,7 @@ pub(crate) fn run_harness_loop(
         }
 
         if post_report.all_passed() {
-            emit_lifecycle_signal(lifecycle, LifecycleSignal::Success, lifecycle_ctx);
+            guard.emit_terminal(LifecycleSignal::Success);
             return Ok(outcome.exit_code);
         }
 
@@ -2802,7 +3037,7 @@ pub(crate) fn run_harness_loop(
         if show_checks {
             claudine::harness::report::report_unhandled_failure(&fail_msg, term);
         }
-        emit_lifecycle_signal(lifecycle, LifecycleSignal::Failure, lifecycle_ctx);
+        guard.emit_terminal(LifecycleSignal::Failure);
         return Err(eyre!("{fail_msg}"));
     }
 }
@@ -3294,8 +3529,9 @@ fn print_wrapper_help(provider: Provider) {
          \x20 -i, --interactive         Force interactive mode even when a prompt string is provided\n\
          \x20 -m, --model <MODEL>       Override the model used by the provider\n\
          \x20 -o, --output <FORMAT>     Set the output format (json, text, stream)\n\
-         \x20 -s, --system-prompt <PROMPT|FILE>  Set or append a system prompt\n\
-         \x20 -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)\n\
+          \x20     --asp <FILE>             Append a system prompt from a file\n\
+          \x20     --rsp <FILE>             Replace the provider's system prompt with contents from a file\n\
+          \x20 -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)\n\
          \x20     --dry-run             Show what would be executed without launching the child\n\
          \x20 -q, --quiet              Show only the header line; suppress env details and info\n\
          \x20     --silent              Suppress all Claudine preflight output\n\
@@ -3393,17 +3629,6 @@ fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWr
     extracted
 }
 
-/// Resolve the `--system-prompt` value: if it looks like a file path and exists,
-/// read its contents; otherwise treat it as a literal prompt string.
-pub(crate) fn resolve_system_prompt(prompt_or_file: &str) -> Result<String> {
-    let path = std::path::Path::new(prompt_or_file);
-    if path.exists() && path.is_file() {
-        Ok(std::fs::read_to_string(path)?)
-    } else {
-        Ok(prompt_or_file.to_string())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3434,6 +3659,7 @@ mod tests {
             included: Vec::new(),
             added: Vec::new(),
             repo_root: None,
+            child_cwd: PathBuf::from("/tmp"),
             package_context: Some(env::PackageContext {
                 package_area: "claudine".to_string(),
                 package: Some("claudine-cli".to_string()),
@@ -3456,6 +3682,7 @@ mod tests {
             included: Vec::new(),
             added: Vec::new(),
             repo_root: None,
+            child_cwd: PathBuf::from("/tmp"),
             package_context: Some(env::PackageContext {
                 package_area: "claudine".to_string(),
                 package: None,
@@ -3585,18 +3812,13 @@ mod tests {
     }
 
     #[test]
-    fn resolve_system_prompt_returns_literal_for_non_file() {
-        let result = resolve_system_prompt("You are a helpful assistant.").unwrap();
-        assert_eq!(result, "You are a helpful assistant.");
-    }
-
-    #[test]
     fn live_stream_sink_maps_coarse_events_into_dispatch_meta() {
         let recorded: Arc<Mutex<Vec<DispatchEventMeta>>> = Arc::new(Mutex::new(Vec::new()));
         let sink_events = recorded.clone();
         let mut sink = LiveStreamSink::with_dispatcher(
             Provider::Codex,
             EnvironmentContext::default(),
+            Path::new("/tmp/repo"),
             Verbosity::Silent,
             Arc::new(Mutex::new(StructuredSummaryDetails::default())),
             move |_event, meta| {
@@ -3616,6 +3838,7 @@ mod tests {
         sink.on_session_start(&session_meta);
 
         sink.on_turn_start(&StreamEventMeta::default());
+        sink.on_step_start(&StreamEventMeta::default());
 
         let mut tool_meta = StreamEventMeta::default();
         tool_meta.extra.insert(
@@ -3644,6 +3867,7 @@ mod tests {
         );
         sink.on_turn_error(&error_meta);
 
+        sink.on_step_finish(&StreamEventMeta::default());
         sink.on_turn_complete(&StreamEventMeta::default());
 
         let metas = recorded.lock().unwrap().clone();
@@ -3656,6 +3880,7 @@ mod tests {
 
         assert_eq!(metas[1].event, AgenticEvent::BeforePrompt);
         assert_eq!(metas[1].session_id.as_deref(), Some("thread-1"));
+        assert_eq!(metas[1].cwd.as_deref(), Some("/tmp/repo"));
 
         assert_eq!(metas[2].event, AgenticEvent::BeforeTool);
         assert_eq!(metas[2].tool_name.as_deref(), Some("search"));
@@ -3669,6 +3894,65 @@ mod tests {
 
         assert_eq!(metas[5].event, AgenticEvent::TurnComplete);
         assert_eq!(metas[5].session_id.as_deref(), Some("thread-1"));
+    }
+
+    #[test]
+    fn tool_progress_line_includes_compact_parameters() {
+        let mut meta = StreamEventMeta::default();
+        meta.extra.insert(
+            "tool_name".into(),
+            serde_json::Value::String("shell".into()),
+        );
+        meta.extra.insert(
+            "tool_input".into(),
+            serde_json::json!({"cmd": "git status"}),
+        );
+
+        assert_eq!(
+            format_tool_progress_line(&meta).as_deref(),
+            Some(r#"tool: shell {"cmd":"git status"}"#)
+        );
+    }
+
+    #[test]
+    fn tool_result_line_surfaces_status_and_result() {
+        let mut meta = StreamEventMeta::default();
+        meta.extra.insert(
+            "tool_name".into(),
+            serde_json::Value::String("search".into()),
+        );
+        meta.extra
+            .insert("tool_id".into(), serde_json::Value::String("tool-1".into()));
+        meta.extra
+            .insert("status".into(), serde_json::Value::String("success".into()));
+        meta.extra
+            .insert("tool_response".into(), serde_json::json!({"hits": 3}));
+
+        assert_eq!(
+            format_tool_result_line(&meta).as_deref(),
+            Some(r#"tool result: search id=tool-1 status=success result={"hits":3}"#)
+        );
+    }
+
+    #[test]
+    fn live_stream_sink_step_events_do_not_dispatch_high_level_events() {
+        let recorded: Arc<Mutex<Vec<DispatchEventMeta>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_events = recorded.clone();
+        let mut sink = LiveStreamSink::with_dispatcher(
+            Provider::OpenCode,
+            EnvironmentContext::default(),
+            Path::new("/tmp/repo"),
+            Verbosity::Silent,
+            Arc::new(Mutex::new(StructuredSummaryDetails::default())),
+            move |_event, meta| {
+                sink_events.lock().unwrap().push(meta);
+            },
+        );
+
+        sink.on_step_start(&StreamEventMeta::default());
+        sink.on_step_finish(&StreamEventMeta::default());
+
+        assert!(recorded.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -3688,6 +3972,7 @@ mod tests {
         let mut sink = LiveStreamSink::with_dispatcher(
             Provider::Codex,
             EnvironmentContext::default(),
+            Path::new("/tmp/repo"),
             Verbosity::Silent,
             Arc::new(Mutex::new(StructuredSummaryDetails::default())),
             move |_event, meta| {
@@ -3772,11 +4057,6 @@ mod tests {
         use proptest::prelude::*;
 
         proptest! {
-            #[test]
-            fn proptest_resolve_system_prompt_never_panics(s in "\\PC*") {
-                let _ = resolve_system_prompt(&s);
-            }
-
             #[test]
             fn proptest_extract_wrapper_flags_preserves_others(
                 flags in prop::collection::vec("-y|--yolo|-i|--interactive|-q|--quiet|--silent", 0..5),

@@ -1,6 +1,8 @@
 use biscuit_file::YamlParseError;
 use std::path::PathBuf;
 
+use crate::events::Provider;
+
 /// All errors that can occur within the Claudine library.
 #[derive(Debug, thiserror::Error)]
 pub enum ClaudineError {
@@ -75,7 +77,7 @@ pub enum ClaudineError {
     #[error("config creation not supported for provider: {provider}")]
     ConfigCreationNotSupported {
         /// Provider name.
-        provider: String,
+        provider: Provider,
     },
 
     /// Protect rule pattern failed to parse as regex.
@@ -150,7 +152,7 @@ pub enum ClaudineError {
     #[error("MCP not supported for {provider}: {reason}")]
     McpProviderNotSupported {
         /// Provider name.
-        provider: String,
+        provider: Provider,
         /// Why the operation is not supported.
         reason: String,
     },

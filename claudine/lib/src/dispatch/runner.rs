@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::time::Duration;
 
 use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
@@ -9,13 +8,13 @@ use tracing::{debug, info_span, warn};
 
 use super::template::interpolate;
 use crate::actions::{
-    CompiledMapper, HookAction, HookDecision, HookResponse, LogTarget, Mapper, ProtectCallContext,
-    ReportFormat, ReportHandler,
+    CompiledMapper, HookAction, HookDecision, HookResponse, Mapper, ReportFormat, ReportHandler,
 };
+use crate::config::claudine_config::{ClaudineConfig, Gender, TtsValue, VoiceSelection};
 use crate::error::Result;
 use crate::events::{EventMeta, GlobalSettings};
-use crate::reporting::paths;
-use crate::services::{ProtectDecision, ProtectOutcome};
+use crate::messaging::RuntimeMessagingSettings;
+use crate::services::protect::decision::ProtectDecision;
 
 /// Execute hook actions in declaration order.
 ///
@@ -33,7 +32,7 @@ pub async fn execute_actions(
 
     for (index, action) in actions.iter().enumerate() {
         match action {
-            HookAction::Speak { message } => {
+            HookAction::Speak { message, .. } => {
                 let _action_span = info_span!(
                     "hook_action",
                     action_index = index,
@@ -45,20 +44,6 @@ pub async fn execute_actions(
                 )
                 .entered();
                 execute_speak(message, meta, settings);
-            }
-            HookAction::Log { target } => {
-                let _action_span = info_span!(
-                    "hook_action",
-                    action_index = index,
-                    action_kind = "log",
-                    blocking = can_block,
-                    timeout_ms = tracing::field::Empty,
-                    target_kind = %log_target_kind(target),
-                    command = tracing::field::Empty,
-                )
-                .entered();
-                let target = resolve_log_target(target, settings);
-                execute_log(target, meta).await?
             }
             HookAction::Report { handler } => {
                 let _action_span = info_span!(
@@ -73,18 +58,18 @@ pub async fn execute_actions(
                 .entered();
                 execute_report(handler.as_ref(), meta, can_block);
             }
-            HookAction::FireAndForget { command, args } => {
+            HookAction::Bash { command, params } => {
                 let _action_span = info_span!(
                     "hook_action",
                     action_index = index,
-                    action_kind = "fire_and_forget",
+                    action_kind = "bash",
                     blocking = can_block,
                     timeout_ms = tracing::field::Empty,
                     target_kind = tracing::field::Empty,
                     command = %command,
                 )
                 .entered();
-                execute_fire_and_forget(command, args.as_deref(), meta)
+                execute_bash(command, params, meta)
             }
             HookAction::Call {
                 command,
@@ -110,25 +95,13 @@ pub async fn execute_actions(
                         continue;
                     };
 
-                    let outcome_reason = protect_reason(&decision.outcome)
-                        .unwrap_or_else(|| decision.reason.clone());
                     let response = HookResponse {
-                        decision: Some(decision_for_short_circuit(&decision.outcome)),
-                        reason: Some(format!(
-                            "call action short-circuited by protect: {outcome_reason}"
-                        )),
-                        protect: Some(ProtectCallContext {
-                            outcome: protect_outcome_slug(&decision.outcome).to_string(),
-                            reason: decision.reason.clone(),
-                            short_circuited: true,
-                        }),
+                        decision: Some(decision_for_short_circuit(decision)),
+                        reason: Some("call action short-circuited by protect: blocked".to_string()),
                         ..HookResponse::default()
                     };
 
-                    debug!(
-                        protect_outcome = protect_outcome_slug(&decision.outcome),
-                        "Short-circuiting call action due to protect decision"
-                    );
+                    debug!("Short-circuiting call action due to protect block");
                     if can_block && should_replace_selected(selected_response.as_ref(), &response) {
                         selected_response = Some(response);
                     }
@@ -178,7 +151,7 @@ pub async fn execute_actions(
                 }
             }
             HookAction::SoundEffect {
-                name,
+                effect,
                 volume,
                 speed,
             } => {
@@ -192,7 +165,7 @@ pub async fn execute_actions(
                     command = tracing::field::Empty,
                 )
                 .entered();
-                execute_sound_effect(name, *volume, *speed);
+                execute_sound_effect(effect, *volume, *speed);
             }
             HookAction::Message { message, image } => {
                 let _action_span = info_span!(
@@ -213,18 +186,272 @@ pub async fn execute_actions(
     Ok(selected_response)
 }
 
-fn resolve_log_target<'a>(target: &'a LogTarget, settings: &'a GlobalSettings) -> &'a LogTarget {
-    match (target, settings.default_log_target.as_ref()) {
-        (LogTarget::File { path: None, .. }, Some(default_target)) => default_target,
-        _ => target,
+
+/// Execute hook actions using the new [`ClaudineConfig`] model.
+///
+/// Unlike [`execute_actions`] which bridges through [`GlobalSettings`], this
+/// function works directly with the canonical config. The key difference is
+/// `Speak` action handling: action-level `voice` and `gender` overrides are
+/// resolved against the config's TTS settings (including gendered voice pairs).
+pub async fn execute_actions_v2(
+    actions: &[HookAction],
+    compiled_mappers: Option<&[Option<CompiledMapper>]>,
+    meta: &EventMeta,
+    config: &ClaudineConfig,
+    messaging: &RuntimeMessagingSettings,
+    can_block: bool,
+    protect_decision: Option<&ProtectDecision>,
+) -> Result<Option<HookResponse>> {
+    let mut selected_response: Option<HookResponse> = None;
+
+    for (index, action) in actions.iter().enumerate() {
+        match action {
+            HookAction::Speak {
+                message,
+                voice,
+                gender,
+            } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "speak",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
+                execute_speak_v2(message, voice.as_deref(), gender.clone(), meta, config);
+            }
+            HookAction::Report { handler } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "report",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
+                execute_report(handler.as_ref(), meta, can_block);
+            }
+            HookAction::Bash { command, params } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "bash",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = %command,
+                )
+                .entered();
+                execute_bash(command, params, meta)
+            }
+            HookAction::Call {
+                command,
+                args,
+                timeout_ms,
+                mapper,
+            } => {
+                let timeout = timeout_ms
+                    .map(Duration::from_millis)
+                    .unwrap_or(Duration::from_secs(60));
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "call",
+                    blocking = can_block,
+                    timeout_ms = timeout.as_millis(),
+                    target_kind = tracing::field::Empty,
+                    command = %command,
+                )
+                .entered();
+                if should_short_circuit_call(protect_decision) {
+                    let Some(decision) = protect_decision else {
+                        continue;
+                    };
+
+                    let response = HookResponse {
+                        decision: Some(decision_for_short_circuit(decision)),
+                        reason: Some("call action short-circuited by protect: blocked".to_string()),
+                        ..HookResponse::default()
+                    };
+
+                    debug!("Short-circuiting call action due to protect block");
+                    if can_block && should_replace_selected(selected_response.as_ref(), &response) {
+                        selected_response = Some(response);
+                    }
+                    continue;
+                }
+
+                let cmd = interpolate(command, meta);
+                let rendered_args = args.as_ref().map(|items| {
+                    items
+                        .iter()
+                        .map(|arg| interpolate(arg, meta))
+                        .collect::<Vec<_>>()
+                });
+
+                let compiled_mapper = compiled_mappers
+                    .and_then(|mappers| mappers.get(index))
+                    .and_then(Option::as_ref);
+
+                match tokio::time::timeout(
+                    timeout,
+                    run_command_blocking(&cmd, rendered_args.as_deref()),
+                )
+                .await
+                {
+                    Ok(Ok(output)) => match apply_mapper(compiled_mapper, mapper.as_ref(), &output)
+                    {
+                        Ok(response) => {
+                            let response = attach_protect_context(response, protect_decision);
+                            if can_block {
+                                if should_replace_selected(selected_response.as_ref(), &response) {
+                                    selected_response = Some(response);
+                                }
+                            } else {
+                                debug!(%cmd, "Call response produced on non-blocking event and discarded");
+                            }
+                        }
+                        Err(error) => {
+                            warn!(%cmd, %error, "Call mapper failed");
+                        }
+                    },
+                    Ok(Err(error)) => {
+                        warn!(%cmd, %error, "Call command failed");
+                    }
+                    Err(_) => {
+                        warn!(%cmd, timeout_ms = timeout.as_millis(), "Call command timed out");
+                    }
+                }
+            }
+            HookAction::SoundEffect {
+                effect,
+                volume,
+                speed,
+            } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "sound_effect",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
+                execute_sound_effect(effect, *volume, *speed);
+            }
+            HookAction::Message { message, image } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "message",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
+                crate::messaging::execute_message(message, image.as_deref(), meta, messaging);
+            }
+        }
     }
+
+    Ok(selected_response)
 }
 
-fn log_target_kind(target: &LogTarget) -> &'static str {
-    match target {
-        LogTarget::File { .. } => "file",
-        LogTarget::Server { .. } => "server",
+/// Speak a message using TTS with [`ClaudineConfig`]-aware voice resolution.
+///
+/// Voice selection priority:
+/// 1. Action-level `voice` override (if present on the `Speak` action)
+/// 2. Config-level voice resolved through gendered voice pairs
+/// 3. Config-level single voice
+/// 4. Auto-detect (no explicit voice)
+fn execute_speak_v2(
+    message_template: &str,
+    voice_override: Option<&str>,
+    gender_override: Option<Gender>,
+    meta: &EventMeta,
+    config: &ClaudineConfig,
+) {
+    let text = interpolate(message_template, meta);
+    if text.is_empty() {
+        return;
     }
+
+    if matches!(config.tts, TtsValue::Boolean(false)) {
+        return;
+    }
+
+    let tts = tts_config_from_claudine(config, voice_override, gender_override);
+
+    tokio::spawn(async move {
+        if let Err(error) = biscuit_speaks::Speak::new(text)
+            .with_config(tts)
+            .play()
+            .await
+        {
+            warn!(%error, "TTS playback failed");
+        }
+    });
+}
+
+/// Build a [`TtsConfig`] from [`ClaudineConfig`] with optional per-action overrides.
+///
+/// Resolution order for voice:
+/// 1. `voice_override` from the action (always wins)
+/// 2. Gendered voice pair from config, using action `gender_override` → config default gender
+/// 3. Single voice from config
+/// 4. No explicit voice (auto-detect)
+fn tts_config_from_claudine(
+    config: &ClaudineConfig,
+    voice_override: Option<&str>,
+    gender_override: Option<Gender>,
+) -> TtsConfig {
+    let mut tts = TtsConfig::new();
+
+    if let Some(voice) = voice_override {
+        tts = tts.with_voice(voice);
+    }
+
+    match &config.tts {
+        TtsValue::Boolean(false) => {}
+        TtsValue::Boolean(true) => {}
+        TtsValue::Config(settings) => {
+            if voice_override.is_none() {
+                if let Some(provider) =
+                    biscuit_speaks::parse_provider_name(&settings.provider)
+                {
+                    tts = tts.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
+                }
+
+                let gender = gender_override.unwrap_or(settings.gender.clone());
+                match &settings.voice {
+                    Some(VoiceSelection::Single(v)) => {
+                        tts = tts.with_voice(v);
+                    }
+                    Some(VoiceSelection::Gendered { male, female }) => {
+                        let voice = match gender {
+                            Gender::Male => male.as_str(),
+                            Gender::Female => female.as_str(),
+                        };
+                        tts = tts.with_voice(voice);
+                    }
+                    None => {}
+                }
+            } else if let Some(provider) =
+                biscuit_speaks::parse_provider_name(&settings.provider)
+            {
+                tts = tts.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
+            }
+        }
+    }
+
+    tts
 }
 
 fn should_replace_selected(current: Option<&HookResponse>, candidate: &HookResponse) -> bool {
@@ -239,62 +466,19 @@ fn should_replace_selected(current: Option<&HookResponse>, candidate: &HookRespo
 }
 
 fn should_short_circuit_call(decision: Option<&ProtectDecision>) -> bool {
-    decision.is_some_and(|decision| {
-        matches!(
-            decision.outcome,
-            ProtectOutcome::AskThenAllowOrStop { .. }
-                | ProtectOutcome::StopCurrent { .. }
-                | ProtectOutcome::StopSession { .. }
-        )
-    })
+    decision.is_some_and(|d| d.is_blocked())
 }
 
-fn decision_for_short_circuit(outcome: &ProtectOutcome) -> HookDecision {
-    match outcome {
-        ProtectOutcome::AskThenAllowOrStop { .. } => HookDecision::Ask,
-        ProtectOutcome::StopCurrent { .. } | ProtectOutcome::StopSession { .. } => {
-            HookDecision::Deny
-        }
-        ProtectOutcome::Allow
-        | ProtectOutcome::AllowWithRedaction { .. }
-        | ProtectOutcome::AdvisoryOnly { .. } => HookDecision::Continue,
-    }
+fn decision_for_short_circuit(_decision: &ProtectDecision) -> HookDecision {
+    HookDecision::Deny
 }
 
 fn attach_protect_context(
-    mut response: HookResponse,
-    protect_decision: Option<&ProtectDecision>,
+    response: HookResponse,
+    _protect_decision: Option<&ProtectDecision>,
 ) -> HookResponse {
-    if let Some(decision) = protect_decision {
-        response.protect = Some(ProtectCallContext {
-            outcome: protect_outcome_slug(&decision.outcome).to_string(),
-            reason: decision.reason.clone(),
-            short_circuited: false,
-        });
-    }
+    // Simplified: new protect doesn't attach context to responses
     response
-}
-
-fn protect_outcome_slug(outcome: &ProtectOutcome) -> &'static str {
-    match outcome {
-        ProtectOutcome::Allow => "allow",
-        ProtectOutcome::AskThenAllowOrStop { .. } => "ask_then_allow_or_stop",
-        ProtectOutcome::StopCurrent { .. } => "stop_current",
-        ProtectOutcome::StopSession { .. } => "stop_session",
-        ProtectOutcome::AllowWithRedaction { .. } => "allow_with_redaction",
-        ProtectOutcome::AdvisoryOnly { .. } => "advisory_only",
-    }
-}
-
-fn protect_reason(outcome: &ProtectOutcome) -> Option<String> {
-    match outcome {
-        ProtectOutcome::Allow => None,
-        ProtectOutcome::AskThenAllowOrStop { reason }
-        | ProtectOutcome::StopCurrent { reason }
-        | ProtectOutcome::StopSession { reason }
-        | ProtectOutcome::AllowWithRedaction { reason }
-        | ProtectOutcome::AdvisoryOnly { reason } => Some(reason.clone()),
-    }
 }
 
 /// Speak a message via biscuit-speaks TTS (fire-and-forget).
@@ -368,82 +552,35 @@ fn execute_sound_effect(name: &str, volume: f32, speed: f32) {
     });
 }
 
-fn execute_fire_and_forget(command: &str, args: Option<&[String]>, meta: &EventMeta) {
+/// Execute a shell command asynchronously via `sh -c "command params"`.
+fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
     let cmd = interpolate(command, meta);
-    let rendered_args: Option<Vec<String>> = args.map(|items| {
-        items
-            .iter()
-            .map(|arg| interpolate(arg, meta))
-            .collect::<Vec<_>>()
-    });
-
-    tokio::spawn(async move {
-        if let Err(error) = run_command_blocking(&cmd, rendered_args.as_deref()).await {
-            warn!(%cmd, %error, "Fire-and-forget command failed");
-        }
-    });
-}
-
-async fn execute_log(target: &LogTarget, meta: &EventMeta) -> Result<()> {
-    match target {
-        LogTarget::File { path, rotate_daily } => {
-            let resolved = paths::resolve_file_log_path(path.as_deref(), *rotate_daily)?;
-            write_jsonl(&resolved, meta)
-        }
-        LogTarget::Server {
-            url,
-            timeout_ms,
-            headers,
-        } => {
-            post_to_server(url, *timeout_ms, headers.as_ref(), meta).await;
-            Ok(())
-        }
-    }
-}
-
-fn write_jsonl(path: &std::path::Path, meta: &EventMeta) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let mut line = serde_json::to_string(meta)?;
-    line.push('\n');
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?
-        .write_all(line.as_bytes())?;
-
-    Ok(())
-}
-
-async fn post_to_server(
-    url: &str,
-    timeout_ms: u64,
-    headers: Option<&std::collections::HashMap<String, String>>,
-    meta: &EventMeta,
-) {
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_millis(timeout_ms))
-        .build()
-    {
-        Ok(client) => client,
-        Err(error) => {
-            warn!(%error, "Failed to build HTTP client for log target");
-            return;
-        }
+    let rendered_params = interpolate(params, meta);
+    let full_command = if rendered_params.is_empty() {
+        cmd.clone()
+    } else {
+        format!("{cmd} {rendered_params}")
     };
 
-    let mut request = client.post(url).json(meta);
-    if let Some(headers) = headers {
-        for (key, value) in headers {
-            request = request.header(key, value);
-        }
-    }
+    debug!(%full_command, "Spawning bash action");
 
-    if let Err(error) = request.send().await {
-        warn!(%error, %url, "Log server POST failed");
-    }
+    tokio::spawn(async move {
+        let result = Command::new("sh")
+            .arg("-c")
+            .arg(&full_command)
+            .output()
+            .await;
+        match result {
+            Ok(output) if !output.status.success() => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(%full_command, %stderr, "Bash action exited with non-zero status");
+            }
+            Err(error) => {
+                warn!(%full_command, %error, "Bash action failed to spawn");
+            }
+            _ => {}
+        }
+    });
 }
 
 fn execute_report(handler: Option<&ReportHandler>, meta: &EventMeta, blocking: bool) {
@@ -744,6 +881,9 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
+    use crate::config::claudine_config::{
+        ClaudineConfig, Gender, TtsConfigSettings, TtsValue, VoiceSelection,
+    };
     use crate::events::{EnvironmentContext, Provider, TtsSettings};
 
     fn meta() -> EventMeta {
@@ -764,34 +904,6 @@ mod tests {
             extra: HashMap::new(),
             env: EnvironmentContext::default(),
         }
-    }
-
-    #[tokio::test]
-    async fn log_file_writes_jsonl() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("events.jsonl");
-
-        let actions = vec![HookAction::Log {
-            target: LogTarget::File {
-                path: Some(path.clone()),
-                rotate_daily: false,
-            },
-        }];
-
-        execute_actions(
-            &actions,
-            None,
-            &meta(),
-            &GlobalSettings::default(),
-            &crate::messaging::RuntimeMessagingSettings::default(),
-            false,
-            None,
-        )
-        .await
-        .unwrap();
-
-        let content = std::fs::read_to_string(path).unwrap();
-        assert!(content.contains("before_tool"));
     }
 
     #[test]
@@ -916,50 +1028,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn attach_protect_context_marks_response() {
-        let response = HookResponse {
-            decision: Some(HookDecision::Allow),
-            ..HookResponse::default()
-        };
-
-        let protect = crate::services::ProtectDecision {
-            outcome: crate::services::ProtectOutcome::Allow,
-            desired_outcome: crate::services::ProtectOutcome::Allow,
-            degraded: false,
-            reason: "protect.normal.balanced".to_string(),
-            capability: Some(crate::services::GateCapability::Guarantee),
-        };
-
-        let with_context = super::attach_protect_context(response, Some(&protect));
-        assert!(with_context.protect.is_some());
-        assert_eq!(
-            with_context.protect.as_ref().map(|p| p.short_circuited),
-            Some(false)
-        );
-    }
-
-    #[test]
-    fn short_circuit_call_for_stop_outcome() {
-        let protect = crate::services::ProtectDecision {
-            outcome: crate::services::ProtectOutcome::StopCurrent {
-                reason: "rules.blocked-command".to_string(),
-            },
-            desired_outcome: crate::services::ProtectOutcome::StopCurrent {
-                reason: "rules.blocked-command".to_string(),
-            },
-            degraded: false,
-            reason: "protect.normal.strict".to_string(),
-            capability: Some(crate::services::GateCapability::Guarantee),
-        };
-
-        assert!(super::should_short_circuit_call(Some(&protect)));
-        assert_eq!(
-            super::decision_for_short_circuit(&protect.outcome),
-            HookDecision::Deny
-        );
-    }
-
     #[tokio::test]
     async fn message_action_skipped_when_no_route() {
         let actions = vec![HookAction::Message {
@@ -991,12 +1059,7 @@ mod tests {
                 message: "notify".to_string(),
                 image: None,
             },
-            HookAction::Log {
-                target: LogTarget::File {
-                    path: None,
-                    rotate_daily: false,
-                },
-            },
+            HookAction::Report { handler: None },
         ];
 
         let messaging = crate::messaging::RuntimeMessagingSettings::default();
@@ -1013,5 +1076,175 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
+    }
+
+    // =========================================================================
+    // execute_actions_v2 and tts_config_from_claudine tests
+    // =========================================================================
+
+    fn claudine_config_with_tts(tts: TtsValue) -> ClaudineConfig {
+        ClaudineConfig {
+            tts,
+            messenger: None,
+            logging: true,
+            protect: Default::default(),
+            actions: HashMap::new(),
+            preferred_agent: Provider::Claude,
+            canonical_provider: None,
+            default_sounds: Default::default(),
+        }
+    }
+
+    #[test]
+    fn tts_config_from_claudine_boolean_true_is_auto_detect() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(true));
+        let tts = tts_config_from_claudine(&config, None, None);
+        assert!(matches!(
+            tts.failover_strategy,
+            TtsFailoverStrategy::FirstAvailable
+        ));
+        assert!(tts.requested_voice.is_none());
+    }
+
+    #[test]
+    fn tts_config_from_claudine_boolean_false_returns_default() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let tts = tts_config_from_claudine(&config, None, None);
+        assert!(tts.requested_voice.is_none());
+    }
+
+    #[test]
+    fn tts_config_from_claudine_single_voice() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Single("Samantha".to_string())),
+            gender: Gender::Female,
+        }));
+        let tts = tts_config_from_claudine(&config, None, None);
+        assert_eq!(tts.requested_voice.as_deref(), Some("Samantha"));
+        assert!(matches!(
+            tts.failover_strategy,
+            TtsFailoverStrategy::SpecificProvider(_)
+        ));
+    }
+
+    #[test]
+    fn tts_config_from_claudine_gendered_voice_female_default() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Gendered {
+                male: "Alex".to_string(),
+                female: "Samantha".to_string(),
+            }),
+            gender: Gender::Female,
+        }));
+        let tts = tts_config_from_claudine(&config, None, None);
+        assert_eq!(tts.requested_voice.as_deref(), Some("Samantha"));
+    }
+
+    #[test]
+    fn tts_config_from_claudine_gendered_voice_male_default() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Gendered {
+                male: "Alex".to_string(),
+                female: "Samantha".to_string(),
+            }),
+            gender: Gender::Male,
+        }));
+        let tts = tts_config_from_claudine(&config, None, None);
+        assert_eq!(tts.requested_voice.as_deref(), Some("Alex"));
+    }
+
+    #[test]
+    fn tts_config_from_claudine_gender_override_selects_male_voice() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Gendered {
+                male: "Alex".to_string(),
+                female: "Samantha".to_string(),
+            }),
+            gender: Gender::Female,
+        }));
+        let tts = tts_config_from_claudine(&config, None, Some(Gender::Male));
+        assert_eq!(tts.requested_voice.as_deref(), Some("Alex"));
+    }
+
+    #[test]
+    fn tts_config_from_claudine_voice_override_wins_over_config() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Single("Samantha".to_string())),
+            gender: Gender::Female,
+        }));
+        let tts = tts_config_from_claudine(&config, Some("Karen"), None);
+        assert_eq!(tts.requested_voice.as_deref(), Some("Karen"));
+    }
+
+    #[test]
+    fn tts_config_from_claudine_voice_override_sets_provider() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Single("Samantha".to_string())),
+            gender: Gender::Female,
+        }));
+        let tts = tts_config_from_claudine(&config, Some("Karen"), None);
+        assert_eq!(tts.requested_voice.as_deref(), Some("Karen"));
+        assert!(matches!(
+            tts.failover_strategy,
+            TtsFailoverStrategy::SpecificProvider(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn execute_actions_v2_runs_bash_action() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+
+        let actions = vec![
+            HookAction::Bash {
+                command: "echo".to_string(),
+                params: "hello".to_string(),
+            },
+            HookAction::Report { handler: None },
+        ];
+
+        let result = execute_actions_v2(
+            &actions,
+            None,
+            &meta(),
+            &config,
+            &messaging,
+            true,
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn execute_actions_v2_message_action() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+
+        let actions = vec![HookAction::Message {
+            message: "test".to_string(),
+            image: None,
+        }];
+
+        let result = execute_actions_v2(
+            &actions,
+            None,
+            &meta(),
+            &config,
+            &messaging,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_none());
     }
 }

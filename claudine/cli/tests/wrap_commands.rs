@@ -6,7 +6,8 @@ use claudine::mcp::types::{
 use predicates::str::contains;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use tempfile::tempdir;
 
 fn write_executable(path: &Path, content: &str) {
@@ -24,20 +25,90 @@ fn write_executable(path: &Path, content: &str) {
     }
 }
 
+fn write_file(path: &Path, content: &str) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(path, content).unwrap();
+}
+
+fn init_git_repo(path: &Path) -> bool {
+    Command::new("git")
+        .arg("init")
+        .current_dir(path)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn create_claudine_monorepo(workspace: &Path) -> Option<(PathBuf, PathBuf, PathBuf)> {
+    let repo_root = workspace.join("repo");
+    let launch_dir = repo_root.join("claudine/cli");
+    let lib_dir = repo_root.join("claudine/lib");
+    let bin_dir = repo_root.join("bin");
+
+    fs::create_dir_all(launch_dir.join("src")).unwrap();
+    fs::create_dir_all(lib_dir.join("src")).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    write_file(
+        &repo_root.join("Cargo.toml"),
+        r#"[workspace]
+resolver = "2"
+members = ["claudine/lib", "claudine/cli"]
+"#,
+    );
+    write_file(
+        &lib_dir.join("Cargo.toml"),
+        r#"[package]
+name = "claudine"
+version = "0.1.0"
+edition = "2024"
+"#,
+    );
+    write_file(&lib_dir.join("src/lib.rs"), "");
+    write_file(
+        &launch_dir.join("Cargo.toml"),
+        r#"[package]
+name = "claudine-cli"
+version = "0.1.0"
+edition = "2024"
+"#,
+    );
+    write_file(&launch_dir.join("src/main.rs"), "fn main() {}\n");
+
+    if !init_git_repo(&repo_root) {
+        return None;
+    }
+
+    Some((repo_root, launch_dir, bin_dir))
+}
+
 fn redact_session_id(input: &str) -> String {
+    let result = redact_temp_home(input);
     const PREFIX: &str = "CLAUDINE_SESSION_ID=";
-    let Some(start) = input.find(PREFIX) else {
-        return input.to_string();
+    let Some(start) = result.find(PREFIX) else {
+        return result;
     };
     let value_start = start + PREFIX.len();
-    // UUID is 36 chars: 8-4-4-4-12
-    let value_end = (value_start + 36).min(input.len());
+    let value_end = (value_start + 36).min(result.len());
     format!(
         "{}{}<redacted>{}",
-        &input[..start],
+        &result[..start],
         PREFIX,
-        &input[value_end..]
+        &result[value_end..]
     )
+}
+
+fn redact_temp_home(input: &str) -> String {
+    const MARKER: &str = "HOME=/var/folders/";
+    let Some(start) = input.find(MARKER) else {
+        return input.to_string();
+    };
+    let value_start = start + 5;
+    let after = &input[value_start..];
+    let end = after.find('\n').unwrap_or(after.len());
+    format!("{}HOME=<redacted>{}", &input[..start], &after[end..])
 }
 
 fn strip_ansi(input: &str) -> String {
@@ -292,6 +363,7 @@ exit 0
         .env("HOME", &fake_home)
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
+        .env("TERM", "dumb")
         .env("TERM_WIDTH", "80")
         .env("OPENAI_API_KEY", "keep")
         .env("INTERNAL_TOKEN", "remove")
@@ -300,7 +372,7 @@ exit 0
         .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
-    insta::assert_snapshot!(redact_session_id(&strip_ansi(&stderr)));
+    insta::assert_snapshot!(redact_temp_home(&redact_session_id(&strip_ansi(&stderr))));
 }
 
 #[cfg(unix)]
@@ -471,6 +543,53 @@ exit 0
     assert!(args.contains(&"minimax/MiniMax-M2.5-highspeed"));
     let env_lines = fs::read_to_string(&env_path).unwrap();
     assert!(env_lines.contains("MODEL=minimax/MiniMax-M2.5-highspeed"));
+}
+
+#[cfg(unix)]
+#[test]
+fn opencode_launches_child_from_repo_root() {
+    let workspace = tempdir().unwrap();
+    let Some((repo_root, launch_dir, bin_dir)) = create_claudine_monorepo(workspace.path()) else {
+        eprintln!("Skipping integration test: git init unavailable");
+        return;
+    };
+    let pwd_path = workspace.path().join("pwd.txt");
+    let env_path = workspace.path().join("env.txt");
+    let args_path = workspace.path().join("args.txt");
+
+    write_executable(
+        &bin_dir.join("opencode"),
+        r#"#!/bin/sh
+pwd > "$CLAUDINE_PWD_FILE"
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+{
+  printf 'PACKAGE=%s\n' "$PACKAGE"
+  printf 'PACKAGE_AREA=%s\n' "$PACKAGE_AREA"
+} > "$CLAUDINE_ENV_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .current_dir(&launch_dir)
+        .env("NO_COLOR", "1")
+        .env("PATH", &bin_dir)
+        .env("CLAUDINE_PWD_FILE", &pwd_path)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_ENV_FILE", &env_path)
+        .args(["opencode", "summarize"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read_to_string(&pwd_path).unwrap().trim(),
+        repo_root.canonicalize().unwrap().display().to_string()
+    );
+    let env_lines = fs::read_to_string(&env_path).unwrap();
+    assert!(env_lines.contains("PACKAGE=claudine-cli"));
+    assert!(env_lines.contains("PACKAGE_AREA=claudine"));
+    let args = fs::read_to_string(&args_path).unwrap();
+    assert!(args.lines().any(|line| line == "summarize"));
 }
 
 #[cfg(unix)]
@@ -2166,6 +2285,159 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn compose_opencode_non_interactive_passes_prompt_as_positional_arg() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let args_path = workspace.path().join("args.txt");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n").unwrap();
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let args = fs::read_to_string(&args_path).unwrap();
+    let collected: Vec<_> = args.lines().collect();
+    let run_index = collected
+        .iter()
+        .position(|arg| *arg == "run")
+        .expect("compose should use the OpenCode run entrypoint");
+    let format_index = collected
+        .iter()
+        .position(|arg| *arg == "--format")
+        .expect("compose should request OpenCode JSON format");
+    let json_index = format_index + 1;
+    let prompt_index = collected
+        .iter()
+        .position(|arg| *arg == "Hello OpenCode")
+        .expect("compose should pass the composed prompt as a positional arg for OpenCode");
+
+    assert!(run_index < format_index, "args: {args}");
+    assert_eq!(collected.get(json_index), Some(&"json"), "args: {args}");
+    assert!(
+        json_index < prompt_index,
+        "OpenCode flags must precede the positional prompt so structured output is enabled; args: {args}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_opencode_launches_child_from_repo_root() {
+    let workspace = tempdir().unwrap();
+    let Some((repo_root, launch_dir, bin_dir)) = create_claudine_monorepo(workspace.path()) else {
+        eprintln!("Skipping integration test: git init unavailable");
+        return;
+    };
+    let pwd_path = workspace.path().join("pwd.txt");
+    let env_path = workspace.path().join("env.txt");
+    let args_path = workspace.path().join("args.txt");
+    let md_file = repo_root.join("prompts/test.md");
+    write_file(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
+
+    write_executable(
+        &bin_dir.join("opencode"),
+        r#"#!/bin/sh
+pwd > "$CLAUDINE_PWD_FILE"
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+{
+  printf 'PACKAGE=%s\n' "$PACKAGE"
+  printf 'PACKAGE_AREA=%s\n' "$PACKAGE_AREA"
+} > "$CLAUDINE_ENV_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .current_dir(&launch_dir)
+        .env("NO_COLOR", "1")
+        .env("PATH", &bin_dir)
+        .env("CLAUDINE_PWD_FILE", &pwd_path)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_ENV_FILE", &env_path)
+        .args(["compose", "--opencode", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read_to_string(&pwd_path).unwrap().trim(),
+        repo_root.canonicalize().unwrap().display().to_string()
+    );
+    let env_lines = fs::read_to_string(&env_path).unwrap();
+    assert!(env_lines.contains("PACKAGE=claudine-cli"));
+    assert!(env_lines.contains("PACKAGE_AREA=claudine"));
+    let args = fs::read_to_string(&args_path).unwrap();
+    let collected: Vec<_> = args.lines().collect();
+    assert!(collected.contains(&"run"));
+    assert!(collected.contains(&"Hello OpenCode"));
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_opencode_launches_from_repo_root_for_package_prompt_refs() {
+    let workspace = tempdir().unwrap();
+    let Some((repo_root, _launch_dir, bin_dir)) = create_claudine_monorepo(workspace.path()) else {
+        eprintln!("Skipping integration test: git init unavailable");
+        return;
+    };
+    let package_root = repo_root.join("claudine");
+    let pwd_path = workspace.path().join("pwd-package.txt");
+    let env_path = workspace.path().join("env-package.txt");
+    let args_path = workspace.path().join("args-package.txt");
+    let md_file = package_root.join("prompts/test.md");
+    write_file(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
+
+    write_executable(
+        &bin_dir.join("opencode"),
+        r#"#!/bin/sh
+pwd > "$CLAUDINE_PWD_FILE"
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+{
+  printf 'PACKAGE=%s\n' "$PACKAGE"
+  printf 'PACKAGE_AREA=%s\n' "$PACKAGE_AREA"
+} > "$CLAUDINE_ENV_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .current_dir(&package_root)
+        .env("NO_COLOR", "1")
+        .env("PATH", &bin_dir)
+        .env("CLAUDINE_PWD_FILE", &pwd_path)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_ENV_FILE", &env_path)
+        .args(["compose", "--opencode", "@prompts/test.md"])
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read_to_string(&pwd_path).unwrap().trim(),
+        repo_root.canonicalize().unwrap().display().to_string()
+    );
+    let env_lines = fs::read_to_string(&env_path).unwrap();
+    assert!(env_lines.contains("PACKAGE_AREA=claudine"));
+    let args = fs::read_to_string(&args_path).unwrap();
+    let collected: Vec<_> = args.lines().collect();
+    assert!(collected.contains(&"run"));
+    assert!(collected.contains(&"Hello OpenCode"));
+}
+
+#[cfg(unix)]
+#[test]
 fn compose_supports_mcp_runtime_and_tag_cleanup() {
     let workspace = tempdir().unwrap();
     let home = workspace.path().join("home");
@@ -2219,6 +2491,102 @@ exit 0
         env_lines.contains(&format!("HOME={}", home.join(".claudine").display())),
         "runtime MCP for codex should use a shadow HOME; env: {env_lines}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_structured_compose_filters_stdin_banner() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello Codex\n").unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+last_message=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output-last-message" ]; then
+    last_message="$arg"
+  fi
+  prev="$arg"
+done
+
+printf '%s\n' 'Reading prompt from stdin...' >&2
+cat > /dev/null
+if [ -n "$last_message" ]; then
+  printf '%s\n' 'Recovered answer' > "$last_message"
+fi
+printf '%s\n' '{"type":"thread.started","thread_id":"codex-1"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":10,"cached_input_tokens":5}}'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["compose", "--codex", "--quiet", md_file.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout("Recovered answer\n");
+
+    let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(!stderr_plain.contains("Reading prompt from stdin..."));
+}
+
+#[cfg(unix)]
+#[test]
+fn codex_structured_compose_surfaces_live_tool_progress() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("test.md");
+    fs::write(&md_file, "---\ntitle: test\n---\nHello Codex\n").unwrap();
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+last_message=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--output-last-message" ]; then
+    last_message="$arg"
+  fi
+  prev="$arg"
+done
+
+cat > /dev/null
+printf '%s\n' '{"type":"thread.started","thread_id":"codex-1"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"item.started","item":{"id":"t1","type":"command_exec","tool_name":"shell","input":{"cmd":"git status"}}}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"t1","type":"command_exec","tool_name":"shell","output":"ok"}}'
+printf '%s\n' '{"type":"item.started","item":{"id":"t2","type":"view_image","tool_name":"view_image"}}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"t2","type":"view_image","output":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":10,"cached_input_tokens":5}}'
+if [ -n "$last_message" ]; then
+  printf '%s\n' 'Recovered answer' > "$last_message"
+fi
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args(["compose", "--codex", "--quiet", md_file.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout("Recovered answer\n");
+
+    let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr_plain.contains(r#"tool: shell {"cmd":"git status"}"#));
+    assert!(stderr_plain.contains(r#"tool result: shell id=t1 result="ok""#));
+    assert!(stderr_plain.contains("tool: view_image"));
+    assert!(stderr_plain.contains(r#"tool result: view_image id=t2 result="ok""#));
 }
 
 #[cfg(unix)]

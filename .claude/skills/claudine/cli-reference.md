@@ -323,7 +323,8 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `-y, --yolo` | Translate to provider-specific auto-approval mode (warn-only for OpenCode) |
 | `-i, --interactive` | Force interactive mode even when a prompt string is provided |
 | `-m, --model <MODEL>` | Override the model used by the provider |
-| `-s, --system-prompt <PROMPT\|FILE>` | Set or append a system prompt (string or file path) |
+| `--asp <FILE>` | Append a system prompt from a file (alias: `--append-system-prompt`) |
+| `--rsp <FILE>` | Replace the provider's system prompt with contents from a file (alias: `--replace-system-prompt`) |
 | `-t, --timeout <SECONDS>` | Timeout in seconds (non-interactive only) |
 | `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |

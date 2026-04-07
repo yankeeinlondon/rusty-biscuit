@@ -580,13 +580,14 @@ impl Markdown {
     ///
     /// ```
     /// use darkmatter::markdown::Markdown;
+    /// use darkmatter::markdown::normalize::HeadingLevel;
     ///
     /// let content = "# Introduction\n\nWelcome.\n\n## Getting Started\n\nFirst steps.";
     /// let md: Markdown = content.into();
     /// let toc = md.toc();
     ///
     /// assert_eq!(toc.heading_count(), 2);
-    /// assert_eq!(toc.root_level(), Some(1));
+    /// assert_eq!(toc.root_level(), Some(HeadingLevel::H1));
     /// assert_eq!(toc.title, Some("Introduction".to_string()));
     /// ```
     pub fn toc(&self) -> MarkdownToc {

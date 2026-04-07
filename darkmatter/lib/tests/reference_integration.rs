@@ -3,8 +3,9 @@
 //! Tests composed graph behavior (rec #13) and validation (rec #14)
 //! with real filesystem documents using `tempfile`.
 
+use darkmatter::markdown::normalize::HeadingLevel;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::ComposeSource;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeSource};
 use darkmatter::markdown::reference::types::{
     ReferenceGraphOptions, ReferenceKind, ReferenceSyntax, ReferenceTarget,
 };
@@ -139,7 +140,7 @@ fn cycle_detection_stops_infinite_recursion() {
     // Verify no duplicate node IDs
     let mut ids = vec![graph.root.node_id.clone()];
     ids.extend(graph.nodes.iter().map(|n| n.node_id.clone()));
-    let unique: std::collections::HashSet<String> = ids.iter().cloned().collect();
+    let unique: std::collections::HashSet<_> = ids.iter().cloned().collect();
     assert_eq!(ids.len(), unique.len(), "all node IDs should be unique");
 }
 
@@ -186,9 +187,10 @@ fn depth_limit_respected() {
     );
 
     let md = load_md(&dir, "a.md");
-    let mut options = ReferenceGraphOptions::default();
     // Set a depth limit of 2
-    options.compose.max_transclusion_depth = 2;
+    let options = ReferenceGraphOptions::with_compose(
+        ComposeOptions::new().with_max_transclusion_depth(2),
+    );
     let graph = md.reference_graph(options).unwrap();
 
     // Should not reach all 5 levels
@@ -806,7 +808,7 @@ fn section_context_populated_in_graph() {
         Some("Intro"),
         "expected section heading 'Intro' for ::file directive in the Intro section"
     );
-    assert_eq!(insertion.context.section_heading_level, Some(2));
+    assert_eq!(insertion.context.section_heading_level, Some(HeadingLevel::H2));
     assert_eq!(
         insertion.context.directive_kind,
         Some(ReferenceSyntax::DirectiveFile)
@@ -1088,7 +1090,7 @@ fn file_tree_section_caption_respects_heading_level() {
     // The directive is under ### Details (level 3)
     assert_eq!(
         insertion.context.section_heading_level,
-        Some(3),
+        Some(HeadingLevel::H3),
         "expected level 3 for ### Details"
     );
     assert_eq!(

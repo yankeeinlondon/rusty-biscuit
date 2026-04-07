@@ -1,5 +1,6 @@
 //! Type definitions for Markdown document delta comparison.
 
+use crate::markdown::normalize::HeadingLevel;
 use serde::Serialize;
 
 /// Path to a section in the document hierarchy.
@@ -181,10 +182,10 @@ pub struct ContentChange {
     pub new_id: Option<SectionId>,
 
     /// The heading level in the original document.
-    pub original_level: Option<u8>,
+    pub original_level: Option<HeadingLevel>,
 
     /// The heading level in the new document.
-    pub new_level: Option<u8>,
+    pub new_level: Option<HeadingLevel>,
 
     /// Line number in original document.
     pub original_line: Option<usize>,
@@ -203,8 +204,8 @@ impl ContentChange {
         action: ChangeAction,
         original_path: Option<SectionPath>,
         new_path: Option<SectionPath>,
-        original_level: Option<u8>,
-        new_level: Option<u8>,
+        original_level: Option<HeadingLevel>,
+        new_level: Option<HeadingLevel>,
         original_line: Option<usize>,
         new_line: Option<usize>,
         description: String,
@@ -224,7 +225,7 @@ impl ContentChange {
     }
 
     /// Creates an "added" change for a section.
-    pub fn added(path: SectionPath, level: u8, line: usize, title: &str) -> Self {
+    pub fn added(path: SectionPath, level: HeadingLevel, line: usize, title: &str) -> Self {
         Self::new(
             ChangeAction::Added,
             None,
@@ -238,7 +239,7 @@ impl ContentChange {
     }
 
     /// Creates a "removed" change for a section.
-    pub fn removed(path: SectionPath, level: u8, line: usize, title: &str) -> Self {
+    pub fn removed(path: SectionPath, level: HeadingLevel, line: usize, title: &str) -> Self {
         Self::new(
             ChangeAction::Removed,
             Some(path),
@@ -255,7 +256,7 @@ impl ContentChange {
     pub fn modified(
         original_path: SectionPath,
         new_path: SectionPath,
-        level: u8,
+        level: HeadingLevel,
         original_line: usize,
         new_line: usize,
         title: &str,
@@ -752,7 +753,7 @@ mod tests {
 
     #[test]
     fn test_content_change_added() {
-        let change = ContentChange::added(vec!["New Section".to_string()], 2, 10, "New Section");
+        let change = ContentChange::added(vec!["New Section".to_string()], HeadingLevel::H2, 10, "New Section");
         assert!(matches!(change.action, ChangeAction::Added));
         assert!(change.original_path.is_none());
         assert!(change.new_path.is_some());
@@ -760,7 +761,7 @@ mod tests {
 
     #[test]
     fn test_content_change_removed() {
-        let change = ContentChange::removed(vec!["Old Section".to_string()], 2, 5, "Old Section");
+        let change = ContentChange::removed(vec!["Old Section".to_string()], HeadingLevel::H2, 5, "Old Section");
         assert!(matches!(change.action, ChangeAction::Removed));
         assert!(change.original_path.is_some());
         assert!(change.new_path.is_none());

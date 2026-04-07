@@ -1,16 +1,11 @@
 use std::collections::HashMap;
 
-use chrono::Utc;
 use serde_json::{Value, json};
 
 use crate::actions::{HookDecision, HookResponse};
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
-use crate::permissions::query::{CommandQuery, PathQuery};
-use crate::services::ProtectObservation;
-use crate::services::protect::intent::ProtectIntent;
-use crate::services::protect::observe::default_observe_protect;
+use crate::events::{AgenticEvent, EventMeta, Provider};
 
-use super::{AdapterError, ProviderAdapter};
+use super::{AdapterError, ProviderAdapter, str_field};
 
 pub(crate) struct KimiCodeAdapter;
 
@@ -28,23 +23,17 @@ impl ProviderAdapter for KimiCodeAdapter {
             .ok_or(AdapterError::MissingField("event_name"))?;
 
         let event = map_event(event_name, raw)?;
-        let mut meta = EventMeta {
-            provider: Provider::KimiCode,
-            event,
-            timestamp: Utc::now(),
-            session_id: str_field(raw, "session_id"),
-            cwd: str_field(raw, "cwd"),
-            tool_name: str_field(raw, "tool_name"),
-            tool_input: raw.get("tool_input").cloned(),
-            tool_response: raw.get("tool_response").cloned(),
-            error: str_field(raw, "error"),
-            prompt: str_field(raw, "prompt"),
-            agent_type: str_field(raw, "agent_type"),
-            notification_type: str_field(raw, "notification_type"),
-            notification_message: str_field(raw, "message"),
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
-        };
+        let mut meta = EventMeta::new(Provider::KimiCode, event);
+        meta.session_id = str_field(raw, "session_id");
+        meta.cwd = str_field(raw, "cwd");
+        meta.tool_name = str_field(raw, "tool_name");
+        meta.tool_input = raw.get("tool_input").cloned();
+        meta.tool_response = raw.get("tool_response").cloned();
+        meta.error = str_field(raw, "error");
+        meta.prompt = str_field(raw, "prompt");
+        meta.agent_type = str_field(raw, "agent_type");
+        meta.notification_type = str_field(raw, "notification_type");
+        meta.notification_message = str_field(raw, "message");
 
         for key in [
             "step_number",
@@ -63,60 +52,6 @@ impl ProviderAdapter for KimiCodeAdapter {
         capture_kimi_usage(&mut meta.extra, usage_source);
 
         Ok((event, meta))
-    }
-
-    fn observe_protect(
-        &self,
-        event: &AgenticEvent,
-        meta: &EventMeta,
-    ) -> Option<ProtectObservation> {
-        let mut obs = default_observe_protect(event, meta)?;
-
-        if let Some(tool_name) = meta.tool_name.as_deref() {
-            let lowered = tool_name.to_ascii_lowercase();
-            let mut intents = Vec::new();
-            let mut replaced = true;
-
-            match lowered.as_str() {
-                "shell" | "execute_command" | "run_command" => {
-                    let cmd = meta.tool_input.as_ref().and_then(|v| {
-                        v.get("command")
-                            .and_then(Value::as_str)
-                            .map(ToOwned::to_owned)
-                            .or_else(|| v.as_str().map(ToOwned::to_owned))
-                    });
-                    if let Some(cmd) = cmd {
-                        intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(&cmd)));
-                    }
-                }
-                "write_file" | "edit_file" | "create_file" | "patch_file" => {
-                    if let Some(path) = kimi_tool_input_path(meta) {
-                        intents.push(ProtectIntent::WritePath(PathQuery::file(&path)));
-                    }
-                }
-                "read_file" | "list_files" | "search_files" => {
-                    if let Some(path) = kimi_tool_input_path(meta) {
-                        intents.push(ProtectIntent::ReadPath(PathQuery::unknown(&path)));
-                    }
-                }
-                _ => {
-                    replaced = false;
-                }
-            }
-
-            if replaced {
-                if obs
-                    .intents
-                    .iter()
-                    .any(|i| matches!(i, ProtectIntent::CompletionOutputScan))
-                {
-                    intents.push(ProtectIntent::CompletionOutputScan);
-                }
-                obs.intents = intents;
-            }
-        }
-
-        Some(obs)
     }
 
     fn can_block(&self, event: &AgenticEvent) -> bool {
@@ -193,23 +128,6 @@ fn map_event(event_name: &str, raw: &Value) -> Result<AgenticEvent, AdapterError
         }
         other => Err(AdapterError::UnknownEvent(other.to_string())),
     }
-}
-
-fn kimi_tool_input_path(meta: &EventMeta) -> Option<String> {
-    meta.tool_input
-        .as_ref()
-        .and_then(|v| v.as_object())
-        .and_then(|map| {
-            map.get("path")
-                .or_else(|| map.get("file_path"))
-                .or_else(|| map.get("file"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-}
-
-fn str_field(raw: &Value, key: &str) -> Option<String> {
-    raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
 /// Capture and normalize Kimi Code usage fields.

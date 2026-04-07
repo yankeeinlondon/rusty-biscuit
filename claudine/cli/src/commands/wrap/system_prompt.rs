@@ -115,7 +115,10 @@ pub(crate) fn describe_effective(effective: &EffectiveSystemPrompt) -> Option<Ve
             Some(vec![
                 format!("source: {}", describe_source(&prepared.source)),
                 format!("mode: {}", mode_label),
-                format!("composed length: {} chars", prepared.composed_markdown.len()),
+                format!(
+                    "composed length: {} chars",
+                    prepared.composed_markdown.len()
+                ),
             ])
         }
     }

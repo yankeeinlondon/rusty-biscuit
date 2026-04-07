@@ -54,7 +54,7 @@ The schema for all of the frontmatter properties is the same. Here's an example:
 
 ```yaml
 start:
-    speak: "You did it, we're starting something great"
+    say: "You did it, we're starting something great"
     effect: crowd-applause
     message: "You did it, we're starting something great"
     stderr: "Starting"
@@ -80,11 +80,11 @@ Usually it's better to have the sound effect first for both a technical and func
     - it's often best to use the sound effect to get the user's attention
     - and then speak once that attention has been gained
 
-However to provide flexibility we offer another command `speak_first`:
+However to provide flexibility we offer another command `say_first`:
 
 ```yaml
 start:
-    speak_first: "You did it, we're starting something great"
+    say_first: "You did it, we're starting something great"
     effect: crowd-applause
     message: "You did it, we're starting something great"
     stderr: "Starting"
@@ -99,7 +99,7 @@ This reverses the order so that our execution looks like:
 - Then
     - play the "crowd-applause" sound effect
 
-> **Note:** the `speak` command can not be used with `speak_first`; this will cause an error.
+> **Note:** the `say` command can not be used with `say_first`; this will cause an error.
 
 ### Singular Audio Output
 

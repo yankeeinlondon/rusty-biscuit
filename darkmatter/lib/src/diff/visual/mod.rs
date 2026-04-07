@@ -17,18 +17,19 @@
 //! println!("{}", output);
 //! ```
 
+mod constants;
 mod diff;
 mod side_by_side;
 mod unified;
+mod utils;
 
 pub use diff::{DiffLine, InlineSpan, compute_visual_diff};
 
+use constants::{BOLD, RESET};
 use std::path::Path;
 
 /// Threshold for switching between side-by-side and unified views.
 const SIDE_BY_SIDE_THRESHOLD: u16 = 110;
-const RESET: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
 const FG_YELLOW: &str = "\x1b[33m";
 
 /// The visual diff layout mode.

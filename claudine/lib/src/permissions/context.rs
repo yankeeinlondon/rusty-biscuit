@@ -97,3 +97,36 @@ pub enum CliPolicyInput<'a> {
     /// Pre-parsed overrides from a backend.
     Parsed(&'a ProviderCliOverrides),
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn policy_context_builders_set_expected_fields() {
+        let trust = ProjectTrustContext {
+            is_trusted: Some(true),
+            source: TrustSource::ExplicitInput,
+        };
+        let context = PolicyContext::new(PathBuf::from("/workspace"))
+            .with_repo_root(PathBuf::from("/repo"))
+            .with_home_dir(PathBuf::from("/home/tester"))
+            .with_trust(trust.clone());
+
+        assert_eq!(context.cwd, PathBuf::from("/workspace"));
+        assert_eq!(context.repo_root, Some(PathBuf::from("/repo")));
+        assert_eq!(context.home_dir, Some(PathBuf::from("/home/tester")));
+        assert_eq!(context.trust.is_trusted, Some(true));
+        assert_eq!(context.trust.source, TrustSource::ExplicitInput);
+    }
+
+    #[test]
+    fn project_trust_default_is_unknown() {
+        let trust = ProjectTrustContext::default();
+
+        assert_eq!(trust.is_trusted, None);
+        assert_eq!(trust.source, TrustSource::Unknown);
+    }
+}

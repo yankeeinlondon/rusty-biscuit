@@ -1,0 +1,271 @@
+use std::collections::HashMap;
+
+use clap::Args;
+use color_eyre::eyre::Result;
+
+use claudine::actions::HookAction;
+use claudine::config::claudine_config::{
+    ClaudineConfig, DefaultSounds, TtsValue,
+};
+use claudine::config::{discover_agents_full, get_configurator, RegistrationResult, SkipReason};
+use claudine::events::{
+    AgenticEvent, EventBinding, GlobalSettings, HookerConfig, Provider, ProviderConfig,
+    recommended_sound,
+};
+
+use crate::log;
+
+#[derive(Debug, Args)]
+pub struct InitArgs {
+    #[arg(long)]
+    pub quick: bool,
+}
+
+pub async fn run_initialization() -> Result<()> {
+    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        return run_headless_initialization().await;
+    }
+
+    run_interactive_initialization().await
+}
+
+async fn run_headless_initialization() -> Result<()> {
+    let config = build_default_config();
+    let path = claudine::dispatch::loader::user_config_path();
+    claudine::dispatch::loader::save_claudine_config(&config, &path)?;
+    log::message(&format!("Claudine: wrote default config to {}", path.display()));
+    Ok(())
+}
+
+async fn run_interactive_initialization() -> Result<()> {
+    log::message("");
+    log::message("  Welcome to Claudine!");
+    log::message("");
+    log::message("  Let's get you set up. This will only take a moment.");
+    log::message("");
+
+    let tts = configure_tts()?;
+    let preferred_agent = configure_preferred_agent()?;
+
+    log::message("");
+    log::message("  Services");
+    log::message("  Claudine provides two services that run automatically:");
+    log::message("    - Logging - records all hook events");
+    log::message("    - Protect - blocks dangerous commands");
+    log::message("  Both are enabled by default.");
+    log::message("");
+
+    let _ = inquire::Confirm::new("  Press Enter to continue")
+        .with_default(true)
+        .prompt()?;
+
+    log::message("");
+    log::message("  Actions");
+    log::message("  By default, a sound plays when human attention is needed.");
+    log::message("");
+
+    let _ = inquire::Confirm::new("  Press Enter to complete initialization")
+        .with_default(true)
+        .prompt()?;
+
+    let config = build_config(tts, preferred_agent);
+    let path = claudine::dispatch::loader::user_config_path();
+    claudine::dispatch::loader::save_claudine_config(&config, &path)?;
+
+    register_hooks_all_providers().await?;
+
+    log::message("");
+    log::message(&format!("  Config: {}", path.display()));
+    log::message("  Edit with: claudine config");
+    log::message("");
+    Ok(())
+}
+
+fn configure_tts() -> Result<TtsValue> {
+    log::message("  Text-to-Speech");
+    log::message("");
+
+    let has_tts = which::which("say").is_ok()
+        || which::which("espeak-ng").is_ok()
+        || which::which("espeak").is_ok();
+
+    if has_tts {
+        let provider_name = if which::which("say").is_ok() {
+            "say (macOS)"
+        } else {
+            "espeak-ng"
+        };
+        log::message(&format!("  Found TTS provider: {provider_name}"));
+        log::message("  TTS will be enabled.");
+        log::message("");
+        Ok(TtsValue::Boolean(true))
+    } else {
+        log::message("  No TTS provider found on this system.");
+        let proceed = inquire::Confirm::new("  Would you like to proceed without TTS?")
+            .with_default(true)
+            .prompt()?;
+        Ok(TtsValue::Boolean(!proceed))
+    }
+}
+
+fn configure_preferred_agent() -> Result<Provider> {
+    log::message("");
+    log::message("  Preferred Agent");
+    log::message("");
+    log::message("  When using compose without specifying a provider,");
+    log::message("  which agent should be the default?");
+    log::message("");
+
+    let agents = discover_agents_full();
+    let installed: Vec<Provider> = agents
+        .iter()
+        .filter(|a| a.on_path)
+        .map(|a| a.provider)
+        .collect();
+
+    if installed.is_empty() {
+        log::message("  No agents detected. Defaulting to Claude.");
+        return Ok(Provider::Claude);
+    }
+
+    let names: Vec<String> = installed.iter().map(|p| p.to_string()).collect();
+    let selection = inquire::Select::new("  Select your preferred agent:", names).prompt()?;
+
+    let index = installed
+        .iter()
+        .position(|p| p.to_string() == selection)
+        .unwrap_or(0);
+
+    Ok(installed[index])
+}
+
+fn build_config(tts: TtsValue, preferred_agent: Provider) -> ClaudineConfig {
+    let mut actions = HashMap::new();
+    actions.insert(
+        AgenticEvent::HumanInTheLoop,
+        vec![HookAction::SoundEffect {
+            effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
+            volume: 1.0,
+            speed: 1.0,
+        }],
+    );
+
+    ClaudineConfig {
+        tts,
+        messenger: None,
+        logging: true,
+        protect: claudine::services::protect::config::ProtectConfig::default(),
+        actions,
+        preferred_agent,
+        canonical_provider: None,
+        default_sounds: DefaultSounds {
+            success: Some("confirmation".to_string()),
+            attention: Some("doorbell".to_string()),
+            error: Some("error-1".to_string()),
+        },
+    }
+}
+
+fn build_default_config() -> ClaudineConfig {
+    let agents = discover_agents_full();
+    let preferred_agent = agents
+        .iter()
+        .find(|a| a.on_path)
+        .map(|a| a.provider)
+        .unwrap_or(Provider::Claude);
+
+    let has_tts = which::which("say").is_ok()
+        || which::which("espeak-ng").is_ok()
+        || which::which("espeak").is_ok();
+
+    build_config(TtsValue::Boolean(has_tts), preferred_agent)
+}
+
+async fn register_hooks_all_providers() -> Result<()> {
+    let agents = discover_agents_full();
+    let hooker_config = build_registration_config(&agents);
+
+    log::message("");
+    log::message("  Registering with detected agents:");
+    for agent in &agents {
+        if !agent.on_path {
+            continue;
+        }
+        let provider = agent.provider;
+        let configurator = get_configurator(provider);
+        match configurator.register(&hooker_config, None) {
+            Ok(RegistrationResult::Registered { event_count }) => {
+                log::message(&format!("    {provider}: registered ({event_count} events)"));
+            }
+            Ok(RegistrationResult::Skipped(SkipReason::AlreadyRegistered)) => {
+                log::message(&format!("    {provider}: already registered"));
+            }
+            Ok(RegistrationResult::Skipped(SkipReason::WrapperOnly { guidance })) => {
+                log::message(&format!("    {provider}: skipped (wrapper-only)"));
+                log::message(&format!("      {guidance}"));
+            }
+            Ok(RegistrationResult::Skipped(SkipReason::NotDetected)) => {
+                log::message(&format!("    {provider}: not detected"));
+            }
+            Ok(RegistrationResult::Skipped(SkipReason::NoHookSupport)) => {
+                log::message(&format!("    {provider}: no hook support"));
+            }
+            Err(e) => {
+                log::message(&format!("    {provider}: {e}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn build_registration_config(agents: &[claudine::config::AgentInfo]) -> HookerConfig {
+    let mut providers = HashMap::new();
+    for agent in agents {
+        if !agent.on_path {
+            continue;
+        }
+        let events = provider_hook_events(agent.provider)
+            .into_iter()
+            .map(|event| {
+                let actions = default_actions_for_event(event);
+                (
+                    event,
+                    EventBinding {
+                        enabled: true,
+                        actions,
+                        matcher: None,
+                    },
+                )
+            })
+            .collect();
+        providers.insert(agent.provider, ProviderConfig { events });
+    }
+
+    HookerConfig {
+        version: "1.0".to_string(),
+        settings: GlobalSettings::default(),
+        providers,
+    }
+}
+
+fn provider_hook_events(provider: Provider) -> Vec<AgenticEvent> {
+    AgenticEvent::ALL
+        .into_iter()
+        .filter(|event| provider.supports_event_via_hook(event))
+        .collect()
+}
+
+fn default_actions_for_event(event: AgenticEvent) -> Vec<HookAction> {
+    if matches!(
+        event,
+        AgenticEvent::PermissionRequest | AgenticEvent::HumanInTheLoop
+    ) {
+        vec![HookAction::SoundEffect {
+            effect: recommended_sound(&event).to_string(),
+            volume: 1.0,
+            speed: 1.0,
+        }]
+    } else {
+        vec![]
+    }
+}

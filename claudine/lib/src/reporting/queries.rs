@@ -1540,3 +1540,42 @@ fn parse_json_value(raw: Option<String>) -> Option<serde_json::Value> {
         serde_json::from_str(&s).ok()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_range_rejects_reversed_dates() {
+        let range = DateRange {
+            from: NaiveDate::from_ymd_opt(2026, 4, 4).unwrap(),
+            to: NaiveDate::from_ymd_opt(2026, 4, 3).unwrap(),
+        };
+
+        assert!(matches!(
+            validate_range(range),
+            Err(ClaudineError::InvalidReportingDateRange { .. })
+        ));
+    }
+
+    #[test]
+    fn repo_label_formats_org_and_repo_name() {
+        assert_eq!(
+            repo_label(Some("openai"), Some("claudine")),
+            "openai/claudine"
+        );
+        assert_eq!(repo_label(None, Some("claudine")), "claudine");
+        assert_eq!(repo_label(None, None), "—");
+    }
+
+    #[test]
+    fn parse_provider_and_json_value_handle_invalid_inputs() {
+        assert_eq!(parse_provider("claude").unwrap(), Provider::Claude);
+        assert!(parse_provider("not-a-provider").is_err());
+        assert_eq!(parse_json_value(Some("{}".to_string())), None);
+        assert_eq!(
+            parse_json_value(Some("{\"ok\":true}".to_string())),
+            Some(serde_json::json!({ "ok": true }))
+        );
+    }
+}

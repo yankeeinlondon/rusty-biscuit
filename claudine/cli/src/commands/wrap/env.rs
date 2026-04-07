@@ -18,8 +18,22 @@ pub(crate) struct EnvPlan {
     pub(crate) added: Vec<(String, String)>,
     pub(crate) package_context: Option<PackageContext>,
     pub(crate) repo_root: Option<PathBuf>,
+    // The actual working directory used when launching the child process.
+    // Callers must consume this directly and must not recompute it from
+    // `repo_root`.
+    pub(crate) child_cwd: PathBuf,
     pub(crate) warnings: Vec<String>,
     pub(crate) shadow_home_path: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub(crate) struct LaunchWorkspaceContext {
+    pub(crate) launch_cwd: PathBuf,
+    pub(crate) repo_root: Option<PathBuf>,
+    pub(crate) child_cwd: PathBuf,
+    pub(crate) package_context: Option<PackageContext>,
+    pub(crate) warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,20 +107,17 @@ pub(crate) fn build_child_env(
         set_added_env(&mut env, &mut added, key, value.clone());
     }
 
+    let launch_ctx = resolve_launch_workspace_context(cwd, repo_root_hint);
+    warnings.extend(launch_ctx.warnings.iter().cloned());
+
     let mut shadow_home_path = None;
-
-    // When a repo_root_hint is provided (composition mode), use it for
-    // shadow-HOME and repo_root instead of re-deriving from the caller's CWD.
-    // This ensures cross-repo composition picks up the source repo's context.
-    let effective_root_for_home = repo_root_hint.unwrap_or(cwd);
-
     let needs_shadow_home =
-        force_shadow_home || repo_home::needs_shadow_home(provider, effective_root_for_home, repo);
+        force_shadow_home || repo_home::needs_shadow_home(provider, &launch_ctx.child_cwd, repo);
 
     // Use a shadow HOME when repo-only isolation is requested, or when Codex
     // needs repo-local prompt overlay because custom prompts are user-scoped.
     if needs_shadow_home {
-        match repo_home::build_repo_home_env(provider, effective_root_for_home, repo) {
+        match repo_home::build_repo_home_env(provider, &launch_ctx.child_cwd, repo) {
             Ok((shadow_env, shadow_path)) => {
                 for (key, value) in shadow_env {
                     env.insert(key, value);
@@ -121,36 +132,18 @@ pub(crate) fn build_child_env(
         }
     }
 
-    // Package context (PACKAGE_AREA, PACKAGE) is always derived from the
-    // caller's CWD so the agent knows which package the user was working in.
-    // The repo_root, however, uses the hint when available so the child
-    // process starts in the correct repository.
-    let mut package_context = None;
-    let mut repo_root = repo_root_hint.map(Path::to_path_buf);
-    match resolve_monorepo_package_context(cwd) {
-        Ok(repo_ctx) => {
-            if repo_root.is_none() {
-                repo_root = repo_ctx.repo_root;
-            }
-            if let Some(package_ctx) = repo_ctx.package_context {
-                set_added_env(
-                    &mut env,
-                    &mut added,
-                    "PACKAGE_AREA",
-                    package_ctx.package_area.clone(),
-                );
-                if let Some(ref package) = package_ctx.package {
-                    set_added_env(&mut env, &mut added, "PACKAGE", package.clone());
-                }
-                package_context = Some(package_ctx);
-            }
-            warnings.extend(repo_ctx.warnings);
+    if let Some(package_ctx) = launch_ctx.package_context.clone() {
+        // PACKAGE metadata is derived from the original launch directory,
+        // not from the child's repo-root working directory.
+        set_added_env(
+            &mut env,
+            &mut added,
+            "PACKAGE_AREA",
+            package_ctx.package_area.clone(),
+        );
+        if let Some(ref package) = package_ctx.package {
+            set_added_env(&mut env, &mut added, "PACKAGE", package.clone());
         }
-        Err(error) => warnings.push(format!(
-            "failed to resolve monorepo package metadata for '{}': {}",
-            cwd.display(),
-            error
-        )),
     }
 
     Ok(EnvPlan {
@@ -158,8 +151,9 @@ pub(crate) fn build_child_env(
         removed,
         included,
         added: added.into_iter().collect(),
-        package_context,
-        repo_root,
+        package_context: launch_ctx.package_context,
+        repo_root: launch_ctx.repo_root,
+        child_cwd: launch_ctx.child_cwd,
         warnings,
         shadow_home_path,
     })
@@ -315,8 +309,48 @@ fn redact_sensitive_args(args: &[String]) -> Vec<String> {
 
 struct RepoContext {
     package_context: Option<PackageContext>,
-    repo_root: Option<PathBuf>,
     warnings: Vec<String>,
+}
+
+fn detect_repo_root(cwd: &Path) -> Option<PathBuf> {
+    detect_git(cwd, false, 1)
+        .ok()
+        .flatten()
+        .map(|info| info.repo_root)
+        .or_else(|| detect_repo(cwd).ok().flatten().map(|repo| repo.root))
+}
+
+fn resolve_launch_workspace_context(
+    launch_cwd: &Path,
+    repo_root_hint: Option<&Path>,
+) -> LaunchWorkspaceContext {
+    let repo_root = repo_root_hint
+        .map(Path::to_path_buf)
+        .or_else(|| detect_repo_root(launch_cwd));
+    let child_cwd = repo_root
+        .clone()
+        .unwrap_or_else(|| launch_cwd.to_path_buf());
+
+    match resolve_monorepo_package_context(launch_cwd) {
+        Ok(repo_ctx) => LaunchWorkspaceContext {
+            launch_cwd: launch_cwd.to_path_buf(),
+            repo_root,
+            child_cwd,
+            package_context: repo_ctx.package_context,
+            warnings: repo_ctx.warnings,
+        },
+        Err(error) => LaunchWorkspaceContext {
+            launch_cwd: launch_cwd.to_path_buf(),
+            repo_root,
+            child_cwd,
+            package_context: None,
+            warnings: vec![format!(
+                "failed to resolve monorepo package metadata for '{}': {}",
+                launch_cwd.display(),
+                error
+            )],
+        },
+    }
 }
 
 fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
@@ -325,7 +359,6 @@ fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
     let Some(repo) = detect_repo(&repo_probe_root)? else {
         return Ok(RepoContext {
             package_context: None,
-            repo_root: git_root,
             warnings: Vec::new(),
         });
     };
@@ -333,7 +366,6 @@ fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
     if !repo.is_monorepo {
         return Ok(RepoContext {
             package_context: None,
-            repo_root: git_root,
             warnings: Vec::new(),
         });
     }
@@ -341,7 +373,6 @@ fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
     let Some(packages) = repo.packages else {
         return Ok(RepoContext {
             package_context: None,
-            repo_root: git_root,
             warnings: vec![format!(
                 "monorepo detected at '{}' but no packages were reported",
                 repo.root.display()
@@ -352,7 +383,6 @@ fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
     if let Some(package_ctx) = select_package_for_cwd(cwd, &packages) {
         return Ok(RepoContext {
             package_context: Some(package_ctx),
-            repo_root: git_root,
             warnings: Vec::new(),
         });
     }
@@ -365,14 +395,12 @@ fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
                 package: None,
                 candidates,
             }),
-            repo_root: git_root,
             warnings: Vec::new(),
         });
     }
 
     Ok(RepoContext {
         package_context: None,
-        repo_root: git_root,
         warnings: vec![format!(
             "monorepo detected at '{}' but no package area matched cwd '{}'",
             repo.root.display(),
@@ -445,6 +473,9 @@ mod tests {
     use super::*;
     use crate::commands::wrap::profile::profile_for_provider;
     use sniff::filesystem::repo::Package;
+    use std::fs;
+    use std::path::Path;
+    use std::process::Command;
 
     #[test]
     fn sanitization_removes_sensitive_names_unless_included() {
@@ -738,6 +769,15 @@ mod tests {
         (kept, removed.into_iter().collect())
     }
 
+    fn init_git_repo(path: &Path) -> bool {
+        Command::new("git")
+            .arg("init")
+            .current_dir(path)
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
     #[test]
     fn repo_root_hint_overrides_cwd_detection() {
         let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
@@ -761,6 +801,7 @@ mod tests {
 
         // repo_root should be the hint, not whatever CWD detection found.
         assert_eq!(plan.repo_root.as_deref(), Some(hint_dir.path()));
+        assert_eq!(plan.child_cwd.as_path(), hint_dir.path());
     }
 
     #[test]
@@ -786,5 +827,55 @@ mod tests {
         // With None hint and a non-git tempdir, repo_root should be None
         // (CWD detection finds no git repo in a tempdir).
         assert_eq!(plan.repo_root, None);
+        assert_eq!(plan.child_cwd.as_path(), cwd.path());
+    }
+
+    #[test]
+    fn launch_workspace_context_keeps_repo_root_when_package_resolution_fails() {
+        let repo_root = tempfile::tempdir().unwrap();
+        let docs_dir = repo_root.path().join("docs");
+        let package_dir = repo_root.path().join("claudine/cli");
+        fs::create_dir_all(&docs_dir).unwrap();
+        fs::create_dir_all(&package_dir).unwrap();
+
+        fs::write(
+            repo_root.path().join("Cargo.toml"),
+            r#"[workspace]
+members = ["claudine/cli"]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            package_dir.join("Cargo.toml"),
+            r#"[package]
+name = "claudine-cli"
+version = "0.1.0"
+edition = "2024"
+"#,
+        )
+        .unwrap();
+
+        if !init_git_repo(repo_root.path()) {
+            eprintln!("Skipping integration test: git init unavailable");
+            return;
+        }
+
+        let ctx = resolve_launch_workspace_context(&docs_dir, None);
+        let canonical_repo_root = repo_root.path().canonicalize().unwrap();
+
+        assert_eq!(ctx.launch_cwd, docs_dir);
+        assert_eq!(
+            ctx.repo_root.as_deref(),
+            Some(canonical_repo_root.as_path())
+        );
+        assert_eq!(ctx.child_cwd.as_path(), canonical_repo_root.as_path());
+        assert!(ctx.package_context.is_none());
+        assert!(
+            ctx.warnings
+                .iter()
+                .any(|warning| warning.contains("no package area matched cwd")),
+            "expected package-context warning, got: {:?}",
+            ctx.warnings
+        );
     }
 }

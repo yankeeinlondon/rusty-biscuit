@@ -555,6 +555,153 @@ mod tests {
         assert_eq!(result.already_whitelisted, 0);
     }
 
+    // --- Shared approval cache across sequence steps -----------------------
+    //
+    // The sequence orchestrator builds a fresh `ShellApprovalOptions` per
+    // step (via `build_harness_shell_options_with_cache`) and wires the
+    // SAME `Arc<Mutex<HashMap>>` approval cache into each one. These
+    // tests exercise that exact pattern: two independent options structs
+    // sharing only their approval cache via `Arc::clone`. Each covers a
+    // different command source so cross-step reuse is proven for every
+    // path the sequence runner threads through pre-flight.
+
+    fn shared_cache_options(
+        dir: &tempfile::TempDir,
+        handler: Arc<dyn ShellApprovalHandler>,
+        cache: Arc<
+            Mutex<std::collections::HashMap<String, crate::harness::shell::CachedApprovalDecision>>,
+        >,
+    ) -> ShellApprovalOptions {
+        ShellApprovalOptions {
+            policy_root: Some(dir.path().to_path_buf()),
+            approval_handler: Some(handler),
+            approval_cache: cache,
+        }
+    }
+
+    fn harness_plan_with_command(source: &std::path::Path, raw: &str) -> HarnessPlan {
+        // Parse the raw command string the same way pre-flight does.
+        let parts: Vec<String> = raw.split_whitespace().map(String::from).collect();
+        let executable = parts[0].clone();
+        let args = parts[1..].to_vec();
+        HarnessPlan {
+            source_path: source.to_path_buf(),
+            timeout: None,
+            pre_checks: vec![ValidationRule {
+                id: ValidationRuleId(0),
+                event: ValidationEvent::ShellCommand,
+                phase: ValidationPhase::Both,
+                kind: ValidationKind::ShellCommand {
+                    command: ApprovedRuntimeCommand {
+                        raw: raw.to_string(),
+                        executable,
+                        args,
+                    },
+                    show_stdout: false,
+                    show_stderr: false,
+                },
+                message_template: None,
+                subject_key: None,
+            }],
+            post_checks: Vec::new(),
+            handlers: HandlerTable::default(),
+            programmatic_handler: None,
+        }
+    }
+
+    #[test]
+    fn shared_cache_across_distinct_options_prevents_reprompt() {
+        // Mirrors the sequence runner: each "step" builds a fresh
+        // ShellApprovalOptions but reuses the same approval cache via
+        // Arc::clone. A non-whitelisted template `::shell` command
+        // approved on step 1 must NOT re-prompt on step 2.
+        let md: Markdown = "# Test\n::shell curl https://example.com\n".into();
+        let compose_options = ComposeOptions::new();
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::AllowOnce));
+        let shared_cache = Arc::new(Mutex::new(std::collections::HashMap::new()));
+
+        // Step 1: fresh options, cache wired in.
+        let step1 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
+        let r1 = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &step1).unwrap();
+        assert_eq!(r1.user_approved, 1);
+        assert_eq!(handler.calls(), 1, "step 1 must prompt once");
+
+        // Step 2: BRAND NEW options, same Arc-cloned cache. Cache hit.
+        let step2 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
+        let r2 = resolve_shell_approvals(Some(&md), Some(&compose_options), None, &step2).unwrap();
+        assert_eq!(r2.total_discovered, 1);
+        assert_eq!(
+            handler.calls(),
+            1,
+            "step 2 must NOT prompt again — shared cache should be hit"
+        );
+    }
+
+    #[test]
+    fn shared_cache_covers_harness_command_path() {
+        // The review requirement is whole-sequence approval reuse, not
+        // template-only reuse. Harness shell commands (pre/post checks,
+        // handlers) flow through the same pre-flight path and must also
+        // honor the shared cache.
+        let dir = tempfile::TempDir::new().unwrap();
+        let source = dir.path().join("harness-source.md");
+        let plan = harness_plan_with_command(&source, "curl https://internal.example.com");
+
+        let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::AllowOnce));
+        let shared_cache = Arc::new(Mutex::new(std::collections::HashMap::new()));
+
+        // Step 1: harness-sourced command approved via handler.
+        let step1 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
+        let r1 = resolve_shell_approvals(None, None, Some(&plan), &step1).unwrap();
+        assert_eq!(r1.user_approved, 1);
+        assert_eq!(handler.calls(), 1, "harness step 1 must prompt once");
+
+        // Step 2: fresh options, same cache. Handler must NOT be invoked.
+        let step2 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
+        let r2 = resolve_shell_approvals(None, None, Some(&plan), &step2).unwrap();
+        assert_eq!(r2.total_discovered, 1);
+        assert_eq!(
+            handler.calls(),
+            1,
+            "harness step 2 must reuse the shared cache, not re-prompt"
+        );
+    }
+
+    #[test]
+    fn shared_cache_spans_template_and_harness_sources() {
+        // A command first discovered via a template `::shell` directive
+        // on step 1 should remain approved when the same command is
+        // later re-discovered from a HarnessPlan source on step 2
+        // (and vice versa). Approval cache keys are normalized command
+        // strings and must be source-agnostic.
+        let dir = tempfile::TempDir::new().unwrap();
+        let source = dir.path().join("mixed-source.md");
+
+        let md: Markdown = "# Test\n::shell curl https://example.com/api\n".into();
+        let compose_options = ComposeOptions::new();
+        let plan = harness_plan_with_command(&source, "curl https://example.com/api");
+
+        let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::AllowOnce));
+        let shared_cache = Arc::new(Mutex::new(std::collections::HashMap::new()));
+
+        // Step 1: command arrives via template ::shell directive.
+        let step1 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
+        resolve_shell_approvals(Some(&md), Some(&compose_options), None, &step1).unwrap();
+        assert_eq!(handler.calls(), 1, "template-sourced command prompts once");
+
+        // Step 2: SAME command now arrives via HarnessPlan. Cache reuse
+        // must cross the template→harness source boundary.
+        let step2 = shared_cache_options(&dir, handler.clone(), Arc::clone(&shared_cache));
+        resolve_shell_approvals(None, None, Some(&plan), &step2).unwrap();
+        assert_eq!(
+            handler.calls(),
+            1,
+            "harness re-discovery of the same command must hit the shared cache"
+        );
+    }
+
     #[test]
     fn approval_request_carries_real_source_provenance() {
         use darkmatter::markdown::compose::ComposeSource;

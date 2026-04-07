@@ -1,15 +1,9 @@
-use std::collections::HashMap;
-
-use chrono::Utc;
 use serde_json::{Map, Value, json};
 
 use crate::actions::{HookDecision, HookResponse};
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
-use crate::permissions::query::{CommandQuery, PathQuery};
-use crate::services::protect::intent::ProtectIntent;
-use crate::services::protect::observe::default_observe_protect;
+use crate::events::{AgenticEvent, EventMeta, Provider};
 
-use super::{AdapterError, ProviderAdapter};
+use super::{AdapterError, ProviderAdapter, str_field};
 
 pub(crate) struct ClaudeAdapter;
 
@@ -33,31 +27,25 @@ impl ProviderAdapter for ClaudeAdapter {
             event = AgenticEvent::HumanInTheLoop;
         }
 
-        let mut meta = EventMeta {
-            provider: Provider::Claude,
-            event,
-            timestamp: Utc::now(),
-            session_id: str_field(raw, "session_id"),
-            cwd: str_field(raw, "cwd"),
-            tool_name,
-            tool_input: raw.get("tool_input").cloned(),
-            tool_response: raw.get("tool_response").cloned(),
-            error: str_field(raw, "error"),
-            prompt: str_field(raw, "prompt"),
-            agent_type: str_field(raw, "agent_type"),
-            notification_type: raw
-                .get("notification")
-                .and_then(|n| n.get("type"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned),
-            notification_message: raw
-                .get("notification")
-                .and_then(|n| n.get("message"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned),
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
-        };
+        let mut meta = EventMeta::new(Provider::Claude, event);
+        meta.session_id = str_field(raw, "session_id");
+        meta.cwd = str_field(raw, "cwd");
+        meta.tool_name = tool_name;
+        meta.tool_input = raw.get("tool_input").cloned();
+        meta.tool_response = raw.get("tool_response").cloned();
+        meta.error = str_field(raw, "error");
+        meta.prompt = str_field(raw, "prompt");
+        meta.agent_type = str_field(raw, "agent_type");
+        meta.notification_type = raw
+            .get("notification")
+            .and_then(|n| n.get("type"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        meta.notification_message = raw
+            .get("notification")
+            .and_then(|n| n.get("message"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
 
         for key in [
             "permission_mode",
@@ -79,79 +67,6 @@ impl ProviderAdapter for ClaudeAdapter {
         }
 
         Ok((event, meta))
-    }
-
-    fn observe_protect(
-        &self,
-        event: &AgenticEvent,
-        meta: &EventMeta,
-    ) -> Option<crate::services::ProtectObservation> {
-        // Start with default observation, then refine for Claude-specific tools.
-        let mut obs = default_observe_protect(event, meta)?;
-
-        // Claude-specific tool intent extraction
-        if let Some(tool_name) = meta.tool_name.as_deref() {
-            let lowered = tool_name.to_ascii_lowercase();
-
-            // Clear default intents and rebuild with Claude-specific knowledge.
-            let mut intents = Vec::new();
-
-            match lowered.as_str() {
-                "write" | "write_file" => {
-                    if let Some(path) = tool_input_path(meta) {
-                        intents.push(ProtectIntent::WritePath(PathQuery::file(path)));
-                    }
-                }
-                "edit" | "edit_file" => {
-                    if let Some(path) = tool_input_path(meta) {
-                        intents.push(ProtectIntent::WritePath(PathQuery::file(path)));
-                    }
-                }
-                "read" | "read_file" | "read_directory" => {
-                    if let Some(path) = tool_input_path(meta) {
-                        intents.push(ProtectIntent::ReadPath(PathQuery::unknown(path)));
-                    }
-                }
-                "bash" | "execute_command" => {
-                    if let Some(cmd) = extract_claude_command(meta) {
-                        intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(cmd)));
-                    }
-                }
-                name if name.starts_with("mcp__") => {
-                    // Claude MCP tool names: mcp__<server>__<tool>
-                    let parts: Vec<&str> = name.splitn(3, "__").collect();
-                    if parts.len() >= 2 {
-                        let server = parts[1].to_owned();
-                        intents.push(ProtectIntent::UseMcpServer {
-                            server: server.clone(),
-                        });
-                        if parts.len() == 3 {
-                            intents.push(ProtectIntent::UseMcpTool {
-                                server,
-                                tool: parts[2].to_owned(),
-                            });
-                        }
-                    }
-                }
-                _ => {
-                    // Keep default intents for unknown tools.
-                    return Some(obs);
-                }
-            }
-
-            // Preserve completion scan intent if present.
-            if obs
-                .intents
-                .iter()
-                .any(|i| matches!(i, ProtectIntent::CompletionOutputScan))
-            {
-                intents.push(ProtectIntent::CompletionOutputScan);
-            }
-
-            obs.intents = intents;
-        }
-
-        Some(obs)
     }
 
     fn can_block(&self, event: &AgenticEvent) -> bool {
@@ -246,32 +161,6 @@ fn map_event(event_name: &str) -> Result<AgenticEvent, AdapterError> {
     Provider::Claude
         .event_from_shared_native_name(event_name)
         .ok_or_else(|| AdapterError::UnknownEvent(event_name.to_string()))
-}
-
-fn str_field(raw: &Value, key: &str) -> Option<String> {
-    raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
-}
-
-fn tool_input_path(meta: &EventMeta) -> Option<String> {
-    meta.tool_input
-        .as_ref()
-        .and_then(|v| v.as_object())
-        .and_then(|map| {
-            map.get("file_path")
-                .or_else(|| map.get("path"))
-                .or_else(|| map.get("file"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-}
-
-fn extract_claude_command(meta: &EventMeta) -> Option<String> {
-    meta.tool_input.as_ref().and_then(|v| {
-        v.get("command")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .or_else(|| v.as_str().map(ToOwned::to_owned))
-    })
 }
 
 fn decision_to_permission(decision: Option<HookDecision>) -> &'static str {

@@ -1,6 +1,7 @@
 //! Type definitions for the `::toc-linking` directive.
 
 use crate::markdown::compose::parse_utils::CursorError;
+use crate::markdown::normalize::HeadingLevel;
 use std::collections::HashSet;
 use std::ops::Range;
 use thiserror::Error;
@@ -94,15 +95,15 @@ impl CleanupService {
 /// When `levels` is empty, the default H2-H6 range applies.
 #[derive(Debug, Clone, Default)]
 pub struct LevelFilter {
-    pub levels: HashSet<u8>,
+    pub levels: HashSet<HeadingLevel>,
 }
 
 impl LevelFilter {
     /// Returns true if the given level passes this filter.
-    pub fn includes(&self, level: u8) -> bool {
+    pub fn includes(&self, level: HeadingLevel) -> bool {
         if self.levels.is_empty() {
             // Default: H2-H6
-            (2..=6).contains(&level)
+            level >= HeadingLevel::H2
         } else {
             self.levels.contains(&level)
         }

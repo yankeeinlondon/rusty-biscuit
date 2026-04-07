@@ -1,16 +1,11 @@
 use std::collections::HashMap;
 
-use chrono::Utc;
 use serde_json::Value;
 
 use crate::actions::HookResponse;
-use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider};
-use crate::permissions::query::{CommandQuery, PathQuery};
-use crate::services::protect::intent::ProtectIntent;
-use crate::services::protect::observe::default_observe_protect;
-use crate::services::{ProtectDecision, ProtectObservation, ProtectOutcome};
+use crate::events::{AgenticEvent, EventMeta, Provider};
 
-use super::{AdapterError, ProviderAdapter};
+use super::{AdapterError, ProviderAdapter, str_field};
 
 pub(crate) struct CodexAdapter;
 
@@ -26,47 +21,39 @@ impl ProviderAdapter for CodexAdapter {
 
         let hook_event = raw.get("hook_event");
         let item = raw.get("item");
-        let mut meta = EventMeta {
-            provider: Provider::Codex,
-            event,
-            timestamp: Utc::now(),
-            session_id: str_field(raw, "thread_id")
-                .or_else(|| str_field(raw, "thread-id"))
-                .or_else(|| str_field(raw, "session_id")),
-            cwd: str_field(raw, "cwd"),
-            tool_name: item
-                .and_then(|value| value.get("name"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-                .or_else(|| str_field(hook_event.unwrap_or(raw), "tool_name")),
-            tool_input: item
-                .and_then(|value| value.get("input"))
-                .cloned()
-                .or_else(|| {
-                    hook_event
-                        .and_then(|value| value.get("tool_input"))
-                        .cloned()
-                }),
-            tool_response: item
-                .and_then(|value| value.get("output"))
-                .cloned()
-                .or_else(|| {
-                    hook_event
-                        .and_then(|value| value.get("output_preview"))
-                        .cloned()
-                }),
-            error: raw
-                .get("error")
-                .and_then(|value| value.get("message"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned),
-            prompt: str_field(raw, "prompt"),
-            agent_type: None,
-            notification_type,
-            notification_message: None,
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
-        };
+        let mut meta = EventMeta::new(Provider::Codex, event);
+        meta.session_id = str_field(raw, "thread_id")
+            .or_else(|| str_field(raw, "thread-id"))
+            .or_else(|| str_field(raw, "session_id"));
+        meta.cwd = str_field(raw, "cwd");
+        meta.tool_name = item
+            .and_then(|value| value.get("name"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| str_field(hook_event.unwrap_or(raw), "tool_name"));
+        meta.tool_input = item
+            .and_then(|value| value.get("input"))
+            .cloned()
+            .or_else(|| {
+                hook_event
+                    .and_then(|value| value.get("tool_input"))
+                    .cloned()
+            });
+        meta.tool_response = item
+            .and_then(|value| value.get("output"))
+            .cloned()
+            .or_else(|| {
+                hook_event
+                    .and_then(|value| value.get("output_preview"))
+                    .cloned()
+            });
+        meta.error = raw
+            .get("error")
+            .and_then(|value| value.get("message"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        meta.prompt = str_field(raw, "prompt");
+        meta.notification_type = notification_type;
 
         for key in ["thread_id", "thread-id", "session_id", "triggered_at"] {
             if let Some(value) = raw.get(key) {
@@ -95,100 +82,6 @@ impl ProviderAdapter for CodexAdapter {
         Ok((event, meta))
     }
 
-    fn observe_protect(
-        &self,
-        event: &AgenticEvent,
-        meta: &EventMeta,
-    ) -> Option<ProtectObservation> {
-        let mut obs = default_observe_protect(event, meta)?;
-
-        // Codex-specific: refine intents from item type and tool input.
-        if let Some(item_type) = meta.extra.get("item_type").and_then(Value::as_str) {
-            let mut intents = Vec::new();
-
-            match item_type {
-                "command_execution" => {
-                    // Extract command from tool_input.params.command (array or string)
-                    let cmd = meta
-                        .tool_input
-                        .as_ref()
-                        .and_then(|v| v.get("params"))
-                        .and_then(|p| {
-                            p.get("command")
-                                .and_then(|c| {
-                                    c.as_array().map(|arr| {
-                                        arr.iter()
-                                            .filter_map(Value::as_str)
-                                            .collect::<Vec<_>>()
-                                            .join(" ")
-                                    })
-                                })
-                                .or_else(|| {
-                                    p.get("command")
-                                        .and_then(Value::as_str)
-                                        .map(ToOwned::to_owned)
-                                })
-                        })
-                        .or_else(|| {
-                            meta.tool_input
-                                .as_ref()
-                                .and_then(|v| v.get("command"))
-                                .and_then(Value::as_str)
-                                .map(ToOwned::to_owned)
-                        });
-                    if let Some(cmd) = cmd {
-                        intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(&cmd)));
-                    }
-                }
-                "file_change" => {
-                    let path = meta
-                        .tool_input
-                        .as_ref()
-                        .and_then(|v| v.as_object())
-                        .and_then(|m| {
-                            m.get("path")
-                                .or_else(|| m.get("file"))
-                                .and_then(Value::as_str)
-                        });
-                    if let Some(path) = path {
-                        intents.push(ProtectIntent::WritePath(PathQuery::file(path)));
-                    }
-                }
-                "mcp_tool_call" => {
-                    let server = meta.tool_name.as_deref().unwrap_or("unknown");
-                    intents.push(ProtectIntent::UseMcpServer {
-                        server: server.to_owned(),
-                    });
-                    if let Some(tool) = meta
-                        .tool_input
-                        .as_ref()
-                        .and_then(|v| v.get("tool"))
-                        .and_then(Value::as_str)
-                    {
-                        intents.push(ProtectIntent::UseMcpTool {
-                            server: server.to_owned(),
-                            tool: tool.to_owned(),
-                        });
-                    }
-                }
-                _ => return Some(obs),
-            }
-
-            // Preserve completion scan intent if present.
-            if obs
-                .intents
-                .iter()
-                .any(|i| matches!(i, ProtectIntent::CompletionOutputScan))
-            {
-                intents.push(ProtectIntent::CompletionOutputScan);
-            }
-
-            obs.intents = intents;
-        }
-
-        Some(obs)
-    }
-
     fn can_block(&self, _event: &AgenticEvent) -> bool {
         false
     }
@@ -207,34 +100,6 @@ impl ProviderAdapter for CodexAdapter {
 
     fn exit_code(&self, _event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
         None
-    }
-
-    fn map_protect_outcome(
-        &self,
-        _event: &AgenticEvent,
-        decision: &ProtectDecision,
-    ) -> Result<HookResponse, AdapterError> {
-        let mut reason = match &decision.outcome {
-            ProtectOutcome::Allow => None,
-            ProtectOutcome::AskThenAllowOrStop { reason }
-            | ProtectOutcome::StopCurrent { reason }
-            | ProtectOutcome::StopSession { reason }
-            | ProtectOutcome::AllowWithRedaction { reason }
-            | ProtectOutcome::AdvisoryOnly { reason } => Some(reason.clone()),
-        };
-
-        if decision.degraded {
-            reason = Some(format!(
-                "{} (codex: no native blocking hook, downgraded to advisory)",
-                reason.unwrap_or_else(|| "protect decision".to_string())
-            ));
-        }
-
-        Ok(HookResponse {
-            decision: Some(crate::actions::HookDecision::Continue),
-            reason,
-            ..HookResponse::default()
-        })
     }
 }
 
@@ -296,10 +161,6 @@ fn event_kind(raw: &Value) -> Option<&str> {
                 .and_then(|value| value.get("event_type"))
         })
         .and_then(Value::as_str)
-}
-
-fn str_field(raw: &Value, key: &str) -> Option<String> {
-    raw.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
 /// Capture Codex usage fields and normalize into `token_usage`.

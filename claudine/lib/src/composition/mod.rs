@@ -14,18 +14,24 @@ pub mod preflight;
 mod prepare;
 mod resolve;
 mod select;
+pub mod sequence;
 mod types;
 
 pub use error::CompositionError;
+#[allow(deprecated)]
 pub use lifecycle::{
-    LifecycleConfig, LifecycleNotification, LifecycleRuntimeContext, LifecycleRuntimeState,
-    LifecycleSignal, emit_lifecycle_signal, parse_lifecycle_config,
+    DefaultLifecycleEmitter, LifecycleConfig, LifecycleEmitter, LifecycleNotification,
+    LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState, LifecycleSignal,
+    emit_lifecycle_signal, parse_lifecycle_config,
 };
 pub use preflight::{PreFlightResult, resolve_shell_approvals};
-pub use prepare::{prepare_direct, prepare_inline};
+pub use prepare::{PrepareOptions, prepare_direct, prepare_inline};
 pub use resolve::{resolve_composition_source, validate_file_permissions};
 pub use select::{build_candidate_set, select_provider};
+pub use sequence::{build_step_overlay, resolve_sequence_plan};
 pub use types::{
     CompositionClosurePlan, CompositionExecutionRequest, CompositionMode, InlineClosurePlan,
-    PreparedComposition, ResolvedCompositionSource, SelectedProvider, SelectionReason,
+    OutputFormat, PreparedComposition, ResolvedCompositionSource, SelectedProvider,
+    SelectionReason, SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource,
+    SequenceStep, SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
 };

@@ -4,33 +4,35 @@ Core library for the Claudine cross-agent event handling, skill linking, and MCP
 
 ## Architecture
 
-The library is organized into fifteen top-level modules plus the shared error type:
+The library is organized into seventeen top-level modules plus the shared error type:
 
 ```
 claudine/lib/src/
-├── actions/      → Hook action types and response model
-├── adapters/     → Provider-specific event parsers
-├── agents/       → Agent capability catalog and registry
-├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
-├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
-├── config/       → Agent detection and hook registration
-├── dispatch/     → Event processing pipeline
-├── events/       → Normalized event model and types
-├── harness/      → Typed pre/post validations, timeouts, handlers, and shell policy
-├── linking/      → Cross-provider skill and command synchronization
-├── messaging/    → Outbound messaging routes, resolution, and provider dispatch
-├── mcp/          → MCP catalog, defaults, import/export, session, and injection
-├── reporting/    → JSONL-to-SQLite reporting index, sync, and typed queries
-├── services/     → Cross-provider policy services (Protect)
-├── stream/       → Structured stream parsing for 6 providers + summary/reporting
-└── error.rs      → ClaudineError enum
+├── actions/        → Hook action types and response model
+├── adapters/       → Provider-specific event parsers
+├── agents/         → Agent capability catalog and registry
+├── badges.rs       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
+├── composition/    → Markdown frontmatter composition (inline, direct, and sequence pipelines)
+├── config/         → Agent detection and hook registration
+├── dispatch/       → Event processing pipeline
+├── events/         → Normalized event model and types
+├── harness/        → Typed pre/post validations, timeouts, handlers, and shell policy
+├── linking/        → Cross-provider skill and command synchronization
+├── messaging/      → Outbound messaging routes, resolution, and provider dispatch
+├── mcp/            → MCP catalog, defaults, import/export, session, and injection
+├── permissions/    → Provider-agnostic policy engine (queries, mutations, canonical model)
+├── reporting/      → JSONL-to-SQLite reporting index, sync, and typed queries
+├── services/       → Cross-provider runtime policy services (Protect)
+├── stream/         → Structured stream parsing for 6 providers + summary/reporting
+├── system_prompt/  → System prompt discovery, CLI switch resolution, and preparation
+└── error.rs        → ClaudineError enum
 ```
 
 ### Actions (`actions`)
 
 Types for hook actions that execute when events fire, and response types for blocking hooks:
 
-- `HookAction` — 7-variant tagged enum: `Speak`, `Log`, `FireAndForget`, `Call`, `Report`, `SoundEffect`, `Message`
+- `HookAction` — 6-variant tagged enum: `SoundEffect`, `Speak`, `Bash`, `Call`, `Report`, `Message`
 - `HookResponse` — Unified response a hook can return to influence agent behavior (decision, reason, updated input, additional context)
 - `HookDecision` — 4-variant enum: `Allow`, `Deny`, `Ask`, `Continue`
 - `LogTarget` — File (with daily rotation) or Server (HTTP POST with timeout)
@@ -220,10 +222,22 @@ Provider-native structured stream parsing for wrapped non-interactive sessions. 
 
 ### Composition (`composition`)
 
-Markdown frontmatter-based composition pipelines for delivering prompts to provider sessions:
+Markdown frontmatter-based composition pipelines for delivering prompts to provider sessions. Three canonical modes:
 
+- **Direct composition** (`claudine compose <file>`): composes the full document as a prompt without mutating the source file
 - **Inline composition** (`claudine inline-compose <file>`): reads frontmatter `prompt` as input, then rewrites the document body from the provider's returned content while preserving source frontmatter
-- **Chained composition** (`claudine compose <file>`): composes the full document as a prompt without mutating the source file
+- **Sequence composition** (`claudine sequence <file>`): runs a serial sequence of composition steps from a single document, reusing wrapper-grade execution with a shared approval cache and `FAIL_FAST` propagation across steps
+
+Sub-modules:
+- `resolve` — source resolution via `biscuit-file::FileReference` with read/write permission validation
+- `prepare` — builds a `PreparedComposition` (effective frontmatter, composed body, pre-execution hashes) via `prepare_direct()` / `prepare_inline()` with `PrepareOptions`
+- `select` — deterministic provider selection (explicit flag → single-installed → frontmatter hint → config favorite → interactive chooser)
+- `preflight` — shell approval collection and execution for `::shell` directives, `shell_command` validations, and `deviate`/`handle` commands
+- `closure` — inline closure plan that merges provider-returned content back into the source file atomically (preserves frontmatter, updates `last_updated`)
+- `sequence` — sequence plan parser, normalizer, and per-step overlay builder for `claudine sequence`
+- `lifecycle` — `LifecycleEmitter` trait and `LifecycleRunGuard` RAII guard that emit lifecycle signals (start/success/failure) to external observers; includes `DefaultLifecycleEmitter` and programmatic handler hook integration
+- `guardrails` — inline composition guardrails appended to prompts to constrain output shape
+- `types` — shared types including `PreparedComposition`, `SelectedProvider`, `SequencePlan`, `SequenceStep`, `SharedApprovalCache`, `CompositionMode`, and `SystemPromptInput`
 
 ### Badges (`badges`)
 
@@ -231,9 +245,42 @@ Styled terminal badge constants for the execution line header: `YOLO`, `NON_INTE
 
 ### Services (`services`)
 
-Cross-provider policy engines that operate on normalized event context:
+Cross-provider runtime policy engines that operate on normalized event context:
 
 - `protect` — Capability-aware policy evaluation service used to normalize safety decisions (`allow`, `ask`, `stop`, `advisory`) across providers with different control surfaces.
+
+### Permissions (`permissions`)
+
+Provider-agnostic permission policy engine. `PolicyEngine` is Claudine's canonical source of truth for provider permission state: it loads provider-native config, composes it with CLI/runtime overrides, normalizes the result into a canonical cross-provider model, answers structured permission queries with explanation and provenance, and plans permission mutations.
+
+Sub-modules:
+- `engine` — `PolicyEngine` and `ProviderPolicyHandle` for per-provider operations
+- `backend` — `ProviderPolicyBackend` trait plus `BackendCapabilities` and `BackendFidelity` describing what each provider can express natively
+- `canonical` — canonical cross-provider model: `CanonicalPolicy`, `CanonicalApprovalMode`, `CanonicalSandboxMode`, `NetworkPolicy`, `FilesystemPolicy`, `McpAccessPolicy`, `SubagentRule`, `CommandAccessRule`, `PathAccessRule`, `DomainAccessRule`, rule provenance, and fidelity flags
+- `context` — `PolicyContext`, `CliPolicyInput`, and `ProjectTrustContext` carrying CLI overrides and trust signals
+- `native` — `NativeEffectivePolicy`, `NativePolicyLayer`, `PolicySource`, and `ProviderCliOverrides` describing the raw provider-native layering
+- `query` / `explain` / `change` / `mutation` — structured queries, provenance-aware explanations, and mutation planning
+- `matchers` — shared glob/regex matching primitives reused across providers
+- `providers` — per-provider backend implementations
+
+The engine is independent from `ProtectService`. Protect remains a runtime decision layer that may consume `PolicyEngine` in future revisions.
+
+### Messaging (`messaging`)
+
+Outbound messaging routes for the `Message` hook action. Supports Discord, Slack, Signal, and WhatsApp providers:
+
+- `config` — `MessagingRouteConfig` and `ScopedMessagingSettings` for route definitions at user and repo scope
+- `resolve` — `ResolvedMessagingRoute` plus secret/image/recipient resolution (`resolve_secret`, `resolve_image_path`, `parse_signal_recipient`) and effective route selection across scopes
+- `send` — `execute_message` and `execute_resolved_message` for dispatching markdown messages through the chosen provider, with Discord image attachment support
+
+### System Prompt (`system_prompt`)
+
+Discovery, CLI switch resolution, and preparation of system prompts injected by the wrapper:
+
+- Discovers standard `system-prompt.md` files across package, package-area, repo, user, and current-directory scopes (`StandardPromptScope`)
+- Resolves explicit CLI switches (`--system-prompt` / `--append-system-prompt` / `--replace-system-prompt`) via `SystemPromptArgs` and `SystemPromptMode`
+- Captures provenance via `SystemPromptSource` (`StandardDiscovered` or `ExplicitFile`)
+- `resolve_and_prepare()` and `prepare_system_prompt()` build the final system prompt string passed to the provider; `LaunchContext` carries the resolved state into wrapper execution
 
 ### Reporting (`reporting`)
 

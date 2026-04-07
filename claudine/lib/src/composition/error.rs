@@ -97,11 +97,48 @@ pub enum CompositionError {
         line: usize,
     },
 
-    /// A lifecycle notification property has both `speak` and `speak_first`.
-    #[error("lifecycle property `{0}` has both `speak` and `speak_first`; only one is allowed")]
-    LifecycleSpeakConflict(String),
+    /// A lifecycle notification property has both `say` and `say_first`.
+    #[error("lifecycle property `{0}` has both `say` and `say_first`; only one is allowed")]
+    LifecycleSayConflict(String),
 
     /// A lifecycle notification property references an unknown sound effect.
     #[error("lifecycle property `{0}` references unknown sound effect `{1}`")]
     LifecycleUnknownEffect(String, String),
+
+    // -- Sequence errors -------------------------------------------------------
+    /// The `sequence` frontmatter value is not a valid type (must be a list or a string).
+    #[error("invalid sequence definition: {0}")]
+    SequenceInvalid(String),
+
+    /// The sequence list is empty.
+    #[error("sequence list is empty; at least one step is required")]
+    SequenceEmpty,
+
+    /// The external YAML file could not be loaded.
+    #[error("failed to load external sequence file: {0}")]
+    SequenceExternalLoad(String),
+
+    /// The external YAML file has an unexpected root shape.
+    #[error("external sequence file has wrong structure: {0}")]
+    SequenceExternalWrongType(String),
+
+    /// An object step is missing the required `name` property.
+    #[error("sequence step at index {index} is missing required `name` property")]
+    SequenceStepNameMissing { index: usize },
+
+    /// The `name` property of an object step is not a string.
+    #[error("sequence step at index {index} has `name` of type {found}, expected string")]
+    SequenceStepNameWrongType { index: usize, found: String },
+
+    /// A template value is not a string.
+    #[error("sequence template key `{key}` has type {found}, expected string")]
+    SequenceTemplateWrongType { key: String, found: String },
+
+    /// Templates require all list items to be objects.
+    #[error("sequence templates require all list items to be objects (dictionaries)")]
+    SequenceTemplateRequiresObjectItems,
+
+    /// A template key collides with a reserved sequence overlay key.
+    #[error("sequence template key `{0}` collides with reserved sequence key")]
+    SequenceReservedTemplateKey(String),
 }

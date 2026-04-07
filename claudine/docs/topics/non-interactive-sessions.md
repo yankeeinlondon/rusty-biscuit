@@ -38,6 +38,27 @@ Parsers also emit coarse lifecycle events via the `StreamEventSink` trait:
 
 These events drive the `LiveStreamSink` in the CLI, which handles session ID emission, tool name tracking, and event dispatch to the logging system.
 
+### Tool Progress Lines
+
+When a structured-stream parser emits `on_before_tool`, the CLI's `LiveStreamSink` writes a progress line to stderr:
+
+```text
+tool: bash
+```
+
+The implementation lives in `claudine/cli/src/commands/wrap/mod.rs` inside `LiveStreamSink::emit_tool_progress_line()`. This is not OpenCode-specific. It applies to every wrapped provider that uses structured streaming and reports tool activity through `on_before_tool`.
+
+Today that means:
+
+- Claude
+- Codex
+- Gemini
+- Kimi Code
+- OpenCode
+- Qwen Code
+
+Goose does not currently participate because it has no structured streaming path in Claudine.
+
 ## Agent Session ID
 
 When a non-interactive session starts, the agent returns a session ID in its structured JSON output. Claudine extracts this and emits it to stderr immediately — regardless of `--quiet` or `--silent` — because it is essential operational tracking info:
@@ -103,9 +124,11 @@ This includes the full (non-truncated) session ID, model name, turn count, per-t
 
 Non-interactive sessions use two delivery mechanisms depending on the provider:
 
-**stdin pipe** — the prompt is written to the child's stdin, then the pipe is closed (EOF). This avoids `ENAMETOOLONG` errors when composed prompts exceed OS argument length limits. Used by: Claude, Kimi Code, OpenCode (non-interactive).
+**stdin pipe** — the prompt is written to the child's stdin, then the pipe is closed (EOF). This avoids `ENAMETOOLONG` errors when composed prompts exceed OS argument length limits. Used by: Claude, Kimi Code.
 
-**Positional/flag arguments** — the prompt is passed as a CLI argument. Some providers convert positionals to flags (e.g., Gemini converts to `--prompt`). Used by: Codex, Gemini, Goose.
+**Positional/flag arguments** — the prompt is passed as a CLI argument. Some providers convert positionals to flags (e.g., Gemini converts to `--prompt`). Used by: Codex, Gemini, Goose, OpenCode.
+
+Even when the prompt is delivered via CLI args, structured non-interactive runs do not inherit the caller's stdin. Claudine closes stdin for those child processes unless it is actively seeding prompt content, which prevents providers from lingering on an open terminal after the non-interactive task is already complete.
 
 ## Output Noise Filtering
 

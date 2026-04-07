@@ -1,5 +1,9 @@
+use std::io::Write;
+use std::path::Path;
+
 use claudine::events::Provider;
 use claudine::stream::StreamProtocol;
+use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail};
 
 // ---------------------------------------------------------------------------
@@ -11,6 +15,29 @@ pub(crate) enum OutputFormat {
     Json,
     Text,
     Stream,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PromptDelivery {
+    Stdin(String),
+    AppendArgs(Vec<String>),
+    InsertArgs { index: usize, args: Vec<String> },
+}
+
+impl PromptDelivery {
+    pub(crate) fn apply_to(self, args: &mut Vec<String>) -> Option<String> {
+        match self {
+            Self::Stdin(prompt) => Some(prompt),
+            Self::AppendArgs(extra) => {
+                args.extend(extra);
+                None
+            }
+            Self::InsertArgs { index, args: extra } => {
+                args.splice(index..index, extra);
+                None
+            }
+        }
+    }
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -33,6 +60,16 @@ impl std::str::FromStr for OutputFormat {
             _ => Err(format!(
                 "unknown output format '{s}'; expected json, text, or stream"
             )),
+        }
+    }
+}
+
+impl From<claudine::composition::OutputFormat> for OutputFormat {
+    fn from(value: claudine::composition::OutputFormat) -> Self {
+        match value {
+            claudine::composition::OutputFormat::Json => Self::Json,
+            claudine::composition::OutputFormat::Text => Self::Text,
+            claudine::composition::OutputFormat::Stream => Self::Stream,
         }
     }
 }
@@ -115,14 +152,30 @@ pub(crate) trait WrapperProfile: Send + Sync {
 
     // -- Universal --system-prompt flag --------------------------------------
 
-    /// Map the universal `--system-prompt <value>` to provider-specific flags.
+    /// Map a resolved system prompt to provider-specific flags, env, and
+    /// temp artifacts.
     ///
-    /// Default: returns a warning that the provider doesn't support it.
-    fn apply_system_prompt(&self, _args: &mut Vec<String>, _prompt: &str) -> Option<String> {
-        Some(format!(
-            "{} does not support --system-prompt; this flag was skipped",
-            self.provider()
-        ))
+    /// Default: returns a warning that the provider doesn't support the
+    /// given mode.
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        Ok(super::system_prompt::SystemPromptApplication {
+            args: vec![],
+            env: vec![],
+            artifacts: vec![],
+            warnings: vec![format!(
+                "{} does not support {} system prompt; this flag was skipped",
+                self.provider(),
+                match prompt.mode {
+                    SystemPromptMode::Append => "append",
+                    SystemPromptMode::Replace => "replace",
+                },
+            )],
+        })
     }
 
     // -- Universal --sandbox flag --------------------------------------------
@@ -195,18 +248,17 @@ pub(crate) trait WrapperProfile: Send + Sync {
 
     // -- Prompt-file delivery -------------------------------------------------
 
-    /// Deliver a composed prompt body to the provider.
+    /// Build a prompt delivery plan for the provider.
     ///
-    /// For arg-based providers, the prompt is injected into `args`.
-    /// For stdin-based providers (Claude, Kimi), the prompt is placed in
-    /// `stdin_seed` and requires `non_interactive` mode.
-    fn apply_prompt_body(
+    /// Providers that need to inspect existing args to place the prompt
+    /// correctly (for example after an entrypoint) can do that here, but the
+    /// caller remains the only place that mutates child args/stdin state.
+    fn prompt_delivery(
         &self,
-        args: &mut Vec<String>,
-        stdin_seed: &mut Option<String>,
+        args: &[String],
         prompt: &str,
         non_interactive: bool,
-    ) -> Result<()>;
+    ) -> Result<PromptDelivery>;
 
     // -- Final argument validation -------------------------------------------
 
@@ -384,25 +436,56 @@ impl WrapperProfile for ClaudeWrapper {
         None
     }
 
-    fn apply_system_prompt(&self, args: &mut Vec<String>, prompt: &str) -> Option<String> {
-        args.push("--system-prompt".to_string());
-        args.push(prompt.to_string());
-        None
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+        use std::io::Write as _;
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                if interactive {
+                    app.args.push("--append-system-prompt".to_string());
+                    app.args.push(prompt.composed_markdown.clone());
+                } else {
+                    let mut tmp = tempfile::NamedTempFile::new()?;
+                    tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                    app.args.push("--append-system-prompt-file".to_string());
+                    app.args.push(tmp.path().display().to_string());
+                    app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+                }
+            }
+            SystemPromptMode::Replace => {
+                if interactive {
+                    app.args.push("--system-prompt".to_string());
+                    app.args.push(prompt.composed_markdown.clone());
+                } else {
+                    let mut tmp = tempfile::NamedTempFile::new()?;
+                    tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                    app.args.push("--system-prompt-file".to_string());
+                    app.args.push(tmp.path().display().to_string());
+                    app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+                }
+            }
+        }
+        Ok(app)
     }
 
-    fn apply_prompt_body(
+    fn prompt_delivery(
         &self,
-        args: &mut Vec<String>,
-        stdin_seed: &mut Option<String>,
+        _args: &[String],
         prompt: &str,
         non_interactive: bool,
-    ) -> Result<()> {
+    ) -> Result<PromptDelivery> {
         if non_interactive {
-            *stdin_seed = Some(prompt.to_string());
+            Ok(PromptDelivery::Stdin(prompt.to_string()))
         } else {
-            args.push(prompt.to_string());
+            Ok(PromptDelivery::AppendArgs(vec![prompt.to_string()]))
         }
-        Ok(())
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
@@ -490,8 +573,8 @@ impl WrapperProfile for CodexWrapper {
         }
 
         // NOTE: prompt validation is deferred to validate_final_args() because
-        // the prompt may not be in args yet (e.g. --compose/--prompt-file
-        // pipelines call apply_prompt_body() separately).
+        // the prompt may not be in args yet (e.g. composition pipelines
+        // compute delivery after non-interactive setup).
         Ok(())
     }
 
@@ -509,6 +592,41 @@ impl WrapperProfile for CodexWrapper {
         }
     }
 
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let (tmp_home, _overlay_path) =
+                    super::system_prompt::create_ephemeral_overlay_home(
+                        ".codex",
+                        "AGENTS.override.md",
+                        &prompt.composed_markdown,
+                    )?;
+                app.env.push((
+                    std::ffi::OsString::from("HOME"),
+                    tmp_home.path().as_os_str().to_owned(),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
+            }
+            SystemPromptMode::Replace => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                app.args.push("-c".to_string());
+                app.args
+                    .push(format!("model_instructions_file={}", tmp.path().display()));
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+        }
+        Ok(app)
+    }
+
     fn apply_sandbox(&self, args: &mut Vec<String>) -> Option<String> {
         if !has_flag(args, "--sandbox") {
             args.push("--sandbox".to_string());
@@ -516,18 +634,17 @@ impl WrapperProfile for CodexWrapper {
         None
     }
 
-    fn apply_prompt_body(
+    fn prompt_delivery(
         &self,
-        args: &mut Vec<String>,
-        stdin_seed: &mut Option<String>,
+        args: &[String],
         prompt: &str,
         non_interactive: bool,
-    ) -> Result<()> {
+    ) -> Result<PromptDelivery> {
         if non_interactive {
             // In non-interactive mode, deliver via stdin to avoid ENAMETOOLONG
             // errors when prompt-file content exceeds OS argument length limits.
             // Codex exec reads from stdin when no positional prompt is provided.
-            *stdin_seed = Some(prompt.to_string());
+            Ok(PromptDelivery::Stdin(prompt.to_string()))
         } else {
             // Interactive: insert as positional after "exec"
             let insert_at = if args.first().is_some_and(|f| f == "exec" || f == "e") {
@@ -535,9 +652,11 @@ impl WrapperProfile for CodexWrapper {
             } else {
                 0
             };
-            args.insert(insert_at, prompt.to_string());
+            Ok(PromptDelivery::InsertArgs {
+                index: insert_at,
+                args: vec![prompt.to_string()],
+            })
         }
-        Ok(())
     }
 
     fn validate_final_args(
@@ -583,6 +702,10 @@ impl WrapperProfile for CodexWrapper {
         if !has_flag(args, "--json") {
             args.push("--json".to_string());
         }
+    }
+
+    fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
+        &["Reading prompt from stdin..."]
     }
 
     fn supports_interactive_inline_closure(&self) -> bool {
@@ -740,20 +863,56 @@ impl WrapperProfile for GeminiWrapper {
         }
     }
 
-    fn apply_prompt_body(
+    fn apply_system_prompt(
         &self,
-        args: &mut Vec<String>,
-        _stdin_seed: &mut Option<String>,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let (tmp_home, _overlay_path) =
+                    super::system_prompt::create_ephemeral_overlay_home(
+                        ".gemini",
+                        "GEMINI.md",
+                        &prompt.composed_markdown,
+                    )?;
+                app.env.push((
+                    std::ffi::OsString::from("HOME"),
+                    tmp_home.path().as_os_str().to_owned(),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
+            }
+            SystemPromptMode::Replace => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                app.env.push((
+                    std::ffi::OsString::from("GEMINI_SYSTEM_MD"),
+                    std::ffi::OsString::from(tmp.path().display().to_string()),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+        }
+        Ok(app)
+    }
+
+    fn prompt_delivery(
+        &self,
+        _args: &[String],
         prompt: &str,
         non_interactive: bool,
-    ) -> Result<()> {
-        args.push(if non_interactive {
-            "--prompt".to_string()
-        } else {
-            "--prompt-interactive".to_string()
-        });
-        args.push(prompt.to_string());
-        Ok(())
+    ) -> Result<PromptDelivery> {
+        Ok(PromptDelivery::AppendArgs(vec![
+            if non_interactive {
+                "--prompt".to_string()
+            } else {
+                "--prompt-interactive".to_string()
+            },
+            prompt.to_string(),
+        ]))
     }
 
     fn supports_structured_stream(&self) -> bool {
@@ -819,20 +978,58 @@ impl WrapperProfile for KimiWrapper {
         Ok(())
     }
 
-    fn apply_prompt_body(
+    fn apply_system_prompt(
         &self,
-        args: &mut Vec<String>,
-        stdin_seed: &mut Option<String>,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                app.warnings.push(
+                    "Kimi does not support append-mode system prompts; this flag was skipped"
+                        .to_string(),
+                );
+            }
+            SystemPromptMode::Replace => {
+                let mut prompt_tmp = tempfile::NamedTempFile::new()?;
+                prompt_tmp.write_all(prompt.composed_markdown.as_bytes())?;
+
+                let agent_yaml = format!(
+                    "extend: default\nsystem_prompt_path: {}\n",
+                    prompt_tmp.path().display()
+                );
+                let mut agent_tmp = tempfile::NamedTempFile::new()?;
+                agent_tmp.write_all(agent_yaml.as_bytes())?;
+
+                app.args.push("--agent-file".to_string());
+                app.args.push(agent_tmp.path().display().to_string());
+                app.artifacts
+                    .push(SystemPromptArtifact::TempFile(prompt_tmp));
+                app.artifacts
+                    .push(SystemPromptArtifact::TempFile(agent_tmp));
+            }
+        }
+        Ok(app)
+    }
+
+    fn prompt_delivery(
+        &self,
+        _args: &[String],
         prompt: &str,
         non_interactive: bool,
-    ) -> Result<()> {
+    ) -> Result<PromptDelivery> {
         if non_interactive {
-            *stdin_seed = Some(prompt.to_string());
+            Ok(PromptDelivery::Stdin(prompt.to_string()))
         } else {
-            args.push("--prompt".to_string());
-            args.push(prompt.to_string());
+            Ok(PromptDelivery::AppendArgs(vec![
+                "--prompt".to_string(),
+                prompt.to_string(),
+            ]))
         }
-        Ok(())
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
@@ -937,6 +1134,39 @@ impl WrapperProfile for QwenWrapper {
         &["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
     }
 
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let (tmp_home, _overlay_path) =
+                    super::system_prompt::create_ephemeral_overlay_home(
+                        ".qwen",
+                        "QWEN.md",
+                        &prompt.composed_markdown,
+                    )?;
+                app.env.push((
+                    std::ffi::OsString::from("HOME"),
+                    tmp_home.path().as_os_str().to_owned(),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
+            }
+            SystemPromptMode::Replace => {
+                app.warnings.push(
+                    "Qwen does not support replace-mode system prompts; this flag was skipped"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(app)
+    }
+
     fn apply_sandbox(&self, args: &mut Vec<String>) -> Option<String> {
         if !has_flag(args, "--sandbox") {
             args.push("--sandbox".to_string());
@@ -944,20 +1174,20 @@ impl WrapperProfile for QwenWrapper {
         None
     }
 
-    fn apply_prompt_body(
+    fn prompt_delivery(
         &self,
-        args: &mut Vec<String>,
-        _stdin_seed: &mut Option<String>,
+        _args: &[String],
         prompt: &str,
         non_interactive: bool,
-    ) -> Result<()> {
-        args.push(if non_interactive {
-            "--prompt".to_string()
-        } else {
-            "--prompt-interactive".to_string()
-        });
-        args.push(prompt.to_string());
-        Ok(())
+    ) -> Result<PromptDelivery> {
+        Ok(PromptDelivery::AppendArgs(vec![
+            if non_interactive {
+                "--prompt".to_string()
+            } else {
+                "--prompt-interactive".to_string()
+            },
+            prompt.to_string(),
+        ]))
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
@@ -1019,6 +1249,40 @@ impl WrapperProfile for OpencodeWrapper {
         Ok(())
     }
 
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+
+                let config = serde_json::json!({
+                    "instructions": [tmp.path().display().to_string()]
+                });
+                app.env.push((
+                    std::ffi::OsString::from("OPENCODE_CONFIG_CONTENT"),
+                    std::ffi::OsString::from(config.to_string()),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+            SystemPromptMode::Replace => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                app.args.push("--system".to_string());
+                app.args.push(tmp.path().display().to_string());
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+        }
+        Ok(app)
+    }
+
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
         let entrypoint = "run";
         if args.first().is_none_or(|first| first != entrypoint) {
@@ -1026,8 +1290,8 @@ impl WrapperProfile for OpencodeWrapper {
         }
 
         // NOTE: prompt validation is deferred to validate_final_args() because
-        // the prompt may not be in args yet (e.g. --compose/--prompt-file
-        // pipelines call apply_prompt_body() separately).
+        // the prompt may not be in args yet (e.g. composition pipelines
+        // compute delivery after non-interactive setup).
         Ok(())
     }
 
@@ -1070,17 +1334,28 @@ impl WrapperProfile for OpencodeWrapper {
         }
     }
 
-    fn apply_prompt_body(
+    fn prompt_delivery(
         &self,
-        args: &mut Vec<String>,
-        stdin_seed: &mut Option<String>,
+        _args: &[String],
         prompt: &str,
         non_interactive: bool,
-    ) -> Result<()> {
+    ) -> Result<PromptDelivery> {
         if non_interactive {
-            // Non-interactive (`opencode run`): deliver via stdin to avoid
-            // exceeding OS argument-list limits on large composed prompts.
-            *stdin_seed = Some(prompt.to_string());
+            // OpenCode's `run` entrypoint accepts the task as a positional
+            // message. Recent CLI builds reject `--prompt` and have been
+            // unreliable when Claudine seeds stdin without a positional task,
+            // so keep non-interactive prompt delivery aligned with the native
+            // contract and fail early if the prompt is too large for argv.
+            const ARG_MAX_HEADROOM: usize = 768 * 1024; // conservative
+            if prompt.len() > ARG_MAX_HEADROOM {
+                bail!(
+                    "OpenCode requires non-interactive prompts as positional arguments, \
+                     but the composed prompt is too large ({} KB) for reliable argv delivery.\n\
+                    Reduce the prompt size or switch providers for this run.",
+                    prompt.len() / 1024
+                );
+            }
+            Ok(PromptDelivery::AppendArgs(vec![prompt.to_string()]))
         } else {
             // Interactive TUI: use --prompt flag which auto-submits the
             // message (OpenCode PR #4510).  This keeps stdin inherited so
@@ -1099,10 +1374,11 @@ impl WrapperProfile for OpencodeWrapper {
                     prompt.len() / 1024
                 );
             }
-            args.push("--prompt".to_string());
-            args.push(prompt.to_string());
+            Ok(PromptDelivery::AppendArgs(vec![
+                "--prompt".to_string(),
+                prompt.to_string(),
+            ]))
         }
-        Ok(())
     }
 
     fn validate_final_args(
@@ -1168,6 +1444,30 @@ impl WrapperProfile for GooseWrapper {
         Ok(())
     }
 
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::SystemPromptApplication;
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                app.args.push("--system".to_string());
+                app.args.push(prompt.composed_markdown.clone());
+            }
+            SystemPromptMode::Replace => {
+                app.warnings.push(
+                    "Goose does not support replace-mode system prompts; this flag was skipped"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(app)
+    }
+
     fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
         let entrypoint = "run";
         if args.first().is_none_or(|first| first != entrypoint) {
@@ -1175,8 +1475,8 @@ impl WrapperProfile for GooseWrapper {
         }
 
         // NOTE: prompt validation is deferred to validate_final_args() because
-        // the prompt may not be in args yet (e.g. --compose/--prompt-file
-        // pipelines call apply_prompt_body() separately).
+        // the prompt may not be in args yet (e.g. composition pipelines
+        // compute delivery after non-interactive setup).
         Ok(())
     }
 
@@ -1190,23 +1490,25 @@ impl WrapperProfile for GooseWrapper {
         None
     }
 
-    fn apply_prompt_body(
+    fn prompt_delivery(
         &self,
-        args: &mut Vec<String>,
-        _stdin_seed: &mut Option<String>,
+        args: &[String],
         prompt: &str,
         _non_interactive: bool,
-    ) -> Result<()> {
+    ) -> Result<PromptDelivery> {
         // Goose: insert -t <prompt> after "run" subcommand
         if let Some(pos) = args.iter().position(|a| a == "run") {
-            args.insert(pos + 1, prompt.to_string());
-            args.insert(pos + 1, "-t".to_string());
+            Ok(PromptDelivery::InsertArgs {
+                index: pos + 1,
+                args: vec!["-t".to_string(), prompt.to_string()],
+            })
         } else {
-            args.push("run".to_string());
-            args.push("-t".to_string());
-            args.push(prompt.to_string());
+            Ok(PromptDelivery::AppendArgs(vec![
+                "run".to_string(),
+                "-t".to_string(),
+                prompt.to_string(),
+            ]))
         }
-        Ok(())
     }
 
     fn validate_final_args(
@@ -1500,6 +1802,18 @@ mod tests {
         p.apply_non_interactive(&mut args).unwrap();
         let err = p.validate_final_args(&args, true, false).unwrap_err();
         assert!(err.to_string().contains("requires a prompt"));
+    }
+
+    #[test]
+    fn opencode_non_interactive_prompt_body_uses_positional_arg() {
+        let p = profile(Provider::OpenCode);
+        let mut args = vec!["run".to_string()];
+        let stdin_seed = p
+            .prompt_delivery(&args, "summarize staged files", true)
+            .unwrap()
+            .apply_to(&mut args);
+        assert_eq!(stdin_seed, None);
+        assert_eq!(args, vec!["run", "summarize staged files"]);
     }
 
     #[test]

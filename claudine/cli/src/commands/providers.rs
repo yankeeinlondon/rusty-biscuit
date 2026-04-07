@@ -7,15 +7,8 @@ use biscuit_terminal::utils::layout::{Alignment, Margin};
 use claudine::events::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider};
 use claudine::linking::{LinkableResource, capabilities_for};
 
+use crate::cli_utils::bool_indicator;
 use crate::log;
-
-fn bool_indicator(value: bool) -> TableCellContent {
-    if value {
-        "\u{2705}".into()
-    } else {
-        "\u{274C}".into()
-    }
-}
 
 fn supports_custom_resource(provider: Provider, resource: LinkableResource) -> bool {
     capabilities_for(provider)

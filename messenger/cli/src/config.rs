@@ -426,11 +426,25 @@ impl Config {
 
     /// Load config from a specific path, returning default if not found.
     pub fn load_from_path(path: &Path) -> Result<Self> {
+        tracing::debug!(path = %path.display(), "loading config");
         if !path.exists() {
+            tracing::debug!(path = %path.display(), "config file not found, using defaults");
             return Ok(Config::default());
         }
         let contents = std::fs::read_to_string(path)?;
-        let config: Config = serde_json::from_str(&contents)?;
+        let config: Config = match serde_json::from_str(&contents) {
+            Ok(config) => config,
+            Err(error) => {
+                tracing::warn!(path = %path.display(), error = %error, "failed to parse config");
+                return Err(error.into());
+            }
+        };
+        tracing::debug!(
+            path = %path.display(),
+            route_count = config.routes.len(),
+            has_default_route = config.default_route.is_some(),
+            "loaded config"
+        );
         Ok(config)
     }
 
@@ -442,11 +456,18 @@ impl Config {
 
     /// Save config to a specific path.
     pub fn save_to_path(&self, path: &Path) -> Result<()> {
+        tracing::debug!(
+            path = %path.display(),
+            route_count = self.routes.len(),
+            has_default_route = self.default_route.is_some(),
+            "saving config"
+        );
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let contents = serde_json::to_string_pretty(self)?;
         std::fs::write(path, contents)?;
+        tracing::debug!(path = %path.display(), "saved config");
         Ok(())
     }
 

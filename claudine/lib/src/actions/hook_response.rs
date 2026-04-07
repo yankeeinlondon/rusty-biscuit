@@ -24,10 +24,6 @@ pub struct HookResponse {
     /// Raw provider-specific response fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw: Option<Value>,
-
-    /// Optional protect context attached by protect-aware action execution.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub protect: Option<ProtectCallContext>,
 }
 
 /// Decisions a hook can communicate back to the agent.
@@ -48,19 +44,6 @@ pub enum HookDecision {
     Continue,
 }
 
-/// Context attached to responses when Protect influenced call action execution.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProtectCallContext {
-    /// Protect outcome label (snake_case string).
-    pub outcome: String,
-    /// Protect reason code or message.
-    pub reason: String,
-    /// Whether execution was short-circuited before running the call action.
-    #[serde(default)]
-    pub short_circuited: bool,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,7 +56,6 @@ mod tests {
         assert_eq!(response.updated_input, None);
         assert_eq!(response.additional_context, None);
         assert_eq!(response.raw, None);
-        assert_eq!(response.protect, None);
     }
 
     #[test]

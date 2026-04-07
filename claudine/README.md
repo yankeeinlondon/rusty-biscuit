@@ -87,12 +87,13 @@ The immediate benefits of wrapped execution are:
 
 Claudine's composition features let you use Markdown as a dynamic template for agentic CLI sessions, leveraging [Darkmatter](../darkmatter/README.md)'s composition pipeline (transclusion, interpolation, conditionals, shell commands).
 
-Two canonical commands:
+Three canonical commands:
 
 - **`claudine compose <file-ref>`** — compose a Markdown file and send it as a prompt (no file mutation)
-- **`claudine inline-compose <file-ref>`** — use the frontmatter `prompt` property to generate and replace the document body
+- **`claudine inline-compose <file-ref>`** — use the frontmatter `prompt` property to generate content and replace the document body, preserving frontmatter byte-for-byte
+- **`claudine sequence <file-ref>`** — run a serial sequence of composition steps declared in one document, with a shared shell approval cache and `FAIL_FAST` propagation on failure
 
-Both commands share a wrapper-grade execution pipeline with full support for environment setup, harness detection, structured streaming, and handler-driven recovery.
+All three commands share a wrapper-grade execution pipeline with full support for environment setup, system prompt resolution, harness detection, structured streaming, and handler-driven recovery.
 
 Provider selection uses explicit flags (`--claude`, `--codex`, etc.), frontmatter hints, config favorites, or interactive chooser. Use `-i` for interactive sessions, `--exclude` to filter providers.
 
@@ -177,25 +178,34 @@ MCP state is stored separately in `~/.claudine/mcp/`:
 
 | Package | Description |
 |---------|-------------|
-| [claudine (lib)](./lib/) | Event model, provider adapters, dispatch pipeline, structured stream parsing (6 providers), skill linking, MCP catalog/sync/runtime support |
-| [claudine-cli](./cli/) | Binary `claudine` — setup wizard, hook inspection, link management, MCP commands, provider wrapper with structured streaming, composition pipelines |
+| [claudine (lib)](./lib/) | Event model, provider adapters, dispatch pipeline, structured stream parsing (6 providers), shared-resource linking, MCP catalog/sync/runtime support, composition pipelines, harness validations, permissions policy engine |
+| [claudine-cli](./cli/) | Binary `claudine` — setup wizard, hook inspection, shared-resource commands (`skills`/`commands`/`agents`), MCP management, provider wrappers with structured streaming, and composition pipelines (`compose`/`inline-compose`/`sequence`) |
 
 ## Documentation
 
-- [Shared Event Model](./docs/shared-event-model.md) - Universal event abstraction (16 events)
-- [Agent Configuration](./docs/agent-configuration.md) - Per-provider setup details
-- [Skill Linking](./docs/skill-linking.md) - Cross-provider skill synchronization
-- [MCP Support](./docs/mcp-support.md) - Catalog storage, `claudine mcp`, provider support, and wrapper runtime behavior
-- [Log Reporting](./docs/log-reporting.md) - JSONL-to-SQLite reporting model and `claudine logs`
-- [Provider Hooks](./docs/hooks/) - Per-provider hook specifications
+See [`./docs/topics/`](./docs/topics/) for the full topic index. Key topics include:
+
+- [Unified Events](./docs/topics/unified-events.md) - Universal event abstraction (16 events)
+- [Skills](./docs/topics/skills.md), [Commands](./docs/topics/commands.md), [Agents](./docs/topics/agents.md) - Cross-provider shared-resource synchronization
+- [MCP Catalog](./docs/topics/mcp-catalog.md) and [MCP Mode](./docs/topics/mcp-mode.md) - Catalog storage, `claudine mcp`, provider support, wrapper runtime behavior
+- [Composition](./docs/topics/composition.md) - `compose`, `inline-compose`, `sequence` commands and harness
+- [System Prompt](./docs/topics/system-prompt.md) - Discovery and CLI switch resolution
+- [Pre-Flight Checks](./docs/topics/pre-flight-checks.md) and [Validations and Handlers](./docs/topics/validations-and-handlers.md) - Harness semantics
+- [Policy Engine](./docs/topics/policy-engine.md) and [Protect Service](./docs/topics/protect-service.md) - Permissions and runtime safety
+- [Log Reporting](./docs/topics/log-reporting.md) and [Traces and Logging](./docs/topics/traces-and-logging.md) - JSONL-to-SQLite reporting and diagnostics
+- [Wrapped Execution Switches](./docs/topics/wrapped-execution-switches.md) - CLI switch translation per provider
+- [Non-Interactive Sessions](./docs/topics/non-interactive-sessions.md) and [Mixing Events into Non-Interactive Sessions](./docs/topics/mixing-events-into-non-interactive-sessions.md)
+- [Repo Isolation](./docs/topics/repo-isolation.md) - Shadow HOME behavior for `--repo`
+- [Stream Parsing](./docs/topics/stream-parsing.md) - Provider-native structured stream handling
 
 ## Monorepo Dependencies
 
 Uses the following libraries from this monorepo:
 
+- `biscuit-file` - File reference resolution (`@` magic paths) for composition commands
 - `biscuit-hash` - xxHash content hashing for skill deduplication
 - `biscuit-speaks` - Text-to-speech for speak actions
-- `biscuit-terminal` - Terminal detection and rich output (tables, prose)
-- `darkmatter` - Markdown rendering for `about` command
+- `biscuit-terminal` - Terminal detection and rich output (tables, prose, OSC8 hyperlinks)
+- `darkmatter` - Composition pipeline (transclusion, interpolation, `::shell`) and Markdown-to-terminal rendering
 - `playa` - Sound effect playback (88 embedded effects)
 - `sniff` - System and environment detection (OS, hardware, git, repo context)

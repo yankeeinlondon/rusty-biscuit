@@ -11,7 +11,6 @@ use crate::attachment::AttachmentSource;
 use crate::capabilities::CapabilitySet;
 use crate::dispatch::Dispatch;
 use crate::error::MessengerError;
-use crate::message::MessageBody;
 use crate::prepared::PreparedMessage;
 use crate::receipt::{MessageRef, ProviderKind, SendReceipt};
 use crate::target::Target;
@@ -233,16 +232,18 @@ impl super::Provider for DiscordProvider {
     }
 
     fn capabilities(&self) -> CapabilitySet {
-        CapabilitySet {
+        const DISCORD_CAPABILITIES: CapabilitySet = CapabilitySet {
             supports_markdown_rendering: true,
             supports_reply: true,
             supports_attachments: true,
             supports_location: true,
             supports_silent_delivery: false,
             supports_link_preview_control: false,
-        }
+        };
+        DISCORD_CAPABILITIES
     }
 
+    #[tracing::instrument(skip_all, fields(provider = "discord", channel = tracing::field::Empty))]
     async fn send_prepared(
         &self,
         dispatch: &Dispatch,
@@ -256,18 +257,23 @@ impl super::Provider for DiscordProvider {
                 ));
             }
         };
+        tracing::Span::current().record("channel", tracing::field::display(channel_id));
 
         // Render the message body (with location text fallback)
-        let content = match message.body() {
-            Some(MessageBody::Plain(_)) | Some(MessageBody::Markdown(_)) => {
-                message.render_body_with_location(ProviderKind::Discord)
-            }
-            None if message.location().is_some() => {
-                message.render_body_with_location(ProviderKind::Discord)
-            }
-            None => String::new(),
-        };
+        let content = message.render_body_with_location(ProviderKind::Discord);
         let attachments = Self::build_attachments(message)?;
+        let attachment_kinds: Vec<_> = message
+            .attachments()
+            .iter()
+            .map(|attachment| &attachment.kind)
+            .collect();
+        tracing::debug!(
+            has_reply = dispatch.reply_to.is_some(),
+            content_len = content.len(),
+            attachment_count = attachments.len(),
+            "sending Discord message"
+        );
+        tracing::trace!(attachment_kinds = ?attachment_kinds, "built Discord attachments");
 
         // Build the message request
         let mut req = self.client.create_message(channel_id);
@@ -285,18 +291,16 @@ impl super::Provider for DiscordProvider {
             req = req.reply(msg_id);
         }
         // Execute the request
-        let response = req.await.map_err(|e| MessengerError::Transport {
-            provider: ProviderKind::Discord,
-            message: e.to_string(),
+        let response = req.await.map_err(|e| {
+            tracing::warn!(error = %e, "Discord request failed");
+            ProviderKind::Discord.transport_error(e)
         })?;
 
-        let msg = response
-            .model()
-            .await
-            .map_err(|e| MessengerError::Transport {
-                provider: ProviderKind::Discord,
-                message: e.to_string(),
-            })?;
+        let msg = response.model().await.map_err(|e| {
+            tracing::warn!(error = %e, "Discord response decode failed");
+            ProviderKind::Discord.transport_error(e)
+        })?;
+        tracing::debug!(raw_id = %msg.id, "Discord message sent");
 
         Ok(SendReceipt {
             provider: ProviderKind::Discord,

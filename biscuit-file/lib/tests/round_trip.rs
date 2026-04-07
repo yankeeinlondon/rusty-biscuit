@@ -89,7 +89,10 @@ fn json_yaml_json_round_trip() {
     let roundtrip: serde_json::Value =
         serde_yaml_ng::from_str(&yaml_str).expect("YAML string -> JSON");
 
-    assert_eq!(value, roundtrip, "JSON -> YAML -> JSON round trip should preserve values");
+    assert_eq!(
+        value, roundtrip,
+        "JSON -> YAML -> JSON round trip should preserve values"
+    );
 }
 
 #[test]
@@ -107,5 +110,8 @@ fn json5_json_round_trip() {
     let roundtrip: serde_json::Value =
         serde_json::from_str(&json_str).expect("parse roundtrip JSON");
 
-    assert_eq!(json_value, roundtrip, "JSON5 -> JSON -> JSON round trip should preserve values");
+    assert_eq!(
+        json_value, roundtrip,
+        "JSON5 -> JSON -> JSON round trip should preserve values"
+    );
 }
