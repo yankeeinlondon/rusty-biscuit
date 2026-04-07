@@ -1,64 +1,72 @@
 # System Prompt Handling
 
-Claudine provides a unified `--system-prompt` flag across all entry points (`wrap`, `compose`, `inline-compose`) that resolves a user-supplied value and translates it into provider-specific CLI arguments. The system also models each agent's native system prompt capabilities for harness integration and provider selection.
+Claudine provides unified `--append-system-prompt` (`--asp`) and `--replace-system-prompt` (`--rsp`) flags across all entry points (`wrap`, `compose`, `inline-compose`) as well as standard `system-prompt.md` file discovery.
 
 ## Entry Points
 
-All three command surfaces accept `-s` / `--system-prompt`:
+All three command surfaces accept the new flags:
 
-| Command                           | Clap definition                   | Flows into                                  |
-|-----------------------------------|-----------------------------------|---------------------------------------------|
-| `claudine wrap <provider> [args]` | `WrapperArgs.system_prompt`       | `run_wrapper()` in `wrap/mod.rs`            |
-| `claudine compose <file>`         | `ComposeArgs.system_prompt`       | `CompositionExecutionRequest.system_prompt` |
-| `claudine inline-compose <file>`  | `InlineComposeArgs.system_prompt` | `CompositionExecutionRequest.system_prompt` |
+| Command                           | Clap definition                                   | Internal type                          |
+|-----------------------------------|-----------------------------------------------------|---------------------------------------|
+| `claudine wrap <provider> [args]` | `WrapperArgs.append_system_prompt` / `replace_system_prompt` | `SystemPromptArgs`                          |
+| `claudine compose <file>`         | `SharedComposeArgs.append_system_prompt` / `replace_system_prompt` | `SystemPromptArgs`                          |
+| `claudine inline-compose <file>`  | `SharedComposeArgs.append_system_prompt` / `replace_system_prompt` | `SystemPromptArgs`                          |
 
-The value is always `Option<String>` — either a literal prompt string or a file path.
+Both flags accept file paths and absolute paths only. They are mutually exclusive.
 
-## Resolution
+ Short aliases: `--asp` and `--rsp`.
 
-`resolve_system_prompt()` (`wrap/mod.rs:3024-3031`) handles the dual-mode input:
+## Resolution Pipeline
 
-```rust
-resolve_system_prompt(prompt_or_file: &str) -> Result<String>
-```
+The resolution pipeline (`claudine/lib/src/system_prompt/`) handles file discovery and Darkmatter composition:
 
-1. If `prompt_or_file` is an existing file path → reads and returns the file contents
-2. Otherwise → returns the string as-is (literal prompt)
+1. **LaunchContext** — detects git root, package root, and package-area root from the CWD
+2. **resolve_system_prompt_source()** — selects the source file based on CLI args or standard file discovery
+3. **prepare_system_prompt()** — composes through Darkmatter, handles empty-body disable
+4. **EffectiveSystemPrompt** — the final result: `None`, `Disabled`, or `Ready(PreparedSystemPrompt)`
 
-This function is called identically in both the wrapper path (`wrap/mod.rs:806`) and the composition path (`wrap/composition.rs:369`).
+### Standard File Discovery
+
+When no explicit flags are given, Claudine searches for `system-prompt.md` in priority order:
+
+1. Package root (inside a Cargo workspace package)
+2. Package-area root
+3. Repository root
+4. User home (`~/.claudine/system-prompt.md`)
 
 ## Provider-Specific Application
-
-The resolved prompt is applied via the `WrapperProfile` trait method:
+Each provider translates the prepared system prompt into provider-specific CLI arguments and env vars via the `apply_system_prompt()` on the `WrapperProfile`:
 
 ```rust
-fn apply_system_prompt(&self, args: &mut Vec<String>, prompt: &str) -> Option<String>
+fn apply_system_prompt(
+    &self,
+    prompt: &PreparedSystemPrompt,
+    interactive: bool,
+    cwd: &Path,
+) -> Result<SystemPromptApplication>
 ```
 
-The default implementation returns a warning string indicating the provider does not support `--system-prompt`. Providers that support it override the method and return `None` (no warning).
+The default implementation returns a warning. Providers that support it override the method.
 
-### Provider Implementations
+### Provider Support Matrix
 
-| Provider    | Supported       | CLI mapping                | Profile location     |
-|-------------|-----------------|----------------------------|----------------------|
-| Claude Code | Yes             | `--system-prompt <prompt>` | `profile.rs:387-391` |
-| Codex       | Default (warns) | —                          | trait default        |
-| Gemini CLI  | Default (warns) | —                          | trait default        |
-| Goose       | Default (warns) | —                          | trait default        |
-| Kimi Code   | Default (warns) | —                          | trait default        |
-| OpenCode    | Default (warns) | —                          | trait default        |
-| Qwen CLI    | Default (warns) | —                          | trait default        |
-| Roo Code    | Default (warns) | —                          | trait default        |
+| Provider    | Append | Replace | Strategy                                                              |
+|-------------|--------|---------|----------------------------------------------------------------------|
+| Claude Code | Yes    | Yes     | Native CLI flags (`--append-system-prompt`, `--system-prompt`)             |
+| Codex       | Yes    | Yes     | Append: ephemeral home + `AGENTS.override.md`. Replace: `-c model_instructions_file` |
+| Gemini CLI  | Yes    | Yes     | Append: ephemeral home + `GEMINI.md`. Replace: `GEMINI_SYSTEM_MD` env |
+| Goose       | Yes    | No      | Append: `--system`. Replace: warn + skip                             |
+| Kimi Code   | No     | Yes     | Replace: temp agent YAML + `--agent-file`. Append: warn + skip     |
+| OpenCode    | Yes    | Yes     | Append: temp file + `OPENCODE_CONFIG_CONTENT`. Replace: `--system` |
+| Qwen CLI   | Yes    | No      | Append: ephemeral home + `QWEN.md`. Replace: warn + skip                |
 
-Currently only Claude Code has an `apply_system_prompt` override. All other providers fall through to the default, which emits a warning and skips the flag.
+### Ephemeral Overlay Home
+For providers that need HOME override (Codex, Gemini, Qwen append), Claudine creates a temporary home directory with the provider config overlay file. If the user already has an overlay file (e.g. `AGENTS.override.md`), its existing content is preserved and the Claudine prompt is appended after it.
 
-When a warning is generated:
-
-- In `wrap` mode: the warning is pushed to `deferred_warnings` and printed after execution header output
-- In `compose` / `inline-compose` mode: the warning is logged via `log::warn()` unless `--quiet` or `--silent` is set
+### Artifact Lifetime
+Temp files and temp directories created during system prompt application must kept alive until the child process exits. Rust's RAII cleanup guarantees they are dropped after `child.wait()` completes.
 
 ## Agent Capability Model
-
 Each agent descriptor in `claudine/lib/src/agents/` declares a `SystemPromptCapabilities` struct:
 
 ```rust
@@ -70,93 +78,13 @@ pub struct SystemPromptCapabilities {
 }
 ```
 
-### Field Semantics
-
-- **`supplement_sources`** — mechanisms that _append_ to the system prompt (e.g. `--append-system-prompt`, `CLAUDE.md hierarchy`, `AGENTS.md`)
-- **`full_replacement_supported`** — whether the provider supports completely replacing the default system prompt
-- **`replacement_mechanisms`** — CLI flags or config keys for full replacement (e.g. `--system-prompt`, `model_instructions_file`)
-- **`memory_files`** — files the agent reads as part of its system prompt (e.g. `~/.claude/CLAUDE.md`, `AGENTS.md`)
-
-### Per-Agent Capabilities
-
-| Agent       | Supplement sources                                                                    | Full replacement | Replacement mechanisms                    | Memory files                                                                       |
-|-------------|---------------------------------------------------------------------------------------|------------------|-------------------------------------------|------------------------------------------------------------------------------------|
-| Claude Code | `--append-system-prompt`, `--append-system-prompt-file`, `CLAUDE.md hierarchy`        | Yes              | `--system-prompt`, `--system-prompt-file` | `~/.claude/CLAUDE.md`, `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/CLAUDE.local.md` |
-| Codex       | `AGENTS.md`, `AGENTS.override.md`, `developer_instructions`                           | Yes              | `model_instructions_file`                 | `~/.codex/AGENTS.override.md`, `~/.codex/AGENTS.md`, `AGENTS.md`                   |
-| Gemini CLI  | `GEMINI.md hierarchy`, `/memory`, `@file imports`                                     | Yes              | `GEMINI_SYSTEM_MD`                        | `~/.gemini/GEMINI.md`, `.gemini/GEMINI.md`, `GEMINI.md`                            |
-| Goose       | `.goosehints`, `goose run --system`, `GOOSE_MOIM_MESSAGE_*`, `recipe instructions`    | No               | —                                         | `.goosehints`                                                                      |
-| Kimi Code   | `AGENTS.md via /init`                                                                 | Yes              | `--agent-file with system_prompt_path`    | `AGENTS.md`                                                                        |
-| OpenCode    | `AGENTS.md`                                                                           | No               | —                                         | `AGENTS.md`                                                                        |
-| Qwen CLI    | `QWEN.md hierarchy`, `@path markdown imports`, `/memory refresh`                      | No               | —                                         | `~/.qwen/QWEN.md`, `QWEN.md`                                                       |
-| Roo Code    | `rules directories`, `.roorules/.roorules-{mode}`, `AGENTS.md/AGENT.md`, `.rooignore` | Yes              | `.roo/system-prompt-{mode-slug}`          | `AGENTS.md`, `AGENT.md`                                                            |
-
 ## Harness Integration
-
 The system prompt capability model is used at runtime by the harness to locate provider-specific memory files.
-
 ### Memory File Discovery
-
-`find_wrapper_harness_source()` (`wrap/mod.rs:1441-1461`) searches for the first existing non-home memory file from the agent's `system_prompt.memory_files` list:
+`find_wrapper_harness_source()` searches for the first existing non-home memory file from the agent's `system_prompt.memory_files` list:
 
 1. Maps the provider to its `AgentId`
 2. Reads `agent.capabilities().runtime.system_prompt.memory_files`
 3. Filters out home-relative paths (those starting with `~`)
 4. Searches from the repo root (or CWD) for the first file that exists on disk
 
-The discovered file is used as the harness source document — its frontmatter may contain handler definitions that drive the harness loop.
-
-### Composition Harness Path
-
-For `compose` and `inline-compose`, the harness uses `materialized_harness_prompt_from_prepared()` (`wrap/mod.rs:1387-1401`) which extracts:
-
-- The composed prompt text
-- The effective frontmatter (single source of truth)
-- The inline closure plan (if inline mode)
-
-These are used to construct a `MaterializedHarnessPrompt` that drives handler-based recovery and post-execution closure.
-
-## Inline Composition and Guardrails
-
-In inline composition mode, the system prompt is separate from the composed prompt. The composed prompt (derived from frontmatter `prompt` property) gets guardrails appended automatically:
-
-1. The `prompt` frontmatter property is extracted and composed through Darkmatter
-2. Default guardrails from `.claudine/inline-compose.md` (or built-in defaults) are appended
-3. The guardrails instruct the agent to return body content only, without frontmatter
-
-Default guardrails (`composition/guardrails.rs`):
-
-```markdown
-> **IMPORTANT:**
->
-> - Return the replacement Markdown body content only
-> - Do not include frontmatter delimiters or frontmatter content
-> - Do not edit the source file directly
-```
-
-Users can customize guardrails by editing `.claudine/inline-compose.md` in the repo root. Claudine creates this file with the defaults if it doesn't exist.
-
-The `--system-prompt` flag is applied _in addition to_ these guardrails — it is passed to the provider as a separate system prompt, not merged into the composed prompt.
-
-## Closure: Frontmatter Preservation
-
-After inline composition, the closure pipeline (`composition/closure.rs`) ensures the original frontmatter is never lost, regardless of what the provider returns:
-
-1. `extract_replacement_body()` strips any accidental frontmatter fences from provider output
-2. `apply_inline_closure()` validates the body is non-empty and differs from the original
-3. `rewrite_inline_document()` reconstructs the file using the _original_ frontmatter with only `last_updated` changed
-
-This means system prompt configuration stored in document frontmatter (e.g. `agent`, `prompt`, custom properties) survives provider execution intact.
-
-## Key Source Files
-
-| File                                   | Role                                                                      |
-|----------------------------------------|---------------------------------------------------------------------------|
-| `cli/src/commands/wrap/mod.rs`         | `WrapperArgs`, `resolve_system_prompt()`, `find_wrapper_harness_source()` |
-| `cli/src/commands/wrap/profile.rs`     | `WrapperProfile` trait with `apply_system_prompt()`                       |
-| `cli/src/commands/wrap/composition.rs` | Composition execution pipeline (system prompt application)                |
-| `cli/src/commands/compose.rs`          | `ComposeArgs`, `InlineComposeArgs` (clap definitions)                     |
-| `lib/src/agents/model.rs`              | `SystemPromptCapabilities` struct                                         |
-| `lib/src/agents/*.rs`                  | Per-agent capability declarations                                         |
-| `lib/src/composition/prepare.rs`       | Prompt preparation (direct and inline)                                    |
-| `lib/src/composition/closure.rs`       | Post-execution frontmatter preservation                                   |
-| `lib/src/composition/guardrails.rs`    | Inline composition guardrail loading                                      |
