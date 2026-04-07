@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 
-use biscuit_speaks::TtsProvider;
 use serde::{Deserialize, Serialize};
 
 use crate::actions::HookAction;
@@ -72,8 +71,10 @@ pub enum VoiceSelection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TtsConfigSettings {
-    /// Which TTS provider to use (e.g., host-based or cloud-based).
-    pub provider: TtsProvider,
+    /// Which TTS provider to use (e.g., "say", "espeak", "elevenlabs").
+    ///
+    /// Resolved to a `TtsProvider` variant at runtime in the dispatch runner.
+    pub provider: String,
 
     /// Optional voice selection (single ID or gendered aliases).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,9 +143,6 @@ pub enum MessengerProviderConfig {
     Discord {
         /// Discord channel ID to send messages to.
         channel_id: String,
-        /// Optional inline bot token (prefer env var).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        bot_token: Option<String>,
         /// Environment variable holding the bot token.
         #[serde(default = "default_discord_bot_token")]
         bot_token_env: String,
@@ -153,9 +151,6 @@ pub enum MessengerProviderConfig {
     Slack {
         /// Slack channel ID to send messages to.
         channel_id: String,
-        /// Optional inline bot token (prefer env var).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        bot_token: Option<String>,
         /// Environment variable holding the bot token.
         #[serde(default = "default_slack_bot_token")]
         bot_token_env: String,
@@ -164,15 +159,9 @@ pub enum MessengerProviderConfig {
     Signal {
         /// Recipient phone number or group ID.
         recipient: String,
-        /// Optional inline RPC URL (can use env var instead).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        rpc_url: Option<String>,
         /// Environment variable holding the RPC URL.
         #[serde(default = "default_signal_rpc_url")]
         rpc_url_env: String,
-        /// Optional account identifier.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        account: Option<String>,
         /// Environment variable holding the account.
         #[serde(default = "default_signal_account")]
         account_env: String,
@@ -181,15 +170,9 @@ pub enum MessengerProviderConfig {
     Whatsapp {
         /// Recipient phone number.
         recipient: String,
-        /// Optional inline access token (prefer env var).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        access_token: Option<String>,
         /// Environment variable holding the access token.
         #[serde(default = "default_whatsapp_access_token")]
         access_token_env: String,
-        /// Optional inline phone number ID (can use env var instead).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        phone_number_id: Option<String>,
         /// Environment variable holding the phone number ID.
         #[serde(default = "default_whatsapp_phone_number_id")]
         phone_number_id_env: String,
@@ -265,8 +248,7 @@ pub struct ClaudineConfig {
     pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
 
     /// Preferred agent provider for lazy composition operations.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preferred_agent: Option<Provider>,
+    pub preferred_agent: Provider,
 
     /// The canonical provider for this scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -289,7 +271,7 @@ impl Default for ClaudineConfig {
             logging: false,
             protect: ProtectConfig::default(),
             actions: HashMap::new(),
-            preferred_agent: None,
+            preferred_agent: Provider::Claude,
             canonical_provider: None,
             default_sounds: DefaultSounds::default(),
         }
@@ -353,28 +335,32 @@ mod tests {
     #[test]
     fn tts_boolean_true_deserializes() {
         let config: ClaudineConfig =
-            serde_json::from_value(serde_json::json!({ "tts": true })).unwrap();
+            serde_json::from_value(serde_json::json!({ "preferred_agent": "claude", "tts": true }))
+                .unwrap();
         assert!(matches!(config.tts, TtsValue::Boolean(true)));
     }
 
     #[test]
     fn tts_boolean_false_deserializes() {
         let config: ClaudineConfig =
-            serde_json::from_value(serde_json::json!({ "tts": false })).unwrap();
+            serde_json::from_value(serde_json::json!({ "preferred_agent": "claude", "tts": false }))
+                .unwrap();
         assert!(matches!(config.tts, TtsValue::Boolean(false)));
     }
 
     #[test]
     fn tts_config_settings_deserializes() {
         let json = serde_json::json!({
+            "preferred_agent": "claude",
             "tts": {
-                "provider": { "host": "say" },
+                "provider": "say",
                 "gender": "male"
             }
         });
         let config: ClaudineConfig = serde_json::from_value(json).unwrap();
         match &config.tts {
             TtsValue::Config(settings) => {
+                assert_eq!(settings.provider, "say");
                 assert_eq!(settings.gender, Gender::Male);
                 assert!(settings.voice.is_none());
             }
@@ -385,8 +371,9 @@ mod tests {
     #[test]
     fn tts_config_with_single_voice() {
         let json = serde_json::json!({
+            "preferred_agent": "claude",
             "tts": {
-                "provider": { "host": "say" },
+                "provider": "espeak",
                 "voice": "Samantha"
             }
         });
@@ -403,8 +390,9 @@ mod tests {
     #[test]
     fn tts_config_with_gendered_voice() {
         let json = serde_json::json!({
+            "preferred_agent": "claude",
             "tts": {
-                "provider": { "host": "say" },
+                "provider": "elevenlabs",
                 "voice": { "male": "Alex", "female": "Samantha" }
             }
         });
@@ -427,21 +415,26 @@ mod tests {
 
     #[test]
     fn protect_boolean_true_deserializes() {
-        let config: ClaudineConfig =
-            serde_json::from_value(serde_json::json!({ "protect": true })).unwrap();
+        let config: ClaudineConfig = serde_json::from_value(
+            serde_json::json!({ "preferred_agent": "claude", "protect": true }),
+        )
+        .unwrap();
         assert!(config.protect.enabled);
     }
 
     #[test]
     fn protect_boolean_false_deserializes() {
-        let config: ClaudineConfig =
-            serde_json::from_value(serde_json::json!({ "protect": false })).unwrap();
+        let config: ClaudineConfig = serde_json::from_value(
+            serde_json::json!({ "preferred_agent": "claude", "protect": false }),
+        )
+        .unwrap();
         assert!(!config.protect.enabled);
     }
 
     #[test]
     fn protect_expanded_form_deserializes() {
         let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
             "protect": {
                 "enabled": true,
                 "rules": { "git_destructive": false }
@@ -458,6 +451,7 @@ mod tests {
     #[test]
     fn actions_map_snake_case_keys() {
         let json = serde_json::json!({
+            "preferred_agent": "claude",
             "actions": {
                 "session_start": [
                     { "type": "sound_effect", "name": "doorbell" }
@@ -498,6 +492,7 @@ mod tests {
     #[test]
     fn messenger_discord_deserializes_with_env_default() {
         let json = serde_json::json!({
+            "preferred_agent": "claude",
             "messenger": {
                 "active_config": "work",
                 "configurations": {
@@ -527,6 +522,7 @@ mod tests {
     #[test]
     fn messenger_slack_deserializes() {
         let json = serde_json::json!({
+            "preferred_agent": "claude",
             "messenger": {
                 "configurations": {
                     "alerts": {
@@ -555,6 +551,7 @@ mod tests {
     #[test]
     fn messenger_signal_deserializes_with_defaults() {
         let json = serde_json::json!({
+            "preferred_agent": "claude",
             "messenger": {
                 "configurations": {
                     "personal": {
@@ -584,6 +581,7 @@ mod tests {
     #[test]
     fn messenger_whatsapp_deserializes_with_defaults() {
         let json = serde_json::json!({
+            "preferred_agent": "claude",
             "messenger": {
                 "configurations": {
                     "biz": {
@@ -613,13 +611,13 @@ mod tests {
     #[test]
     fn messenger_round_trip() {
         let json = serde_json::json!({
+            "preferred_agent": "claude",
             "messenger": {
                 "active_config": "main",
                 "configurations": {
                     "main": {
                         "provider": "slack",
-                        "channel_id": "C999",
-                        "bot_token": "xoxb-test"
+                        "channel_id": "C999"
                     }
                 }
             }
@@ -638,6 +636,7 @@ mod tests {
     #[test]
     fn default_sounds_deserializes() {
         let json = serde_json::json!({
+            "preferred_agent": "claude",
             "default_sounds": {
                 "success": "doorbell",
                 "error": "space-alarm"
@@ -652,6 +651,7 @@ mod tests {
     #[test]
     fn default_sounds_all_fields() {
         let json = serde_json::json!({
+            "preferred_agent": "claude",
             "default_sounds": {
                 "success": "doorbell",
                 "attention": "bong",
@@ -672,12 +672,12 @@ mod tests {
     fn preferred_agent_deserializes() {
         let json = serde_json::json!({ "preferred_agent": "claude" });
         let config: ClaudineConfig = serde_json::from_value(json).unwrap();
-        assert_eq!(config.preferred_agent, Some(Provider::Claude));
+        assert_eq!(config.preferred_agent, Provider::Claude);
     }
 
     #[test]
     fn canonical_provider_deserializes() {
-        let json = serde_json::json!({ "canonical_provider": "goose" });
+        let json = serde_json::json!({ "preferred_agent": "claude", "canonical_provider": "goose" });
         let config: ClaudineConfig = serde_json::from_value(json).unwrap();
         assert_eq!(config.canonical_provider, Some(Provider::Goose));
     }
@@ -687,26 +687,30 @@ mod tests {
     // -------------------------------------------------------------------------
 
     #[test]
-    fn empty_object_deserializes_with_defaults() {
-        let config: ClaudineConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+    fn minimal_config_deserializes_with_defaults() {
+        let config: ClaudineConfig =
+            serde_json::from_value(serde_json::json!({ "preferred_agent": "claude" })).unwrap();
         assert!(matches!(config.tts, TtsValue::Boolean(false)));
         assert!(!config.logging);
         assert!(config.protect.enabled);
         assert!(config.actions.is_empty());
         assert!(config.messenger.is_none());
-        assert!(config.preferred_agent.is_none());
+        assert_eq!(config.preferred_agent, Provider::Claude);
         assert!(config.canonical_provider.is_none());
     }
 
     #[test]
-    fn default_impl_matches_empty_deserialization() {
+    fn default_impl_matches_minimal_deserialization() {
         let from_default = ClaudineConfig::default();
-        let from_json: ClaudineConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        let from_json: ClaudineConfig =
+            serde_json::from_value(serde_json::json!({ "preferred_agent": "claude" })).unwrap();
         // Both should have TtsValue::Boolean(false)
         assert!(matches!(from_default.tts, TtsValue::Boolean(false)));
         assert!(matches!(from_json.tts, TtsValue::Boolean(false)));
         assert_eq!(from_default.logging, from_json.logging);
         assert_eq!(from_default.protect.enabled, from_json.protect.enabled);
+        assert_eq!(from_default.preferred_agent, Provider::Claude);
+        assert_eq!(from_json.preferred_agent, Provider::Claude);
     }
 
     // -------------------------------------------------------------------------
@@ -758,6 +762,7 @@ mod tests {
     #[test]
     fn validate_rejects_missing_active_messenger_config() {
         let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
             "messenger": {
                 "active_config": "nonexistent",
                 "configurations": {}
@@ -773,6 +778,7 @@ mod tests {
     #[test]
     fn validate_accepts_valid_messenger_active_config() {
         let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
             "messenger": {
                 "active_config": "main",
                 "configurations": {
@@ -790,6 +796,7 @@ mod tests {
     #[test]
     fn validate_accepts_messenger_with_no_active_config() {
         let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
             "messenger": {
                 "configurations": {
                     "route1": {
@@ -806,6 +813,7 @@ mod tests {
     #[test]
     fn validate_rejects_invalid_protect_config() {
         let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
             "protect": {
                 "rules": {
                     "git_destructive": {
@@ -822,6 +830,7 @@ mod tests {
     #[test]
     fn validate_rejects_unknown_success_sound() {
         let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
             "default_sounds": {
                 "success": "this-sound-does-not-exist-xyz-abc"
             }
@@ -839,6 +848,7 @@ mod tests {
     #[test]
     fn validate_accepts_known_sound_names() {
         let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
             "default_sounds": {
                 "success": "doorbell",
                 "attention": "bong",
@@ -888,7 +898,7 @@ mod tests {
         assert!(back.validate().is_ok());
         assert!(back.logging);
         assert!(back.protect.enabled);
-        assert_eq!(back.preferred_agent, Some(Provider::Claude));
+        assert_eq!(back.preferred_agent, Provider::Claude);
         assert_eq!(back.canonical_provider, Some(Provider::Gemini));
     }
 }
