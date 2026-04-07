@@ -4,12 +4,12 @@ use super::catalog::{ProtectPlatform, RuleGroup, ScanSurface};
 use super::config::ProtectConfig;
 use super::decision::{ProtectDecision, ProtectMatch};
 use super::matcher::CompiledCatalog;
-use super::path::{SensitivePathChecker, all_targets_allowed, extract_target_paths};
+use super::path::{SensitivePathChecker, all_targets_allowed, extract_target_paths, normalize_path};
 
 /// Evaluation request for the protect service.
 pub enum ProtectRequest<'a> {
     BashCommand { command: &'a str },
-    WritePath { path: &'a str },
+    WritePath { path: &'a str, cwd: Option<&'a str> },
     McpResponse { payload: &'a str },
 }
 
@@ -42,7 +42,7 @@ impl ProtectService {
 
         match request {
             ProtectRequest::BashCommand { command } => self.evaluate_bash_command(command),
-            ProtectRequest::WritePath { path } => self.evaluate_write_path(path),
+            ProtectRequest::WritePath { path, cwd } => self.evaluate_write_path(path, *cwd),
             ProtectRequest::McpResponse { payload } => self.evaluate_mcp_response(payload),
         }
     }
@@ -72,19 +72,43 @@ impl ProtectService {
         ProtectDecision::allow()
     }
 
-    fn evaluate_write_path(&self, path: &str) -> ProtectDecision {
+    fn evaluate_write_path(&self, path: &str, cwd: Option<&str>) -> ProtectDecision {
         if !self.config.is_group_enabled(RuleGroup::SensitivePaths) {
             return ProtectDecision::allow();
         }
 
-        if self.path_checker.is_sensitive(path) {
+        // Resolve relative paths against cwd
+        let resolved = match cwd {
+            Some(cwd) if !path.starts_with('/') && !path.starts_with('~') => {
+                normalize_path(&format!("{cwd}/{path}"))
+            }
+            _ => normalize_path(path),
+        };
+        let resolved_str = resolved.to_string_lossy();
+
+        if self.path_checker.is_sensitive(&resolved_str) {
+            // Check allow_paths suppression
+            if let Some(allow_paths) = self.config.get_allow_paths(RuleGroup::SensitivePaths) {
+                if allow_paths.iter().any(|allowed| {
+                    if allowed.starts_with('/') {
+                        // Absolute allow path: exact match or prefix match
+                        resolved_str == *allowed
+                            || resolved_str.starts_with(&format!("{allowed}/"))
+                    } else {
+                        // Relative allow path: match any path component
+                        resolved_str.split('/').any(|part| part == allowed.as_str())
+                    }
+                }) {
+                    return ProtectDecision::allow();
+                }
+            }
             return ProtectDecision::blocked(ProtectMatch {
                 group: RuleGroup::SensitivePaths,
                 rule_id: "sensitive_prefix".to_string(),
                 pattern: String::new(),
-                matched_text: path.to_string(),
+                matched_text: resolved_str.to_string(),
                 surface: ScanSurface::WritePath,
-                target_path: Some(path.to_string()),
+                target_path: Some(resolved_str.to_string()),
                 config_key: "protect.rules.sensitive_paths".to_string(),
             });
         }
@@ -156,7 +180,10 @@ mod tests {
         let service = default_service();
         let home = dirs::home_dir().unwrap();
         let ssh_path = format!("{}/.ssh/config", home.display());
-        let decision = service.evaluate(&ProtectRequest::WritePath { path: &ssh_path });
+        let decision = service.evaluate(&ProtectRequest::WritePath {
+            path: &ssh_path,
+            cwd: None,
+        });
         assert!(decision.is_blocked());
         assert_eq!(decision.blocked.unwrap().group, RuleGroup::SensitivePaths);
     }
@@ -164,7 +191,10 @@ mod tests {
     #[test]
     fn write_inside_repo_is_allowed() {
         let service = default_service();
-        let decision = service.evaluate(&ProtectRequest::WritePath { path: "src/main.rs" });
+        let decision = service.evaluate(&ProtectRequest::WritePath {
+            path: "src/main.rs",
+            cwd: None,
+        });
         assert!(!decision.is_blocked());
     }
 
@@ -234,6 +264,89 @@ mod tests {
             decision.blocked.as_ref().unwrap().rule_id,
             "rm_boot",
             "should match the rm_boot rule specifically"
+        );
+    }
+
+    // Task 5 tests - relative path resolution
+    #[test]
+    fn relative_path_traversal_to_ssh_is_blocked() {
+        let service = default_service();
+        let home = dirs::home_dir().unwrap();
+        let cwd = format!("{}/projects/myapp", home.display());
+        let decision = service.evaluate(&ProtectRequest::WritePath {
+            path: "../../.ssh/config",
+            cwd: Some(&cwd),
+        });
+        assert!(
+            decision.is_blocked(),
+            "relative traversal to ~/.ssh should be blocked"
+        );
+    }
+
+    #[test]
+    fn relative_path_traversal_to_etc_is_blocked() {
+        let service = default_service();
+        let decision = service.evaluate(&ProtectRequest::WritePath {
+            path: "../../../../../etc/hosts",
+            cwd: Some("/home/user/project/src"),
+        });
+        assert!(
+            decision.is_blocked(),
+            "relative traversal to /etc should be blocked"
+        );
+    }
+
+    #[test]
+    fn relative_path_inside_repo_is_allowed() {
+        let service = default_service();
+        let decision = service.evaluate(&ProtectRequest::WritePath {
+            path: "../lib/src/main.rs",
+            cwd: Some("/home/user/project/cli"),
+        });
+        assert!(
+            !decision.is_blocked(),
+            "relative path to repo file should be allowed"
+        );
+    }
+
+    // Task 3 tests - allow_paths for sensitive_paths
+    #[test]
+    fn write_to_allowed_sensitive_path_is_permitted() {
+        let mut config = ProtectConfig::default();
+        config.rules.sensitive_paths = Some(RuleGroupConfig::Detailed(
+            RuleGroupDetailedConfig {
+                enabled: true,
+                allow_paths: vec!["/etc/resolv.conf".to_string()],
+            },
+        ));
+        let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
+        let decision = service.evaluate(&ProtectRequest::WritePath {
+            path: "/etc/resolv.conf",
+            cwd: None,
+        });
+        assert!(
+            !decision.is_blocked(),
+            "allowed sensitive path should not be blocked"
+        );
+    }
+
+    #[test]
+    fn write_to_non_allowed_sensitive_path_is_still_blocked() {
+        let mut config = ProtectConfig::default();
+        config.rules.sensitive_paths = Some(RuleGroupConfig::Detailed(
+            RuleGroupDetailedConfig {
+                enabled: true,
+                allow_paths: vec!["/etc/resolv.conf".to_string()],
+            },
+        ));
+        let service = ProtectService::new(config, ProtectPlatform::current()).unwrap();
+        let decision = service.evaluate(&ProtectRequest::WritePath {
+            path: "/etc/passwd",
+            cwd: None,
+        });
+        assert!(
+            decision.is_blocked(),
+            "non-allowed sensitive path should be blocked"
         );
     }
 }

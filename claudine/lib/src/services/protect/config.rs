@@ -106,7 +106,7 @@ impl ProtectConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
-        // Only filesystem_destruction supports allow_paths.
+        // Only filesystem_destruction and sensitive_paths support allow_paths.
         let non_allow_path_groups = [
             ("disk_manipulation", &self.rules.disk_manipulation),
             ("remote_execution", &self.rules.remote_execution),
@@ -118,7 +118,6 @@ impl ProtectConfig {
             ("obfuscated_execution", &self.rules.obfuscated_execution),
             ("prompt_injection", &self.rules.prompt_injection),
             ("credential_exfiltration", &self.rules.credential_exfiltration),
-            ("sensitive_paths", &self.rules.sensitive_paths),
         ];
 
         for (name, toggle) in non_allow_path_groups {
@@ -379,6 +378,23 @@ mod tests {
         assert!(
             err.contains("posture"),
             "error should mention the unknown field: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_allow_paths_on_sensitive_paths() {
+        let config: ProtectConfig = serde_json::from_value(serde_json::json!({
+            "rules": {
+                "sensitive_paths": {
+                    "enabled": true,
+                    "allow_paths": ["/etc/resolv.conf"]
+                }
+            }
+        }))
+        .unwrap();
+        assert!(
+            config.validate().is_ok(),
+            "sensitive_paths should support allow_paths"
         );
     }
 }

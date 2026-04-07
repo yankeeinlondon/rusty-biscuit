@@ -40,7 +40,10 @@ fn extract_before_tool_request<'a>(meta: &'a EventMeta) -> Option<ProtectRequest
         || lowered.contains("delete")
     {
         if let Some(path) = extract_path_string(meta.tool_input.as_ref()?) {
-            return Some(ProtectRequest::WritePath { path });
+            return Some(ProtectRequest::WritePath {
+                path,
+                cwd: meta.cwd.as_deref(),
+            });
         }
     }
 
@@ -116,7 +119,7 @@ mod tests {
         let request = extract_protect_request(&AgenticEvent::BeforeTool, &meta);
         assert!(matches!(
             request,
-            Some(ProtectRequest::WritePath { path }) if path == "/etc/hosts"
+            Some(ProtectRequest::WritePath { path, cwd }) if path == "/etc/hosts" && cwd.is_none()
         ));
     }
 
