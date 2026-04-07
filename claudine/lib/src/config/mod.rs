@@ -1,5 +1,6 @@
 pub mod atomic;
 pub(crate) mod backup;
+pub mod migration;
 pub mod claudine_config;
 mod claude;
 mod codex;
