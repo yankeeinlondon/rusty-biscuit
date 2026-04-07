@@ -137,13 +137,33 @@ impl CompiledCatalog {
                 continue;
             }
 
-            let surface = rules[0].surface;
-            let compiled = CompiledGroup::compile(group, surface, &rules)?;
+            // A group may contain rules across multiple surfaces (e.g.
+            // credential_exfiltration has both BashCommand and McpResponse
+            // rules). Split by surface so each CompiledGroup targets one.
+            let cmd_rules: Vec<&RuleDefinition> = rules
+                .iter()
+                .filter(|r| r.surface == ScanSurface::BashCommand)
+                .copied()
+                .collect();
+            let mcp_rules: Vec<&RuleDefinition> = rules
+                .iter()
+                .filter(|r| r.surface == ScanSurface::McpResponse)
+                .copied()
+                .collect();
 
-            match surface {
-                ScanSurface::BashCommand => command_groups.push(compiled),
-                ScanSurface::McpResponse => mcp_groups.push(compiled),
-                ScanSurface::WritePath => {}
+            if !cmd_rules.is_empty() {
+                command_groups.push(CompiledGroup::compile(
+                    group,
+                    ScanSurface::BashCommand,
+                    &cmd_rules,
+                )?);
+            }
+            if !mcp_rules.is_empty() {
+                mcp_groups.push(CompiledGroup::compile(
+                    group,
+                    ScanSurface::McpResponse,
+                    &mcp_rules,
+                )?);
             }
         }
 
