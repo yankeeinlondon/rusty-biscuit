@@ -33,7 +33,14 @@ The shorthand will assume the following:
 
 ### Full Syntax
 
+- in it's basic form (_as demonstrated above_), there is no difference from the shorthand and all assumptions remain the same
+- however, the full syntax provides the additional properties and capabilities:
+    - `handle`
+    - `outcome` - `fail` | `skip`
 
+#### Handlers
+
+For every validation which returns **false** we are now 
 
 
 ## Validations
