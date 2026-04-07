@@ -79,6 +79,7 @@
             "spatialization",
             "startswith",
             "tavily",
+            "userdel",
             "Vorbis",
             "wezterm",
             "Wezterm",

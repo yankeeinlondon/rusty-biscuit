@@ -230,7 +230,7 @@ commit *args="":
     @echo ""
     @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" {{args}}
+    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y {{args}}
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
@@ -308,6 +308,20 @@ git-conflict:
 deps:
     @echo "Dependencies:"
     @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{LIBRARY}}*:"
+
+prompt:
+    #!/usr/bin/env bash
+    FILE="./prompts/$(date +%F-%H.%M.%S-prompt.md)"
+    md edit "${FILE}"
+    claudine compose "${FILE}" --opencode --model zai-coding-plan/glm-5.1 --op "prompt"
+    just _speak "Prompt was completed"
+    if confirm "Keep prompt file?"; then
+        echo -e "prompt saved as {{BLUE}}${FILE}{{RESET}}"
+        echo
+    else
+        rm "${FILE}"
+        echo -e "prompt file {{RED}}removed{{RESET}} ({{DIM}}${FILE}{{RESET}})"
+    fi
 
 # Show all README.md files in the package
 readme_files:
