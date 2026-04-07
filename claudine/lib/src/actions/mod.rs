@@ -1,3 +1,4 @@
+pub mod bash_executor;
 mod hook_action;
 mod hook_response;
 
