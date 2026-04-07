@@ -10,8 +10,10 @@ use super::template::interpolate;
 use crate::actions::{
     CompiledMapper, HookAction, HookDecision, HookResponse, Mapper, ReportFormat, ReportHandler,
 };
+use crate::config::claudine_config::{ClaudineConfig, Gender, TtsValue, VoiceSelection};
 use crate::error::Result;
 use crate::events::{EventMeta, GlobalSettings};
+use crate::messaging::RuntimeMessagingSettings;
 use crate::services::protect::decision::ProtectDecision;
 
 /// Execute hook actions in declaration order.
@@ -184,6 +186,273 @@ pub async fn execute_actions(
     Ok(selected_response)
 }
 
+
+/// Execute hook actions using the new [`ClaudineConfig`] model.
+///
+/// Unlike [`execute_actions`] which bridges through [`GlobalSettings`], this
+/// function works directly with the canonical config. The key difference is
+/// `Speak` action handling: action-level `voice` and `gender` overrides are
+/// resolved against the config's TTS settings (including gendered voice pairs).
+pub async fn execute_actions_v2(
+    actions: &[HookAction],
+    compiled_mappers: Option<&[Option<CompiledMapper>]>,
+    meta: &EventMeta,
+    config: &ClaudineConfig,
+    messaging: &RuntimeMessagingSettings,
+    can_block: bool,
+    protect_decision: Option<&ProtectDecision>,
+) -> Result<Option<HookResponse>> {
+    let mut selected_response: Option<HookResponse> = None;
+
+    for (index, action) in actions.iter().enumerate() {
+        match action {
+            HookAction::Speak {
+                message,
+                voice,
+                gender,
+            } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "speak",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
+                execute_speak_v2(message, voice.as_deref(), gender.clone(), meta, config);
+            }
+            HookAction::Report { handler } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "report",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
+                execute_report(handler.as_ref(), meta, can_block);
+            }
+            HookAction::Bash { command, params } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "bash",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = %command,
+                )
+                .entered();
+                execute_bash(command, params, meta)
+            }
+            HookAction::Call {
+                command,
+                args,
+                timeout_ms,
+                mapper,
+            } => {
+                let timeout = timeout_ms
+                    .map(Duration::from_millis)
+                    .unwrap_or(Duration::from_secs(60));
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "call",
+                    blocking = can_block,
+                    timeout_ms = timeout.as_millis(),
+                    target_kind = tracing::field::Empty,
+                    command = %command,
+                )
+                .entered();
+                if should_short_circuit_call(protect_decision) {
+                    let Some(decision) = protect_decision else {
+                        continue;
+                    };
+
+                    let response = HookResponse {
+                        decision: Some(decision_for_short_circuit(decision)),
+                        reason: Some("call action short-circuited by protect: blocked".to_string()),
+                        ..HookResponse::default()
+                    };
+
+                    debug!("Short-circuiting call action due to protect block");
+                    if can_block && should_replace_selected(selected_response.as_ref(), &response) {
+                        selected_response = Some(response);
+                    }
+                    continue;
+                }
+
+                let cmd = interpolate(command, meta);
+                let rendered_args = args.as_ref().map(|items| {
+                    items
+                        .iter()
+                        .map(|arg| interpolate(arg, meta))
+                        .collect::<Vec<_>>()
+                });
+
+                let compiled_mapper = compiled_mappers
+                    .and_then(|mappers| mappers.get(index))
+                    .and_then(Option::as_ref);
+
+                match tokio::time::timeout(
+                    timeout,
+                    run_command_blocking(&cmd, rendered_args.as_deref()),
+                )
+                .await
+                {
+                    Ok(Ok(output)) => match apply_mapper(compiled_mapper, mapper.as_ref(), &output)
+                    {
+                        Ok(response) => {
+                            let response = attach_protect_context(response, protect_decision);
+                            if can_block {
+                                if should_replace_selected(selected_response.as_ref(), &response) {
+                                    selected_response = Some(response);
+                                }
+                            } else {
+                                debug!(%cmd, "Call response produced on non-blocking event and discarded");
+                            }
+                        }
+                        Err(error) => {
+                            warn!(%cmd, %error, "Call mapper failed");
+                        }
+                    },
+                    Ok(Err(error)) => {
+                        warn!(%cmd, %error, "Call command failed");
+                    }
+                    Err(_) => {
+                        warn!(%cmd, timeout_ms = timeout.as_millis(), "Call command timed out");
+                    }
+                }
+            }
+            HookAction::SoundEffect {
+                effect,
+                volume,
+                speed,
+            } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "sound_effect",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
+                execute_sound_effect(effect, *volume, *speed);
+            }
+            HookAction::Message { message, image } => {
+                let _action_span = info_span!(
+                    "hook_action",
+                    action_index = index,
+                    action_kind = "message",
+                    blocking = can_block,
+                    timeout_ms = tracing::field::Empty,
+                    target_kind = tracing::field::Empty,
+                    command = tracing::field::Empty,
+                )
+                .entered();
+                crate::messaging::execute_message(message, image.as_deref(), meta, messaging);
+            }
+        }
+    }
+
+    Ok(selected_response)
+}
+
+/// Speak a message using TTS with [`ClaudineConfig`]-aware voice resolution.
+///
+/// Voice selection priority:
+/// 1. Action-level `voice` override (if present on the `Speak` action)
+/// 2. Config-level voice resolved through gendered voice pairs
+/// 3. Config-level single voice
+/// 4. Auto-detect (no explicit voice)
+fn execute_speak_v2(
+    message_template: &str,
+    voice_override: Option<&str>,
+    gender_override: Option<Gender>,
+    meta: &EventMeta,
+    config: &ClaudineConfig,
+) {
+    let text = interpolate(message_template, meta);
+    if text.is_empty() {
+        return;
+    }
+
+    if matches!(config.tts, TtsValue::Boolean(false)) {
+        return;
+    }
+
+    let tts = tts_config_from_claudine(config, voice_override, gender_override);
+
+    tokio::spawn(async move {
+        if let Err(error) = biscuit_speaks::Speak::new(text)
+            .with_config(tts)
+            .play()
+            .await
+        {
+            warn!(%error, "TTS playback failed");
+        }
+    });
+}
+
+/// Build a [`TtsConfig`] from [`ClaudineConfig`] with optional per-action overrides.
+///
+/// Resolution order for voice:
+/// 1. `voice_override` from the action (always wins)
+/// 2. Gendered voice pair from config, using action `gender_override` → config default gender
+/// 3. Single voice from config
+/// 4. No explicit voice (auto-detect)
+fn tts_config_from_claudine(
+    config: &ClaudineConfig,
+    voice_override: Option<&str>,
+    gender_override: Option<Gender>,
+) -> TtsConfig {
+    let mut tts = TtsConfig::new();
+
+    if let Some(voice) = voice_override {
+        tts = tts.with_voice(voice);
+    }
+
+    match &config.tts {
+        TtsValue::Boolean(false) => {}
+        TtsValue::Boolean(true) => {}
+        TtsValue::Config(settings) => {
+            if voice_override.is_none() {
+                if let Some(provider) =
+                    biscuit_speaks::parse_provider_name(&settings.provider)
+                {
+                    tts = tts.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
+                }
+
+                let gender = gender_override.unwrap_or(settings.gender.clone());
+                match &settings.voice {
+                    Some(VoiceSelection::Single(v)) => {
+                        tts = tts.with_voice(v);
+                    }
+                    Some(VoiceSelection::Gendered { male, female }) => {
+                        let voice = match gender {
+                            Gender::Male => male.as_str(),
+                            Gender::Female => female.as_str(),
+                        };
+                        tts = tts.with_voice(voice);
+                    }
+                    None => {}
+                }
+            } else if let Some(provider) =
+                biscuit_speaks::parse_provider_name(&settings.provider)
+            {
+                tts = tts.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
+            }
+        }
+    }
+
+    tts
+}
 
 fn should_replace_selected(current: Option<&HookResponse>, candidate: &HookResponse) -> bool {
     match current {
@@ -612,6 +881,9 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
+    use crate::config::claudine_config::{
+        ClaudineConfig, Gender, TtsConfigSettings, TtsValue, VoiceSelection,
+    };
     use crate::events::{EnvironmentContext, Provider, TtsSettings};
 
     fn meta() -> EventMeta {
@@ -804,5 +1076,175 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
+    }
+
+    // =========================================================================
+    // execute_actions_v2 and tts_config_from_claudine tests
+    // =========================================================================
+
+    fn claudine_config_with_tts(tts: TtsValue) -> ClaudineConfig {
+        ClaudineConfig {
+            tts,
+            messenger: None,
+            logging: true,
+            protect: Default::default(),
+            actions: HashMap::new(),
+            preferred_agent: Provider::Claude,
+            canonical_provider: None,
+            default_sounds: Default::default(),
+        }
+    }
+
+    #[test]
+    fn tts_config_from_claudine_boolean_true_is_auto_detect() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(true));
+        let tts = tts_config_from_claudine(&config, None, None);
+        assert!(matches!(
+            tts.failover_strategy,
+            TtsFailoverStrategy::FirstAvailable
+        ));
+        assert!(tts.requested_voice.is_none());
+    }
+
+    #[test]
+    fn tts_config_from_claudine_boolean_false_returns_default() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let tts = tts_config_from_claudine(&config, None, None);
+        assert!(tts.requested_voice.is_none());
+    }
+
+    #[test]
+    fn tts_config_from_claudine_single_voice() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Single("Samantha".to_string())),
+            gender: Gender::Female,
+        }));
+        let tts = tts_config_from_claudine(&config, None, None);
+        assert_eq!(tts.requested_voice.as_deref(), Some("Samantha"));
+        assert!(matches!(
+            tts.failover_strategy,
+            TtsFailoverStrategy::SpecificProvider(_)
+        ));
+    }
+
+    #[test]
+    fn tts_config_from_claudine_gendered_voice_female_default() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Gendered {
+                male: "Alex".to_string(),
+                female: "Samantha".to_string(),
+            }),
+            gender: Gender::Female,
+        }));
+        let tts = tts_config_from_claudine(&config, None, None);
+        assert_eq!(tts.requested_voice.as_deref(), Some("Samantha"));
+    }
+
+    #[test]
+    fn tts_config_from_claudine_gendered_voice_male_default() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Gendered {
+                male: "Alex".to_string(),
+                female: "Samantha".to_string(),
+            }),
+            gender: Gender::Male,
+        }));
+        let tts = tts_config_from_claudine(&config, None, None);
+        assert_eq!(tts.requested_voice.as_deref(), Some("Alex"));
+    }
+
+    #[test]
+    fn tts_config_from_claudine_gender_override_selects_male_voice() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Gendered {
+                male: "Alex".to_string(),
+                female: "Samantha".to_string(),
+            }),
+            gender: Gender::Female,
+        }));
+        let tts = tts_config_from_claudine(&config, None, Some(Gender::Male));
+        assert_eq!(tts.requested_voice.as_deref(), Some("Alex"));
+    }
+
+    #[test]
+    fn tts_config_from_claudine_voice_override_wins_over_config() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Single("Samantha".to_string())),
+            gender: Gender::Female,
+        }));
+        let tts = tts_config_from_claudine(&config, Some("Karen"), None);
+        assert_eq!(tts.requested_voice.as_deref(), Some("Karen"));
+    }
+
+    #[test]
+    fn tts_config_from_claudine_voice_override_sets_provider() {
+        let config = claudine_config_with_tts(TtsValue::Config(TtsConfigSettings {
+            provider: "say".to_string(),
+            voice: Some(VoiceSelection::Single("Samantha".to_string())),
+            gender: Gender::Female,
+        }));
+        let tts = tts_config_from_claudine(&config, Some("Karen"), None);
+        assert_eq!(tts.requested_voice.as_deref(), Some("Karen"));
+        assert!(matches!(
+            tts.failover_strategy,
+            TtsFailoverStrategy::SpecificProvider(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn execute_actions_v2_runs_bash_action() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+
+        let actions = vec![
+            HookAction::Bash {
+                command: "echo".to_string(),
+                params: "hello".to_string(),
+            },
+            HookAction::Report { handler: None },
+        ];
+
+        let result = execute_actions_v2(
+            &actions,
+            None,
+            &meta(),
+            &config,
+            &messaging,
+            true,
+            None,
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn execute_actions_v2_message_action() {
+        let config = claudine_config_with_tts(TtsValue::Boolean(false));
+        let messaging = RuntimeMessagingSettings::default();
+
+        let actions = vec![HookAction::Message {
+            message: "test".to_string(),
+            image: None,
+        }];
+
+        let result = execute_actions_v2(
+            &actions,
+            None,
+            &meta(),
+            &config,
+            &messaging,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_none());
     }
 }

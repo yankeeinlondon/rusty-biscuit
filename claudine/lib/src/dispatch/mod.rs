@@ -11,10 +11,9 @@ use tracing::{debug, info, info_span};
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
-use crate::config::claudine_config::{ClaudineConfig, TtsValue, VoiceSelection};
 use crate::error::Result;
 use crate::events::{
-    AgenticEvent, EnvironmentContext, EventMeta, GlobalSettings, Provider, ResolvedHook, TtsSettings,
+    AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook,
 };
 use crate::services::protect::decision::ProtectDecision;
 use crate::services::protect::observe::extract_protect_request;
@@ -303,13 +302,11 @@ pub async fn dispatch_canonical_with_runtime(
         "Executing resolved canonical hook"
     );
 
-    let bridged_settings = bridge_settings(runtime.config());
-
-    let action_response = runner::execute_actions(
+    let action_response = runner::execute_actions_v2(
         &resolved_hook.actions,
         Some(binding.compiled_mappers()),
         &resolved_hook.meta,
-        &bridged_settings,
+        runtime.config(),
         runtime.messaging(),
         resolved_hook.can_block,
         protect_pre.as_ref(),
@@ -347,29 +344,6 @@ pub async fn dispatch_canonical_with_runtime(
         protect_pre,
         protect_post,
     )
-}
-
-/// Bridge [`ClaudineConfig`] settings to the legacy [`GlobalSettings`]
-/// expected by [`runner::execute_actions`].
-fn bridge_settings(config: &ClaudineConfig) -> GlobalSettings {
-    GlobalSettings {
-        default_log_target: None,
-        tts: match &config.tts {
-            TtsValue::Boolean(false) => None,
-            TtsValue::Boolean(true) => None,
-            TtsValue::Config(cfg) => Some(TtsSettings {
-                provider: Some(cfg.provider.clone()),
-                voice: match &cfg.voice {
-                    Some(VoiceSelection::Single(v)) => Some(v.clone()),
-                    _ => None,
-                },
-                rate: None,
-            }),
-        },
-        linking: None,
-        protect: Some(config.protect.clone()),
-        messaging: None,
-    }
 }
 
 fn prepare_meta_for_dispatch(meta: &mut EventMeta, env: &EnvironmentContext) {
@@ -739,9 +713,31 @@ fn finalize_response(
 mod tests {
     use super::*;
     use crate::actions::*;
+    use crate::config::claudine_config::{ClaudineConfig, TtsValue, VoiceSelection};
     use crate::events::*;
     use serde_json::json;
     use std::collections::HashMap;
+
+    fn bridge_settings(config: &ClaudineConfig) -> GlobalSettings {
+        GlobalSettings {
+            default_log_target: None,
+            tts: match &config.tts {
+                TtsValue::Boolean(false) => None,
+                TtsValue::Boolean(true) => None,
+                TtsValue::Config(cfg) => Some(TtsSettings {
+                    provider: Some(cfg.provider.clone()),
+                    voice: match &cfg.voice {
+                        Some(VoiceSelection::Single(v)) => Some(v.clone()),
+                        _ => None,
+                    },
+                    rate: None,
+                }),
+            },
+            linking: None,
+            protect: Some(config.protect.clone()),
+            messaging: None,
+        }
+    }
 
     #[tokio::test]
     async fn dispatch_returns_default_for_unknown_event() {
