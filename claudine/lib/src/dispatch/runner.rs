@@ -15,7 +15,7 @@ use crate::actions::{
 use crate::error::Result;
 use crate::events::{EventMeta, GlobalSettings};
 use crate::reporting::paths;
-use crate::services::{ProtectDecision, ProtectOutcome};
+use crate::services::protect::decision::ProtectDecision;
 
 /// Execute hook actions in declaration order.
 ///
@@ -110,25 +110,14 @@ pub async fn execute_actions(
                         continue;
                     };
 
-                    let outcome_reason = protect_reason(&decision.outcome)
-                        .unwrap_or_else(|| decision.reason.clone());
                     let response = HookResponse {
-                        decision: Some(decision_for_short_circuit(&decision.outcome)),
-                        reason: Some(format!(
-                            "call action short-circuited by protect: {outcome_reason}"
-                        )),
-                        protect: Some(ProtectCallContext {
-                            outcome: decision.outcome.clone(),
-                            reason: decision.reason.clone(),
-                            short_circuited: true,
-                        }),
+                        decision: Some(decision_for_short_circuit(decision)),
+                        reason: Some("call action short-circuited by protect: blocked".to_string()),
+                        protect: None,
                         ..HookResponse::default()
                     };
 
-                    debug!(
-                        protect_outcome = protect_outcome_slug(&decision.outcome),
-                        "Short-circuiting call action due to protect decision"
-                    );
+                    debug!("Short-circuiting call action due to protect block");
                     if can_block && should_replace_selected(selected_response.as_ref(), &response) {
                         selected_response = Some(response);
                     }
@@ -239,62 +228,19 @@ fn should_replace_selected(current: Option<&HookResponse>, candidate: &HookRespo
 }
 
 fn should_short_circuit_call(decision: Option<&ProtectDecision>) -> bool {
-    decision.is_some_and(|decision| {
-        matches!(
-            decision.outcome,
-            ProtectOutcome::AskThenAllowOrStop { .. }
-                | ProtectOutcome::StopCurrent { .. }
-                | ProtectOutcome::StopSession { .. }
-        )
-    })
+    decision.is_some_and(|d| d.is_blocked())
 }
 
-fn decision_for_short_circuit(outcome: &ProtectOutcome) -> HookDecision {
-    match outcome {
-        ProtectOutcome::AskThenAllowOrStop { .. } => HookDecision::Ask,
-        ProtectOutcome::StopCurrent { .. } | ProtectOutcome::StopSession { .. } => {
-            HookDecision::Deny
-        }
-        ProtectOutcome::Allow
-        | ProtectOutcome::AllowWithRedaction { .. }
-        | ProtectOutcome::AdvisoryOnly { .. } => HookDecision::Continue,
-    }
+fn decision_for_short_circuit(_decision: &ProtectDecision) -> HookDecision {
+    HookDecision::Deny
 }
 
 fn attach_protect_context(
-    mut response: HookResponse,
-    protect_decision: Option<&ProtectDecision>,
+    response: HookResponse,
+    _protect_decision: Option<&ProtectDecision>,
 ) -> HookResponse {
-    if let Some(decision) = protect_decision {
-        response.protect = Some(ProtectCallContext {
-            outcome: decision.outcome.clone(),
-            reason: decision.reason.clone(),
-            short_circuited: false,
-        });
-    }
+    // Simplified: new protect doesn't attach context to responses
     response
-}
-
-fn protect_outcome_slug(outcome: &ProtectOutcome) -> &'static str {
-    match outcome {
-        ProtectOutcome::Allow => "allow",
-        ProtectOutcome::AskThenAllowOrStop { .. } => "ask_then_allow_or_stop",
-        ProtectOutcome::StopCurrent { .. } => "stop_current",
-        ProtectOutcome::StopSession { .. } => "stop_session",
-        ProtectOutcome::AllowWithRedaction { .. } => "allow_with_redaction",
-        ProtectOutcome::AdvisoryOnly { .. } => "advisory_only",
-    }
-}
-
-fn protect_reason(outcome: &ProtectOutcome) -> Option<String> {
-    match outcome {
-        ProtectOutcome::Allow => None,
-        ProtectOutcome::AskThenAllowOrStop { reason }
-        | ProtectOutcome::StopCurrent { reason }
-        | ProtectOutcome::StopSession { reason }
-        | ProtectOutcome::AllowWithRedaction { reason }
-        | ProtectOutcome::AdvisoryOnly { reason } => Some(reason.clone()),
-    }
 }
 
 /// Speak a message via biscuit-speaks TTS (fire-and-forget).

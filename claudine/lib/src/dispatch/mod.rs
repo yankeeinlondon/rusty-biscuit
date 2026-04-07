@@ -9,14 +9,15 @@ use std::sync::Arc;
 use serde_json::Value;
 use tracing::{debug, info, info_span};
 
-use crate::actions::HookResponse;
+use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
 use crate::error::{ClaudineError, Result};
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook};
-use crate::permissions::{PolicyContext, PolicyEngine, ProjectTrustContext, TrustSource};
-use crate::services::{
-    ProtectCliContext, ProtectDecision, ProtectOutcome, ProtectService, ProtectSessionContext,
-};
+use crate::services::protect::catalog::ProtectPlatform;
+use crate::services::protect::decision::{ProtectDecision, ProtectOutcome};
+use crate::services::protect::observe::extract_protect_request;
+use crate::services::protect::report::format_blocked_message;
+use crate::services::protect::service::ProtectService;
 
 /// Wrapper-session-scoped dispatch runtime.
 ///
@@ -318,54 +319,28 @@ async fn dispatch_preparsed_with_config(
         can_block,
     };
 
-    let engine = Arc::new(PolicyEngine::new());
-    let mut protect_service = config.settings().protect.clone().map(|protect| {
-        ProtectService::with_capabilities(
-            engine.clone(),
-            protect,
-            provider,
-            adapter.protect_capabilities(),
-        )
+    let protect_service = config.settings().protect.as_ref().and_then(|protect| {
+        ProtectService::new(protect.clone(), ProtectPlatform::current()).ok()
     });
 
-    // Build session context
-    let session_ctx = build_session_context(provider, &resolved_hook.meta);
+    let protect_pre = protect_service.as_ref().and_then(|service| {
+        let request = extract_protect_request(&resolved_hook.event, &resolved_hook.meta)?;
+        let decision = service.evaluate(&request);
+        if decision.is_blocked() {
+            Some(decision)
+        } else {
+            None
+        }
+    });
 
-    let protect_pre = if let Some(service) = protect_service.as_mut() {
-        service
-            .evaluate_event_structured(
-                provider,
-                resolved_hook.event,
-                &resolved_hook.meta,
-                &session_ctx,
-                adapter,
-            )
-            .ok()
-            .flatten()
-    } else {
-        None
-    };
-
-    let protect_pre_decision = protect_pre.as_ref().map(|e| e.decision.clone());
-
-    if let Some(eval) = protect_pre.as_ref()
-        && should_short_circuit_on_protect(&eval.decision.outcome)
-    {
-        let response = adapter
-            .map_protect_outcome(&resolved_hook.event, &eval.decision)
-            .map_err(|error| {
-                ClaudineError::ProtectEnforcementMapping(format!(
-                    "provider={provider} event={} pre-action: {error}",
-                    resolved_hook.event
-                ))
-            })?;
-
+    if let Some(ref decision) = protect_pre {
+        let response = map_protect_block(decision);
         return finalize_response(
             adapter,
             &resolved_hook.event,
             resolved_hook.can_block,
             Some(response),
-            protect_pre_decision,
+            protect_pre.clone(),
             None,
         );
     }
@@ -387,53 +362,28 @@ async fn dispatch_preparsed_with_config(
         config.settings(),
         config.messaging(),
         resolved_hook.can_block,
-        protect_pre_decision.as_ref(),
+        protect_pre.as_ref(),
     )
     .await?;
 
-    let protect_post = if let Some(service) = protect_service.as_mut() {
-        // Only run post-action evaluation for relevant events
-        if matches!(
+    let protect_post = protect_service.as_ref().and_then(|service| {
+        if !matches!(
             resolved_hook.event,
             AgenticEvent::AfterTool | AgenticEvent::TurnComplete | AgenticEvent::SubagentStop
         ) {
-            service
-                .evaluate_event_structured(
-                    provider,
-                    resolved_hook.event,
-                    &resolved_hook.meta,
-                    &session_ctx,
-                    adapter,
-                )
-                .ok()
-                .flatten()
+            return None;
+        }
+        let request = extract_protect_request(&resolved_hook.event, &resolved_hook.meta)?;
+        let decision = service.evaluate(&request);
+        if decision.is_blocked() {
+            Some(decision)
         } else {
             None
         }
-    } else {
-        None
-    };
+    });
 
-    let protect_post_decision = protect_post.as_ref().map(|e| e.decision.clone());
-
-    // Post-action: blocking outcomes take priority over redaction.
-    let action_response = if let Some(eval) = protect_post.as_ref() {
-        if should_short_circuit_on_protect(&eval.decision.outcome) {
-            Some(
-                adapter
-                    .map_protect_outcome(&resolved_hook.event, &eval.decision)
-                    .map_err(|error| {
-                        ClaudineError::ProtectEnforcementMapping(format!(
-                            "provider={provider} event={} post-action: {error}",
-                            resolved_hook.event
-                        ))
-                    })?,
-            )
-        } else if let Some(plan) = &eval.redaction {
-            apply_redaction(action_response, plan)
-        } else {
-            action_response
-        }
+    let action_response = if let Some(ref decision) = protect_post {
+        Some(map_protect_block(decision))
     } else {
         action_response
     };
@@ -443,140 +393,32 @@ async fn dispatch_preparsed_with_config(
         &resolved_hook.event,
         resolved_hook.can_block,
         action_response,
-        protect_pre_decision,
-        protect_post_decision,
+        protect_pre,
+        protect_post,
     )
 }
 
-fn build_session_context(provider: Provider, meta: &EventMeta) -> ProtectSessionContext {
-    let cwd = meta
-        .cwd
+fn map_protect_block(decision: &ProtectDecision) -> HookResponse {
+    let reason = decision
+        .blocked
         .as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
+        .map(|m| format_blocked_message(m))
+        .unwrap_or_else(|| "protect: blocked".to_string());
 
-    let mut policy_ctx = PolicyContext::new(cwd);
-    if let Some(ref git) = meta.env.git {
-        policy_ctx = policy_ctx.with_repo_root(git.repo_root.clone());
-    }
-    if let Some(home) = dirs::home_dir() {
-        policy_ctx = policy_ctx.with_home_dir(home);
-    }
-
-    // Derive project trust from event metadata and wrapper state.
-    let trust = derive_trust_context(meta);
-    policy_ctx = policy_ctx.with_trust(trust);
-
-    let cli_ctx = std::env::var("AGENT_PARAMS")
-        .ok()
-        .map(|params| {
-            let argv: Vec<String> = params.split_whitespace().map(String::from).collect();
-            ProtectCliContext::Argv(argv)
-        })
-        .unwrap_or(ProtectCliContext::None);
-
-    ProtectSessionContext {
-        provider,
-        policy_context: policy_ctx,
-        cli: cli_ctx,
-        interactive: std::env::var("INTERACTIVE")
-            .ok()
-            .is_some_and(|v| v == "1" || v == "true")
-            || std::env::var("CLAUDINE_INTERACTIVE")
-                .ok()
-                .is_some_and(|v| v == "1" || v == "true"),
-        yolo: std::env::var("YOLO")
-            .ok()
-            .is_some_and(|v| v == "1" || v == "true")
-            || std::env::var("CLAUDINE_YOLO")
-                .ok()
-                .is_some_and(|v| v == "1" || v == "true"),
-        session_id: meta
-            .session_id
-            .clone()
-            .or_else(|| std::env::var("CLAUDINE_SESSION_ID").ok()),
-    }
-}
-
-/// Derive project trust from event metadata extras and environment.
-///
-/// Trust sources in priority order:
-/// 1. Explicit `is_trusted` field in event extra (set by wrapper preflight)
-/// 2. `CLAUDINE_TRUST` environment variable
-/// 3. Provider permission mode (e.g., Claude's `acceptEdits` implies trusted)
-fn derive_trust_context(meta: &EventMeta) -> ProjectTrustContext {
-    // 1. Explicit trust flag from wrapper or event payload
-    if let Some(trusted) = meta.extra.get("is_trusted").and_then(Value::as_bool) {
-        return ProjectTrustContext {
-            is_trusted: Some(trusted),
-            source: TrustSource::ExplicitInput,
-        };
-    }
-
-    // 2. CLAUDINE_TRUST environment variable
-    if let Ok(val) = std::env::var("CLAUDINE_TRUST") {
-        let lowered = val.trim().to_ascii_lowercase();
-        if lowered == "1" || lowered == "true" {
-            return ProjectTrustContext {
-                is_trusted: Some(true),
-                source: TrustSource::ExplicitInput,
-            };
-        } else if lowered == "0" || lowered == "false" {
-            return ProjectTrustContext {
-                is_trusted: Some(false),
-                source: TrustSource::ExplicitInput,
-            };
-        }
-    }
-
-    // 3. Infer from provider permission mode (Claude-specific: acceptEdits implies trusted)
-    if let Some(mode) = meta.extra.get("permission_mode").and_then(Value::as_str) {
-        let lowered = mode.to_ascii_lowercase();
-        if lowered.contains("accept") || lowered.contains("trust") {
-            return ProjectTrustContext {
-                is_trusted: Some(true),
-                source: TrustSource::ProviderConfig,
-            };
-        }
-    }
-
-    ProjectTrustContext::default()
-}
-
-fn apply_redaction(
-    response: Option<HookResponse>,
-    plan: &crate::services::ProtectRedactionPlan,
-) -> Option<HookResponse> {
-    use crate::actions::HookDecision;
-    use crate::services::ProtectRedactionPlan;
-
-    let mut response = response.unwrap_or_default();
-
-    match plan {
-        ProtectRedactionPlan::ReplaceText(redaction) => {
-            response.additional_context = Some(redaction.text.clone());
-            // Preserve existing decision or set Allow so formatters know
-            // there is an active response to serialize.
-            if response.decision.is_none() {
-                response.decision = Some(HookDecision::Allow);
+    HookResponse {
+        decision: Some(HookDecision::Deny),
+        reason: Some(reason),
+        updated_input: None,
+        additional_context: None,
+        raw: Some(serde_json::json!({
+            "protect": {
+                "outcome": "block",
+                "group": decision.blocked.as_ref().map(|m| m.group.config_key()),
+                "rule_id": decision.blocked.as_ref().map(|m| &m.rule_id),
             }
-        }
-        ProtectRedactionPlan::ReplaceJson(redaction) => {
-            response.updated_input = Some(redaction.value.clone());
-            if response.decision.is_none() {
-                response.decision = Some(HookDecision::Allow);
-            }
-        }
-        ProtectRedactionPlan::BlockPayload { reason } => {
-            // BlockPayload must produce an enforceable deny.
-            response.additional_context = None;
-            response.updated_input = None;
-            response.decision = Some(HookDecision::Deny);
-            response.reason = Some(reason.clone());
-        }
+        })),
+        protect: None,
     }
-
-    Some(response)
 }
 
 fn runtime_repo_root(env: &EnvironmentContext) -> Option<&Path> {
@@ -620,13 +462,10 @@ fn finalize_response(
     protect_pre: Option<ProtectDecision>,
     protect_post: Option<ProtectDecision>,
 ) -> Result<DispatchOutcome> {
-    let stop_session =
-        has_stop_session(protect_pre.as_ref()) || has_stop_session(protect_post.as_ref());
-
     if !can_block {
         return Ok(DispatchOutcome {
             response: adapter.non_blocking_ack(),
-            exit_code: stop_session.then_some(2),
+            exit_code: None,
             protect_pre,
             protect_post,
         });
@@ -642,11 +481,7 @@ fn finalize_response(
     };
 
     let payload = adapter.format_response(event, &response)?;
-    let exit_code = if stop_session {
-        Some(2)
-    } else {
-        adapter.exit_code(event, &response)
-    };
+    let exit_code = adapter.exit_code(event, &response);
 
     let response_payload = if payload.is_null() {
         None
@@ -660,19 +495,6 @@ fn finalize_response(
         protect_pre,
         protect_post,
     })
-}
-
-fn should_short_circuit_on_protect(outcome: &ProtectOutcome) -> bool {
-    matches!(
-        outcome,
-        ProtectOutcome::AskThenAllowOrStop { .. }
-            | ProtectOutcome::StopCurrent { .. }
-            | ProtectOutcome::StopSession { .. }
-    )
-}
-
-fn has_stop_session(decision: Option<&ProtectDecision>) -> bool {
-    decision.is_some_and(|decision| matches!(decision.outcome, ProtectOutcome::StopSession { .. }))
 }
 
 #[cfg(test)]

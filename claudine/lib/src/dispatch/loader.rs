@@ -12,7 +12,7 @@ use crate::events::{
     Provider,
 };
 use crate::messaging::RuntimeMessagingSettings;
-use crate::services::{ProtectConfig, ProtectPosture};
+use crate::services::protect::config::ProtectConfig;
 
 /// Candidate file names for user-level configuration.
 const USER_CONFIG_NAMES: &[&str] = &[".claudine/config.json"];
@@ -465,25 +465,13 @@ fn merge_protect_configs(
 ) -> Option<ProtectConfig> {
     match (user, repo) {
         (None, None) => None,
-        (Some(user_cfg), None) => Some(user_cfg.clone()),
-        (None, Some(repo_cfg)) => Some(repo_cfg.clone()),
+        (Some(u), None) => Some(u.clone()),
+        (None, Some(r)) => Some(r.clone()),
         (Some(user_cfg), Some(repo_cfg)) => {
-            let mut merged = user_cfg.merge_with(repo_cfg);
-            let allow_downgrade =
-                user_cfg.allow_repo_posture_downgrade || repo_cfg.allow_repo_posture_downgrade;
-
-            if !allow_downgrade {
-                if user_cfg.posture == ProtectPosture::Strict
-                    && merged.posture != ProtectPosture::Strict
-                {
-                    merged.posture = ProtectPosture::Strict;
-                }
-
-                if user_cfg.enabled && !merged.enabled {
-                    merged.enabled = true;
-                }
+            let mut merged = repo_cfg.clone();
+            if user_cfg.enabled && !merged.enabled {
+                merged.enabled = true;
             }
-
             Some(merged)
         }
     }
@@ -537,7 +525,7 @@ mod tests {
     use super::*;
     use crate::actions::*;
     use crate::events::*;
-    use crate::services::{ProtectConfig, ProtectPosture};
+    use crate::services::protect::config::ProtectConfig;
     use std::collections::HashMap;
     use std::path::PathBuf;
 
