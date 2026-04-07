@@ -20,8 +20,7 @@ use claudine::composition::lifecycle::{
 };
 use claudine::composition::{
     CompositionClosurePlan, CompositionError, CompositionExecutionRequest, CompositionMode,
-    InlineClosurePlan, SelectedProvider, SelectionReason, SystemPromptInput, build_candidate_set,
-    select_provider,
+    InlineClosurePlan, SelectedProvider, SelectionReason, build_candidate_set, select_provider,
 };
 use claudine::events::Provider;
 use claudine::stream::stderr::Verbosity;
@@ -189,6 +188,7 @@ pub(crate) fn execute_composition_request_inner(
             detail_requested,
             request.repo,
             compose_display.as_ref(),
+            request.sequence,
             request.operation.as_deref(),
             None, // no inline prompt text for compose
             Some(&compose_source_hint),
@@ -396,16 +396,51 @@ pub(crate) fn execute_composition_request_inner(
         }
     }
 
-    // Universal --system-prompt flag
-    if let Some(ref prompt) = request.system_prompt {
-        let resolved = resolve_system_prompt_input(prompt)?;
-        if let Some(warn) = profile.apply_system_prompt(&mut child_args, &resolved)
-            && !silent
-            && !quiet
-        {
-            log::warn(&warn);
+    let launch_context = claudine::system_prompt::LaunchContext::from_cwd(&launch_cwd)
+        .unwrap_or_else(|_| claudine::system_prompt::LaunchContext {
+            cwd: launch_cwd.clone(),
+            repo_root: None,
+            package_area_root: None,
+            package_root: None,
+        });
+    let effective_sp =
+        claudine::system_prompt::resolve_and_prepare(&request.system_prompt_args, &launch_context)
+            .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+
+    let mut sp_artifacts: Vec<super::system_prompt::SystemPromptArtifact> = Vec::new();
+
+    match &effective_sp {
+        claudine::system_prompt::EffectiveSystemPrompt::None => {}
+        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source } => {
+            if !quiet && !silent {
+                log::info(&format!(
+                    "system prompt disabled by empty {}",
+                    super::system_prompt::describe_source(source),
+                ));
+            }
+        }
+        claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
+            let application =
+                profile.apply_system_prompt(prepared, !effective_non_interactive, &launch_cwd)?;
+            child_args.extend(application.args);
+            for (k, v) in application.env {
+                if k == "HOME" && env_plan.env.contains_key(std::ffi::OsStr::new("HOME")) {
+                    continue;
+                }
+                env_plan.env.insert(
+                    k.to_string_lossy().to_string().into(),
+                    v.to_string_lossy().to_string().into(),
+                );
+            }
+            sp_artifacts = application.artifacts;
+            for warn in application.warnings {
+                if !silent && !quiet {
+                    log::warn(&warn);
+                }
+            }
         }
     }
+    let _ = &sp_artifacts;
 
     // Universal --sandbox flag
     if request.sandbox
@@ -461,6 +496,8 @@ pub(crate) fn execute_composition_request_inner(
 
     profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
 
+    let sp_display_lines = super::system_prompt::describe_effective(&effective_sp);
+
     // --dry-run: print what would be executed and exit
     if request.dry_run {
         crate::output::log_dry_run(
@@ -472,6 +509,7 @@ pub(crate) fn execute_composition_request_inner(
             None,
             child_cwd,
             &term,
+            sp_display_lines.as_deref(),
         );
         return Ok(SingleCompositionOutcome {
             exit_code: 0,
@@ -778,13 +816,6 @@ pub(crate) fn execute_composition_request_inner(
             exit_code,
             provider,
         })
-    }
-}
-
-fn resolve_system_prompt_input(input: &SystemPromptInput) -> Result<String> {
-    match input {
-        SystemPromptInput::Inline { prompt } => Ok(prompt.clone()),
-        SystemPromptInput::File { path } => Ok(std::fs::read_to_string(path)?),
     }
 }
 

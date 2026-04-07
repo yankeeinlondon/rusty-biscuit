@@ -3,11 +3,12 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
     self, CompositionExecutionRequest, CompositionMode, PrepareOptions, ResolvedCompositionSource,
     SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceStepResult,
-    SystemPromptInput,
 };
 use color_eyre::eyre::{Result, eyre};
 
@@ -32,10 +33,13 @@ pub(crate) fn execute_sequence(
     let total_steps = plan.steps.len();
 
     if !silent {
-        log::message(&format!(
-            "Sequence: {} step(s), fail_fast={}",
+        let term = log::terminal();
+        let status = Status::from_prose(format!(
+            "<b>Sequence:</b> <yellow>{}</yellow> step(s), <i>fail_fast</i> is set to <blue>{}</blue>",
             total_steps, effective_fail_fast
-        ));
+        ))
+        .state(StatusState::Info);
+        log::message(&status.render(&term));
     }
 
     let mut summary = SequenceRunSummary {
@@ -59,12 +63,14 @@ pub(crate) fn execute_sequence(
         let overlay = build_step_overlay(&plan, step_index);
 
         if !silent {
-            log::message(&format!(
-                "[{}/{}] {}",
+            let status = Status::from_prose(format!(
+                "[<yellow>{}/{}</yellow>] <i>starting</i> <b>{}</b>",
                 step_index + 1,
                 total_steps,
                 step.name
-            ));
+            ))
+            .state(StatusState::Info);
+            log::message(&status.render(&log::terminal()));
         }
 
         let start = std::time::Instant::now();
@@ -120,12 +126,14 @@ pub(crate) fn execute_sequence(
                 let duration = start.elapsed();
                 let error_msg = e.to_string();
                 if !silent {
-                    log::error(&format!(
-                        "step {}/{} failed: {}",
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> failed: {}",
                         step_index + 1,
                         total_steps,
                         error_msg
-                    ));
+                    ))
+                    .state(StatusState::Failure);
+                    log::message(&status.render(&log::terminal()));
                 }
                 summary.failed += 1;
                 summary.steps.push(SequenceStepResult {
@@ -142,18 +150,10 @@ pub(crate) fn execute_sequence(
             }
         };
 
-        let system_prompt = shared
-            .system_prompt
-            .as_ref()
-            .map(|prompt| SystemPromptInput::Inline {
-                prompt: prompt.clone(),
-            })
-            .or_else(|| {
-                shared
-                    .system_prompt_file
-                    .as_ref()
-                    .map(|path| SystemPromptInput::File { path: path.clone() })
-            });
+        let system_prompt_args = claudine::system_prompt::SystemPromptArgs {
+            append_file: shared.append_system_prompt.clone(),
+            replace_file: shared.replace_system_prompt.clone(),
+        };
 
         let request = CompositionExecutionRequest {
             mode: CompositionMode::ChainedDocument,
@@ -161,11 +161,12 @@ pub(crate) fn execute_sequence(
             prepared,
             explicit_provider: shared.explicit_provider(),
             excluded: shared.excluded(),
+            sequence: true,
             yolo: shared.yolo,
             include: shared.include.clone(),
             model: shared.model.clone(),
             output: shared.output,
-            system_prompt,
+            system_prompt_args,
             timeout: shared.timeout,
             operation: shared.operation.clone(),
             sandbox: shared.sandbox,
@@ -196,12 +197,14 @@ pub(crate) fn execute_sequence(
                     duration,
                 });
                 if !silent {
-                    log::message(&format!(
-                        "step {}/{} succeeded (via {})",
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> succeeded (<dim><i>via {}</i></dim>)",
                         step_index + 1,
                         total_steps,
                         outcome.provider
-                    ));
+                    ))
+                    .state(StatusState::Success);
+                    log::message(&status.render(&log::terminal()));
                 }
             }
             Ok(outcome) => {
@@ -218,12 +221,14 @@ pub(crate) fn execute_sequence(
                     duration,
                 });
                 if !silent {
-                    log::error(&format!(
-                        "step {}/{} failed: {}",
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> failed: {}",
                         step_index + 1,
                         total_steps,
                         error_msg
-                    ));
+                    ))
+                    .state(StatusState::Failure);
+                    log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
                     break;
@@ -240,12 +245,14 @@ pub(crate) fn execute_sequence(
                     duration,
                 });
                 if !silent {
-                    log::error(&format!(
-                        "step {}/{} failed: {}",
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> failed: {}",
                         step_index + 1,
                         total_steps,
                         error_msg
-                    ));
+                    ))
+                    .state(StatusState::Failure);
+                    log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
                     break;
@@ -258,15 +265,19 @@ pub(crate) fn execute_sequence(
     if !silent {
         eprintln!();
         if summary.failed == 0 {
-            log::message(&format!(
-                "Sequence finished: {} succeeded, 0 failed",
+            let status = Status::from_prose(format!(
+                "Sequence finished: <green>{}</green> succeeded, 0 failed",
                 summary.succeeded
-            ));
+            ))
+            .state(StatusState::Success);
+            log::message(&status.render(&log::terminal()));
         } else {
-            log::error(&format!(
-                "Sequence finished: {} succeeded, {} failed",
+            let status = Status::from_prose(format!(
+                "Sequence finished: <green>{}</green> succeeded, <red>{}</red> failed",
                 summary.succeeded, summary.failed
-            ));
+            ))
+            .state(StatusState::Failure);
+            log::message(&status.render(&log::terminal()));
         }
     }
 
