@@ -283,6 +283,31 @@ async fn dispatch_preparsed_with_config(
         return Ok(DispatchOutcome::default());
     };
 
+    // --- Protect pre-evaluation runs regardless of binding ---
+    let protect_service = config.protect_service();
+    let protect_pre = protect_service.and_then(|service| {
+        let request = extract_protect_request(&event, &meta)?;
+        let decision = service.evaluate(&request);
+        if decision.is_blocked() {
+            Some(decision)
+        } else {
+            None
+        }
+    });
+
+    if let Some(ref decision) = protect_pre {
+        let response = map_protect_block(decision);
+        return finalize_response(
+            adapter,
+            &event,
+            can_block,
+            Some(response),
+            protect_pre.clone(),
+            None,
+        );
+    }
+
+    // --- Binding-dependent action execution ---
     let binding = match config.get_binding(provider, &event) {
         Some(binding) => binding,
         None => {
@@ -316,30 +341,6 @@ async fn dispatch_preparsed_with_config(
         actions: binding.actions().to_vec(),
         can_block,
     };
-
-    let protect_service = config.protect_service();
-
-    let protect_pre = protect_service.and_then(|service| {
-        let request = extract_protect_request(&resolved_hook.event, &resolved_hook.meta)?;
-        let decision = service.evaluate(&request);
-        if decision.is_blocked() {
-            Some(decision)
-        } else {
-            None
-        }
-    });
-
-    if let Some(ref decision) = protect_pre {
-        let response = map_protect_block(decision);
-        return finalize_response(
-            adapter,
-            &resolved_hook.event,
-            resolved_hook.can_block,
-            Some(response),
-            protect_pre.clone(),
-            None,
-        );
-    }
 
     info!(
         event = %resolved_hook.event,
@@ -864,5 +865,43 @@ mod tests {
 
         assert!(matcher::matches_with_pattern(Some("Bash|Edit"), &meta));
         assert!(!matcher::matches_with_pattern(Some("Read"), &meta));
+    }
+
+    #[tokio::test]
+    async fn protect_blocks_before_tool_even_without_binding() {
+        use crate::services::protect::catalog::ProtectPlatform;
+        use crate::services::protect::config::ProtectConfig;
+        use crate::services::protect::service::ProtectService;
+
+        let protect_service =
+            ProtectService::new(ProtectConfig::default(), ProtectPlatform::current()).unwrap();
+
+        let config = loader::RuntimeConfig::new_for_test(
+            GlobalSettings::default(),
+            HashMap::new(),
+            Some(protect_service),
+        );
+
+        let mut meta = EventMeta::new(Provider::Claude, AgenticEvent::BeforeTool);
+        meta.tool_name = Some("Bash".to_string());
+        meta.tool_input = Some(json!({"command": "rm -rf /"}));
+        meta.env = EnvironmentContext::default();
+
+        let outcome = dispatch_preparsed_with_config(
+            Provider::Claude,
+            AgenticEvent::BeforeTool,
+            meta,
+            Some(&config),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            outcome
+                .protect_pre
+                .as_ref()
+                .map_or(false, |d| d.is_blocked()),
+            "protect should block rm -rf / even without a BeforeTool binding"
+        );
     }
 }

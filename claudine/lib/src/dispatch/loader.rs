@@ -32,7 +32,7 @@ pub struct RuntimeConfig {
 }
 
 #[derive(Debug, Clone, Default)]
-struct RuntimeProviderConfig {
+pub(crate) struct RuntimeProviderConfig {
     events: HashMap<AgenticEvent, RuntimeEventBinding>,
 }
 
@@ -70,6 +70,23 @@ impl RuntimeConfig {
         self.providers
             .get(&provider)
             .and_then(|provider_config| provider_config.events.get(event))
+    }
+}
+
+impl RuntimeConfig {
+    /// Build a RuntimeConfig directly for testing.
+    #[cfg(test)]
+    pub fn new_for_test(
+        settings: GlobalSettings,
+        providers: HashMap<Provider, RuntimeProviderConfig>,
+        protect_service: Option<ProtectService>,
+    ) -> Self {
+        Self {
+            settings,
+            messaging: RuntimeMessagingSettings::default(),
+            providers,
+            protect_service,
+        }
     }
 }
 
