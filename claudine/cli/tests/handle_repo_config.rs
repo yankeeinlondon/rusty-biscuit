@@ -62,36 +62,38 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
         return;
     }
 
-    let config = serde_json::json!({
-        "version": "1.0",
-        "settings": {
-            "linking": {
-                "canonical_provider": {
-                    "repo_skill": "claude"
-                }
-            }
-        },
-        "providers": {
-            "claude": {
-                "events": {
-                    "session_start": {
-                        "enabled": true,
-                        "actions": [
-                            {
-                                "type": "report",
-                                "handler": {
-                                    "format": "json"
-                                }
-                            }
-                        ]
+    // Minimal user config (required by load_claudine_config before repo merge).
+    let user_config = serde_json::json!({
+        "preferred_agent": "claude",
+        "tts": false,
+        "logging": false,
+        "protect": { "enabled": false }
+    });
+    write(
+        &home_dir.join(".claudine/config.json"),
+        &serde_json::to_string_pretty(&user_config).unwrap(),
+    );
+
+    // Repo config with the session_start action.
+    let repo_config = serde_json::json!({
+        "preferred_agent": "claude",
+        "tts": false,
+        "logging": false,
+        "protect": { "enabled": false },
+        "actions": {
+            "session_start": [
+                {
+                    "type": "report",
+                    "handler": {
+                        "format": "json"
                     }
                 }
-            }
+            ]
         }
     });
     write(
         &repo_root.join(".claudine/config.json"),
-        &serde_json::to_string_pretty(&config).unwrap(),
+        &serde_json::to_string_pretty(&repo_config).unwrap(),
     );
 
     let output = cargo_bin_cmd!("claudine")
@@ -126,36 +128,38 @@ fn handle_logs_wrapper_package_context_from_env() {
         return;
     }
 
-    let config = serde_json::json!({
-        "version": "1.0",
-        "settings": {
-            "linking": {
-                "canonical_provider": {
-                    "repo_skill": "claude"
-                }
-            }
-        },
-        "providers": {
-            "claude": {
-                "events": {
-                    "session_start": {
-                        "enabled": true,
-                        "actions": [
-                            {
-                                "type": "report",
-                                "handler": {
-                                    "format": "json"
-                                }
-                            }
-                        ]
+    // Minimal user config (required by load_claudine_config before repo merge).
+    let user_config = serde_json::json!({
+        "preferred_agent": "claude",
+        "tts": false,
+        "logging": false,
+        "protect": { "enabled": false }
+    });
+    write(
+        &home_dir.join(".claudine/config.json"),
+        &serde_json::to_string_pretty(&user_config).unwrap(),
+    );
+
+    // Repo config with the session_start action.
+    let repo_config = serde_json::json!({
+        "preferred_agent": "claude",
+        "tts": false,
+        "logging": false,
+        "protect": { "enabled": false },
+        "actions": {
+            "session_start": [
+                {
+                    "type": "report",
+                    "handler": {
+                        "format": "json"
                     }
                 }
-            }
+            ]
         }
     });
     write(
         &repo_root.join(".claudine/config.json"),
-        &serde_json::to_string_pretty(&config).unwrap(),
+        &serde_json::to_string_pretty(&repo_config).unwrap(),
     );
 
     let output = cargo_bin_cmd!("claudine")
