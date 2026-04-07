@@ -7,14 +7,14 @@ use tracing::{debug, info, warn};
 
 use crate::actions::{CompiledMapper, HookAction, Mapper};
 use crate::config::atomic::atomic_write;
-use crate::config::claudine_config::ClaudineConfig;
+use crate::config::claudine_config::{ClaudineConfig, ClaudineMessengerConfig, MessengerProviderConfig};
 use crate::config::migration;
 use crate::error::{ClaudineError, Result};
 use crate::events::{
     AgenticEvent, CanonicalProviderSettings, GlobalSettings, HookerConfig, LinkingSettings,
     Provider,
 };
-use crate::messaging::RuntimeMessagingSettings;
+use crate::messaging::{MessagingRouteConfig, RuntimeMessagingSettings, ScopedMessagingSettings};
 use crate::services::protect::catalog::ProtectPlatform;
 use crate::services::protect::config::{ProtectConfig, ProtectRuleToggles};
 use crate::services::protect::service::ProtectService;
@@ -328,6 +328,202 @@ fn compile_mapper(
             })?;
             Ok(CompiledMapper::Regex { pattern: compiled })
         }
+    }
+}
+
+// ==========================================================================
+// CanonicalRuntimeConfig (compiled from the new ClaudineConfig)
+// ==========================================================================
+
+/// Runtime configuration compiled from the new [`ClaudineConfig`].
+///
+/// Unlike the old [`RuntimeConfig`] which indexes by provider+event,
+/// this indexes by canonical event only.
+#[derive(Debug, Clone)]
+pub struct CanonicalRuntimeConfig {
+    pub(crate) config: ClaudineConfig,
+    pub(crate) messaging: RuntimeMessagingSettings,
+    pub(crate) protect_service: Option<ProtectService>,
+    pub(crate) events: HashMap<AgenticEvent, RuntimeEventBinding>,
+}
+
+impl CanonicalRuntimeConfig {
+    /// Get the underlying [`ClaudineConfig`].
+    pub fn config(&self) -> &ClaudineConfig {
+        &self.config
+    }
+
+    /// Get runtime messaging settings.
+    pub fn messaging(&self) -> &RuntimeMessagingSettings {
+        &self.messaging
+    }
+
+    /// Get the cached protect service, if available.
+    pub fn protect_service(&self) -> Option<&ProtectService> {
+        self.protect_service.as_ref()
+    }
+
+    /// Get an event binding for a canonical event.
+    pub fn get_binding(&self, event: &AgenticEvent) -> Option<&RuntimeEventBinding> {
+        self.events.get(event)
+    }
+}
+
+/// Compile a [`ClaudineConfig`] into a [`CanonicalRuntimeConfig`].
+///
+/// This iterates the flat event→actions map, compiles regex mappers for
+/// `Call` actions, builds the protect service if enabled, and bridges
+/// messenger settings to the existing [`RuntimeMessagingSettings`] type.
+pub fn compile_canonical_runtime(
+    config: ClaudineConfig,
+    _repo_root: Option<&Path>,
+) -> Result<CanonicalRuntimeConfig> {
+    // 1. Compile event bindings
+    let mut events = HashMap::new();
+    for (event, actions) in &config.actions {
+        let compiled_mappers = actions
+            .iter()
+            .map(|action| compile_canonical_action_mapper(action, *event))
+            .collect::<Result<Vec<_>>>()?;
+
+        events.insert(
+            *event,
+            RuntimeEventBinding {
+                enabled: true,
+                actions: actions.clone(),
+                matcher: None,
+                compiled_mappers,
+            },
+        );
+    }
+
+    // 2. Build ProtectService if enabled
+    let protect_service = if config.protect.enabled {
+        Some(ProtectService::new(
+            config.protect.clone(),
+            ProtectPlatform::current(),
+        )?)
+    } else {
+        None
+    };
+
+    // 3. Bridge messenger config to RuntimeMessagingSettings
+    let messaging = config
+        .messenger
+        .as_ref()
+        .map(bridge_messenger_to_runtime)
+        .unwrap_or_default();
+
+    Ok(CanonicalRuntimeConfig {
+        config,
+        messaging,
+        protect_service,
+        events,
+    })
+}
+
+/// Compile mapper metadata for a single action in the canonical config.
+///
+/// Same logic as [`compile_action_mapper`] but without a provider context,
+/// since canonical events are provider-agnostic.
+fn compile_canonical_action_mapper(
+    action: &HookAction,
+    event: AgenticEvent,
+) -> Result<Option<CompiledMapper>> {
+    let HookAction::Call { mapper, .. } = action else {
+        return Ok(None);
+    };
+
+    mapper
+        .as_ref()
+        .map(|mapper| compile_canonical_mapper(mapper, event))
+        .transpose()
+}
+
+/// Compile a single mapper without provider context.
+fn compile_canonical_mapper(mapper: &Mapper, event: AgenticEvent) -> Result<CompiledMapper> {
+    match mapper {
+        Mapper::JsonField { field } => Ok(CompiledMapper::JsonField {
+            field: field.clone(),
+        }),
+        Mapper::JsonObject => Ok(CompiledMapper::JsonObject),
+        Mapper::ExitCode => Ok(CompiledMapper::ExitCode),
+        Mapper::Regex { pattern } => {
+            let compiled = Regex::new(pattern).map_err(|error| {
+                ClaudineError::TemplateError(format!(
+                    "invalid mapper regex for event={event}: {error} ({pattern})"
+                ))
+            })?;
+            Ok(CompiledMapper::Regex { pattern: compiled })
+        }
+    }
+}
+
+/// Bridge [`ClaudineMessengerConfig`] to [`RuntimeMessagingSettings`].
+///
+/// The new config uses [`MessengerProviderConfig`] variants while the
+/// existing runtime uses [`MessagingRouteConfig`]. This function converts
+/// between the two and wraps the result as a user-scope
+/// [`ScopedMessagingSettings`].
+fn bridge_messenger_to_runtime(messenger: &ClaudineMessengerConfig) -> RuntimeMessagingSettings {
+    let configs: HashMap<String, MessagingRouteConfig> = messenger
+        .configurations
+        .iter()
+        .map(|(name, provider_cfg)| (name.clone(), bridge_provider_config(provider_cfg)))
+        .collect();
+
+    let scoped = ScopedMessagingSettings {
+        active: messenger.active_config.clone(),
+        configs,
+    };
+
+    RuntimeMessagingSettings {
+        user: Some(scoped),
+        repo: None,
+    }
+}
+
+/// Convert a single [`MessengerProviderConfig`] to [`MessagingRouteConfig`].
+fn bridge_provider_config(cfg: &MessengerProviderConfig) -> MessagingRouteConfig {
+    match cfg {
+        MessengerProviderConfig::Discord {
+            channel_id,
+            bot_token_env,
+        } => MessagingRouteConfig::Discord {
+            channel_id: channel_id.clone(),
+            bot_token: None,
+            bot_token_env: bot_token_env.clone(),
+        },
+        MessengerProviderConfig::Slack {
+            channel_id,
+            bot_token_env,
+        } => MessagingRouteConfig::Slack {
+            channel_id: channel_id.clone(),
+            bot_token: None,
+            bot_token_env: bot_token_env.clone(),
+        },
+        MessengerProviderConfig::Signal {
+            recipient,
+            rpc_url_env,
+            account_env,
+        } => MessagingRouteConfig::Signal {
+            recipient: recipient.clone(),
+            rpc_url: None,
+            rpc_url_env: rpc_url_env.clone(),
+            account: None,
+            account_env: account_env.clone(),
+        },
+        MessengerProviderConfig::Whatsapp {
+            recipient,
+            access_token_env,
+            phone_number_id_env,
+        } => MessagingRouteConfig::WhatsApp {
+            recipient: recipient.clone(),
+            access_token: None,
+            access_token_env: access_token_env.clone(),
+            phone_number_id: None,
+            phone_number_id_env: phone_number_id_env.clone(),
+        },
     }
 }
 
@@ -743,6 +939,7 @@ fn merge_canonical_providers(
 mod tests {
     use super::*;
     use crate::actions::*;
+    use crate::config::claudine_config::DefaultSounds;
     use crate::events::*;
     use crate::services::protect::config::RuleGroupDetailedConfig;
     use crate::services::protect::{
@@ -1794,5 +1991,238 @@ mod tests {
         let loaded = load_claudine_config(Some(&path), None).unwrap();
         assert_eq!(loaded.preferred_agent, config.preferred_agent);
         assert_eq!(loaded.logging, config.logging);
+    }
+
+    // =====================================================================
+    // CanonicalRuntimeConfig tests
+    // =====================================================================
+
+    #[test]
+    fn compile_canonical_runtime_indexes_by_event() {
+        let mut config = ClaudineConfig::default();
+        config.actions.insert(
+            AgenticEvent::HumanInTheLoop,
+            vec![HookAction::SoundEffect {
+                effect: "doorbell".to_string(),
+                volume: 1.0,
+                speed: 1.0,
+            }],
+        );
+        config.default_sounds = DefaultSounds::default();
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        assert!(runtime.get_binding(&AgenticEvent::HumanInTheLoop).is_some());
+        assert!(runtime.get_binding(&AgenticEvent::SessionStart).is_none());
+    }
+
+    #[test]
+    fn compile_canonical_runtime_builds_protect() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = true;
+        config.default_sounds = DefaultSounds::default();
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        assert!(runtime.protect_service().is_some());
+    }
+
+    #[test]
+    fn compile_canonical_runtime_no_protect_when_disabled() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        assert!(runtime.protect_service().is_none());
+    }
+
+    #[test]
+    fn compile_canonical_runtime_compiles_call_mappers() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Call {
+                command: "echo".to_string(),
+                args: Some(vec!["allow because safe".to_string()]),
+                mapper: Some(Mapper::Regex {
+                    pattern: r"(?P<decision>allow|deny)\s+because\s+(?P<reason>.*)".to_string(),
+                }),
+                timeout_ms: None,
+            }],
+        );
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let binding = runtime
+            .get_binding(&AgenticEvent::BeforeTool)
+            .expect("missing binding");
+        assert_eq!(binding.actions().len(), 1);
+        assert_eq!(binding.compiled_mappers().len(), 1);
+        assert!(binding.compiled_mappers()[0].is_some());
+    }
+
+    #[test]
+    fn compile_canonical_runtime_fails_on_invalid_mapper_regex() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Call {
+                command: "echo".to_string(),
+                args: None,
+                mapper: Some(Mapper::Regex {
+                    pattern: "[invalid(".to_string(),
+                }),
+                timeout_ms: None,
+            }],
+        );
+
+        let error = compile_canonical_runtime(config, None).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("invalid mapper regex"));
+        assert!(message.contains("before_tool"));
+    }
+
+    #[test]
+    fn compile_canonical_runtime_bridges_messenger_config() {
+        use crate::config::claudine_config::{ClaudineMessengerConfig, MessengerProviderConfig};
+
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.messenger = Some(ClaudineMessengerConfig {
+            active_config: Some("alerts".to_string()),
+            configurations: HashMap::from([(
+                "alerts".to_string(),
+                MessengerProviderConfig::Discord {
+                    channel_id: "999".to_string(),
+                    bot_token_env: "DISCORD_BOT_TOKEN".to_string(),
+                },
+            )]),
+        });
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let messaging = runtime.messaging();
+        assert!(messaging.user.is_some());
+        assert_eq!(
+            messaging.user.as_ref().unwrap().active.as_deref(),
+            Some("alerts")
+        );
+        assert!(messaging.user.as_ref().unwrap().configs.contains_key("alerts"));
+    }
+
+    #[test]
+    fn compile_canonical_runtime_no_messenger_gives_empty_messaging() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.messenger = None;
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let messaging = runtime.messaging();
+        assert!(messaging.user.is_none());
+        assert!(messaging.repo.is_none());
+    }
+
+    #[test]
+    fn bridge_provider_config_discord() {
+        let cfg = MessengerProviderConfig::Discord {
+            channel_id: "123".to_string(),
+            bot_token_env: "MY_TOKEN".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::Discord {
+                channel_id,
+                bot_token,
+                bot_token_env,
+            } => {
+                assert_eq!(channel_id, "123");
+                assert_eq!(bot_token, None);
+                assert_eq!(bot_token_env, "MY_TOKEN");
+            }
+            other => panic!("expected Discord, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_provider_config_slack() {
+        let cfg = MessengerProviderConfig::Slack {
+            channel_id: "C456".to_string(),
+            bot_token_env: "SLACK_TOKEN".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::Slack {
+                channel_id,
+                bot_token,
+                bot_token_env,
+            } => {
+                assert_eq!(channel_id, "C456");
+                assert_eq!(bot_token, None);
+                assert_eq!(bot_token_env, "SLACK_TOKEN");
+            }
+            other => panic!("expected Slack, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_provider_config_signal() {
+        let cfg = MessengerProviderConfig::Signal {
+            recipient: "+15551234567".to_string(),
+            rpc_url_env: "SIG_RPC".to_string(),
+            account_env: "SIG_ACCT".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::Signal {
+                recipient,
+                rpc_url,
+                rpc_url_env,
+                account,
+                account_env,
+            } => {
+                assert_eq!(recipient, "+15551234567");
+                assert_eq!(rpc_url, None);
+                assert_eq!(rpc_url_env, "SIG_RPC");
+                assert_eq!(account, None);
+                assert_eq!(account_env, "SIG_ACCT");
+            }
+            other => panic!("expected Signal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_provider_config_whatsapp() {
+        let cfg = MessengerProviderConfig::Whatsapp {
+            recipient: "+15559876543".to_string(),
+            access_token_env: "WA_TOKEN".to_string(),
+            phone_number_id_env: "WA_PHONE".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::WhatsApp {
+                recipient,
+                access_token,
+                access_token_env,
+                phone_number_id,
+                phone_number_id_env,
+            } => {
+                assert_eq!(recipient, "+15559876543");
+                assert_eq!(access_token, None);
+                assert_eq!(access_token_env, "WA_TOKEN");
+                assert_eq!(phone_number_id, None);
+                assert_eq!(phone_number_id_env, "WA_PHONE");
+            }
+            other => panic!("expected WhatsApp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn canonical_runtime_exposes_config() {
+        let config = ClaudineConfig::default();
+        let runtime = compile_canonical_runtime(config.clone(), None).unwrap();
+        assert_eq!(runtime.config().preferred_agent, config.preferred_agent);
     }
 }
