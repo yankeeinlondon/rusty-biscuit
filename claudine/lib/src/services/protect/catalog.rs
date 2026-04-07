@@ -207,7 +207,6 @@ pub static CATALOG: &[RuleDefinition] = &[
         platforms: PlatformApplicability::All,
         supports_allow_paths: false,
     },
-
     // ========== disk_manipulation ==========
     RuleDefinition {
         group: RuleGroup::DiskManipulation,
@@ -289,7 +288,6 @@ pub static CATALOG: &[RuleDefinition] = &[
         platforms: PlatformApplicability::LinuxOnly,
         supports_allow_paths: false,
     },
-
     // ========== remote_execution ==========
     RuleDefinition {
         group: RuleGroup::RemoteExecution,
@@ -339,7 +337,6 @@ pub static CATALOG: &[RuleDefinition] = &[
         platforms: PlatformApplicability::All,
         supports_allow_paths: false,
     },
-
     // ========== git_destructive ==========
     RuleDefinition {
         group: RuleGroup::GitDestructive,
@@ -421,7 +418,6 @@ pub static CATALOG: &[RuleDefinition] = &[
         platforms: PlatformApplicability::All,
         supports_allow_paths: false,
     },
-
     // ========== system_sabotage ==========
     RuleDefinition {
         group: RuleGroup::SystemSabotage,
@@ -495,7 +491,6 @@ pub static CATALOG: &[RuleDefinition] = &[
         platforms: PlatformApplicability::MacOsOnly,
         supports_allow_paths: false,
     },
-
     // ========== network_sabotage ==========
     RuleDefinition {
         group: RuleGroup::NetworkSabotage,
@@ -537,7 +532,6 @@ pub static CATALOG: &[RuleDefinition] = &[
         platforms: PlatformApplicability::LinuxOnly,
         supports_allow_paths: false,
     },
-
     // ========== container_cloud ==========
     RuleDefinition {
         group: RuleGroup::ContainerCloud,
@@ -587,7 +581,6 @@ pub static CATALOG: &[RuleDefinition] = &[
         platforms: PlatformApplicability::All,
         supports_allow_paths: false,
     },
-
     // ========== database_nukes ==========
     RuleDefinition {
         group: RuleGroup::DatabaseNukes,
@@ -637,7 +630,6 @@ pub static CATALOG: &[RuleDefinition] = &[
         platforms: PlatformApplicability::All,
         supports_allow_paths: false,
     },
-
     // ========== obfuscated_execution ==========
     RuleDefinition {
         group: RuleGroup::ObfuscatedExecution,
@@ -679,7 +671,6 @@ pub static CATALOG: &[RuleDefinition] = &[
         platforms: PlatformApplicability::All,
         supports_allow_paths: false,
     },
-
     // ========== prompt_injection (MCP) ==========
     RuleDefinition {
         group: RuleGroup::PromptInjection,
@@ -761,7 +752,6 @@ pub static CATALOG: &[RuleDefinition] = &[
         platforms: PlatformApplicability::All,
         supports_allow_paths: false,
     },
-
     // ========== credential_exfiltration ==========
     RuleDefinition {
         group: RuleGroup::CredentialExfiltration,
@@ -803,7 +793,6 @@ pub static CATALOG: &[RuleDefinition] = &[
         platforms: PlatformApplicability::All,
         supports_allow_paths: false,
     },
-
     // ========== sensitive_paths ==========
     // NOTE: Sensitive paths are handled separately via prefix matching in path.rs,
     // not via regex. This group exists for configuration purposes but has no
@@ -856,7 +845,9 @@ mod tests {
     fn macos_filter_excludes_linux_only() {
         let filtered = rules_for_platform(ProtectPlatform::MacOs);
         assert!(
-            !filtered.iter().any(|r| r.platforms == PlatformApplicability::LinuxOnly),
+            !filtered
+                .iter()
+                .any(|r| r.platforms == PlatformApplicability::LinuxOnly),
             "macOS catalog should not contain Linux-only rules"
         );
     }
@@ -865,7 +856,9 @@ mod tests {
     fn linux_filter_excludes_macos_only() {
         let filtered = rules_for_platform(ProtectPlatform::Linux);
         assert!(
-            !filtered.iter().any(|r| r.platforms == PlatformApplicability::MacOsOnly),
+            !filtered
+                .iter()
+                .any(|r| r.platforms == PlatformApplicability::MacOsOnly),
             "Linux catalog should not contain macOS-only rules"
         );
     }

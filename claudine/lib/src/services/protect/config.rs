@@ -37,8 +37,8 @@ impl<'de> Deserialize<'de> for ProtectConfig {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = serde_json::Value::deserialize(deserializer)
-            .map_err(serde::de::Error::custom)?;
+        let value =
+            serde_json::Value::deserialize(deserializer).map_err(serde::de::Error::custom)?;
 
         // Shorthand: bool
         if let Some(b) = value.as_bool() {
@@ -73,8 +73,7 @@ impl<'de> Deserialize<'de> for ProtectConfig {
             custom_patterns: Vec<CustomPattern>,
         }
 
-        let expanded: Expanded =
-            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        let expanded: Expanded = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
 
         Ok(Self {
             enabled: expanded.enabled,
@@ -98,9 +97,7 @@ impl ProtectConfig {
 
     pub fn get_allow_paths(&self, group: RuleGroup) -> Option<&Vec<String>> {
         match self.rules.get(group) {
-            Some(RuleGroupConfig::Detailed(d)) if !d.allow_paths.is_empty() => {
-                Some(&d.allow_paths)
-            }
+            Some(RuleGroupConfig::Detailed(d)) if !d.allow_paths.is_empty() => Some(&d.allow_paths),
             _ => None,
         }
     }
@@ -117,7 +114,10 @@ impl ProtectConfig {
             ("database_nukes", &self.rules.database_nukes),
             ("obfuscated_execution", &self.rules.obfuscated_execution),
             ("prompt_injection", &self.rules.prompt_injection),
-            ("credential_exfiltration", &self.rules.credential_exfiltration),
+            (
+                "credential_exfiltration",
+                &self.rules.credential_exfiltration,
+            ),
         ];
 
         for (name, toggle) in non_allow_path_groups {
@@ -344,10 +344,7 @@ mod tests {
         let paths = config.get_allow_paths(RuleGroup::FilesystemDestruction);
         assert_eq!(
             paths,
-            Some(&vec![
-                "node_modules".to_string(),
-                "target".to_string()
-            ])
+            Some(&vec!["node_modules".to_string(), "target".to_string()])
         );
     }
 
@@ -373,7 +370,10 @@ mod tests {
             "posture": "strict",
             "rules": {}
         }));
-        assert!(result.is_err(), "unknown field 'posture' should be rejected");
+        assert!(
+            result.is_err(),
+            "unknown field 'posture' should be rejected"
+        );
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("posture"),

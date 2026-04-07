@@ -13,11 +13,9 @@ use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
 use crate::error::Result;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook};
-use crate::services::protect::catalog::ProtectPlatform;
 use crate::services::protect::decision::ProtectDecision;
 use crate::services::protect::observe::extract_protect_request;
 use crate::services::protect::report::format_blocked_message;
-use crate::services::protect::service::ProtectService;
 
 /// Wrapper-session-scoped dispatch runtime.
 ///
@@ -319,11 +317,9 @@ async fn dispatch_preparsed_with_config(
         can_block,
     };
 
-    let protect_service = config.settings().protect.as_ref().and_then(|protect| {
-        ProtectService::new(protect.clone(), ProtectPlatform::current()).ok()
-    });
+    let protect_service = config.protect_service();
 
-    let protect_pre = protect_service.as_ref().and_then(|service| {
+    let protect_pre = protect_service.and_then(|service| {
         let request = extract_protect_request(&resolved_hook.event, &resolved_hook.meta)?;
         let decision = service.evaluate(&request);
         if decision.is_blocked() {
@@ -366,7 +362,7 @@ async fn dispatch_preparsed_with_config(
     )
     .await?;
 
-    let protect_post = protect_service.as_ref().and_then(|service| {
+    let protect_post = protect_service.and_then(|service| {
         if !matches!(
             resolved_hook.event,
             AgenticEvent::AfterTool | AgenticEvent::TurnComplete | AgenticEvent::SubagentStop
@@ -869,5 +865,4 @@ mod tests {
         assert!(matcher::matches_with_pattern(Some("Bash|Edit"), &meta));
         assert!(!matcher::matches_with_pattern(Some("Read"), &meta));
     }
-
 }

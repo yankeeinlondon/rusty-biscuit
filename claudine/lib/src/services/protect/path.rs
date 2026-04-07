@@ -14,6 +14,7 @@ const SENSITIVE_PREFIXES: &[&str] = &[
 const SENSITIVE_HOME_PREFIXES: &[&str] = &[".ssh", ".gnupg"];
 
 /// Checks whether a file path targets a sensitive system location.
+#[derive(Debug, Clone)]
 pub struct SensitivePathChecker {
     home_dir: Option<PathBuf>,
 }
@@ -239,7 +240,10 @@ mod tests {
         assert!(checker.is_sensitive("/dev"), "/dev should be sensitive");
         assert!(checker.is_sensitive("/proc"), "/proc should be sensitive");
         assert!(checker.is_sensitive("/sys"), "/sys should be sensitive");
-        assert!(checker.is_sensitive("/System"), "/System should be sensitive");
+        assert!(
+            checker.is_sensitive("/System"),
+            "/System should be sensitive"
+        );
     }
 
     #[test]
@@ -260,6 +264,9 @@ mod tests {
     fn tilde_exact_sensitive_directory_roots_are_detected() {
         let checker = SensitivePathChecker::new();
         assert!(checker.is_sensitive("~/.ssh"), "~/.ssh should be sensitive");
-        assert!(checker.is_sensitive("~/.gnupg"), "~/.gnupg should be sensitive");
+        assert!(
+            checker.is_sensitive("~/.gnupg"),
+            "~/.gnupg should be sensitive"
+        );
     }
 }

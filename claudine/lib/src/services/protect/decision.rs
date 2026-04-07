@@ -33,11 +33,17 @@ pub struct ProtectDecision {
 
 impl ProtectDecision {
     pub fn allow() -> Self {
-        Self { outcome: ProtectOutcome::Allow, blocked: None }
+        Self {
+            outcome: ProtectOutcome::Allow,
+            blocked: None,
+        }
     }
 
     pub fn blocked(m: ProtectMatch) -> Self {
-        Self { outcome: ProtectOutcome::Block, blocked: Some(m) }
+        Self {
+            outcome: ProtectOutcome::Block,
+            blocked: Some(m),
+        }
     }
 
     pub fn is_blocked(&self) -> bool {
@@ -70,6 +76,9 @@ mod tests {
         };
         let decision = ProtectDecision::blocked(m);
         assert!(decision.is_blocked());
-        assert_eq!(decision.blocked.as_ref().unwrap().rule_id, "rm_recursive_force");
+        assert_eq!(
+            decision.blocked.as_ref().unwrap().rule_id,
+            "rm_recursive_force"
+        );
     }
 }

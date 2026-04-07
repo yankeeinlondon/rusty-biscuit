@@ -12,7 +12,9 @@ use crate::events::{
     Provider,
 };
 use crate::messaging::RuntimeMessagingSettings;
+use crate::services::protect::catalog::ProtectPlatform;
 use crate::services::protect::config::{ProtectConfig, ProtectRuleToggles};
+use crate::services::protect::service::ProtectService;
 
 /// Candidate file names for user-level configuration.
 const USER_CONFIG_NAMES: &[&str] = &[".claudine/config.json"];
@@ -26,6 +28,7 @@ pub struct RuntimeConfig {
     settings: GlobalSettings,
     messaging: RuntimeMessagingSettings,
     providers: HashMap<Provider, RuntimeProviderConfig>,
+    protect_service: Option<ProtectService>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -51,6 +54,11 @@ impl RuntimeConfig {
     /// Get runtime messaging settings.
     pub fn messaging(&self) -> &RuntimeMessagingSettings {
         &self.messaging
+    }
+
+    /// Get the cached protect service, if available.
+    pub fn protect_service(&self) -> Option<&ProtectService> {
+        self.protect_service.as_ref()
     }
 
     /// Get an event binding for a specific provider and event.
@@ -230,6 +238,10 @@ fn compile_runtime_config_with_messaging(
         );
     }
 
+    let protect_service = settings.protect.as_ref().and_then(|protect| {
+        ProtectService::new(protect.clone(), ProtectPlatform::current()).ok()
+    });
+
     Ok(RuntimeConfig {
         settings,
         messaging: RuntimeMessagingSettings {
@@ -237,6 +249,7 @@ fn compile_runtime_config_with_messaging(
             repo: repo_messaging,
         },
         providers: runtime_providers,
+        protect_service,
     })
 }
 

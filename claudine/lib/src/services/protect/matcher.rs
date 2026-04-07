@@ -7,6 +7,7 @@ use super::config::{CustomPattern, ProtectConfig};
 use super::decision::ProtectMatch;
 
 /// A compiled group of rules sharing one `RegexSet` for fast matching.
+#[derive(Debug, Clone)]
 pub struct CompiledGroup {
     pub group: RuleGroup,
     pub surface: ScanSurface,
@@ -18,22 +19,17 @@ pub struct CompiledGroup {
 }
 
 impl CompiledGroup {
-    fn compile(
-        group: RuleGroup,
-        surface: ScanSurface,
-        rules: &[&RuleDefinition],
-    ) -> Result<Self> {
+    fn compile(group: RuleGroup, surface: ScanSurface, rules: &[&RuleDefinition]) -> Result<Self> {
         let patterns: Vec<&str> = rules.iter().map(|r| r.pattern).collect();
         let rule_ids: Vec<String> = rules.iter().map(|r| r.rule_id.to_string()).collect();
         let supports_allow_paths = rules.iter().any(|r| r.supports_allow_paths);
         let supports_allow_paths_per_rule: Vec<bool> =
             rules.iter().map(|r| r.supports_allow_paths).collect();
 
-        let regex_set =
-            RegexSet::new(&patterns).map_err(|e| ClaudineError::ProtectRuleParse {
-                pattern: format!("group:{group}"),
-                source: e,
-            })?;
+        let regex_set = RegexSet::new(&patterns).map_err(|e| ClaudineError::ProtectRuleParse {
+            pattern: format!("group:{group}"),
+            source: e,
+        })?;
 
         let regexes: Vec<Regex> = patterns
             .iter()
@@ -114,6 +110,7 @@ impl CompiledGroup {
 }
 
 /// The compiled rule catalog, ready for evaluation.
+#[derive(Debug, Clone)]
 pub struct CompiledCatalog {
     pub command_groups: Vec<CompiledGroup>,
     pub mcp_groups: Vec<CompiledGroup>,
@@ -144,8 +141,11 @@ impl CompiledCatalog {
                 continue;
             }
 
-            let rules: Vec<&RuleDefinition> =
-                filtered.iter().filter(|r| r.group == group).copied().collect();
+            let rules: Vec<&RuleDefinition> = filtered
+                .iter()
+                .filter(|r| r.group == group)
+                .copied()
+                .collect();
             if rules.is_empty() {
                 continue;
             }
@@ -226,16 +226,13 @@ impl CompiledCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::protect::catalog::RuleGroup;
     use crate::services::RuleGroupConfig;
+    use crate::services::protect::catalog::RuleGroup;
 
     #[test]
     fn compilation_succeeds_for_all_groups() {
-        let catalog = CompiledCatalog::new(
-            &ProtectConfig::default(),
-            ProtectPlatform::current(),
-        )
-        .expect("catalog should compile");
+        let catalog = CompiledCatalog::new(&ProtectConfig::default(), ProtectPlatform::current())
+            .expect("catalog should compile");
         assert!(!catalog.command_groups.is_empty());
         assert!(!catalog.mcp_groups.is_empty());
     }
@@ -286,7 +283,11 @@ mod tests {
     fn safe_mcp_response_is_allowed() {
         let catalog =
             CompiledCatalog::new(&ProtectConfig::default(), ProtectPlatform::current()).unwrap();
-        assert!(catalog.evaluate_mcp("Here is the file content you requested.").is_none());
+        assert!(
+            catalog
+                .evaluate_mcp("Here is the file content you requested.")
+                .is_none()
+        );
     }
 
     #[test]

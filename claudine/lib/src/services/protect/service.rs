@@ -21,6 +21,7 @@ pub enum ProtectRequest<'a> {
 ///
 /// No PolicyEngine, no postures, no capability downgrade. Receives a
 /// ProtectRequest and returns a deterministic Allow or Block.
+#[derive(Debug, Clone)]
 pub struct ProtectService {
     catalog: CompiledCatalog,
     config: ProtectConfig,
@@ -30,6 +31,7 @@ pub struct ProtectService {
 impl ProtectService {
     /// Build a protect service from config and platform.
     pub fn new(config: ProtectConfig, platform: ProtectPlatform) -> Result<Self> {
+        config.validate()?;
         let catalog = CompiledCatalog::new(&config, platform)?;
         Ok(Self {
             catalog,
@@ -314,6 +316,24 @@ mod tests {
         assert!(
             !decision.is_blocked(),
             "relative path to repo file should be allowed"
+        );
+    }
+
+    #[test]
+    fn new_rejects_invalid_config() {
+        let config: ProtectConfig = serde_json::from_value(serde_json::json!({
+            "rules": {
+                "git_destructive": {
+                    "enabled": true,
+                    "allow_paths": ["something"]
+                }
+            }
+        }))
+        .unwrap();
+        let result = ProtectService::new(config, ProtectPlatform::current());
+        assert!(
+            result.is_err(),
+            "ProtectService::new should reject invalid config"
         );
     }
 
