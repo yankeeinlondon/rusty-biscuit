@@ -459,6 +459,54 @@ fn compile_canonical_mapper(mapper: &Mapper, event: AgenticEvent) -> Result<Comp
     }
 }
 
+/// Bridge [`ClaudineConfig`] TTS settings to legacy [`GlobalSettings`].
+///
+/// Constructs a minimal [`GlobalSettings`] containing only the TTS
+/// configuration, suitable for [`LifecycleRuntimeContext`].
+pub fn bridge_tts_settings(config: &ClaudineConfig) -> GlobalSettings {
+    use crate::config::claudine_config::{TtsValue, VoiceSelection, Gender};
+    use crate::events::TtsSettings;
+
+    let tts = match &config.tts {
+        TtsValue::Boolean(false) => None,
+        TtsValue::Boolean(true) => Some(TtsSettings {
+            provider: None,
+            voice: None,
+            rate: None,
+        }),
+        TtsValue::Config(cfg) => {
+            let voice = match &cfg.voice {
+                Some(VoiceSelection::Single(v)) => Some(v.clone()),
+                Some(VoiceSelection::Gendered { male, female }) => match cfg.gender {
+                    Gender::Male => Some(male.clone()),
+                    Gender::Female => Some(female.clone()),
+                },
+                None => None,
+            };
+            Some(TtsSettings {
+                provider: Some(cfg.provider.clone()),
+                voice,
+                rate: None,
+            })
+        }
+    };
+    GlobalSettings {
+        tts,
+        ..GlobalSettings::default()
+    }
+}
+
+/// Bridge [`ClaudineConfig`] messenger settings to [`RuntimeMessagingSettings`].
+///
+/// Reuses [`bridge_messenger_to_runtime`] from [`compile_canonical_runtime`].
+pub fn bridge_messaging_settings(config: &ClaudineConfig) -> RuntimeMessagingSettings {
+    config
+        .messenger
+        .as_ref()
+        .map(bridge_messenger_to_runtime)
+        .unwrap_or_default()
+}
+
 /// Bridge [`ClaudineMessengerConfig`] to [`RuntimeMessagingSettings`].
 ///
 /// The new config uses [`MessengerProviderConfig`] variants while the
