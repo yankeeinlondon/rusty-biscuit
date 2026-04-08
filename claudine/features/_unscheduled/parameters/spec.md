@@ -29,9 +29,21 @@ Let's say that we have a prompt "@testing.md" which defines a property `color` t
 - If we provide the `color` variable as a number:
 
     ```sh
-    claudine compose "@testing.md"
+    claudine compose "@testing.md" color=42
     ```
 
-    We will get a `MissingParameter` error which looks something like:
+    We will get a `InvalidParameterType` error which looks something like:
 
-    - `Status::with_prose("<b><red>MissingParameter:</red></b> the <blue>@testing.md</blue> prompt requires that the parameter <green>color</green> be passed in with a <i>string</i> value!").state(Error)`
+    - `Status::with_prose("<b><red>InvalidParameterType:</red></b> the <blue>@testing.md</blue> prompt requires that the parameter <green>color</green> be passed in with a <i>string</i> value!").state(Error)`
+
+## Defining Parameters
+
+### Inline
+
+Let's start with an example:
+
+```md
+
+```
+
+### External Reference
