@@ -4,7 +4,7 @@ use ratatui::widgets::*;
 
 use super::super::app::{App, AppMode, ModalState};
 use claudine::actions::HookAction;
-use claudine::events::init_defaults::recommended_sound;
+use claudine::events::recommended_sound;
 use claudine::events::AgenticEvent;
 
 /// Action types a user can add to an event.

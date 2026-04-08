@@ -233,7 +233,7 @@ pub struct ClaudineConfig {
     pub messenger: Option<ClaudineMessengerConfig>,
 
     /// Whether the logging service is enabled.
-    #[serde(default)]
+    #[serde(default = "default_logging")]
     pub logging: bool,
 
     /// Protect service configuration.
@@ -257,6 +257,10 @@ pub struct ClaudineConfig {
     /// Default sound effects for outcome categories.
     #[serde(default)]
     pub default_sounds: DefaultSounds,
+}
+
+fn default_logging() -> bool {
+    true
 }
 
 fn default_protect() -> ProtectConfig {
@@ -695,7 +699,7 @@ mod tests {
         let config: ClaudineConfig =
             serde_json::from_value(serde_json::json!({ "preferred_agent": "claude" })).unwrap();
         assert!(matches!(config.tts, TtsValue::Boolean(false)));
-        assert!(!config.logging);
+        assert!(config.logging);
         assert!(config.protect.enabled);
         assert!(config.actions.is_empty());
         assert!(config.messenger.is_none());
