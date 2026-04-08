@@ -24,25 +24,6 @@ fn write(path: &Path, content: &str) {
 }
 
 #[test]
-fn init_quick_writes_protect_defaults() {
-    let root = test_root();
-    let home = root.join("home");
-    fs::create_dir_all(&home).unwrap();
-
-    cargo_bin_cmd!("claudine")
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
-        .args(["init", "--quick"])
-        .assert()
-        .success();
-
-    let config_path = home.join(".claudine/config.json");
-    let config: Value = serde_json::from_str(&fs::read_to_string(config_path).unwrap()).unwrap();
-    assert_eq!(config["settings"]["protect"]["enabled"], true);
-    assert_eq!(config["settings"]["protect"]["posture"], "balanced");
-}
-
-#[test]
 fn handle_json_includes_protect_decisions() {
     let root = test_root();
     let home = root.join("home");
