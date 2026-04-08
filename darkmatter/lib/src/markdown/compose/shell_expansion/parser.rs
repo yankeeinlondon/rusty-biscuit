@@ -81,6 +81,7 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
                     span: line_start..line_with_newline_end,
                     line: line_num,
                     error_handling,
+                    timeout_override: None,
                 });
             }
         }

@@ -20,6 +20,8 @@ pub struct ShellDirective {
     pub span: std::ops::Range<usize>,
     pub line: usize,
     pub error_handling: ErrorHandling,
+    /// Per-command timeout override. When Some, takes precedence over the global timeout.
+    pub timeout_override: Option<std::time::Duration>,
 }
 
 /// A shell command discovered during document graph analysis.

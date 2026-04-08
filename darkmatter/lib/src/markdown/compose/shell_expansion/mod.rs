@@ -78,6 +78,7 @@ use crate::markdown::compose::ComposeOptions;
 ///     span: 0..10,
 ///     line: 1,
 ///     error_handling: ErrorHandling::default(),
+///     timeout_override: None,
 /// };
 /// let options = ComposeOptions::new();
 /// let policy_paths = ShellPolicyPaths {
@@ -302,6 +303,7 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
             span: directive.span.clone(),
             line: directive.line,
             error_handling: directive.error_handling.clone(),
+            timeout_override: directive.timeout_override,
         };
 
         return (effective, Some(resolved.alias_name));
