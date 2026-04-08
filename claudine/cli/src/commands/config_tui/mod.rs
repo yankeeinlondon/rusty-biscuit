@@ -41,11 +41,10 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
     let (repo_config, repo_config_path) = if let Some(ref git) = git_info {
         let repo_root = &git.repo_root;
         let repo_cfg_path = repo_root.join(".claudine").join("config.json");
-        let repo_cfg = if repo_cfg_path.exists() {
-            claudine::dispatch::loader::load_claudine_config(Some(&repo_cfg_path), None).ok()
-        } else {
-            None
-        };
+        let repo_cfg =
+            claudine::dispatch::loader::load_repo_override_config(&repo_cfg_path)
+                .ok()
+                .flatten();
         (repo_cfg, Some(repo_cfg_path))
     } else {
         (None, None)
@@ -92,7 +91,7 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            claudine::dispatch::loader::save_claudine_config(repo_cfg, path)?;
+            claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
         }
 
         eprintln!();
@@ -234,9 +233,9 @@ fn build_hotkey_pairs(app: &App) -> Vec<(&'static str, &'static str)> {
                 ("A", "Agent"),
                 ("U", "User Provider"),
                 ("R", "Repo Provider"),
-                ("1", "Success"),
-                ("2", "Attention"),
-                ("3", "Error"),
+                ("S", "Success"),
+                ("N", "Attention"),
+                ("E", "Error"),
             ]);
         }
         app::Tab::Services => {
@@ -250,9 +249,10 @@ fn build_hotkey_pairs(app: &App) -> Vec<(&'static str, &'static str)> {
             pairs.extend([
                 ("T", "Toggle TTS"),
                 ("P", "Provider"),
-                ("G", "Default Gender"),
-                ("F", "Female Voice"),
-                ("M", "Male Voice"),
+                ("f", "Female Voice"),
+                ("m", "Male Voice"),
+                ("F", "Set Female"),
+                ("M", "Set Male"),
             ]);
         }
         app::Tab::Actions => {

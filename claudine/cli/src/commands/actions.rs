@@ -57,7 +57,7 @@ fn run_simple(config: &ClaudineConfig, term: &Terminal) -> Result<()> {
         log::data("No configured actions found.");
         log::data("");
         log::data(
-            "{{dim}}Run {{blue}}claudine init{{reset}}{{dim}} to configure event hooks.{{reset}}",
+            "{{dim}}Run {{blue}}claudine config{{reset}}{{dim}} to configure event hooks.{{reset}}",
         );
         return Ok(());
     }
@@ -174,7 +174,7 @@ fn run_verbose(config: &ClaudineConfig, term: &Terminal) -> Result<()> {
         log::data("No configured actions found.");
         log::data("");
         log::data(
-            "{{dim}}Run {{blue}}claudine init{{reset}}{{dim}} to configure event hooks.{{reset}}",
+            "{{dim}}Run {{blue}}claudine config{{reset}}{{dim}} to configure event hooks.{{reset}}",
         );
         return Ok(());
     }

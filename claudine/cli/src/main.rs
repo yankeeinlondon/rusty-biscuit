@@ -28,6 +28,16 @@ fn wrapper_command(
     }
 }
 
+/// Check if the Claudine config file exists. If not, run the initialization
+/// process so a config is available for the command about to run.
+async fn ensure_config_exists() -> Result<()> {
+    let config_path = claudine::dispatch::loader::user_config_path();
+    if !config_path.exists() {
+        commands::init_wizard::run_initialization().await?;
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
@@ -51,10 +61,19 @@ async fn main() -> Result<()> {
 
     let command = match wrapper_command(cli.command.unwrap()) {
         Ok((provider, args)) => {
+            // Wrapper commands also need config — check before launching
+            ensure_config_exists().await?;
             return commands::wrap::run_provider_wrapper(provider, args, cli.verbose);
         }
         Err(command) => *command,
     };
+
+    // Commands that must work without config (handle is a hook callback,
+    // completions is shell setup). Everything else requires config.
+    let needs_config = !matches!(command, Commands::Handle(_) | Commands::Completions(_));
+    if needs_config {
+        ensure_config_exists().await?;
+    }
 
     match command {
         Commands::Handle(args) => commands::handle::run(args).await,

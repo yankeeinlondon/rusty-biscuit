@@ -68,7 +68,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 
         if !global_config.exists() {
             log::warn("No global ~/.claudine/config.json found.");
-            log::message("Consider running `claudine init` first to set up global defaults.");
+            log::message("Run any claudine command to trigger initialization, or run `claudine config`.");
             log::message("");
         }
     }

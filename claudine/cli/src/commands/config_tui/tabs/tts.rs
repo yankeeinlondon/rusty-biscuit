@@ -312,13 +312,19 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             app.dirty = true;
         }
         _ if !is_enabled => {}
-        KeyCode::Char('g') | KeyCode::Char('G') => {
+        // Shift+F → set preferred gender to female
+        KeyCode::Char('F') => {
             ensure_tts_config(app);
             if let TtsValue::Config(ref mut cfg) = app.config.tts {
-                cfg.gender = match cfg.gender {
-                    Gender::Female => Gender::Male,
-                    Gender::Male => Gender::Female,
-                };
+                cfg.gender = Gender::Female;
+                app.dirty = true;
+            }
+        }
+        // Shift+M → set preferred gender to male
+        KeyCode::Char('M') => {
+            ensure_tts_config(app);
+            if let TtsValue::Config(ref mut cfg) = app.config.tts {
+                cfg.gender = Gender::Male;
                 app.dirty = true;
             }
         }
@@ -337,7 +343,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 .unwrap_or(0);
             app.modal = Some(ModalState::TtsProvider { highlighted });
         }
-        KeyCode::Char('f') | KeyCode::Char('F') => {
+        KeyCode::Char('f') => {
             let provider = match &app.config.tts {
                 TtsValue::Config(cfg) => cfg.provider.clone(),
                 _ => return,
@@ -362,7 +368,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 highlighted,
             });
         }
-        KeyCode::Char('m') | KeyCode::Char('M') => {
+        KeyCode::Char('m') => {
             let provider = match &app.config.tts {
                 TtsValue::Config(cfg) => cfg.provider.clone(),
                 _ => return,

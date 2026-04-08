@@ -3,7 +3,6 @@ use ratatui::prelude::*;
 use ratatui::widgets::*;
 
 use super::super::app::{App, AppMode, ModalState};
-use super::super::reducers::create_default_sound_action;
 use claudine::actions::HookAction;
 use claudine::events::AgenticEvent;
 
@@ -14,6 +13,7 @@ const ACTION_TYPE_LABELS: &[&str] = &[
     "Message (to chat app)",
     "Shell Command",
     "Report (to STDOUT)",
+    "Call (synchronous with response)",
 ];
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -100,6 +100,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             &title,
             &items,
             *highlighted,
+        );
+    }
+
+    if let Some(ModalState::ActionSoundSelector { highlighted, .. }) = &app.modal {
+        let sounds = super::super::get_sound_effect_names();
+        let items: Vec<String> = sounds.iter().map(|s| s.to_string()).collect();
+        super::super::widgets::modal::render_list_modal_with_hotkeys(
+            frame,
+            area,
+            "Select Sound Effect",
+            &items,
+            *highlighted,
+            &[("P", "Play"), ("ENTER", "Select"), ("ESC", "Cancel")],
         );
     }
 
@@ -333,7 +346,10 @@ fn editable_text(action: &HookAction) -> Option<(String, String, usize)> {
         HookAction::Bash { command, .. } => {
             Some(("Shell Command".to_string(), command.clone(), 3))
         }
-        HookAction::Report { .. } => None, // nothing editable
+        HookAction::Report { .. } => None,
+        HookAction::Call { command, .. } => {
+            Some(("Call Command".to_string(), command.clone(), 5))
+        }
         _ => None,
     }
 }
@@ -383,15 +399,30 @@ pub fn handle_edit_actions_modal(app: &mut App, key: KeyEvent) {
                 let idx = app.modal_highlighted();
                 if let Some(actions) = app.config.actions.get(&event)
                     && let Some(action) = actions.get(idx)
-                    && let Some((label, buffer, action_type)) = editable_text(action)
                 {
-                    app.push_modal(ModalState::TextInput {
-                        event,
-                        action_type,
-                        buffer,
-                        label,
-                        edit_index: Some(idx),
-                    });
+                    // Sound effects use the sound selector modal instead of text input
+                    if matches!(action, HookAction::SoundEffect { .. }) {
+                        let sounds = super::super::get_sound_effect_names();
+                        let current = match action {
+                            HookAction::SoundEffect { effect, .. } => {
+                                sounds.iter().position(|s| *s == effect).unwrap_or(0)
+                            }
+                            _ => 0,
+                        };
+                        app.push_modal(ModalState::ActionSoundSelector {
+                            event,
+                            highlighted: current,
+                            edit_index: Some(idx),
+                        });
+                    } else if let Some((label, buffer, action_type)) = editable_text(action) {
+                        app.push_modal(ModalState::TextInput {
+                            event,
+                            action_type,
+                            buffer,
+                            label,
+                            edit_index: Some(idx),
+                        });
+                    }
                 }
             }
         }
@@ -539,15 +570,12 @@ pub fn handle_action_type_chooser_modal(app: &mut App, key: KeyEvent) {
             let idx = app.modal_highlighted();
             match idx {
                 0 => {
-                    // Sound Effect - use the recommended sound for this event
-                    let action = create_default_sound_action(&event);
-                    app.config
-                        .actions
-                        .entry(event)
-                        .or_default()
-                        .push(action);
-                    app.dirty = true;
-                    app.pop_to_edit_actions();
+                    // Sound Effect - open sound selector
+                    app.push_modal(ModalState::ActionSoundSelector {
+                        event,
+                        highlighted: 0,
+                        edit_index: None,
+                    });
                 }
                 1 => {
                     // Speak - need text input
@@ -589,6 +617,16 @@ pub fn handle_action_type_chooser_modal(app: &mut App, key: KeyEvent) {
                         .push(action);
                     app.dirty = true;
                     app.pop_to_edit_actions();
+                }
+                5 => {
+                    // Call - need command text input
+                    app.push_modal(ModalState::TextInput {
+                        event,
+                        action_type: 5,
+                        buffer: String::new(),
+                        label: "Call Command".to_string(),
+                        edit_index: None,
+                    });
                 }
                 _ => {
                     app.pop_modal();
@@ -669,6 +707,7 @@ pub fn handle_text_input_modal(app: &mut App, key: KeyEvent) {
                         HookAction::Speak { message, .. } => *message = text,
                         HookAction::Message { message, .. } => *message = text,
                         HookAction::Bash { command, .. } => *command = text,
+                        HookAction::Call { command, .. } => *command = text,
                         _ => {}
                     }
                 }
@@ -688,6 +727,12 @@ pub fn handle_text_input_modal(app: &mut App, key: KeyEvent) {
                         command: text,
                         params: String::new(),
                     },
+                    5 => HookAction::Call {
+                        command: text,
+                        args: None,
+                        timeout_ms: None,
+                        mapper: None,
+                    },
                     _ => {
                         app.pop_modal();
                         return;
@@ -701,6 +746,73 @@ pub fn handle_text_input_modal(app: &mut App, key: KeyEvent) {
             }
             app.dirty = true;
             app.pop_to_edit_actions();
+        }
+        KeyCode::Esc => {
+            app.pop_modal();
+        }
+        _ => {}
+    }
+}
+
+pub fn handle_action_sound_selector_modal(app: &mut App, key: KeyEvent) {
+    let (event, edit_index) = match &app.modal {
+        Some(ModalState::ActionSoundSelector {
+            event, edit_index, ..
+        }) => (*event, *edit_index),
+        _ => return,
+    };
+    let sounds = super::super::get_sound_effect_names();
+    let count = sounds.len();
+
+    match key.code {
+        KeyCode::Up => {
+            let idx = app.modal_highlighted();
+            if idx > 0 {
+                app.set_modal_highlighted(idx - 1);
+            }
+        }
+        KeyCode::Down => {
+            let idx = app.modal_highlighted();
+            if idx + 1 < count {
+                app.set_modal_highlighted(idx + 1);
+            }
+        }
+        KeyCode::Char('p') | KeyCode::Char('P') => {
+            let idx = app.modal_highlighted();
+            if let Some(effect) = playa::SoundEffect::from_name(sounds[idx]) {
+                std::thread::spawn(move || {
+                    let _ = effect.play();
+                });
+            }
+        }
+        KeyCode::Enter => {
+            let idx = app.modal_highlighted();
+            if let Some(&effect_name) = sounds.get(idx) {
+                if let Some(edit_idx) = edit_index {
+                    // Editing existing action
+                    if let Some(actions) = app.config.actions.get_mut(&event)
+                        && let Some(action) = actions.get_mut(edit_idx)
+                    {
+                        if let HookAction::SoundEffect { effect, .. } = action {
+                            *effect = effect_name.to_string();
+                        }
+                    }
+                } else {
+                    // Adding new action
+                    let action = HookAction::SoundEffect {
+                        effect: effect_name.to_string(),
+                        volume: 1.0,
+                        speed: 1.0,
+                    };
+                    app.config
+                        .actions
+                        .entry(event)
+                        .or_default()
+                        .push(action);
+                }
+                app.dirty = true;
+                app.pop_to_edit_actions();
+            }
         }
         KeyCode::Esc => {
             app.pop_modal();

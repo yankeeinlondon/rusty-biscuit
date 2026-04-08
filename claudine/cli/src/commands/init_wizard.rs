@@ -29,10 +29,10 @@ pub async fn run_initialization() -> Result<()> {
 }
 
 async fn run_headless_initialization() -> Result<()> {
-    let config = build_default_config();
+    let config = build_headless_config();
     let path = claudine::dispatch::loader::user_config_path();
     claudine::dispatch::loader::save_claudine_config(&config, &path)?;
-    log::message(&format!("Claudine: wrote default config to {}", path.display()));
+    // Silently write defaults in headless/CI mode per spec
     Ok(())
 }
 
@@ -239,7 +239,8 @@ fn build_config(tts: TtsValue, preferred_agent: Provider, messenger: Option<Clau
     }
 }
 
-fn build_default_config() -> ClaudineConfig {
+/// CI-safe headless defaults: TTS off, Logging on, Protect default.
+fn build_headless_config() -> ClaudineConfig {
     let agents = discover_agents_full();
     let preferred_agent = agents
         .iter()
@@ -247,11 +248,7 @@ fn build_default_config() -> ClaudineConfig {
         .map(|a| a.provider)
         .unwrap_or(Provider::Claude);
 
-    let has_tts = which::which("say").is_ok()
-        || which::which("espeak-ng").is_ok()
-        || which::which("espeak").is_ok();
-
-    build_config(TtsValue::Boolean(has_tts), preferred_agent, None)
+    build_config(TtsValue::Boolean(false), preferred_agent, None)
 }
 
 async fn register_hooks_all_providers() -> Result<()> {

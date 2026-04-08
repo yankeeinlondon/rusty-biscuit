@@ -143,7 +143,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(error_line), chunks[8]);
 
     if let Some(ModalState::AgentSelector { highlighted }) = &app.modal {
-        let agents = super::super::get_provider_list();
+        let agents = super::super::get_available_providers(app);
         let items: Vec<String> = agents.iter().map(|p| p.to_string()).collect();
         super::super::widgets::modal::render_list_modal(
             frame,
@@ -207,7 +207,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('a') | KeyCode::Char('A') => {
-            let agents = super::super::get_provider_list();
+            let agents = super::super::get_available_providers(app);
             let highlighted = agents
                 .iter()
                 .position(|p| *p == app.config.preferred_agent)
@@ -238,7 +238,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 app.modal = Some(ModalState::RepoProviderSelector { highlighted });
             }
         }
-        KeyCode::Char('1') => {
+        KeyCode::Char('s') | KeyCode::Char('S') => {
             let current = app.config.default_sounds.success.as_deref();
             let sounds = super::super::get_sound_effect_names();
             let highlighted = current
@@ -250,7 +250,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 highlighted,
             });
         }
-        KeyCode::Char('2') => {
+        // Note: 'A' is taken by Agent selector, so Attention uses 'N' (atteNtion)
+        KeyCode::Char('n') | KeyCode::Char('N') => {
             let current = app.config.default_sounds.attention.as_deref();
             let sounds = super::super::get_sound_effect_names();
             let highlighted = current
@@ -262,7 +263,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 highlighted,
             });
         }
-        KeyCode::Char('3') => {
+        KeyCode::Char('e') | KeyCode::Char('E') => {
             let current = app.config.default_sounds.error.as_deref();
             let sounds = super::super::get_sound_effect_names();
             let highlighted = current
@@ -279,7 +280,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_agent_selector_modal(app: &mut App, key: KeyEvent) {
-    let providers = super::super::get_provider_list();
+    let providers = super::super::get_available_providers(app);
     let count = providers.len();
     match key.code {
         KeyCode::Up => {
@@ -362,7 +363,7 @@ pub fn handle_repo_provider_modal(app: &mut App, key: KeyEvent) {
             let idx = app.modal_highlighted();
             if app.repo_config.is_none() {
                 app.repo_config =
-                    Some(claudine::config::claudine_config::ClaudineConfig::default());
+                    Some(claudine::config::claudine_config::RepoOverrideConfig::default());
             }
             if let Some(ref mut repo_cfg) = app.repo_config {
                 if idx == 0 {

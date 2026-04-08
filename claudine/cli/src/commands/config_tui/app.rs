@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use claudine::config::claudine_config::ClaudineConfig;
+use claudine::config::claudine_config::{ClaudineConfig, RepoOverrideConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
@@ -55,7 +55,7 @@ pub struct App {
     pub is_in_repo: bool,
     pub should_quit: bool,
     pub dirty: bool,
-    pub repo_config: Option<ClaudineConfig>,
+    pub repo_config: Option<RepoOverrideConfig>,
     pub repo_config_path: Option<std::path::PathBuf>,
     pub repo_dirty: bool,
     pub repo_name: Option<String>,
@@ -122,6 +122,23 @@ pub enum ModalState {
         /// When Some, update the action at this index instead of appending.
         edit_index: Option<usize>,
     },
+    /// Sound effect picker for adding/editing a sound_effect action.
+    ActionSoundSelector {
+        event: claudine::events::AgenticEvent,
+        highlighted: usize,
+        /// When Some, update the action at this index instead of appending.
+        edit_index: Option<usize>,
+    },
+    /// Input modal for messenger provider config fields.
+    MessengerInput {
+        provider: String,
+        /// Current field being edited (index into the provider's field list).
+        field_index: usize,
+        /// Accumulated field values collected so far.
+        fields: Vec<(String, String)>,
+        buffer: String,
+        label: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,7 +157,7 @@ pub enum GenderTab {
 impl App {
     pub fn new(
         config: ClaudineConfig,
-        repo_config: Option<ClaudineConfig>,
+        repo_config: Option<RepoOverrideConfig>,
         repo_config_path: Option<std::path::PathBuf>,
         is_in_repo: bool,
         repo_name: Option<String>,
@@ -270,6 +287,12 @@ impl App {
             ModalState::TextInput { .. } => {
                 super::tabs::actions::handle_text_input_modal(self, key);
             }
+            ModalState::ActionSoundSelector { .. } => {
+                super::tabs::actions::handle_action_sound_selector_modal(self, key);
+            }
+            ModalState::MessengerInput { .. } => {
+                super::tabs::messenger::handle_messenger_input_modal(self, key);
+            }
         }
     }
 
@@ -289,6 +312,8 @@ impl App {
             Some(ModalState::ActionTypeChooser { highlighted, .. }) => *highlighted,
             Some(ModalState::ConfirmDelete { .. }) => 0,
             Some(ModalState::TextInput { .. }) => 0,
+            Some(ModalState::ActionSoundSelector { highlighted, .. }) => *highlighted,
+            Some(ModalState::MessengerInput { .. }) => 0,
             None => 0,
         }
     }
@@ -310,6 +335,8 @@ impl App {
                 ModalState::ActionTypeChooser { highlighted, .. } => *highlighted = new_idx,
                 ModalState::ConfirmDelete { .. } => {}
                 ModalState::TextInput { .. } => {}
+                ModalState::ActionSoundSelector { highlighted, .. } => *highlighted = new_idx,
+                ModalState::MessengerInput { .. } => {}
             }
         }
     }

@@ -43,14 +43,10 @@ pub async fn run(args: AgentsArgs, verbose: bool) -> Result<()> {
 
     if is_git_repo && args.apply && repo_canonical_needs_init(&paths, LinkableResource::Agent) {
         log::message("");
-        log::message("Repo canonical provider is not configured. Running claudine init --repo ...");
+        log::message("Repo canonical provider is not configured.");
+        log::message("Run `claudine config` and set the repo provider in the Preferences tab.");
         log::message("");
-        super::init::run(super::init::InitArgs {
-            quick: false,
-            repo: true,
-        })
-        .await?;
-        log::message("");
+        return Ok(());
     }
 
     let fix_summary = if args.apply {
