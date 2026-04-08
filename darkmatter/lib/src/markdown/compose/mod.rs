@@ -325,6 +325,21 @@ impl Markdown {
                 }
             }
 
+            // Snapshot frontmatter string values before interpolation for the
+            // executable-token provenance check in frontmatter shell expansion.
+            let pre_interpolation_snapshot: Option<HashMap<String, String>> =
+                if options.is_enabled(ComposeOperation::FrontmatterShellExpansion) {
+                    let mut snapshot = HashMap::new();
+                    for (key, value) in self.frontmatter().as_map().iter() {
+                        if let Some(s) = value.as_str() {
+                            snapshot.insert(key.clone(), s.to_string());
+                        }
+                    }
+                    Some(snapshot)
+                } else {
+                    None
+                };
+
             // Frontmatter Interpolation: resolve {{ }} in frontmatter values
             // before EffectiveState is built, since it mutates frontmatter
             // inputs that drive later stages.
@@ -340,6 +355,29 @@ impl Markdown {
                 if let Some(start) = fm_start {
                     perf.record(
                         perf::PerfMetricKind::FrontmatterInterpolation,
+                        start.elapsed(),
+                    );
+                }
+            }
+
+            // Frontmatter Shell Expansion: execute $(cmd) in frontmatter values
+            // before EffectiveState is built, since the expanded values must be
+            // visible to all later stages.
+            if options.is_enabled(ComposeOperation::FrontmatterShellExpansion) {
+                let fse_start = perf.is_enabled().then(std::time::Instant::now);
+                let fse_report =
+                    frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
+                        self.frontmatter_mut(),
+                        &options,
+                        runtime,
+                        pre_interpolation_snapshot.as_ref(),
+                    )?;
+                report.frontmatter_shell_expansions_applied = fse_report.replacements;
+                report.shell_approvals_used += fse_report.approvals_used;
+                report.warnings.extend(fse_report.warnings);
+                if let Some(start) = fse_start {
+                    perf.record(
+                        perf::PerfMetricKind::FrontmatterShellExpansion,
                         start.elapsed(),
                     );
                 }
@@ -3760,5 +3798,118 @@ Rounded: {{ round(pi) }}"#;
             composed.content()
         );
         assert!(composed.content().contains("After"));
+    }
+
+    mod frontmatter_shell_expansion_integration {
+        use super::*;
+        use crate::markdown::compose::shell_expansion::types::{
+            ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
+            ShellExpansionError, ShellExpansionOptions,
+        };
+        use std::sync::Arc;
+        use tempfile::TempDir;
+
+        struct MockApproval;
+        impl ShellApprovalHandler for MockApproval {
+            fn approve(
+                &self,
+                _req: ShellApprovalRequest,
+            ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+                Ok(ShellApprovalDecision::AllowOnce)
+            }
+        }
+
+        #[test]
+        fn frontmatter_shell_output_visible_to_body_interpolation() {
+            let temp_dir = TempDir::new().unwrap();
+            let content = "---\ngreeting: \"$(echo hello)\"\n---\nMessage: {{greeting}}\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert!(
+                composed.content().contains("Message: hello"),
+                "Expected 'Message: hello' in:\n{}",
+                composed.content()
+            );
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+        }
+
+        #[test]
+        fn frontmatter_interpolation_feeds_into_shell_expansion() {
+            let temp_dir = TempDir::new().unwrap();
+            let content =
+                "---\nfile: README.md\ndir: \"$(dirname {{file}})\"\n---\nDir: {{dir}}\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterInterpolation,
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            // dirname README.md returns "."
+            assert!(
+                composed.content().contains("Dir: ."),
+                "Expected 'Dir: .' in:\n{}",
+                composed.content()
+            );
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+        }
+
+        #[test]
+        fn body_and_frontmatter_shell_coexist() {
+            let temp_dir = TempDir::new().unwrap();
+            let content =
+                "---\nfm_val: \"$(echo from-frontmatter)\"\n---\n::shell echo from-body\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::ShellExpansion,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+            assert_eq!(report.shell_expansions_applied, 1);
+            assert!(composed.content().contains("from-body"));
+        }
+
+        #[test]
+        fn frontmatter_shell_with_no_candidates_is_noop() {
+            let content = "---\ntitle: Hello\n---\nBody text\n";
+            let md: Markdown = content.into();
+
+            let options =
+                ComposeOptions::new().only(&[ComposeOperation::FrontmatterShellExpansion]);
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert_eq!(report.frontmatter_shell_expansions_applied, 0);
+            assert!(composed.content().contains("Body text"));
+        }
     }
 }
