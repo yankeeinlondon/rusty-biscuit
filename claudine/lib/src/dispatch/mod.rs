@@ -13,9 +13,7 @@ use tracing::{debug, info, info_span, warn};
 use crate::actions::{HookDecision, HookResponse};
 use crate::adapters::{self, AdapterError};
 use crate::error::Result;
-use crate::events::{
-    AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook,
-};
+use crate::events::{AgenticEvent, EnvironmentContext, EventMeta, Provider, ResolvedHook};
 use crate::services::protect::decision::ProtectDecision;
 use crate::services::protect::observe::extract_protect_request;
 use crate::services::protect::report::format_blocked_message;
@@ -976,11 +974,8 @@ mod tests {
 
         // Load runtime config using explicit non-existent user path to avoid loading real user config
         let non_existent_user = repo.path().join("no-user-config.json");
-        let runtime_config = loader::load_runtime_config(
-            Some(&non_existent_user),
-            Some(repo.path()),
-        )
-        .unwrap();
+        let runtime_config =
+            loader::load_runtime_config(Some(&non_existent_user), Some(repo.path())).unwrap();
         let runtime = DispatchRuntimeContext::from_runtime_config(runtime_config);
         assert!(runtime.has_config());
 
@@ -1127,11 +1122,8 @@ mod tests {
 
         // Load runtime config using explicit non-existent user path to avoid loading real user config
         let non_existent_user = repo.path().join("no-user-config.json");
-        let runtime_config = loader::load_runtime_config(
-            Some(&non_existent_user),
-            Some(repo.path()),
-        )
-        .unwrap();
+        let runtime_config =
+            loader::load_runtime_config(Some(&non_existent_user), Some(repo.path())).unwrap();
         let runtime = DispatchRuntimeContext::from_runtime_config(runtime_config);
         assert!(runtime.has_config());
 

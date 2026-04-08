@@ -296,7 +296,7 @@ pub struct RepoOverrideConfig {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_messenger_override",
+        deserialize_with = "deserialize_optional_messenger_override"
     )]
     pub active_messenger: Option<Option<String>>,
 }
@@ -1097,7 +1097,10 @@ mod tests {
         .unwrap();
         let err = config.validate().unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("attention") && msg.contains("nonexistent-sound-xyz"), "error: {msg}");
+        assert!(
+            msg.contains("attention") && msg.contains("nonexistent-sound-xyz"),
+            "error: {msg}"
+        );
     }
 
     #[test]
@@ -1111,7 +1114,10 @@ mod tests {
         .unwrap();
         let err = config.validate().unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("error") && msg.contains("bogus-sound-name"), "error: {msg}");
+        assert!(
+            msg.contains("error") && msg.contains("bogus-sound-name"),
+            "error: {msg}"
+        );
     }
 
     // -------------------------------------------------------------------------

@@ -113,7 +113,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             Constraint::Length(2), // Logging toggle
             Constraint::Length(1), // blank separator
             Constraint::Length(1), // Protect toggle
-            Constraint::Min(0),   // Protect detail (when enabled)
+            Constraint::Min(0),    // Protect detail (when enabled)
         ])
         .split(area);
 
@@ -128,7 +128,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         render_protect_detail(frame, chunks[3], &app.config.protect.rules);
     }
 
-    if let Some(ModalState::ProtectRules { highlighted, staged_rules }) = &app.modal {
+    if let Some(ModalState::ProtectRules {
+        highlighted,
+        staged_rules,
+    }) = &app.modal
+    {
         render_protect_rules_modal(frame, area, staged_rules, *highlighted);
     }
 }
@@ -150,7 +154,7 @@ fn render_protect_detail(frame: &mut Frame, area: Rect, rules: &ProtectRuleToggl
             Constraint::Length(1), // blank
             Constraint::Length(3), // description
             Constraint::Length(1), // blank
-            Constraint::Min(0),   // category grid
+            Constraint::Min(0),    // category grid
         ])
         .split(area);
 
@@ -341,13 +345,11 @@ fn render_protect_rules_modal(
                 })
                 .collect();
 
-            let list = List::new(items)
-                .highlight_symbol(">> ")
-                .highlight_style(
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                );
+            let list = List::new(items).highlight_symbol(">> ").highlight_style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            );
             let mut state = ListState::default().with_selected(Some(highlighted));
             frame.render_stateful_widget(list, chunks[0], &mut state);
 

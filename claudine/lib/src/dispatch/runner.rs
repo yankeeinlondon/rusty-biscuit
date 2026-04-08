@@ -187,7 +187,6 @@ pub async fn execute_actions(
     Ok(selected_response)
 }
 
-
 /// Execute hook actions using the new [`ClaudineConfig`] model.
 ///
 /// Unlike [`execute_actions`] which bridges through [`GlobalSettings`], this
@@ -424,9 +423,7 @@ fn tts_config_from_claudine(
         TtsValue::Boolean(true) => {}
         TtsValue::Config(settings) => {
             if voice_override.is_none() {
-                if let Some(provider) =
-                    biscuit_speaks::parse_provider_name(&settings.provider)
-                {
+                if let Some(provider) = biscuit_speaks::parse_provider_name(&settings.provider) {
                     tts = tts.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
                 }
 
@@ -444,9 +441,7 @@ fn tts_config_from_claudine(
                     }
                     None => {}
                 }
-            } else if let Some(provider) =
-                biscuit_speaks::parse_provider_name(&settings.provider)
-            {
+            } else if let Some(provider) = biscuit_speaks::parse_provider_name(&settings.provider) {
                 tts = tts.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
             }
         }
@@ -1289,16 +1284,8 @@ mod tests {
             HookAction::Report { handler: None },
         ];
 
-        let result = execute_actions_v2(
-            &actions,
-            None,
-            &meta(),
-            &config,
-            &messaging,
-            true,
-            None,
-        )
-        .await;
+        let result =
+            execute_actions_v2(&actions, None, &meta(), &config, &messaging, true, None).await;
 
         assert!(result.is_ok());
     }
@@ -1313,17 +1300,9 @@ mod tests {
             image: None,
         }];
 
-        let result = execute_actions_v2(
-            &actions,
-            None,
-            &meta(),
-            &config,
-            &messaging,
-            false,
-            None,
-        )
-        .await
-        .unwrap();
+        let result = execute_actions_v2(&actions, None, &meta(), &config, &messaging, false, None)
+            .await
+            .unwrap();
 
         assert!(result.is_none());
     }

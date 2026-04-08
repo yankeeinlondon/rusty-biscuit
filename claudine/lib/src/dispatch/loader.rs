@@ -7,7 +7,9 @@ use tracing::{debug, info, warn};
 
 use crate::actions::{CompiledMapper, HookAction, Mapper};
 use crate::config::atomic::atomic_write;
-use crate::config::claudine_config::{ClaudineConfig, ClaudineMessengerConfig, MessengerProviderConfig, RepoOverrideConfig};
+use crate::config::claudine_config::{
+    ClaudineConfig, ClaudineMessengerConfig, MessengerProviderConfig, RepoOverrideConfig,
+};
 use crate::config::migration;
 use crate::error::{ClaudineError, Result};
 use crate::events::{
@@ -464,7 +466,7 @@ fn compile_canonical_mapper(mapper: &Mapper, event: AgenticEvent) -> Result<Comp
 /// Constructs a minimal [`GlobalSettings`] containing only the TTS
 /// configuration, suitable for [`LifecycleRuntimeContext`].
 pub fn bridge_tts_settings(config: &ClaudineConfig) -> GlobalSettings {
-    use crate::config::claudine_config::{TtsValue, VoiceSelection, Gender};
+    use crate::config::claudine_config::{Gender, TtsValue, VoiceSelection};
     use crate::events::TtsSettings;
 
     let tts = match &config.tts {
@@ -745,7 +747,10 @@ pub fn load_claudine_config(
             let repo_value = parse_json5_to_value(&repo_raw)?;
             if migration::is_old_format(&repo_value) {
                 migration::backup_old_config(&repo_path)?;
-                warn!(?repo_path, "Repo config was old format; backed up and ignored");
+                warn!(
+                    ?repo_path,
+                    "Repo config was old format; backed up and ignored"
+                );
             } else {
                 let repo_override: RepoOverrideConfig =
                     serde_json::from_value(repo_value).map_err(ClaudineError::JsonParse)?;
@@ -788,7 +793,10 @@ pub fn load_repo_override_config(path: &Path) -> Result<Option<RepoOverrideConfi
     let value = parse_json5_to_value(&raw)?;
     if migration::is_old_format(&value) {
         migration::backup_old_config(path)?;
-        warn!(?path, "Repo override config was old format; backed up and ignored");
+        warn!(
+            ?path,
+            "Repo override config was old format; backed up and ignored"
+        );
         return Ok(None);
     }
     let config: RepoOverrideConfig =
@@ -821,10 +829,7 @@ pub fn save_repo_override_config(config: &RepoOverrideConfig, path: &Path) -> Re
 ///
 /// Settings are populated with defaults — configurator implementations
 /// only access the per-provider event bindings, not global settings.
-pub fn claudine_config_to_hooker(
-    config: &ClaudineConfig,
-    providers: &[Provider],
-) -> HookerConfig {
+pub fn claudine_config_to_hooker(config: &ClaudineConfig, providers: &[Provider]) -> HookerConfig {
     let mut provider_configs = HashMap::new();
     for &provider in providers {
         let events: HashMap<AgenticEvent, EventBinding> = config
@@ -872,18 +877,17 @@ fn merge_repo_override(user: &mut ClaudineConfig, repo: &RepoOverrideConfig) {
     }
 
     // active_messenger: repo overrides the active config key only
-    if let Some(ref override_value) = repo.active_messenger {
-        if let Some(ref mut messenger) = user.messenger {
-            messenger.active_config = override_value.clone();
-        }
+    if let Some(override_value) = &repo.active_messenger
+        && let Some(messenger) = &mut user.messenger
+    {
+        messenger.active_config = override_value.clone();
     }
 }
 
 /// Parse a raw string as JSON5 and return a [`serde_json::Value`].
 fn parse_json5_to_value(raw: &str) -> Result<serde_json::Value> {
-    let json5 = Json5::from_str(raw).map_err(|e| {
-        ClaudineError::ConfigValidation(format!("JSON5 parse error: {e}"))
-    })?;
+    let json5 = Json5::from_str(raw)
+        .map_err(|e| ClaudineError::ConfigValidation(format!("JSON5 parse error: {e}")))?;
     Ok(json5.as_json_value().clone())
 }
 
@@ -2051,12 +2055,13 @@ mod tests {
         }"#;
         std::fs::write(config_dir.join("config.json"), json5_content).unwrap();
 
-        let config =
-            load_claudine_config(Some(&config_dir.join("config.json")), None).unwrap();
+        let config = load_claudine_config(Some(&config_dir.join("config.json")), None).unwrap();
         assert!(config.logging);
-        assert!(config
-            .actions
-            .contains_key(&crate::events::AgenticEvent::HumanInTheLoop));
+        assert!(
+            config
+                .actions
+                .contains_key(&crate::events::AgenticEvent::HumanInTheLoop)
+        );
     }
 
     #[test]
@@ -2320,7 +2325,14 @@ mod tests {
             messaging.user.as_ref().unwrap().active.as_deref(),
             Some("alerts")
         );
-        assert!(messaging.user.as_ref().unwrap().configs.contains_key("alerts"));
+        assert!(
+            messaging
+                .user
+                .as_ref()
+                .unwrap()
+                .configs
+                .contains_key("alerts")
+        );
     }
 
     #[test]
@@ -2509,16 +2521,10 @@ mod tests {
         std::fs::write(&path, serde_json::to_string(&old_format).unwrap()).unwrap();
 
         let result = load_repo_override_config(&path).unwrap();
-        assert!(
-            result.is_none(),
-            "old-format config should return Ok(None)"
-        );
+        assert!(result.is_none(), "old-format config should return Ok(None)");
 
         // The file should have been backed up
-        assert!(
-            !path.exists(),
-            "old-format config should have been renamed"
-        );
+        assert!(!path.exists(), "old-format config should have been renamed");
         assert!(
             dir.path().join("config.json.bak").exists(),
             "backup should exist"
@@ -2603,8 +2609,7 @@ mod tests {
             canonical_provider: Some(Provider::Gemini),
             ..RepoOverrideConfig::default()
         };
-        save_repo_override_config(&repo_override, &repo_dir.join(".claudine/config.json"))
-            .unwrap();
+        save_repo_override_config(&repo_override, &repo_dir.join(".claudine/config.json")).unwrap();
 
         let loaded = load_claudine_config(Some(&user_path), Some(&repo_dir)).unwrap();
         assert_eq!(
@@ -2692,11 +2697,7 @@ mod tests {
             "providers": {}
         });
         let config_path = config_dir.join("config.json");
-        std::fs::write(
-            &config_path,
-            serde_json::to_string(&old_config).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(&config_path, serde_json::to_string(&old_config).unwrap()).unwrap();
 
         // First load triggers backup
         let _ = load_claudine_config(Some(&config_path), None);

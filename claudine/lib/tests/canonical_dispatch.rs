@@ -131,10 +131,9 @@ async fn dispatch_with_default_config_returns_no_protect_decisions() {
         AgenticEvent::HumanInTheLoop,
     ] {
         let meta = EventMeta::new(Provider::Claude, event);
-        let outcome =
-            dispatch_canonical_with_runtime(Provider::Claude, event, meta, &runtime)
-                .await
-                .unwrap();
+        let outcome = dispatch_canonical_with_runtime(Provider::Claude, event, meta, &runtime)
+            .await
+            .unwrap();
         assert!(
             outcome.protect_pre.is_none(),
             "expected no protect_pre for {event}"
@@ -173,21 +172,20 @@ async fn dispatch_protect_post_evaluates_without_binding() {
     ));
     meta.env = claudine::events::EnvironmentContext::default();
 
-    let outcome = dispatch_canonical_with_runtime(
-        Provider::Claude,
-        AgenticEvent::AfterTool,
-        meta,
-        &runtime,
-    )
-    .await
-    .unwrap();
+    let outcome =
+        dispatch_canonical_with_runtime(Provider::Claude, AgenticEvent::AfterTool, meta, &runtime)
+            .await
+            .unwrap();
 
     // protect_pre runs before the binding lookup, so the MCP injection is
     // caught there and the pipeline returns early (protect_post stays None).
     // The important property being validated is that the protect scan ran at
     // all — meaning the pipeline did NOT return early due to the absent binding.
     assert!(
-        outcome.protect_pre.as_ref().map_or(false, |d| d.is_blocked()),
+        outcome
+            .protect_pre
+            .as_ref()
+            .map_or(false, |d| d.is_blocked()),
         "protect should evaluate and block dangerous MCP response on AfterTool even without an action binding"
     );
     assert!(

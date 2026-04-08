@@ -33,10 +33,7 @@ pub enum ValidatedCommand {
 /// the command cannot be found on PATH, or a JS/TS file has no usable interpreter.
 pub fn validate_command(command: &str) -> Result<ValidatedCommand> {
     let path = Path::new(command);
-    let base_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(command);
+    let base_name = path.file_name().and_then(|n| n.to_str()).unwrap_or(command);
 
     if BLOCKED_COMMANDS.contains(&base_name) {
         return Err(ClaudineError::ConfigValidation(format!(
@@ -78,9 +75,7 @@ pub fn validate_command(command: &str) -> Result<ValidatedCommand> {
 /// `node` (node only for `.js`/`.mjs`).
 fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
     let content = std::fs::read_to_string(command).map_err(|e| {
-        ClaudineError::ConfigValidation(format!(
-            "cannot read script `{command}`: {e}"
-        ))
+        ClaudineError::ConfigValidation(format!("cannot read script `{command}`: {e}"))
     })?;
 
     if let Some(first_line) = content.lines().next()

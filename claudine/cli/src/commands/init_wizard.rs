@@ -8,7 +8,7 @@ use claudine::config::claudine_config::{
     ClaudineConfig, ClaudineMessengerConfig, DefaultSounds, MessengerProviderConfig, TtsValue,
 };
 use claudine::config::{
-    ProviderHookPlan, discover_agents_full, get_configurator, RegistrationResult, SkipReason,
+    ProviderHookPlan, RegistrationResult, SkipReason, discover_agents_full, get_configurator,
 };
 use claudine::events::{AgenticEvent, Provider, recommended_sound};
 
@@ -119,7 +119,9 @@ fn configure_tts() -> Result<TtsValue> {
                 }
                 _ => {
                     log::message("  Could not install espeak-ng automatically.");
-                    log::message("  You can install a TTS provider later and enable TTS via `claudine config`.");
+                    log::message(
+                        "  You can install a TTS provider later and enable TTS via `claudine config`.",
+                    );
                 }
             }
         }
@@ -175,7 +177,8 @@ fn configure_messenger() -> Result<Option<ClaudineMessengerConfig>> {
     }
 
     let providers = ["Discord", "Slack", "Signal", "WhatsApp"];
-    let selection = inquire::Select::new("  Select messenger provider:", providers.to_vec()).prompt()?;
+    let selection =
+        inquire::Select::new("  Select messenger provider:", providers.to_vec()).prompt()?;
 
     let (name, config) = match selection {
         "Discord" => (
@@ -232,7 +235,11 @@ fn configure_messenger() -> Result<Option<ClaudineMessengerConfig>> {
     }))
 }
 
-fn build_config(tts: TtsValue, preferred_agent: Provider, messenger: Option<ClaudineMessengerConfig>) -> ClaudineConfig {
+fn build_config(
+    tts: TtsValue,
+    preferred_agent: Provider,
+    messenger: Option<ClaudineMessengerConfig>,
+) -> ClaudineConfig {
     let mut actions = HashMap::new();
     actions.insert(
         AgenticEvent::HumanInTheLoop,
@@ -288,7 +295,9 @@ async fn register_hooks_all_providers() -> Result<()> {
         let configurator = get_configurator(provider);
         match configurator.register(&plan, None) {
             Ok(RegistrationResult::Registered { event_count }) => {
-                log::message(&format!("    {provider}: registered ({event_count} events)"));
+                log::message(&format!(
+                    "    {provider}: registered ({event_count} events)"
+                ));
             }
             Ok(RegistrationResult::Skipped(SkipReason::AlreadyRegistered)) => {
                 log::message(&format!("    {provider}: already registered"));
@@ -317,4 +326,3 @@ fn provider_hook_events(provider: Provider) -> Vec<AgenticEvent> {
         .filter(|event| provider.supports_event_via_hook(event))
         .collect()
 }
-
