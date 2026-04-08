@@ -403,13 +403,13 @@ pub fn handle_sound_selector_modal(app: &mut App, key: KeyEvent, _category: Soun
         }
         KeyCode::Char('p') | KeyCode::Char('P') => {
             let idx = app.modal_highlighted();
-            if idx > 0 {
-                if let Some(effect) = playa::SoundEffect::from_name(sounds[idx - 1]) {
-                    // Play in a background thread so we don't block the TUI
-                    std::thread::spawn(move || {
-                        let _ = effect.play();
-                    });
-                }
+            if idx > 0
+                && let Some(effect) = playa::SoundEffect::from_name(sounds[idx - 1])
+            {
+                // Play in a background thread so we don't block the TUI
+                std::thread::spawn(move || {
+                    let _ = effect.play();
+                });
             }
         }
         KeyCode::Enter | KeyCode::Char('d') | KeyCode::Char('D') => {

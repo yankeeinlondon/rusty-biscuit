@@ -4,6 +4,7 @@ use ratatui::widgets::*;
 
 use super::super::app::{App, AppMode, ModalState};
 use claudine::actions::HookAction;
+use claudine::events::init_defaults::recommended_sound;
 use claudine::events::AgenticEvent;
 
 /// Action types a user can add to an event.
@@ -236,7 +237,7 @@ fn summarize_actions(actions: &[HookAction], max_width: usize) -> String {
 fn get_unconfigured_events(app: &App) -> Vec<AgenticEvent> {
     AgenticEvent::ALL
         .into_iter()
-        .filter(|e| app.config.actions.get(e).map_or(true, |a| a.is_empty()))
+        .filter(|e| app.config.actions.get(e).is_none_or(|a| a.is_empty()))
         .collect()
 }
 
@@ -380,18 +381,17 @@ pub fn handle_edit_actions_modal(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => {
             if action_count > 0 {
                 let idx = app.modal_highlighted();
-                if let Some(actions) = app.config.actions.get(&event) {
-                    if let Some(action) = actions.get(idx) {
-                        if let Some((label, buffer, action_type)) = editable_text(action) {
-                            app.push_modal(ModalState::TextInput {
-                                event,
-                                action_type,
-                                buffer,
-                                label,
-                                edit_index: Some(idx),
-                            });
-                        }
-                    }
+                if let Some(actions) = app.config.actions.get(&event)
+                    && let Some(action) = actions.get(idx)
+                    && let Some((label, buffer, action_type)) = editable_text(action)
+                {
+                    app.push_modal(ModalState::TextInput {
+                        event,
+                        action_type,
+                        buffer,
+                        label,
+                        edit_index: Some(idx),
+                    });
                 }
             }
         }
@@ -539,16 +539,16 @@ pub fn handle_action_type_chooser_modal(app: &mut App, key: KeyEvent) {
             let idx = app.modal_highlighted();
             match idx {
                 0 => {
-                    // Sound Effect - use the default attention sound
+                    // Sound Effect - use the recommended sound for this event
                     let action = HookAction::SoundEffect {
-                        effect: "attention".to_string(),
+                        effect: recommended_sound(&event).to_string(),
                         volume: 1.0,
                         speed: 1.0,
                     };
                     app.config
                         .actions
                         .entry(event)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(action);
                     app.dirty = true;
                     app.pop_to_edit_actions();
@@ -589,7 +589,7 @@ pub fn handle_action_type_chooser_modal(app: &mut App, key: KeyEvent) {
                     app.config
                         .actions
                         .entry(event)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(action);
                     app.dirty = true;
                     app.pop_to_edit_actions();
@@ -665,15 +665,15 @@ pub fn handle_text_input_modal(app: &mut App, key: KeyEvent) {
 
             if let Some(idx) = edit_index {
                 // Editing an existing action in place
-                if let Some(actions) = app.config.actions.get_mut(&event) {
-                    if let Some(action) = actions.get_mut(idx) {
-                        match action {
-                            HookAction::SoundEffect { effect, .. } => *effect = text,
-                            HookAction::Speak { message, .. } => *message = text,
-                            HookAction::Message { message, .. } => *message = text,
-                            HookAction::Bash { command, .. } => *command = text,
-                            _ => {}
-                        }
+                if let Some(actions) = app.config.actions.get_mut(&event)
+                    && let Some(action) = actions.get_mut(idx)
+                {
+                    match action {
+                        HookAction::SoundEffect { effect, .. } => *effect = text,
+                        HookAction::Speak { message, .. } => *message = text,
+                        HookAction::Message { message, .. } => *message = text,
+                        HookAction::Bash { command, .. } => *command = text,
+                        _ => {}
                     }
                 }
             } else {
@@ -700,7 +700,7 @@ pub fn handle_text_input_modal(app: &mut App, key: KeyEvent) {
                 app.config
                     .actions
                     .entry(event)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(action);
             }
             app.dirty = true;

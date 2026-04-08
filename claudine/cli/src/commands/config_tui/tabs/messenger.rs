@@ -299,12 +299,6 @@ pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
     }
 }
 
-pub fn handle_messenger_edit_modal(app: &mut App, key: KeyEvent) {
-    if key.code == KeyCode::Esc {
-        app.modal = None;
-    }
-}
-
 fn ensure_messenger_config(app: &mut App) {
     if app.config.messenger.is_none() {
         app.config.messenger = Some(ClaudineMessengerConfig {

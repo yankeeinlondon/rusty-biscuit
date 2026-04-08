@@ -84,15 +84,14 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
         if app.dirty {
             claudine::dispatch::loader::save_claudine_config(&app.config, &config_path)?;
         }
-        if app.repo_dirty {
-            if let Some(ref path) = app.repo_config_path {
-                if let Some(ref repo_cfg) = app.repo_config {
-                    if let Some(parent) = path.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    claudine::dispatch::loader::save_claudine_config(repo_cfg, path)?;
-                }
+        if app.repo_dirty
+            && let Some(ref path) = app.repo_config_path
+            && let Some(ref repo_cfg) = app.repo_config
+        {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
             }
+            claudine::dispatch::loader::save_claudine_config(repo_cfg, path)?;
         }
 
         eprintln!();
@@ -102,12 +101,12 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
                 "- The \x1b[1mUser\x1b[0m configuration was saved to \x1b[34m~/.claudine/config.json\x1b[0m"
             );
         }
-        if app.repo_dirty {
-            if let (Some(name), Some(branch)) = (&app.repo_name, &app.branch_name) {
-                eprintln!(
-                    "- The \x1b[33m{name}\x1b[0m(\x1b[2m{branch}\x1b[0m) \x1b[3mrepo configuration\x1b[0m was saved to \x1b[34m./.claudine/config.json\x1b[0m"
-                );
-            }
+        if app.repo_dirty
+            && let (Some(name), Some(branch)) = (&app.repo_name, &app.branch_name)
+        {
+            eprintln!(
+                "- The \x1b[33m{name}\x1b[0m(\x1b[2m{branch}\x1b[0m) \x1b[3mrepo configuration\x1b[0m was saved to \x1b[34m./.claudine/config.json\x1b[0m"
+            );
         }
         eprintln!();
     } else {
@@ -334,10 +333,7 @@ pub fn tts_provider_display_name(provider: &TtsProvider) -> &'static str {
             HostTtsProvider::SpdSay => "spd-say (Speech Dispatcher)",
             _ => "unknown",
         },
-        TtsProvider::Cloud(c) => match c {
-            CloudTtsProvider::ElevenLabs => "elevenlabs (ElevenLabs API)",
-            _ => "unknown",
-        },
+        TtsProvider::Cloud(CloudTtsProvider::ElevenLabs) => "elevenlabs (ElevenLabs API)",
         _ => "unknown",
     }
 }
@@ -360,10 +356,7 @@ pub fn tts_provider_slug(provider: &TtsProvider) -> &'static str {
             HostTtsProvider::SpdSay => "spd-say",
             _ => "unknown",
         },
-        TtsProvider::Cloud(c) => match c {
-            CloudTtsProvider::ElevenLabs => "elevenlabs",
-            _ => "unknown",
-        },
+        TtsProvider::Cloud(CloudTtsProvider::ElevenLabs) => "elevenlabs",
         _ => "unknown",
     }
 }
@@ -379,7 +372,7 @@ pub fn query_voices_for_provider(
     let tts_provider = tts_provider_from_slug(provider);
     let base_quality = tts_provider
         .as_ref()
-        .map(|p| biscuit_speaks::provider_base_quality(p))
+        .map(biscuit_speaks::provider_base_quality)
         .unwrap_or(biscuit_speaks::VoiceQuality::Unknown);
 
     let names: Vec<String> = match provider {

@@ -462,34 +462,27 @@ pub fn handle_voice_selector_modal(app: &mut App, key: KeyEvent) {
             let selected_voice = voices.get(idx).map(|(name, _)| name.clone());
 
             ensure_tts_config(app);
-            if let TtsValue::Config(ref mut cfg) = app.config.tts {
-                if let Some(voice_name) = selected_voice {
-                    match (&cfg.voice, gender_tab) {
-                        (Some(VoiceSelection::Gendered { male, .. }), GenderTab::Female) => {
-                            cfg.voice = Some(VoiceSelection::Gendered {
-                                male: male.clone(),
-                                female: voice_name,
-                            });
-                        }
-                        (Some(VoiceSelection::Gendered { female, .. }), GenderTab::Male) => {
-                            cfg.voice = Some(VoiceSelection::Gendered {
-                                male: voice_name,
-                                female: female.clone(),
-                            });
-                        }
-                        (_, GenderTab::Female) => {
-                            // First voice selection - start gendered
-                            cfg.voice = Some(VoiceSelection::Gendered {
-                                male: format!("{} default", cfg.provider),
-                                female: voice_name,
-                            });
-                        }
-                        (_, GenderTab::Male) => {
-                            cfg.voice = Some(VoiceSelection::Gendered {
-                                male: voice_name,
-                                female: format!("{} default", cfg.provider),
-                            });
-                        }
+            if let TtsValue::Config(ref mut cfg) = app.config.tts
+                && let Some(voice_name) = selected_voice
+            {
+                match (&cfg.voice, gender_tab) {
+                    (Some(VoiceSelection::Gendered { male, .. }), GenderTab::Female) => {
+                        cfg.voice = Some(VoiceSelection::Gendered {
+                            male: male.clone(),
+                            female: voice_name,
+                        });
+                    }
+                    (Some(VoiceSelection::Gendered { female, .. }), GenderTab::Male) => {
+                        cfg.voice = Some(VoiceSelection::Gendered {
+                            male: voice_name,
+                            female: female.clone(),
+                        });
+                    }
+                    (_, GenderTab::Female) => {
+                        cfg.voice = Some(VoiceSelection::Single(voice_name));
+                    }
+                    (_, GenderTab::Male) => {
+                        cfg.voice = Some(VoiceSelection::Single(voice_name));
                     }
                 }
             }

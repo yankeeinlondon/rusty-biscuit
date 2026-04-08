@@ -102,11 +102,6 @@ pub enum ModalState {
     MessengerAdd {
         highlighted: usize,
     },
-    MessengerEdit {
-        #[allow(dead_code)] // read by full edit handler (pending stash restore)
-        config_name: String,
-        field_index: usize,
-    },
     EventSelector {
         highlighted: usize,
     },
@@ -250,9 +245,6 @@ impl App {
             ModalState::MessengerAdd { .. } => {
                 super::tabs::messenger::handle_messenger_add_modal(self, key);
             }
-            ModalState::MessengerEdit { .. } => {
-                super::tabs::messenger::handle_messenger_edit_modal(self, key);
-            }
             ModalState::EventSelector { .. } => {
                 super::tabs::actions::handle_event_selector_modal(self, key);
             }
@@ -280,7 +272,6 @@ impl App {
             Some(ModalState::VoiceSelector { highlighted, .. }) => *highlighted,
             Some(ModalState::MessengerSelect { highlighted }) => *highlighted,
             Some(ModalState::MessengerAdd { highlighted }) => *highlighted,
-            Some(ModalState::MessengerEdit { field_index, .. }) => *field_index,
             Some(ModalState::EventSelector { highlighted }) => *highlighted,
             Some(ModalState::ActionTypeChooser { highlighted, .. }) => *highlighted,
             Some(ModalState::ConfirmDelete { .. }) => 0,
@@ -302,7 +293,6 @@ impl App {
                 ModalState::VoiceSelector { highlighted, .. } => *highlighted = new_idx,
                 ModalState::MessengerSelect { highlighted } => *highlighted = new_idx,
                 ModalState::MessengerAdd { highlighted } => *highlighted = new_idx,
-                ModalState::MessengerEdit { field_index, .. } => *field_index = new_idx,
                 ModalState::EventSelector { highlighted } => *highlighted = new_idx,
                 ModalState::ActionTypeChooser { highlighted, .. } => *highlighted = new_idx,
                 ModalState::ConfirmDelete { .. } => {}
