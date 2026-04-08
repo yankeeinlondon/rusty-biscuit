@@ -7,7 +7,9 @@ use biscuit_terminal::utils::layout::Margin;
 use clap::Args;
 use color_eyre::eyre::Result;
 
+use claudine::config::claudine_config::ClaudineConfig;
 use claudine::config::{RegistrationResult, SkipReason, detect_agents, get_configurator};
+use claudine::dispatch::loader::{claudine_config_to_hooker, load_claudine_config};
 use claudine::events::Provider;
 
 use crate::cli_utils::event_name_pascal;
@@ -173,13 +175,26 @@ fn build_provider_section(provider: Provider, actions: Vec<SyncAction>) -> Unord
     list
 }
 
+/// Get expected events for a provider from ClaudineConfig.
+///
+/// Returns events that are in the config's actions map AND supported
+/// by this provider via hook registration.
+fn expected_events(config: &ClaudineConfig, provider: Provider) -> Vec<String> {
+    config
+        .actions
+        .keys()
+        .filter(|event| provider.supports_event_via_hook(event))
+        .map(|event| event.as_slug().to_string())
+        .collect()
+}
+
 /// Re-sync hook registrations with detected agents.
 pub async fn run(args: SyncArgs) -> Result<()> {
     let term = crate::log::terminal();
 
     // Load current config from user/repo locations
     // If config is missing, treat as "remove all hooks" operation
-    let config = match claudine::dispatch::loader::load_config(None, None) {
+    let config = match load_claudine_config(None, None) {
         Ok(cfg) => Some(cfg),
         Err(claudine::error::ClaudineError::ConfigNotFound(_)) => None,
         Err(e) => return Err(e.into()),
@@ -187,18 +202,19 @@ pub async fn run(args: SyncArgs) -> Result<()> {
 
     let filter_provider = args.provider;
 
-    // Get providers to sync:
-    // - If config exists, sync all providers configured in it
-    // - If config is None, deregister from all detected agents
-    let providers_to_sync: Vec<Provider> = match &config {
-        Some(cfg) => cfg.providers.keys().copied().collect(),
-        None => detect_agents().into_iter().map(|(p, _)| p).collect(),
-    };
+    // Get detected agents for registration
+    let detected = detect_agents();
+    let detected_providers: Vec<Provider> = detected.iter().map(|(p, _)| *p).collect();
+
+    // Build a HookerConfig bridge for register() calls
+    let hooker_config = config
+        .as_ref()
+        .map(|cfg| claudine_config_to_hooker(cfg, &detected_providers));
 
     // Collect all actions by provider
     let mut provider_actions: HashMap<Provider, Vec<SyncAction>> = HashMap::new();
 
-    for provider in providers_to_sync {
+    for &provider in &detected_providers {
         if let Some(ref filter) = filter_provider
             && provider != *filter
         {
@@ -210,8 +226,8 @@ pub async fn run(args: SyncArgs) -> Result<()> {
 
         // When config is None, deregister (remove all claudine hooks)
         // When config is Some, register/sync hooks
-        match &config {
-            None => {
+        match (&config, &hooker_config) {
+            (None, _) => {
                 // Config removed - deregister from all providers
                 if args.dry_run {
                     let registered = configurator.is_registered(None).unwrap_or(false);
@@ -231,25 +247,15 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                     }
                 }
             }
-            Some(cfg) => {
+            (Some(cfg), Some(hooker)) => {
                 if args.dry_run {
                     // For dry run, show what would happen
                     let registered_events =
                         configurator.registered_events(None).unwrap_or_default();
-                    let expected_events: Vec<String> = cfg
-                        .providers
-                        .get(&provider)
-                        .map(|p| {
-                            p.events
-                                .iter()
-                                .filter(|(e, b)| b.enabled && provider.supports_event_via_hook(e))
-                                .map(|(e, _)| e.as_slug().to_string())
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    let expected = expected_events(cfg, provider);
 
                     // Find events to add
-                    for event in &expected_events {
+                    for event in &expected {
                         if !registered_events.contains(event) {
                             actions.push(SyncAction::WouldAdd(event.clone()));
                         }
@@ -257,7 +263,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
 
                     // Find stale events to remove
                     for event in &registered_events {
-                        if !expected_events.contains(event) {
+                        if !expected.contains(event) {
                             actions.push(SyncAction::WouldRemoveStale(event.clone()));
                         }
                     }
@@ -270,7 +276,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                     let was_registered = configurator.is_registered(None).unwrap_or(false);
                     let before_events = configurator.registered_events(None).unwrap_or_default();
 
-                    match configurator.register(cfg, None) {
+                    match configurator.register(hooker, None) {
                         Ok(RegistrationResult::Registered { event_count: _ }) => {
                             // Get events after sync
                             let after_events =
@@ -327,6 +333,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                     }
                 }
             }
+            _ => unreachable!(),
         }
     }
 
@@ -344,121 +351,10 @@ pub async fn run(args: SyncArgs) -> Result<()> {
 
     log::data("");
 
-    // Check for unsupported events in config
-    if let Some(cfg) = &config {
-        let mut unsupported_warnings: Vec<(Provider, Vec<String>)> = Vec::new();
-
-        for (provider, provider_config) in &cfg.providers {
-            let unsupported: Vec<String> = provider_config
-                .events
-                .iter()
-                .filter(|(event, binding)| {
-                    binding.enabled && !provider.supports_event_via_hook(event)
-                })
-                .map(|(event, _)| event.as_slug().to_string())
-                .collect();
-
-            if !unsupported.is_empty() {
-                unsupported_warnings.push((*provider, unsupported));
-            }
-        }
-
-        if !unsupported_warnings.is_empty() {
-            if args.fix && !args.dry_run {
-                // Fix: Remove unsupported events and save config
-                let mut fixed_config = cfg.clone();
-                let removed =
-                    claudine::dispatch::loader::remove_unsupported_events(&mut fixed_config);
-
-                // Save the fixed config
-                match claudine::dispatch::loader::save_config(&fixed_config) {
-                    Ok(path) => {
-                        let header = Prose::new(
-                            "<green><b>Fixed:</b></green> Removed unsupported events from config:",
-                        );
-                        log::data(&format!("✓ {}", header.render(&term)));
-                        log::data("");
-
-                        for (provider, events) in &removed {
-                            let events_str = events
-                                .iter()
-                                .map(|event| event_name_pascal(event))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            let line = Prose::new(format!(
-                                "  <b>{}</b>: <dim><strikethrough>{}</strikethrough></dim>",
-                                provider, events_str
-                            ));
-                            log::data(&line.render(&term));
-                        }
-
-                        log::data("");
-                        let saved_msg =
-                            Prose::new(format!("<dim>Config saved to {}</dim>", path.display()));
-                        log::data(&saved_msg.render(&term));
-                        log::data("");
-                    }
-                    Err(e) => {
-                        let error_msg = Prose::new(format!(
-                            "<red><b>Error:</b></red> Failed to save config: {}",
-                            e
-                        ));
-                        log::data(&error_msg.render(&term));
-                        log::data("");
-                    }
-                }
-            } else if args.fix && args.dry_run {
-                // Dry run: Show what would be removed
-                let header = Prose::new(
-                    "<yellow><b>Would fix:</b></yellow> These unsupported events would be removed:",
-                );
-                log::data(&format!("⚠ {}", header.render(&term)));
-                log::data("");
-
-                for (provider, events) in &unsupported_warnings {
-                    let events_str = events
-                        .iter()
-                        .map(|event| event_name_pascal(event))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let line = Prose::new(format!(
-                        "  <b>{}</b>: <dim><strikethrough>{}</strikethrough></dim>",
-                        provider, events_str
-                    ));
-                    log::data(&line.render(&term));
-                }
-
-                log::data("");
-            } else {
-                // No fix: Show warning
-                let warning_header = Prose::new(
-                    "<yellow><b>Warning:</b></yellow> Some configured events are not supported by their providers:",
-                );
-                log::data(&format!("⚠ {}", warning_header.render(&term)));
-                log::data("");
-
-                for (provider, events) in &unsupported_warnings {
-                    let events_str = events
-                        .iter()
-                        .map(|event| event_name_pascal(event))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let line = Prose::new(format!(
-                        "  <b>{}</b>: <red><strikethrough>{}</strikethrough></red>",
-                        provider, events_str
-                    ));
-                    log::data(&line.render(&term));
-                }
-
-                log::data("");
-                let hint = Prose::new(
-                    "<dim>These events won't fire. Use --fix to remove them, or edit ~/.claudine/config.json manually.</dim>",
-                );
-                log::data(&hint.render(&term));
-                log::data("");
-            }
-        }
-    }
+    // With ClaudineConfig, events are provider-agnostic — every event applies
+    // to all providers. Events that a provider doesn't support simply won't
+    // fire for that provider. This is expected, not a configuration error.
+    // The --fix flag is preserved for CLI compatibility but is not actionable.
 
     Ok(())
 }
