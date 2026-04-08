@@ -553,36 +553,60 @@ fn execute_sound_effect(name: &str, volume: f32, speed: f32) {
     });
 }
 
-/// Execute a shell command asynchronously via `sh -c "command params"`.
+/// Execute a validated command asynchronously using direct spawning.
+///
+/// The command is first validated through [`bash_executor::validate_command`]
+/// which checks against the blocklist, resolves the executable on PATH, and
+/// handles JS/TS interpreter discovery. The resulting `ValidatedCommand`
+/// is then spawned directly (no `sh -c`).
 fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
     let cmd = interpolate(command, meta);
     let rendered_params = interpolate(params, meta);
-    let escaped_params = if rendered_params.is_empty() {
-        String::new()
-    } else {
-        bash_executor::shell_escape(&rendered_params)
-    };
-    let full_command = if escaped_params.is_empty() {
-        cmd.clone()
-    } else {
-        format!("{cmd} {escaped_params}")
+
+    // Validate the command before execution
+    let validated = match bash_executor::validate_command(&cmd) {
+        Ok(v) => v,
+        Err(error) => {
+            warn!(%cmd, %error, "Bash action command validation failed");
+            return;
+        }
     };
 
-    debug!(%full_command, "Spawning bash action");
+    // Split rendered_params into individual arguments on whitespace.
+    // Each argument is passed directly to the process (no shell interpretation).
+    let param_args: Vec<String> = if rendered_params.is_empty() {
+        vec![]
+    } else {
+        rendered_params
+            .split_whitespace()
+            .map(String::from)
+            .collect()
+    };
+
+    debug!(?validated, ?param_args, "Spawning bash action");
 
     tokio::spawn(async move {
-        let result = Command::new("sh")
-            .arg("-c")
-            .arg(&full_command)
-            .output()
-            .await;
+        let result = match &validated {
+            bash_executor::ValidatedCommand::Direct(executable) => {
+                Command::new(executable).args(&param_args).output().await
+            }
+            bash_executor::ValidatedCommand::Interpreted {
+                interpreter,
+                script,
+            } => {
+                let mut cmd = Command::new(interpreter);
+                cmd.arg(script);
+                cmd.args(&param_args);
+                cmd.output().await
+            }
+        };
         match result {
             Ok(output) if !output.status.success() => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                warn!(%full_command, %stderr, "Bash action exited with non-zero status");
+                warn!(?validated, %stderr, "Bash action exited with non-zero status");
             }
             Err(error) => {
-                warn!(%full_command, %error, "Bash action failed to spawn");
+                warn!(?validated, %error, "Bash action failed to spawn");
             }
             _ => {}
         }

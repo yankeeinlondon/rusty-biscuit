@@ -267,6 +267,27 @@ fn default_protect() -> ProtectConfig {
     ProtectConfig::default()
 }
 
+// ============================================================================
+// RepoOverrideConfig
+// ============================================================================
+
+/// Repo-scoped configuration override.
+///
+/// A repo config file (`{repo}/.claudine/config.json`) only contains the
+/// fields that are allowed to differ per-repo. Unlike [`ClaudineConfig`],
+/// all fields are optional, so a repo file that contains only
+/// `{ "canonical_provider": "gemini" }` will deserialize successfully.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RepoOverrideConfig {
+    /// Override the canonical provider for this repo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_provider: Option<Provider>,
+
+    /// Override or extend actions for this repo (per-event replacement).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
+}
+
 impl Default for ClaudineConfig {
     fn default() -> Self {
         Self {

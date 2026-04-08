@@ -7,7 +7,7 @@ use tracing::{debug, info, warn};
 
 use crate::actions::{CompiledMapper, HookAction, Mapper};
 use crate::config::atomic::atomic_write;
-use crate::config::claudine_config::{ClaudineConfig, ClaudineMessengerConfig, MessengerProviderConfig};
+use crate::config::claudine_config::{ClaudineConfig, ClaudineMessengerConfig, MessengerProviderConfig, RepoOverrideConfig};
 use crate::config::migration;
 use crate::error::{ClaudineError, Result};
 use crate::events::{
@@ -735,10 +735,10 @@ pub fn load_claudine_config(
         if repo_path.is_file() {
             let repo_raw = std::fs::read_to_string(&repo_path)?;
             let repo_value = parse_json5_to_value(&repo_raw)?;
-            let repo_config: ClaudineConfig =
+            let repo_override: RepoOverrideConfig =
                 serde_json::from_value(repo_value).map_err(ClaudineError::JsonParse)?;
-            debug!(?repo_path, "Loaded ClaudineConfig (repo)");
-            merge_claudine_configs(&mut config, &repo_config);
+            debug!(?repo_path, "Loaded RepoOverrideConfig");
+            merge_repo_override(&mut config, &repo_override);
         }
     }
 
@@ -757,6 +757,39 @@ pub fn save_claudine_config(config: &ClaudineConfig, path: &Path) -> Result<()> 
     let json = serde_json::to_string_pretty(config)?;
     atomic_write(path, json.as_bytes())?;
     info!(?path, "Saved ClaudineConfig");
+    Ok(())
+}
+
+/// Load a repo-scoped [`RepoOverrideConfig`] from the given path.
+///
+/// Returns `Ok(None)` if the file does not exist.
+///
+/// ## Errors
+///
+/// Returns errors for I/O failures or parse errors.
+pub fn load_repo_override_config(path: &Path) -> Result<Option<RepoOverrideConfig>> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let raw = std::fs::read_to_string(path)?;
+    let value = parse_json5_to_value(&raw)?;
+    let config: RepoOverrideConfig =
+        serde_json::from_value(value).map_err(ClaudineError::JsonParse)?;
+    debug!(?path, "Loaded RepoOverrideConfig");
+    Ok(Some(config))
+}
+
+/// Save a [`RepoOverrideConfig`] to disk as pretty-printed JSON.
+///
+/// Creates parent directories if they do not exist and writes atomically.
+///
+/// ## Errors
+///
+/// Returns errors if serialization fails or the file cannot be written.
+pub fn save_repo_override_config(config: &RepoOverrideConfig, path: &Path) -> Result<()> {
+    let json = serde_json::to_string_pretty(config)?;
+    atomic_write(path, json.as_bytes())?;
+    info!(?path, "Saved RepoOverrideConfig");
     Ok(())
 }
 
@@ -803,13 +836,13 @@ pub fn claudine_config_to_hooker(
     }
 }
 
-/// Merge a repo-level [`ClaudineConfig`] into a user-level config.
+/// Merge a repo-level [`RepoOverrideConfig`] into a user-level config.
 ///
 /// Merge rules:
 /// - `canonical_provider`: repo overrides user if repo has `Some`.
 /// - `actions`: per-event replacement — if repo defines actions for an event,
 ///   that vector fully replaces the user's entry for the same event.
-fn merge_claudine_configs(user: &mut ClaudineConfig, repo: &ClaudineConfig) {
+fn merge_repo_override(user: &mut ClaudineConfig, repo: &RepoOverrideConfig) {
     // canonical_provider: repo overrides user if set
     if repo.canonical_provider.is_some() {
         user.canonical_provider = repo.canonical_provider;
@@ -2022,11 +2055,11 @@ mod tests {
             canonical_provider: Some(Provider::Claude),
             ..ClaudineConfig::default()
         };
-        let repo = ClaudineConfig {
+        let repo = RepoOverrideConfig {
             canonical_provider: Some(Provider::Gemini),
-            ..ClaudineConfig::default()
+            ..RepoOverrideConfig::default()
         };
-        merge_claudine_configs(&mut user, &repo);
+        merge_repo_override(&mut user, &repo);
         assert_eq!(user.canonical_provider, Some(Provider::Gemini));
     }
 
@@ -2046,17 +2079,19 @@ mod tests {
             vec![HookAction::Report { handler: None }],
         );
 
-        let mut repo = ClaudineConfig::default();
-        repo.actions.insert(
-            AgenticEvent::SessionStart,
-            vec![HookAction::SoundEffect {
-                effect: "repo-sound".to_string(),
-                volume: 0.5,
-                speed: 1.0,
-            }],
-        );
+        let mut repo = RepoOverrideConfig {
+            actions: std::collections::HashMap::from([(
+                AgenticEvent::SessionStart,
+                vec![HookAction::SoundEffect {
+                    effect: "repo-sound".to_string(),
+                    volume: 0.5,
+                    speed: 1.0,
+                }],
+            )]),
+            ..RepoOverrideConfig::default()
+        };
 
-        merge_claudine_configs(&mut user, &repo);
+        merge_repo_override(&mut user, &repo);
 
         // SessionStart replaced by repo
         let session_start = &user.actions[&AgenticEvent::SessionStart];
@@ -2374,7 +2409,8 @@ mod tests {
     }
 
     /// Verifies that repo config merge does NOT override preferred_agent
-    /// (merge only touches canonical_provider and actions).
+    /// Repo config only has canonical_provider and actions; preferred_agent
+    /// is user-only and cannot appear in a `RepoOverrideConfig`.
     #[test]
     fn load_claudine_config_preferred_agent_not_overridden_by_repo() {
         let dir = tempfile::tempdir().unwrap();
@@ -2387,20 +2423,26 @@ mod tests {
         };
         save_claudine_config(&user_config, &user_path).unwrap();
 
-        // Repo config with preferred_agent = Gemini
+        // Repo config only sets canonical_provider (no preferred_agent field)
         let repo_dir = dir.path().join("repo");
         std::fs::create_dir_all(repo_dir.join(".claudine")).unwrap();
-        let repo_config = ClaudineConfig {
-            preferred_agent: Provider::Gemini,
-            ..ClaudineConfig::default()
+        let repo_override = RepoOverrideConfig {
+            canonical_provider: Some(Provider::Gemini),
+            ..RepoOverrideConfig::default()
         };
-        save_claudine_config(&repo_config, &repo_dir.join(".claudine/config.json")).unwrap();
+        save_repo_override_config(&repo_override, &repo_dir.join(".claudine/config.json"))
+            .unwrap();
 
         let loaded = load_claudine_config(Some(&user_path), Some(&repo_dir)).unwrap();
         assert_eq!(
             loaded.preferred_agent,
             Provider::Codex,
             "repo should not override user's preferred_agent"
+        );
+        assert_eq!(
+            loaded.canonical_provider,
+            Some(Provider::Gemini),
+            "repo should override canonical_provider"
         );
     }
 
