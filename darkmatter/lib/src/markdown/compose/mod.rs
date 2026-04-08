@@ -44,6 +44,7 @@ pub(crate) mod cache;
 pub mod conditions;
 pub mod context;
 mod frontmatter_interpolation;
+pub(crate) mod frontmatter_shell_expansion;
 pub(crate) mod parse_utils;
 pub(crate) mod perf;
 mod state;
