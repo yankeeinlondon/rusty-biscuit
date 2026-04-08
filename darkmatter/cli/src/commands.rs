@@ -122,6 +122,8 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             allow_missing_transclusions,
             allow_any_missing_reference,
             allow_ctx_override,
+            timeout,
+            allow_shell_timeout,
             perf,
         } => {
             let mode = resolve_list_spacing(compact, loose);
@@ -141,6 +143,8 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 indent,
                 &allow,
                 allow_ctx_override,
+                timeout,
+                allow_shell_timeout,
                 perf,
                 cli,
             )?;
@@ -340,6 +344,8 @@ pub fn run_compose(
     indent: Option<usize>,
     allow: &ComposeAllowFlags,
     allow_ctx_override: bool,
+    timeout_secs: Option<u64>,
+    allow_shell_timeout: bool,
     perf: bool,
     cli: &Cli,
 ) -> Result<()> {
@@ -475,6 +481,9 @@ pub fn run_compose(
     let is_file_input = resolved_input.is_some();
 
     let shell_opts = ShellExpansionOptions {
+        timeout: timeout_secs
+            .map(|s| std::time::Duration::from_secs(s))
+            .unwrap_or(std::time::Duration::from_secs(10)),
         policy_root: resolved_input.as_ref().and_then(|p| {
             p.parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
@@ -489,6 +498,9 @@ pub fn run_compose(
     };
 
     options = options.with_shell(shell_opts);
+    if allow_shell_timeout {
+        options = options.with_allow_shell_timeout(true);
+    }
     options = options.with_list_spacing(list_spacing);
     options = options.with_allow_ctx_override(allow_ctx_override);
     options = options.with_perf(perf);
@@ -503,20 +515,6 @@ pub fn run_compose(
         use darkmatter::markdown::compose::ShellExpansionError;
 
         match &e {
-            ShellExpansion(ShellExpansionError::ApprovalRequired {
-                command,
-                whitelist_path,
-                ..
-            }) => {
-                let executable = command.split_whitespace().next().unwrap_or(command);
-                eyre!(
-                    "Approval required for '{command}'.\n\
-                     To allow in non-interactive mode, add one of these to {}:\n  \
-                     exact {command}\n  \
-                     prefix {executable}",
-                    whitelist_path.display(),
-                )
-            }
             ShellExpansion(ShellExpansionError::ExecutionFailed {
                 command,
                 code,
@@ -555,6 +553,18 @@ pub fn run_compose(
             }
             ShellExpansion(ShellExpansionError::Denied { command, origin }) => {
                 eyre!("Command denied at {origin}: '{command}'")
+            }
+            ShellExpansion(ShellExpansionError::ApprovalRequired {
+                command,
+                whitelist_path,
+                origin: _,
+                ..
+            }) => {
+                let executable = command.split_whitespace().next().unwrap_or(command);
+                eyre!(
+                    "Approval required for '{command}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {command}\n  prefix {executable}",
+                    whitelist_path.display(),
+                )
             }
             _ => eyre!("{e}"),
         }

@@ -139,6 +139,14 @@ pub enum Command {
         #[arg(long)]
         allow_ctx_override: bool,
 
+        /// Global shell command timeout in seconds (default: 10)
+        #[arg(long, value_name = "SECONDS")]
+        timeout: Option<u64>,
+
+        /// Convert shell timeout failures into empty strings instead of errors
+        #[arg(long)]
+        allow_shell_timeout: bool,
+
         /// Emit a compose performance report to stderr after completion
         #[arg(long)]
         perf: bool,
@@ -644,5 +652,41 @@ mod tests {
     fn debug_flag_absent_is_none() {
         let cli = Cli::try_parse_from(["md", "doc.md"]).unwrap();
         assert_eq!(cli.debug_level, None);
+    }
+
+    #[test]
+    fn compose_timeout_flag_parses() {
+        let cli = Cli::try_parse_from(["md", "compose", "doc.md", "--timeout", "3"]).unwrap();
+        match cli.command {
+            Some(Command::Compose { timeout, .. }) => assert_eq!(timeout, Some(3)),
+            _ => panic!("Expected Compose command"),
+        }
+    }
+
+    #[test]
+    fn compose_allow_shell_timeout_flag_parses() {
+        let cli = Cli::try_parse_from(["md", "compose", "doc.md", "--allow-shell-timeout"]).unwrap();
+        match cli.command {
+            Some(Command::Compose { allow_shell_timeout, .. }) => assert!(allow_shell_timeout),
+            _ => panic!("Expected Compose command"),
+        }
+    }
+
+    #[test]
+    fn compose_timeout_defaults_to_none() {
+        let cli = Cli::try_parse_from(["md", "compose", "doc.md"]).unwrap();
+        match cli.command {
+            Some(Command::Compose { timeout, .. }) => assert_eq!(timeout, None),
+            _ => panic!("Expected Compose command"),
+        }
+    }
+
+    #[test]
+    fn compose_allow_shell_timeout_defaults_false() {
+        let cli = Cli::try_parse_from(["md", "compose", "doc.md"]).unwrap();
+        match cli.command {
+            Some(Command::Compose { allow_shell_timeout, .. }) => assert!(!allow_shell_timeout),
+            _ => panic!("Expected Compose command"),
+        }
     }
 }
