@@ -117,27 +117,7 @@ _ask_codex prompt:
     fi
 
 
-implement:
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 2, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . && just commit
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 3, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . && just commit
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 4, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . && just commit
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 5, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . && just commit
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 6, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . && just commit
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 7, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . && just commit
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 8, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . && just commit
-    @claudine compose @prompts/review-feature.md --codex -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", spec: "spec.md", design: "tech-design.md", iteration: 1 }'
-    @claudine compose @prompts/implement-review.md --claude -y -- set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 1 }'
-    @git add . && just commit
-    @claudine compose @prompts/review-feature.md --codex -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", spec: "spec.md", design: "tech-design.md", iteration: 2 }'
-    @claudine compose @prompts/implement-review.md --claude -y -- set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 2 }'
-    @git add . && just commit || exit 0
+
 
 # use an AI agent to respond to a question (uses `AGENT`)
 ask prompt:
