@@ -10,6 +10,8 @@ failure:
 
 Your task is to implement phase {{phase}} of the plan found in {{plan}}.
 
+- use the '{{ctx.current_package_area}}' skill during this implementation
+
 You are done when:
 
 - all functionality defined in phase {{phase}} has been implemented
@@ -23,3 +25,4 @@ You are done when:
 - Report a summary of what you did including all the source files you changed.
 - You do not need to run tests across the entire monorepo as this will take far too long. Only 
 - once the implementation is complete update the '{{ctx.current_package_area}}' if there were any notable changes needed in this skill
+- you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!

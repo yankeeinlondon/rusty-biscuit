@@ -4,7 +4,9 @@ spec: ""
 design: ""
 iteration: 1
 success:
-    say: "Review {{iteration}} has completed"
+    say: "Feature review {{iteration}} has completed"
+failure:
+    say: "Feature review {{iteration}} failed to complete!"
 ---
 
 We have just completed a feature defined in "{{dir}}":
@@ -26,3 +28,9 @@ Save your review suggestions to "{{dir}}/review.md"
 ::block when="iteration != 1"
 Save your review suggestions to "{{dir}}/review-{{iteration}}.md"
 ::end-block
+
+
+**IMPORTANT:**
+
+- use the '{{ctx.current_package_area}}' skill during this review
+- you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!
