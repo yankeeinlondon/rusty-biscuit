@@ -89,6 +89,28 @@ impl AgenticEvent {
         }
     }
 
+    /// Returns a human-readable display name for terminal presentation.
+    pub const fn human_name(&self) -> &'static str {
+        match self {
+            AgenticEvent::SessionStart => "Session Start",
+            AgenticEvent::SessionEnd => "Session End",
+            AgenticEvent::BeforePrompt => "Before Prompt",
+            AgenticEvent::BeforeTool => "Before Tool",
+            AgenticEvent::AfterTool => "After Tool",
+            AgenticEvent::ToolError => "Tool Error",
+            AgenticEvent::PermissionRequest => "Permission Request",
+            AgenticEvent::TurnComplete => "Turn Complete",
+            AgenticEvent::TurnError => "Turn Error",
+            AgenticEvent::SubagentStart => "Subagent Start",
+            AgenticEvent::SubagentStop => "Subagent Stop",
+            AgenticEvent::BeforeModel => "Before Model",
+            AgenticEvent::AfterModel => "After Model",
+            AgenticEvent::BeforeCompact => "Before Compact",
+            AgenticEvent::Notification => "Notification",
+            AgenticEvent::HumanInTheLoop => "HITL (human in the loop)",
+        }
+    }
+
     /// Returns a PascalCase display label for terminal presentation.
     pub const fn as_pascal_case(&self) -> &'static str {
         match self {

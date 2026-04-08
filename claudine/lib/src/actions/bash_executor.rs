@@ -75,33 +75,33 @@ fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
         ))
     })?;
 
-    if let Some(first_line) = content.lines().next() {
-        if let Some(shebang) = first_line.strip_prefix("#!") {
-            let interpreter = shebang.split_whitespace().next().unwrap_or("").to_string();
-            if interpreter.is_empty() {
+    if let Some(first_line) = content.lines().next()
+        && let Some(shebang) = first_line.strip_prefix("#!")
+    {
+        let interpreter = shebang.split_whitespace().next().unwrap_or("").to_string();
+        if interpreter.is_empty() {
+            return Err(ClaudineError::ConfigValidation(format!(
+                "script `{command}` has an empty shebang line"
+            )));
+        }
+        let interpreter_path = Path::new(&interpreter);
+        if interpreter_path.is_absolute() {
+            if !interpreter_path.exists() {
                 return Err(ClaudineError::ConfigValidation(format!(
-                    "script `{command}` has an empty shebang line"
+                    "shebang interpreter `{interpreter}` not found for script `{command}`"
                 )));
             }
-            let interpreter_path = Path::new(&interpreter);
-            if interpreter_path.is_absolute() {
-                if !interpreter_path.exists() {
-                    return Err(ClaudineError::ConfigValidation(format!(
-                        "shebang interpreter `{interpreter}` not found for script `{command}`"
-                    )));
-                }
-            } else {
-                which::which(&interpreter).map_err(|_| {
-                    ClaudineError::ConfigValidation(format!(
-                        "shebang interpreter `{interpreter}` not found on PATH for script `{command}`"
-                    ))
-                })?;
-            }
-            return Ok(ValidatedCommand::Interpreted {
-                interpreter,
-                script: command.to_string(),
-            });
+        } else {
+            which::which(&interpreter).map_err(|_| {
+                ClaudineError::ConfigValidation(format!(
+                    "shebang interpreter `{interpreter}` not found on PATH for script `{command}`"
+                ))
+            })?;
         }
+        return Ok(ValidatedCommand::Interpreted {
+            interpreter,
+            script: command.to_string(),
+        });
     }
 
     if let Ok(_bun) = which::which("bun") {
@@ -111,13 +111,13 @@ fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
         });
     }
 
-    if matches!(extension, "js" | "mjs") {
-        if let Ok(_node) = which::which("node") {
-            return Ok(ValidatedCommand::Interpreted {
-                interpreter: "node".to_string(),
-                script: command.to_string(),
-            });
-        }
+    if matches!(extension, "js" | "mjs")
+        && let Ok(_node) = which::which("node")
+    {
+        return Ok(ValidatedCommand::Interpreted {
+            interpreter: "node".to_string(),
+            script: command.to_string(),
+        });
     }
 
     Err(ClaudineError::ConfigValidation(format!(

@@ -222,7 +222,7 @@ pub async fn execute_actions_v2(
                     command = tracing::field::Empty,
                 )
                 .entered();
-                execute_speak_v2(message, voice.as_deref(), gender.clone(), meta, config);
+                execute_speak_v2(message, voice.as_deref(), *gender, meta, config);
             }
             HookAction::Report { handler } => {
                 let _action_span = info_span!(
@@ -430,7 +430,7 @@ fn tts_config_from_claudine(
                     tts = tts.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
                 }
 
-                let gender = gender_override.unwrap_or(settings.gender.clone());
+                let gender = gender_override.unwrap_or(settings.gender);
                 match &settings.voice {
                     Some(VoiceSelection::Single(v)) => {
                         tts = tts.with_voice(v);
