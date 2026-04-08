@@ -32,26 +32,7 @@ async fn run_headless_initialization() -> Result<()> {
     let config = build_headless_config();
     let path = claudine::dispatch::loader::user_config_path();
     claudine::dispatch::loader::save_claudine_config(&config, &path)?;
-    // Silently register hooks in headless/CI mode to match the interactive flow
-    register_hooks_all_providers_headless();
     Ok(())
-}
-
-/// Register hooks for all detected providers without any terminal output.
-fn register_hooks_all_providers_headless() {
-    let agents = discover_agents_full();
-    for agent in &agents {
-        if !agent.on_path {
-            continue;
-        }
-        let provider = agent.provider;
-        let plan = ProviderHookPlan {
-            events: provider_hook_events(provider),
-            canonical_for: None,
-        };
-        let configurator = get_configurator(provider);
-        let _ = configurator.register(&plan, None);
-    }
 }
 
 async fn run_interactive_initialization() -> Result<()> {
