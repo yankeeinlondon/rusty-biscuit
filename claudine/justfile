@@ -331,25 +331,14 @@ review *args="":
     @just _speak "Review for {{LIB_NAME}} package has completed."
 
 implement:
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 3, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . || just _speak "No dirty files found! Surprising." && just commit
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 4, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . || just _speak "No dirty files found! Surprising." && just commit
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 5, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . || just _speak "No dirty files found! Surprising." && just commit
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 6, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . || just _speak "No dirty files found! Surprising." && just commit
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 7, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . || just _speak "No dirty files found! Surprising." && just commit
-    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 8, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
-    @git add . || just _speak "No dirty files found! Surprising." && just commit
-    @claudine compose @prompts/review-feature.md --codex -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", spec: "spec.md", design: "tech-design.md", iteration: 1 }'
-    @claudine compose @prompts/implement-review.md --claude -y -- set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 1 }'
+    @claudine compose @prompts/implement-review.md --claude -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 1, spec: "spec.md", design: "tech-design.md", }'
     @git add . && just commit
     @claudine compose @prompts/review-feature.md --codex -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", spec: "spec.md", design: "tech-design.md", iteration: 2 }'
-    @claudine compose @prompts/implement-review.md --claude -y -- set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 2 }'
+    @claudine compose @prompts/implement-review.md --claude -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 2, spec: "spec.md", design: "tech-design.md" }'
     @git add . && just commit || exit 0
-
+    @claudine compose @prompts/review-feature.md --codex -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", spec: "spec.md", design: "tech-design.md", iteration: 3 }'
+    @claudine compose @prompts/implement-review.md --claude -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 3, spec: "spec.md", design: "tech-design.md" }'
+    @git add . && just commit || exit 0
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).

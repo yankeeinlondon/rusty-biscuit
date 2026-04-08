@@ -74,12 +74,8 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
         &serde_json::to_string_pretty(&user_config).unwrap(),
     );
 
-    // Repo config with the session_start action.
+    // Repo override config (only contains overridable fields).
     let repo_config = serde_json::json!({
-        "preferred_agent": "claude",
-        "tts": false,
-        "logging": false,
-        "protect": { "enabled": false },
         "actions": {
             "session_start": [
                 {
@@ -140,12 +136,8 @@ fn handle_logs_wrapper_package_context_from_env() {
         &serde_json::to_string_pretty(&user_config).unwrap(),
     );
 
-    // Repo config with the session_start action.
+    // Repo override config (only contains overridable fields).
     let repo_config = serde_json::json!({
-        "preferred_agent": "claude",
-        "tts": false,
-        "logging": false,
-        "protect": { "enabled": false },
         "actions": {
             "session_start": [
                 {
