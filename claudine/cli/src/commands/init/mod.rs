@@ -68,7 +68,9 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 
         if !global_config.exists() {
             log::warn("No global ~/.claudine/config.json found.");
-            log::message("Run any claudine command to trigger initialization, or run `claudine config`.");
+            log::message(
+                "Run any claudine command to trigger initialization, or run `claudine config`.",
+            );
             log::message("");
         }
     }
@@ -117,8 +119,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("");
     log::message("Phase 4: Protect Defaults");
     log::message("-------------------------");
-    let protect_enabled =
-        prompts::prompt_protect_enabled(defaults.protect_enabled.or(Some(true)))?;
+    let protect_enabled = prompts::prompt_protect_enabled(defaults.protect_enabled.or(Some(true)))?;
     let protect_defaults = if protect_enabled {
         Some(ProtectConfig::default())
     } else {

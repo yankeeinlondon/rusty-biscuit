@@ -487,11 +487,7 @@ fn run_provider_detail(provider: Provider, config: Option<&ClaudineConfig>) -> R
                 .render(&term)
                 .into(),
             Some(a) => {
-                let text = a
-                    .iter()
-                    .map(format_action)
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let text = a.iter().map(format_action).collect::<Vec<_>>().join("\n");
                 Prose::new(text).render(&term).into()
             }
         };
@@ -679,9 +675,7 @@ fn run_simple(
                 .unwrap_or_default();
 
             // Get ALL enabled events to detect config errors
-            let all_enabled: HashSet<String> = config
-                .map(all_enabled_events)
-                .unwrap_or_default();
+            let all_enabled: HashSet<String> = config.map(all_enabled_events).unwrap_or_default();
 
             // Find unsupported events (enabled but not in expected because provider doesn't support them)
             let unsupported: HashSet<&String> = all_enabled
