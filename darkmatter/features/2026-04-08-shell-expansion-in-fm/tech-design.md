@@ -40,8 +40,8 @@ This is a state-shaping stage, not a rendering convenience.
 ## Non-Goals
 
 1. Supporting embedded shell substitutions inside larger strings such as `"prefix $(cmd) suffix"`.
-2. Supporting frontmatter-shell-specific error-handling switches like body `--when-error` or `--stderr-contains`.
-3. Re-parsing shell output as YAML, JSON, or typed frontmatter. Expanded values remain strings.
+2. Supporting frontmatter-shell-specific error-handling switches like body `--when-error` or `--stderr-contains`. Any non-zero exit from a frontmatter shell command is always a hard compose error.
+3. Re-parsing shell output as YAML, JSON, or typed frontmatter. Expanded values remain trimmed strings.
 4. Allowing interpolated text to supply the executable token for a frontmatter shell command.
 5. Perfect preflight discovery of commands hidden behind shell-generated transclusion paths.
 
@@ -136,6 +136,20 @@ dir: "$(dirname {{file}})"
 
 Here the executable token `dirname` is literal and only the argument is interpolated.
 
+### Error Handling
+
+Frontmatter shell expansion has no error-recovery options. Any non-zero exit code, missing executable, blacklisted command, or denied approval results in an immediate compose error. This is intentionally simpler than body `::shell` directives, which support `--when-error`, `--when-exit-code`, and other recovery switches.
+
+Timeout failures follow the timeout behavior described below, which is the only configurable error path for frontmatter shell expansion.
+
+### Output Normalization
+
+The stdout captured from a frontmatter shell command is trimmed of all surrounding whitespace (equivalent to `.trim()`) before being stored as the frontmatter value. This removes trailing newlines from single-line output and leading/trailing whitespace from multi-line output. Internal whitespace and newlines are preserved.
+
+### Concurrency
+
+When multiple top-level frontmatter properties contain shell expressions, they are executed concurrently. Seed-only interpolation semantics guarantee that no shell expression can reference another shell expression's output, so there are no cross-dependencies between concurrent executions. If any command fails, the compose error is reported and composition aborts.
+
 ### Timeout Semantics
 
 Timeout behavior is shared by body shell expansion and frontmatter shell expansion.
@@ -152,6 +166,9 @@ Configurable behavior:
 - CLI exposes `--timeout <seconds>`
 - CLI exposes `--allow-shell-timeout`, which converts timeout failures into empty-string replacements
 - a specific shell invocation can override the timeout with `::timeout:<seconds>`
+- for body `::shell` directives, `::timeout:<seconds>` must appear as the last token on the line, after any error-handling flags:
+  - valid: `::shell cmd --when-error empty ::timeout:5`
+  - invalid: `::shell cmd ::timeout:5 --when-error empty`
 
 Effects of a timeout:
 
@@ -229,7 +246,8 @@ Responsibilities:
 - parse the `$()` wrapper and optional timeout suffix
 - validate the executable-token interpolation rule
 - convert candidates into shell-command specs
-- execute approved commands through the shared shell runtime
+- execute approved commands concurrently through the shared shell runtime
+- trim all surrounding whitespace from each command's stdout
 - rewrite frontmatter values in place
 - return a stage-specific report and warnings
 
@@ -466,6 +484,7 @@ In `darkmatter/cli/src/commands.rs`:
 ### `darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs`
 
 - teach body `::shell` parsing to understand a trailing `::timeout:<n>` suffix
+- `::timeout:<n>` must be the last token on the `::shell` line; reject if it appears before error-handling flags
 - keep existing error-handling-option support intact
 
 ### `darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs`

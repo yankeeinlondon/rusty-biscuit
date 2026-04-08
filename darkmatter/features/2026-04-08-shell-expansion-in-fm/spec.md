@@ -26,6 +26,20 @@ In this example we've revealed the core syntax of **Frontmatter Shell Expansion*
 
 The content in between the `$(` and `)` is taken as being the shell command as well as optional parameters.
 
+## Error Handling
+
+A frontmatter shell command that fails with a non-zero exit code is always a hard compose error. Unlike body `::shell` directives which support `--when-error`, `--when-exit-code`, and other recovery options, frontmatter shell expansion intentionally offers no error-recovery switches. If the command fails, composition aborts immediately.
+
+Timeout failures follow the separate timeout behavior described below, but all other execution failures (command not found, non-zero exit, etc.) are always fatal.
+
+## Output Normalization
+
+The stdout captured from a frontmatter shell command is trimmed of all surrounding whitespace (leading and trailing, including newlines) before being stored as the frontmatter value. This is equivalent to calling `.trim()` on the raw output.
+
+## Concurrency
+
+When multiple top-level frontmatter properties contain shell expressions, they are executed concurrently. This is safe because frontmatter interpolation uses seed-only semantics — shell expressions cannot reference each other's output, so there are no cross-dependencies between them.
+
 ## Security
 
 The preflight checks we do for the existing [shell expansion](@claudine/docs/inline/shell-expansion.md) will be extended to detect **Frontmatter Shell Expansions** as well. Then the process of authorizing the composition of the Markdown document remains unchanged except that these new Frontmatter based shell commands will be included.
@@ -72,5 +86,11 @@ As part of this feature we will introduce **timeouts** for both the original she
 
                 ```md
                 ::shell ls -la ::timeout:1
+                ```
+
+            - in the body, `::timeout:N` must always appear as the **last token** on the `::shell` line, after any error-handling flags:
+
+                ```md
+                ::shell ls -la --when-error empty ::timeout:5
                 ```
                 
