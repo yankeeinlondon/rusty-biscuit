@@ -60,8 +60,22 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
                     });
                 }
 
+                // Check that ::timeout: only appears as the last token (if at all)
+                for (i, token) in tokens.iter().enumerate() {
+                    if token.starts_with("::timeout:") && i < tokens.len() - 1 {
+                        return Err(ShellExpansionError::ParseDirective {
+                            line: line_num,
+                            message: "::timeout:<N> must be the last token on the ::shell line"
+                                .to_string(),
+                        });
+                    }
+                }
+
                 // Extract error handling options from anywhere in the token list
                 let (error_handling, cmd_tokens) = extract_error_handling(&tokens, line_num)?;
+
+                // Extract timeout suffix from the end of the command tokens
+                let (timeout_override, cmd_tokens) = extract_timeout_suffix(&cmd_tokens, line_num)?;
 
                 if cmd_tokens.is_empty() {
                     return Err(ShellExpansionError::ParseDirective {
@@ -81,7 +95,7 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
                     span: line_start..line_with_newline_end,
                     line: line_num,
                     error_handling,
-                    timeout_override: None,
+                    timeout_override,
                 });
             }
         }
@@ -194,6 +208,49 @@ fn parse_exit_code(raw: &str, option_name: &str, line: usize) -> Result<i32, She
             line,
             message: format!("{option_name} requires an integer exit code, got '{raw}'"),
         })
+}
+
+/// Extracts a trailing `::timeout:<N>` token from the command token list.
+///
+/// ## Returns
+///
+/// A tuple of (timeout_override, remaining_tokens). The suffix must be the last
+/// token in the list. If present and valid, returns Some(Duration); otherwise None.
+///
+/// ## Errors
+///
+/// Returns an error if:
+/// - The timeout value is not a positive integer
+/// - The timeout value is zero
+fn extract_timeout_suffix(
+    tokens: &[String],
+    line: usize,
+) -> Result<(Option<std::time::Duration>, Vec<String>), ShellExpansionError> {
+    if tokens.is_empty() {
+        return Ok((None, tokens.to_vec()));
+    }
+
+    let last = &tokens[tokens.len() - 1];
+    if let Some(value_str) = last.strip_prefix("::timeout:") {
+        let seconds: u64 = value_str
+            .parse()
+            .map_err(|_| ShellExpansionError::ParseDirective {
+                line,
+                message: format!(
+                    "::timeout requires a positive integer of seconds, got '{value_str}'"
+                ),
+            })?;
+        if seconds == 0 {
+            return Err(ShellExpansionError::ParseDirective {
+                line,
+                message: "::timeout value must be greater than zero".to_string(),
+            });
+        }
+        let remaining = tokens[..tokens.len() - 1].to_vec();
+        Ok((Some(std::time::Duration::from_secs(seconds)), remaining))
+    } else {
+        Ok((None, tokens.to_vec()))
+    }
 }
 
 #[cfg(test)]
@@ -525,5 +582,71 @@ And `::shell echo inline` should also be ignored.
             directives[0].error_handling.enrich_error,
             Some("check path".to_string())
         );
+    }
+
+    #[test]
+    fn parse_timeout_suffix_at_end() {
+        let content = "::shell echo hello ::timeout:5\n";
+        let directives = parse_directives(content).unwrap();
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].executable, "echo");
+        assert_eq!(directives[0].args, vec!["hello"]);
+        assert_eq!(
+            directives[0].timeout_override,
+            Some(std::time::Duration::from_secs(5))
+        );
+    }
+
+    #[test]
+    fn parse_timeout_suffix_after_error_handling() {
+        let content = "::shell echo hello --when-error empty ::timeout:3\n";
+        let directives = parse_directives(content).unwrap();
+        assert_eq!(directives[0].executable, "echo");
+        assert_eq!(directives[0].args, vec!["hello"]);
+        assert_eq!(
+            directives[0].error_handling.when_error,
+            Some("empty".to_string())
+        );
+        assert_eq!(
+            directives[0].timeout_override,
+            Some(std::time::Duration::from_secs(3))
+        );
+    }
+
+    #[test]
+    fn parse_no_timeout_suffix_leaves_none() {
+        let content = "::shell echo hello\n";
+        let directives = parse_directives(content).unwrap();
+        assert!(directives[0].timeout_override.is_none());
+    }
+
+    #[test]
+    fn parse_timeout_suffix_before_error_handling_is_rejected() {
+        let content = "::shell echo hello ::timeout:5 --when-error empty\n";
+        let result = parse_directives(content);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("::timeout") && err.contains("last"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_timeout_zero_is_rejected() {
+        let content = "::shell echo hello ::timeout:0\n";
+        let result = parse_directives(content);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("greater than zero"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_timeout_non_integer_is_rejected() {
+        let content = "::shell echo hello ::timeout:abc\n";
+        let result = parse_directives(content);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("integer"), "got: {err}");
     }
 }
