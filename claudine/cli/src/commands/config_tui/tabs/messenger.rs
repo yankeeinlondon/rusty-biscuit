@@ -154,7 +154,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         ..
     }) = &app.modal
     {
-        let total = messenger_fields(provider).len();
+        let total = messenger_fields_with_name(provider).len();
         let title = format!("{} ({}/{})", provider, field_index + 1, total);
         super::super::widgets::modal::render_modal(
             frame,
@@ -319,14 +319,14 @@ pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => {
             let idx = app.modal_highlighted();
             if let Some(provider) = providers.get(idx) {
-                // Start the multi-step input flow for this provider
-                let (label, _) = messenger_fields(provider)[0].clone();
+                // Start with a "Configuration Name" field so the user can give
+                // a unique name (allowing multiple configs per provider).
                 app.push_modal(ModalState::MessengerInput {
                     provider: provider.to_string(),
                     field_index: 0,
                     fields: Vec::new(),
                     buffer: String::new(),
-                    label,
+                    label: "Configuration Name".to_string(),
                 });
             }
         }
@@ -335,6 +335,14 @@ pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
         }
         _ => {}
     }
+}
+
+/// Returns the ordered list of (label, default_value) for a messenger provider,
+/// **including** the leading "Configuration Name" field at index 0.
+fn messenger_fields_with_name(provider: &str) -> Vec<(String, String)> {
+    let mut fields = vec![("Configuration Name".to_string(), provider.to_string())];
+    fields.extend(messenger_fields(provider));
+    fields
 }
 
 /// Returns the ordered list of (label, default_value) for a messenger provider.
@@ -394,7 +402,8 @@ pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
             field_index,
             ..
         }) => {
-            let total = messenger_fields(provider).len();
+            // Total fields includes the leading "Configuration Name" field.
+            let total = messenger_fields_with_name(provider).len();
             (provider.clone(), *field_index, total)
         }
         _ => return,
@@ -423,8 +432,8 @@ pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
                 _ => return,
             };
 
-            // Use default if buffer is empty and a default exists
-            let all_field_defs = messenger_fields(&provider_name);
+            // Use the name-aware field definitions (index 0 = config name).
+            let all_field_defs = messenger_fields_with_name(&provider_name);
             let value = if current_buffer.is_empty() {
                 all_field_defs
                     .get(field_index)
@@ -453,13 +462,21 @@ pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
                     label: next_label,
                 });
             } else {
-                // All fields collected, build config
-                if let Some(config) = build_messenger_from_fields(&provider_name, &collected_fields) {
+                // All fields collected. Index 0 is the user-defined config name;
+                // the remaining fields are provider-specific settings.
+                let config_name = collected_fields
+                    .first()
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_else(|| provider_name.clone());
+                let provider_fields: Vec<(String, String)> =
+                    collected_fields.into_iter().skip(1).collect();
+                if let Some(config) = build_messenger_from_fields(&provider_name, &provider_fields) {
                     ensure_messenger_config(app);
-                    let name = provider_name.clone();
                     if let Some(ref mut messenger) = app.config.messenger {
-                        messenger.configurations.insert(name.clone(), config);
-                        messenger.active_config = Some(name);
+                        messenger
+                            .configurations
+                            .insert(config_name.clone(), config);
+                        messenger.active_config = Some(config_name);
                     }
                     app.dirty = true;
                 }

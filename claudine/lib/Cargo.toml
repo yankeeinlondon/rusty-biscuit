@@ -68,6 +68,9 @@ walkdir = "2.5"
 # Executable lookup
 which = "7"
 
+# Shell-words parsing for bash params
+shell-words = "1"
+
 [dev-dependencies]
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
 tempfile = "3"

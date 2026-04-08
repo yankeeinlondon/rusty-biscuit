@@ -139,6 +139,20 @@ pub enum ModalState {
         buffer: String,
         label: String,
     },
+    /// Multi-field editor for an individual action's properties.
+    ActionFieldList {
+        event: claudine::events::AgenticEvent,
+        action_index: usize,
+        highlighted: usize,
+    },
+    /// Text input for a single field within the action field editor.
+    ActionFieldInput {
+        event: claudine::events::AgenticEvent,
+        action_index: usize,
+        field_name: String,
+        buffer: String,
+        label: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -293,6 +307,12 @@ impl App {
             ModalState::MessengerInput { .. } => {
                 super::tabs::messenger::handle_messenger_input_modal(self, key);
             }
+            ModalState::ActionFieldList { .. } => {
+                super::tabs::actions::handle_action_field_list_modal(self, key);
+            }
+            ModalState::ActionFieldInput { .. } => {
+                super::tabs::actions::handle_action_field_input_modal(self, key);
+            }
         }
     }
 
@@ -314,6 +334,8 @@ impl App {
             Some(ModalState::TextInput { .. }) => 0,
             Some(ModalState::ActionSoundSelector { highlighted, .. }) => *highlighted,
             Some(ModalState::MessengerInput { .. }) => 0,
+            Some(ModalState::ActionFieldList { highlighted, .. }) => *highlighted,
+            Some(ModalState::ActionFieldInput { .. }) => 0,
             None => 0,
         }
     }
@@ -337,6 +359,8 @@ impl App {
                 ModalState::TextInput { .. } => {}
                 ModalState::ActionSoundSelector { highlighted, .. } => *highlighted = new_idx,
                 ModalState::MessengerInput { .. } => {}
+                ModalState::ActionFieldList { highlighted, .. } => *highlighted = new_idx,
+                ModalState::ActionFieldInput { .. } => {}
             }
         }
     }

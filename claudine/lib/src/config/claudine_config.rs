@@ -278,6 +278,7 @@ fn default_protect() -> ProtectConfig {
 /// all fields are optional, so a repo file that contains only
 /// `{ "canonical_provider": "gemini" }` will deserialize successfully.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RepoOverrideConfig {
     /// Override the canonical provider for this repo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1089,6 +1090,61 @@ mod tests {
         let err = config.validate().unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("error") && msg.contains("bogus-sound-name"), "error: {msg}");
+    }
+
+    // -------------------------------------------------------------------------
+    // RepoOverrideConfig — deny_unknown_fields
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn repo_override_rejects_preferred_agent_field() {
+        let result = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "preferred_agent": "claude"
+        }));
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("preferred_agent"),
+            "error should mention the unknown field: {msg}"
+        );
+    }
+
+    #[test]
+    fn repo_override_rejects_logging_field() {
+        let result = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "logging": true
+        }));
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("logging"),
+            "error should mention the unknown field: {msg}"
+        );
+    }
+
+    #[test]
+    fn repo_override_accepts_canonical_provider() {
+        let config = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "canonical_provider": "gemini"
+        }))
+        .unwrap();
+        assert_eq!(config.canonical_provider, Some(Provider::Gemini));
+        assert!(config.actions.is_empty());
+    }
+
+    #[test]
+    fn repo_override_accepts_actions() {
+        let config = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "actions": {
+                "session_start": [
+                    { "type": "sound_effect", "effect": "doorbell" }
+                ]
+            }
+        }))
+        .unwrap();
+        assert!(config.canonical_provider.is_none());
+        assert!(config.actions.contains_key(&AgenticEvent::SessionStart));
+        assert_eq!(config.actions[&AgenticEvent::SessionStart].len(), 1);
     }
 
     /// Comprehensive round-trip: build a fully-populated valid config,

@@ -14,7 +14,15 @@ pub enum ValidatedCommand {
     /// A directly executable binary at the resolved path.
     Direct(String),
     /// A script to be run through an interpreter.
-    Interpreted { interpreter: String, script: String },
+    ///
+    /// `interpreter` is the executable (e.g., `/usr/bin/env`).
+    /// `interpreter_args` are additional args before the script
+    /// (e.g., `["bun"]` for `#!/usr/bin/env bun`).
+    Interpreted {
+        interpreter: String,
+        interpreter_args: Vec<String>,
+        script: String,
+    },
 }
 
 /// Validates a command string for use as a bash action.
@@ -78,12 +86,17 @@ fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
     if let Some(first_line) = content.lines().next()
         && let Some(shebang) = first_line.strip_prefix("#!")
     {
-        let interpreter = shebang.split_whitespace().next().unwrap_or("").to_string();
+        let mut parts = shebang.split_whitespace();
+        let interpreter = parts.next().unwrap_or("").to_string();
         if interpreter.is_empty() {
             return Err(ClaudineError::ConfigValidation(format!(
                 "script `{command}` has an empty shebang line"
             )));
         }
+        // Capture remaining shebang tokens as interpreter args
+        // (e.g., `#!/usr/bin/env bun` → interpreter="/usr/bin/env", args=["bun"])
+        let interpreter_args: Vec<String> = parts.map(String::from).collect();
+
         let interpreter_path = Path::new(&interpreter);
         if interpreter_path.is_absolute() {
             if !interpreter_path.exists() {
@@ -100,6 +113,7 @@ fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
         }
         return Ok(ValidatedCommand::Interpreted {
             interpreter,
+            interpreter_args,
             script: command.to_string(),
         });
     }
@@ -107,6 +121,7 @@ fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
     if let Ok(_bun) = which::which("bun") {
         return Ok(ValidatedCommand::Interpreted {
             interpreter: "bun".to_string(),
+            interpreter_args: vec![],
             script: command.to_string(),
         });
     }
@@ -116,6 +131,7 @@ fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
     {
         return Ok(ValidatedCommand::Interpreted {
             interpreter: "node".to_string(),
+            interpreter_args: vec![],
             script: command.to_string(),
         });
     }
@@ -191,5 +207,76 @@ mod tests {
     #[test]
     fn shell_escape_empty_string() {
         assert_eq!(shell_escape(""), "''");
+    }
+
+    #[test]
+    fn shebang_env_bun_parses_interpreter_args() {
+        if !Path::new("/usr/bin/env").exists() {
+            return;
+        }
+
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".ts")
+            .tempfile()
+            .expect("failed to create temp file");
+
+        use std::io::Write;
+        writeln!(tmp, "#!/usr/bin/env bun").unwrap();
+        writeln!(tmp, "console.log('hello');").unwrap();
+
+        let path = tmp.path().to_str().unwrap().to_string();
+        let result = validate_command(&path).expect("validate_command should succeed");
+
+        match result {
+            ValidatedCommand::Interpreted {
+                interpreter,
+                interpreter_args,
+                script,
+            } => {
+                assert_eq!(interpreter, "/usr/bin/env");
+                assert_eq!(interpreter_args, vec!["bun".to_string()]);
+                assert_eq!(script, path);
+            }
+            other => panic!("expected Interpreted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shebang_simple_interpreter_has_no_args() {
+        if !Path::new("/usr/bin/env").exists() {
+            return;
+        }
+
+        // Use /usr/bin/env as the single-token shebang interpreter since we
+        // know it exists (checked above). Real-world shebangs like
+        // `#!/usr/bin/bun` would work identically; we just need something
+        // present on disk.
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".ts")
+            .tempfile()
+            .expect("failed to create temp file");
+
+        use std::io::Write;
+        writeln!(tmp, "#!/usr/bin/env").unwrap();
+        writeln!(tmp, "console.log('hello');").unwrap();
+
+        let path = tmp.path().to_str().unwrap().to_string();
+        let result = validate_command(&path).expect("validate_command should succeed");
+
+        match result {
+            ValidatedCommand::Interpreted {
+                interpreter,
+                interpreter_args,
+                script,
+            } => {
+                assert_eq!(interpreter, "/usr/bin/env");
+                assert!(
+                    interpreter_args.is_empty(),
+                    "expected empty interpreter_args, got {interpreter_args:?}"
+                );
+                assert_eq!(script, path);
+            }
+            other => panic!("expected Interpreted, got {other:?}"),
+        }
     }
 }

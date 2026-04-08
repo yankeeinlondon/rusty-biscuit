@@ -572,15 +572,18 @@ fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
         }
     };
 
-    // Split rendered_params into individual arguments on whitespace.
-    // Each argument is passed directly to the process (no shell interpretation).
+    // Parse rendered_params using shell-words to correctly handle quoted arguments
+    // and interpolated values containing spaces (e.g., `--message 'hello world'`).
     let param_args: Vec<String> = if rendered_params.is_empty() {
         vec![]
     } else {
-        rendered_params
-            .split_whitespace()
-            .map(String::from)
-            .collect()
+        match shell_words::split(&rendered_params) {
+            Ok(args) => args,
+            Err(e) => {
+                warn!(%rendered_params, %e, "Failed to parse bash action params");
+                return;
+            }
+        }
     };
 
     debug!(?validated, ?param_args, "Spawning bash action");
@@ -592,9 +595,11 @@ fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
             }
             bash_executor::ValidatedCommand::Interpreted {
                 interpreter,
+                interpreter_args,
                 script,
             } => {
                 let mut cmd = Command::new(interpreter);
+                cmd.args(interpreter_args);
                 cmd.arg(script);
                 cmd.args(&param_args);
                 cmd.output().await

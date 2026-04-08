@@ -166,6 +166,123 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         );
     }
 
+    if let Some(ModalState::ActionFieldList {
+        event,
+        action_index,
+        highlighted,
+    }) = &app.modal
+    {
+        if let Some(actions) = app.config.actions.get(event)
+            && let Some(action) = actions.get(*action_index)
+        {
+            let fields = get_action_fields(action);
+            let title = format!("Edit {} Fields", action.type_pascal_case());
+            super::super::widgets::modal::render_modal(
+                frame,
+                area,
+                &title,
+                55,
+                50,
+                |frame, area| {
+                    let chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Min(0),
+                            Constraint::Length(1),
+                            Constraint::Length(1),
+                        ])
+                        .split(area);
+
+                    let items: Vec<ListItem> = fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (_, label, value))| {
+                            let display_value = if value.is_empty() {
+                                "(empty)".to_string()
+                            } else {
+                                truncate_str(value, 30)
+                            };
+                            let style = if i == *highlighted {
+                                Style::default()
+                                    .fg(Color::Yellow)
+                                    .add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default()
+                            };
+                            let value_style = if value.is_empty() {
+                                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
+                            } else {
+                                Style::default().fg(Color::Cyan)
+                            };
+                            ListItem::new(Line::from(vec![
+                                Span::styled(format!("{label}: "), style),
+                                Span::styled(display_value, value_style),
+                            ]))
+                        })
+                        .collect();
+
+                    let list = List::new(items);
+                    frame.render_widget(list, chunks[0]);
+
+                    let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&[
+                        ("ENTER", "Edit"),
+                        ("ESC", "Done"),
+                    ]);
+                    let hotkey_widget = Paragraph::new(hotkey_line)
+                        .alignment(Alignment::Center)
+                        .style(Style::default().bg(Color::Indexed(236)));
+                    frame.render_widget(hotkey_widget, chunks[2]);
+                },
+            );
+        }
+    }
+
+    if let Some(ModalState::ActionFieldInput {
+        label, buffer, ..
+    }) = &app.modal
+    {
+        super::super::widgets::modal::render_modal(
+            frame,
+            area,
+            label,
+            60,
+            20,
+            |frame, area| {
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(1),
+                        Constraint::Length(1),
+                        Constraint::Length(1),
+                        Constraint::Min(0),
+                    ])
+                    .split(area);
+
+                let input_line = Line::from(vec![
+                    Span::styled("> ", Style::default().fg(Color::Yellow)),
+                    Span::raw(buffer.as_str()),
+                    Span::styled(
+                        "_",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::SLOW_BLINK),
+                    ),
+                ]);
+                frame.render_widget(Paragraph::new(input_line), chunks[0]);
+
+                let hotkey_line =
+                    super::super::widgets::modal::build_modal_hotkey_line(&[
+                        ("ENTER", "Confirm"),
+                        ("ESC", "Cancel"),
+                    ]);
+                let hotkey_widget = Paragraph::new(hotkey_line)
+                    .alignment(Alignment::Center)
+                    .style(Style::default().bg(Color::Indexed(236)));
+                frame.render_widget(hotkey_widget, chunks[2]);
+            },
+        );
+    }
+
     if let Some(ModalState::TextInput {
         label, buffer, ..
     }) = &app.modal
@@ -397,33 +514,13 @@ pub fn handle_edit_actions_modal(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => {
             if action_count > 0 {
                 let idx = app.modal_highlighted();
-                if let Some(actions) = app.config.actions.get(&event)
-                    && let Some(action) = actions.get(idx)
-                {
-                    // Sound effects use the sound selector modal instead of text input
-                    if matches!(action, HookAction::SoundEffect { .. }) {
-                        let sounds = super::super::get_sound_effect_names();
-                        let current = match action {
-                            HookAction::SoundEffect { effect, .. } => {
-                                sounds.iter().position(|s| *s == effect).unwrap_or(0)
-                            }
-                            _ => 0,
-                        };
-                        app.push_modal(ModalState::ActionSoundSelector {
-                            event,
-                            highlighted: current,
-                            edit_index: Some(idx),
-                        });
-                    } else if let Some((label, buffer, action_type)) = editable_text(action) {
-                        app.push_modal(ModalState::TextInput {
-                            event,
-                            action_type,
-                            buffer,
-                            label,
-                            edit_index: Some(idx),
-                        });
-                    }
-                }
+                // Open the multi-field editor so all action properties are
+                // accessible, not just the primary text field.
+                app.push_modal(ModalState::ActionFieldList {
+                    event,
+                    action_index: idx,
+                    highlighted: 0,
+                });
             }
         }
         KeyCode::Char('a') | KeyCode::Char('A') => {
@@ -746,6 +843,342 @@ pub fn handle_text_input_modal(app: &mut App, key: KeyEvent) {
             }
             app.dirty = true;
             app.pop_to_edit_actions();
+        }
+        KeyCode::Esc => {
+            app.pop_modal();
+        }
+        _ => {}
+    }
+}
+
+/// Returns the list of (field_name, display_label, current_value) for all editable
+/// fields on the given action, so every property is reachable from the TUI.
+fn get_action_fields(action: &HookAction) -> Vec<(&'static str, &'static str, String)> {
+    match action {
+        HookAction::SoundEffect {
+            effect,
+            volume,
+            speed,
+        } => vec![
+            ("effect", "Effect", effect.clone()),
+            ("volume", "Volume", format!("{volume}")),
+            ("speed", "Speed", format!("{speed}")),
+        ],
+        HookAction::Speak {
+            message,
+            voice,
+            gender,
+        } => vec![
+            ("message", "Message", message.clone()),
+            (
+                "voice",
+                "Voice",
+                voice.clone().unwrap_or_default(),
+            ),
+            (
+                "gender",
+                "Gender",
+                gender
+                    .map(|g| match g {
+                        claudine::config::claudine_config::Gender::Male => "male",
+                        claudine::config::claudine_config::Gender::Female => "female",
+                    })
+                    .unwrap_or("")
+                    .to_string(),
+            ),
+        ],
+        HookAction::Message { message, image } => vec![
+            ("message", "Message", message.clone()),
+            ("image", "Image Path", image.clone().unwrap_or_default()),
+        ],
+        HookAction::Bash { command, params } => vec![
+            ("command", "Command", command.clone()),
+            ("params", "Parameters", params.clone()),
+        ],
+        HookAction::Report { handler } => {
+            let (fmt, template, metadata) = match handler {
+                Some(h) => (
+                    match h.format {
+                        claudine::actions::ReportFormat::Text => "text",
+                        claudine::actions::ReportFormat::Json => "json",
+                        claudine::actions::ReportFormat::Compact => "compact",
+                        _ => "text",
+                    }
+                    .to_string(),
+                    h.template.clone().unwrap_or_default(),
+                    if h.include_metadata {
+                        "true".to_string()
+                    } else {
+                        "false".to_string()
+                    },
+                ),
+                None => (String::new(), String::new(), String::new()),
+            };
+            vec![
+                ("format", "Format (text/json/compact)", fmt),
+                ("template", "Template", template),
+                ("include_metadata", "Include Metadata (true/false)", metadata),
+            ]
+        }
+        HookAction::Call {
+            command,
+            args,
+            timeout_ms,
+            mapper,
+        } => vec![
+            ("command", "Command", command.clone()),
+            (
+                "args",
+                "Args (comma-separated)",
+                args.as_ref()
+                    .map(|a| a.join(", "))
+                    .unwrap_or_default(),
+            ),
+            (
+                "timeout_ms",
+                "Timeout (ms)",
+                timeout_ms
+                    .map(|t| t.to_string())
+                    .unwrap_or_default(),
+            ),
+            (
+                "mapper",
+                "Mapper",
+                mapper
+                    .as_ref()
+                    .map(|m| match m {
+                        claudine::actions::Mapper::JsonField { field } => {
+                            format!("json_field:{field}")
+                        }
+                        claudine::actions::Mapper::JsonObject => "json_object".to_string(),
+                        claudine::actions::Mapper::ExitCode => "exit_code".to_string(),
+                        claudine::actions::Mapper::Regex { pattern } => {
+                            format!("regex:{pattern}")
+                        }
+                        _ => String::new(),
+                    })
+                    .unwrap_or_default(),
+            ),
+        ],
+        _ => vec![],
+    }
+}
+
+/// Apply a text value to a specific named field on an action.
+fn apply_action_field(action: &mut HookAction, field_name: &str, value: String) {
+    match action {
+        HookAction::SoundEffect {
+            effect,
+            volume,
+            speed,
+        } => match field_name {
+            "effect" => *effect = value,
+            "volume" => {
+                if let Ok(v) = value.parse::<f32>() {
+                    *volume = v.clamp(0.0, 1.0);
+                }
+            }
+            "speed" => {
+                if let Ok(v) = value.parse::<f32>() {
+                    *speed = v.max(0.1);
+                }
+            }
+            _ => {}
+        },
+        HookAction::Speak {
+            message,
+            voice,
+            gender,
+        } => match field_name {
+            "message" => *message = value,
+            "voice" => {
+                *voice = if value.is_empty() { None } else { Some(value) };
+            }
+            "gender" => {
+                *gender = match value.to_lowercase().as_str() {
+                    "male" => Some(claudine::config::claudine_config::Gender::Male),
+                    "female" => Some(claudine::config::claudine_config::Gender::Female),
+                    _ => None,
+                };
+            }
+            _ => {}
+        },
+        HookAction::Message { message, image } => match field_name {
+            "message" => *message = value,
+            "image" => {
+                *image = if value.is_empty() { None } else { Some(value) };
+            }
+            _ => {}
+        },
+        HookAction::Bash { command, params } => match field_name {
+            "command" => *command = value,
+            "params" => *params = value,
+            _ => {}
+        },
+        HookAction::Report { handler } => {
+            // Lazily initialize handler if needed.
+            let h = handler.get_or_insert_with(|| claudine::actions::ReportHandler {
+                format: claudine::actions::ReportFormat::Text,
+                template: None,
+                include_metadata: false,
+            });
+            match field_name {
+                "format" => {
+                    h.format = match value.to_lowercase().as_str() {
+                        "json" => claudine::actions::ReportFormat::Json,
+                        "compact" => claudine::actions::ReportFormat::Compact,
+                        _ => claudine::actions::ReportFormat::Text,
+                    };
+                }
+                "template" => {
+                    h.template = if value.is_empty() { None } else { Some(value) };
+                }
+                "include_metadata" => {
+                    h.include_metadata = value == "true";
+                }
+                _ => {}
+            }
+        }
+        HookAction::Call {
+            command,
+            args,
+            timeout_ms,
+            mapper,
+        } => match field_name {
+            "command" => *command = value,
+            "args" => {
+                let parsed: Vec<String> = value
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                *args = if parsed.is_empty() { None } else { Some(parsed) };
+            }
+            "timeout_ms" => {
+                *timeout_ms = value.parse::<u64>().ok();
+            }
+            "mapper" => {
+                *mapper = if value.is_empty() {
+                    None
+                } else if value == "json_object" {
+                    Some(claudine::actions::Mapper::JsonObject)
+                } else if value == "exit_code" {
+                    Some(claudine::actions::Mapper::ExitCode)
+                } else if let Some(field) = value.strip_prefix("json_field:") {
+                    Some(claudine::actions::Mapper::JsonField {
+                        field: field.to_string(),
+                    })
+                } else if let Some(pattern) = value.strip_prefix("regex:") {
+                    Some(claudine::actions::Mapper::Regex {
+                        pattern: pattern.to_string(),
+                    })
+                } else {
+                    None
+                };
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+pub fn handle_action_field_list_modal(app: &mut App, key: KeyEvent) {
+    let (event, action_index) = match &app.modal {
+        Some(ModalState::ActionFieldList {
+            event,
+            action_index,
+            ..
+        }) => (*event, *action_index),
+        _ => return,
+    };
+
+    let field_count = app
+        .config
+        .actions
+        .get(&event)
+        .and_then(|a| a.get(action_index))
+        .map(|a| get_action_fields(a).len())
+        .unwrap_or(0);
+
+    match key.code {
+        KeyCode::Up => {
+            let idx = app.modal_highlighted();
+            if idx > 0 {
+                app.set_modal_highlighted(idx - 1);
+            }
+        }
+        KeyCode::Down => {
+            let idx = app.modal_highlighted();
+            if idx + 1 < field_count {
+                app.set_modal_highlighted(idx + 1);
+            }
+        }
+        KeyCode::Enter => {
+            let idx = app.modal_highlighted();
+            if let Some(actions) = app.config.actions.get(&event)
+                && let Some(action) = actions.get(action_index)
+            {
+                let fields = get_action_fields(action);
+                if let Some((name, label, current_value)) = fields.get(idx) {
+                    // For the "effect" field of SoundEffect, use the sound selector.
+                    if *name == "effect" && matches!(action, HookAction::SoundEffect { .. }) {
+                        let sounds = super::super::get_sound_effect_names();
+                        let highlighted = sounds
+                            .iter()
+                            .position(|s| *s == current_value.as_str())
+                            .unwrap_or(0);
+                        app.push_modal(ModalState::ActionSoundSelector {
+                            event,
+                            highlighted,
+                            edit_index: Some(action_index),
+                        });
+                    } else {
+                        app.push_modal(ModalState::ActionFieldInput {
+                            event,
+                            action_index,
+                            field_name: name.to_string(),
+                            buffer: current_value.clone(),
+                            label: label.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.pop_modal();
+        }
+        _ => {}
+    }
+}
+
+pub fn handle_action_field_input_modal(app: &mut App, key: KeyEvent) {
+    let (event, action_index, field_name, buffer) = match &mut app.modal {
+        Some(ModalState::ActionFieldInput {
+            event,
+            action_index,
+            field_name,
+            buffer,
+            ..
+        }) => (*event, *action_index, field_name.clone(), buffer),
+        _ => return,
+    };
+
+    match key.code {
+        KeyCode::Char(c) => {
+            buffer.push(c);
+        }
+        KeyCode::Backspace => {
+            buffer.pop();
+        }
+        KeyCode::Enter => {
+            let value = buffer.clone();
+            if let Some(actions) = app.config.actions.get_mut(&event)
+                && let Some(action) = actions.get_mut(action_index)
+            {
+                apply_action_field(action, &field_name, value);
+                app.dirty = true;
+            }
+            app.pop_modal();
         }
         KeyCode::Esc => {
             app.pop_modal();

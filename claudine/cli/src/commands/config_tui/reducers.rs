@@ -23,15 +23,16 @@ pub fn create_default_sound_action(event: &AgenticEvent) -> HookAction {
 /// Compute the new `VoiceSelection` after a user picks a voice for one gender.
 ///
 /// When the existing selection is already `Gendered`, the opposite gender is
-/// preserved. Otherwise, a `Single` selection is returned (the user can always
-/// come back and set the other gender, at which point the `Gendered` arms
-/// handle promotion).
+/// preserved. When the existing selection is `Single`, it is promoted to
+/// `Gendered` by assigning the existing voice to the opposite gender. When
+/// there is no existing selection, a `Single` is returned.
 pub fn apply_voice_selection(
     current: Option<&VoiceSelection>,
     gender: GenderTab,
     voice: String,
 ) -> VoiceSelection {
     match (current, gender) {
+        // Already gendered — update the target gender, preserve the other.
         (Some(VoiceSelection::Gendered { male, .. }), GenderTab::Female) => {
             VoiceSelection::Gendered {
                 male: male.clone(),
@@ -44,7 +45,22 @@ pub fn apply_voice_selection(
                 female: female.clone(),
             }
         }
-        (_, GenderTab::Female) | (_, GenderTab::Male) => VoiceSelection::Single(voice),
+        // Currently Single — promote to Gendered by treating the existing
+        // voice as the opposite gender's selection.
+        (Some(VoiceSelection::Single(existing)), GenderTab::Female) => {
+            VoiceSelection::Gendered {
+                male: existing.clone(),
+                female: voice,
+            }
+        }
+        (Some(VoiceSelection::Single(existing)), GenderTab::Male) => {
+            VoiceSelection::Gendered {
+                male: voice,
+                female: existing.clone(),
+            }
+        }
+        // No prior voice — start as Single.
+        (None, _) => VoiceSelection::Single(voice),
     }
 }
 
@@ -124,11 +140,31 @@ mod tests {
     }
 
     #[test]
-    fn voice_single_when_existing_single() {
-        let current = VoiceSelection::Single("Alex".to_string());
+    fn voice_promotes_single_to_gendered_when_setting_male() {
+        let current = VoiceSelection::Single("Samantha".to_string());
         let result =
             apply_voice_selection(Some(&current), GenderTab::Male, "Daniel".to_string());
-        assert_eq!(result, VoiceSelection::Single("Daniel".to_string()));
+        assert_eq!(
+            result,
+            VoiceSelection::Gendered {
+                male: "Daniel".to_string(),
+                female: "Samantha".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn voice_promotes_single_to_gendered_when_setting_female() {
+        let current = VoiceSelection::Single("Alex".to_string());
+        let result =
+            apply_voice_selection(Some(&current), GenderTab::Female, "Karen".to_string());
+        assert_eq!(
+            result,
+            VoiceSelection::Gendered {
+                male: "Alex".to_string(),
+                female: "Karen".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -213,5 +249,22 @@ mod tests {
     fn messenger_unknown_returns_none() {
         assert!(create_messenger_config("telegram").is_none());
         assert!(create_messenger_config("").is_none());
+    }
+
+    #[test]
+    fn voice_gendered_from_female_then_male() {
+        // Step 1: No prior selection — pick female voice → Single
+        let step1 = apply_voice_selection(None, GenderTab::Female, "Samantha".to_string());
+        assert_eq!(step1, VoiceSelection::Single("Samantha".to_string()));
+
+        // Step 2: Single female exists — pick male voice → promotes to Gendered
+        let step2 = apply_voice_selection(Some(&step1), GenderTab::Male, "Daniel".to_string());
+        assert_eq!(
+            step2,
+            VoiceSelection::Gendered {
+                male: "Daniel".to_string(),
+                female: "Samantha".to_string(),
+            }
+        );
     }
 }

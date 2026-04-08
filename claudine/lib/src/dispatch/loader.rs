@@ -729,16 +729,29 @@ pub fn load_claudine_config(
         serde_json::from_value(value).map_err(ClaudineError::JsonParse)?;
     debug!(?path, "Loaded ClaudineConfig (user)");
 
-    // Merge repo-level config if present
+    // Merge repo-level config if present.
+    // Skip when the repo config resolves to the same file as the user config
+    // (e.g., HOME points at the repo root) to avoid re-parsing the same file
+    // as a different type.
     if let Some(root) = repo_root {
         let repo_path = root.join(REPO_CONFIG_NAME);
-        if repo_path.is_file() {
+        let same_file = repo_path
+            .canonicalize()
+            .ok()
+            .zip(path.canonicalize().ok())
+            .is_some_and(|(r, u)| r == u);
+        if repo_path.is_file() && !same_file {
             let repo_raw = std::fs::read_to_string(&repo_path)?;
             let repo_value = parse_json5_to_value(&repo_raw)?;
-            let repo_override: RepoOverrideConfig =
-                serde_json::from_value(repo_value).map_err(ClaudineError::JsonParse)?;
-            debug!(?repo_path, "Loaded RepoOverrideConfig");
-            merge_repo_override(&mut config, &repo_override);
+            if migration::is_old_format(&repo_value) {
+                migration::backup_old_config(&repo_path)?;
+                warn!(?repo_path, "Repo config was old format; backed up and ignored");
+            } else {
+                let repo_override: RepoOverrideConfig =
+                    serde_json::from_value(repo_value).map_err(ClaudineError::JsonParse)?;
+                debug!(?repo_path, "Loaded RepoOverrideConfig");
+                merge_repo_override(&mut config, &repo_override);
+            }
         }
     }
 
@@ -773,6 +786,11 @@ pub fn load_repo_override_config(path: &Path) -> Result<Option<RepoOverrideConfi
     }
     let raw = std::fs::read_to_string(path)?;
     let value = parse_json5_to_value(&raw)?;
+    if migration::is_old_format(&value) {
+        migration::backup_old_config(path)?;
+        warn!(?path, "Repo override config was old format; backed up and ignored");
+        return Ok(None);
+    }
     let config: RepoOverrideConfig =
         serde_json::from_value(value).map_err(ClaudineError::JsonParse)?;
     debug!(?path, "Loaded RepoOverrideConfig");
@@ -2350,6 +2368,94 @@ mod tests {
         let config = ClaudineConfig::default();
         let runtime = compile_canonical_runtime(config.clone(), None).unwrap();
         assert_eq!(runtime.config().preferred_agent, config.preferred_agent);
+    }
+
+    // =====================================================================
+    // Repo-scoped old-format config migration
+    // =====================================================================
+
+    /// When the repo-level `.claudine/config.json` contains old-format content,
+    /// `load_claudine_config` should succeed (using user config only), and the
+    /// repo config should be renamed to `.bak`.
+    #[test]
+    fn repo_old_format_config_backed_up_and_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Write a valid user config
+        let user_path = dir.path().join("user-config.json");
+        let user_config = ClaudineConfig {
+            preferred_agent: Provider::Claude,
+            ..ClaudineConfig::default()
+        };
+        save_claudine_config(&user_config, &user_path).unwrap();
+
+        // Write an old-format repo config
+        let repo_dir = dir.path().join("repo");
+        let repo_config_dir = repo_dir.join(".claudine");
+        std::fs::create_dir_all(&repo_config_dir).unwrap();
+        let repo_config_path = repo_config_dir.join("config.json");
+        let old_format = serde_json::json!({
+            "claude": {},
+            "gemini": {}
+        });
+        std::fs::write(
+            &repo_config_path,
+            serde_json::to_string(&old_format).unwrap(),
+        )
+        .unwrap();
+
+        // load_claudine_config should succeed (not crash with parse error)
+        let loaded = load_claudine_config(Some(&user_path), Some(&repo_dir)).unwrap();
+        assert_eq!(
+            loaded.preferred_agent,
+            Provider::Claude,
+            "user config should be returned when repo config is old format"
+        );
+
+        // The repo config should have been renamed to .bak
+        assert!(
+            !repo_config_path.exists(),
+            "old-format repo config should have been renamed"
+        );
+        assert!(
+            repo_config_dir.join("config.json.bak").exists(),
+            "backup of old-format repo config should exist"
+        );
+    }
+
+    /// `load_repo_override_config` returns `Ok(None)` when the file is old-format
+    /// and backs up the file.
+    #[test]
+    fn load_repo_override_config_old_format_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+
+        let old_format = serde_json::json!({
+            "version": "1.0",
+            "settings": {},
+            "providers": {
+                "claude": {
+                    "events": {}
+                }
+            }
+        });
+        std::fs::write(&path, serde_json::to_string(&old_format).unwrap()).unwrap();
+
+        let result = load_repo_override_config(&path).unwrap();
+        assert!(
+            result.is_none(),
+            "old-format config should return Ok(None)"
+        );
+
+        // The file should have been backed up
+        assert!(
+            !path.exists(),
+            "old-format config should have been renamed"
+        );
+        assert!(
+            dir.path().join("config.json.bak").exists(),
+            "backup should exist"
+        );
     }
 
     // =====================================================================
