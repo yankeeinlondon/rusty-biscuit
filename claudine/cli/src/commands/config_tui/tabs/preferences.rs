@@ -3,7 +3,6 @@ use ratatui::prelude::*;
 use ratatui::widgets::*;
 
 use super::super::app::{App, AppMode, ModalState, SoundCategory};
-use super::super::widgets::toggle::Toggle;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let is_detail = app.mode == AppMode::Detail;
@@ -62,13 +61,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(user_line), chunks[1]);
 
     if app.is_in_repo {
+        let repo_provider = app
+            .repo_config
+            .as_ref()
+            .and_then(|rc| rc.canonical_provider)
+            .map(|p| format!("[{}]", p))
+            .unwrap_or_else(|| "[not set]".to_string());
         let repo_line = Paragraph::new(Line::from(vec![
             Span::styled(
                 "Repo Provider",
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw(": "),
-            Span::styled("[not set]", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                repo_provider,
+                if is_detail {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                },
+            ),
         ]));
         frame.render_widget(repo_line, chunks[2]);
     } else {
@@ -129,7 +141,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     if let Some(ModalState::UserProviderSelector { highlighted }) = &app.modal {
-        let providers = super::super::get_provider_list();
+        let providers = super::super::get_available_providers();
         let mut items: Vec<String> = providers.iter().map(|p| p.to_string()).collect();
         items.insert(0, "(clear)".to_string());
         super::super::widgets::modal::render_list_modal(
@@ -238,7 +250,7 @@ pub fn handle_agent_selector_modal(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_user_provider_modal(app: &mut App, key: KeyEvent) {
-    let providers = super::super::get_provider_list();
+    let providers = super::super::get_available_providers();
     let count = providers.len() + 1;
     match key.code {
         KeyCode::Up => {
@@ -271,7 +283,41 @@ pub fn handle_user_provider_modal(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_repo_provider_modal(app: &mut App, key: KeyEvent) {
-    handle_user_provider_modal(app, key);
+    let providers = super::super::get_provider_list();
+    let count = providers.len() + 1;
+    match key.code {
+        KeyCode::Up => {
+            let idx = app.modal_highlighted();
+            if idx > 0 {
+                app.set_modal_highlighted(idx - 1);
+            }
+        }
+        KeyCode::Down => {
+            let idx = app.modal_highlighted();
+            if idx + 1 < count {
+                app.set_modal_highlighted(idx + 1);
+            }
+        }
+        KeyCode::Enter => {
+            let idx = app.modal_highlighted();
+            if app.repo_config.is_none() {
+                app.repo_config = Some(claudine::config::claudine_config::ClaudineConfig::default());
+            }
+            if let Some(ref mut repo_cfg) = app.repo_config {
+                if idx == 0 {
+                    repo_cfg.canonical_provider = None;
+                } else if let Some(provider) = providers.get(idx - 1) {
+                    repo_cfg.canonical_provider = Some(*provider);
+                }
+            }
+            app.repo_dirty = true;
+            app.modal = None;
+        }
+        KeyCode::Esc => {
+            app.modal = None;
+        }
+        _ => {}
+    }
 }
 
 pub fn handle_sound_selector_modal(app: &mut App, key: KeyEvent, _category: SoundCategory) {

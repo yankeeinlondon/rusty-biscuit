@@ -24,26 +24,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .and_then(|m| m.active_config.as_deref())
         .unwrap_or("None");
 
+    let select_style = if is_detail && app.messenger_focus == 0 {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    } else if is_detail {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+
+    let add_style = if is_detail && app.messenger_focus == 1 {
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+    } else if is_detail {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
     let select_line = Line::from(vec![
         Span::styled("Active", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw(": "),
-        Span::styled(
-            format!("[{active_name}]"),
-            if is_detail {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default()
-            },
-        ),
+        Span::styled(format!("[{active_name}]"), select_style),
         Span::raw("  "),
-        Span::styled(
-            "[+ Add]",
-            if is_detail {
-                Style::default().fg(Color::Cyan)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            },
-        ),
+        Span::styled("[+ Add]", add_style),
     ]);
     frame.render_widget(Paragraph::new(select_line), chunks[0]);
 
@@ -58,8 +60,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(detail, chunks[2]);
 
     if is_detail && app.modal.is_none() {
-        let help = Paragraph::new(" s: select active | a: add new")
-            .style(Style::default().fg(Color::DarkGray));
+        let edit_indicator = if app.messenger_focus == 2 { ">" } else { " " };
+        let help = Paragraph::new(format!(
+            " Tab/Shift-Tab: focus | Enter: activate | {edit_indicator}Edit active config"
+        ))
+        .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(help, chunks[2]);
     }
 
@@ -96,12 +101,34 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
-        KeyCode::Char('s') | KeyCode::Char('S') => {
-            app.modal = Some(ModalState::MessengerSelect { highlighted: 0 });
+        KeyCode::Tab => {
+            app.messenger_focus = (app.messenger_focus + 1) % 3;
         }
-        KeyCode::Char('a') | KeyCode::Char('A') => {
-            app.modal = Some(ModalState::MessengerAdd { highlighted: 0 });
+        KeyCode::BackTab => {
+            app.messenger_focus = (app.messenger_focus + 2) % 3;
         }
+        KeyCode::Enter => match app.messenger_focus {
+            0 => {
+                app.modal = Some(ModalState::MessengerSelect { highlighted: 0 });
+            }
+            1 => {
+                app.modal = Some(ModalState::MessengerAdd { highlighted: 0 });
+            }
+            2 => {
+                if let Some(name) = app
+                    .config
+                    .messenger
+                    .as_ref()
+                    .and_then(|m| m.active_config.clone())
+                {
+                    app.modal = Some(ModalState::MessengerEdit {
+                        config_name: name,
+                        field_index: 0,
+                    });
+                }
+            }
+            _ => {}
+        },
         _ => {}
     }
 }
@@ -204,6 +231,12 @@ pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
             app.modal = None;
         }
         _ => {}
+    }
+}
+
+pub fn handle_messenger_edit_modal(app: &mut App, key: KeyEvent) {
+    if key.code == KeyCode::Esc {
+        app.modal = None;
     }
 }
 

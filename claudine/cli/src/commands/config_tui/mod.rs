@@ -19,7 +19,7 @@ use claudine::services::protect::config::{
 };
 use claudine::services::protect::catalog::RuleGroup;
 
-use crate::commands::config_tui::app::{App, AppMode};
+use crate::commands::config_tui::app::App;
 
 #[derive(Debug, Args)]
 pub struct ConfigArgs {}
@@ -31,12 +31,24 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
     }
 
     let config = claudine::dispatch::loader::load_claudine_config(Some(&config_path), None)?;
-    let is_in_repo = sniff::filesystem::git::detect_git(&std::env::current_dir()?, false, 1)
-        .ok()
-        .flatten()
-        .is_some();
+    let cwd = std::env::current_dir()?;
+    let git_info = sniff::filesystem::git::detect_git(&cwd, false, 1).ok().flatten();
+    let is_in_repo = git_info.is_some();
 
-    let mut app = App::new(config, is_in_repo);
+    let (repo_config, repo_config_path) = if let Some(ref git) = git_info {
+        let repo_root = &git.repo_root;
+        let repo_cfg_path = repo_root.join(".claudine").join("config.json");
+        let repo_cfg = if repo_cfg_path.exists() {
+            claudine::dispatch::loader::load_claudine_config(Some(&repo_cfg_path), None).ok()
+        } else {
+            None
+        };
+        (repo_cfg, Some(repo_cfg_path))
+    } else {
+        (None, None)
+    };
+
+    let mut app = App::new(config, repo_config, repo_config_path, is_in_repo);
 
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
@@ -60,6 +72,18 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
     if app.dirty {
         claudine::dispatch::loader::save_claudine_config(&app.config, &config_path)?;
         eprintln!("Configuration saved to {}", config_path.display());
+    }
+
+    if app.repo_dirty {
+        if let Some(ref path) = app.repo_config_path {
+            if let Some(ref repo_cfg) = app.repo_config {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                claudine::dispatch::loader::save_claudine_config(repo_cfg, path)?;
+                eprintln!("Repo configuration saved to {}", path.display());
+            }
+        }
     }
 
     Ok(())
@@ -130,6 +154,15 @@ fn get_provider_list() -> Vec<claudine::events::Provider> {
     PROVIDERS_DISPLAY_ORDER.to_vec()
 }
 
+fn get_available_providers() -> Vec<claudine::events::Provider> {
+    let agents = claudine::config::discover_agents_full();
+    agents
+        .iter()
+        .filter(|a| a.is_available())
+        .map(|a| a.provider)
+        .collect()
+}
+
 fn get_sound_effect_names() -> Vec<&'static str> {
     playa::SoundEffect::all_names().to_vec()
 }
@@ -148,8 +181,49 @@ fn get_tts_providers() -> Vec<&'static str> {
     providers
 }
 
-fn get_tts_voices() -> Vec<&'static str> {
-    vec![]
+pub fn query_voices_for_provider(provider: &str) -> Vec<String> {
+    match provider {
+        "say" => query_say_voices(),
+        "espeak-ng" => query_espeak_voices("espeak-ng"),
+        "espeak" => query_espeak_voices("espeak"),
+        _ => vec![],
+    }
+}
+
+fn query_say_voices() -> Vec<String> {
+    let output = match std::process::Command::new("say").arg("-v").arg("?").output() {
+        Ok(o) => o,
+        Err(_) => return vec![],
+    };
+    if !output.status.success() {
+        return vec![];
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let name = line.split_whitespace().next()?;
+            Some(name.to_string())
+        })
+        .collect()
+}
+
+fn query_espeak_voices(binary: &str) -> Vec<String> {
+    let output = match std::process::Command::new(binary).arg("--voices").output() {
+        Ok(o) => o,
+        Err(_) => return vec![],
+    };
+    if !output.status.success() {
+        return vec![];
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .skip(1) // header line
+        .filter_map(|line| {
+            // espeak --voices format: Pty Language Age/Gender VoiceName ...
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            parts.get(3).map(|s| s.to_string())
+        })
+        .collect()
 }
 
 fn get_protect_rule_names() -> Vec<&'static str> {

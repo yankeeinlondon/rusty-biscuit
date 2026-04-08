@@ -85,9 +85,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         highlighted,
     }) = &app.modal
     {
-        let voices = super::super::get_tts_voices();
         let mut items = vec!["(auto)".to_string()];
-        items.extend(voices.iter().map(|s| s.to_string()));
+        items.extend(app.cached_voices.iter().cloned());
         super::super::widgets::modal::render_list_modal(
             frame,
             area,
@@ -115,12 +114,22 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             app.modal = Some(ModalState::TtsProvider { highlighted: 0 });
         }
         KeyCode::Char('f') => {
+            let provider = match &app.config.tts {
+                TtsValue::Config(cfg) => cfg.provider.clone(),
+                _ => "auto".to_string(),
+            };
+            app.cached_voices = super::super::query_voices_for_provider(&provider);
             app.modal = Some(ModalState::VoiceSelector {
                 gender: GenderTab::Female,
                 highlighted: 0,
             });
         }
         KeyCode::Char('m') => {
+            let provider = match &app.config.tts {
+                TtsValue::Config(cfg) => cfg.provider.clone(),
+                _ => "auto".to_string(),
+            };
+            app.cached_voices = super::super::query_voices_for_provider(&provider);
             app.modal = Some(ModalState::VoiceSelector {
                 gender: GenderTab::Male,
                 highlighted: 0,
@@ -178,7 +187,7 @@ pub fn handle_voice_selector_modal(app: &mut App, key: KeyEvent) {
         Some(ModalState::VoiceSelector { gender, .. }) => *gender,
         _ => return,
     };
-    let voices = super::super::get_tts_voices();
+    let voices = &app.cached_voices;
     let count = voices.len() + 1;
     match key.code {
         KeyCode::Up => {
@@ -198,7 +207,7 @@ pub fn handle_voice_selector_modal(app: &mut App, key: KeyEvent) {
             let selected_voice = if idx == 0 {
                 None
             } else {
-                Some(voices[idx - 1].to_string())
+                Some(voices[idx - 1].clone())
             };
 
             ensure_tts_config(app);
