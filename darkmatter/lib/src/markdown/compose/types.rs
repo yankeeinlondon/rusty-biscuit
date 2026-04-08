@@ -28,6 +28,10 @@ pub enum ComposeOperation {
     /// Runs before the final effective state is built.
     FrontmatterInterpolation,
 
+    /// Executes shell commands embedded in frontmatter values.
+    /// Runs before the final effective state is built.
+    FrontmatterShellExpansion,
+
     /// Applies the frontmatter `replace` map to substitute text
     /// patterns throughout the document body.
     TextReplacement,
@@ -147,22 +151,23 @@ pub enum ComposePhase {
 
 impl ComposeOperation {
     /// Total number of compose operations.
-    pub const COUNT: usize = 11;
+    pub const COUNT: usize = 12;
 
     /// Stable discriminant index for fixed-size operation sets.
     pub const fn index(self) -> usize {
         match self {
             Self::FrontmatterInterpolation => 0,
-            Self::TextReplacement => 1,
-            Self::PageBlocks => 2,
-            Self::Interpolation => 3,
-            Self::ShellExpansion => 4,
-            Self::BlockTransclusion => 5,
-            Self::FrontmatterTransclusion => 6,
-            Self::CodeTransclusion => 7,
-            Self::TocLinking => 8,
-            Self::Cleanup => 9,
-            Self::Normalization => 10,
+            Self::FrontmatterShellExpansion => 1,
+            Self::TextReplacement => 2,
+            Self::PageBlocks => 3,
+            Self::Interpolation => 4,
+            Self::ShellExpansion => 5,
+            Self::BlockTransclusion => 6,
+            Self::FrontmatterTransclusion => 7,
+            Self::CodeTransclusion => 8,
+            Self::TocLinking => 9,
+            Self::Cleanup => 10,
+            Self::Normalization => 11,
         }
     }
 
@@ -170,6 +175,7 @@ impl ComposeOperation {
     pub fn phase(&self) -> ComposePhase {
         match self {
             Self::FrontmatterInterpolation
+            | Self::FrontmatterShellExpansion
             | Self::TextReplacement
             | Self::PageBlocks
             | Self::Interpolation
@@ -189,6 +195,7 @@ impl ComposeOperation {
         &[
             // Inline Pre (serial)
             Self::FrontmatterInterpolation,
+            Self::FrontmatterShellExpansion,
             Self::TextReplacement,
             Self::PageBlocks,
             Self::Interpolation,
@@ -214,6 +221,7 @@ impl std::fmt::Display for ComposeOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::FrontmatterInterpolation => write!(f, "FrontmatterInterpolation"),
+            Self::FrontmatterShellExpansion => write!(f, "Frontmatter Shell Expansion"),
             Self::TextReplacement => write!(f, "TextReplacement"),
             Self::PageBlocks => write!(f, "PageBlocks"),
             Self::Interpolation => write!(f, "Interpolation"),
@@ -1297,6 +1305,7 @@ pub struct ComposePerfReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ComposeStage {
     FrontmatterInterpolation,
+    FrontmatterShellExpansion,
     EffectiveStateBuild,
     TextReplacement,
     PageBlocks,
@@ -1314,6 +1323,7 @@ impl std::fmt::Display for ComposeStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::FrontmatterInterpolation => "frontmatter interpolation",
+            Self::FrontmatterShellExpansion => "frontmatter shell expansion",
             Self::EffectiveStateBuild => "effective state build",
             Self::TextReplacement => "text replacement",
             Self::PageBlocks => "page blocks",
@@ -1372,6 +1382,9 @@ impl Default for ComposePerfReport {
 pub struct ComposeReport {
     /// Number of frontmatter interpolation expressions resolved.
     pub frontmatter_interpolations_applied: usize,
+
+    /// Number of frontmatter shell expansions applied.
+    pub frontmatter_shell_expansions_applied: usize,
 
     /// Number of text replacements applied.
     pub replacements_applied: usize,
@@ -1447,6 +1460,7 @@ impl ComposeReport {
     /// Returns true if any changes were made by any stage.
     pub fn has_changes(&self) -> bool {
         self.frontmatter_interpolations_applied > 0
+            || self.frontmatter_shell_expansions_applied > 0
             || self.replacements_applied > 0
             || self.interpolations_applied > 0
             || self.toc_links_generated > 0
@@ -1472,6 +1486,13 @@ impl ComposeReport {
             parts.push(format!(
                 "{} frontmatter interpolation(s)",
                 self.frontmatter_interpolations_applied
+            ));
+        }
+
+        if self.frontmatter_shell_expansions_applied > 0 {
+            parts.push(format!(
+                "{} frontmatter shell expansion(s)",
+                self.frontmatter_shell_expansions_applied
             ));
         }
 
@@ -1553,6 +1574,7 @@ impl ComposeReport {
     /// Merges another report into this one.
     pub fn merge(&mut self, mut other: ComposeReport) {
         self.frontmatter_interpolations_applied += other.frontmatter_interpolations_applied;
+        self.frontmatter_shell_expansions_applied += other.frontmatter_shell_expansions_applied;
         self.replacements_applied += other.replacements_applied;
         self.interpolations_applied += other.interpolations_applied;
         self.toc_links_generated += other.toc_links_generated;
@@ -1709,6 +1731,7 @@ mod tests {
             ComposeOperation::default_order(),
             &[
                 ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::FrontmatterShellExpansion,
                 ComposeOperation::TextReplacement,
                 ComposeOperation::PageBlocks,
                 ComposeOperation::Interpolation,
@@ -1728,6 +1751,10 @@ mod tests {
         let expectations = [
             (
                 ComposeOperation::FrontmatterInterpolation,
+                ComposePhase::InlinePre,
+            ),
+            (
+                ComposeOperation::FrontmatterShellExpansion,
                 ComposePhase::InlinePre,
             ),
             (ComposeOperation::TextReplacement, ComposePhase::InlinePre),
@@ -2108,8 +2135,8 @@ mod tests {
 
     #[test]
     fn with_shell_timeout_behavior_sets_value() {
-        let options = ComposeOptions::new()
-            .with_shell_timeout_behavior(ShellTimeoutBehavior::EmptyString);
+        let options =
+            ComposeOptions::new().with_shell_timeout_behavior(ShellTimeoutBehavior::EmptyString);
         assert_eq!(
             options.shell_timeout_behavior,
             ShellTimeoutBehavior::EmptyString
@@ -2129,5 +2156,38 @@ mod tests {
     fn with_allow_shell_timeout_false_keeps_error() {
         let options = ComposeOptions::new().with_allow_shell_timeout(false);
         assert_eq!(options.shell_timeout_behavior, ShellTimeoutBehavior::Error);
+    }
+
+    #[test]
+    fn frontmatter_shell_expansion_is_inline_pre() {
+        assert_eq!(
+            ComposeOperation::FrontmatterShellExpansion.phase(),
+            ComposePhase::InlinePre
+        );
+    }
+
+    #[test]
+    fn frontmatter_shell_expansion_follows_interpolation_in_default_order() {
+        let order = ComposeOperation::default_order();
+        let fm_interp_pos = order
+            .iter()
+            .position(|op| *op == ComposeOperation::FrontmatterInterpolation)
+            .unwrap();
+        let fm_shell_pos = order
+            .iter()
+            .position(|op| *op == ComposeOperation::FrontmatterShellExpansion)
+            .unwrap();
+        assert_eq!(fm_shell_pos, fm_interp_pos + 1);
+    }
+
+    #[test]
+    fn compose_report_tracks_frontmatter_shell_expansions() {
+        let report = ComposeReport::new();
+        assert_eq!(report.frontmatter_shell_expansions_applied, 0);
+    }
+
+    #[test]
+    fn default_order_has_twelve_operations() {
+        assert_eq!(ComposeOperation::default_order().len(), 12);
     }
 }

@@ -5,20 +5,21 @@
 //!
 //! **Inline Pre** (serial):
 //! 1. **Frontmatter Interpolation** - Resolve `{{variable}}` in frontmatter values
-//! 2. **Text Replacement** - Replace literal strings from frontmatter `replace` map
-//! 3. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions
-//! 4. **Interpolation** - Expand `{{variable}}` expressions in body content
-//! 5. **Shell Expansion** - Execute `::shell` directives with security controls
+//! 2. **Frontmatter Shell Expansion** - Execute shell commands in frontmatter values
+//! 3. **Text Replacement** - Replace literal strings from frontmatter `replace` map
+//! 4. **Page Blocks** - Evaluate `::block`/`::end-block` conditional regions
+//! 5. **Interpolation** - Expand `{{variable}}` expressions in body content
+//! 6. **Shell Expansion** - Execute `::shell` directives with security controls
 //!
 //! **Transclusion** (concurrent execution after serial preparation):
-//! 6. **Block Transclusion** - Include `::file`/`::url` referenced documents
-//! 7. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
-//! 8. **Code Transclusion** - Include `::code` file content as fenced blocks
-//! 9. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
+//! 7. **Block Transclusion** - Include `::file`/`::url` referenced documents
+//! 8. **Frontmatter Transclusion** - Prepend/append `prologue`/`epilogue` documents
+//! 9. **Code Transclusion** - Include `::code` file content as fenced blocks
+//! 10. **TOC Linking** - Expand `::toc-linking` directives into heading link lists
 //!
 //! **Inline Post** (serial):
-//! 10. **Cleanup** - Normalize markdown formatting
-//! 11. **Normalization** - Adjust heading levels
+//! 11. **Cleanup** - Normalize markdown formatting
+//! 12. **Normalization** - Adjust heading levels
 //!
 //! ## Examples
 //!
@@ -428,6 +429,9 @@ impl Markdown {
                                 ComposeOperation::FrontmatterInterpolation => {
                                     perf::PerfMetricKind::FrontmatterInterpolation
                                 }
+                                ComposeOperation::FrontmatterShellExpansion => {
+                                    perf::PerfMetricKind::FrontmatterShellExpansion
+                                }
                                 ComposeOperation::TextReplacement => {
                                     perf::PerfMetricKind::TextReplacement
                                 }
@@ -507,6 +511,9 @@ impl Markdown {
             // FrontmatterInterpolation is handled before EffectiveState build,
             // not in the generic operation loop.
             ComposeOperation::FrontmatterInterpolation => Ok(()),
+            // FrontmatterShellExpansion is handled before EffectiveState build,
+            // not in the generic operation loop.
+            ComposeOperation::FrontmatterShellExpansion => Ok(()),
             ComposeOperation::TextReplacement => {
                 report.replacements_applied = self.run_replacement_stage(state, options);
                 Ok(())
