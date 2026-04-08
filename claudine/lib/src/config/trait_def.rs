@@ -3,7 +3,8 @@ use std::path::Path;
 use sniff::programs::InstalledAiClients;
 
 use crate::error::Result;
-use crate::events::{HookerConfig, Provider};
+use crate::events::{AgenticEvent, Provider};
+use crate::linking::ResourceScope;
 
 /// Result of registering hooks with a provider.
 #[derive(Debug)]
@@ -33,6 +34,19 @@ pub enum SkipReason {
     NoHookSupport,
 }
 
+/// A focused type capturing only what configurators need for hook registration.
+///
+/// Replaces the heavyweight `HookerConfig` in the configurator interface,
+/// carrying only the event list and optional canonical scope. Global settings,
+/// linking preferences, and TTS configuration stay in `ClaudineConfig`.
+#[derive(Debug, Clone)]
+pub struct ProviderHookPlan {
+    /// Events to register for this provider.
+    pub events: Vec<AgenticEvent>,
+    /// Optional scope classification for canonical provider status.
+    pub canonical_for: Option<ResourceScope>,
+}
+
 /// Trait for provider-specific hook configuration management.
 pub trait AgentConfigurator {
     /// Which provider this configurator handles.
@@ -55,7 +69,7 @@ pub trait AgentConfigurator {
     /// Register Claudine hooks with this provider's config.
     fn register(
         &self,
-        config: &HookerConfig,
+        plan: &ProviderHookPlan,
         config_dir: Option<&Path>,
     ) -> Result<RegistrationResult>;
 

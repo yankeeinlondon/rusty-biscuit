@@ -12,7 +12,7 @@ mod qwen;
 mod roo;
 mod trait_def;
 
-pub use trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
+pub use trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
 
 use std::path::PathBuf;
 
