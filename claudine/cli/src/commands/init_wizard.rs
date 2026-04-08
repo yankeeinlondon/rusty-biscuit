@@ -5,7 +5,7 @@ use color_eyre::eyre::Result;
 
 use claudine::actions::HookAction;
 use claudine::config::claudine_config::{
-    ClaudineConfig, DefaultSounds, TtsValue,
+    ClaudineConfig, ClaudineMessengerConfig, DefaultSounds, MessengerProviderConfig, TtsValue,
 };
 use claudine::config::{discover_agents_full, get_configurator, RegistrationResult, SkipReason};
 use claudine::events::{
@@ -59,6 +59,8 @@ async fn run_interactive_initialization() -> Result<()> {
         .with_default(true)
         .prompt()?;
 
+    let messenger = configure_messenger()?;
+
     log::message("");
     log::message("  Actions");
     log::message("  By default, a sound plays when human attention is needed.");
@@ -68,7 +70,7 @@ async fn run_interactive_initialization() -> Result<()> {
         .with_default(true)
         .prompt()?;
 
-    let config = build_config(tts, preferred_agent);
+    let config = build_config(tts, preferred_agent, messenger);
     let path = claudine::dispatch::loader::user_config_path();
     claudine::dispatch::loader::save_claudine_config(&config, &path)?;
 
@@ -139,7 +141,79 @@ fn configure_preferred_agent() -> Result<Provider> {
     Ok(installed[index])
 }
 
-fn build_config(tts: TtsValue, preferred_agent: Provider) -> ClaudineConfig {
+fn configure_messenger() -> Result<Option<ClaudineMessengerConfig>> {
+    log::message("");
+    log::message("  Messenger");
+    log::message("  Claudine can send notifications via Discord, Slack, Signal, or WhatsApp.");
+    log::message("");
+
+    let setup_now = inquire::Confirm::new("  Would you like to configure a messenger now?")
+        .with_default(false)
+        .prompt()?;
+
+    if !setup_now {
+        return Ok(None);
+    }
+
+    let providers = ["Discord", "Slack", "Signal", "WhatsApp"];
+    let selection = inquire::Select::new("  Select messenger provider:", providers.to_vec()).prompt()?;
+
+    let (name, config) = match selection {
+        "Discord" => (
+            "discord".to_string(),
+            MessengerProviderConfig::Discord {
+                channel_id: inquire::Text::new("  Discord channel ID:").prompt()?,
+                bot_token_env: inquire::Text::new("  Bot token env var:")
+                    .with_default("DISCORD_BOT_TOKEN")
+                    .prompt()?,
+            },
+        ),
+        "Slack" => (
+            "slack".to_string(),
+            MessengerProviderConfig::Slack {
+                channel_id: inquire::Text::new("  Slack channel ID:").prompt()?,
+                bot_token_env: inquire::Text::new("  Bot token env var:")
+                    .with_default("SLACK_BOT_TOKEN")
+                    .prompt()?,
+            },
+        ),
+        "Signal" => (
+            "signal".to_string(),
+            MessengerProviderConfig::Signal {
+                recipient: inquire::Text::new("  Signal recipient:").prompt()?,
+                rpc_url_env: inquire::Text::new("  RPC URL env var:")
+                    .with_default("SIGNAL_RPC_URL")
+                    .prompt()?,
+                account_env: inquire::Text::new("  Account env var:")
+                    .with_default("SIGNAL_ACCOUNT")
+                    .prompt()?,
+            },
+        ),
+        "WhatsApp" => (
+            "whatsapp".to_string(),
+            MessengerProviderConfig::Whatsapp {
+                recipient: inquire::Text::new("  WhatsApp recipient:").prompt()?,
+                access_token_env: inquire::Text::new("  Access token env var:")
+                    .with_default("WHATSAPP_ACCESS_TOKEN")
+                    .prompt()?,
+                phone_number_id_env: inquire::Text::new("  Phone number ID env var:")
+                    .with_default("WHATSAPP_PHONE_NUMBER_ID")
+                    .prompt()?,
+            },
+        ),
+        _ => return Ok(None),
+    };
+
+    let mut configurations = std::collections::HashMap::new();
+    configurations.insert(name.clone(), config);
+
+    Ok(Some(ClaudineMessengerConfig {
+        active_config: Some(name),
+        configurations,
+    }))
+}
+
+fn build_config(tts: TtsValue, preferred_agent: Provider, messenger: Option<ClaudineMessengerConfig>) -> ClaudineConfig {
     let mut actions = HashMap::new();
     actions.insert(
         AgenticEvent::HumanInTheLoop,
@@ -152,7 +226,7 @@ fn build_config(tts: TtsValue, preferred_agent: Provider) -> ClaudineConfig {
 
     ClaudineConfig {
         tts,
-        messenger: None,
+        messenger,
         logging: true,
         protect: claudine::services::protect::config::ProtectConfig::default(),
         actions,
@@ -178,7 +252,7 @@ fn build_default_config() -> ClaudineConfig {
         || which::which("espeak-ng").is_ok()
         || which::which("espeak").is_ok();
 
-    build_config(TtsValue::Boolean(has_tts), preferred_agent)
+    build_config(TtsValue::Boolean(has_tts), preferred_agent, None)
 }
 
 async fn register_hooks_all_providers() -> Result<()> {
