@@ -65,6 +65,8 @@ pub struct App {
     pub modal_stack: Vec<ModalState>,
     pub cached_voices: Vec<(String, biscuit_speaks::VoiceQuality)>,
     pub messenger_focus: usize,
+    /// Cached provider discovery results (computed once in `App::new()`).
+    pub cached_agents: Vec<claudine::config::AgentInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +146,7 @@ impl App {
         repo_name: Option<String>,
         branch_name: Option<String>,
     ) -> Self {
+        let cached_agents = claudine::config::discover_agents_full();
         Self {
             mode: AppMode::Overview,
             focused_tab: Tab::Preferences,
@@ -162,7 +165,17 @@ impl App {
             modal_stack: Vec::new(),
             cached_voices: Vec::new(),
             messenger_focus: 0,
+            cached_agents,
         }
+    }
+
+    /// Returns the list of available (installed) providers from the cached discovery.
+    pub fn available_providers(&self) -> Vec<claudine::events::Provider> {
+        self.cached_agents
+            .iter()
+            .filter(|a| a.is_available())
+            .map(|a| a.provider)
+            .collect()
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {

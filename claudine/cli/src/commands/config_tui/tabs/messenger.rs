@@ -3,6 +3,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::*;
 
 use super::super::app::{App, AppMode, ModalState};
+use super::super::reducers::create_messenger_config;
 use claudine::config::claudine_config::{ClaudineMessengerConfig, MessengerProviderConfig};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
@@ -257,33 +258,11 @@ pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Enter => {
             let idx = app.modal_highlighted();
-            if let Some(provider) = providers.get(idx) {
+            if let Some(provider) = providers.get(idx)
+                && let Some(config) = create_messenger_config(provider)
+            {
                 ensure_messenger_config(app);
                 let name = provider.to_string();
-                let config = match *provider {
-                    "discord" => MessengerProviderConfig::Discord {
-                        channel_id: String::new(),
-                        bot_token_env: "DISCORD_BOT_TOKEN".to_string(),
-                    },
-                    "slack" => MessengerProviderConfig::Slack {
-                        channel_id: String::new(),
-                        bot_token_env: "SLACK_BOT_TOKEN".to_string(),
-                    },
-                    "signal" => MessengerProviderConfig::Signal {
-                        recipient: String::new(),
-                        rpc_url_env: "SIGNAL_RPC_URL".to_string(),
-                        account_env: "SIGNAL_ACCOUNT".to_string(),
-                    },
-                    "whatsapp" => MessengerProviderConfig::Whatsapp {
-                        recipient: String::new(),
-                        access_token_env: "WHATSAPP_ACCESS_TOKEN".to_string(),
-                        phone_number_id_env: "WHATSAPP_PHONE_NUMBER_ID".to_string(),
-                    },
-                    _ => {
-                        app.modal = None;
-                        return;
-                    }
-                };
                 if let Some(ref mut messenger) = app.config.messenger {
                     messenger.configurations.insert(name.clone(), config);
                     messenger.active_config = Some(name);

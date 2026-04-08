@@ -1,4 +1,5 @@
 pub mod app;
+pub mod reducers;
 pub mod tabs;
 pub mod widgets;
 
@@ -297,13 +298,8 @@ fn get_provider_list() -> Vec<claudine::events::Provider> {
     PROVIDERS_DISPLAY_ORDER.to_vec()
 }
 
-fn get_available_providers() -> Vec<claudine::events::Provider> {
-    let agents = claudine::config::discover_agents_full();
-    agents
-        .iter()
-        .filter(|a| a.is_available())
-        .map(|a| a.provider)
-        .collect()
+fn get_available_providers(app: &App) -> Vec<claudine::events::Provider> {
+    app.available_providers()
 }
 
 fn get_sound_effect_names() -> Vec<&'static str> {

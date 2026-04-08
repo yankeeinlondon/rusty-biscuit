@@ -3,6 +3,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::*;
 
 use super::super::app::{App, AppMode, GenderTab, ModalState};
+use super::super::reducers::apply_voice_selection;
 use super::super::widgets::toggle::Toggle;
 use claudine::config::claudine_config::{Gender, TtsConfigSettings, TtsValue, VoiceSelection};
 
@@ -465,26 +466,11 @@ pub fn handle_voice_selector_modal(app: &mut App, key: KeyEvent) {
             if let TtsValue::Config(ref mut cfg) = app.config.tts
                 && let Some(voice_name) = selected_voice
             {
-                match (&cfg.voice, gender_tab) {
-                    (Some(VoiceSelection::Gendered { male, .. }), GenderTab::Female) => {
-                        cfg.voice = Some(VoiceSelection::Gendered {
-                            male: male.clone(),
-                            female: voice_name,
-                        });
-                    }
-                    (Some(VoiceSelection::Gendered { female, .. }), GenderTab::Male) => {
-                        cfg.voice = Some(VoiceSelection::Gendered {
-                            male: voice_name,
-                            female: female.clone(),
-                        });
-                    }
-                    (_, GenderTab::Female) => {
-                        cfg.voice = Some(VoiceSelection::Single(voice_name));
-                    }
-                    (_, GenderTab::Male) => {
-                        cfg.voice = Some(VoiceSelection::Single(voice_name));
-                    }
-                }
+                cfg.voice = Some(apply_voice_selection(
+                    cfg.voice.as_ref(),
+                    gender_tab,
+                    voice_name,
+                ));
             }
             app.dirty = true;
             app.modal = None;

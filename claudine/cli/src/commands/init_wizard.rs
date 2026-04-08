@@ -7,11 +7,10 @@ use claudine::actions::HookAction;
 use claudine::config::claudine_config::{
     ClaudineConfig, ClaudineMessengerConfig, DefaultSounds, MessengerProviderConfig, TtsValue,
 };
-use claudine::config::{discover_agents_full, get_configurator, RegistrationResult, SkipReason};
-use claudine::events::{
-    AgenticEvent, EventBinding, GlobalSettings, HookerConfig, Provider, ProviderConfig,
-    recommended_sound,
+use claudine::config::{
+    ProviderHookPlan, discover_agents_full, get_configurator, RegistrationResult, SkipReason,
 };
+use claudine::events::{AgenticEvent, Provider, recommended_sound};
 
 use crate::log;
 
@@ -257,7 +256,6 @@ fn build_default_config() -> ClaudineConfig {
 
 async fn register_hooks_all_providers() -> Result<()> {
     let agents = discover_agents_full();
-    let hooker_config = build_registration_config(&agents);
 
     log::message("");
     log::message("  Registering with detected agents:");
@@ -266,8 +264,12 @@ async fn register_hooks_all_providers() -> Result<()> {
             continue;
         }
         let provider = agent.provider;
+        let plan = ProviderHookPlan {
+            events: provider_hook_events(provider),
+            canonical_for: None,
+        };
         let configurator = get_configurator(provider);
-        match configurator.register(&hooker_config, None) {
+        match configurator.register(&plan, None) {
             Ok(RegistrationResult::Registered { event_count }) => {
                 log::message(&format!("    {provider}: registered ({event_count} events)"));
             }
@@ -292,36 +294,6 @@ async fn register_hooks_all_providers() -> Result<()> {
     Ok(())
 }
 
-fn build_registration_config(agents: &[claudine::config::AgentInfo]) -> HookerConfig {
-    let mut providers = HashMap::new();
-    for agent in agents {
-        if !agent.on_path {
-            continue;
-        }
-        let events = provider_hook_events(agent.provider)
-            .into_iter()
-            .map(|event| {
-                let actions = default_actions_for_event(event);
-                (
-                    event,
-                    EventBinding {
-                        enabled: true,
-                        actions,
-                        matcher: None,
-                    },
-                )
-            })
-            .collect();
-        providers.insert(agent.provider, ProviderConfig { events });
-    }
-
-    HookerConfig {
-        version: "1.0".to_string(),
-        settings: GlobalSettings::default(),
-        providers,
-    }
-}
-
 fn provider_hook_events(provider: Provider) -> Vec<AgenticEvent> {
     AgenticEvent::ALL
         .into_iter()
@@ -329,17 +301,3 @@ fn provider_hook_events(provider: Provider) -> Vec<AgenticEvent> {
         .collect()
 }
 
-fn default_actions_for_event(event: AgenticEvent) -> Vec<HookAction> {
-    if matches!(
-        event,
-        AgenticEvent::PermissionRequest | AgenticEvent::HumanInTheLoop
-    ) {
-        vec![HookAction::SoundEffect {
-            effect: recommended_sound(&event).to_string(),
-            volume: 1.0,
-            speed: 1.0,
-        }]
-    } else {
-        vec![]
-    }
-}

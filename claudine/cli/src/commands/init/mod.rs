@@ -11,7 +11,8 @@ use color_eyre::eyre::Result;
 
 use claudine::actions::HookAction;
 use claudine::config::{
-    AgentInfo, RegistrationResult, SkipReason, discover_agents_full, get_configurator,
+    AgentInfo, ProviderHookPlan, RegistrationResult, SkipReason, discover_agents_full,
+    get_configurator,
 };
 use claudine::events::{
     AgenticEvent, CanonicalProviderSettings, EventBinding, GlobalSettings, HookerConfig,
@@ -217,8 +218,16 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("Registering with available agents:");
     for agent in &selected_agents {
         let provider = agent.provider;
+        let plan = ProviderHookPlan {
+            events: config
+                .providers
+                .get(&provider)
+                .map(|pc| pc.events.keys().copied().collect())
+                .unwrap_or_default(),
+            canonical_for: None,
+        };
         let configurator = get_configurator(provider);
-        match configurator.register(&config, None) {
+        match configurator.register(&plan, None) {
             Ok(RegistrationResult::Registered { event_count }) => {
                 log::message(&format!("  {provider}: registered ({event_count} events)"));
             }
@@ -397,8 +406,16 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     let mut providers: Vec<Provider> = config.providers.keys().copied().collect();
     providers.sort_by_key(|provider| provider.to_string());
     for provider in providers {
+        let plan = ProviderHookPlan {
+            events: config
+                .providers
+                .get(&provider)
+                .map(|pc| pc.events.keys().copied().collect())
+                .unwrap_or_default(),
+            canonical_for: None,
+        };
         let configurator = get_configurator(provider);
-        match configurator.register(&config, None) {
+        match configurator.register(&plan, None) {
             Ok(RegistrationResult::Registered { event_count }) => {
                 log::message(&format!("  {provider}: registered ({event_count} events)"));
             }

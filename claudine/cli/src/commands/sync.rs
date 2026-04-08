@@ -8,8 +8,10 @@ use clap::Args;
 use color_eyre::eyre::Result;
 
 use claudine::config::claudine_config::ClaudineConfig;
-use claudine::config::{RegistrationResult, SkipReason, detect_agents, get_configurator};
-use claudine::dispatch::loader::{claudine_config_to_hooker, load_claudine_config};
+use claudine::config::{
+    ProviderHookPlan, RegistrationResult, SkipReason, detect_agents, get_configurator,
+};
+use claudine::dispatch::loader::load_claudine_config;
 use claudine::events::Provider;
 
 use crate::cli_utils::event_name_pascal;
@@ -188,6 +190,19 @@ fn expected_events(config: &ClaudineConfig, provider: Provider) -> Vec<String> {
         .collect()
 }
 
+/// Get expected events as typed `AgenticEvent` values for building a `ProviderHookPlan`.
+fn expected_events_typed(
+    config: &ClaudineConfig,
+    provider: Provider,
+) -> Vec<claudine::events::AgenticEvent> {
+    config
+        .actions
+        .keys()
+        .filter(|event| provider.supports_event_via_hook(event))
+        .copied()
+        .collect()
+}
+
 /// Re-sync hook registrations with detected agents.
 pub async fn run(args: SyncArgs) -> Result<()> {
     let term = crate::log::terminal();
@@ -206,11 +221,6 @@ pub async fn run(args: SyncArgs) -> Result<()> {
     let detected = detect_agents();
     let detected_providers: Vec<Provider> = detected.iter().map(|(p, _)| *p).collect();
 
-    // Build a HookerConfig bridge for register() calls
-    let hooker_config = config
-        .as_ref()
-        .map(|cfg| claudine_config_to_hooker(cfg, &detected_providers));
-
     // Collect all actions by provider
     let mut provider_actions: HashMap<Provider, Vec<SyncAction>> = HashMap::new();
 
@@ -224,9 +234,15 @@ pub async fn run(args: SyncArgs) -> Result<()> {
         let configurator = get_configurator(provider);
         let actions = provider_actions.entry(provider).or_default();
 
+        // Build a ProviderHookPlan for this provider from the config
+        let plan = config.as_ref().map(|cfg| ProviderHookPlan {
+            events: expected_events_typed(cfg, provider),
+            canonical_for: None,
+        });
+
         // When config is None, deregister (remove all claudine hooks)
         // When config is Some, register/sync hooks
-        match (&config, &hooker_config) {
+        match (&config, &plan) {
             (None, _) => {
                 // Config removed - deregister from all providers
                 if args.dry_run {
@@ -247,7 +263,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                     }
                 }
             }
-            (Some(cfg), Some(hooker)) => {
+            (Some(cfg), Some(hook_plan)) => {
                 if args.dry_run {
                     // For dry run, show what would happen
                     let registered_events =
@@ -276,7 +292,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                     let was_registered = configurator.is_registered(None).unwrap_or(false);
                     let before_events = configurator.registered_events(None).unwrap_or_default();
 
-                    match configurator.register(hooker, None) {
+                    match configurator.register(hook_plan, None) {
                         Ok(RegistrationResult::Registered { event_count: _ }) => {
                             // Get events after sync
                             let after_events =

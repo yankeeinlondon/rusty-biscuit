@@ -155,7 +155,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     if let Some(ModalState::UserProviderSelector { highlighted }) = &app.modal {
-        let providers = super::super::get_available_providers();
+        let providers = super::super::get_available_providers(app);
         let mut items: Vec<String> = providers.iter().map(|p| p.to_string()).collect();
         items.insert(0, "(clear)".to_string());
         super::super::widgets::modal::render_list_modal(
@@ -215,7 +215,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             app.modal = Some(ModalState::AgentSelector { highlighted });
         }
         KeyCode::Char('u') | KeyCode::Char('U') => {
-            let providers = super::super::get_available_providers();
+            let providers = super::super::get_available_providers(app);
             let highlighted = app
                 .config
                 .canonical_provider
@@ -310,7 +310,7 @@ pub fn handle_agent_selector_modal(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_user_provider_modal(app: &mut App, key: KeyEvent) {
-    let providers = super::super::get_available_providers();
+    let providers = super::super::get_available_providers(app);
     let count = providers.len() + 1;
     match key.code {
         KeyCode::Up => {

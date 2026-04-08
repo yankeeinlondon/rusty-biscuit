@@ -3,8 +3,8 @@ use ratatui::prelude::*;
 use ratatui::widgets::*;
 
 use super::super::app::{App, AppMode, ModalState};
+use super::super::reducers::create_default_sound_action;
 use claudine::actions::HookAction;
-use claudine::events::recommended_sound;
 use claudine::events::AgenticEvent;
 
 /// Action types a user can add to an event.
@@ -540,11 +540,7 @@ pub fn handle_action_type_chooser_modal(app: &mut App, key: KeyEvent) {
             match idx {
                 0 => {
                     // Sound Effect - use the recommended sound for this event
-                    let action = HookAction::SoundEffect {
-                        effect: recommended_sound(&event).to_string(),
-                        volume: 1.0,
-                        speed: 1.0,
-                    };
+                    let action = create_default_sound_action(&event);
                     app.config
                         .actions
                         .entry(event)
