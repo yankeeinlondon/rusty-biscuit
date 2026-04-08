@@ -28,14 +28,28 @@ fn wrapper_command(
     }
 }
 
-/// Check if the Claudine config file exists. If not, run the initialization
-/// process so a config is available for the command about to run.
+/// Check if the Claudine config file exists and is valid. If not (missing or
+/// old-format that was backed up), run the initialization process so a
+/// config is available for the command about to run.
 async fn ensure_config_exists() -> Result<()> {
     let config_path = claudine::dispatch::loader::user_config_path();
     if !config_path.exists() {
         commands::init_wizard::run_initialization().await?;
+        return Ok(());
     }
-    Ok(())
+
+    // The file exists, but it may be old-format. Attempt a load —
+    // load_claudine_config backs up stale configs and returns ConfigNotFound.
+    match claudine::dispatch::loader::load_claudine_config(Some(&config_path), None) {
+        Ok(_) => Ok(()),
+        Err(claudine::error::ClaudineError::ConfigNotFound(_)) => {
+            // Old-format was detected and backed up; re-run initialization.
+            commands::init_wizard::run_initialization().await?;
+            Ok(())
+        }
+        // Other errors (parse, validation) should propagate.
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[tokio::main]
