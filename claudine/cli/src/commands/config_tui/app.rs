@@ -86,6 +86,7 @@ pub enum ModalState {
     },
     ProtectRules {
         highlighted: usize,
+        staged_rules: claudine::services::protect::config::ProtectRuleToggles,
     },
     EditActions {
         event: claudine::events::AgenticEvent,
@@ -322,7 +323,7 @@ impl App {
             Some(ModalState::UserProviderSelector { highlighted }) => *highlighted,
             Some(ModalState::RepoProviderSelector { highlighted }) => *highlighted,
             Some(ModalState::SoundSelector { highlighted, .. }) => *highlighted,
-            Some(ModalState::ProtectRules { highlighted }) => *highlighted,
+            Some(ModalState::ProtectRules { highlighted, .. }) => *highlighted,
             Some(ModalState::EditActions { highlighted, .. }) => *highlighted,
             Some(ModalState::TtsProvider { highlighted }) => *highlighted,
             Some(ModalState::VoiceSelector { highlighted, .. }) => *highlighted,
@@ -347,7 +348,7 @@ impl App {
                 ModalState::UserProviderSelector { highlighted } => *highlighted = new_idx,
                 ModalState::RepoProviderSelector { highlighted } => *highlighted = new_idx,
                 ModalState::SoundSelector { highlighted, .. } => *highlighted = new_idx,
-                ModalState::ProtectRules { highlighted } => *highlighted = new_idx,
+                ModalState::ProtectRules { highlighted, .. } => *highlighted = new_idx,
                 ModalState::EditActions { highlighted, .. } => *highlighted = new_idx,
                 ModalState::TtsProvider { highlighted } => *highlighted = new_idx,
                 ModalState::VoiceSelector { highlighted, .. } => *highlighted = new_idx,

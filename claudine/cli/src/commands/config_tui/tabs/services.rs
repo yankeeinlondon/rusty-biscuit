@@ -128,8 +128,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         render_protect_detail(frame, chunks[3], &app.config.protect.rules);
     }
 
-    if let Some(ModalState::ProtectRules { highlighted }) = &app.modal {
-        render_protect_rules_modal(frame, area, app, *highlighted);
+    if let Some(ModalState::ProtectRules { highlighted, staged_rules }) = &app.modal {
+        render_protect_rules_modal(frame, area, staged_rules, *highlighted);
     }
 }
 
@@ -299,9 +299,14 @@ fn render_category_columns(frame: &mut Frame, area: Rect, rules: &ProtectRuleTog
 // Protect rules modal (unchanged)
 // ---------------------------------------------------------------------------
 
-fn render_protect_rules_modal(frame: &mut Frame, area: Rect, app: &App, highlighted: usize) {
+fn render_protect_rules_modal(
+    frame: &mut Frame,
+    area: Rect,
+    staged_rules: &ProtectRuleToggles,
+    highlighted: usize,
+) {
     let rule_names = super::super::get_protect_rule_names();
-    let enabled_rules = &app.config.protect.rules;
+    let enabled_rules = staged_rules;
 
     super::super::widgets::modal::render_modal(
         frame,
@@ -374,7 +379,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             app.dirty = true;
         }
         KeyCode::Char('c') | KeyCode::Char('C') => {
-            app.modal = Some(ModalState::ProtectRules { highlighted: 0 });
+            app.modal = Some(ModalState::ProtectRules {
+                highlighted: 0,
+                staged_rules: app.config.protect.rules.clone(),
+            });
         }
         _ => {}
     }
@@ -399,11 +407,20 @@ pub fn handle_protect_rules_modal(app: &mut App, key: KeyEvent) {
         KeyCode::Char(' ') => {
             let idx = app.modal_highlighted();
             if let Some(name) = rule_names.get(idx) {
-                super::super::toggle_protect_rule(&mut app.config.protect.rules, name);
+                if let Some(ModalState::ProtectRules { staged_rules, .. }) = &mut app.modal {
+                    super::super::toggle_protect_rule(staged_rules, name);
+                }
+            }
+        }
+        KeyCode::Enter => {
+            // Commit staged rules to config
+            if let Some(ModalState::ProtectRules { staged_rules, .. }) = app.modal.take() {
+                app.config.protect.rules = staged_rules;
                 app.dirty = true;
             }
         }
-        KeyCode::Enter | KeyCode::Esc => {
+        KeyCode::Esc => {
+            // Discard staged changes
             app.modal = None;
         }
         _ => {}
