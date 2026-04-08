@@ -10,12 +10,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
-            Constraint::Length(2),
-            Constraint::Length(2),
-            Constraint::Length(1),
-            Constraint::Length(2),
-            Constraint::Length(1),
+            Constraint::Length(2), // Preferred Agent
+            Constraint::Length(1), // "Canonical Sources:" heading
+            Constraint::Length(1), // User Scoped Provider
+            Constraint::Length(1), // Repo Scoped Provider
+            Constraint::Length(1), // blank
+            Constraint::Length(1), // "Default Sounds" heading
+            Constraint::Length(1), // Success
+            Constraint::Length(1), // Attention
+            Constraint::Length(1), // Error
             Constraint::Min(0),
         ])
         .split(area);
@@ -38,16 +41,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     ]);
     frame.render_widget(Paragraph::new(agent_line), chunks[0]);
 
+    // Canonical Sources heading
+    let heading = Paragraph::new(Span::styled(
+        "Canonical Sources:",
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    frame.render_widget(heading, chunks[1]);
+
+    // User Scoped Provider (indented)
     let user_provider = app
         .config
         .canonical_provider
         .map(|p| p.to_string())
         .unwrap_or_else(|| "(not set)".to_string());
     let user_line = Line::from(vec![
-        Span::styled(
-            "User Provider",
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
+        Span::raw("  "),
+        Span::styled("User Scoped Provider", Style::default()),
         Span::raw(": "),
         Span::styled(
             format!("[{user_provider}]"),
@@ -58,8 +67,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             },
         ),
     ]);
-    frame.render_widget(Paragraph::new(user_line), chunks[1]);
+    frame.render_widget(Paragraph::new(user_line), chunks[2]);
 
+    // Repo Scoped Provider (indented)
     if app.is_in_repo {
         let repo_provider = app
             .repo_config
@@ -67,35 +77,36 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             .and_then(|rc| rc.canonical_provider)
             .map(|p| format!("[{}]", p))
             .unwrap_or_else(|| "[not set]".to_string());
-        let repo_line = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Repo Provider",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
+        let repo_line = Line::from(vec![
+            Span::raw("  "),
+            Span::styled("Repo Scoped Provider", Style::default()),
             Span::raw(": "),
             Span::styled(
                 repo_provider,
                 if is_detail {
                     Style::default().fg(Color::Yellow)
                 } else {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(Color::Gray)
                 },
             ),
-        ]));
-        frame.render_widget(repo_line, chunks[2]);
+        ]);
+        frame.render_widget(Paragraph::new(repo_line), chunks[3]);
     } else {
-        let repo_line = Paragraph::new(Span::styled(
-            "Repo Provider: (not in a git repo)",
-            Style::default().fg(Color::DarkGray),
-        ));
-        frame.render_widget(repo_line, chunks[2]);
+        let repo_line = Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                "Repo Scoped Provider: (not in a git repo)",
+                Style::default().fg(Color::Gray),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(repo_line), chunks[3]);
     }
 
     let sounds_header = Paragraph::new(Span::styled(
-        "Default Sounds",
+        "Default Sounds:",
         Style::default().add_modifier(Modifier::BOLD),
     ));
-    frame.render_widget(sounds_header, chunks[4]);
+    frame.render_widget(sounds_header, chunks[5]);
 
     let success = app
         .config
@@ -110,23 +121,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .as_deref()
         .unwrap_or("none");
     let error = app.config.default_sounds.error.as_deref().unwrap_or("none");
-    let sounds_line = Line::from(vec![
-        Span::styled("S:", Style::default().fg(Color::Green)),
-        Span::raw(format!(" {success}  ")),
-        Span::styled("A:", Style::default().fg(Color::Yellow)),
-        Span::raw(format!(" {attention}  ")),
-        Span::styled("E:", Style::default().fg(Color::Red)),
-        Span::raw(format!(" {error}")),
-    ]);
-    frame.render_widget(Paragraph::new(sounds_line), chunks[5]);
 
-    if is_detail {
-        let help = Paragraph::new(
-            " a: Agent | u: User provider | r: Repo provider | 1: Success | 2: Attention | 3: Error",
-        )
-        .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(help, chunks[6]);
-    }
+    let value_style = Style::default().fg(Color::Indexed(250));
+    let success_line = Line::from(vec![
+        Span::raw("  "),
+        Span::styled("Success: ", Style::default().fg(Color::Green)),
+        Span::styled(success, value_style),
+    ]);
+    let attention_line = Line::from(vec![
+        Span::raw("  "),
+        Span::styled("Attention: ", Style::default().fg(Color::Yellow)),
+        Span::styled(attention, value_style),
+    ]);
+    let error_line = Line::from(vec![
+        Span::raw("  "),
+        Span::styled("Error: ", Style::default().fg(Color::Red)),
+        Span::styled(error, value_style),
+    ]);
+    frame.render_widget(Paragraph::new(success_line), chunks[6]);
+    frame.render_widget(Paragraph::new(attention_line), chunks[7]);
+    frame.render_widget(Paragraph::new(error_line), chunks[8]);
 
     if let Some(ModalState::AgentSelector { highlighted }) = &app.modal {
         let agents = super::super::get_provider_list();
@@ -179,39 +193,85 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let sounds = super::super::get_sound_effect_names();
         let mut items = vec!["(none)".to_string()];
         items.extend(sounds.iter().map(|s| s.to_string()));
-        super::super::widgets::modal::render_list_modal(frame, area, title, &items, *highlighted);
+        super::super::widgets::modal::render_list_modal_with_hotkeys(
+            frame,
+            area,
+            title,
+            &items,
+            *highlighted,
+            &[("P", "Play"), ("ENTER", "Select"), ("ESC", "Cancel")],
+        );
     }
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('a') | KeyCode::Char('A') => {
-            app.modal = Some(ModalState::AgentSelector { highlighted: 0 });
+            let agents = super::super::get_provider_list();
+            let highlighted = agents
+                .iter()
+                .position(|p| *p == app.config.preferred_agent)
+                .unwrap_or(0);
+            app.modal = Some(ModalState::AgentSelector { highlighted });
         }
         KeyCode::Char('u') | KeyCode::Char('U') => {
-            app.modal = Some(ModalState::UserProviderSelector { highlighted: 0 });
+            let providers = super::super::get_available_providers();
+            let highlighted = app
+                .config
+                .canonical_provider
+                .and_then(|cp| providers.iter().position(|p| *p == cp))
+                .map(|i| i + 1) // +1 for "(clear)" at index 0
+                .unwrap_or(0);
+            app.modal = Some(ModalState::UserProviderSelector { highlighted });
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
             if app.is_in_repo {
-                app.modal = Some(ModalState::RepoProviderSelector { highlighted: 0 });
+                let providers = super::super::get_provider_list();
+                let current = app
+                    .repo_config
+                    .as_ref()
+                    .and_then(|rc| rc.canonical_provider);
+                let highlighted = current
+                    .and_then(|cp| providers.iter().position(|p| *p == cp))
+                    .map(|i| i + 1) // +1 for "(clear)" at index 0
+                    .unwrap_or(0);
+                app.modal = Some(ModalState::RepoProviderSelector { highlighted });
             }
         }
         KeyCode::Char('1') => {
+            let current = app.config.default_sounds.success.as_deref();
+            let sounds = super::super::get_sound_effect_names();
+            let highlighted = current
+                .and_then(|name| sounds.iter().position(|s| *s == name))
+                .map(|i| i + 1) // +1 because index 0 is "(none)"
+                .unwrap_or(0);
             app.modal = Some(ModalState::SoundSelector {
                 category: SoundCategory::Success,
-                highlighted: 0,
+                highlighted,
             });
         }
         KeyCode::Char('2') => {
+            let current = app.config.default_sounds.attention.as_deref();
+            let sounds = super::super::get_sound_effect_names();
+            let highlighted = current
+                .and_then(|name| sounds.iter().position(|s| *s == name))
+                .map(|i| i + 1)
+                .unwrap_or(0);
             app.modal = Some(ModalState::SoundSelector {
                 category: SoundCategory::Attention,
-                highlighted: 0,
+                highlighted,
             });
         }
         KeyCode::Char('3') => {
+            let current = app.config.default_sounds.error.as_deref();
+            let sounds = super::super::get_sound_effect_names();
+            let highlighted = current
+                .and_then(|name| sounds.iter().position(|s| *s == name))
+                .map(|i| i + 1)
+                .unwrap_or(0);
             app.modal = Some(ModalState::SoundSelector {
                 category: SoundCategory::Error,
-                highlighted: 0,
+                highlighted,
             });
         }
         _ => {}
@@ -301,7 +361,8 @@ pub fn handle_repo_provider_modal(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => {
             let idx = app.modal_highlighted();
             if app.repo_config.is_none() {
-                app.repo_config = Some(claudine::config::claudine_config::ClaudineConfig::default());
+                app.repo_config =
+                    Some(claudine::config::claudine_config::ClaudineConfig::default());
             }
             if let Some(ref mut repo_cfg) = app.repo_config {
                 if idx == 0 {
@@ -340,7 +401,18 @@ pub fn handle_sound_selector_modal(app: &mut App, key: KeyEvent, _category: Soun
                 app.set_modal_highlighted(idx + 1);
             }
         }
-        KeyCode::Enter => {
+        KeyCode::Char('p') | KeyCode::Char('P') => {
+            let idx = app.modal_highlighted();
+            if idx > 0 {
+                if let Some(effect) = playa::SoundEffect::from_name(sounds[idx - 1]) {
+                    // Play in a background thread so we don't block the TUI
+                    std::thread::spawn(move || {
+                        let _ = effect.play();
+                    });
+                }
+            }
+        }
+        KeyCode::Enter | KeyCode::Char('d') | KeyCode::Char('D') => {
             let idx = app.modal_highlighted();
             let value = if idx == 0 {
                 None

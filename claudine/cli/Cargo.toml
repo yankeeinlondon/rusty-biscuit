@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 biscuit-file = { path = "../../biscuit-file/lib" }
+biscuit-speaks = { path = "../../biscuit-speaks/lib" }
 claudine = { path = "../lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects"] }
 sniff = { path = "../../sniff/lib" }

@@ -58,9 +58,12 @@ pub struct App {
     pub repo_config: Option<ClaudineConfig>,
     pub repo_config_path: Option<std::path::PathBuf>,
     pub repo_dirty: bool,
+    pub repo_name: Option<String>,
+    pub branch_name: Option<String>,
     pub list_index: usize,
     pub modal: Option<ModalState>,
-    pub cached_voices: Vec<String>,
+    pub modal_stack: Vec<ModalState>,
+    pub cached_voices: Vec<(String, biscuit_speaks::VoiceQuality)>,
     pub messenger_focus: usize,
 }
 
@@ -80,6 +83,10 @@ pub enum ModalState {
         highlighted: usize,
     },
     ProtectRules {
+        highlighted: usize,
+    },
+    EditActions {
+        event: claudine::events::AgenticEvent,
         highlighted: usize,
     },
     TtsProvider {
@@ -103,8 +110,20 @@ pub enum ModalState {
     EventSelector {
         highlighted: usize,
     },
+    ActionTypeChooser {
+        event: claudine::events::AgenticEvent,
+        highlighted: usize,
+    },
     ConfirmDelete {
         event_index: usize,
+    },
+    TextInput {
+        event: claudine::events::AgenticEvent,
+        action_type: usize,
+        buffer: String,
+        label: String,
+        /// When Some, update the action at this index instead of appending.
+        edit_index: Option<usize>,
     },
 }
 
@@ -127,6 +146,8 @@ impl App {
         repo_config: Option<ClaudineConfig>,
         repo_config_path: Option<std::path::PathBuf>,
         is_in_repo: bool,
+        repo_name: Option<String>,
+        branch_name: Option<String>,
     ) -> Self {
         Self {
             mode: AppMode::Overview,
@@ -139,8 +160,11 @@ impl App {
             repo_config,
             repo_config_path,
             repo_dirty: false,
+            repo_name,
+            branch_name,
             list_index: 0,
             modal: None,
+            modal_stack: Vec::new(),
             cached_voices: Vec::new(),
             messenger_focus: 0,
         }
@@ -211,6 +235,9 @@ impl App {
             ModalState::ProtectRules { .. } => {
                 super::tabs::services::handle_protect_rules_modal(self, key);
             }
+            ModalState::EditActions { .. } => {
+                super::tabs::actions::handle_edit_actions_modal(self, key);
+            }
             ModalState::TtsProvider { .. } => {
                 super::tabs::tts::handle_tts_provider_modal(self, key);
             }
@@ -229,8 +256,14 @@ impl App {
             ModalState::EventSelector { .. } => {
                 super::tabs::actions::handle_event_selector_modal(self, key);
             }
+            ModalState::ActionTypeChooser { .. } => {
+                super::tabs::actions::handle_action_type_chooser_modal(self, key);
+            }
             ModalState::ConfirmDelete { .. } => {
                 super::tabs::actions::handle_confirm_delete_modal(self, key);
+            }
+            ModalState::TextInput { .. } => {
+                super::tabs::actions::handle_text_input_modal(self, key);
             }
         }
     }
@@ -242,13 +275,16 @@ impl App {
             Some(ModalState::RepoProviderSelector { highlighted }) => *highlighted,
             Some(ModalState::SoundSelector { highlighted, .. }) => *highlighted,
             Some(ModalState::ProtectRules { highlighted }) => *highlighted,
+            Some(ModalState::EditActions { highlighted, .. }) => *highlighted,
             Some(ModalState::TtsProvider { highlighted }) => *highlighted,
             Some(ModalState::VoiceSelector { highlighted, .. }) => *highlighted,
             Some(ModalState::MessengerSelect { highlighted }) => *highlighted,
             Some(ModalState::MessengerAdd { highlighted }) => *highlighted,
             Some(ModalState::MessengerEdit { field_index, .. }) => *field_index,
             Some(ModalState::EventSelector { highlighted }) => *highlighted,
+            Some(ModalState::ActionTypeChooser { highlighted, .. }) => *highlighted,
             Some(ModalState::ConfirmDelete { .. }) => 0,
+            Some(ModalState::TextInput { .. }) => 0,
             None => 0,
         }
     }
@@ -261,13 +297,39 @@ impl App {
                 ModalState::RepoProviderSelector { highlighted } => *highlighted = new_idx,
                 ModalState::SoundSelector { highlighted, .. } => *highlighted = new_idx,
                 ModalState::ProtectRules { highlighted } => *highlighted = new_idx,
+                ModalState::EditActions { highlighted, .. } => *highlighted = new_idx,
                 ModalState::TtsProvider { highlighted } => *highlighted = new_idx,
                 ModalState::VoiceSelector { highlighted, .. } => *highlighted = new_idx,
                 ModalState::MessengerSelect { highlighted } => *highlighted = new_idx,
                 ModalState::MessengerAdd { highlighted } => *highlighted = new_idx,
                 ModalState::MessengerEdit { field_index, .. } => *field_index = new_idx,
                 ModalState::EventSelector { highlighted } => *highlighted = new_idx,
+                ModalState::ActionTypeChooser { highlighted, .. } => *highlighted = new_idx,
                 ModalState::ConfirmDelete { .. } => {}
+                ModalState::TextInput { .. } => {}
+            }
+        }
+    }
+
+    /// Push the current modal onto the stack and set a new one on top.
+    pub fn push_modal(&mut self, new_modal: ModalState) {
+        if let Some(current) = self.modal.take() {
+            self.modal_stack.push(current);
+        }
+        self.modal = Some(new_modal);
+    }
+
+    /// Pop back one level: restore the parent modal from the stack.
+    pub fn pop_modal(&mut self) {
+        self.modal = self.modal_stack.pop();
+    }
+
+    /// Pop until EditActions is the current modal, or close all if none found.
+    pub fn pop_to_edit_actions(&mut self) {
+        loop {
+            match &self.modal {
+                Some(ModalState::EditActions { .. }) | None => return,
+                _ => self.modal = self.modal_stack.pop(),
             }
         }
     }

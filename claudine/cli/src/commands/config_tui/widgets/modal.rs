@@ -26,7 +26,15 @@ pub fn render_modal(
     let inner = block.inner(modal_area);
     frame.render_widget(block, modal_area);
 
-    content_fn(frame, inner);
+    // Apply 1-cell left and top padding inside all modals
+    let padded = Rect {
+        x: inner.x + 1,
+        y: inner.y + 1,
+        width: inner.width.saturating_sub(1),
+        height: inner.height.saturating_sub(1),
+    };
+
+    content_fn(frame, padded);
 }
 
 pub fn render_list_modal(
@@ -36,25 +44,98 @@ pub fn render_list_modal(
     items: &[String],
     highlighted: usize,
 ) {
+    render_list_modal_with_hotkeys(
+        frame,
+        parent_area,
+        title,
+        items,
+        highlighted,
+        &[("ENTER", "Select"), ("ESC", "Cancel")],
+    );
+}
+
+pub fn render_list_modal_with_hotkeys(
+    frame: &mut Frame,
+    parent_area: Rect,
+    title: &str,
+    items: &[String],
+    highlighted: usize,
+    hotkeys: &[(&str, &str)],
+) {
     render_modal(frame, parent_area, title, 50, 60, |frame, area| {
-        let items: Vec<ListItem> = items
+        let has_hotkeys = !hotkeys.is_empty();
+        let (list_area, hotkey_area) = if has_hotkeys {
+            let split = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(0),
+                    Constraint::Length(1), // blank separator
+                    Constraint::Length(1), // hotkey bar
+                ])
+                .split(area);
+            (split[0], Some(split[2]))
+        } else {
+            (area, None)
+        };
+
+        let items_count = items.len();
+        let list_items: Vec<ListItem> = items
             .iter()
-            .enumerate()
-            .map(|(i, item)| {
-                let style = if i == highlighted {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::White)
-                };
-                ListItem::new(Line::from(Span::styled(item.as_str(), style)))
+            .map(|item| {
+                ListItem::new(Line::from(Span::styled(
+                    item.as_str(),
+                    Style::default().fg(Color::White),
+                )))
             })
             .collect();
 
-        let list = List::new(items).highlight_symbol(">> ");
-        frame.render_widget(list, area);
+        let list = List::new(list_items)
+            .highlight_symbol(">> ")
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            );
+        let mut state = ListState::default().with_selected(Some(highlighted));
+        frame.render_stateful_widget(list, list_area, &mut state);
+
+        if items_count > list_area.height as usize {
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None);
+            let mut scrollbar_state =
+                ScrollbarState::new(items_count).position(highlighted);
+            frame.render_stateful_widget(scrollbar, list_area, &mut scrollbar_state);
+        }
+
+        if let Some(hotkey_area) = hotkey_area {
+            let hotkey_line = build_modal_hotkey_line(hotkeys);
+            let hotkey_widget = Paragraph::new(hotkey_line)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(Color::Indexed(236)));
+            frame.render_widget(hotkey_widget, hotkey_area);
+        }
     });
+}
+
+/// Build a styled hotkey line for use inside modals.
+/// Keys are bold+yellow, descriptions are light gray, pipe separators.
+pub fn build_modal_hotkey_line(pairs: &[(&str, &str)]) -> Line<'static> {
+    let key_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(Color::Indexed(250));
+    let sep_style = Style::default().fg(Color::Indexed(240));
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (i, (key, desc)) in pairs.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" │ ", sep_style));
+        }
+        spans.push(Span::styled(key.to_string(), key_style));
+        spans.push(Span::styled(format!(": {desc}"), desc_style));
+    }
+    Line::from(spans)
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
