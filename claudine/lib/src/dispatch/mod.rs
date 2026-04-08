@@ -32,8 +32,29 @@ pub struct DispatchRuntimeContext {
 
 impl DispatchRuntimeContext {
     /// Load and compile the runtime config once for a specific environment.
+    ///
+    /// Tries the canonical [`ClaudineConfig`] format first (written by the
+    /// config TUI). Falls back to the legacy [`HookerConfig`] format if the
+    /// canonical load fails with a parse error.
     pub fn load_for_env(env: &EnvironmentContext) -> Result<Self> {
-        match loader::load_runtime_config(None, runtime_repo_root(env)) {
+        let repo_root = runtime_repo_root(env);
+
+        // Try canonical (new) format first
+        match loader::load_claudine_config(None, repo_root) {
+            Ok(config) => {
+                let runtime = loader::compile_canonical_runtime(config, repo_root)?;
+                return Ok(Self {
+                    config: None,
+                    canonical_config: Some(Arc::new(runtime)),
+                });
+            }
+            Err(crate::error::ClaudineError::ConfigNotFound(_)) => return Ok(Self::default()),
+            Err(_) => {
+                // Canonical parse failed — fall back to legacy format
+            }
+        }
+
+        match loader::load_runtime_config(None, repo_root) {
             Ok(config) => Ok(Self {
                 config: Some(Arc::new(config)),
                 canonical_config: None,
@@ -69,7 +90,7 @@ impl DispatchRuntimeContext {
 
     /// Return true when a compiled runtime config is available.
     pub fn has_config(&self) -> bool {
-        self.config.is_some()
+        self.config.is_some() || self.canonical_config.is_some()
     }
 
     /// Get the canonical runtime config, if loaded.
@@ -154,6 +175,12 @@ pub async fn dispatch_event_meta_with_runtime(
     meta.event = event;
     let env = meta.env.clone();
     prepare_meta_for_dispatch(&mut meta, &env);
+
+    // Prefer canonical dispatch when available
+    if let Some(canonical) = runtime.canonical_config.as_deref() {
+        return dispatch_canonical_with_runtime(provider, event, meta, canonical).await;
+    }
+
     dispatch_preparsed_with_config(provider, event, meta, runtime.config.as_deref()).await
 }
 
