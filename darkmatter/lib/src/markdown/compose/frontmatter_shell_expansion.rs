@@ -4,9 +4,14 @@
 //! parses them, validates the executable-token interpolation rule, and returns
 //! structured directives ready for execution.
 
+use super::shell_expansion::store::resolve_policy_paths;
 use super::shell_expansion::tokenize::tokenize;
-use super::types::ComposeWarning;
+use super::shell_expansion::types::{
+    ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective, ShellExpansionError,
+};
+use super::types::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
+use crate::markdown::types::MarkdownResult;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -177,6 +182,94 @@ pub(crate) fn scan_frontmatter(
     directives
 }
 
+/// Executes all frontmatter shell expansion directives and rewrites
+/// frontmatter values in place.
+///
+/// Scans top-level string-valued frontmatter entries for `$(...)` expressions,
+/// validates them, executes approved commands through the shared shell runtime,
+/// trims output, and rewrites the frontmatter values.
+///
+/// ## Errors
+///
+/// Returns an error if:
+/// - Policy file I/O fails
+/// - Command execution fails (blacklisted, denied, execution error, etc.)
+pub(crate) fn execute_frontmatter_shell_expansion(
+    frontmatter: &mut Frontmatter,
+    options: &ComposeOptions,
+    runtime: &mut PipelineRuntime,
+    pre_interpolation_snapshot: Option<&HashMap<String, String>>,
+) -> MarkdownResult<FrontmatterShellExpansionReport> {
+    let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot);
+
+    if candidates.is_empty() {
+        return Ok(FrontmatterShellExpansionReport {
+            replacements: 0,
+            approvals_used: 0,
+            warnings: vec![],
+        });
+    }
+
+    // Resolve policy paths once for all directives
+    let shell_opts = options.shell_options();
+    let policy_paths = resolve_policy_paths(&shell_opts, &options.source)?;
+    runtime.shell.ensure_loaded(&policy_paths)?;
+
+    let mut results: Vec<(String, String)> = Vec::new();
+
+    for candidate in &candidates {
+        // Build a ShellDirective compatible with the existing execution infrastructure
+        let directive = ShellDirective {
+            raw_command: candidate.raw_command.clone(),
+            executable: candidate.executable.clone(),
+            args: candidate.args.clone(),
+            span: 0..0, // Not relevant for frontmatter
+            origin: ShellCommandOrigin::Frontmatter {
+                key: candidate.key.clone(),
+            },
+            error_handling: ErrorHandling::default(),
+            timeout_override: candidate.timeout_override,
+        };
+
+        // Execute through existing shell expansion infrastructure
+        let output = execute_directive(&directive, options, &policy_paths, &mut runtime.shell)?;
+
+        // Trim all surrounding whitespace per spec
+        let trimmed = output.trim().to_string();
+
+        results.push((candidate.key.clone(), trimmed));
+    }
+
+    // Rewrite frontmatter values
+    let fm_mut = frontmatter.as_map_mut();
+    let replacements = results.len();
+    for (key, value) in results {
+        fm_mut.insert(key, Value::String(value));
+    }
+
+    let approvals_used = runtime.shell.take_recent_approval_count();
+
+    Ok(FrontmatterShellExpansionReport {
+        replacements,
+        approvals_used,
+        warnings: vec![],
+    })
+}
+
+/// Executes a shell directive with policy enforcement and approval flow.
+///
+/// This is a thin wrapper around the existing shell expansion infrastructure
+/// that adapts it for frontmatter shell commands.
+fn execute_directive(
+    directive: &ShellDirective,
+    options: &ComposeOptions,
+    policy_paths: &super::shell_expansion::types::ShellPolicyPaths,
+    shell_runtime: &mut super::shell_expansion::types::ShellExpansionRuntime,
+) -> Result<String, ShellExpansionError> {
+    // Delegate to the existing shell expansion infrastructure
+    super::shell_expansion::execute_directive(directive, options, policy_paths, shell_runtime)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,5 +389,118 @@ mod tests {
         let directives = scan_frontmatter(&fm, None);
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].key, "top");
+    }
+}
+
+#[cfg(test)]
+mod execution_tests {
+    use super::*;
+    use crate::markdown::compose::cache::CacheAccessMode;
+    use crate::markdown::compose::shell_expansion::types::{
+        PipelineRuntime, ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
+        ShellExpansionError, ShellExpansionOptions,
+    };
+    use crate::markdown::compose::types::ComposeOptions;
+    use crate::markdown::frontmatter::Frontmatter;
+    use serde_json::json;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    fn fm_from_json(data: serde_json::Value) -> Frontmatter {
+        let map: crate::markdown::types::FrontmatterMap = match data {
+            serde_json::Value::Object(obj) => obj.into_iter().collect(),
+            _ => Default::default(),
+        };
+        Frontmatter::from_map(map)
+    }
+
+    struct MockApproval;
+    impl ShellApprovalHandler for MockApproval {
+        fn approve(
+            &self,
+            _request: ShellApprovalRequest,
+        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+            Ok(ShellApprovalDecision::AllowOnce)
+        }
+    }
+
+    fn make_runtime() -> PipelineRuntime {
+        PipelineRuntime::new(16, CacheAccessMode::Off, None)
+    }
+
+    #[test]
+    fn execute_replaces_frontmatter_value_with_output() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "greeting": "$(echo hello world)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("greeting"), Some(&json!("hello world")));
+    }
+
+    #[test]
+    fn execute_trims_output_whitespace() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "val": "$(echo '  padded  ')"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("val"), Some(&json!("padded")));
+    }
+
+    #[test]
+    fn execute_skips_non_shell_values() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "title": "Hello",
+            "count": 42,
+            "cmd": "$(echo result)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("title"), Some(&json!("Hello")));
+        assert_eq!(fm.as_map().get("count"), Some(&json!(42)));
+        assert_eq!(fm.as_map().get("cmd"), Some(&json!("result")));
+    }
+
+    #[test]
+    fn execute_no_candidates_returns_empty_report() {
+        let mut fm = fm_from_json(json!({
+            "title": "Hello",
+            "count": 42
+        }));
+        let options = ComposeOptions::new();
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 0);
+        assert_eq!(report.approvals_used, 0);
     }
 }
