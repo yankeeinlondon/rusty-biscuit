@@ -101,6 +101,7 @@ pub enum ModalState {
     },
     MessengerSelect {
         highlighted: usize,
+        for_repo: bool,
     },
     MessengerAdd {
         highlighted: usize,
@@ -327,7 +328,7 @@ impl App {
             Some(ModalState::EditActions { highlighted, .. }) => *highlighted,
             Some(ModalState::TtsProvider { highlighted }) => *highlighted,
             Some(ModalState::VoiceSelector { highlighted, .. }) => *highlighted,
-            Some(ModalState::MessengerSelect { highlighted }) => *highlighted,
+            Some(ModalState::MessengerSelect { highlighted, .. }) => *highlighted,
             Some(ModalState::MessengerAdd { highlighted }) => *highlighted,
             Some(ModalState::EventSelector { highlighted }) => *highlighted,
             Some(ModalState::ActionTypeChooser { highlighted, .. }) => *highlighted,
@@ -352,7 +353,7 @@ impl App {
                 ModalState::EditActions { highlighted, .. } => *highlighted = new_idx,
                 ModalState::TtsProvider { highlighted } => *highlighted = new_idx,
                 ModalState::VoiceSelector { highlighted, .. } => *highlighted = new_idx,
-                ModalState::MessengerSelect { highlighted } => *highlighted = new_idx,
+                ModalState::MessengerSelect { highlighted, .. } => *highlighted = new_idx,
                 ModalState::MessengerAdd { highlighted } => *highlighted = new_idx,
                 ModalState::EventSelector { highlighted } => *highlighted = new_idx,
                 ModalState::ActionTypeChooser { highlighted, .. } => *highlighted = new_idx,

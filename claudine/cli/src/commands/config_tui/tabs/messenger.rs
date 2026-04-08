@@ -29,15 +29,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // Calculate layout based on content
     let config_lines = configs.len().max(1); // at least 1 line for "no configs" message
+    let repo_line_count: u16 = if app.is_in_repo { 1 } else { 0 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Active config line
-            Constraint::Length(1), // blank
-            Constraint::Length(1), // "Configurations:" heading
+            Constraint::Length(1),              // Active config line
+            Constraint::Length(repo_line_count), // Repo override line (0 when not in repo)
+            Constraint::Length(1),              // blank
+            Constraint::Length(1),              // "Configurations:" heading
             Constraint::Length(config_lines as u16),
-            Constraint::Length(1), // blank
-            Constraint::Length(1), // [+ Add New] button
+            Constraint::Length(1),              // blank
+            Constraint::Length(1),              // [+ Add New] button
             Constraint::Min(0),
         ])
         .split(area);
@@ -60,12 +62,30 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     ]);
     frame.render_widget(Paragraph::new(select_line), chunks[0]);
 
+    // Repo override line (only when in a repo)
+    if app.is_in_repo {
+        let repo_override_text = match app
+            .repo_config
+            .as_ref()
+            .and_then(|rc| rc.active_messenger.as_ref())
+        {
+            Some(Some(name)) => format!("Repo override: {name}"),
+            Some(None) => "Repo override: (disabled)".to_string(),
+            None => "Repo override: (inherits user)".to_string(),
+        };
+        let repo_line = Paragraph::new(Span::styled(
+            repo_override_text,
+            Style::default().fg(Color::DarkGray),
+        ));
+        frame.render_widget(repo_line, chunks[1]);
+    }
+
     // Configurations heading
     let heading = Paragraph::new(Span::styled(
         "Configurations:",
         Style::default().add_modifier(Modifier::BOLD),
     ));
-    frame.render_widget(heading, chunks[2]);
+    frame.render_widget(heading, chunks[3]);
 
     // List configurations
     if configs.is_empty() {
@@ -73,7 +93,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             "  No messenger configurations. Press A to add one.",
             Style::default().fg(Color::DarkGray),
         ));
-        frame.render_widget(no_configs, chunks[3]);
+        frame.render_widget(no_configs, chunks[4]);
     } else {
         let items: Vec<ListItem> = configs
             .iter()
@@ -106,7 +126,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             .collect();
 
         let list = List::new(items);
-        frame.render_widget(list, chunks[3]);
+        frame.render_widget(list, chunks[4]);
     }
 
     // Add button
@@ -118,19 +138,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Style::default().fg(Color::Gray)
     };
     let add_line = Paragraph::new(Span::styled("[+ Add New]", add_style));
-    frame.render_widget(add_line, chunks[5]);
+    frame.render_widget(add_line, chunks[6]);
 
     // Render modals
-    if let Some(ModalState::MessengerSelect { highlighted }) = &app.modal {
+    if let Some(ModalState::MessengerSelect {
+        highlighted,
+        for_repo,
+    }) = &app.modal
+    {
         let config_names: Vec<String> = configs.iter().map(|(k, _)| k.clone()).collect();
-        let mut items = vec!["(none)".to_string()];
-        items.extend(config_names);
+        let (title, items) = if *for_repo {
+            let mut items = vec!["(inherit user)".to_string(), "(disabled)".to_string()];
+            items.extend(config_names);
+            ("Repo Messenger Override", items)
+        } else {
+            let mut items = vec!["(none)".to_string()];
+            items.extend(config_names);
+            ("Select Active Messenger", items)
+        };
         super::super::widgets::modal::render_list_modal(
-            frame,
-            area,
-            "Select Active Messenger",
-            &items,
-            *highlighted,
+            frame, area, title, &items, *highlighted,
         );
     }
 
@@ -219,6 +246,32 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('a') | KeyCode::Char('A') => {
             app.modal = Some(ModalState::MessengerAdd { highlighted: 0 });
         }
+        KeyCode::Char('r') | KeyCode::Char('R') if app.is_in_repo => {
+            let configs: Vec<String> = app
+                .config
+                .messenger
+                .as_ref()
+                .map(|m| m.configurations.keys().cloned().collect())
+                .unwrap_or_default();
+            // Index 0 = "(inherit user)", 1 = "(disabled)", 2+ = config names
+            let repo_active = app
+                .repo_config
+                .as_ref()
+                .and_then(|rc| rc.active_messenger.as_ref());
+            let highlighted = match repo_active {
+                None => 0,       // inherits
+                Some(None) => 1, // disabled
+                Some(Some(name)) => configs
+                    .iter()
+                    .position(|k| k == name)
+                    .map(|i| i + 2)
+                    .unwrap_or(0),
+            };
+            app.modal = Some(ModalState::MessengerSelect {
+                highlighted,
+                for_repo: true,
+            });
+        }
         KeyCode::Enter => match app.messenger_focus {
             0 => {
                 // Select active - only show select modal if there are configs
@@ -244,7 +297,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                         .and_then(|name| configs.iter().position(|k| k == name))
                         .map(|i| i + 1) // +1 for "(none)" at index 0
                         .unwrap_or(0);
-                    app.modal = Some(ModalState::MessengerSelect { highlighted });
+                    app.modal = Some(ModalState::MessengerSelect {
+                        highlighted,
+                        for_repo: false,
+                    });
                 } else {
                     // No configs to select from - offer to add instead
                     app.modal = Some(ModalState::MessengerAdd { highlighted: 0 });
@@ -260,43 +316,97 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_messenger_select_modal(app: &mut App, key: KeyEvent) {
+    let for_repo = matches!(
+        app.modal,
+        Some(ModalState::MessengerSelect {
+            for_repo: true,
+            ..
+        })
+    );
+
     let configs: Vec<String> = app
         .config
         .messenger
         .as_ref()
         .map(|m| m.configurations.keys().cloned().collect())
         .unwrap_or_default();
-    let count = configs.len() + 1;
-    match key.code {
-        KeyCode::Up => {
-            let idx = app.modal_highlighted();
-            if idx > 0 {
-                app.set_modal_highlighted(idx - 1);
-            }
-        }
-        KeyCode::Down => {
-            let idx = app.modal_highlighted();
-            if idx + 1 < count {
-                app.set_modal_highlighted(idx + 1);
-            }
-        }
-        KeyCode::Enter => {
-            let idx = app.modal_highlighted();
-            ensure_messenger_config(app);
-            if let Some(ref mut messenger) = app.config.messenger {
-                if idx == 0 {
-                    messenger.active_config = None;
-                } else if let Some(name) = configs.get(idx - 1) {
-                    messenger.active_config = Some(name.clone());
+
+    if for_repo {
+        // Repo selection: 0 = inherit, 1 = disabled, 2+ = config names
+        let count = configs.len() + 2;
+        match key.code {
+            KeyCode::Up => {
+                let idx = app.modal_highlighted();
+                if idx > 0 {
+                    app.set_modal_highlighted(idx - 1);
                 }
             }
-            app.dirty = true;
-            app.modal = None;
+            KeyCode::Down => {
+                let idx = app.modal_highlighted();
+                if idx + 1 < count {
+                    app.set_modal_highlighted(idx + 1);
+                }
+            }
+            KeyCode::Enter => {
+                let idx = app.modal_highlighted();
+                if app.repo_config.is_none() {
+                    app.repo_config = Some(
+                        claudine::config::claudine_config::RepoOverrideConfig::default(),
+                    );
+                }
+                if let Some(ref mut repo_cfg) = app.repo_config {
+                    match idx {
+                        0 => repo_cfg.active_messenger = None,       // inherit
+                        1 => repo_cfg.active_messenger = Some(None), // disabled
+                        i => {
+                            if let Some(name) = configs.get(i - 2) {
+                                repo_cfg.active_messenger = Some(Some(name.clone()));
+                            }
+                        }
+                    }
+                }
+                app.repo_dirty = true;
+                app.modal = None;
+            }
+            KeyCode::Esc => {
+                app.modal = None;
+            }
+            _ => {}
         }
-        KeyCode::Esc => {
-            app.modal = None;
+    } else {
+        // User-scope selection: 0 = (none), 1+ = config names
+        let count = configs.len() + 1;
+        match key.code {
+            KeyCode::Up => {
+                let idx = app.modal_highlighted();
+                if idx > 0 {
+                    app.set_modal_highlighted(idx - 1);
+                }
+            }
+            KeyCode::Down => {
+                let idx = app.modal_highlighted();
+                if idx + 1 < count {
+                    app.set_modal_highlighted(idx + 1);
+                }
+            }
+            KeyCode::Enter => {
+                let idx = app.modal_highlighted();
+                ensure_messenger_config(app);
+                if let Some(ref mut messenger) = app.config.messenger {
+                    if idx == 0 {
+                        messenger.active_config = None;
+                    } else if let Some(name) = configs.get(idx - 1) {
+                        messenger.active_config = Some(name.clone());
+                    }
+                }
+                app.dirty = true;
+                app.modal = None;
+            }
+            KeyCode::Esc => {
+                app.modal = None;
+            }
+            _ => {}
         }
-        _ => {}
     }
 }
 
