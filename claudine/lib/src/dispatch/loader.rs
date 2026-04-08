@@ -11,8 +11,8 @@ use crate::config::claudine_config::{ClaudineConfig, ClaudineMessengerConfig, Me
 use crate::config::migration;
 use crate::error::{ClaudineError, Result};
 use crate::events::{
-    AgenticEvent, CanonicalProviderSettings, GlobalSettings, HookerConfig, LinkingSettings,
-    Provider,
+    AgenticEvent, CanonicalProviderSettings, EventBinding, GlobalSettings, HookerConfig,
+    LinkingSettings, Provider, ProviderConfig,
 };
 use crate::messaging::{MessagingRouteConfig, RuntimeMessagingSettings, ScopedMessagingSettings};
 use crate::services::protect::catalog::ProtectPlatform;
@@ -758,6 +758,49 @@ pub fn save_claudine_config(config: &ClaudineConfig, path: &Path) -> Result<()> 
     atomic_write(path, json.as_bytes())?;
     info!(?path, "Saved ClaudineConfig");
     Ok(())
+}
+
+/// Convert a [`ClaudineConfig`] into a [`HookerConfig`] for backward
+/// compatibility with [`AgentConfigurator::register()`].
+///
+/// Since `ClaudineConfig` stores events provider-agnostically, the
+/// resulting `HookerConfig` creates a [`ProviderConfig`] for each
+/// specified provider, all sharing the same event bindings from
+/// [`ClaudineConfig::actions`].
+///
+/// Settings are populated with defaults — configurator implementations
+/// only access the per-provider event bindings, not global settings.
+pub fn claudine_config_to_hooker(
+    config: &ClaudineConfig,
+    providers: &[Provider],
+) -> HookerConfig {
+    let mut provider_configs = HashMap::new();
+    for &provider in providers {
+        let events: HashMap<AgenticEvent, EventBinding> = config
+            .actions
+            .iter()
+            .map(|(event, actions)| {
+                (
+                    *event,
+                    EventBinding {
+                        enabled: true,
+                        actions: actions.clone(),
+                        matcher: None,
+                    },
+                )
+            })
+            .collect();
+        provider_configs.insert(provider, ProviderConfig { events });
+    }
+
+    HookerConfig {
+        version: "2.0".to_string(),
+        settings: GlobalSettings {
+            protect: Some(config.protect.clone()),
+            ..GlobalSettings::default()
+        },
+        providers: provider_configs,
+    }
 }
 
 /// Merge a repo-level [`ClaudineConfig`] into a user-level config.
