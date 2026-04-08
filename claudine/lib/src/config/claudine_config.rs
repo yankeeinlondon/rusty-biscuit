@@ -287,6 +287,28 @@ pub struct RepoOverrideConfig {
     /// Override or extend actions for this repo (per-event replacement).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
+
+    /// Override the active messenger configuration key for this repo.
+    ///
+    /// - `None` (absent): no override, inherit from user config.
+    /// - `Some(None)` (JSON `null`): disable messenger for this repo.
+    /// - `Some(Some(key))`: use the named configuration for this repo.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_messenger_override",
+    )]
+    pub active_messenger: Option<Option<String>>,
+}
+
+fn deserialize_optional_messenger_override<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<String> = serde::Deserialize::deserialize(deserializer)?;
+    Ok(Some(value))
 }
 
 impl Default for ClaudineConfig {
@@ -1145,6 +1167,29 @@ mod tests {
         assert!(config.canonical_provider.is_none());
         assert!(config.actions.contains_key(&AgenticEvent::SessionStart));
         assert_eq!(config.actions[&AgenticEvent::SessionStart].len(), 1);
+    }
+
+    #[test]
+    fn repo_override_with_active_messenger_round_trips() {
+        let json = r#"{ "active_messenger": "work-slack" }"#;
+        let repo: RepoOverrideConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(repo.active_messenger, Some(Some("work-slack".to_string())));
+        let serialized = serde_json::to_string(&repo).unwrap();
+        assert!(serialized.contains("work-slack"));
+    }
+
+    #[test]
+    fn repo_override_with_null_active_messenger_disables() {
+        let json = r#"{ "active_messenger": null }"#;
+        let repo: RepoOverrideConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(repo.active_messenger, Some(None));
+    }
+
+    #[test]
+    fn repo_override_without_active_messenger_is_no_override() {
+        let json = r#"{}"#;
+        let repo: RepoOverrideConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(repo.active_messenger, None);
     }
 
     /// Comprehensive round-trip: build a fully-populated valid config,

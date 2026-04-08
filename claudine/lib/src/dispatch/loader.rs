@@ -870,6 +870,13 @@ fn merge_repo_override(user: &mut ClaudineConfig, repo: &RepoOverrideConfig) {
     for (event, repo_actions) in &repo.actions {
         user.actions.insert(*event, repo_actions.clone());
     }
+
+    // active_messenger: repo overrides the active config key only
+    if let Some(ref override_value) = repo.active_messenger {
+        if let Some(ref mut messenger) = user.messenger {
+            messenger.active_config = override_value.clone();
+        }
+    }
 }
 
 /// Parse a raw string as JSON5 and return a [`serde_json::Value`].
@@ -2097,7 +2104,7 @@ mod tests {
             vec![HookAction::Report { handler: None }],
         );
 
-        let mut repo = RepoOverrideConfig {
+        let repo = RepoOverrideConfig {
             actions: std::collections::HashMap::from([(
                 AgenticEvent::SessionStart,
                 vec![HookAction::SoundEffect {
@@ -2122,6 +2129,66 @@ mod tests {
 
         // TurnComplete untouched
         assert!(user.actions.contains_key(&AgenticEvent::TurnComplete));
+    }
+
+    #[test]
+    fn merge_repo_override_applies_active_messenger() {
+        use crate::config::claudine_config::{ClaudineMessengerConfig, MessengerProviderConfig};
+
+        let mut user = ClaudineConfig::default();
+        user.messenger = Some(ClaudineMessengerConfig {
+            active_config: Some("personal".to_string()),
+            configurations: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(
+                    "personal".to_string(),
+                    MessengerProviderConfig::Discord {
+                        channel_id: "123".to_string(),
+                        bot_token_env: "TOKEN".to_string(),
+                    },
+                );
+                m.insert(
+                    "work".to_string(),
+                    MessengerProviderConfig::Slack {
+                        channel_id: "C456".to_string(),
+                        bot_token_env: "SLACK_URL".to_string(),
+                    },
+                );
+                m
+            },
+        });
+
+        let repo = RepoOverrideConfig {
+            active_messenger: Some(Some("work".to_string())),
+            ..Default::default()
+        };
+
+        merge_repo_override(&mut user, &repo);
+
+        assert_eq!(
+            user.messenger.as_ref().unwrap().active_config.as_deref(),
+            Some("work"),
+        );
+    }
+
+    #[test]
+    fn merge_repo_override_disables_messenger_with_null() {
+        use crate::config::claudine_config::ClaudineMessengerConfig;
+
+        let mut user = ClaudineConfig::default();
+        user.messenger = Some(ClaudineMessengerConfig {
+            active_config: Some("personal".to_string()),
+            configurations: std::collections::HashMap::new(),
+        });
+
+        let repo = RepoOverrideConfig {
+            active_messenger: Some(None),
+            ..Default::default()
+        };
+
+        merge_repo_override(&mut user, &repo);
+
+        assert_eq!(user.messenger.as_ref().unwrap().active_config, None);
     }
 
     #[test]
