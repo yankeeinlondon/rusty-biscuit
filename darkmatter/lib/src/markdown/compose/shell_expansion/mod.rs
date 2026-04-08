@@ -46,6 +46,7 @@ pub use types::{
     ErrorHandling, ErrorHandlingOutcome, ShellApprovalDecision, ShellApprovalHandler,
     ShellApprovalRequest, ShellCommandEntry, ShellDirective, ShellExpansionError,
     ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths, ShellRuleSet,
+    ShellTimeoutBehavior,
 };
 
 use crate::markdown::compose::ComposeOptions;

@@ -162,9 +162,20 @@ impl ErrorHandling {
     }
 }
 
+/// What happens when a shell command exceeds its timeout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShellTimeoutBehavior {
+    /// Compose aborts with a shell-expansion error (default).
+    #[default]
+    Error,
+    /// The shell result is replaced with an empty string and a warning is emitted.
+    EmptyString,
+}
+
 /// Options for shell expansion behavior.
 pub struct ShellExpansionOptions {
     pub timeout: std::time::Duration,
+    pub timeout_behavior: ShellTimeoutBehavior,
     pub policy_root: Option<PathBuf>,
     pub working_directory: Option<PathBuf>,
     pub approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
@@ -176,6 +187,7 @@ impl Clone for ShellExpansionOptions {
     fn clone(&self) -> Self {
         Self {
             timeout: self.timeout,
+            timeout_behavior: self.timeout_behavior,
             policy_root: self.policy_root.clone(),
             working_directory: self.working_directory.clone(),
             approval_handler: self.approval_handler.clone(),
@@ -188,6 +200,7 @@ impl fmt::Debug for ShellExpansionOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ShellExpansionOptions")
             .field("timeout", &self.timeout)
+            .field("timeout_behavior", &self.timeout_behavior)
             .field("policy_root", &self.policy_root)
             .field("working_directory", &self.working_directory)
             .field(
@@ -207,6 +220,7 @@ impl Default for ShellExpansionOptions {
     fn default() -> Self {
         Self {
             timeout: std::time::Duration::from_secs(10),
+            timeout_behavior: ShellTimeoutBehavior::Error,
             policy_root: None,
             working_directory: None,
             approval_handler: None,
@@ -731,5 +745,16 @@ mod tests {
             }
             .is_empty()
         );
+    }
+
+    #[test]
+    fn shell_timeout_behavior_default_is_error() {
+        assert_eq!(ShellTimeoutBehavior::default(), ShellTimeoutBehavior::Error);
+    }
+
+    #[test]
+    fn shell_expansion_options_default_timeout_behavior_is_error() {
+        let opts = ShellExpansionOptions::default();
+        assert_eq!(opts.timeout_behavior, ShellTimeoutBehavior::Error);
     }
 }

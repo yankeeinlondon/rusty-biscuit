@@ -59,6 +59,7 @@ pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
 pub use context::ContextMergeDiagnostic;
 pub use shell_expansion::ShellExpansionError;
+pub use shell_expansion::ShellTimeoutBehavior;
 pub use state::{EffectiveState, EffectiveStateBuilder};
 pub use toc_linking::TocLinkingError;
 pub use transclusion::TransclusionError;

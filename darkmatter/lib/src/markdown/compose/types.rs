@@ -9,6 +9,7 @@
 
 use super::super::normalize::NormalizationReport;
 use super::cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
+use super::shell_expansion::types::ShellTimeoutBehavior;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -350,6 +351,10 @@ pub struct ComposeOptions {
     /// Default: 10 seconds.
     pub(crate) shell_timeout: std::time::Duration,
 
+    /// What happens when a shell command exceeds its timeout.
+    /// Default: `Error` (abort compose).
+    pub(crate) shell_timeout_behavior: ShellTimeoutBehavior,
+
     /// Root directory for shell expansion policy files.
     ///
     /// When set, only commands matching an approval policy in this
@@ -526,6 +531,7 @@ impl ComposeOptions {
             resolve_repo_root: true,
             magic_paths: Vec::new(),
             shell_timeout: std::time::Duration::from_secs(10),
+            shell_timeout_behavior: ShellTimeoutBehavior::Error,
             shell_policy_root: None,
             shell_working_directory: None,
             shell_approval_handler: None,
@@ -681,6 +687,27 @@ impl ComposeOptions {
         self
     }
 
+    /// Sets the shell timeout behavior directly on flat compose options.
+    #[must_use]
+    pub fn with_shell_timeout_behavior(mut self, behavior: ShellTimeoutBehavior) -> Self {
+        self.shell_timeout_behavior = behavior;
+        self
+    }
+
+    /// Sets whether to allow shell commands to timeout without aborting compose.
+    ///
+    /// When `true`, sets `shell_timeout_behavior` to `EmptyString`.
+    /// When `false`, sets it to `Error` (default).
+    #[must_use]
+    pub fn with_allow_shell_timeout(mut self, allow: bool) -> Self {
+        self.shell_timeout_behavior = if allow {
+            ShellTimeoutBehavior::EmptyString
+        } else {
+            ShellTimeoutBehavior::Error
+        };
+        self
+    }
+
     /// Sets the shell policy root directly on flat compose options.
     #[must_use]
     pub fn with_shell_policy_root(mut self, path: impl Into<PathBuf>) -> Self {
@@ -814,6 +841,7 @@ impl ComposeOptions {
     pub(crate) fn shell_options(&self) -> super::shell_expansion::ShellExpansionOptions {
         super::shell_expansion::ShellExpansionOptions {
             timeout: self.shell_timeout,
+            timeout_behavior: self.shell_timeout_behavior,
             policy_root: self.shell_policy_root.clone(),
             working_directory: self.shell_working_directory.clone(),
             approval_handler: self.shell_approval_handler.clone(),
@@ -2070,5 +2098,36 @@ mod tests {
         assert_eq!(perf.total, Duration::from_millis(17));
         assert_eq!(perf.metrics[0].elapsed, Duration::from_millis(5));
         assert_eq!(perf.metrics[0].calls, 2);
+    }
+
+    #[test]
+    fn compose_options_default_timeout_behavior_is_error() {
+        let options = ComposeOptions::new();
+        assert_eq!(options.shell_timeout_behavior, ShellTimeoutBehavior::Error);
+    }
+
+    #[test]
+    fn with_shell_timeout_behavior_sets_value() {
+        let options = ComposeOptions::new()
+            .with_shell_timeout_behavior(ShellTimeoutBehavior::EmptyString);
+        assert_eq!(
+            options.shell_timeout_behavior,
+            ShellTimeoutBehavior::EmptyString
+        );
+    }
+
+    #[test]
+    fn with_allow_shell_timeout_sets_empty_string() {
+        let options = ComposeOptions::new().with_allow_shell_timeout(true);
+        assert_eq!(
+            options.shell_timeout_behavior,
+            ShellTimeoutBehavior::EmptyString
+        );
+    }
+
+    #[test]
+    fn with_allow_shell_timeout_false_keeps_error() {
+        let options = ComposeOptions::new().with_allow_shell_timeout(false);
+        assert_eq!(options.shell_timeout_behavior, ShellTimeoutBehavior::Error);
     }
 }
