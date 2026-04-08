@@ -521,40 +521,40 @@ pub fn run_compose(
                 command,
                 code,
                 stderr,
-                line,
+                origin,
                 ..
             }) => {
                 let detail = stderr.trim();
                 if detail.is_empty() {
-                    eyre!("Shell command failed (exit {code}) on line {line}: '{command}'")
+                    eyre!("Shell command failed (exit {code}) at {origin}: '{command}'")
                 } else {
                     eyre!(
-                        "Shell command failed (exit {code}) on line {line}: '{command}'\n{detail}"
+                        "Shell command failed (exit {code}) at {origin}: '{command}'\n{detail}"
                     )
                 }
             }
-            ShellExpansion(ShellExpansionError::CommandNotFound { command, line }) => {
+            ShellExpansion(ShellExpansionError::CommandNotFound { command, origin }) => {
                 eyre!(
-                    "Command not found: '{command}' (line {line})\n\
+                    "Command not found: '{command}' ({origin})\n\
                      Ensure '{command}' is installed and available on your PATH."
                 )
             }
             ShellExpansion(ShellExpansionError::Timeout {
                 command,
                 timeout,
-                line,
+                origin,
             }) => {
-                eyre!("Shell command timed out after {timeout:?} on line {line}: '{command}'")
+                eyre!("Shell command timed out after {timeout:?} at {origin}: '{command}'")
             }
             ShellExpansion(ShellExpansionError::Blacklisted {
                 command,
                 reason,
-                line,
+                origin,
             }) => {
-                eyre!("Blocked command on line {line}: '{command}'\nReason: {reason}")
+                eyre!("Blocked command at {origin}: '{command}'\nReason: {reason}")
             }
-            ShellExpansion(ShellExpansionError::Denied { command, line }) => {
-                eyre!("Command denied on line {line}: '{command}'")
+            ShellExpansion(ShellExpansionError::Denied { command, origin }) => {
+                eyre!("Command denied at {origin}: '{command}'")
             }
             _ => eyre!("{e}"),
         }

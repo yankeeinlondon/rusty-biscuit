@@ -14,7 +14,7 @@ use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
-use crate::markdown::compose::shell_expansion::types::ShellCommandEntry;
+use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellCommandOrigin};
 use crate::markdown::compose::types::SourceRange;
 use crate::markdown::types::MarkdownResult;
 
@@ -122,7 +122,7 @@ pub fn collect_shell_commands(
             // Look up provenance from the source map
             let (source_file, line) = lookup_provenance(
                 directive.span.start,
-                directive.line,
+                directive.origin.line_number(),
                 &report.source_map,
                 composed.content(),
                 &default_source,
@@ -134,7 +134,7 @@ pub fn collect_shell_commands(
                 args,
                 normalized,
                 source_file,
-                line,
+                origin: ShellCommandOrigin::Body { line },
             });
         }
     }
@@ -321,6 +321,6 @@ replace:
             child_path.canonicalize().unwrap()
         );
         // Line 2 in child.md (line 1 is "# Child", line 2 is "::shell echo from-child")
-        assert_eq!(child_entry.line, 2, "line should be 2 in the child file");
+        assert_eq!(child_entry.origin, ShellCommandOrigin::Body { line: 2 }, "line should be 2 in the child file");
     }
 }

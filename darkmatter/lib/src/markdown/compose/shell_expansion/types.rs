@@ -11,14 +11,42 @@ use crate::markdown::compose::ComposeSource;
 use crate::markdown::toc::MarkdownTocNode;
 use crate::markdown::types::MarkdownResult;
 
-/// Parsed `::shell` directive with raw command, executable, args, span, and line.
+/// Where a shell command originates in a document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellCommandOrigin {
+    /// Body `::shell` directive at the given 1-indexed line.
+    Body { line: usize },
+    /// Frontmatter property with a `$(...)` shell expression.
+    Frontmatter { key: String },
+}
+
+impl fmt::Display for ShellCommandOrigin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Body { line } => write!(f, "line {line}"),
+            Self::Frontmatter { key } => write!(f, "frontmatter.{key}"),
+        }
+    }
+}
+
+impl ShellCommandOrigin {
+    /// Returns the line number if this is a body origin, or 0 for frontmatter.
+    pub fn line_number(&self) -> usize {
+        match self {
+            Self::Body { line } => *line,
+            Self::Frontmatter { .. } => 0,
+        }
+    }
+}
+
+/// Parsed `::shell` directive with raw command, executable, args, span, and origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellDirective {
     pub raw_command: String,
     pub executable: String,
     pub args: Vec<String>,
     pub span: std::ops::Range<usize>,
-    pub line: usize,
+    pub origin: ShellCommandOrigin,
     pub error_handling: ErrorHandling,
     /// Per-command timeout override. When Some, takes precedence over the global timeout.
     pub timeout_override: Option<std::time::Duration>,
@@ -41,8 +69,8 @@ pub struct ShellCommandEntry {
     pub normalized: String,
     /// Source file where this directive was found.
     pub source_file: PathBuf,
-    /// Line number in the source file.
-    pub line: usize,
+    /// Where this command originates (body line or frontmatter key).
+    pub origin: ShellCommandOrigin,
 }
 
 /// Error handling options parsed from `::shell` directive flags.
@@ -243,7 +271,7 @@ pub trait ShellApprovalHandler: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct ShellApprovalRequest {
     pub source: ComposeSource,
-    pub line: usize,
+    pub origin: ShellCommandOrigin,
     pub raw_command: String,
     pub executable: String,
     pub args: Vec<String>,
@@ -267,54 +295,54 @@ pub enum ShellApprovalDecision {
 /// Errors from shell expansion operations.
 #[derive(Error, Debug)]
 pub enum ShellExpansionError {
-    #[error("Shell directive parse error on line {line}: {message}")]
-    ParseDirective { line: usize, message: String },
+    #[error("Shell directive parse error at {origin}: {message}")]
+    ParseDirective { origin: ShellCommandOrigin, message: String },
 
-    #[error("Command not found: '{command}' on line {line}")]
-    CommandNotFound { command: String, line: usize },
+    #[error("Command not found: '{command}' at {origin}")]
+    CommandNotFound { command: String, origin: ShellCommandOrigin },
 
-    #[error("Blacklisted command '{command}' on line {line}: {reason}")]
+    #[error("Blacklisted command '{command}' at {origin}: {reason}")]
     Blacklisted {
         command: String,
         reason: String,
-        line: usize,
+        origin: ShellCommandOrigin,
     },
 
-    #[error("Approval required for '{command}' on line {line}")]
+    #[error("Approval required for '{command}' at {origin}")]
     ApprovalRequired {
         command: String,
         whitelist_path: PathBuf,
         blacklist_path: PathBuf,
-        line: usize,
+        origin: ShellCommandOrigin,
     },
 
-    #[error("Command denied: '{command}' on line {line}")]
-    Denied { command: String, line: usize },
+    #[error("Command denied: '{command}' at {origin}")]
+    Denied { command: String, origin: ShellCommandOrigin },
 
     #[error(
-        "Command '{command}' on line {line} was not pre-approved{source_desc}. \
+        "Command '{command}' at {origin} was not pre-approved{source_desc}. \
          This is a bug in the pre-flight scanner -- please report it."
     )]
     NotPreApproved {
         command: String,
-        line: usize,
+        origin: ShellCommandOrigin,
         source_desc: String,
     },
 
-    #[error("Command timed out after {timeout:?}: '{command}' on line {line}")]
+    #[error("Command timed out after {timeout:?}: '{command}' at {origin}")]
     Timeout {
         command: String,
         timeout: std::time::Duration,
-        line: usize,
+        origin: ShellCommandOrigin,
     },
 
-    #[error("Command failed (exit {code}): '{command}' on line {line}")]
+    #[error("Command failed (exit {code}): '{command}' at {origin}")]
     ExecutionFailed {
         command: String,
         code: i32,
         stdout: String,
         stderr: String,
-        line: usize,
+        origin: ShellCommandOrigin,
     },
 
     #[error("Policy I/O error for {path}: {source}")]
@@ -758,5 +786,29 @@ mod tests {
     fn shell_expansion_options_default_timeout_behavior_is_error() {
         let opts = ShellExpansionOptions::default();
         assert_eq!(opts.timeout_behavior, ShellTimeoutBehavior::Error);
+    }
+
+    #[test]
+    fn shell_command_origin_body_display() {
+        let origin = ShellCommandOrigin::Body { line: 42 };
+        assert_eq!(format!("{origin}"), "line 42");
+    }
+
+    #[test]
+    fn shell_command_origin_frontmatter_display() {
+        let origin = ShellCommandOrigin::Frontmatter { key: "files".to_string() };
+        assert_eq!(format!("{origin}"), "frontmatter.files");
+    }
+
+    #[test]
+    fn shell_command_origin_line_number_body() {
+        let origin = ShellCommandOrigin::Body { line: 42 };
+        assert_eq!(origin.line_number(), 42);
+    }
+
+    #[test]
+    fn shell_command_origin_line_number_frontmatter() {
+        let origin = ShellCommandOrigin::Frontmatter { key: "x".to_string() };
+        assert_eq!(origin.line_number(), 0);
     }
 }

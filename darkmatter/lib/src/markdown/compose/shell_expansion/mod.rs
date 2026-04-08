@@ -44,7 +44,7 @@ pub use policy::{
 pub use store::resolve_policy_paths;
 pub use types::{
     ErrorHandling, ErrorHandlingOutcome, ShellApprovalDecision, ShellApprovalHandler,
-    ShellApprovalRequest, ShellCommandEntry, ShellDirective, ShellExpansionError,
+    ShellApprovalRequest, ShellCommandEntry, ShellCommandOrigin, ShellDirective, ShellExpansionError,
     ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths, ShellRuleSet,
     ShellTimeoutBehavior,
 };
@@ -67,7 +67,7 @@ use crate::markdown::compose::ComposeOptions;
 /// ## Examples
 ///
 /// ```no_run
-/// use darkmatter::markdown::compose::shell_expansion::{execute_directive, types::{ErrorHandling, ShellDirective, ShellExpansionRuntime, ShellPolicyPaths}};
+/// use darkmatter::markdown::compose::shell_expansion::{execute_directive, types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionRuntime, ShellPolicyPaths}};
 /// use darkmatter::markdown::compose::ComposeOptions;
 /// use std::path::PathBuf;
 ///
@@ -76,7 +76,7 @@ use crate::markdown::compose::ComposeOptions;
 ///     executable: "echo".to_string(),
 ///     args: vec!["hello".to_string()],
 ///     span: 0..10,
-///     line: 1,
+///     origin: ShellCommandOrigin::Body { line: 1 },
 ///     error_handling: ErrorHandling::default(),
 ///     timeout_override: None,
 /// };
@@ -108,7 +108,7 @@ pub fn execute_directive(
         } else {
             return Err(ShellExpansionError::NotPreApproved {
                 command: display_command(directive, alias_name.as_deref()),
-                line: directive.line,
+                origin: directive.origin.clone(),
                 source_desc: match &options.source {
                     crate::markdown::compose::ComposeSource::File(p) => {
                         format!(" (in {})", p.display())
@@ -126,7 +126,7 @@ pub fn execute_directive(
         return Err(ShellExpansionError::Blacklisted {
             command: display_command(directive, alias_name.as_deref()),
             reason,
-            line: directive.line,
+            origin: directive.origin.clone(),
         });
     }
 
@@ -140,7 +140,7 @@ pub fn execute_directive(
         return Err(ShellExpansionError::Blacklisted {
             command: display_command(directive, alias_name.as_deref()),
             reason: "user blacklist".to_string(),
-            line: directive.line,
+            origin: directive.origin.clone(),
         });
     }
 
@@ -162,7 +162,7 @@ pub fn execute_directive(
     if let Some(ref handler) = options.shell_approval_handler {
         let request = ShellApprovalRequest {
             source: options.source.clone(),
-            line: directive.line,
+            origin: directive.origin.clone(),
             raw_command: effective.raw_command.clone(),
             executable: effective.executable.clone(),
             args: effective.args.clone(),
@@ -189,7 +189,7 @@ pub fn execute_directive(
             }
             ShellApprovalDecision::Deny => Err(ShellExpansionError::Denied {
                 command: display_command(directive, alias_name.as_deref()),
-                line: directive.line,
+                origin: directive.origin.clone(),
             }),
             ShellApprovalDecision::BlacklistPersist => {
                 store::append_blacklist_exact(policy_paths, &normalized)?;
@@ -197,7 +197,7 @@ pub fn execute_directive(
                 Err(ShellExpansionError::Blacklisted {
                     command: display_command(directive, alias_name.as_deref()),
                     reason: "user blacklisted".to_string(),
-                    line: directive.line,
+                    origin: directive.origin.clone(),
                 })
             }
         }
@@ -206,7 +206,7 @@ pub fn execute_directive(
             command: display_command(directive, alias_name.as_deref()),
             whitelist_path: policy_paths.whitelist.clone(),
             blacklist_path: policy_paths.blacklist.clone(),
-            line: directive.line,
+            origin: directive.origin.clone(),
         })
     }
 }
@@ -247,7 +247,7 @@ fn execute_and_handle_errors(
                             code,
                             stdout,
                             stderr,
-                            line,
+                            origin,
                         }) => {
                             let enriched_stderr = if stderr.is_empty() {
                                 enrichment
@@ -259,7 +259,7 @@ fn execute_and_handle_errors(
                                 code,
                                 stdout,
                                 stderr: enriched_stderr,
-                                line,
+                                origin,
                             })
                         }
                         _ => unreachable!(),
@@ -301,7 +301,7 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
             executable: resolved.executable,
             args: merged_args,
             span: directive.span.clone(),
-            line: directive.line,
+            origin: directive.origin.clone(),
             error_handling: directive.error_handling.clone(),
             timeout_override: directive.timeout_override,
         };

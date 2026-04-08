@@ -1,7 +1,7 @@
 //! Parser for `::shell` directives in markdown content.
 
 use super::tokenize::tokenize;
-use super::types::{ErrorHandling, ShellDirective, ShellExpansionError};
+use super::types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionError};
 use crate::markdown::compose::parse_utils::{find_code_regions, is_in_code_region};
 
 /// Parses all `::shell` directives from markdown content.
@@ -46,7 +46,7 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
                 // Parse the command
                 let tokens =
                     tokenize(command_text).map_err(|e| ShellExpansionError::ParseDirective {
-                        line: line_num,
+                        origin: ShellCommandOrigin::Body { line: line_num },
                         message: match e {
                             ShellExpansionError::ParseDirective { message, .. } => message,
                             _ => e.to_string(),
@@ -55,7 +55,7 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
 
                 if tokens.is_empty() {
                     return Err(ShellExpansionError::ParseDirective {
-                        line: line_num,
+                        origin: ShellCommandOrigin::Body { line: line_num },
                         message: "Empty command".to_string(),
                     });
                 }
@@ -64,7 +64,7 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
                 for (i, token) in tokens.iter().enumerate() {
                     if token.starts_with("::timeout:") && i < tokens.len() - 1 {
                         return Err(ShellExpansionError::ParseDirective {
-                            line: line_num,
+                            origin: ShellCommandOrigin::Body { line: line_num },
                             message: "::timeout:<N> must be the last token on the ::shell line"
                                 .to_string(),
                         });
@@ -79,7 +79,7 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
 
                 if cmd_tokens.is_empty() {
                     return Err(ShellExpansionError::ParseDirective {
-                        line: line_num,
+                        origin: ShellCommandOrigin::Body { line: line_num },
                         message: "No command after error handling options".to_string(),
                     });
                 }
@@ -93,7 +93,7 @@ pub fn parse_directives(content: &str) -> Result<Vec<ShellDirective>, ShellExpan
                     executable,
                     args,
                     span: line_start..line_with_newline_end,
-                    line: line_num,
+                    origin: ShellCommandOrigin::Body { line: line_num },
                     error_handling,
                     timeout_override,
                 });
@@ -152,7 +152,7 @@ fn extract_error_handling(
             // Validate we have enough remaining tokens for the option's arguments
             if i + argc >= tokens.len() {
                 return Err(ShellExpansionError::ParseDirective {
-                    line,
+                    origin: ShellCommandOrigin::Body { line },
                     message: format!("{option} requires {argc} argument(s)"),
                 });
             }
@@ -205,7 +205,7 @@ fn extract_error_handling(
 fn parse_exit_code(raw: &str, option_name: &str, line: usize) -> Result<i32, ShellExpansionError> {
     raw.parse::<i32>()
         .map_err(|_| ShellExpansionError::ParseDirective {
-            line,
+            origin: ShellCommandOrigin::Body { line },
             message: format!("{option_name} requires an integer exit code, got '{raw}'"),
         })
 }
@@ -235,14 +235,14 @@ fn extract_timeout_suffix(
         let seconds: u64 = value_str
             .parse()
             .map_err(|_| ShellExpansionError::ParseDirective {
-                line,
+                origin: ShellCommandOrigin::Body { line },
                 message: format!(
                     "::timeout requires a positive integer of seconds, got '{value_str}'"
                 ),
             })?;
         if seconds == 0 {
             return Err(ShellExpansionError::ParseDirective {
-                line,
+                origin: ShellCommandOrigin::Body { line },
                 message: "::timeout value must be greater than zero".to_string(),
             });
         }
@@ -264,7 +264,7 @@ mod tests {
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].executable, "echo");
         assert_eq!(directives[0].args, vec!["hello"]);
-        assert_eq!(directives[0].line, 1);
+        assert_eq!(directives[0].origin, ShellCommandOrigin::Body { line: 1 });
         assert_eq!(directives[0].raw_command, "echo hello");
     }
 
@@ -275,10 +275,10 @@ mod tests {
         assert_eq!(directives.len(), 2);
         assert_eq!(directives[0].executable, "ls");
         assert_eq!(directives[0].args, vec!["-la"]);
-        assert_eq!(directives[0].line, 1);
+        assert_eq!(directives[0].origin, ShellCommandOrigin::Body { line: 1 });
         assert_eq!(directives[1].executable, "pwd");
         assert_eq!(directives[1].args.len(), 0);
-        assert_eq!(directives[1].line, 3);
+        assert_eq!(directives[1].origin, ShellCommandOrigin::Body { line: 3 });
     }
 
     #[test]
@@ -337,7 +337,7 @@ And `::shell echo inline` should also be ignored.
             &content[directives[0].span.clone()],
             "::shell echo hello\r\n"
         );
-        assert_eq!(directives[1].line, 3);
+        assert_eq!(directives[1].origin, ShellCommandOrigin::Body { line: 3 });
         assert_eq!(&content[directives[1].span.clone()], "::shell pwd\r\n");
     }
 
@@ -384,8 +384,8 @@ And `::shell echo inline` should also be ignored.
         assert!(result.is_err());
         let err = result.unwrap_err();
         match err {
-            ShellExpansionError::ParseDirective { line, message } => {
-                assert_eq!(line, 1);
+            ShellExpansionError::ParseDirective { origin, message } => {
+                assert_eq!(origin, ShellCommandOrigin::Body { line: 1 });
                 assert!(message.contains("pipes"));
             }
             _ => panic!("Expected ParseDirective error"),
@@ -397,8 +397,8 @@ And `::shell echo inline` should also be ignored.
         let content = "Line 1\nLine 2\n::shell echo a\nLine 4\n::shell echo b\n";
         let directives = parse_directives(content).unwrap();
         assert_eq!(directives.len(), 2);
-        assert_eq!(directives[0].line, 3);
-        assert_eq!(directives[1].line, 5);
+        assert_eq!(directives[0].origin, ShellCommandOrigin::Body { line: 3 });
+        assert_eq!(directives[1].origin, ShellCommandOrigin::Body { line: 5 });
     }
 
     #[test]

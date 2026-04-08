@@ -85,7 +85,7 @@ fn write_prompt<W: Write>(
         .render_optimistic(None);
     let source_label = Prose::new("<dim>Source:</dim>").render_optimistic(None);
     let source_value =
-        Prose::new(format!("<bold>{source_desc}:{}</bold>", request.line)).render_optimistic(None);
+        Prose::new(format!("<bold>{source_desc}:{}</bold>", request.origin)).render_optimistic(None);
     let cmd_label = Prose::new("<dim>Command:</dim>").render_optimistic(None);
     let cmd_value = Prose::new(format!(
         "<bold><cyan>{}</cyan></bold>",
@@ -182,9 +182,10 @@ mod tests {
     use std::path::PathBuf;
 
     fn request() -> ShellApprovalRequest {
+        use darkmatter::markdown::compose::ShellCommandOrigin;
         ShellApprovalRequest {
             source: ComposeSource::File(PathBuf::from("/tmp/doc.md")),
-            line: 12,
+            origin: ShellCommandOrigin::Body { line: 12 },
             raw_command: "echo hello".to_string(),
             executable: "echo".to_string(),
             args: vec!["hello".to_string()],
@@ -224,7 +225,7 @@ mod tests {
         assert_eq!(decision, ShellApprovalDecision::AllowCommandPersist);
         let prompt = strip_ansi(&String::from_utf8(output).unwrap());
         assert!(prompt.contains("Shell Approval Required"));
-        assert!(prompt.contains("/tmp/doc.md:12"));
+        assert!(prompt.contains("/tmp/doc.md:line 12"));
         assert!(prompt.contains("echo hello"));
     }
 

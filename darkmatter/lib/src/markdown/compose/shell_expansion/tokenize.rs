@@ -6,7 +6,7 @@
 //! - Backslash escaping outside quotes
 //! - Rejects shell metacharacters and redirections
 
-use super::types::ShellExpansionError;
+use super::types::{ShellCommandOrigin, ShellExpansionError};
 
 /// Tokenizes a shell command string into executable and arguments.
 ///
@@ -39,7 +39,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, ShellExpansionError> {
 
     if trimmed.is_empty() {
         return Err(ShellExpansionError::ParseDirective {
-            line: 0,
+            origin: ShellCommandOrigin::Body { line: 0 },
             message: "Empty command".to_string(),
         });
     }
@@ -70,7 +70,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, ShellExpansionError> {
                 }
                 if !found_close {
                     return Err(ShellExpansionError::ParseDirective {
-                        line: 0,
+                        origin: ShellCommandOrigin::Body { line: 0 },
                         message: "Unterminated single quote".to_string(),
                     });
                 }
@@ -92,7 +92,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, ShellExpansionError> {
                             }
                         } else {
                             return Err(ShellExpansionError::ParseDirective {
-                                line: 0,
+                                origin: ShellCommandOrigin::Body { line: 0 },
                                 message: "Unterminated escape sequence in double quote".to_string(),
                             });
                         }
@@ -105,7 +105,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, ShellExpansionError> {
                 }
                 if !found_close {
                     return Err(ShellExpansionError::ParseDirective {
-                        line: 0,
+                        origin: ShellCommandOrigin::Body { line: 0 },
                         message: "Unterminated double quote".to_string(),
                     });
                 }
@@ -123,7 +123,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, ShellExpansionError> {
                     }
                 } else {
                     return Err(ShellExpansionError::ParseDirective {
-                        line: 0,
+                        origin: ShellCommandOrigin::Body { line: 0 },
                         message: "Trailing backslash".to_string(),
                     });
                 }
@@ -132,31 +132,31 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, ShellExpansionError> {
             // Reject metacharacters
             '|' => {
                 return Err(ShellExpansionError::ParseDirective {
-                    line: 0,
+                    origin: ShellCommandOrigin::Body { line: 0 },
                     message: "Shell pipes are not allowed".to_string(),
                 });
             }
             ';' => {
                 return Err(ShellExpansionError::ParseDirective {
-                    line: 0,
+                    origin: ShellCommandOrigin::Body { line: 0 },
                     message: "Command chaining (;) is not allowed".to_string(),
                 });
             }
             '<' => {
                 return Err(ShellExpansionError::ParseDirective {
-                    line: 0,
+                    origin: ShellCommandOrigin::Body { line: 0 },
                     message: "Input redirection (<) is not allowed".to_string(),
                 });
             }
             '>' => {
                 return Err(ShellExpansionError::ParseDirective {
-                    line: 0,
+                    origin: ShellCommandOrigin::Body { line: 0 },
                     message: "Output redirection (>) is not allowed".to_string(),
                 });
             }
             '`' => {
                 return Err(ShellExpansionError::ParseDirective {
-                    line: 0,
+                    origin: ShellCommandOrigin::Body { line: 0 },
                     message: "Command substitution (`) is not allowed".to_string(),
                 });
             }
@@ -164,7 +164,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, ShellExpansionError> {
                 // Check for $(
                 if chars.peek() == Some(&'(') {
                     return Err(ShellExpansionError::ParseDirective {
-                        line: 0,
+                        origin: ShellCommandOrigin::Body { line: 0 },
                         message: "Command substitution $() is not allowed".to_string(),
                     });
                 }
@@ -174,7 +174,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, ShellExpansionError> {
                 // Check for &&
                 if chars.peek() == Some(&'&') {
                     return Err(ShellExpansionError::ParseDirective {
-                        line: 0,
+                        origin: ShellCommandOrigin::Body { line: 0 },
                         message: "Conditional execution (&&) is not allowed".to_string(),
                     });
                 }
@@ -195,7 +195,7 @@ pub fn tokenize(input: &str) -> Result<Vec<String>, ShellExpansionError> {
 
     if tokens.is_empty() {
         return Err(ShellExpansionError::ParseDirective {
-            line: 0,
+            origin: ShellCommandOrigin::Body { line: 0 },
             message: "Empty command".to_string(),
         });
     }

@@ -11,7 +11,9 @@ use std::time::Instant;
 
 use tracing::{debug, instrument, warn};
 
-use super::types::{ShellDirective, ShellExpansionError, ShellExpansionOptions, ShellTimeoutBehavior};
+use super::types::{
+    ShellDirective, ShellExpansionError, ShellExpansionOptions, ShellTimeoutBehavior,
+};
 use crate::markdown::compose::ComposeSource;
 
 /// Resolves the working directory for command execution.
@@ -71,7 +73,7 @@ pub fn resolve_working_directory(
 ///
 /// ```no_run
 /// use darkmatter::markdown::compose::shell_expansion::executor::execute_command;
-/// use darkmatter::markdown::compose::shell_expansion::types::{ErrorHandling, ShellDirective, ShellExpansionOptions};
+/// use darkmatter::markdown::compose::shell_expansion::types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionOptions};
 /// use darkmatter::markdown::compose::ComposeSource;
 ///
 /// let directive = ShellDirective {
@@ -79,7 +81,7 @@ pub fn resolve_working_directory(
 ///     executable: "echo".to_string(),
 ///     args: vec!["hello".to_string()],
 ///     span: 0..10,
-///     line: 1,
+///     origin: ShellCommandOrigin::Body { line: 1 },
 ///     error_handling: ErrorHandling::default(),
 ///     timeout_override: None,
 /// };
@@ -91,7 +93,7 @@ pub fn resolve_working_directory(
 #[instrument(skip_all, fields(
     command = %directive.raw_command,
     executable = %directive.executable,
-    line = directive.line,
+    line = directive.origin.line_number(),
 ))]
 pub fn execute_command(
     directive: &ShellDirective,
@@ -102,7 +104,7 @@ pub fn execute_command(
     let resolved_path =
         which::which(&directive.executable).map_err(|_| ShellExpansionError::CommandNotFound {
             command: directive.executable.clone(),
-            line: directive.line,
+            origin: directive.origin.clone(),
         })?;
 
     // 2. Resolve working directory
@@ -129,7 +131,7 @@ pub fn execute_command(
             code: -1,
             stdout: String::new(),
             stderr: e.to_string(),
-            line: directive.line,
+            origin: directive.origin.clone(),
         })?;
 
     // 5. Drain stdout and stderr concurrently via threads
@@ -200,7 +202,7 @@ pub fn execute_command(
                         code: status.code().unwrap_or(-1),
                         stdout,
                         stderr,
-                        line: directive.line,
+                        origin: directive.origin.clone(),
                     });
                 }
             }
@@ -216,7 +218,7 @@ pub fn execute_command(
                             return Err(ShellExpansionError::Timeout {
                                 command: directive.raw_command.clone(),
                                 timeout,
-                                line: directive.line,
+                                origin: directive.origin.clone(),
                             });
                         }
                         ShellTimeoutBehavior::EmptyString => {
@@ -232,7 +234,7 @@ pub fn execute_command(
                     code: -1,
                     stdout: String::new(),
                     stderr: e.to_string(),
-                    line: directive.line,
+                    origin: directive.origin.clone(),
                 });
             }
         }
@@ -258,7 +260,7 @@ fn join_output_thread(
             code: -1,
             stdout: String::new(),
             stderr: format!("{stream_name} capture thread panicked: {detail}"),
-            line: directive.line,
+            origin: directive.origin.clone(),
         }
     })
 }
@@ -266,7 +268,7 @@ fn join_output_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::shell_expansion::types::ErrorHandling;
+    use crate::markdown::compose::shell_expansion::types::{ErrorHandling, ShellCommandOrigin};
     use std::ffi::OsStr;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -278,7 +280,7 @@ mod tests {
             executable: exe.to_string(),
             args: args.iter().map(|s| s.to_string()).collect(),
             span: 0..raw.len(),
-            line,
+            origin: ShellCommandOrigin::Body { line },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
         }
@@ -329,9 +331,9 @@ mod tests {
         let result = execute_command(&d, &options, &source);
         assert!(result.is_err());
         match result.unwrap_err() {
-            ShellExpansionError::CommandNotFound { command, line } => {
+            ShellExpansionError::CommandNotFound { command, origin } => {
                 assert_eq!(command, "nonexistent_command_xyz");
-                assert_eq!(line, 1);
+                assert_eq!(origin, ShellCommandOrigin::Body { line: 1 });
             }
             err => panic!("Expected CommandNotFound, got: {:?}", err),
         }
@@ -424,7 +426,7 @@ mod tests {
                 "import sys; sys.stderr.write('oops'); sys.stdout.write('ok')".to_string(),
             ],
             span: 0..10,
-            line: 1,
+            origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
         };
@@ -445,10 +447,10 @@ mod tests {
         let err = join_output_thread(handle, "stdout", &d).unwrap_err();
         match err {
             ShellExpansionError::ExecutionFailed {
-                code, stderr, line, ..
+                code, stderr, origin, ..
             } => {
                 assert_eq!(code, -1);
-                assert_eq!(line, 7);
+                assert_eq!(origin, ShellCommandOrigin::Body { line: 7 });
                 assert!(stderr.contains("stdout capture thread panicked"));
                 assert!(stderr.contains("boom"));
             }
@@ -484,7 +486,7 @@ mod tests {
             executable: "echo".to_string(),
             args: vec!["hello world".to_string()],
             span: 0..18,
-            line: 1,
+            origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
         };
@@ -510,7 +512,7 @@ mod tests {
                     .to_string(),
             ],
             span: 0..10,
-            line: 1,
+            origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
         };
@@ -553,7 +555,7 @@ mod tests {
             executable: "echo".to_string(),
             args: vec!["\x1b[31mhello\x1b[0m".to_string()],
             span: 0..0,
-            line: 1,
+            origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
         };
@@ -571,7 +573,7 @@ mod tests {
             executable: "echo".to_string(),
             args: vec!["\x1b[31mhello\x1b[0m".to_string()],
             span: 0..0,
-            line: 1,
+            origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
         };
@@ -593,7 +595,7 @@ mod tests {
             executable: "env".to_string(),
             args: vec![],
             span: 0..0,
-            line: 1,
+            origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: None,
         };
@@ -611,7 +613,7 @@ mod tests {
             executable: "sleep".to_string(),
             args: vec!["10".to_string()],
             span: 0..0,
-            line: 1,
+            origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: Some(Duration::from_millis(100)),
         };
@@ -638,7 +640,7 @@ mod tests {
             executable: "sleep".to_string(),
             args: vec!["10".to_string()],
             span: 0..0,
-            line: 1,
+            origin: ShellCommandOrigin::Body { line: 1 },
             error_handling: ErrorHandling::default(),
             timeout_override: Some(Duration::from_millis(100)),
         };
