@@ -7,6 +7,7 @@ use tokio::process::Command;
 use tracing::{debug, info_span, warn};
 
 use super::template::interpolate;
+use crate::actions::bash_executor;
 use crate::actions::{
     CompiledMapper, HookAction, HookDecision, HookResponse, Mapper, ReportFormat, ReportHandler,
 };
@@ -556,10 +557,15 @@ fn execute_sound_effect(name: &str, volume: f32, speed: f32) {
 fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
     let cmd = interpolate(command, meta);
     let rendered_params = interpolate(params, meta);
-    let full_command = if rendered_params.is_empty() {
+    let escaped_params = if rendered_params.is_empty() {
+        String::new()
+    } else {
+        bash_executor::shell_escape(&rendered_params)
+    };
+    let full_command = if escaped_params.is_empty() {
         cmd.clone()
     } else {
-        format!("{cmd} {rendered_params}")
+        format!("{cmd} {escaped_params}")
     };
 
     debug!(%full_command, "Spawning bash action");
