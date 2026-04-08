@@ -280,13 +280,6 @@ gem *args="":
     @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
 
 
-implement topic phase plan="":
-    @echo
-    @echo -e "{{BOLD}}Phase {{phase}}:{{RESET}} {{DIM}}{{topic}}{{RESET}}"
-    @echo
-    @claudine compose @prompts/implement.md --set '{ topic: "{{topic}}", phase: "{{phase}}", plan: "{{plan}}" }' --yolo
-
-
 git-conflict:
     #!/usr/bin/env bash
     base=$(git merge-base HEAD main)
@@ -336,6 +329,26 @@ review *args="":
     @echo
     @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
     @just _speak "Review for {{LIB_NAME}} package has completed."
+
+implement:
+    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 3, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
+    @git add . || just _speak "No dirty files found! Surprising." && just commit
+    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 4, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
+    @git add . || just _speak "No dirty files found! Surprising." && just commit
+    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 5, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
+    @git add . || just _speak "No dirty files found! Surprising." && just commit
+    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 6, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
+    @git add . || just _speak "No dirty files found! Surprising." && just commit
+    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 7, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
+    @git add . || just _speak "No dirty files found! Surprising." && just commit
+    @claudine compose @prompts/implement-phase.md --claude -y --set '{ phase: 8, plan: "@claudine/fixes/2026-04-08-different-configs/plan.md" }'
+    @git add . || just _speak "No dirty files found! Surprising." && just commit
+    @claudine compose @prompts/review-feature.md --codex -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", spec: "spec.md", design: "tech-design.md", iteration: 1 }'
+    @claudine compose @prompts/implement-review.md --claude -y -- set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 1 }'
+    @git add . && just commit
+    @claudine compose @prompts/review-feature.md --codex -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", spec: "spec.md", design: "tech-design.md", iteration: 2 }'
+    @claudine compose @prompts/implement-review.md --claude -y -- set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 2 }'
+    @git add . && just commit || exit 0
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.
