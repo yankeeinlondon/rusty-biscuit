@@ -268,7 +268,7 @@ impl Default for ClaudineConfig {
         Self {
             tts: TtsValue::default(),
             messenger: None,
-            logging: false,
+            logging: true,
             protect: ProtectConfig::default(),
             actions: HashMap::new(),
             preferred_agent: Provider::Claude,

@@ -266,7 +266,7 @@ fn load_init_defaults(repo_scope: bool, repo_root: &std::path::Path) -> InitDefa
             .map(|linking| linking.preference.clone())
             .unwrap_or_default(),
         action_profile: infer_action_profile(&config),
-        protect_enabled: Some(config.settings.protect.as_ref().map_or(false, |p| p.enabled)),
+        protect_enabled: Some(config.settings.protect.as_ref().is_some_and(|p| p.enabled)),
     }
 }
 
