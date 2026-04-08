@@ -555,10 +555,21 @@ fn execute_sound_effect(name: &str, volume: f32, speed: f32) {
 
 /// Execute a validated command asynchronously using direct spawning.
 ///
-/// The command is first validated through [`bash_executor::validate_command`]
-/// which checks against the blocklist, resolves the executable on PATH, and
-/// handles JS/TS interpreter discovery. The resulting `ValidatedCommand`
-/// is then spawned directly (no `sh -c`).
+/// ## Interpolation Contract
+///
+/// Template placeholders in `command` and `params` are expanded by
+/// [`interpolate`] as raw string substitution. The rendered `params`
+/// string is then split by [`shell_words::split`] into discrete `argv`
+/// entries. This means:
+///
+/// - Interpolated values that contain spaces **will** split into
+///   multiple arguments unless the config author quoted them in the
+///   `params` template (e.g., `--message '{{tool_name}}'`).
+/// - No shell metacharacter interpretation occurs because the command
+///   is spawned directly via `Command::new().args()`, not through
+///   `sh -c`.
+/// - The `shell_escape()` helper in `bash_executor` is intentionally
+///   not used here — it is for callers that build `sh -c` strings.
 fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
     let cmd = interpolate(command, meta);
     let rendered_params = interpolate(params, meta);
@@ -1281,5 +1292,48 @@ mod tests {
         .unwrap();
 
         assert!(result.is_none());
+    }
+
+    // =========================================================================
+    // shell_words argv interpolation contract tests
+    // =========================================================================
+
+    #[test]
+    fn shell_words_preserves_spaces_in_quoted_params() {
+        let raw = "--message 'my tool'";
+        let args = shell_words::split(raw).unwrap();
+        assert_eq!(args, vec!["--message", "my tool"]);
+    }
+
+    #[test]
+    fn shell_words_splits_unquoted_spaces() {
+        let raw = "--message my tool";
+        let args = shell_words::split(raw).unwrap();
+        assert_eq!(args, vec!["--message", "my", "tool"]);
+    }
+
+    #[test]
+    fn shell_words_handles_metacharacters_safely() {
+        let raw = "--path /tmp/$(whoami)";
+        let args = shell_words::split(raw).unwrap();
+        assert_eq!(args, vec!["--path", "/tmp/$(whoami)"]);
+    }
+
+    #[test]
+    fn shell_words_handles_quotes_in_values() {
+        let raw = r#"--message "it's a test""#;
+        let args = shell_words::split(raw).unwrap();
+        assert_eq!(args, vec!["--message", "it's a test"]);
+    }
+
+    #[test]
+    fn shell_words_empty_params_produces_no_args() {
+        let raw = "";
+        let args: Vec<String> = if raw.is_empty() {
+            vec![]
+        } else {
+            shell_words::split(raw).unwrap()
+        };
+        assert!(args.is_empty());
     }
 }

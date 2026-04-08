@@ -143,6 +143,13 @@ fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
 
 /// Wraps a value in single quotes, escaping any embedded single quotes.
 ///
+/// **Note:** This function is provided for callers that need explicit
+/// shell escaping (e.g., building `sh -c` strings). The standard dispatch
+/// path does NOT use this function because it passes interpolated values
+/// through `shell_words::split` and then supplies them as discrete `argv`
+/// entries via `Command::args()`, which preserves variable boundaries
+/// without shell interpretation.
+///
 /// ## Examples
 ///
 /// ```
