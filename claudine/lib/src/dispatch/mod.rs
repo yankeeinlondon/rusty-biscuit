@@ -1,6 +1,6 @@
 pub mod loader;
 mod matcher;
-mod runner;
+pub mod runner;
 pub mod template;
 
 use std::io::Write;
@@ -366,6 +366,10 @@ pub async fn dispatch_canonical_with_runtime(
     } else {
         action_response
     };
+
+    // --- Default sounds ---
+    let was_blocked = protect_pre.is_some() || protect_post.is_some();
+    runner::play_default_sound_for_event(&event, runtime.config(), was_blocked);
 
     finalize_response(
         adapter,

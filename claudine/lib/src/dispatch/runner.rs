@@ -13,7 +13,7 @@ use crate::actions::{
 };
 use crate::config::claudine_config::{ClaudineConfig, Gender, TtsValue, VoiceSelection};
 use crate::error::Result;
-use crate::events::{EventMeta, GlobalSettings};
+use crate::events::{AgenticEvent, EventMeta, GlobalSettings};
 use crate::messaging::RuntimeMessagingSettings;
 use crate::services::protect::decision::ProtectDecision;
 
@@ -551,6 +551,40 @@ fn execute_sound_effect(name: &str, volume: f32, speed: f32) {
             warn!(%error, "Sound effect playback failed");
         }
     });
+}
+
+/// Determine which default sound (if any) should play for the given event.
+///
+/// Maps canonical events to sound categories:
+/// - `success`: SessionEnd, TurnComplete
+/// - `attention`: HumanInTheLoop
+/// - `error`: triggered by protect blocks
+pub fn default_sound_for_event<'a>(
+    event: &AgenticEvent,
+    config: &'a ClaudineConfig,
+    was_blocked: bool,
+) -> Option<&'a str> {
+    if was_blocked {
+        return config.default_sounds.error.as_deref();
+    }
+    match event {
+        AgenticEvent::SessionEnd | AgenticEvent::TurnComplete => {
+            config.default_sounds.success.as_deref()
+        }
+        AgenticEvent::HumanInTheLoop => config.default_sounds.attention.as_deref(),
+        _ => None,
+    }
+}
+
+/// Play the appropriate default sound for an event, if configured.
+pub(crate) fn play_default_sound_for_event(
+    event: &AgenticEvent,
+    config: &ClaudineConfig,
+    was_blocked: bool,
+) {
+    if let Some(name) = default_sound_for_event(event, config, was_blocked) {
+        execute_sound_effect(name, 1.0, 1.0);
+    }
 }
 
 /// Execute a validated command asynchronously using direct spawning.

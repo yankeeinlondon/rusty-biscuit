@@ -196,6 +196,51 @@ async fn dispatch_protect_post_evaluates_without_binding() {
     );
 }
 
+/// Default sounds map events to the correct sound categories.
+#[test]
+fn default_sound_maps_event_to_category() {
+    use claudine::config::claudine_config::{ClaudineConfig, DefaultSounds};
+    use claudine::dispatch::runner::default_sound_for_event;
+    use claudine::events::AgenticEvent;
+
+    let config = ClaudineConfig {
+        default_sounds: DefaultSounds {
+            success: Some("doorbell".to_string()),
+            attention: Some("bong".to_string()),
+            error: Some("space-alarm".to_string()),
+        },
+        ..ClaudineConfig::default()
+    };
+
+    // Success events
+    assert_eq!(
+        default_sound_for_event(&AgenticEvent::TurnComplete, &config, false),
+        Some("doorbell"),
+    );
+    assert_eq!(
+        default_sound_for_event(&AgenticEvent::SessionEnd, &config, false),
+        Some("doorbell"),
+    );
+
+    // Attention events
+    assert_eq!(
+        default_sound_for_event(&AgenticEvent::HumanInTheLoop, &config, false),
+        Some("bong"),
+    );
+
+    // Error (blocked)
+    assert_eq!(
+        default_sound_for_event(&AgenticEvent::BeforeTool, &config, true),
+        Some("space-alarm"),
+    );
+
+    // No sound for unmapped events
+    assert_eq!(
+        default_sound_for_event(&AgenticEvent::SessionStart, &config, false),
+        None,
+    );
+}
+
 /// When logging is enabled and no action binding exists, the JSONL log file
 /// should still be written to. This validates that logging is independent
 /// of binding lookup.
