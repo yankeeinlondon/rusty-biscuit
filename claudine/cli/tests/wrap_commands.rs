@@ -2688,12 +2688,12 @@ fn repo_scoped_config_favorite_selects_provider() {
         .output()
         .unwrap();
 
-    // Create repo-local config with goose as the favorite
+    // Create repo-local config with goose as the preferred agent
     let config_dir = workspace.path().join(".claudine");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
         config_dir.join("config.json"),
-        r#"{"version":"1","settings":{"linking":{"preference":["goose"],"canonical_provider":{}}},"providers":{}}"#,
+        r#"{"preferred_agent":"goose"}"#,
     )
     .unwrap();
 

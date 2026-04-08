@@ -547,8 +547,11 @@ pub(crate) fn execute_composition_request_inner(
             },
         )
     } else {
-        match claudine::dispatch::loader::load_runtime_config(None, effective_repo_root) {
-            Ok(config) => (config.settings().clone(), config.messaging().clone()),
+        match claudine::dispatch::loader::load_claudine_config(None, effective_repo_root) {
+            Ok(config) => (
+                claudine::dispatch::loader::bridge_tts_settings(&config),
+                claudine::dispatch::loader::bridge_messaging_settings(&config),
+            ),
             Err(_) => (
                 claudine::events::GlobalSettings::default(),
                 claudine::messaging::RuntimeMessagingSettings {
@@ -1466,8 +1469,9 @@ fn load_config_favorite(cwd: &Path) -> Option<Provider> {
         .ok()
         .flatten()
         .map(|info| info.repo_root);
-    let config = claudine::dispatch::loader::load_config(None, repo_root.as_deref()).ok()?;
-    config.settings.linking?.preference.first().copied()
+    let config =
+        claudine::dispatch::loader::load_claudine_config(None, repo_root.as_deref()).ok()?;
+    Some(config.preferred_agent)
 }
 
 // -- Legacy composition session event --------------------------------------
