@@ -2316,4 +2316,225 @@ mod tests {
         let runtime = compile_canonical_runtime(config.clone(), None).unwrap();
         assert_eq!(runtime.config().preferred_agent, config.preferred_agent);
     }
+
+    // =====================================================================
+    // Phase 5.2: preferred_agent honored by load_claudine_config
+    // =====================================================================
+
+    /// Writes a ClaudineConfig with a non-default preferred_agent and
+    /// verifies that `load_claudine_config` returns it faithfully.
+    #[test]
+    fn load_claudine_config_honors_preferred_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+
+        let config = ClaudineConfig {
+            preferred_agent: Provider::Codex,
+            ..ClaudineConfig::default()
+        };
+        save_claudine_config(&config, &path).unwrap();
+
+        let loaded = load_claudine_config(Some(&path), None).unwrap();
+        assert_eq!(
+            loaded.preferred_agent,
+            Provider::Codex,
+            "preferred_agent should be Codex as written"
+        );
+    }
+
+    /// Verifies that each provider variant round-trips through
+    /// `save_claudine_config` + `load_claudine_config` as preferred_agent.
+    #[test]
+    fn load_claudine_config_preferred_agent_all_providers() {
+        let providers = [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::Gemini,
+            Provider::Goose,
+            Provider::KimiCode,
+            Provider::OpenCode,
+            Provider::QwenCode,
+            Provider::RooCode,
+        ];
+
+        let dir = tempfile::tempdir().unwrap();
+        for provider in providers {
+            let path = dir.path().join(format!("{provider:?}.json"));
+            let config = ClaudineConfig {
+                preferred_agent: provider,
+                ..ClaudineConfig::default()
+            };
+            save_claudine_config(&config, &path).unwrap();
+            let loaded = load_claudine_config(Some(&path), None).unwrap();
+            assert_eq!(
+                loaded.preferred_agent, provider,
+                "preferred_agent round-trip failed for {provider:?}"
+            );
+        }
+    }
+
+    /// Verifies that repo config merge does NOT override preferred_agent
+    /// (merge only touches canonical_provider and actions).
+    #[test]
+    fn load_claudine_config_preferred_agent_not_overridden_by_repo() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // User config with preferred_agent = Codex
+        let user_path = dir.path().join("user.json");
+        let user_config = ClaudineConfig {
+            preferred_agent: Provider::Codex,
+            ..ClaudineConfig::default()
+        };
+        save_claudine_config(&user_config, &user_path).unwrap();
+
+        // Repo config with preferred_agent = Gemini
+        let repo_dir = dir.path().join("repo");
+        std::fs::create_dir_all(repo_dir.join(".claudine")).unwrap();
+        let repo_config = ClaudineConfig {
+            preferred_agent: Provider::Gemini,
+            ..ClaudineConfig::default()
+        };
+        save_claudine_config(&repo_config, &repo_dir.join(".claudine/config.json")).unwrap();
+
+        let loaded = load_claudine_config(Some(&user_path), Some(&repo_dir)).unwrap();
+        assert_eq!(
+            loaded.preferred_agent,
+            Provider::Codex,
+            "repo should not override user's preferred_agent"
+        );
+    }
+
+    // =====================================================================
+    // Phase 5.3: Repo config migration (old format detection)
+    // =====================================================================
+
+    /// Writes an old-format config to the user config path, loads via
+    /// `load_claudine_config`, and verifies the backup was created
+    /// and a `ConfigNotFound` error was returned.
+    #[test]
+    fn load_claudine_config_old_format_creates_backup_and_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join(".claudine");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        // Write old per-provider format
+        let old_config = serde_json::json!({
+            "version": "1.0",
+            "settings": {
+                "tts": { "provider": "say" }
+            },
+            "providers": {
+                "claude": {
+                    "events": {
+                        "session_start": {
+                            "enabled": true,
+                            "actions": [
+                                { "type": "speak", "message": "hello" }
+                            ]
+                        }
+                    }
+                }
+            }
+        });
+
+        let config_path = config_dir.join("config.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&old_config).unwrap(),
+        )
+        .unwrap();
+
+        // Load should fail with ConfigNotFound
+        let result = load_claudine_config(Some(&config_path), None);
+        assert!(result.is_err(), "old format should produce an error");
+        assert!(
+            matches!(result.unwrap_err(), ClaudineError::ConfigNotFound(_)),
+            "error should be ConfigNotFound"
+        );
+
+        // Original file should be gone, .bak should exist
+        assert!(
+            !config_path.exists(),
+            "original config should have been renamed"
+        );
+        assert!(
+            config_dir.join("config.json.bak").exists(),
+            "backup file should exist"
+        );
+    }
+
+    /// After old format backup, a second load attempt also returns
+    /// `ConfigNotFound` since the original file no longer exists.
+    #[test]
+    fn load_claudine_config_after_old_format_backup_returns_config_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join(".claudine");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let old_config = serde_json::json!({
+            "version": "1.0",
+            "settings": {},
+            "providers": {}
+        });
+        let config_path = config_dir.join("config.json");
+        std::fs::write(
+            &config_path,
+            serde_json::to_string(&old_config).unwrap(),
+        )
+        .unwrap();
+
+        // First load triggers backup
+        let _ = load_claudine_config(Some(&config_path), None);
+
+        // Second load: file is gone
+        let result = load_claudine_config(Some(&config_path), None);
+        assert!(
+            matches!(result.unwrap_err(), ClaudineError::ConfigNotFound(_)),
+            "second load should also return ConfigNotFound"
+        );
+    }
+
+    /// Old format with root-level provider keys (no version/providers) is
+    /// also detected and backed up.
+    #[test]
+    fn load_claudine_config_detects_old_provider_keys_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+
+        let old_config = serde_json::json!({
+            "claude": { "events": {} },
+            "gemini": { "events": {} }
+        });
+        std::fs::write(&path, serde_json::to_string(&old_config).unwrap()).unwrap();
+
+        let result = load_claudine_config(Some(&path), None);
+        assert!(
+            matches!(result.unwrap_err(), ClaudineError::ConfigNotFound(_)),
+            "root-level provider keys should be detected as old format"
+        );
+        assert!(
+            dir.path().join("config.json.bak").exists(),
+            "backup should be created for root-level provider key format"
+        );
+    }
+
+    /// A valid new-format config is NOT treated as old format and loads fine.
+    #[test]
+    fn load_claudine_config_does_not_backup_new_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+
+        let new_config = ClaudineConfig {
+            preferred_agent: Provider::Claude,
+            ..ClaudineConfig::default()
+        };
+        save_claudine_config(&new_config, &path).unwrap();
+
+        let loaded = load_claudine_config(Some(&path), None).unwrap();
+        assert_eq!(loaded.preferred_agent, Provider::Claude);
+        assert!(
+            !dir.path().join("config.json.bak").exists(),
+            "new format should not produce a backup"
+        );
+    }
 }
