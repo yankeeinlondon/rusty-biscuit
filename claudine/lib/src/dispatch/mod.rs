@@ -287,74 +287,72 @@ pub async fn dispatch_canonical_with_runtime(
     }
 
     // --- Binding lookup by canonical event only ---
-    let binding = match runtime.get_binding(&event) {
-        Some(binding) => binding,
-        None => {
-            debug!(%event, "No canonical binding found for event, skipping");
-            return Ok(DispatchOutcome::default());
+    let binding = runtime.get_binding(&event);
+
+    // --- Execute actions if binding exists and is valid ---
+    let action_response = if let Some(binding) = binding {
+        if !binding.enabled() {
+            debug!(%event, "Canonical binding disabled, skipping actions");
+            None
+        } else if !matcher::matches_with_regex(binding.matcher(), &meta) {
+            debug!(%event, "Matcher did not match in canonical binding, skipping actions");
+            None
+        } else {
+            if binding.actions().is_empty() {
+                debug!(
+                    %event,
+                    "No actions configured in canonical binding; protect evaluation may still apply"
+                );
+            }
+
+            let resolved_hook = ResolvedHook {
+                event,
+                meta: meta.clone(),
+                provider,
+                actions: binding.actions().to_vec(),
+                can_block,
+            };
+
+            info!(
+                event = %resolved_hook.event,
+                provider = %resolved_hook.provider,
+                tool_name = resolved_hook.meta.tool_name.as_deref().unwrap_or(""),
+                tool_detail = tool_detail.as_deref().unwrap_or(""),
+                action_count = resolved_hook.actions.len(),
+                can_block = resolved_hook.can_block,
+                "Executing resolved canonical hook"
+            );
+
+            runner::execute_actions_v2(
+                &resolved_hook.actions,
+                Some(binding.compiled_mappers()),
+                &resolved_hook.meta,
+                runtime.config(),
+                runtime.messaging(),
+                resolved_hook.can_block,
+                protect_pre.as_ref(),
+            )
+            .await?
         }
+    } else {
+        debug!(%event, "No canonical binding found for event, skipping actions");
+        None
     };
 
-    if !binding.enabled() {
-        debug!(%event, "Canonical binding disabled, skipping");
-        return Ok(DispatchOutcome::default());
-    }
-
-    if binding.actions().is_empty() {
-        debug!(
-            %event,
-            "No actions configured in canonical binding; protect evaluation may still apply"
-        );
-    }
-
-    if !matcher::matches_with_regex(binding.matcher(), &meta) {
-        debug!(%event, "Matcher did not match in canonical binding, skipping");
-        return Ok(DispatchOutcome::default());
-    }
-
-    let resolved_hook = ResolvedHook {
-        event,
-        meta,
-        provider,
-        actions: binding.actions().to_vec(),
-        can_block,
-    };
-
-    info!(
-        event = %resolved_hook.event,
-        provider = %resolved_hook.provider,
-        tool_name = resolved_hook.meta.tool_name.as_deref().unwrap_or(""),
-        tool_detail = tool_detail.as_deref().unwrap_or(""),
-        action_count = resolved_hook.actions.len(),
-        can_block = resolved_hook.can_block,
-        "Executing resolved canonical hook"
-    );
-
-    let action_response = runner::execute_actions_v2(
-        &resolved_hook.actions,
-        Some(binding.compiled_mappers()),
-        &resolved_hook.meta,
-        runtime.config(),
-        runtime.messaging(),
-        resolved_hook.can_block,
-        protect_pre.as_ref(),
-    )
-    .await?;
-
-    // --- JSONL event logging ---
+    // --- JSONL event logging (independent of binding) ---
     if runtime.config().logging {
-        log_dispatch_event(&resolved_hook.meta);
+        log_dispatch_event(&meta);
     }
 
-    // --- Protect post-evaluation ---
+    // --- Protect post-evaluation (independent of binding) ---
     let protect_post = protect_service.and_then(|service| {
         if !matches!(
-            resolved_hook.event,
+            event,
             AgenticEvent::AfterTool | AgenticEvent::TurnComplete | AgenticEvent::SubagentStop
         ) {
             return None;
         }
-        let request = extract_protect_request(&resolved_hook.event, &resolved_hook.meta)?;
+        let request = extract_protect_request(&event, &meta)?;
         let decision = service.evaluate(&request);
         if decision.is_blocked() {
             Some(decision)
@@ -371,8 +369,8 @@ pub async fn dispatch_canonical_with_runtime(
 
     finalize_response(
         adapter,
-        &resolved_hook.event,
-        resolved_hook.can_block,
+        &event,
+        can_block,
         action_response,
         protect_pre,
         protect_post,
@@ -1449,6 +1447,7 @@ mod tests {
 
         let mut config = ClaudineConfig::default();
         config.protect.enabled = false;
+        config.logging = false;
         config.default_sounds = DefaultSounds::default();
 
         let runtime = loader::compile_canonical_runtime(config, None).unwrap();
@@ -1465,11 +1464,12 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(
-            outcome,
-            DispatchOutcome::default(),
-            "no binding means default outcome"
-        );
+        // finalize_response always runs now; SessionStart is non-blocking so
+        // the adapter returns its ack.  Protect decisions should be absent
+        // since SessionStart is not a protect_post event and protect is
+        // disabled.
+        assert!(outcome.protect_pre.is_none());
+        assert!(outcome.protect_post.is_none());
     }
 
     #[tokio::test]
