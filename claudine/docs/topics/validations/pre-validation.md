@@ -14,6 +14,9 @@ If a `skip` or `fail` state is specified in a rule, we immediately give up on th
     - Otherwise the execution will end and a 0/ok exit code will be returned
 - `fail`
     - We provide status to the caller: `Status:with_prose("").state(StatusState::Error)`
+    - If the document is part of a **Sequence** with `fail_fast` set to **true** (the default) then we:
+        - Return with an exit code of 2
+        - 
 
 The `success` state is the case where _all_ pre-validation rules.
 
