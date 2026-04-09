@@ -891,10 +891,16 @@ fn test_network_primary_interface_is_populated() {
     let result = detect().unwrap();
     let network = result.network.expect("network should be present");
 
-    if !network.permission_denied && !network.interfaces.is_empty() {
+    let has_eligible_interface = !network.permission_denied
+        && network
+            .interfaces
+            .iter()
+            .any(|i| !i.flags.is_loopback && !i.ipv4_addresses.is_empty() && i.flags.is_up);
+
+    if has_eligible_interface {
         assert!(
             network.primary_interface.is_some(),
-            "primary_interface should be populated when non-loopback interfaces exist"
+            "primary_interface should be populated when a non-loopback IPv4 interface exists"
         );
         let primary = network.primary_interface.unwrap();
         assert!(

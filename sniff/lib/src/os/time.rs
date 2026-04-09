@@ -303,7 +303,7 @@ fn detect_timezone_name() -> Option<String> {
 /// This is a pure function so it can be unit-tested on any platform.
 #[cfg(any(target_os = "windows", test))]
 fn parse_windows_timezone_id_output(stdout: &[u8]) -> Option<String> {
-    let id = String::from_utf8(stdout.to_vec()).ok()?;
+    let id = std::str::from_utf8(stdout).ok()?;
     let trimmed = id.trim_end().trim_end_matches('\r').trim_end_matches('\n');
     if trimmed.is_empty() {
         return None;

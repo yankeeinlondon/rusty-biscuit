@@ -27,15 +27,15 @@ pub(crate) fn list_windows_scm_services() -> Vec<Service> {
 
 #[cfg(target_os = "windows")]
 fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
-    use windows::Win32::Foundation::{ERROR_MORE_DATA, HANDLE};
+    use windows::Win32::Foundation::ERROR_MORE_DATA;
     use windows::Win32::System::Services::{
         CloseServiceHandle, ENUM_SERVICE_STATUS_PROCESSW, EnumServicesStatusExW, OpenSCManagerW,
-        SC_ENUM_PROCESS_INFO, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_RUNNING, SERVICE_STATE_ALL,
-        SERVICE_STATUS_PROCESS, SERVICE_WIN32,
+        SC_ENUM_PROCESS_INFO, SC_HANDLE, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_RUNNING,
+        SERVICE_STATE_ALL, SERVICE_STATUS_PROCESS, SERVICE_WIN32,
     };
     use windows::core::PCWSTR;
 
-    let scm: HANDLE =
+    let scm: SC_HANDLE =
         unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_ENUMERATE_SERVICE)? };
     let _guard = ScopeGuard::new(|| unsafe { CloseServiceHandle(scm).ok() });
 
@@ -185,9 +185,23 @@ mod tests {
         assert_eq!(svc.pid, None);
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
-    fn test_list_windows_scm_services_returns_vec() {
+    fn test_list_windows_scm_services_stub_returns_empty() {
         let services = list_windows_scm_services();
         assert!(services.is_empty());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_list_windows_scm_services_returns_real_services() {
+        let services = list_windows_scm_services();
+        assert!(
+            !services.is_empty(),
+            "SCM enumeration should return at least one service on Windows"
+        );
+        for svc in &services {
+            assert!(!svc.name.is_empty(), "service name should not be empty");
+        }
     }
 }
