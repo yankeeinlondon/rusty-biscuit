@@ -7,12 +7,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
 use darkmatter::markdown::compose::shell_expansion::{
-    ShellApprovalHandler, ShellExpansionOptions, check_builtin_blacklist, check_user_blacklist,
-    check_whitelist, normalize_command, resolve_policy_paths,
+    check_builtin_blacklist, check_user_blacklist, check_whitelist, normalize_command,
+    resolve_policy_paths, ShellApprovalHandler, ShellExpansionOptions,
 };
+use darkmatter::markdown::compose::ComposeSource;
 
 use crate::harness::error::HarnessError;
 use crate::harness::model::ApprovedRuntimeCommand;
@@ -151,8 +151,9 @@ pub fn validate_and_approve_command_parts(
     if let Some(decision) = options
         .approval_cache
         .lock()
-        .ok()
-        .and_then(|cache| cache.get(&normalized).copied())
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&normalized)
+        .copied()
     {
         match decision {
             CachedApprovalDecision::Allowed => {
@@ -271,9 +272,8 @@ fn cache_approval_decision(
     normalized: &str,
     decision: CachedApprovalDecision,
 ) {
-    if let Ok(mut cache) = cache.lock() {
-        cache.insert(normalized.to_string(), decision);
-    }
+    let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+    cache.insert(normalized.to_string(), decision);
 }
 
 /// Execute an approved command and return its exit code and stdout/stderr.
@@ -360,8 +360,8 @@ mod tests {
     use darkmatter::markdown::compose::shell_expansion::{
         ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
     };
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     struct CapturingHandler {
         captured: Arc<Mutex<Option<ShellApprovalRequest>>>,
