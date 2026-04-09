@@ -296,10 +296,16 @@ pub enum ShellApprovalDecision {
 #[derive(Error, Debug)]
 pub enum ShellExpansionError {
     #[error("Shell directive parse error at {origin}: {message}")]
-    ParseDirective { origin: ShellCommandOrigin, message: String },
+    ParseDirective {
+        origin: ShellCommandOrigin,
+        message: String,
+    },
 
     #[error("Command not found: '{command}' at {origin}")]
-    CommandNotFound { command: String, origin: ShellCommandOrigin },
+    CommandNotFound {
+        command: String,
+        origin: ShellCommandOrigin,
+    },
 
     #[error("Blacklisted command '{command}' at {origin}: {reason}")]
     Blacklisted {
@@ -317,7 +323,10 @@ pub enum ShellExpansionError {
     },
 
     #[error("Command denied: '{command}' at {origin}")]
-    Denied { command: String, origin: ShellCommandOrigin },
+    Denied {
+        command: String,
+        origin: ShellCommandOrigin,
+    },
 
     #[error(
         "Command '{command}' at {origin} was not pre-approved{source_desc}. \
@@ -796,7 +805,9 @@ mod tests {
 
     #[test]
     fn shell_command_origin_frontmatter_display() {
-        let origin = ShellCommandOrigin::Frontmatter { key: "files".to_string() };
+        let origin = ShellCommandOrigin::Frontmatter {
+            key: "files".to_string(),
+        };
         assert_eq!(format!("{origin}"), "frontmatter.files");
     }
 
@@ -808,7 +819,9 @@ mod tests {
 
     #[test]
     fn shell_command_origin_line_number_frontmatter() {
-        let origin = ShellCommandOrigin::Frontmatter { key: "x".to_string() };
+        let origin = ShellCommandOrigin::Frontmatter {
+            key: "x".to_string(),
+        };
         assert_eq!(origin.line_number(), 0);
     }
 }

@@ -16,6 +16,48 @@ use super::types::{
 };
 use crate::markdown::compose::ComposeSource;
 
+/// Detailed output from a successful shell command execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CommandExecution {
+    /// Captured stdout.
+    pub stdout: String,
+    /// Captured stderr.
+    pub stderr: String,
+    /// Present when the command timed out but timeout fallback converted it to
+    /// an empty-string result.
+    pub timeout_fallback: Option<std::time::Duration>,
+}
+
+impl CommandExecution {
+    pub(crate) fn from_streams(stdout: String, stderr: String) -> Self {
+        Self {
+            stdout,
+            stderr,
+            timeout_fallback: None,
+        }
+    }
+
+    fn timeout_fallback(timeout: std::time::Duration) -> Self {
+        Self {
+            stdout: String::new(),
+            stderr: String::new(),
+            timeout_fallback: Some(timeout),
+        }
+    }
+
+    /// Returns stdout and stderr combined using the body-shell contract.
+    pub fn combined_output(&self) -> String {
+        let mut output = self.stdout.clone();
+        if !self.stderr.is_empty() {
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&self.stderr);
+        }
+        output
+    }
+}
+
 /// Resolves the working directory for command execution.
 ///
 /// Resolution order:
@@ -100,6 +142,18 @@ pub fn execute_command(
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
 ) -> Result<String, ShellExpansionError> {
+    Ok(execute_command_detailed(directive, shell_opts, source)?.combined_output())
+}
+
+/// Executes a shell directive command with timeout and output capture.
+///
+/// Returns stdout/stderr separately so callers can implement different output
+/// contracts for body and frontmatter shell expansion.
+pub(crate) fn execute_command_detailed(
+    directive: &ShellDirective,
+    shell_opts: &ShellExpansionOptions,
+    source: &ComposeSource,
+) -> Result<CommandExecution, ShellExpansionError> {
     // 1. Resolve executable with which::which
     let resolved_path =
         which::which(&directive.executable).map_err(|_| ShellExpansionError::CommandNotFound {
@@ -169,22 +223,18 @@ pub fn execute_command(
                 let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
 
                 if status.success() {
-                    // Combine stdout + stderr
-                    let mut output = stdout_str;
-                    if !stderr_str.is_empty() {
-                        if !output.is_empty() {
-                            output.push('\n');
-                        }
-                        output.push_str(&stderr_str);
-                    }
+                    let (mut stdout, mut stderr) = (stdout_str, stderr_str);
 
                     if shell_opts.strip_ansi {
-                        output = biscuit_terminal::prelude::strip_escape_codes(output);
+                        stdout = biscuit_terminal::prelude::strip_escape_codes(stdout);
+                        stderr = biscuit_terminal::prelude::strip_escape_codes(stderr);
                     }
+
+                    let output = CommandExecution::from_streams(stdout, stderr);
 
                     debug!(
                         exit_code = 0,
-                        output_len = output.len(),
+                        output_len = output.combined_output().len(),
                         "shell: command succeeded"
                     );
                     return Ok(output);
@@ -222,7 +272,7 @@ pub fn execute_command(
                             });
                         }
                         ShellTimeoutBehavior::EmptyString => {
-                            return Ok(String::new());
+                            return Ok(CommandExecution::timeout_fallback(timeout));
                         }
                     }
                 }
@@ -433,8 +483,10 @@ mod tests {
         let options = ShellExpansionOptions::default();
         let source = ComposeSource::Unknown;
 
-        let output = execute_command(&d, &options, &source).unwrap();
-        assert_eq!(output, "ok\noops");
+        let output = execute_command_detailed(&d, &options, &source).unwrap();
+        assert_eq!(output.stdout, "ok");
+        assert_eq!(output.stderr, "oops");
+        assert_eq!(output.combined_output(), "ok\noops");
     }
 
     #[test]
@@ -447,7 +499,10 @@ mod tests {
         let err = join_output_thread(handle, "stdout", &d).unwrap_err();
         match err {
             ShellExpansionError::ExecutionFailed {
-                code, stderr, origin, ..
+                code,
+                stderr,
+                origin,
+                ..
             } => {
                 assert_eq!(code, -1);
                 assert_eq!(origin, ShellCommandOrigin::Body { line: 7 });
@@ -651,8 +706,11 @@ mod tests {
         };
         let source = ComposeSource::Unknown;
 
-        let result = execute_command(&d, &options, &source);
+        let result = execute_command_detailed(&d, &options, &source);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "");
+        let result = result.unwrap();
+        assert_eq!(result.stdout, "");
+        assert_eq!(result.stderr, "");
+        assert_eq!(result.timeout_fallback, Some(Duration::from_millis(100)));
     }
 }

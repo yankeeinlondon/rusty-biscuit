@@ -682,9 +682,11 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_shell(mut self, shell: super::shell_expansion::ShellExpansionOptions) -> Self {
         self.shell_timeout = shell.timeout;
+        self.shell_timeout_behavior = shell.timeout_behavior;
         self.shell_policy_root = shell.policy_root;
         self.shell_working_directory = shell.working_directory;
         self.shell_approval_handler = shell.approval_handler;
+        self.shell_strip_ansi = shell.strip_ansi;
         self
     }
 

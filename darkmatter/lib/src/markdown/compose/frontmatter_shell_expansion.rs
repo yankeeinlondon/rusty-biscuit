@@ -9,9 +9,11 @@ use super::shell_expansion::tokenize::tokenize;
 use super::shell_expansion::types::{
     ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective, ShellExpansionError,
 };
+use super::shell_expansion::{execute_prepared_directive, prepare_directive};
 use super::types::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
 use crate::markdown::types::MarkdownResult;
+use rayon::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -20,8 +22,6 @@ use std::collections::HashMap;
 pub(crate) struct FrontmatterShellDirective {
     /// The frontmatter key this directive was extracted from.
     pub key: String,
-    /// The raw template string (post-interpolation value).
-    pub raw_template: String,
     /// The command string between $( and ).
     pub raw_command: String,
     /// The resolved executable name.
@@ -60,100 +60,98 @@ pub(crate) struct FrontmatterShellExpansionReport {
 ///   - If that portion contains `{{` and `}}`, reject (return None)
 ///   - Also check after pipe/chain operators in the original for executable-position
 ///     interpolation
-/// - Return None for any parse failure (frontmatter shell expressions silently
-///   skip invalid values)
+/// - Return an error for any parse/validation failure once the value matches
+///   the `$(` shell-expression shape
 pub(crate) fn parse_shell_value(
     value: &str,
     key: &str,
     original_value: Option<&str>,
-) -> Option<FrontmatterShellDirective> {
+) -> Result<Option<FrontmatterShellDirective>, ShellExpansionError> {
     // Must start with $(
     if !value.starts_with("$(") {
-        return None;
+        return Ok(None);
     }
 
-    // Find the closing )
     let rest = &value[2..];
-    let close_pos = rest.find(')')?;
+    let close_pos = find_unquoted_closing_paren(rest, key)?;
 
     let inner_command = &rest[..close_pos];
     let after_close = &rest[close_pos + 1..];
 
     // Check for ::timeout:N suffix
     let timeout_override = if let Some(timeout_str) = after_close.strip_prefix("::timeout:") {
-        // Must be the entire remainder
-        let timeout_val: u64 = timeout_str.parse().ok()?;
+        let timeout_val: u64 = timeout_str.parse().map_err(|_| {
+            frontmatter_parse_error(
+                key,
+                "Invalid ::timeout value in frontmatter shell expression; expected a positive integer number of seconds",
+            )
+        })?;
         if timeout_val == 0 {
-            return None; // reject zero timeout
+            return Err(frontmatter_parse_error(
+                key,
+                "Frontmatter shell timeout must be greater than zero",
+            ));
         }
         Some(std::time::Duration::from_secs(timeout_val))
     } else if !after_close.is_empty() {
-        // If there's content after ) but it's not ::timeout:, reject
-        return None;
+        return Err(frontmatter_parse_error(
+            key,
+            "Unexpected trailing content after frontmatter shell expression",
+        ));
     } else {
         None
     };
 
     // Check executable-token interpolation rule if we have the original
     if let Some(original) = original_value {
-        if !validate_no_executable_interpolation(original) {
-            return None;
-        }
+        validate_no_executable_interpolation(original, key)?;
     }
 
     // Tokenize the inner command
-    let tokens = tokenize(inner_command).ok()?;
-    if tokens.is_empty() {
-        return None;
-    }
+    let tokens = tokenize(inner_command).map_err(|error| remap_parse_error(error, key))?;
 
     let executable = tokens[0].clone();
     let args = tokens[1..].to_vec();
 
-    Some(FrontmatterShellDirective {
+    Ok(Some(FrontmatterShellDirective {
         key: key.to_string(),
-        raw_template: value.to_string(),
         raw_command: inner_command.to_string(),
         executable,
         args,
         timeout_override,
-    })
+    }))
 }
 
 /// Validates that the executable token doesn't contain interpolation.
 ///
 /// Checks the ORIGINAL (pre-interpolation) string to ensure `{{ }}` doesn't
 /// appear in the executable position (first token after `$(` and before whitespace).
-fn validate_no_executable_interpolation(original: &str) -> bool {
+fn validate_no_executable_interpolation(
+    original: &str,
+    key: &str,
+) -> Result<(), ShellExpansionError> {
     // Must start with $(
     if !original.starts_with("$(") {
-        return true;
+        return Ok(());
     }
 
     let rest = &original[2..];
-    let close_pos = match rest.find(')') {
-        Some(pos) => pos,
-        None => return true, // malformed, will fail elsewhere
-    };
+    let close_pos = find_unquoted_closing_paren(rest, key)?;
 
     let inner = &rest[..close_pos];
 
     // Extract the executable portion (up to first whitespace)
-    let executable_portion = inner
-        .split_whitespace()
-        .next()
-        .unwrap_or(inner);
+    let executable_portion = first_token_portion(inner);
 
     // Check if it contains {{ and }}
     if executable_portion.contains("{{") && executable_portion.contains("}}") {
-        return false;
+        return Err(frontmatter_parse_error(
+            key,
+            "Frontmatter shell executable may not come from interpolation",
+        ));
     }
 
-    // Also check for operators that could introduce executable interpolation
-    // The tokenizer already rejects pipes, semicolons, etc., but we need to
-    // check the ORIGINAL string before tokenization for interpolation in those positions
-    // For now, the main check is the first token
-    true
+    Ok(())
 }
 
 /// Scans all top-level string-valued frontmatter entries and returns candidates.
@@ -162,7 +160,7 @@ fn validate_no_executable_interpolation(original: &str) -> bool {
 pub(crate) fn scan_frontmatter(
     frontmatter: &Frontmatter,
     pre_interpolation_snapshot: Option<&HashMap<String, String>>,
-) -> Vec<FrontmatterShellDirective> {
+) -> Result<Vec<FrontmatterShellDirective>, ShellExpansionError> {
     let mut directives = Vec::new();
     let fm = frontmatter.as_map();
 
@@ -173,13 +171,13 @@ pub(crate) fn scan_frontmatter(
                 .and_then(|map| map.get(key))
                 .map(|s| s.as_str());
 
-            if let Some(directive) = parse_shell_value(s, key, original) {
+            if let Some(directive) = parse_shell_value(s, key, original)? {
                 directives.push(directive);
             }
         }
     }
 
-    directives
+    Ok(directives)
 }
 
 /// Executes all frontmatter shell expansion directives and rewrites
@@ -200,7 +198,7 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     runtime: &mut PipelineRuntime,
     pre_interpolation_snapshot: Option<&HashMap<String, String>>,
 ) -> MarkdownResult<FrontmatterShellExpansionReport> {
-    let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot);
+    let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot)?;
 
     if candidates.is_empty() {
         return Ok(FrontmatterShellExpansionReport {
@@ -215,9 +213,9 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     let policy_paths = resolve_policy_paths(&shell_opts, &options.source)?;
     runtime.shell.ensure_loaded(&policy_paths)?;
 
-    let mut results: Vec<(String, String)> = Vec::new();
+    let mut prepared = Vec::with_capacity(candidates.len());
 
-    for candidate in &candidates {
+    for (index, candidate) in candidates.iter().enumerate() {
         // Build a ShellDirective compatible with the existing execution infrastructure
         let directive = ShellDirective {
             raw_command: candidate.raw_command.clone(),
@@ -231,43 +229,107 @@ pub(crate) fn execute_frontmatter_shell_expansion(
             timeout_override: candidate.timeout_override,
         };
 
-        // Execute through existing shell expansion infrastructure
-        let output = execute_directive(&directive, options, &policy_paths, &mut runtime.shell)?;
-
-        // Trim all surrounding whitespace per spec
-        let trimmed = output.trim().to_string();
-
-        results.push((candidate.key.clone(), trimmed));
+        prepared.push((
+            index,
+            candidate.key.clone(),
+            prepare_directive(&directive, options, &policy_paths, &mut runtime.shell)?,
+        ));
     }
+
+    let mut executions = prepared
+        .into_par_iter()
+        .map(|(index, key, prepared)| (index, key, execute_prepared_directive(&prepared, options)))
+        .collect::<Vec<_>>();
+    executions.sort_by_key(|(index, _, _)| *index);
 
     // Rewrite frontmatter values
     let fm_mut = frontmatter.as_map_mut();
-    let replacements = results.len();
-    for (key, value) in results {
-        fm_mut.insert(key, Value::String(value));
+    let mut warnings = Vec::new();
+    for (_, key, execution) in executions {
+        let execution = execution?;
+        warnings.extend(execution.warnings);
+        fm_mut.insert(key, Value::String(execution.stdout.trim().to_string()));
     }
 
     let approvals_used = runtime.shell.take_recent_approval_count();
 
     Ok(FrontmatterShellExpansionReport {
-        replacements,
+        replacements: candidates.len(),
         approvals_used,
-        warnings: vec![],
+        warnings,
     })
 }
 
-/// Executes a shell directive with policy enforcement and approval flow.
-///
-/// This is a thin wrapper around the existing shell expansion infrastructure
-/// that adapts it for frontmatter shell commands.
-fn execute_directive(
-    directive: &ShellDirective,
-    options: &ComposeOptions,
-    policy_paths: &super::shell_expansion::types::ShellPolicyPaths,
-    shell_runtime: &mut super::shell_expansion::types::ShellExpansionRuntime,
-) -> Result<String, ShellExpansionError> {
-    // Delegate to the existing shell expansion infrastructure
-    super::shell_expansion::execute_directive(directive, options, policy_paths, shell_runtime)
+fn frontmatter_parse_error(key: &str, message: impl Into<String>) -> ShellExpansionError {
+    ShellExpansionError::ParseDirective {
+        origin: ShellCommandOrigin::Frontmatter {
+            key: key.to_string(),
+        },
+        message: message.into(),
+    }
+}
+
+fn remap_parse_error(error: ShellExpansionError, key: &str) -> ShellExpansionError {
+    match error {
+        ShellExpansionError::ParseDirective { message, .. } => {
+            frontmatter_parse_error(key, message)
+        }
+        other => other,
+    }
+}
+
+fn find_unquoted_closing_paren(rest: &str, key: &str) -> Result<usize, ShellExpansionError> {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+
+    for (idx, ch) in rest.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if !in_single => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            ')' if !in_single && !in_double => return Ok(idx),
+            _ => {}
+        }
+    }
+
+    Err(frontmatter_parse_error(
+        key,
+        "Missing closing ')' in frontmatter shell expression",
+    ))
+}
+
+fn first_token_portion(input: &str) -> &str {
+    let trimmed = input.trim_start();
+    if trimmed.is_empty() {
+        return trimmed;
+    }
+
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+
+    for (idx, ch) in trimmed.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' if !in_single => escaped = true,
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            c if c.is_whitespace() && !in_single && !in_double => return &trimmed[..idx],
+            _ => {}
+        }
+    }
+
+    trimmed
 }
 
 #[cfg(test)]
@@ -278,8 +340,8 @@ mod tests {
     #[test]
     fn detects_simple_shell_expression() {
         let result = parse_shell_value("$(echo hello)", "key", None);
-        assert!(result.is_some());
-        let directive = result.unwrap();
+        assert!(result.is_ok());
+        let directive = result.unwrap().unwrap();
         assert_eq!(directive.executable, "echo");
         assert_eq!(directive.args, vec!["hello"]);
         assert_eq!(directive.raw_command, "echo hello");
@@ -289,41 +351,44 @@ mod tests {
     #[test]
     fn detects_expression_with_timeout() {
         let result = parse_shell_value("$(pwd)::timeout:3", "key", None);
-        assert!(result.is_some());
-        let directive = result.unwrap();
+        assert!(result.is_ok());
+        let directive = result.unwrap().unwrap();
         assert_eq!(directive.executable, "pwd");
         assert_eq!(directive.args.len(), 0);
-        assert_eq!(directive.timeout_override, Some(std::time::Duration::from_secs(3)));
+        assert_eq!(
+            directive.timeout_override,
+            Some(std::time::Duration::from_secs(3))
+        );
     }
 
     #[test]
     fn ignores_non_shell_string() {
         let result = parse_shell_value("plain text", "key", None);
-        assert!(result.is_none());
+        assert!(matches!(result, Ok(None)));
     }
 
     #[test]
     fn ignores_partial_match_no_closing() {
         let result = parse_shell_value("$(echo hello", "key", None);
-        assert!(result.is_none());
+        assert!(result.is_err());
     }
 
     #[test]
     fn ignores_embedded_expression() {
         let result = parse_shell_value("prefix $(cmd) suffix", "key", None);
-        assert!(result.is_none());
+        assert!(matches!(result, Ok(None)));
     }
 
     #[test]
     fn rejects_zero_timeout() {
         let result = parse_shell_value("$(echo)::timeout:0", "key", None);
-        assert!(result.is_none());
+        assert!(result.is_err());
     }
 
     #[test]
     fn rejects_non_integer_timeout() {
         let result = parse_shell_value("$(echo)::timeout:abc", "key", None);
-        assert!(result.is_none());
+        assert!(result.is_err());
     }
 
     #[test]
@@ -331,7 +396,7 @@ mod tests {
         let original = "$({{cmd}} arg)";
         let resolved = "$(ls arg)";
         let result = parse_shell_value(resolved, "key", Some(original));
-        assert!(result.is_none());
+        assert!(result.is_err());
     }
 
     #[test]
@@ -339,8 +404,8 @@ mod tests {
         let original = "$(dirname {{file}})";
         let resolved = "$(dirname README.md)";
         let result = parse_shell_value(resolved, "key", Some(original));
-        assert!(result.is_some());
-        let directive = result.unwrap();
+        assert!(result.is_ok());
+        let directive = result.unwrap().unwrap();
         assert_eq!(directive.executable, "dirname");
         assert_eq!(directive.args, vec!["README.md"]);
     }
@@ -349,10 +414,18 @@ mod tests {
     fn accepts_no_interpolation_at_all() {
         let original = "$(echo hello)";
         let result = parse_shell_value(original, "key", Some(original));
-        assert!(result.is_some());
-        let directive = result.unwrap();
+        assert!(result.is_ok());
+        let directive = result.unwrap().unwrap();
         assert_eq!(directive.executable, "echo");
         assert_eq!(directive.args, vec!["hello"]);
+    }
+
+    #[test]
+    fn accepts_closing_paren_inside_quoted_argument() {
+        let result = parse_shell_value("$(printf ')')", "key", None).unwrap();
+        let directive = result.unwrap();
+        assert_eq!(directive.executable, "printf");
+        assert_eq!(directive.args, vec![")"]);
     }
 
     #[test]
@@ -363,7 +436,7 @@ mod tests {
         fm.insert("cmd2", json!("$(pwd)")).unwrap();
         fm.insert("number", json!(42)).unwrap();
 
-        let directives = scan_frontmatter(&fm, None);
+        let directives = scan_frontmatter(&fm, None).unwrap();
         assert_eq!(directives.len(), 2);
         assert!(directives.iter().any(|d| d.key == "cmd1"));
         assert!(directives.iter().any(|d| d.key == "cmd2"));
@@ -372,10 +445,11 @@ mod tests {
     #[test]
     fn scan_skips_nested_objects() {
         let mut fm = Frontmatter::new();
-        fm.insert("outer", json!({"inner": "$(echo nested)"})).unwrap();
+        fm.insert("outer", json!({"inner": "$(echo nested)"}))
+            .unwrap();
         fm.insert("top", json!("$(echo top)")).unwrap();
 
-        let directives = scan_frontmatter(&fm, None);
+        let directives = scan_frontmatter(&fm, None).unwrap();
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].key, "top");
     }
@@ -383,12 +457,32 @@ mod tests {
     #[test]
     fn scan_skips_arrays() {
         let mut fm = Frontmatter::new();
-        fm.insert("arr", json!(["$(echo one)", "$(echo two)"])).unwrap();
+        fm.insert("arr", json!(["$(echo one)", "$(echo two)"]))
+            .unwrap();
         fm.insert("top", json!("$(echo top)")).unwrap();
 
-        let directives = scan_frontmatter(&fm, None);
+        let directives = scan_frontmatter(&fm, None).unwrap();
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].key, "top");
+    }
+
+    #[test]
+    fn scan_errors_on_malformed_shell_expression() {
+        let mut fm = Frontmatter::new();
+        fm.insert("bad", json!("$(echo hi)::timeout:0")).unwrap();
+
+        let err = scan_frontmatter(&fm, None).unwrap_err();
+        match err {
+            ShellExpansionError::ParseDirective { origin, .. } => {
+                assert_eq!(
+                    origin,
+                    ShellCommandOrigin::Frontmatter {
+                        key: "bad".to_string()
+                    }
+                );
+            }
+            other => panic!("Expected ParseDirective, got {other:?}"),
+        }
     }
 }
 
@@ -403,7 +497,9 @@ mod execution_tests {
     use crate::markdown::compose::types::ComposeOptions;
     use crate::markdown::frontmatter::Frontmatter;
     use serde_json::json;
+    use std::path::PathBuf;
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
     fn fm_from_json(data: serde_json::Value) -> Frontmatter {
@@ -426,6 +522,13 @@ mod execution_tests {
 
     fn make_runtime() -> PipelineRuntime {
         PipelineRuntime::new(16, CacheAccessMode::Off, None)
+    }
+
+    fn find_python() -> Option<PathBuf> {
+        ["python3", "python"]
+            .into_iter()
+            .find_map(|candidate| which::which(candidate).ok())
+            .filter(|path| !path.as_os_str().is_empty())
     }
 
     #[test]
@@ -502,5 +605,94 @@ mod execution_tests {
             execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
         assert_eq!(report.replacements, 0);
         assert_eq!(report.approvals_used, 0);
+    }
+
+    #[test]
+    fn execute_frontmatter_uses_stdout_only() {
+        let Some(python) = find_python() else {
+            return;
+        };
+
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "val": format!(
+                "$({} -c \"import sys; sys.stdout.write('out'); sys.stderr.write('warn')\")",
+                python.display()
+            )
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(report.replacements, 1);
+        assert_eq!(fm.as_map().get("val"), Some(&json!("out")));
+    }
+
+    #[test]
+    fn execute_timeout_fallback_emits_warning() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = fm_from_json(json!({
+            "val": "$(sleep 1)"
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            timeout: Duration::from_millis(100),
+            timeout_behavior:
+                super::super::shell_expansion::types::ShellTimeoutBehavior::EmptyString,
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        assert_eq!(fm.as_map().get("val"), Some(&json!("")));
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report.warnings[0].message.contains("timed out"));
+    }
+
+    #[test]
+    fn execute_frontmatter_commands_concurrently() {
+        let Some(python) = find_python() else {
+            return;
+        };
+
+        let temp_dir = TempDir::new().unwrap();
+        let sleep_cmd = |label: &str| {
+            format!(
+                "$({} -c \"import time; time.sleep(0.35); print('{}', end='')\")",
+                python.display(),
+                label
+            )
+        };
+        let mut fm = fm_from_json(json!({
+            "one": sleep_cmd("one"),
+            "two": sleep_cmd("two")
+        }));
+        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+            timeout: Duration::from_secs(2),
+            policy_root: Some(temp_dir.path().to_path_buf()),
+            approval_handler: Some(Arc::new(MockApproval)),
+            ..Default::default()
+        });
+        let mut runtime = make_runtime();
+
+        let start = Instant::now();
+        let report =
+            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(report.replacements, 2);
+        assert_eq!(fm.as_map().get("one"), Some(&json!("one")));
+        assert_eq!(fm.as_map().get("two"), Some(&json!("two")));
+        assert!(
+            elapsed < Duration::from_millis(650),
+            "expected concurrent execution under 650ms, got {elapsed:?}"
+        );
     }
 }

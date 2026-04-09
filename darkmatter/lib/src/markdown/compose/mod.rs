@@ -85,7 +85,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info, instrument, trace, warn};
 
 use cache::operation::CacheableOperation;
-use shell_expansion::{apply_replacements_in_reverse, execute_directive};
+use shell_expansion::{apply_replacements_in_reverse, execute_directive_detailed};
 
 /// Shorten an absolute path for display in diagnostics.
 ///
@@ -127,6 +127,48 @@ fn find_git_root_from(start: &Path) -> Option<PathBuf> {
             return None;
         }
     }
+}
+
+/// Applies pre-effective-state frontmatter preparation shared by runtime
+/// compose and shell-command discovery.
+///
+/// This mutates frontmatter with external-state defaults and `--set`
+/// overrides using the same rules the real compose pipeline uses. When
+/// requested, it also captures the post-merge/pre-interpolation string
+/// snapshot used for frontmatter shell executable provenance checks.
+pub(crate) fn prepare_frontmatter_for_compose(
+    markdown: &mut Markdown,
+    options: &ComposeOptions,
+    capture_pre_interpolation_snapshot: bool,
+) -> Option<HashMap<String, String>> {
+    // Apply external state as defaults using deep-merge: nested keys
+    // from external state fill in missing values at every level, not
+    // just top-level keys. Frontmatter values take precedence.
+    if let Some(external) = options.external_state.as_ref() {
+        let fm = markdown.frontmatter_mut().as_map_mut();
+        let current = Value::Object(fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+        let merged = state::deep_merge(external, &current);
+        if let Value::Object(map) = merged {
+            *fm = map.into_iter().collect();
+        }
+    }
+
+    // Apply set overrides: unconditionally overwrite frontmatter keys.
+    if let Some(overrides) = options.set_overrides.as_ref().and_then(Value::as_object) {
+        let fm = markdown.frontmatter_mut().as_map_mut();
+        for (key, value) in overrides {
+            fm.insert(key.clone(), value.clone());
+        }
+    }
+
+    capture_pre_interpolation_snapshot.then(|| {
+        markdown
+            .frontmatter()
+            .as_map()
+            .iter()
+            .filter_map(|(key, value)| value.as_str().map(|s| (key.clone(), s.to_string())))
+            .collect()
+    })
 }
 
 #[derive(Clone)]
@@ -304,41 +346,11 @@ impl Markdown {
             let mut report = ComposeReport::new();
             let mut perf = perf::PerfCollector::new(options.perf_enabled);
 
-            // Apply external state as defaults using deep-merge: nested keys
-            // from external state fill in missing values at every level, not
-            // just top-level keys. Frontmatter values take precedence.
-            if let Some(external) = options.external_state.as_ref() {
-                let fm = self.frontmatter_mut().as_map_mut();
-                let current =
-                    Value::Object(fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
-                let merged = state::deep_merge(external, &current);
-                if let Value::Object(map) = merged {
-                    *fm = map.into_iter().collect();
-                }
-            }
-
-            // Apply set overrides: unconditionally overwrite frontmatter keys.
-            if let Some(overrides) = options.set_overrides.as_ref().and_then(Value::as_object) {
-                let fm = self.frontmatter_mut().as_map_mut();
-                for (key, value) in overrides {
-                    fm.insert(key.clone(), value.clone());
-                }
-            }
-
-            // Snapshot frontmatter string values before interpolation for the
-            // executable-token provenance check in frontmatter shell expansion.
-            let pre_interpolation_snapshot: Option<HashMap<String, String>> =
-                if options.is_enabled(ComposeOperation::FrontmatterShellExpansion) {
-                    let mut snapshot = HashMap::new();
-                    for (key, value) in self.frontmatter().as_map().iter() {
-                        if let Some(s) = value.as_str() {
-                            snapshot.insert(key.clone(), s.to_string());
-                        }
-                    }
-                    Some(snapshot)
-                } else {
-                    None
-                };
+            let pre_interpolation_snapshot = prepare_frontmatter_for_compose(
+                self,
+                &options,
+                options.is_enabled(ComposeOperation::FrontmatterShellExpansion),
+            );
 
             // Frontmatter Interpolation: resolve {{ }} in frontmatter values
             // before EffectiveState is built, since it mutates frontmatter
@@ -365,13 +377,12 @@ impl Markdown {
             // visible to all later stages.
             if options.is_enabled(ComposeOperation::FrontmatterShellExpansion) {
                 let fse_start = perf.is_enabled().then(std::time::Instant::now);
-                let fse_report =
-                    frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
-                        self.frontmatter_mut(),
-                        &options,
-                        runtime,
-                        pre_interpolation_snapshot.as_ref(),
-                    )?;
+                let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
+                    self.frontmatter_mut(),
+                    &options,
+                    runtime,
+                    pre_interpolation_snapshot.as_ref(),
+                )?;
                 report.frontmatter_shell_expansions_applied = fse_report.replacements;
                 report.shell_approvals_used += fse_report.approvals_used;
                 report.warnings.extend(fse_report.warnings);
@@ -967,9 +978,10 @@ impl Markdown {
         let mut replacements = Vec::new();
 
         for directive in directives {
-            let replacement =
-                execute_directive(&directive, options, &policy_paths, &mut runtime.shell)?;
-            replacements.push((directive.span.clone(), replacement));
+            let execution =
+                execute_directive_detailed(&directive, options, &policy_paths, &mut runtime.shell)?;
+            replacements.push((directive.span.clone(), execution.combined_output()));
+            report.warnings.extend(execution.warnings);
             report.shell_expansions_applied += 1;
         }
 
@@ -3803,10 +3815,11 @@ Rounded: {{ round(pi) }}"#;
     mod frontmatter_shell_expansion_integration {
         use super::*;
         use crate::markdown::compose::shell_expansion::types::{
-            ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
-            ShellExpansionError, ShellExpansionOptions,
+            ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
+            ShellExpansionOptions,
         };
         use std::sync::Arc;
+        use std::time::Duration;
         use tempfile::TempDir;
 
         struct MockApproval;
@@ -3849,8 +3862,7 @@ Rounded: {{ round(pi) }}"#;
         #[test]
         fn frontmatter_interpolation_feeds_into_shell_expansion() {
             let temp_dir = TempDir::new().unwrap();
-            let content =
-                "---\nfile: README.md\ndir: \"$(dirname {{file}})\"\n---\nDir: {{dir}}\n";
+            let content = "---\nfile: README.md\ndir: \"$(dirname {{file}})\"\n---\nDir: {{dir}}\n";
             let md: Markdown = content.into();
 
             let options = ComposeOptions::new()
@@ -3910,6 +3922,49 @@ Rounded: {{ round(pi) }}"#;
             let (composed, report) = md.compose_with(options).unwrap();
             assert_eq!(report.frontmatter_shell_expansions_applied, 0);
             assert!(composed.content().contains("Body text"));
+        }
+
+        #[test]
+        fn frontmatter_shell_timeout_empty_emits_warning() {
+            let temp_dir = TempDir::new().unwrap();
+            let content = "---\nval: \"$(sleep 1)\"\n---\nValue: {{val}}\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new()
+                .only(&[
+                    ComposeOperation::FrontmatterShellExpansion,
+                    ComposeOperation::Interpolation,
+                ])
+                .with_shell(ShellExpansionOptions {
+                    timeout: Duration::from_millis(100),
+                    timeout_behavior: super::ShellTimeoutBehavior::EmptyString,
+                    policy_root: Some(temp_dir.path().to_path_buf()),
+                    approval_handler: Some(Arc::new(MockApproval)),
+                    ..Default::default()
+                });
+
+            let (composed, report) = md.compose_with(options).unwrap();
+            assert!(composed.content().contains("Value: "));
+            assert_eq!(report.frontmatter_shell_expansions_applied, 1);
+            assert_eq!(report.warnings.len(), 1);
+            assert!(report.warnings[0].message.contains("timed out"));
+        }
+
+        #[test]
+        fn frontmatter_shell_rejects_interpolated_executable() {
+            let content = "---\ncmd_name: echo\nval: \"$({{cmd_name}} hello)\"\n---\n";
+            let md: Markdown = content.into();
+
+            let options = ComposeOptions::new().only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::FrontmatterShellExpansion,
+            ]);
+
+            let err = md.compose_with(options).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("Frontmatter shell executable may not come from interpolation")
+            );
         }
     }
 }

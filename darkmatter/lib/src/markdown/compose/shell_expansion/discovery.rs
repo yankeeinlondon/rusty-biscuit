@@ -13,6 +13,7 @@ use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::frontmatter_interpolation::interpolate_frontmatter;
 use crate::markdown::compose::frontmatter_shell_expansion::scan_frontmatter;
+use crate::markdown::compose::prepare_frontmatter_for_compose;
 use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
@@ -93,15 +94,14 @@ pub fn collect_shell_commands(
     // ── Phase 1: Discover frontmatter shell commands ───────────────
     {
         let mut fm_clone = markdown.clone();
+        let pre_interpolation_snapshot =
+            prepare_frontmatter_for_compose(&mut fm_clone, options, true);
         if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
-            let _ = interpolate_frontmatter(
-                fm_clone.frontmatter_mut(),
-                options.context(),
-                false,
-            );
+            let _ = interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false);
         }
 
-        let candidates = scan_frontmatter(fm_clone.frontmatter(), None);
+        let candidates =
+            scan_frontmatter(fm_clone.frontmatter(), pre_interpolation_snapshot.as_ref())?;
 
         for candidate in candidates {
             let (executable, args) = if which::which(&candidate.executable).is_ok() {
@@ -134,14 +134,19 @@ pub fn collect_shell_commands(
     // ── Phase 2: Discover body shell commands ──────────────────────
     // Run compose with only interpolation + transclusion (no shell execution).
     // ::shell directives remain as text in the composed output.
-    let discovery_options = options.clone().only(&[
+    let discovery_ops: Vec<_> = [
         ComposeOperation::FrontmatterInterpolation,
         ComposeOperation::TextReplacement,
         ComposeOperation::PageBlocks,
         ComposeOperation::Interpolation,
         ComposeOperation::BlockTransclusion,
         ComposeOperation::FrontmatterTransclusion,
-    ]);
+    ]
+    .into_iter()
+    .filter(|op| options.is_enabled(*op))
+    .collect();
+
+    let discovery_options = options.clone().only(&discovery_ops);
 
     let (composed, report) = markdown.compose_with(discovery_options)?;
 
@@ -365,7 +370,11 @@ replace:
             child_path.canonicalize().unwrap()
         );
         // Line 2 in child.md (line 1 is "# Child", line 2 is "::shell echo from-child")
-        assert_eq!(child_entry.origin, ShellCommandOrigin::Body { line: 2 }, "line should be 2 in the child file");
+        assert_eq!(
+            child_entry.origin,
+            ShellCommandOrigin::Body { line: 2 },
+            "line should be 2 in the child file"
+        );
     }
 
     #[test]
@@ -378,8 +387,16 @@ replace:
 
         assert_eq!(entries.len(), 2, "entries: {:?}", entries);
         let executables: Vec<&str> = entries.iter().map(|e| e.executable.as_str()).collect();
-        assert!(executables.contains(&"sniff"), "Missing sniff: {:?}", executables);
-        assert!(executables.contains(&"echo"), "Missing echo: {:?}", executables);
+        assert!(
+            executables.contains(&"sniff"),
+            "Missing sniff: {:?}",
+            executables
+        );
+        assert!(
+            executables.contains(&"echo"),
+            "Missing echo: {:?}",
+            executables
+        );
     }
 
     #[test]
@@ -420,5 +437,44 @@ replace:
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].raw_command, "echo world");
+    }
+
+    #[test]
+    fn discovery_uses_external_state_before_frontmatter_scan() {
+        let content = "---\ncmd: \"{{tool}}\"\n---\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new()
+            .with_external_state(serde_json::json!({"tool": "$(echo external)"}));
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_command, "echo external");
+    }
+
+    #[test]
+    fn discovery_uses_set_overrides_before_frontmatter_scan() {
+        let content = "---\ncmd: \"$(echo before)\"\n---\n";
+        let md: Markdown = content.into();
+        let options =
+            ComposeOptions::new().with_set_overrides(serde_json::json!({"cmd": "$(echo after)"}));
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_command, "echo after");
+    }
+
+    #[test]
+    fn discovery_rejects_interpolated_frontmatter_executable() {
+        let content = "---\ncmd_name: echo\ncmd: \"$({{cmd_name}} hello)\"\n---\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let err = collect_shell_commands(&md, &options).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Frontmatter shell executable may not come from interpolation")
+        );
     }
 }
