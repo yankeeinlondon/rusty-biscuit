@@ -1,28 +1,12 @@
 {
     "folders": [
         {
+            "name": "shared",
+            "path": ".ai"
+        },
+        {
             "name": "Darkmatter",
             "path": "darkmatter"
-        },
-        {
-            "name": "Claudine Prompts",
-            "path": ".claudine/prompts"
-        },
-        {
-            "name": "Monorepo Prompts",
-            "path": "prompts"
-        },
-        {
-            "name": "Monorepo Skills",
-            "path": ".claude/skills"
-        },
-        {
-            "name": "Agent Definitions",
-            "path": ".claude/agents"
-        },
-        {
-            "name": "Monorepo Memory",
-            "path": ".memory"
         },
         {
             "name": "~ monorepo",
