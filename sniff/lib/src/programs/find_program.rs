@@ -764,7 +764,7 @@ mod tests {
     /// Verifies the index does not include non-executable files.
     #[test]
     fn test_executable_index_excludes_non_executable() {
-        use crate::test_helpers::{ScopedEnv, ENV_MUTEX};
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
         use std::fs;
         use tempfile::tempdir;
 
@@ -800,7 +800,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_executable_index_includes_executable() {
-        use crate::test_helpers::{ScopedEnv, ENV_MUTEX};
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;

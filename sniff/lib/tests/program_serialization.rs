@@ -26,7 +26,8 @@ fn all_categories_serialization_roundtrip() {
             let json = serde_json::to_string(&detector).unwrap();
             let decoded: CategoryDetector<$t> = serde_json::from_str(&json).unwrap();
             assert_eq!(
-                detector, decoded,
+                detector,
+                decoded,
                 "Roundtrip failed for {}",
                 std::any::type_name::<$t>()
             );
@@ -53,7 +54,8 @@ fn deserialize_from_legacy_boolean_format() {
 
 #[test]
 fn deserialize_from_rich_entry_format() {
-    let json = r#"{"vim": {"installed": true, "name": "Vim", "description": "test", "website": "test"}}"#;
+    let json =
+        r#"{"vim": {"installed": true, "name": "Vim", "description": "test", "website": "test"}}"#;
     let detector: CategoryDetector<Editor> = serde_json::from_str(json).unwrap();
     assert!(detector.is_installed(Editor::Vim));
 }

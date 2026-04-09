@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, instrument, warn};
 
-use crate::request::GitRequest;
 use crate::Result;
+use crate::request::GitRequest;
 
 use super::types::*;
 
@@ -554,7 +554,10 @@ pub(crate) fn get_git_config(repo: &Repository) -> GitConfig {
 /// For each branch, resolves the tip commit's short hash and computes
 /// ahead/behind relative to the current branch's HEAD. The current branch
 /// itself gets ahead=0, behind=0.
-pub(crate) fn get_local_branches(repo: &Repository, current_branch: Option<&str>) -> Vec<LocalBranchInfo> {
+pub(crate) fn get_local_branches(
+    repo: &Repository,
+    current_branch: Option<&str>,
+) -> Vec<LocalBranchInfo> {
     let mut branches = Vec::new();
 
     // Resolve HEAD commit OID for ahead/behind calculations
@@ -1376,9 +1379,7 @@ pub fn detect_merge_conflicts(repo: &Repository) -> Vec<PathBuf> {
             .or(conflict.their.as_ref())
             .or(conflict.ancestor.as_ref());
         if let Some(entry) = path {
-            let path = PathBuf::from(
-                std::str::from_utf8(&entry.path).unwrap_or_default(),
-            );
+            let path = PathBuf::from(std::str::from_utf8(&entry.path).unwrap_or_default());
             if !conflicted.contains(&path) {
                 conflicted.push(path);
             }

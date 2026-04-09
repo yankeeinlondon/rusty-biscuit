@@ -113,6 +113,8 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
     use core_foundation::base::TCFType;
     use core_foundation::string::CFString;
     use coreaudio_sys::{
+        AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectID,
+        AudioObjectPropertyAddress, AudioValueRange,
         kAudioDevicePropertyAvailableNominalSampleRates, kAudioDevicePropertyDeviceNameCFString,
         kAudioDevicePropertyDeviceUID, kAudioDevicePropertyNominalSampleRate,
         kAudioDevicePropertyStreamConfiguration, kAudioDevicePropertyTransportType,
@@ -123,8 +125,6 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
         kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDevices,
         kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
         kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
-        AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectID,
-        AudioObjectPropertyAddress, AudioValueRange,
     };
 
     // --- Helper closures ---
@@ -188,11 +188,7 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                 (&raw mut device_id).cast(),
             );
 
-            if status != 0 {
-                0
-            } else {
-                device_id
-            }
+            if status != 0 { 0 } else { device_id }
         }
     };
 
@@ -348,11 +344,7 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                 (&raw mut rate).cast(),
             );
 
-            if status != 0 {
-                0.0
-            } else {
-                rate
-            }
+            if status != 0 { 0.0 } else { rate }
         }
     };
 

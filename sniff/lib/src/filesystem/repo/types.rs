@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
 
 use crate::filesystem::file_types::{
-    is_command_runner_filename, FileAssociation, FileAssociationStats, FileInventory,
-    FrameworkStats, ProgrammingLanguage, ProgrammingLanguageStats,
+    FileAssociation, FileAssociationStats, FileInventory, FrameworkStats, ProgrammingLanguage,
+    ProgrammingLanguageStats, is_command_runner_filename,
 };
 use crate::filesystem::languages::LanguageBreakdown;
 use crate::filesystem::repo::detection::{

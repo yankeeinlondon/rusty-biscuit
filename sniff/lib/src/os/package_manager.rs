@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 
-use super::distro::LinuxFamily;
 use super::OsType;
+use super::distro::LinuxFamily;
 
 // ============================================================================
 // Package Manager Detection Infrastructure
@@ -1550,7 +1550,7 @@ mod tests {
 
     mod path_parsing_tests {
         use super::*;
-        use crate::test_helpers::{ScopedEnv, ENV_MUTEX};
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
         use tempfile::TempDir;
 
         #[test]

@@ -12,12 +12,12 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::SniffInstallationError;
 use crate::programs::enums::CategoryEnum;
 use crate::programs::find_program::{
     ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
 };
 use crate::programs::schema::{ProgramError, ProgramMetadata};
-use crate::error::SniffInstallationError;
 
 /// Describes where a program executable was discovered.
 ///
@@ -1038,11 +1038,26 @@ mod tests {
     fn test_installation_method_manager_binary() {
         assert_eq!(InstallationMethod::Brew("vim").manager_binary(), "brew");
         assert_eq!(InstallationMethod::Apt("vim").manager_binary(), "apt");
-        assert_eq!(InstallationMethod::Cargo("ripgrep").manager_binary(), "cargo");
-        assert_eq!(InstallationMethod::Npm("typescript").manager_binary(), "npm");
-        assert_eq!(InstallationMethod::RemoteBash("url").manager_binary(), "bash");
-        assert_eq!(InstallationMethod::Chocolatey("vim").manager_binary(), "choco");
-        assert_eq!(InstallationMethod::Hex("hex_package").manager_binary(), "mix");
+        assert_eq!(
+            InstallationMethod::Cargo("ripgrep").manager_binary(),
+            "cargo"
+        );
+        assert_eq!(
+            InstallationMethod::Npm("typescript").manager_binary(),
+            "npm"
+        );
+        assert_eq!(
+            InstallationMethod::RemoteBash("url").manager_binary(),
+            "bash"
+        );
+        assert_eq!(
+            InstallationMethod::Chocolatey("vim").manager_binary(),
+            "choco"
+        );
+        assert_eq!(
+            InstallationMethod::Hex("hex_package").manager_binary(),
+            "mix"
+        );
     }
 
     #[test]

@@ -1325,7 +1325,10 @@ fn detect_package_languages(
         crate::filesystem::file_types::project_package_inventory(repo_inv, path, exclude_roots)
     } else {
         // Fall back to per-package scanning
-        match crate::filesystem::file_types::scan_file_inventory_with_exclusions(path, exclude_roots) {
+        match crate::filesystem::file_types::scan_file_inventory_with_exclusions(
+            path,
+            exclude_roots,
+        ) {
             Ok(inv) => inv,
             Err(_) => return PackageScanResult::default(),
         }

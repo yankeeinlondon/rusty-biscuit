@@ -97,7 +97,11 @@ impl ConventionalCommit {
         if let Some(caps) = re.captures(first_line) {
             let scope = caps.get(2).and_then(|m| {
                 let s = m.as_str();
-                if s.is_empty() { None } else { Some(s.to_string()) }
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
             });
             Self {
                 operation: Some(caps.get(1).unwrap().as_str().to_string()),
@@ -569,7 +573,7 @@ impl GitRepo {
 
     /// Git user configuration.
     pub fn config(&self) -> GitConfig {
-super::detection::get_git_config(&self.repo)
+        super::detection::get_git_config(&self.repo)
     }
 
     /// Local branch information.
@@ -643,7 +647,8 @@ super::detection::get_git_config(&self.repo)
             (status, Vec::new())
         };
 
-        let remotes = super::detection::get_remotes(&self.repo, request.include_remote_branch_details);
+        let remotes =
+            super::detection::get_remotes(&self.repo, request.include_remote_branch_details);
 
         let worktrees = if request.include_worktrees {
             super::detection::get_worktrees(&self.repo)
