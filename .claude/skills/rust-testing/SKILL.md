@@ -36,6 +36,26 @@ my_project/
 └── Cargo.toml
 ```
 
+### Large CLI/TUI Layout
+
+```
+my_cli/
+├── src/
+│   ├── main.rs
+│   ├── output.rs
+│   └── tui/
+│       ├── app.rs
+│       ├── reducers.rs
+│       └── widgets/
+├── tests/
+│   ├── common/
+│   │   └── mod.rs      # Shared tempdir / file / git / ANSI helpers
+│   ├── command_routing.rs
+│   └── workflow_tests.rs
+└── benches/
+    └── hot_paths.rs
+```
+
 ### Essential Commands
 
 ```bash
@@ -47,6 +67,7 @@ cargo nextest run -E 'test(auth)'  # Filter with expressions
 cargo bench                     # Run criterion benchmarks
 cargo +nightly test             # Pin a newer toolchain when default cargo is too old
 cargo +stable nextest run       # Pin stable explicitly when shell cargo is inconsistent
+cargo nextest run -p my_crate   # Package-scoped monorepo verification
 ```
 
 ## Toolchain Troubleshooting
@@ -90,12 +111,15 @@ When you need to pin a toolchain to get reliable results, include the exact comm
 - [Property-Based Testing](./property-testing.md) - Proptest for invariant verification
 - [Mocking](./mocking.md) - Mockall for isolating dependencies
 - [Benchmarking](./benchmarking.md) - Criterion for performance measurement
+- [CLI Output Testing](./cli-output-testing.md) - stdout/stderr, ANSI, and shell completion checks
+- [TUI Testing](./tui-testing.md) - Ratatui `TestBackend` rendering and event-path tests
 
 ### Tools
 
 - [cargo-nextest](./nextest.md) - Enhanced test runner
 - [Fuzz Testing](./fuzzing.md) - cargo-fuzz for security testing
 - [Snapshot Testing](./snapshots.md) - Insta for complex output verification
+- [Snapshot Redaction](./snapshot-redaction.md) - Stable snapshots for temp paths, IDs, ANSI, and timestamps
 
 ## Common Patterns
 
@@ -132,6 +156,81 @@ fn parse_config() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+### Shared CLI Integration Helpers
+
+```rust
+// tests/common/mod.rs
+pub struct TestWorkspace {
+    root: std::path::PathBuf,
+}
+
+pub fn write(path: &std::path::Path, content: &str) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(path, content).unwrap();
+}
+
+pub fn strip_ansi(input: &str) -> String {
+    biscuit_terminal::prelude::strip_escape_codes(input)
+}
+```
+
+```rust
+// tests/command_routing.rs
+mod common;
+
+use assert_cmd::cargo::cargo_bin_cmd;
+
+#[test]
+fn command_writes_machine_output_to_stdout() {
+    let output = cargo_bin_cmd!("my-cli")
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    assert!(!output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+}
+```
+
+### Ratatui Render Test
+
+```rust
+use insta::assert_debug_snapshot;
+use ratatui::{Terminal, backend::TestBackend};
+
+#[test]
+fn widget_render_matches_snapshot() {
+    let backend = TestBackend::new(80, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|frame| render(frame, frame.area(), &app)).unwrap();
+
+    let buffer = terminal.backend().buffer().clone();
+    assert_debug_snapshot!(buffer);
+}
+```
+
+### ANSI / Plain Output Assertions
+
+```rust
+let output = cargo_bin_cmd!("my-cli")
+    .env("NO_COLOR", "1")
+    .args(["providers"])
+    .assert()
+    .success()
+    .get_output()
+    .clone();
+
+let stdout = String::from_utf8(output.stdout).unwrap();
+assert_eq!(stdout, strip_ansi(&stdout));
+```
+
+Use `FORCE_COLOR=1` when you need styled output in non-TTY integration tests, and `--plain` when the CLI exposes an explicit no-ANSI mode that should override env-based color forcing.
 
 ### Expected Panic
 
