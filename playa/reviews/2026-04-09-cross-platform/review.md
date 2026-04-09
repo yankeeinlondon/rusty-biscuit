@@ -43,6 +43,7 @@ Similarly, `backend_name()` returns `"noop"` on Windows (line 127).
 **Impact:** Audio ducking silently does nothing on Windows. Users who enable `audio-ducking` get no warning that it's a no-op.
 
 **Suggested fix:** Either implement a `WindowsBackend` using WASAPI `ISimpleAudioVolume` per-session ducking, or log a clear warning when ducking is requested on Windows:
+
 ```rust
 #[cfg(target_os = "windows")]
 {
@@ -68,6 +69,7 @@ Two problems:
 **Impact:** On threads with STA COM (common in GUI apps embedding playa), every WASAPI SFX attempt silently fails and falls through to the rodio default path. The user gets the wrong audio category routing with no diagnostic.
 
 **Suggested fix:**
+
 ```rust
 let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
 let needs_uninit = hr.is_ok(); // S_OK or S_FALSE
@@ -76,6 +78,7 @@ if needs_uninit {
     CoUninitialize();
 }
 ```
+
 Handle `RPC_E_CHANGED_MODE` by proceeding (COM is already initialized) rather than failing.
 
 ---
@@ -108,6 +111,7 @@ Compare: the macOS and Windows SFX paths have explicit timeouts. The native_play
 **Impact:** On a system with a hung PulseAudio daemon, `play_sfx_as_event` blocks the calling thread forever. Since `SoundEffect::play_with_options()` calls this synchronously, the entire process hangs.
 
 **Suggested fix:** Add an `Instant::now() + timeout` deadline check inside each wait loop:
+
 ```rust
 let deadline = Instant::now() + Duration::from_secs(5);
 loop {
@@ -140,6 +144,7 @@ PulseAudio internally quantizes volume to a `u32` on a 0-65536 scale. Each `incr
 **Impact:** Repeated ducking cycles gradually shift application volumes away from user-set levels.
 
 **Suggested fix:** Use absolute volume setting if pulsectl-rs exposes it. If only relative adjustments are available, compute the final step as the delta from current to the exact original cached in `original_volumes`, ensuring the last step always lands on the correct value:
+
 ```rust
 // On the final step, snap to the exact original
 if is_last_step {
@@ -155,6 +160,7 @@ if is_last_step {
 The `AlsaBackend` adjusts the Master/PCM/Speaker/Headphone mixer control, which affects **all audio output** system-wide, including Playa's own playback stream. Unlike the PulseAudio backend (which excludes Playa's streams by PID), ALSA has no per-application volume concept.
 
 The factory logs a warning at selection time (`factory.rs:78`):
+
 ```rust
 eprintln!("Warning: PulseAudio not available, using ALSA fallback (affects all audio)");
 ```
@@ -180,6 +186,7 @@ Compare: the macOS path returns quickly after queuing audio in CoreAudio/rodio. 
 When called from `SoundEffect::play_with_options()`, which is a sync function, this blocks the thread. If the caller is in an async context and didn't use `spawn_blocking`, the Tokio runtime is blocked.
 
 **Suggested fix:** Either:
+
 1. Wrap the PulseAudio operation in `std::thread::spawn` with a timeout (matching how `open_sfx_stream_with_timeout` already works), or
 2. Document that `play_sfx_as_event` is blocking and should not be called from async contexts without `spawn_blocking`.
 
@@ -188,6 +195,7 @@ When called from `SoundEffect::play_with_options()`, which is a sync function, t
 **File:** `lib/src/sfx_player.rs:631-635` (Windows) and `837-839` (Linux)
 
 Both platforms implement speed control by lying about the sample rate:
+
 ```rust
 let effective_rate = (sample_rate_u32 as f32 * speed) as u32;
 ```
@@ -197,6 +205,7 @@ This causes pitch-shifted playback (chipmunk effect at 2x). The rodio fallback p
 **Impact:** Speed control sounds different on Windows/Linux (pitch-shifted) vs. the rodio fallback (potentially time-stretched). Users may notice inconsistent audio quality across platforms.
 
 **Suggested fix:** Document this behavior as a known limitation. If consistent behavior is important, always use the rodio default path when speed control is requested, falling back to platform-specific paths only for volume and routing:
+
 ```rust
 if options.speed.is_some() {
     // Skip platform-specific path to get consistent speed behavior
@@ -224,6 +233,7 @@ fn write_temp_audio(bytes: &[u8]) -> Result<PathBuf, PlaybackError> {
 **Impact:** On all platforms, repeated playback of `AudioData::Bytes` accumulates temp files in the system temp directory. On Linux servers with small `/tmp` partitions, this could fill the filesystem. On Windows, `%TEMP%` is never cleaned by the OS.
 
 **Suggested fix:** Delete the temp file after the player process exits:
+
 ```rust
 // In playa_with_player_and_options, after child.wait():
 if let ResolvedSource::Path(ref path) = source {
@@ -232,6 +242,7 @@ if let ResolvedSource::Path(ref path) = source {
     }
 }
 ```
+
 Or use `tempfile::NamedTempFile` with auto-cleanup on drop.
 
 ### M4. Windows player detection: no guidance when no player found
@@ -249,6 +260,7 @@ This error gives no hint about what to install.
 **Impact:** Windows users with native playback disabled (or for formats that don't decode natively) get an opaque error with no recovery path.
 
 **Suggested fix:** Enhance the `NoCompatiblePlayer` error message on Windows to suggest installing mpv or FFmpeg:
+
 ```rust
 #[cfg(target_os = "windows")]
 {
@@ -275,6 +287,7 @@ On surround sound setups (5.1, 7.1), additional channels (RearLeft, RearRight, L
 **Impact:** Inconsistent ducking on surround sound systems. Rear channels stay at full volume, creating an unbalanced mix during ducking.
 
 **Suggested fix:** Iterate over all channels that have playback volume:
+
 ```rust
 use alsa::mixer::SelemChannelId::*;
 for channel in [FrontLeft, FrontRight, FrontCenter, RearLeft, RearRight,
@@ -282,6 +295,7 @@ for channel in [FrontLeft, FrontRight, FrontCenter, RearLeft, RearRight,
     let _ = elem.set_playback_volume(channel, target);
 }
 ```
+
 Or use the ALSA API to query which channels exist on the element and set all of them.
 
 ---
@@ -369,6 +383,7 @@ Linux)
 On macOS, the ducking features are similarly not enabled in the install recipe — ducking is presumably opt-in. But the comment at line 234 says "enables native playback on macOS/Windows" without mentioning ducking, which could confuse users who expect ducking to work after install.
 
 **Suggested fix:** Add a comment in the install recipe or README noting that ducking requires explicit feature flags:
+
 ```bash
 # Audio ducking requires additional feature flags:
 #   --features audio-ducking-linux (Linux, requires PulseAudio or ALSA dev headers)
