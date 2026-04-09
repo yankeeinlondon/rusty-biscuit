@@ -91,6 +91,85 @@ pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     }
 }
 
+// ── Compose positional classification ─────────────────────────────────
+
+struct ParsedComposeArgs {
+    input: Option<PathBuf>,
+    shorthand_setters: serde_json::Map<String, serde_json::Value>,
+}
+
+fn parse_compose_setter(
+    token: &str,
+) -> Option<std::result::Result<(String, serde_json::Value), String>> {
+    let eq_pos = token.find('=')?;
+    let key = &token[..eq_pos];
+    let raw_value = &token[eq_pos + 1..];
+
+    if key.is_empty() {
+        return Some(Err("setter key must not be empty".to_string()));
+    }
+
+    let mut chars = key.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return None;
+    }
+
+    for ch in chars {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            continue;
+        }
+        return None;
+    }
+
+    let value = parse_shorthand_value(raw_value);
+    Some(Ok((key.to_string(), value)))
+}
+
+fn parse_shorthand_value(raw: &str) -> serde_json::Value {
+    if raw.is_empty() {
+        return serde_json::Value::String(String::new());
+    }
+    match biscuit_file::Json5::from_str(raw) {
+        Ok(parsed) => parsed.value().clone(),
+        Err(_) => serde_json::Value::String(raw.to_string()),
+    }
+}
+
+fn parse_compose_positionals(args: &[String]) -> Result<ParsedComposeArgs> {
+    let mut input: Option<PathBuf> = None;
+    let mut shorthand_setters = serde_json::Map::new();
+
+    for token in args {
+        match parse_compose_setter(token) {
+            Some(Ok((key, value))) => {
+                shorthand_setters.insert(key, value);
+            }
+            Some(Err(e)) => {
+                return Err(eyre!("Invalid setter '{}': {}", token, e));
+            }
+            None => {
+                if input.is_some() {
+                    return Err(eyre!(
+                        "expected at most one input path, but got multiple: {}",
+                        args.iter()
+                            .filter(|t| parse_compose_setter(t).is_none())
+                            .map(|t| t.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                input = Some(PathBuf::from(token));
+            }
+        }
+    }
+
+    Ok(ParsedComposeArgs {
+        input,
+        shorthand_setters,
+    })
+}
+
 pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
     match command {
         CliCommand::Render {
@@ -112,7 +191,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             run_clean(input.as_ref(), save, indent, mode, cli.verbose > 0)?;
         }
         CliCommand::Compose {
-            input,
+            args,
             state,
             set,
             output,
@@ -130,6 +209,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             allow_shell_timeout,
             perf,
         } => {
+            let parsed = parse_compose_positionals(&args)?;
             let mode = resolve_list_spacing(compact, loose);
             let allow = ComposeAllowFlags {
                 hyperlinks: allow_missing_hyperlinks || allow_any_missing_reference,
@@ -137,9 +217,10 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 transclusions: allow_missing_transclusions || allow_any_missing_reference,
             };
             run_compose(
-                input.as_ref(),
+                parsed.input.as_ref(),
                 state.as_deref(),
                 set.as_deref(),
+                parsed.shorthand_setters,
                 output,
                 show,
                 frontmatter,
@@ -341,6 +422,7 @@ pub fn run_compose(
     input: Option<&PathBuf>,
     state_json: Option<&str>,
     set_json: Option<&str>,
+    shorthand_setters: serde_json::Map<String, serde_json::Value>,
     output: OutputFormat,
     show: bool,
     include_frontmatter: bool,
@@ -412,16 +494,28 @@ pub fn run_compose(
     }
 
     // Parse --set as JSON or JSON5
-    if let Some(json_str) = set_json {
-        let parsed = biscuit_file::Json5::from_str(json_str)
-            .wrap_err("Invalid JSON/JSON5 in --set argument")?;
-        let set = parsed.value().clone();
-        if !set.is_object() {
-            return Err(eyre!(
-                "Invalid --set argument: expected a JSON object like {{\"name\":\"Alice\"}}"
-            ));
-        }
-        options = options.with_set_overrides(set);
+    let mut override_map: serde_json::Map<String, serde_json::Value> =
+        if let Some(json_str) = set_json {
+            let parsed = biscuit_file::Json5::from_str(json_str)
+                .wrap_err("Invalid JSON/JSON5 in --set argument")?;
+            let set = parsed.value().clone();
+            if let serde_json::Value::Object(map) = set {
+                map
+            } else {
+                return Err(eyre!(
+                    "Invalid --set argument: expected a JSON object like {{\"name\":\"Alice\"}}"
+                ));
+            }
+        } else {
+            serde_json::Map::new()
+        };
+
+    for (key, value) in shorthand_setters {
+        override_map.insert(key, value);
+    }
+
+    if !override_map.is_empty() {
+        options = options.with_set_overrides(serde_json::Value::Object(override_map));
     }
 
     // ── Reference validation ───────────────────────────────────────────

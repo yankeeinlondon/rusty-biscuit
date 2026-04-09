@@ -78,9 +78,9 @@ pub enum Command {
 
     /// Compose a document through the compose pipeline.
     Compose {
-        /// Input file path (use "-" for stdin)
-        #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
-        input: Option<PathBuf>,
+        /// Positional arguments: input path and/or key=value setters
+        #[arg(value_name = "ARGS", num_args = 0..)]
+        args: Vec<String>,
 
         /// Default values as JSON; fills in null/missing frontmatter keys without overriding existing values
         #[arg(long, value_name = "JSON")]
@@ -635,7 +635,7 @@ mod tests {
 
     #[test]
     fn compose_without_perf_defaults_false() {
-        let cli = Cli::try_parse_from(["md", "compose", "doc.md"]).unwrap();
+        let cli = Cli::try_parse_from(["md", "compose"]).unwrap();
         match cli.command {
             Some(Command::Compose { perf, .. }) => assert!(!perf),
             _ => panic!("Expected Compose command"),
@@ -678,7 +678,7 @@ mod tests {
 
     #[test]
     fn compose_timeout_defaults_to_none() {
-        let cli = Cli::try_parse_from(["md", "compose", "doc.md"]).unwrap();
+        let cli = Cli::try_parse_from(["md", "compose"]).unwrap();
         match cli.command {
             Some(Command::Compose { timeout, .. }) => assert_eq!(timeout, None),
             _ => panic!("Expected Compose command"),
@@ -687,12 +687,34 @@ mod tests {
 
     #[test]
     fn compose_allow_shell_timeout_defaults_false() {
-        let cli = Cli::try_parse_from(["md", "compose", "doc.md"]).unwrap();
+        let cli = Cli::try_parse_from(["md", "compose"]).unwrap();
         match cli.command {
             Some(Command::Compose {
                 allow_shell_timeout,
                 ..
             }) => assert!(!allow_shell_timeout),
+            _ => panic!("Expected Compose command"),
+        }
+    }
+
+    #[test]
+    fn compose_args_captures_positional_tokens() {
+        let cli = Cli::try_parse_from(["md", "compose", "doc.md", "key=value"]).unwrap();
+        match cli.command {
+            Some(Command::Compose { args, .. }) => {
+                assert_eq!(args, vec!["doc.md", "key=value"]);
+            }
+            _ => panic!("Expected Compose command"),
+        }
+    }
+
+    #[test]
+    fn compose_args_empty_when_no_positionals() {
+        let cli = Cli::try_parse_from(["md", "compose"]).unwrap();
+        match cli.command {
+            Some(Command::Compose { args, .. }) => {
+                assert!(args.is_empty());
+            }
             _ => panic!("Expected Compose command"),
         }
     }

@@ -520,6 +520,146 @@ fn test_compose_set_and_state_combined() {
         .stdout(predicate::str::contains("Hi Bob"));
 }
 
+// =============================================================================
+//              COMPOSE SHORTHAND SETTER TESTS
+// =============================================================================
+
+#[test]
+fn test_compose_shorthand_basic_file_input() {
+    let tmp = md_file("# Hello {{ iteration }}\n");
+    md_cmd()
+        .args(["compose"])
+        .arg(tmp.path())
+        .arg("iteration=1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello 1"));
+}
+
+#[test]
+fn test_compose_shorthand_basic_stdin() {
+    md_cmd()
+        .args(["compose", "iteration=1"])
+        .write_stdin("# Hello {{ iteration }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello 1"));
+}
+
+#[test]
+fn test_compose_shorthand_multiple_setters_mixed_types() {
+    md_cmd()
+        .args(["compose", "iteration=1", "draft=false", "name=Alice"])
+        .write_stdin("{{ iteration }} {{ draft }} {{ name }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 false Alice"));
+}
+
+#[test]
+fn test_compose_shorthand_json5_value() {
+    md_cmd()
+        .args(["compose", r#"meta={author:"Alice"}"#])
+        .write_stdin("{{ meta.author }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Alice"));
+}
+
+#[test]
+fn test_compose_shorthand_participates_in_validation() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    std::fs::create_dir(temp_dir.path().join("features")).unwrap();
+    std::fs::write(
+        temp_dir.path().join("features/my-plan.md"),
+        "# My Plan\n\nPlan content here.",
+    )
+    .unwrap();
+
+    let template_path = temp_dir.path().join("template.md");
+    std::fs::write(&template_path, "# Task\n\n::file features/{{plan}}\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&template_path)
+        .arg("plan=my-plan.md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Plan content here."));
+}
+
+#[test]
+fn test_compose_shorthand_wins_over_state() {
+    md_cmd()
+        .args([
+            "compose",
+            "-",
+            "--state",
+            r#"{"iteration":0}"#,
+            "iteration=1",
+        ])
+        .write_stdin("{{ iteration }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1"));
+}
+
+#[test]
+fn test_compose_shorthand_wins_over_set() {
+    md_cmd()
+        .args(["compose", "-", "--set", r#"{"iteration":1}"#, "iteration=2"])
+        .write_stdin("{{ iteration }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2"));
+}
+
+#[test]
+fn test_compose_shorthand_duplicate_keys_last_write_wins() {
+    md_cmd()
+        .args(["compose", "iteration=1", "iteration=2"])
+        .write_stdin("{{ iteration }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2"));
+}
+
+#[test]
+fn test_compose_shorthand_empty_value() {
+    md_cmd()
+        .args(["compose", "empty="])
+        .write_stdin("'{{ empty }}'")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("''"));
+}
+
+#[test]
+fn test_compose_shorthand_multiple_non_setter_tokens_error() {
+    let tmp = md_file("# Test\n");
+    md_cmd()
+        .args(["compose"])
+        .arg(tmp.path())
+        .arg("other.md")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("expected at most one input path"));
+}
+
+#[test]
+fn test_compose_shorthand_path_escape_hatch() {
+    let tmp = md_file("# Content\n");
+    let path_str = format!("./{}", tmp.path().file_name().unwrap().to_string_lossy());
+    md_cmd()
+        .args(["compose"])
+        .arg(&path_str)
+        .arg("key=val")
+        .current_dir(tmp.path().parent().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Content"));
+}
+
 #[test]
 fn test_compose_set_invalid_json() {
     md_cmd()
@@ -1647,6 +1787,48 @@ fn test_compose_with_nonexistent_command_fails() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Command not found"));
+}
+
+#[test]
+fn test_compose_timeout_flag_fails_timed_out_shell() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let md_path = temp_dir.path().join("test.md");
+    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+
+    std::fs::write(&md_path, "# Test\n::shell sleep 2\n").unwrap();
+    std::fs::write(&whitelist_path, "prefix sleep\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&md_path)
+        .arg("--timeout")
+        .arg("1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("timed out"));
+}
+
+#[test]
+fn test_compose_allow_shell_timeout_emits_warning() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let md_path = temp_dir.path().join("test.md");
+    let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
+
+    std::fs::write(&md_path, "# Test\n::shell sleep 2\nAfter\n").unwrap();
+    std::fs::write(&whitelist_path, "prefix sleep\n").unwrap();
+
+    md_cmd()
+        .arg("compose")
+        .arg(&md_path)
+        .arg("--timeout")
+        .arg("1")
+        .arg("--allow-shell-timeout")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Test"))
+        .stdout(predicate::str::contains("After"))
+        .stderr(predicate::str::contains("timed out"))
+        .stderr(predicate::str::contains("replaced with an empty"));
 }
 
 // =============================================================================
