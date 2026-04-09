@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
@@ -16,6 +16,7 @@ use crate::permissions::change::{
     CommandPattern, PolicyChange, PolicyChangeOp, PolicyChangeTarget, PolicyPersistence,
 };
 use crate::permissions::context::{CliPolicyInput, PolicyContext};
+use crate::permissions::json_utils::ensure_json_value;
 use crate::permissions::mutation::{
     ConfigEditPlan, OneShotMutationPlan, PersistentMutationPlan, PolicyMutationPlan,
 };
@@ -1054,27 +1055,18 @@ fn build_one_shot_plan(change: &PolicyChange) -> Result<Option<OneShotMutationPl
     }))
 }
 
-fn ensure_json_value<'a>(root: &'a mut Value, path: &[&str]) -> &'a mut Value {
-    let mut current = root;
-    for key in path {
-        if !current.is_object() {
-            *current = Value::Object(Map::new());
-        }
-        current = current
-            .as_object_mut()
-            .expect("object")
-            .entry((*key).to_owned())
-            .or_insert(Value::Null);
-    }
-    current
-}
-
 fn push_string_array_value(root: &mut Value, path: &[&str], value: &str) {
     let target = ensure_json_value(root, path);
     if !target.is_array() {
         *target = Value::Array(Vec::new());
     }
-    let array = target.as_array_mut().expect("array");
+    debug_assert!(
+        target.is_array(),
+        "push_string_array_value: type mismatch after set — expected array, got {:?}",
+        target
+    );
+    // SAFETY: the value is guaranteed to be an Array because we just set it above
+    let array = unsafe { target.as_array_mut().unwrap_unchecked() };
     let already_present = array
         .iter()
         .any(|existing| existing.as_str() == Some(value));
