@@ -369,7 +369,10 @@ fn format_mac_address(mac: &[u8; 6]) -> String {
 ///
 /// Returns the name of the primary interface, or None if no suitable interface exists.
 fn find_primary_interface(interfaces: &[NetworkInterface]) -> Option<String> {
-    select_primary_interface(interfaces, detect_default_route_interface().as_deref())
+    select_primary_interface(
+        interfaces,
+        detect_default_route_interface(interfaces).as_deref(),
+    )
 }
 
 fn select_primary_interface(
@@ -469,7 +472,7 @@ fn is_primary_candidate(interface: &NetworkInterface) -> bool {
     !interface.flags.is_loopback && !interface.ipv4_addresses.is_empty() && interface.flags.is_up
 }
 
-fn detect_default_route_interface() -> Option<String> {
+fn detect_default_route_interface(interfaces: &[NetworkInterface]) -> Option<String> {
     #[cfg(any(
         target_os = "macos",
         target_os = "freebsd",
@@ -478,14 +481,23 @@ fn detect_default_route_interface() -> Option<String> {
         target_os = "dragonfly"
     ))]
     {
+        let _ = interfaces;
         command_output("route", &["-n", "get", "default"])
             .and_then(|output| parse_bsd_default_route_interface(&output))
     }
 
     #[cfg(target_os = "linux")]
     {
+        let _ = interfaces;
         command_output("ip", &["route", "show", "default"])
             .and_then(|output| parse_linux_default_route_interface(&output))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        command_output("route", &["print", "0.0.0.0"])
+            .and_then(|output| parse_windows_default_route_interface_ip(&output))
+            .and_then(|ip| interface_name_for_ipv4(interfaces, ip))
     }
 
     #[cfg(not(any(
@@ -494,9 +506,11 @@ fn detect_default_route_interface() -> Option<String> {
         target_os = "openbsd",
         target_os = "netbsd",
         target_os = "dragonfly",
-        target_os = "linux"
+        target_os = "linux",
+        target_os = "windows"
     )))]
     {
+        let _ = interfaces;
         None
     }
 }
@@ -537,6 +551,47 @@ fn parse_linux_default_route_interface(output: &str) -> Option<String> {
             .find(|window| window[0] == "dev")
             .map(|window| window[1].to_string())
     })
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn parse_windows_default_route_interface_ip(output: &str) -> Option<std::net::Ipv4Addr> {
+    let mut best: Option<(std::net::Ipv4Addr, u32)> = None;
+
+    for line in output.lines() {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 5 {
+            continue;
+        }
+        if cols[0] != "0.0.0.0" || cols[1] != "0.0.0.0" {
+            continue;
+        }
+        // Column layout: Network Netmask Gateway Interface Metric [...]
+        let ip: std::net::Ipv4Addr = match cols[3].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let metric: u32 = match cols[4].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        match best {
+            None => best = Some((ip, metric)),
+            Some((_, best_m)) if metric < best_m => best = Some((ip, metric)),
+            _ => {}
+        }
+    }
+
+    best.map(|(ip, _)| ip)
+}
+
+fn interface_name_for_ipv4(
+    interfaces: &[NetworkInterface],
+    address: std::net::Ipv4Addr,
+) -> Option<String> {
+    interfaces
+        .iter()
+        .find(|iface| iface.ipv4_addresses.contains(&address))
+        .map(|iface| iface.name.clone())
 }
 
 /// Detects network interfaces, excluding loopback and down interfaces.
@@ -1209,5 +1264,76 @@ destination: default
             parse_linux_default_route_interface(output),
             Some("wlp3s0".to_string())
         );
+    }
+
+    #[test]
+    fn test_parse_windows_default_route_single_route() {
+        let output = "\
+===========================================================================
+Interface List
+ 15...00 1a 2b 3c 4d 5e ......Intel Ethernet Adapter
+===========================================================================
+IPv4 Route Table
+===========================================================================
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0      192.168.1.1    192.168.1.100     25
+===========================================================================";
+        assert_eq!(
+            parse_windows_default_route_interface_ip(output),
+            Some("192.168.1.100".parse::<std::net::Ipv4Addr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_parse_windows_default_route_lowest_metric_wins() {
+        let output = "\
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0      192.168.1.1    192.168.1.100     50
+          0.0.0.0          0.0.0.0      10.0.0.1       10.0.0.50         10
+          0.0.0.0          0.0.0.0      172.16.0.1     172.16.0.5       200";
+        assert_eq!(
+            parse_windows_default_route_interface_ip(output),
+            Some("10.0.0.50".parse::<std::net::Ipv4Addr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_parse_windows_default_route_malformed_rows_ignored() {
+        let output = "\
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0      192.168.1.1    not-an-ip         25
+          0.0.0.0          0.0.0.0      10.0.0.1       10.0.0.50         10
+          1.2.3.0          255.255.255.0 1.2.3.1       1.2.3.4           5
+garbage line";
+        assert_eq!(
+            parse_windows_default_route_interface_ip(output),
+            Some("10.0.0.50".parse::<std::net::Ipv4Addr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_parse_windows_default_route_no_routes() {
+        let output = "Active Routes:\nNetwork Destination Netmask Gateway Interface Metric";
+        assert_eq!(parse_windows_default_route_interface_ip(output), None);
+    }
+
+    #[test]
+    fn test_interface_name_for_ipv4_found() {
+        let mut iface = create_test_interface("Ethernet", true, true);
+        iface.ipv4_addresses.clear();
+        iface.ipv4_addresses.push("10.0.0.50".parse().unwrap());
+
+        let result = interface_name_for_ipv4(&[iface], "10.0.0.50".parse().unwrap());
+        assert_eq!(result, Some("Ethernet".to_string()));
+    }
+
+    #[test]
+    fn test_interface_name_for_ipv4_not_found() {
+        let iface = create_test_interface("Ethernet", true, true);
+        let result = interface_name_for_ipv4(&[iface], "10.0.0.99".parse().unwrap());
+        assert_eq!(result, None);
     }
 }
