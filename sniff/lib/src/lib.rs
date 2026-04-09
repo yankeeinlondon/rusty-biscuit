@@ -14,6 +14,9 @@ pub mod remote;
 pub mod request;
 pub mod services;
 
+#[cfg(test)]
+mod test_helpers;
+
 pub use error::{Result, SniffError};
 pub use filesystem::FilesystemInfo;
 pub use hardware::HardwareInfo;
