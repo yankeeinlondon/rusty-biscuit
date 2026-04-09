@@ -36,8 +36,7 @@ pub enum SkipReason {
 
 /// A focused type capturing only what configurators need for hook registration.
 ///
-/// Replaces the heavyweight `HookerConfig` in the configurator interface,
-/// carrying only the event list and optional canonical scope. Global settings,
+/// Carrying only the event list and optional canonical scope. Global settings,
 /// linking preferences, and TTS configuration stay in `ClaudineConfig`.
 #[derive(Debug, Clone)]
 pub struct ProviderHookPlan {

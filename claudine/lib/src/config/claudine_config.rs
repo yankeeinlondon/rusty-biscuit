@@ -2,7 +2,7 @@
 //!
 //! This module defines [`ClaudineConfig`], the canonical flat configuration
 //! schema written to `~/.claudine/config.json`. It replaces the old
-//! per-provider `HookerConfig` with a single cross-provider event map.
+//! per-provider config format with a single cross-provider event map.
 
 use std::collections::HashMap;
 
@@ -278,7 +278,6 @@ fn default_protect() -> ProtectConfig {
 /// all fields are optional, so a repo file that contains only
 /// `{ "canonical_provider": "gemini" }` will deserialize successfully.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct RepoOverrideConfig {
     /// Override the canonical provider for this repo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
