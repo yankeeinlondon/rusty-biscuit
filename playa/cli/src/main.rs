@@ -875,16 +875,17 @@ async fn print_duck_info() {
             }
         }
         "linux-alsa" => {
-            println!("Strategy: System-wide volume control via ALSA (fallback)");
+            println!("Strategy: System-wide volume control via ALSA");
             println!("  - Fades master volume down during playback");
-            println!("  - Affects ALL audio including Playa's output");
-            println!("  - Used because PulseAudio is not available");
-            println!();
-            println!("Tip: For per-application ducking, install PulseAudio or PipeWire");
+            println!("  - Affects ALL audio including Playa's output (self-ducking)");
+            println!("  - Not automatically selected; available for explicit opt-in only");
         }
         "noop" => {
             println!("Strategy: No ducking (disabled or unavailable)");
             println!("  - Audio playback will not affect other audio sources");
+            if cfg!(target_os = "linux") {
+                println!("  - On Linux this typically means PulseAudio/PipeWire is unavailable");
+            }
         }
         _ => {
             println!("Strategy: {}", name);

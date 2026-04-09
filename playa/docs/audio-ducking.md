@@ -11,7 +11,7 @@ This document turns the discovery notes into a concrete, per-OS plan for Playaâ€
 
 ## Scope and non-goals
 
-- Scope: macOS, Windows, Linux (PulseAudio/PipeWire). Best-effort global ducking on ALSA-only systems. No mobile platforms.
+- Scope: macOS, Windows, Linux (PulseAudio/PipeWire). Per-application ducking on Linux requires PulseAudio or PipeWire; systems without PulseAudio/PipeWire fall back to noop. ALSA-only ducking is available for explicit opt-in but not selected by default because it also attenuates Playa's own output. No mobile platforms.
 - Non-goals: precise per-app pause/resume, advanced media session coordination, or long-running audio activity detection. Ducking is bounded to the lifetime of a single Playa playback request.
 
 ## Feature flags and build matrix
@@ -20,7 +20,7 @@ This document turns the discovery notes into a concrete, per-OS plan for Playaâ€
 - OS slices (activated automatically via `cfg(target_os)` when `audio-ducking` is set):
     - `audio-ducking-macos`: CoreAudio virtual master volume path.
     - `audio-ducking-windows`: WASAPI per-session volume, keyed by session instance identifier.
-    - `audio-ducking-linux`: PulseAudio/PipeWire path; ALSA global fallback.
+    - `audio-ducking-linux`: PulseAudio/PipeWire per-sink-input ducking; noop fallback when unavailable.
 - Library surface stays consistent; unimplemented platforms return a no-op ducking guard.
 
 ## Library surface
@@ -76,14 +76,14 @@ This document turns the discovery notes into a concrete, per-OS plan for Playaâ€
 ### Linux (PulseAudio / PipeWire)
 
 - Crates: `pulsectl` (preferred) with a potential `libpulse-binding` fallback. PipeWire commonly exposes a PulseAudio server, so the same calls usually work.
-- Approach: per-sink-input ducking for all active sink inputs except Playaâ€™s. Global sink ducking as fallback. ALSA-only: adjust the master PCM control if available.
+- Approach: per-sink-input ducking for all active sink inputs except Playa's. ALSA master mixer control is available for explicit opt-in but is not selected by default because it also attenuates Playa's own output (self-ducking).
 - Steps:
   1) Connect via pulsectl; enumerate sink inputs. Identify Playa by `application.name`/process ID and skip it.
-  2) Snapshot per sink input volume (per-channel). Active means state `Running` or uncorked.
-  3) Fade each sink input to `floor_scalar`; fallback: fade the sink volume.
-  4) Restore per input; fallback restore sink volume.
-  5) ALSA-only: read current mixer control, fade master scalar, restore.
-- Limitations: ALSA fallback is coarse and may not be present; treat as best-effort with warnings.
+  2) Snapshot per sink input volume (per-channel), caching exact PulseAudio volume units. Active means state `Running` or uncorked.
+  3) Fade each sink input to `floor_scalar` using relative deltas; final step snaps to exact cached units.
+  4) Restore per input using relative deltas; final step snaps to exact cached original units to prevent drift.
+  5) ALSA-only: read current mixer control, fade master scalar, restore (not selected by default).
+- Limitations: ALSA fallback is not auto-selected because it causes self-ducking. Systems without PulseAudio/PipeWire degrade to noop.
 
 ## Data structures (per backend)
 
