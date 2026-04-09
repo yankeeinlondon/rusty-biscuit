@@ -8,17 +8,7 @@ use claudine::config::claudine_config::{ClaudineMessengerConfig, MessengerProvid
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let is_detail = app.mode == AppMode::Detail;
 
-    let configs: Vec<(String, &MessengerProviderConfig)> = app
-        .config
-        .messenger
-        .as_ref()
-        .map(|m| {
-            m.configurations
-                .iter()
-                .map(|(k, v)| (k.clone(), v))
-                .collect()
-        })
-        .unwrap_or_default();
+    let configs = sorted_messenger_configs(app);
 
     let active_name = app
         .config
@@ -239,13 +229,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('a') | KeyCode::Char('A') => {
             app.modal = Some(ModalState::MessengerAdd { highlighted: 0 });
         }
+        KeyCode::Char('s') | KeyCode::Char('S') => {
+            open_messenger_select_modal(app);
+        }
         KeyCode::Char('r') | KeyCode::Char('R') if app.is_in_repo => {
-            let configs: Vec<String> = app
-                .config
-                .messenger
-                .as_ref()
-                .map(|m| m.configurations.keys().cloned().collect())
-                .unwrap_or_default();
+            let configs = sorted_messenger_names(app);
             // Index 0 = "(inherit user)", 1 = "(disabled)", 2+ = config names
             let repo_active = app
                 .repo_config
@@ -267,37 +255,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Enter => match app.messenger_focus {
             0 => {
-                // Select active - only show select modal if there are configs
-                let has_configs = app
-                    .config
-                    .messenger
-                    .as_ref()
-                    .map(|m| !m.configurations.is_empty())
-                    .unwrap_or(false);
-                if has_configs {
-                    let configs: Vec<String> = app
-                        .config
-                        .messenger
-                        .as_ref()
-                        .map(|m| m.configurations.keys().cloned().collect())
-                        .unwrap_or_default();
-                    let active = app
-                        .config
-                        .messenger
-                        .as_ref()
-                        .and_then(|m| m.active_config.as_deref());
-                    let highlighted = active
-                        .and_then(|name| configs.iter().position(|k| k == name))
-                        .map(|i| i + 1) // +1 for "(none)" at index 0
-                        .unwrap_or(0);
-                    app.modal = Some(ModalState::MessengerSelect {
-                        highlighted,
-                        for_repo: false,
-                    });
-                } else {
-                    // No configs to select from - offer to add instead
-                    app.modal = Some(ModalState::MessengerAdd { highlighted: 0 });
-                }
+                open_messenger_select_modal(app);
             }
             1 => {
                 app.modal = Some(ModalState::MessengerAdd { highlighted: 0 });
@@ -318,7 +276,11 @@ pub fn handle_messenger_select_modal(app: &mut App, key: KeyEvent) {
         .config
         .messenger
         .as_ref()
-        .map(|m| m.configurations.keys().cloned().collect())
+        .map(|m| {
+            let mut names: Vec<_> = m.configurations.keys().cloned().collect();
+            names.sort();
+            names
+        })
         .unwrap_or_default();
 
     if for_repo {
@@ -397,6 +359,51 @@ pub fn handle_messenger_select_modal(app: &mut App, key: KeyEvent) {
             _ => {}
         }
     }
+}
+
+fn sorted_messenger_configs(app: &App) -> Vec<(String, &MessengerProviderConfig)> {
+    let mut configs: Vec<_> = app
+        .config
+        .messenger
+        .as_ref()
+        .map(|m| {
+            m.configurations
+                .iter()
+                .map(|(name, config)| (name.clone(), config))
+                .collect()
+        })
+        .unwrap_or_default();
+    configs.sort_by(|left, right| left.0.cmp(&right.0));
+    configs
+}
+
+fn sorted_messenger_names(app: &App) -> Vec<String> {
+    sorted_messenger_configs(app)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+fn open_messenger_select_modal(app: &mut App) {
+    let configs = sorted_messenger_names(app);
+    if configs.is_empty() {
+        app.modal = Some(ModalState::MessengerAdd { highlighted: 0 });
+        return;
+    }
+
+    let active = app
+        .config
+        .messenger
+        .as_ref()
+        .and_then(|m| m.active_config.as_deref());
+    let highlighted = active
+        .and_then(|name| configs.iter().position(|k| k == name))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    app.modal = Some(ModalState::MessengerSelect {
+        highlighted,
+        for_repo: false,
+    });
 }
 
 pub fn handle_messenger_add_modal(app: &mut App, key: KeyEvent) {
@@ -488,21 +495,21 @@ fn build_messenger_from_fields(
 ) -> Option<MessengerProviderConfig> {
     match provider {
         "discord" => Some(MessengerProviderConfig::Discord {
-            channel_id: fields.get(0).map(|(_, v)| v.clone()).unwrap_or_default(),
+            channel_id: fields.first().map(|(_, v)| v.clone()).unwrap_or_default(),
             bot_token_env: fields
                 .get(1)
                 .map(|(_, v)| v.clone())
                 .unwrap_or_else(|| "DISCORD_BOT_TOKEN".to_string()),
         }),
         "slack" => Some(MessengerProviderConfig::Slack {
-            channel_id: fields.get(0).map(|(_, v)| v.clone()).unwrap_or_default(),
+            channel_id: fields.first().map(|(_, v)| v.clone()).unwrap_or_default(),
             bot_token_env: fields
                 .get(1)
                 .map(|(_, v)| v.clone())
                 .unwrap_or_else(|| "SLACK_BOT_TOKEN".to_string()),
         }),
         "signal" => Some(MessengerProviderConfig::Signal {
-            recipient: fields.get(0).map(|(_, v)| v.clone()).unwrap_or_default(),
+            recipient: fields.first().map(|(_, v)| v.clone()).unwrap_or_default(),
             rpc_url_env: fields
                 .get(1)
                 .map(|(_, v)| v.clone())
@@ -513,7 +520,7 @@ fn build_messenger_from_fields(
                 .unwrap_or_else(|| "SIGNAL_ACCOUNT".to_string()),
         }),
         "whatsapp" => Some(MessengerProviderConfig::Whatsapp {
-            recipient: fields.get(0).map(|(_, v)| v.clone()).unwrap_or_default(),
+            recipient: fields.first().map(|(_, v)| v.clone()).unwrap_or_default(),
             access_token_env: fields
                 .get(1)
                 .map(|(_, v)| v.clone())
@@ -528,7 +535,7 @@ fn build_messenger_from_fields(
 }
 
 pub fn handle_messenger_input_modal(app: &mut App, key: KeyEvent) {
-    let (provider, field_index, total_fields) = match &app.modal {
+    let (_provider, field_index, total_fields) = match &app.modal {
         Some(ModalState::MessengerInput {
             provider,
             field_index,
@@ -631,5 +638,75 @@ fn ensure_messenger_config(app: &mut App) {
             active_config: None,
             configurations: Default::default(),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use super::*;
+    use claudine::config::claudine_config::ClaudineConfig;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn test_app() -> App {
+        App::new(ClaudineConfig::default(), None, None, false, None, None)
+    }
+
+    #[test]
+    fn messenger_names_are_sorted_alphabetically() {
+        let mut app = test_app();
+        app.config.messenger = Some(ClaudineMessengerConfig {
+            active_config: None,
+            configurations: std::collections::HashMap::from([
+                (
+                    "zeta".to_string(),
+                    MessengerProviderConfig::Slack {
+                        channel_id: "1".to_string(),
+                        bot_token_env: "SLACK_BOT_TOKEN".to_string(),
+                    },
+                ),
+                (
+                    "alpha".to_string(),
+                    MessengerProviderConfig::Discord {
+                        channel_id: "2".to_string(),
+                        bot_token_env: "DISCORD_BOT_TOKEN".to_string(),
+                    },
+                ),
+            ]),
+        });
+
+        assert_eq!(
+            sorted_messenger_names(&app),
+            vec!["alpha".to_string(), "zeta".to_string()]
+        );
+    }
+
+    #[test]
+    fn s_hotkey_opens_select_modal() {
+        let mut app = test_app();
+        app.config.messenger = Some(ClaudineMessengerConfig {
+            active_config: Some("alpha".to_string()),
+            configurations: std::collections::HashMap::from([(
+                "alpha".to_string(),
+                MessengerProviderConfig::Discord {
+                    channel_id: "2".to_string(),
+                    bot_token_env: "DISCORD_BOT_TOKEN".to_string(),
+                },
+            )]),
+        });
+
+        handle_key(&mut app, key(KeyCode::Char('s')));
+
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::MessengerSelect {
+                highlighted: 1,
+                for_repo: false
+            })
+        ));
     }
 }

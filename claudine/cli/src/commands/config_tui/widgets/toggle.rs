@@ -38,9 +38,7 @@ impl Widget for Toggle<'_> {
 
         // Off state: bold+red when selected, dimmed when not
         let off_style = if !self.value {
-            Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };

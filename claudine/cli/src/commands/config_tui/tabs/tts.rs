@@ -198,25 +198,21 @@ fn render_voice_selector_modal(
             })
             .collect();
 
-        let list = List::new(items)
-            .highlight_symbol(">> ")
-            .highlight_style(
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            );
+        let list = List::new(items).highlight_symbol(">> ").highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
         let mut state = ListState::default().with_selected(Some(highlighted));
         frame.render_stateful_widget(list, chunks[0], &mut state);
 
         // Quality legend
-        let legend = Paragraph::new(Line::from(vec![
-            Span::styled(
-                "Voices with excellent quality are indicated with ⭐️, poor voice quality with 👎.",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::ITALIC),
-            ),
-        ]));
+        let legend = Paragraph::new(Line::from(vec![Span::styled(
+            "Voices with excellent quality are indicated with ⭐️, poor voice quality with 👎.",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )]));
         frame.render_widget(legend, chunks[2]);
 
         let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&[

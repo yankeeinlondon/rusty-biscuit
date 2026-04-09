@@ -47,10 +47,28 @@ impl Tab {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionView {
+    Effective,
+    User,
+    Repo,
+}
+
+impl ActionView {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ActionView::Effective => "Effective",
+            ActionView::User => "User",
+            ActionView::Repo => "Repo",
+        }
+    }
+}
+
 pub struct App {
     pub mode: AppMode,
     pub focused_tab: Tab,
     pub selected_tab: Option<Tab>,
+    pub actions_view: ActionView,
     pub config: ClaudineConfig,
     pub is_in_repo: bool,
     pub should_quit: bool,
@@ -86,7 +104,7 @@ pub enum ModalState {
     },
     ProtectRules {
         highlighted: usize,
-        staged_rules: claudine::services::protect::config::ProtectRuleToggles,
+        staged_rules: Box<claudine::services::protect::config::ProtectRuleToggles>,
     },
     EditActions {
         event: claudine::events::AgenticEvent,
@@ -184,6 +202,11 @@ impl App {
             mode: AppMode::Overview,
             focused_tab: Tab::Preferences,
             selected_tab: None,
+            actions_view: if is_in_repo {
+                ActionView::Effective
+            } else {
+                ActionView::User
+            },
             config,
             is_in_repo,
             should_quit: false,
@@ -206,7 +229,7 @@ impl App {
     pub fn available_providers(&self) -> Vec<claudine::events::Provider> {
         self.cached_agents
             .iter()
-            .filter(|a| a.is_available())
+            .filter(|a| a.on_path)
             .map(|a| a.provider)
             .collect()
     }

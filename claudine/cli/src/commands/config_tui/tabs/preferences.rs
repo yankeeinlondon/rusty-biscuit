@@ -208,21 +208,25 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('a') | KeyCode::Char('A') => {
             let agents = super::super::get_available_providers(app);
-            let highlighted = agents
-                .iter()
-                .position(|p| *p == app.config.preferred_agent)
-                .unwrap_or(0);
-            app.modal = Some(ModalState::AgentSelector { highlighted });
+            if !agents.is_empty() {
+                let highlighted = agents
+                    .iter()
+                    .position(|p| *p == app.config.preferred_agent)
+                    .unwrap_or(0);
+                app.modal = Some(ModalState::AgentSelector { highlighted });
+            }
         }
         KeyCode::Char('u') | KeyCode::Char('U') => {
             let providers = super::super::get_available_providers(app);
-            let highlighted = app
-                .config
-                .canonical_provider
-                .and_then(|cp| providers.iter().position(|p| *p == cp))
-                .map(|i| i + 1) // +1 for "(clear)" at index 0
-                .unwrap_or(0);
-            app.modal = Some(ModalState::UserProviderSelector { highlighted });
+            if !providers.is_empty() {
+                let highlighted = app
+                    .config
+                    .canonical_provider
+                    .and_then(|cp| providers.iter().position(|p| *p == cp))
+                    .map(|i| i + 1) // +1 for "(clear)" at index 0
+                    .unwrap_or(0);
+                app.modal = Some(ModalState::UserProviderSelector { highlighted });
+            }
         }
         KeyCode::Char('r') | KeyCode::Char('R') => {
             if app.is_in_repo {
@@ -432,5 +436,67 @@ pub fn handle_sound_selector_modal(app: &mut App, key: KeyEvent, _category: Soun
             app.modal = None;
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use super::*;
+    use claudine::config::AgentInfo;
+    use claudine::config::claudine_config::ClaudineConfig;
+    use claudine::events::Provider;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn test_app() -> App {
+        App::new(ClaudineConfig::default(), None, None, false, None, None)
+    }
+
+    #[test]
+    fn available_provider_picker_ignores_stale_config_only_agents() {
+        let mut app = test_app();
+        app.cached_agents = vec![
+            AgentInfo {
+                provider: Provider::Claude,
+                config_exists: true,
+                on_path: false,
+                display_name: "Claude Code",
+                binary_name: "claude",
+                config_path: Some(PathBuf::from("/tmp/claude.json")),
+            },
+            AgentInfo {
+                provider: Provider::Codex,
+                config_exists: false,
+                on_path: true,
+                display_name: "Codex",
+                binary_name: "codex",
+                config_path: None,
+            },
+        ];
+
+        assert_eq!(app.available_providers(), vec![Provider::Codex]);
+    }
+
+    #[test]
+    fn stale_config_only_agents_do_not_open_user_provider_modal() {
+        let mut app = test_app();
+        app.cached_agents = vec![AgentInfo {
+            provider: Provider::Claude,
+            config_exists: true,
+            on_path: false,
+            display_name: "Claude Code",
+            binary_name: "claude",
+            config_path: Some(PathBuf::from("/tmp/claude.json")),
+        }];
+
+        handle_key(&mut app, key(KeyCode::Char('u')));
+
+        assert!(app.modal.is_none());
     }
 }

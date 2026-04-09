@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use clap::Args;
 use color_eyre::eyre::Result;
 
+use biscuit_speaks::detection::get_available_providers as get_available_tts_providers;
+use biscuit_speaks::types::{CloudTtsProvider, HostTtsProvider, TtsProvider};
 use claudine::actions::HookAction;
 use claudine::config::claudine_config::{
     ClaudineConfig, ClaudineMessengerConfig, DefaultSounds, MessengerProviderConfig, TtsValue,
@@ -85,16 +87,7 @@ fn configure_tts() -> Result<TtsValue> {
     log::message("  Text-to-Speech");
     log::message("");
 
-    let has_tts = which::which("say").is_ok()
-        || which::which("espeak-ng").is_ok()
-        || which::which("espeak").is_ok();
-
-    if has_tts {
-        let provider_name = if which::which("say").is_ok() {
-            "say (macOS)"
-        } else {
-            "espeak-ng"
-        };
+    if let Some(provider_name) = detected_tts_provider_name() {
         log::message(&format!("  Found TTS provider: {provider_name}"));
         log::message("  TTS will be enabled.");
         log::message("");
@@ -106,22 +99,29 @@ fn configure_tts() -> Result<TtsValue> {
             .with_default(false)
             .prompt()?;
         if install {
-            // Attempt to install espeak-ng as a reasonable cross-platform default.
             log::message("");
-            log::message("  Attempting to install espeak-ng...");
-            let install_result = std::process::Command::new("brew")
-                .args(["install", "espeak-ng"])
-                .output();
-            match install_result {
-                Ok(output) if output.status.success() => {
-                    log::message("  espeak-ng installed successfully. TTS enabled.");
-                    return Ok(TtsValue::Boolean(true));
+            match tts_install_plan_for_current_host() {
+                TtsInstallPlan::AutoInstall { command, args } => {
+                    let rendered_command = format!("{command} {}", args.join(" "));
+                    log::message(&format!(
+                        "  Attempting to install a TTS provider with `{rendered_command}`..."
+                    ));
+                    let install_result = std::process::Command::new(&command).args(&args).output();
+                    match install_result {
+                        Ok(output) if output.status.success() => {
+                            log::message("  TTS provider installed successfully. TTS enabled.");
+                            return Ok(TtsValue::Boolean(true));
+                        }
+                        _ => {
+                            log::message("  Could not install a TTS provider automatically.");
+                            print_tts_install_guidance(&TtsInstallPlan::Guidance {
+                                lines: fallback_tts_install_guidance(std::env::consts::OS),
+                            });
+                        }
+                    }
                 }
-                _ => {
-                    log::message("  Could not install espeak-ng automatically.");
-                    log::message(
-                        "  You can install a TTS provider later and enable TTS via `claudine config`.",
-                    );
+                guidance @ TtsInstallPlan::Guidance { .. } => {
+                    print_tts_install_guidance(&guidance);
                 }
             }
         }
@@ -320,9 +320,204 @@ async fn register_hooks_all_providers() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TtsInstallPlan {
+    AutoInstall { command: String, args: Vec<String> },
+    Guidance { lines: Vec<String> },
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct TtsInstallCapabilities {
+    has_brew: bool,
+    has_apt: bool,
+    has_dnf: bool,
+    has_pacman: bool,
+    has_zypper: bool,
+    has_winget: bool,
+    has_choco: bool,
+}
+
+fn detected_tts_provider_name() -> Option<&'static str> {
+    get_available_tts_providers()
+        .first()
+        .map(tts_provider_display_name)
+}
+
+fn tts_provider_display_name(provider: &TtsProvider) -> &'static str {
+    match provider {
+        TtsProvider::Host(host) => match host {
+            HostTtsProvider::Say => "say (macOS)",
+            HostTtsProvider::ESpeak => "espeak-ng",
+            HostTtsProvider::Piper => "piper",
+            HostTtsProvider::EchoGarden => "echogarden",
+            HostTtsProvider::Sherpa => "sherpa-onnx",
+            HostTtsProvider::Mimic3 => "mimic3",
+            HostTtsProvider::Festival => "festival",
+            HostTtsProvider::Gtts => "gtts",
+            HostTtsProvider::Sapi => "sapi (Windows)",
+            HostTtsProvider::KokoroTts => "kokoro-tts",
+            HostTtsProvider::Pico2Wave => "pico2wave",
+            HostTtsProvider::SpdSay => "spd-say",
+            _ => "host TTS",
+        },
+        TtsProvider::Cloud(CloudTtsProvider::ElevenLabs) => "elevenlabs",
+        _ => "cloud TTS",
+    }
+}
+
+fn tts_install_plan_for_current_host() -> TtsInstallPlan {
+    let capabilities = TtsInstallCapabilities {
+        has_brew: command_exists("brew"),
+        has_apt: command_exists("apt-get"),
+        has_dnf: command_exists("dnf"),
+        has_pacman: command_exists("pacman"),
+        has_zypper: command_exists("zypper"),
+        has_winget: command_exists("winget"),
+        has_choco: command_exists("choco"),
+    };
+    tts_install_plan(std::env::consts::OS, capabilities)
+}
+
+fn tts_install_plan(os: &str, capabilities: TtsInstallCapabilities) -> TtsInstallPlan {
+    match os {
+        "macos" if capabilities.has_brew => TtsInstallPlan::AutoInstall {
+            command: "brew".to_string(),
+            args: vec!["install".to_string(), "espeak-ng".to_string()],
+        },
+        "linux" if capabilities.has_apt => TtsInstallPlan::Guidance {
+            lines: vec![
+                "Install eSpeak NG with: sudo apt-get install espeak-ng".to_string(),
+                "Then rerun `claudine config` to enable TTS.".to_string(),
+            ],
+        },
+        "linux" if capabilities.has_dnf => TtsInstallPlan::Guidance {
+            lines: vec![
+                "Install eSpeak NG with: sudo dnf install espeak-ng".to_string(),
+                "Then rerun `claudine config` to enable TTS.".to_string(),
+            ],
+        },
+        "linux" if capabilities.has_pacman => TtsInstallPlan::Guidance {
+            lines: vec![
+                "Install eSpeak NG with: sudo pacman -S espeak-ng".to_string(),
+                "Then rerun `claudine config` to enable TTS.".to_string(),
+            ],
+        },
+        "linux" if capabilities.has_zypper => TtsInstallPlan::Guidance {
+            lines: vec![
+                "Install eSpeak NG with: sudo zypper install espeak-ng".to_string(),
+                "Then rerun `claudine config` to enable TTS.".to_string(),
+            ],
+        },
+        "windows" if capabilities.has_winget => TtsInstallPlan::Guidance {
+            lines: vec![
+                "Install eSpeak NG with: winget install eSpeak-NG.eSpeak-NG".to_string(),
+                "Then reopen your terminal and rerun `claudine config`.".to_string(),
+            ],
+        },
+        "windows" if capabilities.has_choco => TtsInstallPlan::Guidance {
+            lines: vec![
+                "Install eSpeak NG with: choco install espeak".to_string(),
+                "Then reopen your terminal and rerun `claudine config`.".to_string(),
+            ],
+        },
+        _ => TtsInstallPlan::Guidance {
+            lines: fallback_tts_install_guidance(os),
+        },
+    }
+}
+
+fn fallback_tts_install_guidance(os: &str) -> Vec<String> {
+    match os {
+        "macos" => vec![
+            "Homebrew was not found, so automatic installation is unavailable.".to_string(),
+            "Install Homebrew from https://brew.sh and then run: brew install espeak-ng"
+                .to_string(),
+            "You can enable TTS later from `claudine config`.".to_string(),
+        ],
+        "linux" => vec![
+            "Automatic installation is unavailable on this Linux host.".to_string(),
+            "Install `espeak-ng` with your distro package manager, then rerun `claudine config`."
+                .to_string(),
+        ],
+        "windows" => vec![
+            "Automatic installation is unavailable on this Windows host.".to_string(),
+            "Install a host TTS provider such as eSpeak NG, then rerun `claudine config`."
+                .to_string(),
+        ],
+        _ => vec![
+            "Automatic installation is unavailable on this host.".to_string(),
+            "Install a supported TTS provider manually, then rerun `claudine config`.".to_string(),
+        ],
+    }
+}
+
+fn print_tts_install_guidance(plan: &TtsInstallPlan) {
+    if let TtsInstallPlan::Guidance { lines } = plan {
+        for line in lines {
+            log::message(&format!("  {line}"));
+        }
+        log::message("  You can enable TTS later via `claudine config`.");
+    }
+}
+
+fn command_exists(command: &str) -> bool {
+    which::which(command).is_ok()
+}
+
 fn provider_hook_events(provider: Provider) -> Vec<AgenticEvent> {
     AgenticEvent::ALL
         .into_iter()
         .filter(|event| provider.supports_event_via_hook(event))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn macos_with_brew_uses_auto_install() {
+        assert_eq!(
+            tts_install_plan(
+                "macos",
+                TtsInstallCapabilities {
+                    has_brew: true,
+                    ..TtsInstallCapabilities::default()
+                },
+            ),
+            TtsInstallPlan::AutoInstall {
+                command: "brew".to_string(),
+                args: vec!["install".to_string(), "espeak-ng".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn linux_with_apt_uses_guided_instructions() {
+        assert_eq!(
+            tts_install_plan(
+                "linux",
+                TtsInstallCapabilities {
+                    has_apt: true,
+                    ..TtsInstallCapabilities::default()
+                },
+            ),
+            TtsInstallPlan::Guidance {
+                lines: vec![
+                    "Install eSpeak NG with: sudo apt-get install espeak-ng".to_string(),
+                    "Then rerun `claudine config` to enable TTS.".to_string(),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn windows_without_package_manager_falls_back_to_manual_guidance() {
+        assert_eq!(
+            tts_install_plan("windows", TtsInstallCapabilities::default()),
+            TtsInstallPlan::Guidance {
+                lines: fallback_tts_install_guidance("windows"),
+            }
+        );
+    }
 }

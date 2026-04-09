@@ -7,9 +7,9 @@ use std::io::stdout;
 
 use clap::Args;
 use crossterm::{
-    event::{self, Event},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
+    event::{self, Event},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::prelude::*;
 use ratatui::widgets::*;
@@ -20,7 +20,7 @@ use claudine::events::PROVIDERS_DISPLAY_ORDER;
 use claudine::services::protect::catalog::RuleGroup;
 use claudine::services::protect::config::{ProtectRuleToggles, RuleGroupConfig};
 
-use crate::commands::config_tui::app::App;
+use crate::commands::config_tui::app::{ActionView, App};
 
 #[derive(Debug, Args)]
 pub struct ConfigArgs {}
@@ -41,10 +41,9 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
     let (repo_config, repo_config_path) = if let Some(ref git) = git_info {
         let repo_root = &git.repo_root;
         let repo_cfg_path = repo_root.join(".claudine").join("config.json");
-        let repo_cfg =
-            claudine::dispatch::loader::load_repo_override_config(&repo_cfg_path)
-                .ok()
-                .flatten();
+        let repo_cfg = claudine::dispatch::loader::load_repo_override_config(&repo_cfg_path)
+            .ok()
+            .flatten();
         (repo_cfg, Some(repo_cfg_path))
     } else {
         (None, None)
@@ -88,10 +87,16 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
             && let Some(ref path) = app.repo_config_path
             && let Some(ref repo_cfg) = app.repo_config
         {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
+            if repo_cfg.is_empty() {
+                if path.exists() {
+                    std::fs::remove_file(path)?;
+                }
+            } else {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
             }
-            claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
         }
 
         eprintln!();
@@ -176,13 +181,14 @@ fn render(frame: &mut Frame, app: &App) {
         );
     frame.render_widget(tabs, chunks[0]);
 
-    let content_block = Block::default().borders(Borders::ALL).border_style(
-        if app.mode == app::AppMode::Detail {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default().fg(Color::Gray)
-        },
-    );
+    let content_block =
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(if app.mode == app::AppMode::Detail {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::Gray)
+            });
 
     let inner = content_block.inner(chunks[1]);
     frame.render_widget(content_block, chunks[1]);
@@ -239,11 +245,7 @@ fn build_hotkey_pairs(app: &App) -> Vec<(&'static str, &'static str)> {
             ]);
         }
         app::Tab::Services => {
-            pairs.extend([
-                ("L", "Logging"),
-                ("P", "Protect"),
-                ("C", "Configure Rules"),
-            ]);
+            pairs.extend([("L", "Logging"), ("P", "Protect"), ("C", "Configure Rules")]);
         }
         app::Tab::Tts => {
             pairs.extend([
@@ -256,19 +258,22 @@ fn build_hotkey_pairs(app: &App) -> Vec<(&'static str, &'static str)> {
             ]);
         }
         app::Tab::Actions => {
-            let configured_count = app
-                .config
-                .actions
-                .iter()
-                .filter(|(_, a)| !a.is_empty())
-                .count();
-            pairs.push(("A", "Add Event"));
-            if configured_count > 0 {
-                pairs.extend([("ENTER", "Edit"), ("D", "Delete")]);
+            if app.is_in_repo {
+                pairs.extend([("U", "User"), ("R", "Repo"), ("V", "Effective")]);
+            }
+
+            if app.is_in_repo && app.actions_view == ActionView::Effective {
+                pairs.push(("ENTER/E", "Edit Source"));
+            } else {
+                let configured_count = tabs::actions::configured_event_count(app);
+                pairs.push(("A", "Add Event"));
+                if configured_count > 0 {
+                    pairs.extend([("ENTER/E", "Edit"), ("D", "Delete")]);
+                }
             }
         }
         app::Tab::Messenger => {
-            pairs.extend([("Tab", "Focus"), ("Enter", "Activate")]);
+            pairs.extend([("Tab", "Focus"), ("Enter", "Activate"), ("S", "Select")]);
         }
     }
 
@@ -362,9 +367,7 @@ pub fn tts_provider_from_slug(slug: &str) -> Option<TtsProvider> {
     biscuit_speaks::detection::parse_provider_name(slug)
 }
 
-pub fn query_voices_for_provider(
-    provider: &str,
-) -> Vec<(String, biscuit_speaks::VoiceQuality)> {
+pub fn query_voices_for_provider(provider: &str) -> Vec<(String, biscuit_speaks::VoiceQuality)> {
     let tts_provider = tts_provider_from_slug(provider);
     let base_quality = tts_provider
         .as_ref()
@@ -375,8 +378,17 @@ pub fn query_voices_for_provider(
         "say" | "macos" => query_say_voices(),
         "espeak-ng" | "espeak" => query_espeak_voices("espeak-ng"),
         "kokoro" => vec![
-            "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "am_adam", "am_michael",
-            "bf_emma", "bf_isabella", "bm_george", "bm_lewis",
+            "af_heart",
+            "af_bella",
+            "af_nicole",
+            "af_sarah",
+            "af_sky",
+            "am_adam",
+            "am_michael",
+            "bf_emma",
+            "bf_isabella",
+            "bm_george",
+            "bm_lewis",
         ]
         .into_iter()
         .map(String::from)
@@ -384,14 +396,15 @@ pub fn query_voices_for_provider(
         _ => vec![],
     };
 
-    names
-        .into_iter()
-        .map(|name| (name, base_quality))
-        .collect()
+    names.into_iter().map(|name| (name, base_quality)).collect()
 }
 
 fn query_say_voices() -> Vec<String> {
-    let output = match std::process::Command::new("say").arg("-v").arg("?").output() {
+    let output = match std::process::Command::new("say")
+        .arg("-v")
+        .arg("?")
+        .output()
+    {
         Ok(o) => o,
         Err(_) => return vec![],
     };

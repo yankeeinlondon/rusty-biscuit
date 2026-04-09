@@ -6,6 +6,7 @@ pub mod config_tui;
 pub mod handle;
 pub mod help;
 pub mod hooks;
+#[cfg(test)]
 pub mod init;
 pub mod init_wizard;
 pub mod link_display;

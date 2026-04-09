@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 
-use super::super::app::{App, AppMode, ModalState};
+use super::super::app::{ActionView, App, AppMode, ModalState};
 use claudine::actions::HookAction;
 use claudine::events::AgenticEvent;
 
@@ -16,28 +18,88 @@ const ACTION_TYPE_LABELS: &[&str] = &[
     "Call (synchronous with response)",
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActionSource {
+    User,
+    Repo,
+}
+
+impl ActionSource {
+    fn badge(self) -> &'static str {
+        match self {
+            ActionSource::User => "user",
+            ActionSource::Repo => "repo",
+        }
+    }
+
+    fn view(self) -> ActionView {
+        match self {
+            ActionSource::User => ActionView::User,
+            ActionSource::Repo => ActionView::Repo,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ActionEntry {
+    event: AgenticEvent,
+    actions: Vec<HookAction>,
+    source: ActionSource,
+}
+
+pub fn configured_event_count(app: &App) -> usize {
+    action_entries_for_view(app).len()
+}
+
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let is_detail = app.mode == AppMode::Detail;
+    let entries = action_entries_for_view(app);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
 
-    let mut configured_events: Vec<(&AgenticEvent, &Vec<HookAction>)> = app
-        .config
-        .actions
-        .iter()
-        .filter(|(_, actions)| !actions.is_empty())
-        .collect();
-    configured_events.sort_by_key(|(event, _)| event.as_slug());
+    let header = Line::from(vec![
+        Span::styled("View", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(": "),
+        Span::styled(
+            app.actions_view.label(),
+            if app.is_in_repo && app.actions_view == ActionView::Effective {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            },
+        ),
+        Span::styled(
+            if app.is_in_repo {
+                "  U user  R repo  V effective"
+            } else {
+                ""
+            },
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(header), chunks[0]);
 
-    if configured_events.is_empty() {
-        let text = Paragraph::new("No actions configured. Press 'A' to add an event.")
-            .style(Style::default().fg(Color::Gray));
-        frame.render_widget(text, area);
+    if entries.is_empty() {
+        let text = Paragraph::new(
+            if app.is_in_repo && app.actions_view == ActionView::Effective {
+                "No actions configured. Switch to User or Repo view to add one."
+            } else {
+                "No actions configured. Press 'A' to add an event."
+            },
+        )
+        .style(Style::default().fg(Color::Gray));
+        frame.render_widget(text, chunks[1]);
     } else {
-        let max_summary_width = area.width.saturating_sub(25) as usize; // leave room for event name
-        let items: Vec<ListItem> = configured_events
+        let max_summary_width = chunks[1].width.saturating_sub(32) as usize;
+        let items: Vec<ListItem> = entries
             .iter()
             .enumerate()
-            .map(|(i, (event, actions))| {
-                let action_summary = summarize_actions(actions, max_summary_width);
+            .map(|(i, entry)| {
+                let action_summary = summarize_actions(&entry.actions, max_summary_width);
                 let name_style = if i == app.list_index && is_detail {
                     Style::default()
                         .fg(Color::Yellow)
@@ -45,8 +107,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 } else {
                     Style::default().add_modifier(Modifier::BOLD)
                 };
-                ListItem::new(Line::from(vec![
-                    Span::styled(event.human_name(), name_style),
+                let mut spans = vec![Span::styled(entry.event.human_name(), name_style)];
+                if app.is_in_repo {
+                    spans.push(Span::styled(
+                        format!(" [{}]", entry.source.badge()),
+                        Style::default().fg(match entry.source {
+                            ActionSource::User => Color::Blue,
+                            ActionSource::Repo => Color::Magenta,
+                        }),
+                    ));
+                }
+                spans.extend([
                     Span::raw(": "),
                     Span::styled(
                         action_summary,
@@ -54,14 +125,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                             .fg(Color::DarkGray)
                             .add_modifier(Modifier::ITALIC),
                     ),
-                ]))
+                ]);
+                ListItem::new(Line::from(spans))
             })
             .collect();
 
         let list = List::new(items)
             .highlight_style(Style::default().fg(Color::Yellow))
             .highlight_symbol(">> ");
-        frame.render_widget(list, area);
+        frame.render_widget(list, chunks[1]);
     }
 
     // Render parent modals from the stack underneath the current modal
@@ -80,7 +152,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let items: Vec<String> = if unconfigured.is_empty() {
             vec!["(all events configured)".to_string()]
         } else {
-            unconfigured.iter().map(|e| e.human_name().to_string()).collect()
+            unconfigured
+                .iter()
+                .map(|e| e.human_name().to_string())
+                .collect()
         };
         super::super::widgets::modal::render_list_modal(
             frame,
@@ -94,13 +169,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if let Some(ModalState::ActionTypeChooser { event, highlighted }) = &app.modal {
         let items: Vec<String> = ACTION_TYPE_LABELS.iter().map(|s| s.to_string()).collect();
         let title = format!("Add Action to: {}", event.human_name());
-        super::super::widgets::modal::render_list_modal(
-            frame,
-            area,
-            &title,
-            &items,
-            *highlighted,
-        );
+        super::super::widgets::modal::render_list_modal(frame, area, &title, &items, *highlighted);
     }
 
     if let Some(ModalState::ActionSoundSelector { highlighted, .. }) = &app.modal {
@@ -117,17 +186,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     if let Some(ModalState::ConfirmDelete { event_index }) = &app.modal {
-        let events: Vec<(&AgenticEvent, &Vec<HookAction>)> = app
-            .config
-            .actions
-            .iter()
-            .filter(|(_, actions)| !actions.is_empty())
-            .collect();
-        let mut sorted: Vec<_> = events;
-        sorted.sort_by_key(|(event, _)| event.as_slug());
+        let sorted = action_entries_for_view(app);
         let event_name = sorted
             .get(*event_index)
-            .map(|(e, _)| e.human_name())
+            .map(|entry| entry.event.human_name())
             .unwrap_or("?");
         super::super::widgets::modal::render_modal(
             frame,
@@ -148,16 +210,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                     ])
                     .split(area);
 
-                let msg = Paragraph::new(format!("Delete all actions for {}?", event_name))
-                    .style(Style::default().fg(Color::White))
-                    .alignment(Alignment::Center);
+                let msg = Paragraph::new(format!(
+                    "Delete all {} actions for {}?",
+                    app.actions_view.label().to_lowercase(),
+                    event_name
+                ))
+                .style(Style::default().fg(Color::White))
+                .alignment(Alignment::Center);
                 frame.render_widget(msg, chunks[1]);
 
-                let hotkey_line =
-                    super::super::widgets::modal::build_modal_hotkey_line(&[
-                        ("Y", "Confirm"),
-                        ("N", "Cancel"),
-                    ]);
+                let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&[
+                    ("Y", "Confirm"),
+                    ("N", "Cancel"),
+                ]);
                 let hotkey_widget = Paragraph::new(hotkey_line)
                     .alignment(Alignment::Center)
                     .style(Style::default().bg(Color::Indexed(236)));
@@ -171,162 +236,133 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         action_index,
         highlighted,
     }) = &app.modal
+        && let Some(actions) = current_actions_map(app).and_then(|actions| actions.get(event))
+        && let Some(action) = actions.get(*action_index)
     {
-        if let Some(actions) = app.config.actions.get(event)
-            && let Some(action) = actions.get(*action_index)
-        {
-            let fields = get_action_fields(action);
-            let title = format!("Edit {} Fields", action.type_pascal_case());
-            super::super::widgets::modal::render_modal(
-                frame,
-                area,
-                &title,
-                55,
-                50,
-                |frame, area| {
-                    let chunks = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([
-                            Constraint::Min(0),
-                            Constraint::Length(1),
-                            Constraint::Length(1),
-                        ])
-                        .split(area);
+        let fields = get_action_fields(action);
+        let title = format!("Edit {} Fields", action.type_pascal_case());
+        super::super::widgets::modal::render_modal(frame, area, &title, 55, 50, |frame, area| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(0),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                ])
+                .split(area);
 
-                    let items: Vec<ListItem> = fields
-                        .iter()
-                        .enumerate()
-                        .map(|(i, (_, label, value))| {
-                            let display_value = if value.is_empty() {
-                                "(empty)".to_string()
-                            } else {
-                                truncate_str(value, 30)
-                            };
-                            let style = if i == *highlighted {
-                                Style::default()
-                                    .fg(Color::Yellow)
-                                    .add_modifier(Modifier::BOLD)
-                            } else {
-                                Style::default()
-                            };
-                            let value_style = if value.is_empty() {
-                                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
-                            } else {
-                                Style::default().fg(Color::Cyan)
-                            };
-                            ListItem::new(Line::from(vec![
-                                Span::styled(format!("{label}: "), style),
-                                Span::styled(display_value, value_style),
-                            ]))
-                        })
-                        .collect();
-
-                    let list = List::new(items);
-                    frame.render_widget(list, chunks[0]);
-
-                    let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&[
-                        ("ENTER", "Edit"),
-                        ("ESC", "Done"),
-                    ]);
-                    let hotkey_widget = Paragraph::new(hotkey_line)
-                        .alignment(Alignment::Center)
-                        .style(Style::default().bg(Color::Indexed(236)));
-                    frame.render_widget(hotkey_widget, chunks[2]);
-                },
-            );
-        }
-    }
-
-    if let Some(ModalState::ActionFieldInput {
-        label, buffer, ..
-    }) = &app.modal
-    {
-        super::super::widgets::modal::render_modal(
-            frame,
-            area,
-            label,
-            60,
-            20,
-            |frame, area| {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Length(1),
-                        Constraint::Length(1),
-                        Constraint::Length(1),
-                        Constraint::Min(0),
-                    ])
-                    .split(area);
-
-                let input_line = Line::from(vec![
-                    Span::styled("> ", Style::default().fg(Color::Yellow)),
-                    Span::raw(buffer.as_str()),
-                    Span::styled(
-                        "_",
+            let items: Vec<ListItem> = fields
+                .iter()
+                .enumerate()
+                .map(|(i, (_, label, value))| {
+                    let display_value = if value.is_empty() {
+                        "(empty)".to_string()
+                    } else {
+                        truncate_str(value, 30)
+                    };
+                    let style = if i == *highlighted {
                         Style::default()
                             .fg(Color::Yellow)
-                            .add_modifier(Modifier::SLOW_BLINK),
-                    ),
-                ]);
-                frame.render_widget(Paragraph::new(input_line), chunks[0]);
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    let value_style = if value.is_empty() {
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::ITALIC)
+                    } else {
+                        Style::default().fg(Color::Cyan)
+                    };
+                    ListItem::new(Line::from(vec![
+                        Span::styled(format!("{label}: "), style),
+                        Span::styled(display_value, value_style),
+                    ]))
+                })
+                .collect();
 
-                let hotkey_line =
-                    super::super::widgets::modal::build_modal_hotkey_line(&[
-                        ("ENTER", "Confirm"),
-                        ("ESC", "Cancel"),
-                    ]);
-                let hotkey_widget = Paragraph::new(hotkey_line)
-                    .alignment(Alignment::Center)
-                    .style(Style::default().bg(Color::Indexed(236)));
-                frame.render_widget(hotkey_widget, chunks[2]);
-            },
-        );
+            let list = List::new(items);
+            frame.render_widget(list, chunks[0]);
+
+            let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&[
+                ("ENTER", "Edit"),
+                ("ESC", "Done"),
+            ]);
+            let hotkey_widget = Paragraph::new(hotkey_line)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(Color::Indexed(236)));
+            frame.render_widget(hotkey_widget, chunks[2]);
+        });
     }
 
-    if let Some(ModalState::TextInput {
-        label, buffer, ..
-    }) = &app.modal
-    {
-        super::super::widgets::modal::render_modal(
-            frame,
-            area,
-            label,
-            60,
-            20,
-            |frame, area| {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Length(1), // input line
-                        Constraint::Length(1), // blank
-                        Constraint::Length(1), // hotkeys
-                        Constraint::Min(0),
-                    ])
-                    .split(area);
+    if let Some(ModalState::ActionFieldInput { label, buffer, .. }) = &app.modal {
+        super::super::widgets::modal::render_modal(frame, area, label, 60, 20, |frame, area| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(0),
+                ])
+                .split(area);
 
-                let input_line = Line::from(vec![
-                    Span::styled("> ", Style::default().fg(Color::Yellow)),
-                    Span::raw(buffer.as_str()),
-                    Span::styled(
-                        "_",
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::SLOW_BLINK),
-                    ),
-                ]);
-                frame.render_widget(Paragraph::new(input_line), chunks[0]);
+            let input_line = Line::from(vec![
+                Span::styled("> ", Style::default().fg(Color::Yellow)),
+                Span::raw(buffer.as_str()),
+                Span::styled(
+                    "_",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::SLOW_BLINK),
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(input_line), chunks[0]);
 
-                let hotkey_line =
-                    super::super::widgets::modal::build_modal_hotkey_line(&[
-                        ("ENTER", "Confirm"),
-                        ("ESC", "Cancel"),
-                    ]);
-                let hotkey_widget = Paragraph::new(hotkey_line)
-                    .alignment(Alignment::Center)
-                    .style(Style::default().bg(Color::Indexed(236)));
-                frame.render_widget(hotkey_widget, chunks[2]);
-            },
-        );
+            let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&[
+                ("ENTER", "Confirm"),
+                ("ESC", "Cancel"),
+            ]);
+            let hotkey_widget = Paragraph::new(hotkey_line)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(Color::Indexed(236)));
+            frame.render_widget(hotkey_widget, chunks[2]);
+        });
+    }
+
+    if let Some(ModalState::TextInput { label, buffer, .. }) = &app.modal {
+        super::super::widgets::modal::render_modal(frame, area, label, 60, 20, |frame, area| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1), // input line
+                    Constraint::Length(1), // blank
+                    Constraint::Length(1), // hotkeys
+                    Constraint::Min(0),
+                ])
+                .split(area);
+
+            let input_line = Line::from(vec![
+                Span::styled("> ", Style::default().fg(Color::Yellow)),
+                Span::raw(buffer.as_str()),
+                Span::styled(
+                    "_",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::SLOW_BLINK),
+                ),
+            ]);
+            frame.render_widget(Paragraph::new(input_line), chunks[0]);
+
+            let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&[
+                ("ENTER", "Confirm"),
+                ("ESC", "Cancel"),
+            ]);
+            let hotkey_widget = Paragraph::new(hotkey_line)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(Color::Indexed(236)));
+            frame.render_widget(hotkey_widget, chunks[2]);
+        });
     }
 }
 
@@ -364,10 +400,119 @@ fn summarize_actions(actions: &[HookAction], max_width: usize) -> String {
     truncate_str(&joined, max_width)
 }
 
+fn action_entries_for_view(app: &App) -> Vec<ActionEntry> {
+    match app.actions_view {
+        ActionView::Effective => effective_action_entries(app),
+        ActionView::User => action_entries_from_map(&app.config.actions, ActionSource::User),
+        ActionView::Repo => app
+            .repo_config
+            .as_ref()
+            .map(|repo| action_entries_from_map(&repo.actions, ActionSource::Repo))
+            .unwrap_or_default(),
+    }
+}
+
+fn action_entries_from_map(
+    actions: &HashMap<AgenticEvent, Vec<HookAction>>,
+    source: ActionSource,
+) -> Vec<ActionEntry> {
+    let mut entries: Vec<_> = actions
+        .iter()
+        .filter(|(_, actions)| !actions.is_empty())
+        .map(|(event, actions)| ActionEntry {
+            event: *event,
+            actions: actions.clone(),
+            source,
+        })
+        .collect();
+    entries.sort_by_key(|entry| entry.event.as_slug());
+    entries
+}
+
+fn effective_action_entries(app: &App) -> Vec<ActionEntry> {
+    let mut merged = action_entries_from_map(&app.config.actions, ActionSource::User);
+    if let Some(repo) = &app.repo_config {
+        for (event, actions) in &repo.actions {
+            if actions.is_empty() {
+                continue;
+            }
+
+            if let Some(existing) = merged.iter_mut().find(|entry| entry.event == *event) {
+                existing.actions = actions.clone();
+                existing.source = ActionSource::Repo;
+            } else {
+                merged.push(ActionEntry {
+                    event: *event,
+                    actions: actions.clone(),
+                    source: ActionSource::Repo,
+                });
+            }
+        }
+    }
+    merged.sort_by_key(|entry| entry.event.as_slug());
+    merged
+}
+
+fn current_actions_map(app: &App) -> Option<&HashMap<AgenticEvent, Vec<HookAction>>> {
+    match app.actions_view {
+        ActionView::Effective => None,
+        ActionView::User => Some(&app.config.actions),
+        ActionView::Repo => app.repo_config.as_ref().map(|repo| &repo.actions),
+    }
+}
+
+fn current_actions_map_mut(app: &mut App) -> Option<&mut HashMap<AgenticEvent, Vec<HookAction>>> {
+    match app.actions_view {
+        ActionView::Effective => None,
+        ActionView::User => Some(&mut app.config.actions),
+        ActionView::Repo => {
+            if app.repo_config.is_none() {
+                app.repo_config =
+                    Some(claudine::config::claudine_config::RepoOverrideConfig::default());
+            }
+            app.repo_config.as_mut().map(|repo| &mut repo.actions)
+        }
+    }
+}
+
+fn mark_current_actions_dirty(app: &mut App) {
+    match app.actions_view {
+        ActionView::Effective => {}
+        ActionView::User => app.dirty = true,
+        ActionView::Repo => app.repo_dirty = true,
+    }
+}
+
+fn switch_effective_selection_to_source_view(app: &mut App) {
+    if app.actions_view != ActionView::Effective {
+        return;
+    }
+
+    let Some(selected) = action_entries_for_view(app).get(app.list_index).cloned() else {
+        return;
+    };
+
+    app.actions_view = selected.source.view();
+    if let Some(index) = action_entries_for_view(app)
+        .iter()
+        .position(|entry| entry.event == selected.event)
+    {
+        app.list_index = index;
+    }
+}
+
 fn get_unconfigured_events(app: &App) -> Vec<AgenticEvent> {
+    let Some(actions) = current_actions_map(app) else {
+        return Vec::new();
+    };
+
     AgenticEvent::ALL
         .into_iter()
-        .filter(|e| app.config.actions.get(e).is_none_or(|a| a.is_empty()))
+        .filter(|event| {
+            actions
+                .get(event)
+                .is_none_or(|configured| configured.is_empty())
+        })
         .collect()
 }
 
@@ -378,97 +523,63 @@ fn render_edit_actions_modal(
     event: AgenticEvent,
     highlighted: usize,
 ) {
-    let actions = app
-        .config
-        .actions
-        .get(&event)
+    let actions = current_actions_map(app)
+        .and_then(|actions| actions.get(&event))
         .cloned()
         .unwrap_or_default();
-    let title = format!("Edit: {}", event.human_name());
+    let title = format!("Edit {}: {}", app.actions_view.label(), event.human_name());
 
-    super::super::widgets::modal::render_modal(
-        frame,
-        area,
-        &title,
-        55,
-        70,
-        |frame, area| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(0),
-                    Constraint::Length(1), // blank separator
-                    Constraint::Length(1), // hotkey bar
-                ])
-                .split(area);
+    super::super::widgets::modal::render_modal(frame, area, &title, 55, 70, |frame, area| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(1), // blank separator
+                Constraint::Length(1), // hotkey bar
+            ])
+            .split(area);
 
-            if actions.is_empty() {
-                let msg = Paragraph::new("No actions configured.")
-                    .style(Style::default().fg(Color::Gray));
-                frame.render_widget(msg, chunks[0]);
-            } else {
-                let items: Vec<ListItem> = actions
-                    .iter()
-                    .enumerate()
-                    .map(|(i, action)| {
-                        let summary = format_action_detail(action);
-                        let style = if i == highlighted {
-                            Style::default()
-                                .fg(Color::Yellow)
-                                .add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default().fg(Color::White)
-                        };
-                        ListItem::new(Line::from(Span::styled(summary, style)))
-                    })
-                    .collect();
-
-                let list = List::new(items)
-                    .highlight_symbol(">> ")
-                    .highlight_style(
+        if actions.is_empty() {
+            let msg =
+                Paragraph::new("No actions configured.").style(Style::default().fg(Color::Gray));
+            frame.render_widget(msg, chunks[0]);
+        } else {
+            let items: Vec<ListItem> = actions
+                .iter()
+                .enumerate()
+                .map(|(i, action)| {
+                    let summary = format_action_detail(action);
+                    let style = if i == highlighted {
                         Style::default()
                             .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    );
-                let mut state = ListState::default().with_selected(Some(highlighted));
-                frame.render_stateful_widget(list, chunks[0], &mut state);
-            }
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    ListItem::new(Line::from(Span::styled(summary, style)))
+                })
+                .collect();
 
-            let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&[
-                ("ENTER", "Edit"),
-                ("A", "Add"),
-                ("D", "Delete"),
-                ("ESC", "Done"),
-            ]);
-            let hotkey_widget = Paragraph::new(hotkey_line)
-                .alignment(Alignment::Center)
-                .style(Style::default().bg(Color::Indexed(236)));
-            frame.render_widget(hotkey_widget, chunks[2]);
-        },
-    );
-}
+            let list = List::new(items).highlight_symbol(">> ").highlight_style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            );
+            let mut state = ListState::default().with_selected(Some(highlighted));
+            frame.render_stateful_widget(list, chunks[0], &mut state);
+        }
 
-/// Returns (label, current_value, action_type) for editable actions.
-fn editable_text(action: &HookAction) -> Option<(String, String, usize)> {
-    match action {
-        HookAction::SoundEffect { effect, .. } => {
-            Some(("Sound Effect".to_string(), effect.clone(), 0))
-        }
-        HookAction::Speak { message, .. } => {
-            Some(("Speak Message".to_string(), message.clone(), 1))
-        }
-        HookAction::Message { message, .. } => {
-            Some(("Message Text".to_string(), message.clone(), 2))
-        }
-        HookAction::Bash { command, .. } => {
-            Some(("Shell Command".to_string(), command.clone(), 3))
-        }
-        HookAction::Report { .. } => None,
-        HookAction::Call { command, .. } => {
-            Some(("Call Command".to_string(), command.clone(), 5))
-        }
-        _ => None,
-    }
+        let hotkey_line = super::super::widgets::modal::build_modal_hotkey_line(&[
+            ("ENTER", "Edit"),
+            ("A", "Add"),
+            ("D", "Delete"),
+            ("ESC", "Done"),
+        ]);
+        let hotkey_widget = Paragraph::new(hotkey_line)
+            .alignment(Alignment::Center)
+            .style(Style::default().bg(Color::Indexed(236)));
+        frame.render_widget(hotkey_widget, chunks[2]);
+    });
 }
 
 fn format_action_detail(action: &HookAction) -> String {
@@ -492,11 +603,9 @@ pub fn handle_edit_actions_modal(app: &mut App, key: KeyEvent) {
         Some(ModalState::EditActions { event, .. }) => *event,
         _ => return,
     };
-    let action_count = app
-        .config
-        .actions
-        .get(&event)
-        .map_or(0, |a| a.len());
+    let action_count = current_actions_map(app)
+        .and_then(|actions| actions.get(&event))
+        .map_or(0, |actions| actions.len());
 
     match key.code {
         KeyCode::Up => {
@@ -532,18 +641,27 @@ pub fn handle_edit_actions_modal(app: &mut App, key: KeyEvent) {
         KeyCode::Char('d') | KeyCode::Char('D') => {
             if action_count > 0 {
                 let idx = app.modal_highlighted();
-                if let Some(actions) = app.config.actions.get_mut(&event) {
+                let mut remove_event = false;
+                if let Some(actions) =
+                    current_actions_map_mut(app).and_then(|actions| actions.get_mut(&event))
+                {
                     if idx < actions.len() {
                         actions.remove(idx);
-                        app.dirty = true;
                     }
                     if actions.is_empty() {
-                        app.config.actions.remove(&event);
-                        app.pop_modal();
-                        return;
+                        remove_event = true;
                     }
                 }
-                let new_count = app.config.actions.get(&event).map_or(0, |a| a.len());
+                if remove_event && let Some(actions) = current_actions_map_mut(app) {
+                    actions.remove(&event);
+                    mark_current_actions_dirty(app);
+                    app.pop_modal();
+                    return;
+                }
+                mark_current_actions_dirty(app);
+                let new_count = current_actions_map(app)
+                    .and_then(|actions| actions.get(&event))
+                    .map_or(0, |actions| actions.len());
                 if app.modal_highlighted() >= new_count && new_count > 0 {
                     app.set_modal_highlighted(new_count - 1);
                 }
@@ -557,37 +675,44 @@ pub fn handle_edit_actions_modal(app: &mut App, key: KeyEvent) {
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
-    let configured_count = app
-        .config
-        .actions
-        .iter()
-        .filter(|(_, a)| !a.is_empty())
-        .count();
+    let configured_count = configured_event_count(app);
 
     match key.code {
+        KeyCode::Char('u') | KeyCode::Char('U') if app.is_in_repo => {
+            app.actions_view = ActionView::User;
+            app.list_index = 0;
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') if app.is_in_repo => {
+            app.actions_view = ActionView::Repo;
+            app.list_index = 0;
+        }
+        KeyCode::Char('v') | KeyCode::Char('V') if app.is_in_repo => {
+            app.actions_view = ActionView::Effective;
+            app.list_index = 0;
+        }
         KeyCode::Char('a') | KeyCode::Char('A') => {
-            let unconfigured = get_unconfigured_events(app);
-            if !unconfigured.is_empty() {
-                app.modal = Some(ModalState::EventSelector { highlighted: 0 });
+            if app.actions_view != ActionView::Effective {
+                let unconfigured = get_unconfigured_events(app);
+                if !unconfigured.is_empty() {
+                    app.modal = Some(ModalState::EventSelector { highlighted: 0 });
+                }
             }
         }
         KeyCode::Char('d') | KeyCode::Char('D') => {
             if configured_count > 0 {
+                switch_effective_selection_to_source_view(app);
                 app.modal = Some(ModalState::ConfirmDelete {
                     event_index: app.list_index,
                 });
             }
         }
-        KeyCode::Enter => {
+        KeyCode::Enter | KeyCode::Char('e') | KeyCode::Char('E') => {
             if configured_count > 0 {
-                let mut event_keys: Vec<AgenticEvent> = app
-                    .config
-                    .actions
-                    .iter()
-                    .filter(|(_, actions)| !actions.is_empty())
-                    .map(|(event, _)| *event)
+                switch_effective_selection_to_source_view(app);
+                let event_keys: Vec<AgenticEvent> = action_entries_for_view(app)
+                    .into_iter()
+                    .map(|entry| entry.event)
                     .collect();
-                event_keys.sort_by_key(|event| event.as_slug());
                 if let Some(event) = event_keys.get(app.list_index).copied() {
                     app.modal = Some(ModalState::EditActions {
                         event,
@@ -707,12 +832,10 @@ pub fn handle_action_type_chooser_modal(app: &mut App, key: KeyEvent) {
                 4 => {
                     // Report
                     let action = HookAction::Report { handler: None };
-                    app.config
-                        .actions
-                        .entry(event)
-                        .or_default()
-                        .push(action);
-                    app.dirty = true;
+                    if let Some(actions) = current_actions_map_mut(app) {
+                        actions.entry(event).or_default().push(action);
+                        mark_current_actions_dirty(app);
+                    }
                     app.pop_to_edit_actions();
                 }
                 5 => {
@@ -745,17 +868,15 @@ pub fn handle_confirm_delete_modal(app: &mut App, key: KeyEvent) {
 
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
-            let mut event_keys: Vec<AgenticEvent> = app
-                .config
-                .actions
-                .iter()
-                .filter(|(_, actions)| !actions.is_empty())
-                .map(|(event, _)| *event)
+            let event_keys: Vec<AgenticEvent> = action_entries_for_view(app)
+                .into_iter()
+                .map(|entry| entry.event)
                 .collect();
-            event_keys.sort_by_key(|event| event.as_slug());
-            if let Some(event) = event_keys.get(event_index).copied() {
-                app.config.actions.remove(&event);
-                app.dirty = true;
+            if let Some(event) = event_keys.get(event_index).copied()
+                && let Some(actions) = current_actions_map_mut(app)
+            {
+                actions.remove(&event);
+                mark_current_actions_dirty(app);
             }
             if app.list_index > 0 {
                 app.list_index -= 1;
@@ -796,7 +917,8 @@ pub fn handle_text_input_modal(app: &mut App, key: KeyEvent) {
 
             if let Some(idx) = edit_index {
                 // Editing an existing action in place
-                if let Some(actions) = app.config.actions.get_mut(&event)
+                if let Some(actions) =
+                    current_actions_map_mut(app).and_then(|actions| actions.get_mut(&event))
                     && let Some(action) = actions.get_mut(idx)
                 {
                     match action {
@@ -835,13 +957,11 @@ pub fn handle_text_input_modal(app: &mut App, key: KeyEvent) {
                         return;
                     }
                 };
-                app.config
-                    .actions
-                    .entry(event)
-                    .or_default()
-                    .push(action);
+                if let Some(actions) = current_actions_map_mut(app) {
+                    actions.entry(event).or_default().push(action);
+                }
             }
-            app.dirty = true;
+            mark_current_actions_dirty(app);
             app.pop_to_edit_actions();
         }
         KeyCode::Esc => {
@@ -870,11 +990,7 @@ fn get_action_fields(action: &HookAction) -> Vec<(&'static str, &'static str, St
             gender,
         } => vec![
             ("message", "Message", message.clone()),
-            (
-                "voice",
-                "Voice",
-                voice.clone().unwrap_or_default(),
-            ),
+            ("voice", "Voice", voice.clone().unwrap_or_default()),
             (
                 "gender",
                 "Gender",
@@ -917,7 +1033,11 @@ fn get_action_fields(action: &HookAction) -> Vec<(&'static str, &'static str, St
             vec![
                 ("format", "Format (text/json/compact)", fmt),
                 ("template", "Template", template),
-                ("include_metadata", "Include Metadata (true/false)", metadata),
+                (
+                    "include_metadata",
+                    "Include Metadata (true/false)",
+                    metadata,
+                ),
             ]
         }
         HookAction::Call {
@@ -930,16 +1050,12 @@ fn get_action_fields(action: &HookAction) -> Vec<(&'static str, &'static str, St
             (
                 "args",
                 "Args (comma-separated)",
-                args.as_ref()
-                    .map(|a| a.join(", "))
-                    .unwrap_or_default(),
+                args.as_ref().map(|a| a.join(", ")).unwrap_or_default(),
             ),
             (
                 "timeout_ms",
                 "Timeout (ms)",
-                timeout_ms
-                    .map(|t| t.to_string())
-                    .unwrap_or_default(),
+                timeout_ms.map(|t| t.to_string()).unwrap_or_default(),
             ),
             (
                 "mapper",
@@ -1052,7 +1168,11 @@ fn apply_action_field(action: &mut HookAction, field_name: &str, value: String) 
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
-                *args = if parsed.is_empty() { None } else { Some(parsed) };
+                *args = if parsed.is_empty() {
+                    None
+                } else {
+                    Some(parsed)
+                };
             }
             "timeout_ms" => {
                 *timeout_ms = value.parse::<u64>().ok();
@@ -1068,12 +1188,12 @@ fn apply_action_field(action: &mut HookAction, field_name: &str, value: String) 
                     Some(claudine::actions::Mapper::JsonField {
                         field: field.to_string(),
                     })
-                } else if let Some(pattern) = value.strip_prefix("regex:") {
-                    Some(claudine::actions::Mapper::Regex {
-                        pattern: pattern.to_string(),
-                    })
                 } else {
-                    None
+                    value
+                        .strip_prefix("regex:")
+                        .map(|pattern| claudine::actions::Mapper::Regex {
+                            pattern: pattern.to_string(),
+                        })
                 };
             }
             _ => {}
@@ -1092,10 +1212,8 @@ pub fn handle_action_field_list_modal(app: &mut App, key: KeyEvent) {
         _ => return,
     };
 
-    let field_count = app
-        .config
-        .actions
-        .get(&event)
+    let field_count = current_actions_map(app)
+        .and_then(|actions| actions.get(&event))
         .and_then(|a| a.get(action_index))
         .map(|a| get_action_fields(a).len())
         .unwrap_or(0);
@@ -1115,7 +1233,7 @@ pub fn handle_action_field_list_modal(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Enter => {
             let idx = app.modal_highlighted();
-            if let Some(actions) = app.config.actions.get(&event)
+            if let Some(actions) = current_actions_map(app).and_then(|actions| actions.get(&event))
                 && let Some(action) = actions.get(action_index)
             {
                 let fields = get_action_fields(action);
@@ -1172,11 +1290,12 @@ pub fn handle_action_field_input_modal(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Enter => {
             let value = buffer.clone();
-            if let Some(actions) = app.config.actions.get_mut(&event)
+            if let Some(actions) =
+                current_actions_map_mut(app).and_then(|actions| actions.get_mut(&event))
                 && let Some(action) = actions.get_mut(action_index)
             {
                 apply_action_field(action, &field_name, value);
-                app.dirty = true;
+                mark_current_actions_dirty(app);
             }
             app.pop_modal();
         }
@@ -1223,12 +1342,12 @@ pub fn handle_action_sound_selector_modal(app: &mut App, key: KeyEvent) {
             if let Some(&effect_name) = sounds.get(idx) {
                 if let Some(edit_idx) = edit_index {
                     // Editing existing action
-                    if let Some(actions) = app.config.actions.get_mut(&event)
+                    if let Some(actions) =
+                        current_actions_map_mut(app).and_then(|actions| actions.get_mut(&event))
                         && let Some(action) = actions.get_mut(edit_idx)
+                        && let HookAction::SoundEffect { effect, .. } = action
                     {
-                        if let HookAction::SoundEffect { effect, .. } = action {
-                            *effect = effect_name.to_string();
-                        }
+                        *effect = effect_name.to_string();
                     }
                 } else {
                     // Adding new action
@@ -1237,13 +1356,11 @@ pub fn handle_action_sound_selector_modal(app: &mut App, key: KeyEvent) {
                         volume: 1.0,
                         speed: 1.0,
                     };
-                    app.config
-                        .actions
-                        .entry(event)
-                        .or_default()
-                        .push(action);
+                    if let Some(actions) = current_actions_map_mut(app) {
+                        actions.entry(event).or_default().push(action);
+                    }
                 }
-                app.dirty = true;
+                mark_current_actions_dirty(app);
                 app.pop_to_edit_actions();
             }
         }
@@ -1251,5 +1368,94 @@ pub fn handle_action_sound_selector_modal(app: &mut App, key: KeyEvent) {
             app.pop_modal();
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use super::*;
+    use claudine::config::claudine_config::{ClaudineConfig, RepoOverrideConfig};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn test_app(is_in_repo: bool) -> App {
+        App::new(
+            ClaudineConfig::default(),
+            if is_in_repo {
+                Some(RepoOverrideConfig::default())
+            } else {
+                None
+            },
+            None,
+            is_in_repo,
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn effective_view_uses_repo_replacements_per_event() {
+        let mut app = test_app(true);
+        app.config.actions.insert(
+            AgenticEvent::SessionStart,
+            vec![HookAction::Report { handler: None }],
+        );
+        app.config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Bash {
+                command: "user".to_string(),
+                params: String::new(),
+            }],
+        );
+        app.repo_config.as_mut().unwrap().actions.insert(
+            AgenticEvent::SessionStart,
+            vec![HookAction::Speak {
+                message: "repo".to_string(),
+                voice: None,
+                gender: None,
+            }],
+        );
+
+        let entries = action_entries_for_view(&app);
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(configured_event_count(&app), 2);
+        assert_eq!(entries[0].event, AgenticEvent::BeforeTool);
+        assert_eq!(entries[0].source, ActionSource::User);
+        assert_eq!(entries[1].event, AgenticEvent::SessionStart);
+        assert_eq!(entries[1].source, ActionSource::Repo);
+        assert!(matches!(entries[1].actions[0], HookAction::Speak { .. }));
+    }
+
+    #[test]
+    fn edit_hotkey_from_effective_view_switches_to_repo_scope() {
+        let mut app = test_app(true);
+        app.config.actions.insert(
+            AgenticEvent::SessionStart,
+            vec![HookAction::Report { handler: None }],
+        );
+        app.repo_config.as_mut().unwrap().actions.insert(
+            AgenticEvent::SessionStart,
+            vec![HookAction::Speak {
+                message: "repo".to_string(),
+                voice: None,
+                gender: None,
+            }],
+        );
+
+        handle_key(&mut app, key(KeyCode::Char('e')));
+
+        assert_eq!(app.actions_view, ActionView::Repo);
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::EditActions {
+                event: AgenticEvent::SessionStart,
+                highlighted: 0
+            })
+        ));
     }
 }

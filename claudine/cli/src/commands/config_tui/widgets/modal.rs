@@ -103,8 +103,7 @@ pub fn render_list_modal_with_hotkeys(
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(None)
                 .end_symbol(None);
-            let mut scrollbar_state =
-                ScrollbarState::new(items_count).position(highlighted);
+            let mut scrollbar_state = ScrollbarState::new(items_count).position(highlighted);
             frame.render_stateful_widget(scrollbar, list_area, &mut scrollbar_state);
         }
 

@@ -3,8 +3,13 @@
 //! These functions encapsulate the logic that was previously inline in modal
 //! key handlers, making them independently testable without any App/terminal state.
 
+use claudine::config::claudine_config::VoiceSelection;
+
+#[cfg(test)]
 use claudine::actions::HookAction;
-use claudine::config::claudine_config::{MessengerProviderConfig, VoiceSelection};
+#[cfg(test)]
+use claudine::config::claudine_config::MessengerProviderConfig;
+#[cfg(test)]
 use claudine::events::{AgenticEvent, recommended_sound};
 
 use super::app::GenderTab;
@@ -12,6 +17,7 @@ use super::app::GenderTab;
 /// Create the default sound effect action for an event.
 ///
 /// Uses `recommended_sound()` to pick a contextually appropriate sound.
+#[cfg(test)]
 pub fn create_default_sound_action(event: &AgenticEvent) -> HookAction {
     HookAction::SoundEffect {
         effect: recommended_sound(event).to_string(),
@@ -47,18 +53,14 @@ pub fn apply_voice_selection(
         }
         // Currently Single — promote to Gendered by treating the existing
         // voice as the opposite gender's selection.
-        (Some(VoiceSelection::Single(existing)), GenderTab::Female) => {
-            VoiceSelection::Gendered {
-                male: existing.clone(),
-                female: voice,
-            }
-        }
-        (Some(VoiceSelection::Single(existing)), GenderTab::Male) => {
-            VoiceSelection::Gendered {
-                male: voice,
-                female: existing.clone(),
-            }
-        }
+        (Some(VoiceSelection::Single(existing)), GenderTab::Female) => VoiceSelection::Gendered {
+            male: existing.clone(),
+            female: voice,
+        },
+        (Some(VoiceSelection::Single(existing)), GenderTab::Male) => VoiceSelection::Gendered {
+            male: voice,
+            female: existing.clone(),
+        },
         // No prior voice — start as Single.
         (None, _) => VoiceSelection::Single(voice),
     }
@@ -69,6 +71,7 @@ pub fn apply_voice_selection(
 /// Returns `None` for unrecognized provider names. The returned config has
 /// empty destination fields — the user must fill them in before the config
 /// passes validation.
+#[cfg(test)]
 pub fn create_messenger_config(provider: &str) -> Option<MessengerProviderConfig> {
     match provider {
         "discord" => Some(MessengerProviderConfig::Discord {
@@ -142,8 +145,7 @@ mod tests {
     #[test]
     fn voice_promotes_single_to_gendered_when_setting_male() {
         let current = VoiceSelection::Single("Samantha".to_string());
-        let result =
-            apply_voice_selection(Some(&current), GenderTab::Male, "Daniel".to_string());
+        let result = apply_voice_selection(Some(&current), GenderTab::Male, "Daniel".to_string());
         assert_eq!(
             result,
             VoiceSelection::Gendered {
@@ -156,8 +158,7 @@ mod tests {
     #[test]
     fn voice_promotes_single_to_gendered_when_setting_female() {
         let current = VoiceSelection::Single("Alex".to_string());
-        let result =
-            apply_voice_selection(Some(&current), GenderTab::Female, "Karen".to_string());
+        let result = apply_voice_selection(Some(&current), GenderTab::Female, "Karen".to_string());
         assert_eq!(
             result,
             VoiceSelection::Gendered {
@@ -173,8 +174,7 @@ mod tests {
             male: "Daniel".to_string(),
             female: "Samantha".to_string(),
         };
-        let result =
-            apply_voice_selection(Some(&current), GenderTab::Female, "Karen".to_string());
+        let result = apply_voice_selection(Some(&current), GenderTab::Female, "Karen".to_string());
         assert_eq!(
             result,
             VoiceSelection::Gendered {
@@ -190,8 +190,7 @@ mod tests {
             male: "Daniel".to_string(),
             female: "Samantha".to_string(),
         };
-        let result =
-            apply_voice_selection(Some(&current), GenderTab::Male, "Tom".to_string());
+        let result = apply_voice_selection(Some(&current), GenderTab::Male, "Tom".to_string());
         assert_eq!(
             result,
             VoiceSelection::Gendered {

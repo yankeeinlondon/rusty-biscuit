@@ -383,7 +383,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('c') | KeyCode::Char('C') => {
             app.modal = Some(ModalState::ProtectRules {
                 highlighted: 0,
-                staged_rules: app.config.protect.rules.clone(),
+                staged_rules: Box::new(app.config.protect.rules.clone()),
             });
         }
         _ => {}
@@ -408,16 +408,16 @@ pub fn handle_protect_rules_modal(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char(' ') => {
             let idx = app.modal_highlighted();
-            if let Some(name) = rule_names.get(idx) {
-                if let Some(ModalState::ProtectRules { staged_rules, .. }) = &mut app.modal {
-                    super::super::toggle_protect_rule(staged_rules, name);
-                }
+            if let Some(name) = rule_names.get(idx)
+                && let Some(ModalState::ProtectRules { staged_rules, .. }) = &mut app.modal
+            {
+                super::super::toggle_protect_rule(staged_rules, name);
             }
         }
         KeyCode::Enter => {
             // Commit staged rules to config
             if let Some(ModalState::ProtectRules { staged_rules, .. }) = app.modal.take() {
-                app.config.protect.rules = staged_rules;
+                app.config.protect.rules = *staged_rules;
                 app.dirty = true;
             }
         }
