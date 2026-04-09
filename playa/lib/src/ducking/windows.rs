@@ -169,9 +169,10 @@ fn get_session_manager() -> Result<IAudioSessionManager2, DuckingError> {
                 DuckingError::Platform(format!("failed to get default audio endpoint: {e}"))
             })?;
 
-        let session_mgr: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None).map_err(|e| {
-            DuckingError::Platform(format!("failed to activate session manager: {e}"))
-        })?;
+        let session_mgr: IAudioSessionManager2 =
+            device.Activate(CLSCTX_ALL, None).map_err(|e| {
+                DuckingError::Platform(format!("failed to activate session manager: {e}"))
+            })?;
 
         Ok(session_mgr)
     }
@@ -188,17 +189,14 @@ fn enumerate_sessions(our_pid: u32) -> Result<Vec<LiveSession>, DuckingError> {
     let session_mgr = get_session_manager()?;
 
     unsafe {
-        let enumerator: IAudioSessionEnumerator = session_mgr
-            .GetSessionEnumerator()
-            .map_err(|e| {
+        let enumerator: IAudioSessionEnumerator =
+            session_mgr.GetSessionEnumerator().map_err(|e| {
                 DuckingError::SnapshotFailed(format!("failed to enumerate sessions: {e}"))
             })?;
 
-        let count = enumerator
-            .GetCount()
-            .map_err(|e| {
-                DuckingError::SnapshotFailed(format!("failed to get session count: {e}"))
-            })?;
+        let count = enumerator.GetCount().map_err(|e| {
+            DuckingError::SnapshotFailed(format!("failed to get session count: {e}"))
+        })?;
 
         let mut sessions = Vec::new();
 
@@ -314,8 +312,8 @@ fn fade_to_floor_blocking(
     snapshot: &VolumeSnapshot,
     config: &DuckConfig,
 ) -> Result<(), DuckingError> {
-    let _com = ComGuard::new()
-        .map_err(|e| DuckingError::Platform(format!("COM init failed: {e}")))?;
+    let _com =
+        ComGuard::new().map_err(|e| DuckingError::Platform(format!("COM init failed: {e}")))?;
 
     let session_mgr = get_session_manager()?;
     let volume_map = build_volume_map(&session_mgr)?;
@@ -353,8 +351,8 @@ fn fade_restore_blocking(
     snapshot: &VolumeSnapshot,
     config: &DuckConfig,
 ) -> Result<(), DuckingError> {
-    let _com = ComGuard::new()
-        .map_err(|e| DuckingError::Platform(format!("COM init failed: {e}")))?;
+    let _com =
+        ComGuard::new().map_err(|e| DuckingError::Platform(format!("COM init failed: {e}")))?;
 
     let session_mgr = get_session_manager()?;
     let volume_map = build_volume_map(&session_mgr)?;
@@ -468,5 +466,44 @@ mod tests {
     fn com_guard_succeeds_when_com_already_initialized() {
         let _com1 = ComGuard::new().expect("first COM init");
         let _com2 = ComGuard::new().expect("second COM init (S_FALSE)");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Windows audio device"]
+    async fn windows_backend_fade_restore_roundtrip() {
+        let backend = WindowsBackend::new();
+        if !backend.is_available() {
+            eprintln!("Skipping: WASAPI not available");
+            return;
+        }
+
+        let snapshot = backend.snapshot().await.unwrap();
+        if snapshot.is_empty() {
+            eprintln!("Skipping: no active sessions to duck");
+            return;
+        }
+
+        let config = DuckConfig::new(50, 0.5).unwrap();
+
+        backend
+            .fade_to_floor(&snapshot, &config)
+            .await
+            .expect("fade to floor should succeed");
+
+        backend
+            .fade_restore(&snapshot, &config)
+            .await
+            .expect("fade restore should succeed");
+
+        let after = backend
+            .snapshot()
+            .await
+            .expect("post-restore snapshot should succeed");
+        assert!(
+            after.len() >= snapshot.len().saturating_sub(1),
+            "sessions should still exist after round-trip (before={}, after={})",
+            snapshot.len(),
+            after.len()
+        );
     }
 }

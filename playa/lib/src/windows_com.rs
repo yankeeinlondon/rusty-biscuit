@@ -7,8 +7,8 @@
 //! This module also provides a safe helper for converting COM-allocated
 //! `PWSTR` strings to Rust `String` values with automatic memory cleanup.
 
+use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
 use windows::core::HRESULT;
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
 /// HRESULT for "COM already initialized with a different threading model".
 const RPC_E_CHANGED_MODE: i32 = -2147417850_i32; // 0x80010106
@@ -125,10 +125,27 @@ impl Drop for ComGuard {
     }
 }
 
+/// Converts a null-terminated UTF-16 `PWSTR` to a Rust `String`.
+///
+/// Returns `None` if the pointer is null or the UTF-16 data cannot be
+/// converted to valid UTF-8.
+///
+/// ## Safety
+///
+/// The caller must ensure `pwstr` points to a valid null-terminated UTF-16
+/// string.
+unsafe fn pwstr_to_string(pwstr: windows::core::PWSTR) -> Option<String> {
+    if pwstr.is_null() {
+        return None;
+    }
+    pwstr.to_string().ok()
+}
+
 /// Converts a COM-allocated `PWSTR` to a `String` and frees the allocation.
 ///
-/// Always frees the COM memory, even if conversion fails. Returns `None` if
-/// the pointer is null or the UTF-16 data cannot be converted to valid UTF-8.
+/// Always frees the COM memory (when non-null), even if conversion fails.
+/// Returns `None` if the pointer is null or the UTF-16 data cannot be
+/// converted to valid UTF-8.
 ///
 /// ## Safety
 ///
@@ -136,11 +153,10 @@ impl Drop for ComGuard {
 /// string allocated with `CoTaskMemAlloc` (or returned by a COM method that
 /// uses `CoTaskMemAlloc`).
 pub(crate) unsafe fn pwstr_to_string_and_free(pwstr: windows::core::PWSTR) -> Option<String> {
-    if pwstr.is_null() {
-        return None;
+    let result = pwstr_to_string(pwstr);
+    if !pwstr.is_null() {
+        windows::Win32::System::Com::CoTaskMemFree(Some(pwstr.0 as *const _));
     }
-    let result = pwstr.to_string().ok();
-    windows::Win32::System::Com::CoTaskMemFree(Some(pwstr.0 as *const _));
     result
 }
 
@@ -196,6 +212,80 @@ mod tests {
     fn pwstr_to_string_returns_none_for_null() {
         let result = unsafe { pwstr_to_string_and_free(windows::core::PWSTR::null()) };
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn pwstr_to_string_converts_valid_utf16() {
+        let text = "Hello, WASAPI!";
+        let mut buffer: Vec<u16> = text.encode_utf16().collect();
+        buffer.push(0);
+        let pwstr = windows::core::PWSTR(buffer.as_mut_ptr());
+        let result = unsafe { pwstr_to_string(pwstr) };
+        assert_eq!(result.as_deref(), Some(text));
+    }
+
+    #[test]
+    fn pwstr_to_string_handles_empty_string() {
+        let mut buffer = [0u16];
+        let pwstr = windows::core::PWSTR(buffer.as_mut_ptr());
+        let result = unsafe { pwstr_to_string(pwstr) };
+        assert_eq!(result.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn pwstr_to_string_and_free_with_allocated_memory() {
+        use windows::Win32::System::Com::CoTaskMemAlloc;
+
+        let text = "session-identifier-test";
+        let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        let byte_len = utf16.len() * 2;
+
+        unsafe {
+            let ptr = CoTaskMemAlloc(byte_len) as *mut u16;
+            assert!(!ptr.is_null(), "CoTaskMemAlloc failed");
+            std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr, utf16.len());
+
+            let pwstr = windows::core::PWSTR(ptr);
+            let result = pwstr_to_string_and_free(pwstr);
+            assert_eq!(result.as_deref(), Some(text));
+        }
+    }
+
+    #[test]
+    fn pwstr_to_string_and_free_with_empty_allocated() {
+        use windows::Win32::System::Com::CoTaskMemAlloc;
+
+        let utf16: Vec<u16> = vec![0];
+        let byte_len = 2;
+
+        unsafe {
+            let ptr = CoTaskMemAlloc(byte_len) as *mut u16;
+            assert!(!ptr.is_null(), "CoTaskMemAlloc failed");
+            std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr, utf16.len());
+
+            let pwstr = windows::core::PWSTR(ptr);
+            let result = pwstr_to_string_and_free(pwstr);
+            assert_eq!(result.as_deref(), Some(""));
+        }
+    }
+
+    #[test]
+    fn pwstr_to_string_and_free_with_unicode() {
+        use windows::Win32::System::Com::CoTaskMemAlloc;
+
+        let text = "日本語セッション\u{1F3B5}";
+        let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        let byte_len = utf16.len() * 2;
+
+        unsafe {
+            let ptr = CoTaskMemAlloc(byte_len) as *mut u16;
+            assert!(!ptr.is_null(), "CoTaskMemAlloc failed");
+            std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr, utf16.len());
+
+            let pwstr = windows::core::PWSTR(ptr);
+            let result = pwstr_to_string_and_free(pwstr);
+            assert_eq!(result.as_deref(), Some(text));
+        }
     }
 
     #[test]

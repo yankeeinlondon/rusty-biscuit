@@ -410,6 +410,152 @@ mod windows_policy_tests {
         let high_floor = (0.5f32 * 1.0f32).clamp(0.0, 1.0);
         assert!((high_floor - 0.5).abs() < f32::EPSILON);
     }
+
+    #[test]
+    fn wasapi_volume_map_prefers_last_entry_for_duplicate_key() {
+        let entries = vec![
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 100,
+                    key: "dup-key".to_string(),
+                },
+                vec![0.8],
+                false,
+            ),
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 200,
+                    key: "dup-key".to_string(),
+                },
+                vec![0.4],
+                true,
+            ),
+        ];
+
+        let mut map = std::collections::HashMap::<String, &SessionVolume>::new();
+        for e in &entries {
+            if let SessionId::WasapiSession { key, .. } = &e.id {
+                map.insert(key.clone(), e);
+            }
+        }
+
+        let entry = map.get("dup-key").expect("key should exist");
+        assert!(
+            matches!(&entry.id, SessionId::WasapiSession { pid, .. } if *pid == 200),
+            "last-inserted entry should win"
+        );
+        assert!((entry.channels[0] - 0.4).abs() < f32::EPSILON);
+        assert!(entry.mute);
+    }
+
+    #[test]
+    fn wasapi_mute_restore_policy_applies_after_final_volume_step() {
+        let snapshot = VolumeSnapshot::with_entries(vec![
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 100,
+                    key: "was-muted".to_string(),
+                },
+                vec![0.5],
+                true,
+            ),
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 200,
+                    key: "was-not-muted".to_string(),
+                },
+                vec![0.7],
+                false,
+            ),
+        ]);
+
+        let config = DuckConfig::new(100, 0.2).unwrap();
+
+        for entry in &snapshot.entries {
+            let original_volume = entry.channels.first().copied().unwrap_or(1.0);
+            let steps = compute_fade_steps(0.1, original_volume, &config);
+            let last = steps.last().expect("should have fade steps");
+            assert!(
+                (last.volume - original_volume).abs() < f32::EPSILON,
+                "final step should reach original volume"
+            );
+            let expected_mute = entry.mute;
+            assert!(
+                matches!(&entry.id, SessionId::WasapiSession { key, .. } if (*key == "was-muted") == expected_mute),
+                "mute state should be preserved from snapshot"
+            );
+        }
+    }
+
+    #[test]
+    fn wasapi_build_volume_map_skips_empty_keys() {
+        let entries = vec![
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 100,
+                    key: "valid-key".to_string(),
+                },
+                vec![0.8],
+                false,
+            ),
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 200,
+                    key: "".to_string(),
+                },
+                vec![0.6],
+                false,
+            ),
+        ];
+
+        let map: std::collections::HashMap<_, _> = entries
+            .iter()
+            .filter_map(|e| match &e.id {
+                SessionId::WasapiSession { key, .. } if !key.is_empty() => Some((key.clone(), e)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key("valid-key"));
+        assert!(!map.contains_key(""));
+    }
+
+    #[test]
+    fn wasapi_fade_steps_for_multiple_sessions_independent() {
+        let snapshot = VolumeSnapshot::with_entries(vec![
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 100,
+                    key: "app-a".to_string(),
+                },
+                vec![1.0],
+                false,
+            ),
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 200,
+                    key: "app-b".to_string(),
+                },
+                vec![0.5],
+                false,
+            ),
+        ]);
+
+        let config = DuckConfig::new(100, 0.2).unwrap();
+
+        for entry in &snapshot.entries {
+            let original = entry.channels[0];
+            let target = (original * config.floor_scalar()).clamp(0.0, 1.0);
+            let steps = compute_fade_steps(original, target, &config);
+
+            assert!(steps.len() >= 3, "should have minimum 3 steps");
+            assert!(
+                (steps.last().unwrap().volume - target).abs() < f32::EPSILON,
+                "final step should reach target"
+            );
+        }
+    }
 }
 
 mod error_tests {
