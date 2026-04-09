@@ -198,7 +198,7 @@ pub fn extract_encoding(locale: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use crate::test_helpers::{ScopedEnv, ENV_MUTEX};
 
     // ========== Locale Tests ==========
 
@@ -322,52 +322,7 @@ mod tests {
 
     mod detect_locale_tests {
         use super::*;
-
-        // Mutex to ensure env var tests don't interfere with each other
-        static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-        /// RAII guard for temporarily setting environment variables in tests.
-        struct ScopedEnv {
-            vars: Vec<(String, Option<String>)>,
-        }
-
-        impl ScopedEnv {
-            fn new() -> Self {
-                Self { vars: Vec::new() }
-            }
-
-            fn set(&mut self, key: &str, value: &str) -> &mut Self {
-                // Store original value for restoration
-                let original = std::env::var(key).ok();
-                self.vars.push((key.to_string(), original));
-                // SAFETY: Tests are run single-threaded with ENV_MUTEX protection,
-                // and we restore the original values in Drop.
-                unsafe { std::env::set_var(key, value) };
-                self
-            }
-
-            fn remove(&mut self, key: &str) -> &mut Self {
-                let original = std::env::var(key).ok();
-                self.vars.push((key.to_string(), original));
-                // SAFETY: Tests are run single-threaded with ENV_MUTEX protection,
-                // and we restore the original values in Drop.
-                unsafe { std::env::remove_var(key) };
-                self
-            }
-        }
-
-        impl Drop for ScopedEnv {
-            fn drop(&mut self) {
-                // Restore original values in reverse order
-                for (key, original) in self.vars.iter().rev() {
-                    // SAFETY: Restoring original values; tests are single-threaded.
-                    match original {
-                        Some(value) => unsafe { std::env::set_var(key, value) },
-                        None => unsafe { std::env::remove_var(key) },
-                    }
-                }
-            }
-        }
+        use crate::test_helpers::ENV_MUTEX;
 
         #[test]
         fn test_detect_locale_reads_lang() {

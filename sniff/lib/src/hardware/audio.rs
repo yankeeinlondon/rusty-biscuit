@@ -113,8 +113,6 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
     use core_foundation::base::TCFType;
     use core_foundation::string::CFString;
     use coreaudio_sys::{
-        AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectID,
-        AudioObjectPropertyAddress, AudioValueRange,
         kAudioDevicePropertyAvailableNominalSampleRates, kAudioDevicePropertyDeviceNameCFString,
         kAudioDevicePropertyDeviceUID, kAudioDevicePropertyNominalSampleRate,
         kAudioDevicePropertyStreamConfiguration, kAudioDevicePropertyTransportType,
@@ -125,6 +123,8 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
         kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDevices,
         kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
         kAudioObjectPropertyScopeInput, kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
+        AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectID,
+        AudioObjectPropertyAddress, AudioValueRange,
     };
 
     // --- Helper closures ---
@@ -188,7 +188,11 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                 (&raw mut device_id).cast(),
             );
 
-            if status != 0 { 0 } else { device_id }
+            if status != 0 {
+                0
+            } else {
+                device_id
+            }
         }
     };
 
@@ -283,23 +287,31 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                 return 0;
             }
 
-            // Allocate aligned buffer for AudioBufferList
-            let mut buf = vec![0u8; data_size as usize];
+            // Allocate properly aligned buffer for AudioBufferList
+            // AudioBufferList requires 8-byte alignment (on 64-bit macOS) for its
+            // nested AudioBuffer struct which contains a pointer (mData).
+            let layout = std::alloc::Layout::from_size_align(data_size as usize, 8)
+                .expect("AudioBufferList layout size should be valid");
+            let buf = std::alloc::alloc(layout);
+            if buf.is_null() {
+                return 0;
+            }
             let status = AudioObjectGetPropertyData(
                 device_id,
                 &address,
                 0,
                 std::ptr::null(),
                 &mut data_size,
-                buf.as_mut_ptr().cast(),
+                buf.cast(),
             );
             if status != 0 {
+                std::alloc::dealloc(buf, layout);
                 return 0;
             }
 
             // Cast to AudioBufferList and read mNumberBuffers, then iterate
             // buffers using proper struct layout (respects alignment/padding).
-            let buffer_list = &*(buf.as_ptr() as *const coreaudio_sys::AudioBufferList);
+            let buffer_list = &*(buf as *const coreaudio_sys::AudioBufferList);
             let num_buffers = buffer_list.mNumberBuffers as usize;
             let mut total_channels: u32 = 0;
 
@@ -311,6 +323,7 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                 total_channels += audio_buf.mNumberChannels;
             }
 
+            std::alloc::dealloc(buf, layout);
             total_channels
         }
     };
@@ -335,7 +348,11 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
                 (&raw mut rate).cast(),
             );
 
-            if status != 0 { 0.0 } else { rate }
+            if status != 0 {
+                0.0
+            } else {
+                rate
+            }
         }
     };
 
