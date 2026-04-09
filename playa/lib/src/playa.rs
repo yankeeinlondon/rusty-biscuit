@@ -139,7 +139,10 @@ impl Playa {
     ///
     /// When the `native-playback` feature is enabled, attempts in-process
     /// decoding via rodio/symphonia first. Falls back to a host player
-    /// subprocess if native decoding fails or is unavailable.
+    /// subprocess if native decoding fails or is unavailable. If a native
+    /// device-open operation times out, playa disables further native playback
+    /// attempts for the rest of the process and subsequent calls route directly
+    /// to the host-player fallback.
     ///
     /// Note: If ducking is configured, use [`play_async`] instead as ducking
     /// requires an async runtime.
@@ -171,7 +174,10 @@ impl Playa {
     ///
     /// When the `native-playback` feature is enabled, attempts in-process
     /// decoding via rodio/symphonia first. Falls back to a host player
-    /// subprocess if native decoding fails or is unavailable.
+    /// subprocess if native decoding fails or is unavailable. If a native
+    /// device-open operation times out, playa disables further native playback
+    /// attempts for the rest of the process and subsequent calls route directly
+    /// to the host-player fallback.
     ///
     /// Ducking (if configured) is set up **before** the native/host decision
     /// so both playback paths benefit from audio attenuation.
