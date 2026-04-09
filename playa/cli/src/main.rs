@@ -846,6 +846,36 @@ async fn print_duck_info() {
                 }
             }
         }
+        "windows-wasapi" => {
+            println!("Strategy: Per-application volume control via WASAPI");
+            println!("  - Ducks individual audio sessions on the default render endpoint");
+            println!("  - Excludes Playa's own audio from ducking");
+            println!("  - Only ducks sessions present when playback starts");
+            println!();
+
+            // Show current sessions
+            let snapshot = backend.snapshot().await;
+            match snapshot {
+                Ok(snap) => {
+                    if snap.is_empty() {
+                        println!("Current state: No other applications playing audio");
+                    } else {
+                        println!("Sessions that would be ducked ({}):", snap.len());
+                        for entry in &snap.entries {
+                            if let playa::ducking::SessionId::WasapiSession { pid, key } =
+                                &entry.id
+                            {
+                                let vol = entry.channels.first().copied().unwrap_or(0.0) * 100.0;
+                                println!("  PID {} [{}] - {:.0}%", pid, key, vol);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("Could not list sessions: {}", e);
+                }
+            }
+        }
         "linux-alsa" => {
             println!("Strategy: System-wide volume control via ALSA (fallback)");
             println!("  - Fades master volume down during playback");

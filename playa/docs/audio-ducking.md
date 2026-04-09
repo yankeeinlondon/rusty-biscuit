@@ -19,8 +19,8 @@ This document turns the discovery notes into a concrete, per-OS plan for Playa�
 - Core flag: `audio-ducking` (enabled in the CLI build). When off, the ducking code is not compiled or linked.
 - OS slices (activated automatically via `cfg(target_os)` when `audio-ducking` is set):
     - `audio-ducking-macos`: CoreAudio virtual master volume path.
-    - `audio-ducking-windows`: WASAPI session/endpoint volume path.
-    - `audio-ducking-pulse`: PulseAudio/PipeWire path; ALSA global fallback.
+    - `audio-ducking-windows`: WASAPI per-session volume, keyed by session instance identifier.
+    - `audio-ducking-linux`: PulseAudio/PipeWire path; ALSA global fallback.
 - Library surface stays consistent; unimplemented platforms return a no-op ducking guard.
 
 ## Library surface
@@ -62,15 +62,16 @@ This document turns the discovery notes into a concrete, per-OS plan for Playa�
 
 ### Windows (WASAPI)
 
-- Crates: `wasapi` (primary). Reference `winmix` for per-process handling; avoid adding a new dependency if not necessary.
-- Approach: per-session ducking via `ISimpleAudioVolume` for each active session on the default render device, excluding Playa’s session. Endpoint-wide ducking via `IAudioEndpointVolume` as a fallback if session access fails.
+- Crate: `windows` (0.62).
+- Approach: per-session ducking via `ISimpleAudioVolume` for each active session on the default multimedia render device, excluding Playa’s own process.
+- Sessions are keyed by `GetSessionInstanceIdentifier()` for precise restore matching.
 - Steps:
   1) `IMMDeviceEnumerator` → default render `IMMDevice`.
   2) Activate `IAudioSessionManager2`; enumerate sessions.
   3) Snapshot `GetMasterVolume` per session (and mute state). Identify Playa’s session by process ID and skip it.
-  4) Fade each session to `floor_scalar`; coarse fallback: fade endpoint scalar.
-  5) Restore with the same ramp.
-- Limitations: Some apps may opt out of session control; endpoint fallback covers most cases.
+  4) Fade each session to `floor_scalar` using absolute `SetMasterVolume` writes, clamped to 0.0..=1.0.
+  5) Restore by re-resolving sessions by key and fading back to snapshot values. Mute state is restored after the final volume step.
+- Limitations: Only sessions present at snapshot time are ducked. Sessions created after playback starts are not affected. v1 does not include endpoint-volume fallback.
 
 ### Linux (PulseAudio / PipeWire)
 

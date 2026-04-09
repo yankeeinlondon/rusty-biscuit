@@ -585,8 +585,10 @@ mod windows_sfx {
             },
             Multimedia::WAVE_FORMAT_IEEE_FLOAT,
         },
-        System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx},
+        System::Com::{CLSCTX_ALL, CoCreateInstance},
     };
+
+    use crate::windows_com::ComGuard;
 
     use crate::types::PlaybackOptions;
 
@@ -635,8 +637,8 @@ mod windows_sfx {
         };
 
         unsafe {
-            // Initialize COM (ignore error if already initialized on this thread).
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            // Initialize COM via shared guard (handles S_OK, S_FALSE, RPC_E_CHANGED_MODE).
+            let _com = ComGuard::new().map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
             // Get default audio render endpoint.
             let enumerator: IMMDeviceEnumerator =
@@ -742,8 +744,8 @@ mod windows_sfx {
         #[test]
         #[ignore = "requires Windows audio device"]
         fn can_get_default_audio_endpoint() {
+            let _com = ComGuard::new().expect("COM init should succeed");
             unsafe {
-                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
                 let enumerator: IMMDeviceEnumerator =
                     CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                         .expect("should create device enumerator");
@@ -759,8 +761,8 @@ mod windows_sfx {
         #[test]
         #[ignore = "requires Windows audio device"]
         fn can_set_sound_effects_category() {
+            let _com = ComGuard::new().expect("COM init should succeed");
             unsafe {
-                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
                 let enumerator: IMMDeviceEnumerator =
                     CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).unwrap();
                 let device = enumerator

@@ -11,6 +11,7 @@ async = ["tokio"]
 audio-ducking = ["tokio"]
 audio-ducking-macos = ["audio-ducking", "coreaudio-sys"]
 audio-ducking-linux = ["audio-ducking", "pulsectl-rs", "alsa"]
+audio-ducking-windows = ["audio-ducking", "windows"]
 
 # Base native audio — SFX playback with common codecs
 sfx-native = [

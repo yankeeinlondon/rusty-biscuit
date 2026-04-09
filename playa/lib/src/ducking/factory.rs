@@ -8,6 +8,9 @@ use crate::ducking::{DuckingBackend, NoopBackend};
 #[cfg(all(target_os = "macos", feature = "audio-ducking-macos"))]
 use crate::ducking::{MacOsBackend, MediaKeysBackend};
 
+#[cfg(all(target_os = "windows", feature = "audio-ducking-windows"))]
+use crate::ducking::WindowsBackend;
+
 #[cfg(all(target_os = "linux", feature = "audio-ducking-linux"))]
 use crate::ducking::{AlsaBackend, LinuxBackend};
 
@@ -58,9 +61,25 @@ pub fn create_backend() -> Box<dyn DuckingBackend> {
         return Box::new(NoopBackend::new());
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", feature = "audio-ducking-windows"))]
     {
-        // Phase 4 will implement this
+        let backend = WindowsBackend::new();
+        if backend.is_available() {
+            return Box::new(backend);
+        }
+        return Box::new(NoopBackend::new());
+    }
+
+    #[cfg(all(target_os = "windows", not(feature = "audio-ducking-windows")))]
+    {
+        use std::sync::Once;
+        static WARN_ONCE: Once = Once::new();
+        WARN_ONCE.call_once(|| {
+            eprintln!(
+                "playa: audio ducking on Windows requires the `audio-ducking-windows` feature; \
+                 falling back to noop"
+            );
+        });
         return Box::new(NoopBackend::new());
     }
 
@@ -122,9 +141,18 @@ pub fn backend_name() -> &'static str {
         return "noop";
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", feature = "audio-ducking-windows"))]
     {
-        return "noop"; // Will be "windows-wasapi" after Phase 4
+        let backend = WindowsBackend::new();
+        if backend.is_available() {
+            return "windows-wasapi";
+        }
+        return "noop";
+    }
+
+    #[cfg(all(target_os = "windows", not(feature = "audio-ducking-windows")))]
+    {
+        return "noop";
     }
 
     #[cfg(all(target_os = "linux", feature = "audio-ducking-linux"))]
@@ -220,11 +248,22 @@ mod tests {
         assert_eq!(backend.name(), "noop");
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", feature = "audio-ducking-windows"))]
     #[test]
-    fn windows_factory_creates_backend() {
+    fn windows_factory_creates_real_backend() {
         let backend = create_backend();
-        // Currently returns noop, will be windows-wasapi after Phase 4
+        let name = backend.name();
+        assert!(
+            name == "windows-wasapi" || name == "noop",
+            "expected windows-wasapi or noop, got {}",
+            name
+        );
+    }
+
+    #[cfg(all(target_os = "windows", not(feature = "audio-ducking-windows")))]
+    #[test]
+    fn windows_factory_creates_noop_without_feature() {
+        let backend = create_backend();
         assert_eq!(backend.name(), "noop");
     }
 }

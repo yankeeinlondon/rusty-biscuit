@@ -144,6 +144,124 @@ mod types_tests {
     }
 }
 
+mod windows_policy_tests {
+    use super::*;
+
+    #[test]
+    fn wasapi_session_key_based_snapshot_restore_matching() {
+        // Sessions should match by key, not by PID alone
+        let snapshot = VolumeSnapshot::with_entries(vec![
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 100,
+                    key: "session-a".to_string(),
+                },
+                vec![0.8],
+                false,
+            ),
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 200,
+                    key: "session-b".to_string(),
+                },
+                vec![0.6],
+                false,
+            ),
+        ]);
+
+        // Verify we can find sessions by key
+        let found = snapshot.entries.iter().find(|e| {
+            matches!(&e.id, SessionId::WasapiSession { key, .. } if key == "session-a")
+        });
+        assert!(found.is_some());
+        assert!((found.unwrap().channels[0] - 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn wasapi_session_excluding_our_pid() {
+        let our_pid = 12345u32;
+        let sessions = vec![
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: our_pid,
+                    key: "self".to_string(),
+                },
+                vec![1.0],
+                false,
+            ),
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 9999,
+                    key: "other".to_string(),
+                },
+                vec![0.7],
+                false,
+            ),
+        ];
+
+        // Filter out our PID (mirrors the backend's enumeration logic)
+        let duckable: Vec<_> = sessions
+            .iter()
+            .filter(|s| {
+                !matches!(&s.id, SessionId::WasapiSession { pid, .. } if *pid == our_pid)
+            })
+            .collect();
+
+        assert_eq!(duckable.len(), 1);
+        assert!(
+            matches!(&duckable[0].id, SessionId::WasapiSession { pid, .. } if *pid == 9999)
+        );
+    }
+
+    #[test]
+    fn wasapi_skipping_missing_sessions_on_restore() {
+        // Snapshot had two sessions, but one disappeared
+        let snapshot = VolumeSnapshot::with_entries(vec![
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 100,
+                    key: "alive".to_string(),
+                },
+                vec![0.8],
+                false,
+            ),
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 200,
+                    key: "gone".to_string(),
+                },
+                vec![0.6],
+                false,
+            ),
+        ]);
+
+        // Simulate live sessions: only "alive" still exists
+        let live_keys = vec!["alive".to_string()];
+
+        // Filter snapshot to only sessions that still exist
+        let restorable: Vec<_> = snapshot
+            .entries
+            .iter()
+            .filter(|e| {
+                matches!(&e.id, SessionId::WasapiSession { key, .. } if live_keys.contains(key))
+            })
+            .collect();
+
+        assert_eq!(restorable.len(), 1);
+        assert!(
+            matches!(&restorable[0].id, SessionId::WasapiSession { key, .. } if key == "alive")
+        );
+    }
+
+    #[test]
+    fn wasapi_empty_snapshot_is_valid() {
+        // No active sessions should produce an empty snapshot
+        let snapshot = VolumeSnapshot::new();
+        assert!(snapshot.is_empty());
+        assert_eq!(snapshot.len(), 0);
+    }
+}
+
 mod error_tests {
     use super::*;
 

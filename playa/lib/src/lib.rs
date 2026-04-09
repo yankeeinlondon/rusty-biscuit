@@ -9,6 +9,12 @@ mod playback;
 mod player;
 mod types;
 
+#[cfg(all(
+    target_os = "windows",
+    any(feature = "sfx-native-windows", feature = "audio-ducking-windows")
+))]
+mod windows_com;
+
 #[cfg(feature = "audio-ducking")]
 pub mod ducking;
 
