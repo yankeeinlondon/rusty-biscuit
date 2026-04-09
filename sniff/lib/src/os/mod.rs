@@ -23,6 +23,7 @@ mod distro;
 mod locale;
 mod package_manager;
 mod time;
+#[cfg(any(target_os = "windows", test))]
 mod windows_timezone_map;
 
 // Re-export all public types for API stability

@@ -278,27 +278,32 @@ fn detect_timezone_name() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn detect_timezone_name() -> Option<String> {
-    let windows_id = detect_windows_timezone_id()?;
-    Some(
-        crate::os::windows_timezone_map::map_windows_timezone_to_iana(&windows_id)
-            .unwrap_or(windows_id),
-    )
-}
-
-#[cfg(target_os = "windows")]
-fn detect_windows_timezone_id() -> Option<String> {
-    let output = Command::new("tzutil")
+    let raw_output = Command::new("tzutil")
         .arg("/g")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output()
         .ok()?;
 
-    if !output.status.success() {
+    if !raw_output.status.success() {
         return None;
     }
 
-    let id = String::from_utf8(output.stdout).ok()?;
+    let windows_id = parse_windows_timezone_id_output(&raw_output.stdout)?;
+    Some(
+        crate::os::windows_timezone_map::map_windows_timezone_to_iana(&windows_id)
+            .map(|s| s.to_string())
+            .unwrap_or(windows_id),
+    )
+}
+
+/// Parse raw `tzutil /g` stdout into a clean Windows timezone ID.
+///
+/// Strips trailing CR/LF and whitespace, returning `None` for empty output.
+/// This is a pure function so it can be unit-tested on any platform.
+#[cfg(any(target_os = "windows", test))]
+fn parse_windows_timezone_id_output(stdout: &[u8]) -> Option<String> {
+    let id = String::from_utf8(stdout.to_vec()).ok()?;
     let trimmed = id.trim_end().trim_end_matches('\r').trim_end_matches('\n');
     if trimmed.is_empty() {
         return None;
@@ -586,13 +591,21 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "windows")]
-    fn test_detect_windows_timezone_id_trims_output() {
-        // Simulate tzutil output with trailing \r\n
-        let raw = "Pacific Standard Time\r\n";
-        let trimmed = raw.trim_end().trim_end_matches('\r').trim_end_matches('\n');
-        assert_eq!(trimmed, "Pacific Standard Time");
-        assert!(!trimmed.is_empty());
+    fn test_parse_windows_timezone_id_trims_output() {
+        let raw = b"Pacific Standard Time\r\n";
+        let result = parse_windows_timezone_id_output(raw);
+        assert_eq!(result, Some("Pacific Standard Time".to_string()));
+
+        let trailing_only = b"  Eastern Standard Time  \r\n";
+        let result2 = parse_windows_timezone_id_output(trailing_only);
+        assert_eq!(result2, Some("  Eastern Standard Time".to_string()));
+    }
+
+    #[test]
+    fn test_parse_windows_timezone_id_rejects_empty() {
+        assert_eq!(parse_windows_timezone_id_output(b""), None);
+        assert_eq!(parse_windows_timezone_id_output(b"\r\n"), None);
+        assert_eq!(parse_windows_timezone_id_output(b"   \r\n"), None);
     }
 
     #[test]
@@ -601,15 +614,12 @@ mod tests {
 
         assert_eq!(
             map_windows_timezone_to_iana("Pacific Standard Time"),
-            Some("America/Los_Angeles".to_string())
+            Some("America/Los_Angeles")
         );
-        assert_eq!(
-            map_windows_timezone_to_iana("UTC"),
-            Some("Etc/UTC".to_string())
-        );
+        assert_eq!(map_windows_timezone_to_iana("UTC"), Some("Etc/UTC"));
         assert_eq!(
             map_windows_timezone_to_iana("W. Europe Standard Time"),
-            Some("Europe/Berlin".to_string())
+            Some("Europe/Berlin")
         );
     }
 
