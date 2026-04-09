@@ -34,6 +34,9 @@ use std::{
 };
 use tracing::{debug, instrument, warn};
 
+#[cfg(target_os = "windows")]
+mod windows_scm;
+
 // =============================================================================
 // Host OS Detection
 // =============================================================================
@@ -376,6 +379,8 @@ impl ServiceManager {
     /// - **systemd** (Linux): Parses `systemctl list-units --type=service`
     /// - **OpenRC**: Parses `rc-status`
     /// - **runit**: Scans `/var/service/` or `SVDIR`
+    /// - **Windows SCM**: Enumerates services via `EnumServicesStatusExW`.
+    ///   On Windows the `status` field holds the raw SCM current-state code.
     /// - **Others**: Returns empty list (not yet implemented)
     pub fn services_detailed(&self, state: ServiceState) -> Vec<Service> {
         let all_services = match self.init_system {
@@ -383,6 +388,8 @@ impl ServiceManager {
             InitSystem::Systemd => list_systemd_services(),
             InitSystem::OpenRc => list_openrc_services(),
             InitSystem::Runit => list_runit_services(),
+            #[cfg(target_os = "windows")]
+            InitSystem::WindowsScm => windows_scm::list_windows_scm_services(),
             _ => Vec::new(),
         };
 
