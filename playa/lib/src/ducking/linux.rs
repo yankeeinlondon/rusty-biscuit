@@ -4,7 +4,12 @@
 //! to duck individual sink inputs (applications playing audio) while excluding
 //! Playa's own audio stream.
 //!
-//! Falls back to ALSA master mixer control on systems without PulseAudio.
+//! ## ALSA Backend
+//!
+//! An `AlsaBackend` is available for systems without PulseAudio, but it is not
+//! selected by the factory because ALSA master-volume ducking also attenuates
+//! Playa's own output (self-ducking). It remains in the codebase for explicit
+//! opt-in use.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -17,6 +22,25 @@ use crate::ducking::{
     DuckConfig, DuckResult, DuckingBackend, DuckingError, SessionId, SessionVolume, VolumeSnapshot,
     compute_fade_steps,
 };
+
+/// Cached original volume for a single sink input.
+///
+/// Stores the exact PulseAudio volume units (0–65535 range) captured at
+/// snapshot time. On the final fade or restore step, the backend snaps
+/// to these exact units to prevent cumulative rounding drift.
+struct CachedPulseVolume {
+    avg_units: u32,
+}
+
+impl CachedPulseVolume {
+    fn new(avg_units: u32) -> Self {
+        Self { avg_units }
+    }
+
+    fn to_percent(&self) -> f64 {
+        self.avg_units as f64 / 65536.0 * 100.0
+    }
+}
 
 /// Linux PulseAudio/PipeWire backend for audio ducking.
 ///
@@ -33,14 +57,20 @@ use crate::ducking::{
 ///
 /// This backend works with PipeWire's PulseAudio compatibility layer, which is
 /// the default on many modern Linux distributions (Fedora, Ubuntu 22.10+).
+///
+/// ## Volume Precision
+///
+/// Original volumes are cached as raw PulseAudio volume units at snapshot time.
+/// Intermediate fade steps use relative deltas, but the final step of any fade
+/// or restore snaps to the exact cached units to prevent cumulative drift.
 #[derive(Debug)]
 pub struct LinuxBackend {
     /// Whether PulseAudio is available.
     pulse_available: AtomicBool,
     /// Current process PID for self-exclusion.
     our_pid: u32,
-    /// Cached original volumes for restoration (index -> volume percentage).
-    original_volumes: Mutex<HashMap<u32, f64>>,
+    /// Cached original volumes for restoration (index -> raw PulseAudio units).
+    cached_volumes: Mutex<HashMap<u32, CachedPulseVolume>>,
 }
 
 impl LinuxBackend {
@@ -54,7 +84,7 @@ impl LinuxBackend {
         Self {
             pulse_available: AtomicBool::new(pulse_available),
             our_pid,
-            original_volumes: Mutex::new(HashMap::new()),
+            cached_volumes: Mutex::new(HashMap::new()),
         }
     }
 
@@ -125,27 +155,23 @@ impl DuckingBackend for LinuxBackend {
             })?;
 
             let mut snapshot = VolumeSnapshot::new();
-            let mut original_volumes = self.original_volumes.lock().unwrap();
-            original_volumes.clear();
+            let mut cached_volumes = self.cached_volumes.lock().unwrap();
+            cached_volumes.clear();
 
             for app in apps {
-                // Skip our own audio
                 if self.should_exclude(&app) {
                     continue;
                 }
 
-                // Skip apps without writable volume
                 if !app.volume_writable {
                     continue;
                 }
 
-                // Get the average volume across channels as a percentage
-                let avg_volume = app.volume.avg().0 as f64 / 65536.0 * 100.0;
+                let avg_units = app.volume.avg().0;
+                let avg_volume = units_to_percent(avg_units);
 
-                // Store original volume for restoration
-                original_volumes.insert(app.index, avg_volume);
+                cached_volumes.insert(app.index, CachedPulseVolume::new(avg_units));
 
-                // Create snapshot entry
                 let app_name = app
                     .name
                     .clone()
@@ -167,6 +193,7 @@ impl DuckingBackend for LinuxBackend {
     fn fade_to_floor(&self, snapshot: &VolumeSnapshot, config: &DuckConfig) -> DuckResult<'_, ()> {
         let snapshot = snapshot.clone();
         let config = *config;
+        let cached_volumes = self.cached_volumes.lock().unwrap().clone();
 
         Box::pin(async move {
             if snapshot.is_empty() {
@@ -177,7 +204,6 @@ impl DuckingBackend for LinuxBackend {
                 DuckingError::Platform(format!("failed to connect to PulseAudio: {}", e))
             })?;
 
-            // For each app, fade to floor
             for entry in &snapshot.entries {
                 let SessionId::PulseSinkInput { index, .. } = &entry.id else {
                     continue;
@@ -186,25 +212,27 @@ impl DuckingBackend for LinuxBackend {
                 let original_volume = entry.channels.first().copied().unwrap_or(1.0);
                 let target_volume = original_volume * config.floor_scalar();
 
-                // Compute fade steps
                 let steps = compute_fade_steps(original_volume, target_volume, &config);
+                let is_final_step = |i: usize| i == steps.len() - 1;
 
-                // Apply each step
-                for step in steps {
-                    let percent = Self::scalar_to_percent(step.volume);
+                for (i, step) in steps.iter().enumerate() {
+                    if is_final_step(i) {
+                        if let Some(cached) = cached_volumes.get(index) {
+                            let target_percent =
+                                Self::scalar_to_percent(original_volume * config.floor_scalar());
+                            let exact_percent = target_percent.min(cached.to_percent());
+                            apply_volume_delta(&mut controller, *index, exact_percent);
 
-                    // Calculate delta from current volume
-                    // pulsectl uses increase/decrease by percent, so we need to get current and adjust
-                    if let Ok(Some(app)) = controller.get_app_by_index(*index) {
-                        let current_percent = app.volume.avg().0 as f64 / 65536.0 * 100.0;
-                        let delta = percent - current_percent;
-
-                        if delta < 0.0 {
-                            let _ = controller.decrease_app_volume_by_percent(*index, -delta);
-                        } else if delta > 0.0 {
-                            let _ = controller.increase_app_volume_by_percent(*index, delta);
+                            tokio::time::sleep(std::time::Duration::from_millis(
+                                step.delay_ms as u64,
+                            ))
+                            .await;
+                            continue;
                         }
                     }
+
+                    let percent = Self::scalar_to_percent(step.volume);
+                    apply_volume_delta(&mut controller, *index, percent);
 
                     tokio::time::sleep(std::time::Duration::from_millis(step.delay_ms as u64))
                         .await;
@@ -218,7 +246,7 @@ impl DuckingBackend for LinuxBackend {
     fn fade_restore(&self, snapshot: &VolumeSnapshot, config: &DuckConfig) -> DuckResult<'_, ()> {
         let snapshot = snapshot.clone();
         let config = *config;
-        let original_volumes = self.original_volumes.lock().unwrap().clone();
+        let cached_volumes = self.cached_volumes.lock().unwrap().clone();
 
         Box::pin(async move {
             if snapshot.is_empty() {
@@ -229,42 +257,32 @@ impl DuckingBackend for LinuxBackend {
                 DuckingError::Platform(format!("failed to connect to PulseAudio: {}", e))
             })?;
 
-            // For each app, fade back to original
             for entry in &snapshot.entries {
                 let SessionId::PulseSinkInput { index, .. } = &entry.id else {
                     continue;
                 };
 
-                // Get original volume from our cache
-                let Some(&original_percent) = original_volumes.get(index) else {
+                let Some(cached) = cached_volumes.get(index) else {
                     continue;
                 };
 
-                // Get current volume
                 let Ok(Some(app)) = controller.get_app_by_index(*index) else {
                     continue;
                 };
 
-                let current_percent = app.volume.avg().0 as f64 / 65536.0 * 100.0;
+                let current_percent = units_to_percent(app.volume.avg().0);
                 let current_scalar = Self::percent_to_scalar(current_percent);
-                let target_scalar = Self::percent_to_scalar(original_percent);
+                let target_scalar = Self::percent_to_scalar(cached.to_percent());
 
-                // Compute fade steps
                 let steps = compute_fade_steps(current_scalar, target_scalar, &config);
+                let is_final_step = |i: usize| i == steps.len() - 1;
 
-                // Apply each step
-                for step in steps {
-                    let percent = Self::scalar_to_percent(step.volume);
-
-                    if let Ok(Some(app)) = controller.get_app_by_index(*index) {
-                        let current = app.volume.avg().0 as f64 / 65536.0 * 100.0;
-                        let delta = percent - current;
-
-                        if delta < 0.0 {
-                            let _ = controller.decrease_app_volume_by_percent(*index, -delta);
-                        } else if delta > 0.0 {
-                            let _ = controller.increase_app_volume_by_percent(*index, delta);
-                        }
+                for (i, step) in steps.iter().enumerate() {
+                    if is_final_step(i) {
+                        apply_volume_delta(&mut controller, *index, cached.to_percent());
+                    } else {
+                        let percent = Self::scalar_to_percent(step.volume);
+                        apply_volume_delta(&mut controller, *index, percent);
                     }
 
                     tokio::time::sleep(std::time::Duration::from_millis(step.delay_ms as u64))
@@ -290,11 +308,31 @@ fn check_pulse_available() -> bool {
     SinkController::create().is_ok()
 }
 
+/// Convert raw PulseAudio volume units (0–65535) to percentage (0–100+).
+fn units_to_percent(units: u32) -> f64 {
+    units as f64 / 65536.0 * 100.0
+}
+
+/// Apply a target volume percentage to a sink input by reading the current
+/// volume and issuing the required relative delta.
+fn apply_volume_delta(controller: &mut SinkController, index: u32, target_percent: f64) {
+    if let Ok(Some(app)) = controller.get_app_by_index(index) {
+        let current_percent = app.volume.avg().0 as f64 / 65536.0 * 100.0;
+        let delta = target_percent - current_percent;
+        if delta < 0.0 {
+            let _ = controller.decrease_app_volume_by_percent(index, -delta);
+        } else if delta > 0.0 {
+            let _ = controller.increase_app_volume_by_percent(index, delta);
+        }
+    }
+}
+
 /// ALSA fallback backend for systems without PulseAudio.
 ///
 /// This provides basic master volume ducking using ALSA's mixer interface.
 /// It's less precise than PulseAudio (affects all audio, including Playa's)
-/// but works on minimal Linux systems.
+/// and is not selected by the factory because it would also duck Playa's
+/// own output. Available for explicit opt-in use only.
 #[derive(Debug)]
 pub struct AlsaBackend {
     /// Whether ALSA mixer is available.
@@ -508,6 +546,57 @@ mod tests {
         assert!((LinuxBackend::percent_to_scalar(50.0) - 0.5).abs() < f32::EPSILON);
         assert!((LinuxBackend::percent_to_scalar(100.0) - 1.0).abs() < f32::EPSILON);
         assert!((LinuxBackend::percent_to_scalar(0.0) - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn units_to_percent_roundtrip() {
+        let units = 32768u32;
+        let percent = units_to_percent(units);
+        let expected = 32768.0 / 65536.0 * 100.0;
+        assert!((percent - expected).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn cached_pulse_volume_to_percent() {
+        let cached = CachedPulseVolume::new(65536);
+        assert!((cached.to_percent() - 100.0).abs() < f64::EPSILON);
+
+        let cached_half = CachedPulseVolume::new(32768);
+        assert!((cached_half.to_percent() - 50.0).abs() < f64::EPSILON);
+
+        let cached_zero = CachedPulseVolume::new(0);
+        assert!((cached_zero.to_percent() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn repeated_duck_restore_no_drift() {
+        let original_units = 49152u32;
+        let cached = CachedPulseVolume::new(original_units);
+
+        for _ in 0..10 {
+            let restored_percent = cached.to_percent();
+            let restored_units = (restored_percent / 100.0 * 65536.0) as u32;
+            assert_eq!(
+                restored_units, original_units,
+                "final snap should always land on exact cached units"
+            );
+        }
+    }
+
+    #[test]
+    fn final_restore_step_uses_exact_cached_units() {
+        let original_units = 39321u32;
+        let cached = CachedPulseVolume::new(original_units);
+        let exact_percent = cached.to_percent();
+        let approx_percent = original_units as f64 / 65536.0 * 100.0;
+
+        assert!(
+            (exact_percent - approx_percent).abs() < f64::EPSILON,
+            "cached units should convert losslessly"
+        );
+
+        let from_approx = (approx_percent / 100.0 * 65536.0) as u32;
+        assert_eq!(from_approx, original_units);
     }
 
     // Integration tests that actually manipulate volume are marked #[ignore]

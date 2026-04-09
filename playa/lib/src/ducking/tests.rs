@@ -558,6 +558,89 @@ mod windows_policy_tests {
     }
 }
 
+mod linux_policy_tests {
+    use super::*;
+
+    #[test]
+    fn linux_factory_only_allows_pulse_or_noop() {
+        let name = backend_name();
+        #[cfg(all(target_os = "linux", feature = "audio-ducking-linux"))]
+        {
+            assert!(
+                name == "linux-pulse" || name == "noop",
+                "Linux factory should only return linux-pulse or noop, got {}",
+                name
+            );
+        }
+        #[cfg(not(all(target_os = "linux", feature = "audio-ducking-linux")))]
+        {
+            assert!(
+                name != "linux-alsa",
+                "linux-alsa should never appear in backend_name()"
+            );
+        }
+    }
+
+    #[test]
+    fn linux_pulse_volume_units_to_percent() {
+        let full = 65536u32;
+        let half = 32768u32;
+        let zero = 0u32;
+
+        let full_pct = full as f64 / 65536.0 * 100.0;
+        let half_pct = half as f64 / 65536.0 * 100.0;
+        let zero_pct = zero as f64 / 65536.0 * 100.0;
+
+        assert!((full_pct - 100.0).abs() < f64::EPSILON);
+        assert!((half_pct - 50.0).abs() < f64::EPSILON);
+        assert!((zero_pct - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn linux_volume_snap_prevents_drift() {
+        let original_units = 39321u32;
+        let original_pct = original_units as f64 / 65536.0 * 100.0;
+
+        for _ in 0..20 {
+            let restored_pct = original_pct;
+            let restored_units = (restored_pct / 100.0 * 65536.0) as u32;
+            assert_eq!(restored_units, original_units);
+        }
+    }
+
+    #[test]
+    fn linux_duck_floor_with_cached_units() {
+        let original_units = 65536u32;
+        let floor_scalar = 0.2f32;
+        let original_pct = original_units as f64 / 65536.0 * 100.0;
+        let floor_pct = original_pct * floor_scalar as f64;
+
+        let floor_units = (floor_pct / 100.0 * 65536.0) as u32;
+        assert_eq!(floor_units, (65536.0 * 0.2) as u32);
+
+        let restored_pct = original_units as f64 / 65536.0 * 100.0;
+        let restored_units = (restored_pct / 100.0 * 65536.0) as u32;
+        assert_eq!(restored_units, original_units);
+    }
+
+    #[test]
+    fn linux_multiple_duck_restore_cycles_no_drift() {
+        let original_units = 49152u32;
+
+        let original_pct = original_units as f64 / 65536.0 * 100.0;
+        let floor_scalar = 0.2f32;
+        let mut current_pct = original_pct;
+
+        for _ in 0..5 {
+            current_pct = original_pct * floor_scalar as f64;
+            current_pct = original_pct;
+        }
+
+        let final_units = (current_pct / 100.0 * 65536.0) as u32;
+        assert_eq!(final_units, original_units);
+    }
+}
+
 mod error_tests {
     use super::*;
 

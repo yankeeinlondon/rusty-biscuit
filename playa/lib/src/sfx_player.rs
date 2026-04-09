@@ -29,9 +29,15 @@
 //! audio during event sounds. Falls back to the default rodio output if
 //! PulseAudio is not available (e.g., ALSA-only systems).
 //!
+//! All PulseAudio wait loops (context connection, stream connection, drain)
+//! use deadline-aware nonblocking polling. If a phase does not complete
+//! within its deadline, the native path fails and playback falls back to
+//! the host player. Playback blocks until completion or timeout.
+//!
 //! Native SFX playback never terminates the process. If a native device-open
 //! operation times out, playa disables further native playback attempts for
 //! the rest of the process and future calls fall back to host playback.
+//! Native Linux errors (including timeouts) fall back to host playback.
 
 use std::io::Cursor;
 use std::time::{Duration, Instant};
@@ -791,6 +797,7 @@ mod windows_sfx {
 #[cfg(all(target_os = "linux", feature = "sfx-native-linux"))]
 mod linux {
     use std::io::Cursor;
+    use std::time::{Duration, Instant};
 
     use libpulse_binding as pulse;
     use libpulse_binding::mainloop::standard::{IterateResult, Mainloop};
@@ -800,7 +807,40 @@ mod linux {
     use pulse::stream::{SeekMode, Stream};
     use rodio::Source;
 
+    use super::{NATIVE_DEVICE_TIMEOUT, PLAYBACK_TIMEOUT};
     use crate::types::PlaybackOptions;
+
+    fn wait_for_pulse_condition<F>(
+        mainloop: &mut Mainloop,
+        deadline: Instant,
+        phase: &'static str,
+        mut check: F,
+    ) -> Result<(), Box<dyn std::error::Error>>
+    where
+        F: FnMut() -> Result<bool, Box<dyn std::error::Error>>,
+    {
+        loop {
+            match mainloop.iterate(false) {
+                IterateResult::Success(_) => {}
+                IterateResult::Err(e) => {
+                    return Err(format!("PulseAudio mainloop error: {e}").into());
+                }
+                IterateResult::Quit(_) => {
+                    return Err("PulseAudio mainloop quit unexpectedly".into());
+                }
+            }
+
+            if check()? {
+                return Ok(());
+            }
+
+            if Instant::now() >= deadline {
+                return Err(format!("PulseAudio {} timed out", phase).into());
+            }
+
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
 
     /// Play sound effect bytes through PulseAudio with `media.role=event`.
     ///
@@ -811,31 +851,30 @@ mod linux {
     ///
     /// Speed is implemented by adjusting the declared sample rate (higher rate =
     /// faster playback with proportional pitch shift).
+    ///
+    /// All wait loops use deadline-aware nonblocking polling. Context and stream
+    /// readiness use `NATIVE_DEVICE_TIMEOUT`; drain uses a clip-derived timeout
+    /// bounded by `PLAYBACK_TIMEOUT`. On timeout the function returns an error
+    /// so the caller can fall back to host player playback.
     pub fn play_sfx_as_event(
         bytes: &[u8],
         options: &PlaybackOptions,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // Decode audio using rodio's decoder.
         let decoder = rodio::Decoder::new(Cursor::new(bytes.to_vec()))?;
         let channels = decoder.channels();
         let sample_rate = decoder.sample_rate();
 
-        // Extract primitive values from NonZero types.
         let channels_u8 = channels.get() as u8;
         let sample_rate_u32 = sample_rate.get();
 
-        // Collect all samples as f32 (fine for short SFX clips).
         let mut samples: Vec<f32> = decoder.collect();
 
-        // Apply volume.
         if let Some(vol) = options.volume {
             for s in &mut samples {
                 *s *= vol;
             }
         }
 
-        // Speed: adjust the declared sample rate. PulseAudio resamples from our
-        // declared rate to the device rate, producing the speed-with-pitch effect.
         let effective_rate = if let Some(speed) = options.speed {
             (sample_rate_u32 as f32 * speed) as u32
         } else {
@@ -852,28 +891,31 @@ mod linux {
             return Err("invalid PulseAudio sample spec".into());
         }
 
-        // Create PulseAudio mainloop (single-threaded, we iterate manually).
         let mut mainloop = Mainloop::new().ok_or("failed to create PulseAudio mainloop")?;
 
-        // Create and connect context.
         let mut context =
             Context::new(&mainloop, "playa").ok_or("failed to create PulseAudio context")?;
 
         context.connect(None, pulse::context::FlagSet::NOFLAGS, None)?;
 
-        // Wait for context to become ready.
-        loop {
-            iterate_or_fail(&mut mainloop)?;
-            match context.get_state() {
-                pulse::context::State::Ready => break,
-                pulse::context::State::Failed | pulse::context::State::Terminated => {
-                    return Err("PulseAudio context connection failed".into());
-                }
-                _ => {}
-            }
-        }
+        let ready_deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
 
-        // Create stream proplist with media.role=event.
+        wait_for_pulse_condition(
+            &mut mainloop,
+            ready_deadline,
+            "context connection",
+            || {
+                match context.get_state() {
+                    pulse::context::State::Ready => return Ok(true),
+                    pulse::context::State::Failed | pulse::context::State::Terminated => {
+                        return Err("PulseAudio context connection failed".into());
+                    }
+                    _ => {}
+                }
+                Ok(false)
+            },
+        )?;
+
         let mut proplist = Proplist::new().ok_or("failed to create PulseAudio proplist")?;
         proplist
             .set_str(pulse::proplist::properties::MEDIA_ROLE, "event")
@@ -883,57 +925,63 @@ mod linux {
             Stream::new_with_proplist(&mut context, "Sound Effect", &spec, None, &mut proplist)
                 .ok_or("failed to create PulseAudio stream")?;
 
-        // Connect stream for playback.
         stream.connect_playback(
-            None, // default device
-            None, // default buffer attributes
+            None,
+            None,
             pulse::stream::FlagSet::NOFLAGS,
-            None, // no volume override
-            None, // no sync stream
+            None,
+            None,
         )?;
 
-        // Wait for stream to become ready.
-        loop {
-            iterate_or_fail(&mut mainloop)?;
-            match stream.get_state() {
-                pulse::stream::State::Ready => break,
-                pulse::stream::State::Failed | pulse::stream::State::Terminated => {
-                    return Err("PulseAudio stream connection failed".into());
+        wait_for_pulse_condition(
+            &mut mainloop,
+            ready_deadline,
+            "stream connection",
+            || {
+                match stream.get_state() {
+                    pulse::stream::State::Ready => return Ok(true),
+                    pulse::stream::State::Failed | pulse::stream::State::Terminated => {
+                        return Err("PulseAudio stream connection failed".into());
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
-        }
+                Ok(false)
+            },
+        )?;
 
-        // Convert f32 samples to little-endian byte representation.
         let byte_data: Vec<u8> = samples.iter().flat_map(|s: &f32| s.to_le_bytes()).collect();
 
-        // Write all audio data. PulseAudio buffers internally.
         stream.write(&byte_data, None, 0, SeekMode::Relative)?;
 
-        // Drain: wait for all buffered audio to finish playing.
-        let op = stream.drain(None);
-        loop {
-            iterate_or_fail(&mut mainloop)?;
-            match op.get_state() {
-                pulse::operation::State::Done | pulse::operation::State::Cancelled => break,
-                pulse::operation::State::Running => {}
-            }
-        }
+        let clip_duration = Duration::from_secs_f64(
+            samples.len() as f64 / (channels.get() as f64 * effective_rate as f64),
+        );
+        let drain_timeout = (clip_duration + Duration::from_secs(5))
+            .min(PLAYBACK_TIMEOUT)
+            .max(NATIVE_DEVICE_TIMEOUT);
+        let drain_deadline = Instant::now() + drain_timeout;
 
-        // Clean up (Drop impls handle the rest).
+        let op = stream.drain(None);
+
+        wait_for_pulse_condition(
+            &mut mainloop,
+            drain_deadline,
+            "drain",
+            || {
+                match op.get_state() {
+                    pulse::operation::State::Done | pulse::operation::State::Cancelled => {
+                        return Ok(true);
+                    }
+                    pulse::operation::State::Running => {}
+                }
+                Ok(false)
+            },
+        )?;
+
         stream.disconnect().ok();
         context.disconnect();
 
         Ok(())
-    }
-
-    /// Iterate the PulseAudio mainloop once, blocking until an event arrives.
-    fn iterate_or_fail(mainloop: &mut Mainloop) -> Result<(), Box<dyn std::error::Error>> {
-        match mainloop.iterate(true) {
-            IterateResult::Success(_) => Ok(()),
-            IterateResult::Err(e) => Err(format!("PulseAudio mainloop error: {e}").into()),
-            IterateResult::Quit(_) => Err("PulseAudio mainloop quit unexpectedly".into()),
-        }
     }
 
     #[cfg(test)]
@@ -978,6 +1026,64 @@ mod linux {
         }
 
         #[test]
+        fn wait_helper_returns_immediately_when_ready() {
+            let call_count = std::sync::atomic::AtomicUsize::new(0);
+            let result = wait_for_pulse_condition_with_mock(
+                Instant::now() + Duration::from_secs(5),
+                "test",
+                || {
+                    call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(true)
+                },
+            );
+            assert!(result.is_ok());
+            assert_eq!(
+                call_count.load(std::sync::atomic::Ordering::SeqCst),
+                1
+            );
+        }
+
+        #[test]
+        fn wait_helper_times_out_when_never_ready() {
+            let result = wait_for_pulse_condition_with_mock(
+                Instant::now() + Duration::from_millis(10),
+                "test-phase",
+                || Ok(false),
+            );
+            assert!(result.is_err());
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("test-phase"),
+                "error should contain phase name: {err}"
+            );
+            assert!(
+                err.contains("timed out"),
+                "error should mention timeout: {err}"
+            );
+        }
+
+        fn wait_for_pulse_condition_with_mock<F>(
+            deadline: Instant,
+            phase: &'static str,
+            mut check: F,
+        ) -> Result<(), Box<dyn std::error::Error>>
+        where
+            F: FnMut() -> Result<bool, Box<dyn std::error::Error>>,
+        {
+            loop {
+                if check()? {
+                    return Ok(());
+                }
+
+                if Instant::now() >= deadline {
+                    return Err(format!("PulseAudio {} timed out", phase).into());
+                }
+
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+
+        #[test]
         #[ignore = "requires PulseAudio daemon"]
         fn can_connect_pulseaudio_context() {
             let mut mainloop = Mainloop::new().expect("should create mainloop");
@@ -986,21 +1092,23 @@ mod linux {
                 .connect(None, pulse::context::FlagSet::NOFLAGS, None)
                 .expect("should start connection");
 
-            let start = std::time::Instant::now();
-            let timeout = std::time::Duration::from_secs(5);
-            loop {
-                if start.elapsed() > timeout {
-                    panic!("timed out waiting for PulseAudio context");
-                }
-                iterate_or_fail(&mut mainloop).expect("mainloop iterate failed");
-                match context.get_state() {
-                    pulse::context::State::Ready => break,
-                    pulse::context::State::Failed | pulse::context::State::Terminated => {
-                        panic!("PulseAudio context failed");
+            let deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
+            wait_for_pulse_condition(
+                &mut mainloop,
+                deadline,
+                "context connection",
+                || {
+                    match context.get_state() {
+                        pulse::context::State::Ready => return Ok(true),
+                        pulse::context::State::Failed | pulse::context::State::Terminated => {
+                            return Err("PulseAudio context failed".into());
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                }
-            }
+                    Ok(false)
+                },
+            )
+            .expect("context should connect");
 
             context.disconnect();
         }
@@ -1014,19 +1122,25 @@ mod linux {
                 .connect(None, pulse::context::FlagSet::NOFLAGS, None)
                 .expect("should start connection");
 
-            // Wait for context ready.
-            loop {
-                iterate_or_fail(&mut mainloop).expect("mainloop iterate failed");
-                match context.get_state() {
-                    pulse::context::State::Ready => break,
-                    pulse::context::State::Failed | pulse::context::State::Terminated => {
-                        panic!("PulseAudio context failed");
-                    }
-                    _ => {}
-                }
-            }
+            let deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
 
-            // Create stream with media.role=event.
+            wait_for_pulse_condition(
+                &mut mainloop,
+                deadline,
+                "context connection",
+                || {
+                    match context.get_state() {
+                        pulse::context::State::Ready => return Ok(true),
+                        pulse::context::State::Failed | pulse::context::State::Terminated => {
+                            return Err("PulseAudio context failed".into());
+                        }
+                        _ => {}
+                    }
+                    Ok(false)
+                },
+            )
+            .expect("context should connect");
+
             let spec = Spec {
                 format: Format::F32le,
                 channels: 1,
@@ -1045,17 +1159,22 @@ mod linux {
                 .connect_playback(None, None, pulse::stream::FlagSet::NOFLAGS, None, None)
                 .expect("should connect for playback");
 
-            // Wait for stream ready.
-            loop {
-                iterate_or_fail(&mut mainloop).expect("mainloop iterate failed");
-                match stream.get_state() {
-                    pulse::stream::State::Ready => break,
-                    pulse::stream::State::Failed | pulse::stream::State::Terminated => {
-                        panic!("PulseAudio stream failed");
+            wait_for_pulse_condition(
+                &mut mainloop,
+                deadline,
+                "stream connection",
+                || {
+                    match stream.get_state() {
+                        pulse::stream::State::Ready => return Ok(true),
+                        pulse::stream::State::Failed | pulse::stream::State::Terminated => {
+                            return Err("PulseAudio stream failed".into());
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                }
-            }
+                    Ok(false)
+                },
+            )
+            .expect("stream should become ready");
 
             stream.disconnect().ok();
             context.disconnect();

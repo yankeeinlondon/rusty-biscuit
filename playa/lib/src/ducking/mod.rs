@@ -10,7 +10,7 @@
 //!
 //! - macOS: CoreAudio virtual master volume
 //! - Windows: WASAPI per-session volume
-//! - Linux: PulseAudio/PipeWire sink inputs (with ALSA fallback)
+//! - Linux: PulseAudio/PipeWire per-sink-input ducking (noop fallback)
 //!
 //! ## Example
 //!
