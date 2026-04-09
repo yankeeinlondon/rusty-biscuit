@@ -179,19 +179,21 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
     // Windows: play through WASAPI with AudioCategory_SoundEffects.
     #[cfg(all(target_os = "windows", feature = "sfx-native-windows"))]
     {
-        if windows_sfx::play_sfx_with_category(bytes, options).is_ok() {
-            return Ok(());
+        if options.speed.is_none() {
+            if windows_sfx::play_sfx_with_category(bytes, options).is_ok() {
+                return Ok(());
+            }
         }
-        // Fall through to default rodio path on error.
     }
 
     // Linux: play through PulseAudio with media.role=event.
     #[cfg(all(target_os = "linux", feature = "sfx-native-linux"))]
     {
-        if linux::play_sfx_as_event(bytes, options).is_ok() {
-            return Ok(());
+        if options.speed.is_none() {
+            if linux::play_sfx_as_event(bytes, options).is_ok() {
+                return Ok(());
+            }
         }
-        // Fall through to default rodio path on error.
     }
 
     let source = Decoder::new(Cursor::new(bytes.to_vec()))?;
@@ -607,8 +609,10 @@ mod windows_sfx {
     ///
     /// Uses `AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM` so WASAPI handles sample rate
     /// and channel conversion from the decoded format to the device format.
-    /// Speed is implemented by adjusting the declared sample rate (higher rate =
-    /// faster playback with proportional pitch shift).
+    ///
+    /// Only used when speed is not set. When speed is requested, the rodio
+    /// default path is used instead so `Player::set_speed()` provides
+    /// consistent time-stretch behavior across platforms.
     pub fn play_sfx_with_category(
         bytes: &[u8],
         options: &PlaybackOptions,
@@ -849,8 +853,9 @@ mod linux {
     /// PulseAudio's `module-role-ducking` use this property to optionally duck
     /// other audio during event sounds.
     ///
-    /// Speed is implemented by adjusting the declared sample rate (higher rate =
-    /// faster playback with proportional pitch shift).
+    /// Only used when speed is not set. When speed is requested, the rodio
+    /// default path is used instead so `Player::set_speed()` provides
+    /// consistent time-stretch behavior across platforms.
     ///
     /// All wait loops use deadline-aware nonblocking polling. Context and stream
     /// readiness use `NATIVE_DEVICE_TIMEOUT`; drain uses a clip-derived timeout

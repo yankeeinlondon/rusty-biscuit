@@ -520,11 +520,17 @@ fn set_alsa_master_volume(volume: f32) -> Result<(), DuckingError> {
                 let range = max - min;
                 let target = min + (volume * range as f32) as i64;
 
-                // Set all channels
                 for channel in [
                     SelemChannelId::FrontLeft,
                     SelemChannelId::FrontRight,
                     SelemChannelId::FrontCenter,
+                    SelemChannelId::RearLeft,
+                    SelemChannelId::RearRight,
+                    SelemChannelId::FrontLeftOfCenter,
+                    SelemChannelId::FrontRightOfCenter,
+                    SelemChannelId::SideLeft,
+                    SelemChannelId::SideRight,
+                    SelemChannelId::Woofer,
                 ] {
                     let _ = elem.set_playback_volume(channel, target);
                 }
