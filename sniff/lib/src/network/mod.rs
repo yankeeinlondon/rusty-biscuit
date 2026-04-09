@@ -359,9 +359,14 @@ fn format_mac_address(mac: &[u8; 6]) -> String {
 /// This first prefers the interface backing the system's default route.
 /// If that cannot be detected, or does not map to an eligible interface,
 /// it falls back to a local heuristic:
-/// 1. Physical interfaces (en*, eth*, wlan*) over virtual ones (bridge*, utun*, docker*, veth*, etc.)
-/// 2. Interfaces with RUNNING flag (actively transmitting)
-/// 3. First interface alphabetically within the same priority tier
+/// 1. Physical adapters over virtual ones
+///    - Unix: `en*`, `eth*`, `wlan*`, `wlp*`, `enp*`
+///    - Windows: `Ethernet`, `Wi-Fi`, `Local Area Connection`
+/// 2. Adapters with RUNNING flag (actively transmitting) over idle ones
+/// 3. Alphabetically first interface name within the same priority tier
+///
+/// Virtual adapters (`bridge*`, `utun*`, `docker*`, `vEthernet*`,
+/// `Hyper-V*`, `Bluetooth*`, `Loopback*`, `Npcap*`, etc.) are deprioritized.
 ///
 /// All candidates must be non-loopback, up, and have at least one IPv4 address.
 ///
@@ -391,45 +396,7 @@ fn select_primary_interface(
 }
 
 fn find_primary_interface_fallback(interfaces: &[NetworkInterface]) -> Option<String> {
-    /// Checks if an interface name looks like a physical interface
-    fn is_physical_interface(name: &str) -> bool {
-        // Physical interface patterns:
-        // - en* (macOS/BSD Ethernet/WiFi)
-        // - eth* (Linux Ethernet)
-        // - wlan* (Linux WiFi)
-        // - wlp* (Linux WiFi with PCI naming)
-        // - enp* (Linux with predictable naming)
-        name.starts_with("en") && !name.starts_with("enx") // enx* are USB adapters, less preferred
-            || name.starts_with("eth")
-            || name.starts_with("wlan")
-            || name.starts_with("wlp")
-            || name.starts_with("enp")
-    }
-
-    /// Checks if an interface name looks like a virtual/bridge interface
-    fn is_virtual_interface(name: &str) -> bool {
-        // Common virtual interface patterns:
-        // - bridge* (network bridges)
-        // - utun* (macOS VPN tunnels)
-        // - tun*, tap* (VPN/virtual network devices)
-        // - veth* (Linux virtual Ethernet)
-        // - docker*, br-* (Docker)
-        // - vmnet* (VM networking)
-        // - awdl0 (Apple Wireless Direct Link)
-        // - llw* (Low Latency WLAN)
-        name.starts_with("bridge")
-            || name.starts_with("utun")
-            || name.starts_with("tun")
-            || name.starts_with("tap")
-            || name.starts_with("veth")
-            || name.starts_with("docker")
-            || name.starts_with("br-")
-            || name.starts_with("vmnet")
-            || name.starts_with("awdl")
-            || name.starts_with("llw")
-    }
-
-    let candidates: Vec<_> = interfaces
+    let mut candidates: Vec<_> = interfaces
         .iter()
         .filter(|i| is_primary_candidate(i))
         .collect();
@@ -438,34 +405,116 @@ fn find_primary_interface_fallback(interfaces: &[NetworkInterface]) -> Option<St
         return None;
     }
 
-    // Priority 1: Physical + Running
-    if let Some(iface) = candidates
-        .iter()
-        .find(|i| is_physical_interface(&i.name) && i.flags.is_running)
-    {
-        return Some(iface.name.clone());
-    }
+    candidates.sort_by(|a, b| {
+        interface_priority(b)
+            .cmp(&interface_priority(a))
+            .then_with(|| a.name.cmp(&b.name))
+    });
 
-    // Priority 2: Physical (even if not running)
-    if let Some(iface) = candidates.iter().find(|i| is_physical_interface(&i.name)) {
-        return Some(iface.name.clone());
-    }
-
-    // Priority 3: Non-virtual + Running
-    if let Some(iface) = candidates
-        .iter()
-        .find(|i| !is_virtual_interface(&i.name) && i.flags.is_running)
-    {
-        return Some(iface.name.clone());
-    }
-
-    // Priority 4: Any non-virtual
-    if let Some(iface) = candidates.iter().find(|i| !is_virtual_interface(&i.name)) {
-        return Some(iface.name.clone());
-    }
-
-    // Fallback: First candidate (even if virtual)
     candidates.first().map(|i| i.name.clone())
+}
+
+/// Computes a priority score for an interface used in primary-interface selection.
+///
+/// Higher values are preferred.  Ties are broken alphabetically by name in
+/// [`find_primary_interface_fallback`].
+///
+/// | Score | Meaning                                  |
+/// |-------|------------------------------------------|
+/// | 4     | Physical adapter, actively running       |
+/// | 3     | Physical adapter, not running            |
+/// | 2     | Non-virtual adapter, actively running    |
+/// | 1     | Non-virtual adapter, not running         |
+/// | 0     | Virtual / unrecognized (lowest priority) |
+fn interface_priority(iface: &NetworkInterface) -> u8 {
+    if is_physical_interface(&iface.name) {
+        if iface.flags.is_running {
+            4
+        } else {
+            3
+        }
+    } else if !is_virtual_interface(&iface.name) {
+        if iface.flags.is_running {
+            2
+        } else {
+            1
+        }
+    } else {
+        0
+    }
+}
+
+/// Checks if an interface name looks like a physical network adapter.
+///
+/// Recognises both Unix-style names (`en*`, `eth*`, `wlan*`, etc.) and common
+/// Windows adapter names (`Ethernet`, `Wi-Fi`, `Local Area Connection`).
+fn is_physical_interface(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+
+    // Unix patterns
+    // - en* (macOS/BSD Ethernet/WiFi), except enx* (USB adapters)
+    // - eth* (Linux Ethernet)
+    // - wlan* (Linux WiFi)
+    // - wlp* (Linux WiFi with PCI naming)
+    // - enp* (Linux with predictable naming)
+    if (lower.starts_with("en") && !lower.starts_with("enx"))
+        || lower.starts_with("eth")
+        || lower.starts_with("wlan")
+        || lower.starts_with("wlp")
+        || lower.starts_with("enp")
+    {
+        return true;
+    }
+
+    // Windows patterns — common adapter names produced by Windows NDIS / Hyper-V
+    matches!(
+        lower.as_str(),
+        "ethernet"
+        | "ethernet 2"
+        | "ethernet 3"
+        | "wi-fi"
+        | "wi-fi 2"
+        | "wi-fi 3"
+        | "local area connection"
+        | "local area connection 2"
+        | "local area connection 3"
+        | "network bridge"
+    )
+}
+
+/// Checks if an interface name looks like a virtual or software adapter.
+///
+/// Covers Unix virtual patterns (`bridge*`, `utun*`, `docker*`, etc.) and
+/// common Windows virtual adapters (`vEthernet*`, Hyper-V, VPN, Bluetooth,
+/// loopback/capture adapters).
+fn is_virtual_interface(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+
+    // Unix virtual patterns
+    if lower.starts_with("bridge")
+        || lower.starts_with("utun")
+        || lower.starts_with("tun")
+        || lower.starts_with("tap")
+        || lower.starts_with("veth")
+        || lower.starts_with("docker")
+        || lower.starts_with("br-")
+        || lower.starts_with("vmnet")
+        || lower.starts_with("awdl")
+        || lower.starts_with("llw")
+    {
+        return true;
+    }
+
+    // Windows virtual patterns
+    // - vEthernet* (Hyper-V virtual switch)
+    // - Hyper-V* adapters
+    // - Bluetooth*, Loopback*, Npcap*, WinCap* (capture adapters)
+    lower.starts_with("vethernet")
+        || lower.starts_with("hyper-v")
+        || lower.starts_with("bluetooth")
+        || lower.starts_with("loopback")
+        || lower.starts_with("npcap")
+        || lower.starts_with("wincap")
 }
 
 fn is_primary_candidate(interface: &NetworkInterface) -> bool {
@@ -1104,7 +1153,6 @@ mod tests {
 
     #[test]
     fn test_primary_interface_excludes_common_virtual_patterns() {
-        // Test that common virtual interface patterns are correctly identified
         let virtual_patterns = vec![
             "bridge100",
             "utun0",
@@ -1116,6 +1164,11 @@ mod tests {
             "vmnet1",
             "awdl0",
             "llw0",
+            "vEthernet (WSL)",
+            "Hyper-V Virtual Ethernet Adapter",
+            "Bluetooth Network Connection",
+            "Loopback",
+            "Npcap Loopback Adapter",
         ];
 
         for virtual_name in virtual_patterns {
@@ -1136,7 +1189,6 @@ mod tests {
 
     #[test]
     fn test_primary_interface_recognizes_physical_patterns() {
-        // Test that common physical interface patterns are correctly identified
         let physical_patterns = vec![
             "en0",     // macOS/BSD
             "en1",     // macOS/BSD
@@ -1145,6 +1197,9 @@ mod tests {
             "wlan0",   // Linux WiFi
             "wlp3s0",  // Linux WiFi with PCI naming
             "enp0s31", // Linux with predictable naming
+            "Ethernet",      // Windows
+            "Wi-Fi",         // Windows
+            "Local Area Connection", // Windows
         ];
 
         for physical_name in physical_patterns {
@@ -1336,5 +1391,159 @@ garbage line";
         let iface = create_test_interface("Ethernet", true, true);
         let result = interface_name_for_ipv4(&[iface], "10.0.0.99".parse().unwrap());
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_primary_interface_alphabetical_tiebreak_physical_running() {
+        let interfaces = vec![
+            create_test_interface("en2", true, true),
+            create_test_interface("en0", true, true),
+            create_test_interface("en1", true, true),
+        ];
+
+        let primary = find_primary_interface_fallback(&interfaces);
+        assert_eq!(
+            primary,
+            Some("en0".to_string()),
+            "Ties among physical+running should be broken alphabetically"
+        );
+    }
+
+    #[test]
+    fn test_primary_interface_alphabetical_tiebreak_physical_not_running() {
+        let interfaces = vec![
+            create_test_interface("eth2", true, false),
+            create_test_interface("eth0", true, false),
+        ];
+
+        let primary = find_primary_interface_fallback(&interfaces);
+        assert_eq!(
+            primary,
+            Some("eth0".to_string()),
+            "Ties among physical+not-running should be broken alphabetically"
+        );
+    }
+
+    #[test]
+    fn test_primary_interface_alphabetical_tiebreak_virtual() {
+        let interfaces = vec![
+            create_test_interface("utun3", true, true),
+            create_test_interface("utun1", true, true),
+        ];
+
+        let primary = find_primary_interface_fallback(&interfaces);
+        assert_eq!(
+            primary,
+            Some("utun1".to_string()),
+            "Ties among virtual interfaces should be broken alphabetically"
+        );
+    }
+
+    #[test]
+    fn test_primary_interface_prefers_windows_physical_over_virtual() {
+        let interfaces = vec![
+            create_test_interface("vEthernet (WSL)", true, true),
+            create_test_interface("Ethernet", true, true),
+            create_test_interface("Loopback", true, true),
+        ];
+
+        let primary = find_primary_interface_fallback(&interfaces);
+        assert_eq!(
+            primary,
+            Some("Ethernet".to_string()),
+            "Should prefer Windows physical adapter over virtual"
+        );
+    }
+
+    #[test]
+    fn test_primary_interface_recognizes_windows_physical_patterns() {
+        let windows_physical = vec![
+            "Ethernet",
+            "Wi-Fi",
+            "Local Area Connection",
+            "Ethernet 2",
+            "Wi-Fi 2",
+        ];
+
+        for name in windows_physical {
+            let interfaces = vec![
+                create_test_interface("vEthernet (Hyper-V)", true, true),
+                create_test_interface(name, true, true),
+            ];
+
+            let primary = find_primary_interface_fallback(&interfaces);
+            assert_eq!(
+                primary,
+                Some(name.to_string()),
+                "Should recognize '{}' as a Windows physical adapter",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_primary_interface_excludes_windows_virtual_patterns() {
+        let windows_virtual = vec![
+            "vEthernet (WSL)",
+            "vEthernet (Default Switch)",
+            "Hyper-V Virtual Ethernet Adapter",
+            "Bluetooth Network Connection",
+            "Loopback",
+            "Npcap Loopback Adapter",
+        ];
+
+        for name in windows_virtual {
+            let interfaces = vec![
+                create_test_interface(name, true, true),
+                create_test_interface("Ethernet", true, true),
+            ];
+
+            let primary = find_primary_interface_fallback(&interfaces);
+            assert_eq!(
+                primary,
+                Some("Ethernet".to_string()),
+                "Should prefer Ethernet over virtual adapter '{}'",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_interface_priority_scoring() {
+        assert_eq!(
+            interface_priority(&create_test_interface("en0", true, true)),
+            4,
+            "Physical + running = 4"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("Ethernet", true, true)),
+            4,
+            "Windows physical + running = 4"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("en0", true, false)),
+            3,
+            "Physical + not running = 3"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("someother0", true, true)),
+            2,
+            "Non-virtual + running = 2"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("someother0", true, false)),
+            1,
+            "Non-virtual + not running = 1"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("docker0", true, true)),
+            0,
+            "Virtual = 0"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("vEthernet (WSL)", true, true)),
+            0,
+            "Windows virtual = 0"
+        );
     }
 }
