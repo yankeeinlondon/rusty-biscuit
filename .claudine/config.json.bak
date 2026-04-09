@@ -1,0 +1,643 @@
+{
+  "version": "1.0",
+  "settings": {
+    "default_log_target": null,
+    "tts": null,
+    "linking": {
+      "preference": [
+        "claude",
+        "codex",
+        "open_code",
+        "gemini",
+        "kimi_code",
+        "qwen_code"
+      ],
+      "canonical_provider": {
+        "user_skill": null,
+        "user_command": null,
+        "user_agent": null,
+        "user_script": null,
+        "repo_skill": "claude",
+        "repo_command": "claude",
+        "repo_agent": "claude",
+        "repo_script": null
+      }
+    },
+    "protect": {
+      "enabled": true,
+      "posture": "balanced",
+      "allow_repo_posture_downgrade": false,
+      "yolo": {
+        "allow_critical_blocking": true,
+        "force_advisory_for_medium_risk": true,
+        "collect_forensic_trail": true
+      },
+      "rules": {
+        "blocked_command_patterns": [],
+        "ask_command_patterns": [],
+        "protected_paths": [],
+        "secret_patterns": []
+      },
+      "completion": {
+        "enabled": true,
+        "max_retries": 3,
+        "check_commands": [],
+        "secret_scan": true
+      },
+      "mcp": {
+        "allowlist": [],
+        "denylist": [],
+        "redact_patterns": [],
+        "block_instruction_payloads": true
+      },
+      "subagents": {
+        "enabled": true,
+        "tighten_permissions": true,
+        "default_profile": "read_mostly"
+      },
+      "privilege": {
+        "deny_when_root_without_sandbox": true,
+        "require_ask_for_network_writes": true,
+        "require_ask_for_broad_fs_writes": true
+      },
+      "providers": {
+        "qwen_code": {
+          "enabled": null,
+          "posture": "advisory",
+          "yolo": null,
+          "rules": null,
+          "completion": {
+            "enabled": false,
+            "max_retries": null,
+            "check_commands": null,
+            "secret_scan": null
+          },
+          "mcp": null,
+          "subagents": null,
+          "privilege": null
+        },
+        "codex": {
+          "enabled": null,
+          "posture": "advisory",
+          "yolo": null,
+          "rules": null,
+          "completion": {
+            "enabled": false,
+            "max_retries": null,
+            "check_commands": null,
+            "secret_scan": null
+          },
+          "mcp": null,
+          "subagents": null,
+          "privilege": null
+        }
+      },
+      "max_recent_decisions": 256
+    }
+  },
+  "providers": {
+    "open_code": {
+      "events": {
+        "after_tool": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "turn_complete": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "before_model": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "notification": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "session_end": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "permission_request": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            },
+            {
+              "type": "speak",
+              "message": "The {{env.AGENT}} agent needs your attention in the {{env.PACKAGE_AREA}} package area"
+            },
+            {
+              "type": "sound_effect",
+              "name": "doorbell-2",
+              "volume": 1.0,
+              "speed": 1.0
+            }
+          ],
+          "matcher": null
+        },
+        "session_start": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "before_prompt": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "human_in_the_loop": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            },
+            {
+              "type": "speak",
+              "message": "The {{env.AGENT}} agent needs your attention in the {{env.PACKAGE_AREA}} package area"
+            },
+            {
+              "type": "sound_effect",
+              "name": "doorbell-2",
+              "volume": 1.0,
+              "speed": 1.0
+            }
+          ],
+          "matcher": null
+        },
+        "turn_error": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "after_model": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "before_compact": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "before_tool": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        }
+      }
+    },
+    "gemini": {
+      "events": {
+        "before_prompt": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "before_model": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "after_tool": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "turn_complete": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "after_model": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "before_compact": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "session_start": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "before_tool": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "session_end": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "notification": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        }
+      }
+    },
+    "claude": {
+      "events": {
+        "before_compact": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "human_in_the_loop": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            },
+            {
+              "type": "speak",
+              "message": "The {{env.AGENT}} agent needs your attention in the {{env.PACKAGE_AREA}} package area"
+            },
+            {
+              "type": "sound_effect",
+              "name": "doorbell-2",
+              "volume": 1.0,
+              "speed": 1.0
+            }
+          ],
+          "matcher": null
+        },
+        "session_end": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "session_start": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "tool_error": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "after_tool": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "permission_request": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            },
+            {
+              "type": "speak",
+              "message": "The {{env.AGENT}} agent needs your attention in the {{env.PACKAGE_AREA}} package area"
+            },
+            {
+              "type": "sound_effect",
+              "name": "doorbell-2",
+              "volume": 1.0,
+              "speed": 1.0
+            }
+          ],
+          "matcher": null
+        },
+        "notification": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "subagent_start": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "turn_complete": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "before_prompt": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "before_tool": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        },
+        "subagent_stop": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        }
+      }
+    },
+    "codex": {
+      "events": {
+        "turn_complete": {
+          "enabled": true,
+          "actions": [
+            {
+              "type": "log",
+              "target": {
+                "type": "file",
+                "rotate_daily": true
+              }
+            }
+          ],
+          "matcher": null
+        }
+      }
+    },
+    "kimi_code": {
+      "events": {}
+    },
+    "qwen_code": {
+      "events": {}
+    }
+  }
+}
