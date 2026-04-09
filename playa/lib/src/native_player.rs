@@ -10,8 +10,7 @@
 
 use std::fs::File;
 use std::io::{BufReader, Cursor};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
@@ -28,33 +27,35 @@ const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(300);
 /// Maximum time to wait for an audio device to open.
 const DEVICE_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Watchdog that terminates the process if an audio device open hangs.
+/// Open an audio output stream with a timeout.
 ///
-/// CoreAudio requires a run loop on the calling thread, so we can't move
-/// device-opening calls to a background thread. Instead, we run them on the
-/// main thread and spawn a watchdog that will abort the process if the call
-/// doesn't complete in time.
-struct DeviceOpenWatchdog {
-    disarmed: Arc<AtomicBool>,
-}
+/// Runs the device-opening logic on a background thread and waits up to
+/// `timeout` for a result. Returns `DeviceOpenTimeout` if the audio device
+/// does not respond in time, instead of blocking the calling thread
+/// indefinitely or terminating the process.
+fn open_stream_with_timeout(
+    timeout: Duration,
+    options: &PlaybackOptions,
+) -> Result<rodio::MixerDeviceSink, NativePlaybackError> {
+    let channel_name = options.channel.clone();
+    let (tx, rx) = mpsc::channel();
 
-impl DeviceOpenWatchdog {
-    fn start(timeout: Duration) -> Self {
-        let disarmed = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&disarmed);
-        let secs = timeout.as_secs();
-        std::thread::spawn(move || {
-            std::thread::sleep(timeout);
-            if !flag.load(Ordering::Relaxed) {
-                eprintln!("playa: audio device did not respond within {secs}s — aborting");
-                std::process::exit(1);
+    std::thread::spawn(move || {
+        let result = if let Some(ref name) = channel_name {
+            if let Some(device) = crate::channels::find_device_by_id_or_name(name) {
+                DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
+            } else {
+                DeviceSinkBuilder::open_default_sink()
             }
-        });
-        Self { disarmed }
-    }
+        } else {
+            DeviceSinkBuilder::open_default_sink()
+        };
+        let _ = tx.send(result);
+    });
 
-    fn disarm(self) {
-        self.disarmed.store(true, Ordering::Relaxed);
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result.map_err(NativePlaybackError::Stream),
+        Err(_) => Err(NativePlaybackError::DeviceOpenTimeout(timeout.as_secs())),
     }
 }
 
@@ -72,6 +73,10 @@ pub enum NativePlaybackError {
     /// Failed to open an audio output stream.
     #[error("failed to open audio stream: {0}")]
     Stream(#[from] rodio::DeviceSinkError),
+
+    /// Audio device did not respond within the allotted time.
+    #[error("audio device did not respond within {0}s")]
+    DeviceOpenTimeout(u64),
 
     /// Failed to decode audio data.
     #[error("failed to decode audio: {0}")]
@@ -156,17 +161,7 @@ fn play_source(
     source: Decoder<impl std::io::Read + std::io::Seek + Send + Sync + 'static>,
     options: &PlaybackOptions,
 ) -> Result<(), NativePlaybackError> {
-    let guard = DeviceOpenWatchdog::start(DEVICE_OPEN_TIMEOUT);
-    let stream = if let Some(channel_name) = &options.channel {
-        if let Some(device) = crate::channels::find_device_by_id_or_name(channel_name) {
-            DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())?
-        } else {
-            DeviceSinkBuilder::open_default_sink()?
-        }
-    } else {
-        DeviceSinkBuilder::open_default_sink()?
-    };
-    guard.disarm();
+    let stream = open_stream_with_timeout(DEVICE_OPEN_TIMEOUT, options)?;
     let player = Player::connect_new(stream.mixer());
 
     if let Some(vol) = options.volume {

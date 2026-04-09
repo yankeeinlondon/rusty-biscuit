@@ -30,8 +30,7 @@
 //! PulseAudio is not available (e.g., ALSA-only systems).
 
 use std::io::Cursor;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
@@ -47,33 +46,26 @@ const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(30);
 /// Maximum time to wait for an audio device to open.
 const DEVICE_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Watchdog that terminates the process if an audio device open hangs.
+/// Open an SFX audio stream with a timeout.
 ///
-/// CoreAudio requires a run loop on the calling thread, so we can't move
-/// device-opening calls to a background thread. Instead, we run them on the
-/// main thread and spawn a watchdog that will abort the process if the call
-/// doesn't complete in time.
-struct DeviceOpenWatchdog {
-    disarmed: Arc<AtomicBool>,
-}
+/// Runs the device-opening logic on a background thread and waits up to
+/// `timeout` for a result. Returns `DeviceOpenTimeout` if the audio device
+/// does not respond in time, instead of blocking the calling thread
+/// indefinitely or terminating the process.
+fn open_sfx_stream_with_timeout(
+    timeout: Duration,
+    options: &PlaybackOptions,
+) -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
+    let opts = options.clone();
+    let (tx, rx) = mpsc::channel();
 
-impl DeviceOpenWatchdog {
-    fn start(timeout: Duration) -> Self {
-        let disarmed = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&disarmed);
-        let secs = timeout.as_secs();
-        std::thread::spawn(move || {
-            std::thread::sleep(timeout);
-            if !flag.load(Ordering::Relaxed) {
-                eprintln!("playa: audio device did not respond within {secs}s — aborting");
-                std::process::exit(1);
-            }
-        });
-        Self { disarmed }
-    }
+    std::thread::spawn(move || {
+        let _ = tx.send(open_sfx_stream(&opts));
+    });
 
-    fn disarm(self) {
-        self.disarmed.store(true, Ordering::Relaxed);
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result.map_err(SfxPlaybackError::Stream),
+        Err(_) => Err(SfxPlaybackError::DeviceOpenTimeout(timeout.as_secs())),
     }
 }
 
@@ -83,6 +75,10 @@ pub enum SfxPlaybackError {
     /// Failed to open an audio output stream.
     #[error("failed to open audio stream: {0}")]
     Stream(#[from] rodio::DeviceSinkError),
+
+    /// Audio device did not respond within the allotted time.
+    #[error("audio device did not respond within {0}s")]
+    DeviceOpenTimeout(u64),
 
     /// Failed to decode audio data.
     #[error("failed to decode audio: {0}")]
@@ -129,9 +125,7 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
         // Fall through to default rodio path on error.
     }
 
-    let guard = DeviceOpenWatchdog::start(DEVICE_OPEN_TIMEOUT);
-    let mut stream = open_sfx_stream(options).map_err(SfxPlaybackError::Stream)?;
-    guard.disarm();
+    let mut stream = open_sfx_stream_with_timeout(DEVICE_OPEN_TIMEOUT, options)?;
     stream.log_on_drop(false);
     let player = Player::connect_new(stream.mixer());
 
