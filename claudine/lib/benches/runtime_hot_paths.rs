@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use claudine::dispatch::loader::load_runtime_config;
+use claudine::config::claudine_config::{ClaudineConfig, DefaultSounds, TtsValue};
+use claudine::dispatch::loader::{compile_canonical_runtime, load_claudine_config};
 use claudine::events::Provider;
 use claudine::services::protect::catalog::{ProtectPlatform, RuleGroup};
 use claudine::services::protect::config::{
@@ -8,8 +9,8 @@ use claudine::services::protect::config::{
 };
 use claudine::services::protect::service::{ProtectRequest, ProtectService};
 use claudine::stream::parser::NullSink;
-use claudine::stream::{ParserConfig, create_parser};
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use claudine::stream::{create_parser, ParserConfig};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use tempfile::TempDir;
 
 fn bench_protect_service(c: &mut Criterion) {
@@ -42,7 +43,11 @@ fn bench_protect_service(c: &mut Criterion) {
     group.bench_function("bash_command", |b| {
         b.iter(|| {
             let decision = service.evaluate(black_box(&bash_request));
-            black_box(decision.blocked.map(|blocked| blocked.group == RuleGroup::Custom))
+            black_box(
+                decision
+                    .blocked
+                    .map(|blocked| blocked.group == RuleGroup::Custom),
+            )
         });
     });
     group.bench_function("write_path", |b| {
@@ -87,11 +92,12 @@ fn bench_runtime_config_loading(c: &mut Criterion) {
     let path = fixture.config_path.clone();
 
     let mut group = c.benchmark_group("runtime_config");
-    group.bench_function("load_runtime_config", |b| {
+    group.bench_function("load_claudine_config", |b| {
         b.iter(|| {
-            let runtime = load_runtime_config(Some(black_box(path.as_path())), None).unwrap();
+            let config = load_claudine_config(Some(black_box(path.as_path())), None).unwrap();
+            let runtime = compile_canonical_runtime(config, None).unwrap();
             let binding = runtime
-                .get_binding(Provider::Claude, &claudine::events::AgenticEvent::BeforeTool)
+                .get_binding(&claudine::events::AgenticEvent::BeforeTool)
                 .unwrap();
             black_box(binding.matcher().is_some());
         });
@@ -125,47 +131,40 @@ impl RuntimeConfigFixture {
         std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
 
         let config = serde_json::json!({
-            "version": "1.0",
-            "settings": {
-                "protect": {
-                    "enabled": true,
-                    "rules": {
-                        "filesystem_destruction": {
-                            "enabled": true,
-                            "allow_paths": ["target", "dist"]
-                        }
+            "tts": false,
+            "logging": true,
+            "protect": {
+                "enabled": true,
+                "rules": {
+                    "filesystem_destruction": {
+                        "enabled": true,
+                        "allow_paths": ["target", "dist"]
                     }
                 }
             },
-            "providers": {
-                "claude": {
-                    "events": {
-                        "before_tool": {
-                            "enabled": true,
-                            "matcher": "Bash|Edit|Write",
-                            "actions": [
-                                {
-                                    "type": "call",
-                                    "command": "echo",
-                                    "args": ["allow because benchmark"],
-                                    "mapper": {
-                                        "type": "regex",
-                                        "pattern": "(?P<decision>allow|deny)\\s+because\\s+(?P<reason>.*)"
-                                    }
-                                },
-                                {
-                                    "type": "report",
-                                    "handler": {
-                                        "format": "json",
-                                        "template": null,
-                                        "include_metadata": false
-                                    }
-                                }
-                            ]
+            "preferred_agent": "claude",
+            "actions": {
+                "before_tool": [
+                    {
+                        "type": "call",
+                        "command": "echo",
+                        "args": ["allow because benchmark"],
+                        "mapper": {
+                            "type": "regex",
+                            "pattern": "(?P<decision>allow|deny)\\s+because\\s+(?P<reason>.*)"
+                        }
+                    },
+                    {
+                        "type": "report",
+                        "handler": {
+                            "format": "json",
+                            "template": null,
+                            "include_metadata": false
                         }
                     }
-                }
-            }
+                ]
+            },
+            "default_sounds": {}
         });
 
         std::fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
