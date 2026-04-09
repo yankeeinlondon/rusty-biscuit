@@ -154,11 +154,9 @@ impl clap::builder::TypedValueParser for AudioFileParser {
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
-        if std::env::var_os("COMPLETE").is_none() {
-            return None;
-        }
+        std::env::var_os("COMPLETE")?;
 
-        let last_arg = std::env::args().last().unwrap_or_default();
+        let last_arg = std::env::args().next_back().unwrap_or_default();
         let mut dir_path = PathBuf::from(".");
         let mut prefix = String::new();
 
