@@ -17,187 +17,42 @@ use crate::events::{AgenticEvent, EventMeta, GlobalSettings};
 use crate::messaging::RuntimeMessagingSettings;
 use crate::services::protect::decision::ProtectDecision;
 
+/// Configuration sources supported by the action runner.
+#[derive(Clone, Copy)]
+pub(crate) enum DispatchConfig<'a> {
+    Legacy(&'a GlobalSettings),
+    Canonical(&'a ClaudineConfig),
+}
+
+impl DispatchConfig<'_> {
+    fn execute_speak(
+        self,
+        message_template: &str,
+        voice_override: Option<&str>,
+        gender_override: Option<Gender>,
+        meta: &EventMeta,
+    ) {
+        match self {
+            Self::Legacy(settings) => execute_speak(message_template, meta, settings),
+            Self::Canonical(config) => execute_speak_from_claudine(
+                message_template,
+                voice_override,
+                gender_override,
+                meta,
+                config,
+            ),
+        }
+    }
+}
+
 /// Execute hook actions in declaration order.
 ///
 /// Returns the selected blocking response from `call` actions when applicable.
-pub async fn execute_actions(
+pub(crate) async fn execute_actions(
     actions: &[HookAction],
     compiled_mappers: Option<&[Option<CompiledMapper>]>,
     meta: &EventMeta,
-    settings: &GlobalSettings,
-    messaging: &crate::messaging::RuntimeMessagingSettings,
-    can_block: bool,
-    protect_decision: Option<&ProtectDecision>,
-) -> Result<Option<HookResponse>> {
-    let mut selected_response: Option<HookResponse> = None;
-
-    for (index, action) in actions.iter().enumerate() {
-        match action {
-            HookAction::Speak { message, .. } => {
-                let _action_span = info_span!(
-                    "hook_action",
-                    action_index = index,
-                    action_kind = "speak",
-                    blocking = can_block,
-                    timeout_ms = tracing::field::Empty,
-                    target_kind = tracing::field::Empty,
-                    command = tracing::field::Empty,
-                )
-                .entered();
-                execute_speak(message, meta, settings);
-            }
-            HookAction::Report { handler } => {
-                let _action_span = info_span!(
-                    "hook_action",
-                    action_index = index,
-                    action_kind = "report",
-                    blocking = can_block,
-                    timeout_ms = tracing::field::Empty,
-                    target_kind = tracing::field::Empty,
-                    command = tracing::field::Empty,
-                )
-                .entered();
-                execute_report(handler.as_ref(), meta, can_block);
-            }
-            HookAction::Bash { command, params } => {
-                let _action_span = info_span!(
-                    "hook_action",
-                    action_index = index,
-                    action_kind = "bash",
-                    blocking = can_block,
-                    timeout_ms = tracing::field::Empty,
-                    target_kind = tracing::field::Empty,
-                    command = %command,
-                )
-                .entered();
-                execute_bash(command, params, meta)
-            }
-            HookAction::Call {
-                command,
-                args,
-                timeout_ms,
-                mapper,
-            } => {
-                let timeout = timeout_ms
-                    .map(Duration::from_millis)
-                    .unwrap_or(Duration::from_secs(60));
-                let _action_span = info_span!(
-                    "hook_action",
-                    action_index = index,
-                    action_kind = "call",
-                    blocking = can_block,
-                    timeout_ms = timeout.as_millis(),
-                    target_kind = tracing::field::Empty,
-                    command = %command,
-                )
-                .entered();
-                if should_short_circuit_call(protect_decision) {
-                    let Some(decision) = protect_decision else {
-                        continue;
-                    };
-
-                    let response = HookResponse {
-                        decision: Some(decision_for_short_circuit(decision)),
-                        reason: Some("call action short-circuited by protect: blocked".to_string()),
-                        ..HookResponse::default()
-                    };
-
-                    debug!("Short-circuiting call action due to protect block");
-                    if can_block && should_replace_selected(selected_response.as_ref(), &response) {
-                        selected_response = Some(response);
-                    }
-                    continue;
-                }
-
-                let cmd = interpolate(command, meta);
-                let rendered_args = args.as_ref().map(|items| {
-                    items
-                        .iter()
-                        .map(|arg| interpolate(arg, meta))
-                        .collect::<Vec<_>>()
-                });
-
-                let compiled_mapper = compiled_mappers
-                    .and_then(|mappers| mappers.get(index))
-                    .and_then(Option::as_ref);
-
-                match tokio::time::timeout(
-                    timeout,
-                    run_command_blocking(&cmd, rendered_args.as_deref()),
-                )
-                .await
-                {
-                    Ok(Ok(output)) => match apply_mapper(compiled_mapper, mapper.as_ref(), &output)
-                    {
-                        Ok(response) => {
-                            let response = attach_protect_context(response, protect_decision);
-                            if can_block {
-                                if should_replace_selected(selected_response.as_ref(), &response) {
-                                    selected_response = Some(response);
-                                }
-                            } else {
-                                debug!(%cmd, "Call response produced on non-blocking event and discarded");
-                            }
-                        }
-                        Err(error) => {
-                            warn!(%cmd, %error, "Call mapper failed");
-                        }
-                    },
-                    Ok(Err(error)) => {
-                        warn!(%cmd, %error, "Call command failed");
-                    }
-                    Err(_) => {
-                        warn!(%cmd, timeout_ms = timeout.as_millis(), "Call command timed out");
-                    }
-                }
-            }
-            HookAction::SoundEffect {
-                effect,
-                volume,
-                speed,
-            } => {
-                let _action_span = info_span!(
-                    "hook_action",
-                    action_index = index,
-                    action_kind = "sound_effect",
-                    blocking = can_block,
-                    timeout_ms = tracing::field::Empty,
-                    target_kind = tracing::field::Empty,
-                    command = tracing::field::Empty,
-                )
-                .entered();
-                execute_sound_effect(effect, *volume, *speed);
-            }
-            HookAction::Message { message, image } => {
-                let _action_span = info_span!(
-                    "hook_action",
-                    action_index = index,
-                    action_kind = "message",
-                    blocking = can_block,
-                    timeout_ms = tracing::field::Empty,
-                    target_kind = tracing::field::Empty,
-                    command = tracing::field::Empty,
-                )
-                .entered();
-                crate::messaging::execute_message(message, image.as_deref(), meta, messaging);
-            }
-        }
-    }
-
-    Ok(selected_response)
-}
-
-/// Execute hook actions using the new [`ClaudineConfig`] model.
-///
-/// Unlike [`execute_actions`] which bridges through [`GlobalSettings`], this
-/// function works directly with the canonical config. The key difference is
-/// `Speak` action handling: action-level `voice` and `gender` overrides are
-/// resolved against the config's TTS settings (including gendered voice pairs).
-pub async fn execute_actions_v2(
-    actions: &[HookAction],
-    compiled_mappers: Option<&[Option<CompiledMapper>]>,
-    meta: &EventMeta,
-    config: &ClaudineConfig,
+    config: DispatchConfig<'_>,
     messaging: &RuntimeMessagingSettings,
     can_block: bool,
     protect_decision: Option<&ProtectDecision>,
@@ -221,7 +76,7 @@ pub async fn execute_actions_v2(
                     command = tracing::field::Empty,
                 )
                 .entered();
-                execute_speak_v2(message, voice.as_deref(), *gender, meta, config);
+                config.execute_speak(message, voice.as_deref(), *gender, meta);
             }
             HookAction::Report { handler } => {
                 let _action_span = info_span!(
@@ -371,7 +226,7 @@ pub async fn execute_actions_v2(
 /// 2. Config-level voice resolved through gendered voice pairs
 /// 3. Config-level single voice
 /// 4. Auto-detect (no explicit voice)
-fn execute_speak_v2(
+fn execute_speak_from_claudine(
     message_template: &str,
     voice_override: Option<&str>,
     gender_override: Option<Gender>,
@@ -1116,7 +971,7 @@ mod tests {
             &actions,
             None,
             &meta(),
-            &GlobalSettings::default(),
+            DispatchConfig::Legacy(&GlobalSettings::default()),
             &messaging,
             false,
             None,
@@ -1143,7 +998,7 @@ mod tests {
             &actions,
             None,
             &meta(),
-            &GlobalSettings::default(),
+            DispatchConfig::Legacy(&GlobalSettings::default()),
             &messaging,
             true,
             None,
@@ -1154,7 +1009,7 @@ mod tests {
     }
 
     // =========================================================================
-    // execute_actions_v2 and tts_config_from_claudine tests
+    // execute_actions and tts_config_from_claudine tests
     // =========================================================================
 
     fn claudine_config_with_tts(tts: TtsValue) -> ClaudineConfig {
@@ -1272,7 +1127,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_actions_v2_runs_bash_action() {
+    async fn execute_actions_runs_bash_action_with_canonical_config() {
         let config = claudine_config_with_tts(TtsValue::Boolean(false));
         let messaging = RuntimeMessagingSettings::default();
 
@@ -1284,14 +1139,22 @@ mod tests {
             HookAction::Report { handler: None },
         ];
 
-        let result =
-            execute_actions_v2(&actions, None, &meta(), &config, &messaging, true, None).await;
+        let result = execute_actions(
+            &actions,
+            None,
+            &meta(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            true,
+            None,
+        )
+        .await;
 
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn execute_actions_v2_message_action() {
+    async fn execute_actions_message_action_with_canonical_config() {
         let config = claudine_config_with_tts(TtsValue::Boolean(false));
         let messaging = RuntimeMessagingSettings::default();
 
@@ -1300,9 +1163,17 @@ mod tests {
             image: None,
         }];
 
-        let result = execute_actions_v2(&actions, None, &meta(), &config, &messaging, false, None)
-            .await
-            .unwrap();
+        let result = execute_actions(
+            &actions,
+            None,
+            &meta(),
+            DispatchConfig::Canonical(&config),
+            &messaging,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
 
         assert!(result.is_none());
     }

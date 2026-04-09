@@ -321,11 +321,11 @@ pub async fn dispatch_canonical_with_runtime(
                 "Executing resolved canonical hook"
             );
 
-            runner::execute_actions_v2(
+            runner::execute_actions(
                 &resolved_hook.actions,
                 Some(binding.compiled_mappers()),
                 &resolved_hook.meta,
-                runtime.config(),
+                runner::DispatchConfig::Canonical(runtime.config()),
                 runtime.messaging(),
                 resolved_hook.can_block,
                 protect_pre.as_ref(),
@@ -656,7 +656,7 @@ async fn dispatch_preparsed_with_config(
         &resolved_hook.actions,
         Some(binding.compiled_mappers()),
         &resolved_hook.meta,
-        config.settings(),
+        runner::DispatchConfig::Legacy(config.settings()),
         config.messaging(),
         resolved_hook.can_block,
         protect_pre.as_ref(),
