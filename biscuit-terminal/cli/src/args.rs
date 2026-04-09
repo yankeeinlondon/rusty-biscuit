@@ -74,9 +74,17 @@ pub struct Args {
     #[arg(long, global = true, display_order = 100)]
     pub json: bool,
 
-    /// Verbose output (show more details)
-    #[arg(short, long, global = true, display_order = 101)]
-    pub verbose: bool,
+    /// Verbose output (repeat for more detail: -v, -vv)
+    #[arg(short, long, global = true, action = clap::ArgAction::Count, display_order = 101)]
+    pub verbose: u8,
+
+    /// Suppress non-essential output
+    #[arg(short, long, global = true, display_order = 103)]
+    pub quiet: bool,
+
+    /// Suppress all output except errors (implies --quiet)
+    #[arg(long, global = true, display_order = 104)]
+    pub silent: bool,
 
     /// Generate shell completions and exit.
     ///
