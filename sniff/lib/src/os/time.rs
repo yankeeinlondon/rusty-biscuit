@@ -31,9 +31,18 @@ pub enum NtpStatus {
 ///
 /// Contains details about the system's timezone configuration, UTC offset,
 /// daylight saving time status, and NTP synchronization state.
+///
+/// ## Platform Notes
+///
+/// - **Linux / macOS**: `timezone` is an IANA name (e.g. `America/Los_Angeles`).
+/// - **Windows**: `timezone` is a mapped IANA name when the Windows zone is
+///   recognised, otherwise the raw Windows timezone ID from `tzutil`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TimeInfo {
-    /// IANA timezone name (e.g., "America/Los_Angeles", "Europe/London")
+    /// Best-effort timezone identifier.
+    ///
+    /// On Linux/macOS this is an IANA name.  On Windows this is a mapped IANA
+    /// name when possible, falling back to the raw Windows timezone ID.
     pub timezone: Option<String>,
     /// Offset from UTC in seconds (negative = west of UTC, positive = east)
     pub utc_offset_seconds: i32,
@@ -229,11 +238,12 @@ pub(crate) fn extract_timezone_from_path(path: &str) -> Option<String> {
 ///
 /// - **Linux**: Reads `/etc/timezone` or parses `/etc/localtime` symlink target
 /// - **macOS**: Parses `/etc/localtime` symlink target
-/// - **Windows**: Returns `None` (registry query not implemented)
+/// - **Windows**: Probes `tzutil /g` and maps the result to an IANA name
+///   (falls back to the raw Windows timezone ID when unmapped)
 ///
 /// ## Returns
 ///
-/// The IANA timezone name (e.g., "America/Los_Angeles") if detected, `None` otherwise.
+/// The timezone identifier if detected, `None` otherwise.
 #[cfg(target_os = "linux")]
 fn detect_timezone_name() -> Option<String> {
     // Try /etc/timezone first (Debian/Ubuntu style)
@@ -268,9 +278,32 @@ fn detect_timezone_name() -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn detect_timezone_name() -> Option<String> {
-    // Windows timezone detection requires registry queries
-    // which is complex - return None for initial implementation
-    None
+    let windows_id = detect_windows_timezone_id()?;
+    Some(
+        crate::os::windows_timezone_map::map_windows_timezone_to_iana(&windows_id)
+            .unwrap_or(windows_id),
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn detect_windows_timezone_id() -> Option<String> {
+    let output = Command::new("tzutil")
+        .arg("/g")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let id = String::from_utf8(output.stdout).ok()?;
+    let trimmed = id.trim_end().trim_end_matches('\r').trim_end_matches('\n');
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -550,5 +583,41 @@ mod tests {
                 | NtpStatus::Inactive
                 | NtpStatus::Unknown
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_detect_windows_timezone_id_trims_output() {
+        // Simulate tzutil output with trailing \r\n
+        let raw = "Pacific Standard Time\r\n";
+        let trimmed = raw.trim_end().trim_end_matches('\r').trim_end_matches('\n');
+        assert_eq!(trimmed, "Pacific Standard Time");
+        assert!(!trimmed.is_empty());
+    }
+
+    #[test]
+    fn test_windows_timezone_map_common_ids() {
+        use crate::os::windows_timezone_map::map_windows_timezone_to_iana;
+
+        assert_eq!(
+            map_windows_timezone_to_iana("Pacific Standard Time"),
+            Some("America/Los_Angeles".to_string())
+        );
+        assert_eq!(
+            map_windows_timezone_to_iana("UTC"),
+            Some("Etc/UTC".to_string())
+        );
+        assert_eq!(
+            map_windows_timezone_to_iana("W. Europe Standard Time"),
+            Some("Europe/Berlin".to_string())
+        );
+    }
+
+    #[test]
+    fn test_windows_timezone_map_unknown_returns_none() {
+        use crate::os::windows_timezone_map::map_windows_timezone_to_iana;
+
+        assert_eq!(map_windows_timezone_to_iana("Nonexistent/Zone"), None);
+        assert_eq!(map_windows_timezone_to_iana(""), None);
     }
 }
