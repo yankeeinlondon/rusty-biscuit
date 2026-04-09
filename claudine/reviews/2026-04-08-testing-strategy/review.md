@@ -102,6 +102,7 @@ Seven integration test files independently define the same helpers:
 `proptest` is listed as a dev-dependency in `claudine/cli/Cargo.toml` but no property-based tests exist anywhere in the codebase.
 
 **Recommendation:** Either add property tests for parser-heavy modules (stream parsers, template engine, config parsing) or remove the dependency to reduce compile times. If adding tests, good candidates include:
+
 - `dispatch::loader` regex matcher patterns
 - `composition::sequence` template rendering
 - `output::truncate_args` boundary behavior
@@ -112,6 +113,7 @@ Estimated effort: 4-6 hours for initial property tests across 3-4 modules.
 #### G3: Snapshot Testing Underutilized (Medium Priority)
 
 Only 3 `insta` snapshots exist despite `insta` being available. Several areas would benefit from snapshot testing:
+
 - Wrapper header rendering (badge composition, env details)
 - Help output for all subcommands (not just the top-level)
 - JSON output for `hooks --describe`, `hooks --variables`, `providers`, `logs`
@@ -134,6 +136,7 @@ Detailed analysis of six key library modules:
 | `composition/preflight.rs` | 14 | Good shared-cache testing; "no handler" error path and post-check sources untested |
 
 **Critical untested paths:**
+
 - `harness/validate.rs`: `ShellCommand` and `NoDirtySourceCode` are safety-critical checks with zero tests
 - `composition/sequence.rs`: All FileReference magic paths (`@`, `!`, `vault:`) are the real-world resolution paths but have no test coverage
 - `dispatch/mod.rs`: `finalize_response` determines blocking behavior and exit codes but has no direct test
@@ -173,6 +176,7 @@ Two PTY tests exist in `pty_tests.rs`, both `#[ignore]` with the note "timing-se
 No tests verify that `NO_COLOR` suppresses colors or that `FORCE_COLOR=1` enables them in non-TTY contexts. This is a CLI best practice requirement.
 
 **Recommendation:** Add 2-3 integration tests:
+
 - `claudine hooks --json` with `NO_COLOR=1` produces no escape codes on stdout
 - `claudine providers` with `FORCE_COLOR=1` produces colored output even when piped
 - Verify `--plain` flag strips escape codes
@@ -186,6 +190,7 @@ Estimated effort: 2 hours.
 ### 4.1 Exit Code Testing
 
 Exit codes are well-tested in the wrapper integration tests:
+
 - Success (exit 0) propagation from child
 - Error (exit 1) propagation from child
 - Usage errors (exit 2) for invalid arguments
@@ -195,6 +200,7 @@ Exit codes are well-tested in the wrapper integration tests:
 ### 4.2 STDOUT vs STDERR Separation
 
 The wrapper tests verify that `--json` produces valid JSON on stdout. However:
+
 - No tests verify that status/progress messages go to stderr for non-wrapper commands
 - No tests verify that errors always go to stderr, even in `--json` mode (for non-wrapper commands)
 
@@ -219,6 +225,7 @@ Shell completions are generated via `claudine completions <shell>`. This subcomm
 ### 5.1 Architecture Overview
 
 The TUI is built with Ratatui using an immediate-mode pattern:
+
 - **State:** Single mutable `App` struct (app.rs)
 - **Rendering:** Direct read from `&App` in tab-specific render functions
 - **Events:** Key dispatch chain from `App::handle_key` to tab-specific handlers
@@ -267,6 +274,7 @@ The current architecture tightly couples key handling to `&mut App`. To make the
 #### R2: Add TestBackend Rendering Tests (Medium Priority, 6-8 hours)
 
 For each tab, create at least one test that:
+
 1. Constructs an `App` with known state
 2. Renders the tab to a `TestBackend` buffer
 3. Asserts the buffer with `insta::assert_debug_snapshot!`
@@ -274,6 +282,7 @@ For each tab, create at least one test that:
 This requires refactoring render functions to accept a reference to a data struct instead of `&App`, or constructing a full `App` in test context. The latter is simpler but requires mocking `cached_agents` and other runtime data.
 
 Start with:
+
 - `widgets/toggle.rs` -- simplest widget, good proof of concept
 - `widgets/modal.rs` -- centering logic, layout correctness
 - `tabs/services.rs` -- protect rule grid rendering
@@ -281,6 +290,7 @@ Start with:
 #### R3: Add Event Simulation Tests (Medium Priority, 6-8 hours)
 
 For each tab, test the key handler by:
+
 1. Constructing an `App` with known state
 2. Calling the tab's `handle_key(app, key)` function with simulated `KeyEvent` instances
 3. Asserting on the resulting `App` state
@@ -290,6 +300,7 @@ Priority: services tab (protect rules), actions tab (CRUD operations), preferenc
 #### R4: Test the App State Machine (Low Priority, 2-3 hours)
 
 Add tests for:
+
 - Overview -> Detail transition (Enter key)
 - Detail -> Overview transition (Esc key)
 - Modal push/pop cycle
@@ -351,11 +362,13 @@ Add tests for:
 **Ongoing maintenance:** ~1 hour per month to review criterion reports and update baselines
 
 **Phase 2 (optional, lower priority):**
+
 - Config loading/merging benchmarks
 - JSONL ingestion benchmarks
 - Sequence plan resolution benchmarks
 
 **Is this recommended?** Yes, with the following caveats:
+
 - Start with phase 1 only -- the protect and stream surfaces are the most impactful
 - Run benchmarks in CI with `cargo bench` on a dedicated job (not per-PR) to avoid slowing the build
 - Use criterion's HTML reports for manual review and regression detection
