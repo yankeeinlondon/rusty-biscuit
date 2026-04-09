@@ -1,6 +1,6 @@
 use sniff::filesystem::ProgrammingLanguage;
 use sniff::os::NtpStatus;
-use sniff::{SniffConfig, detect, detect_with_config};
+use sniff::{detect, detect_with_config, SniffConfig};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -117,18 +117,14 @@ fn test_detect_language_uses_package_boundary_from_nested_workspace() {
 
     assert_eq!(languages.primary, Some(ProgrammingLanguage::Rust));
     assert_eq!(languages.total_files_scanned, 2);
-    assert!(
-        languages
-            .languages
-            .iter()
-            .any(|lang| lang.language == ProgrammingLanguage::Rust)
-    );
-    assert!(
-        !languages
-            .languages
-            .iter()
-            .any(|lang| lang.language == ProgrammingLanguage::TypeScript)
-    );
+    assert!(languages
+        .languages
+        .iter()
+        .any(|lang| lang.language == ProgrammingLanguage::Rust));
+    assert!(!languages
+        .languages
+        .iter()
+        .any(|lang| lang.language == ProgrammingLanguage::TypeScript));
 }
 
 // === Regression tests for JSON serialization of partial results ===
@@ -320,7 +316,7 @@ fn test_detect_timezone_returns_valid_offset() {
 /// Tests that detect_os_type matches the current platform.
 #[test]
 fn test_detect_os_type_matches_platform() {
-    use sniff::hardware::{OsType, detect_os_type};
+    use sniff::hardware::{detect_os_type, OsType};
 
     let os_type = detect_os_type();
 
@@ -366,7 +362,7 @@ fn test_detect_os_type_matches_platform() {
 #[cfg(target_os = "macos")]
 #[test]
 fn test_macos_package_managers_finds_expected_managers() {
-    use sniff::hardware::{SystemPackageManager, detect_macos_package_managers};
+    use sniff::hardware::{detect_macos_package_managers, SystemPackageManager};
 
     let managers = detect_macos_package_managers();
 
@@ -857,7 +853,7 @@ fn test_os_summary_has_no_time_data() {
 
 #[test]
 fn test_executable_index_parity_with_which_for_common_programs() {
-    use sniff::programs::{ExecutableIndex, find_program_with_source};
+    use sniff::programs::{find_program_with_source, ExecutableIndex};
 
     let index = ExecutableIndex::build();
 
@@ -932,5 +928,76 @@ fn test_services_detailed_returns_non_empty_names() {
                 "every service should have a non-empty name"
             );
         }
+    }
+}
+
+/// On Windows the default `detect_timezone()` code path should populate the
+/// `timezone` field via `tzutil`.  This test locks down the runtime contract
+/// on an actual Windows host without using the plan-based opt-in path.
+#[cfg(target_os = "windows")]
+#[test]
+fn test_detect_timezone_windows_populates_timezone_name() {
+    let time_info = sniff::hardware::detect_timezone();
+
+    assert!(
+        time_info.timezone.is_some(),
+        "detect_timezone() should populate timezone on Windows via tzutil"
+    );
+
+    let tz = time_info.timezone.unwrap();
+    assert!(!tz.is_empty(), "timezone name should not be empty");
+
+    // IANA names contain '/' (e.g. "America/Los_Angeles").  Unmapped Windows
+    // IDs typically contain "Standard" or "Daylight" but never '/'.
+    // Either way the value should be non-empty and valid.
+    assert!(
+        tz.len() >= 3,
+        "timezone name should be at least 3 characters, got: '{tz}'"
+    );
+}
+
+/// On Windows `services_detailed(Running)` should return only services whose
+/// SCM state is `SERVICE_RUNNING`.
+#[cfg(target_os = "windows")]
+#[test]
+fn test_services_detailed_running_filter_windows() {
+    use sniff::services::{ServiceManager, ServiceState};
+
+    let manager = ServiceManager::detect();
+    let all = manager.services_detailed(ServiceState::All);
+    let running = manager.services_detailed(ServiceState::Running);
+
+    // Running should be a subset of all
+    assert!(
+        running.len() <= all.len(),
+        "Running services ({}) should not exceed total ({})",
+        running.len(),
+        all.len()
+    );
+
+    for svc in &running {
+        assert!(
+            svc.running,
+            "Service '{}' passed Running filter but running=false",
+            svc.name
+        );
+    }
+}
+
+/// On Windows `services_detailed(Stopped)` should return only stopped services.
+#[cfg(target_os = "windows")]
+#[test]
+fn test_services_detailed_stopped_filter_windows() {
+    use sniff::services::{ServiceManager, ServiceState};
+
+    let manager = ServiceManager::detect();
+    let stopped = manager.services_detailed(ServiceState::Stopped);
+
+    for svc in &stopped {
+        assert!(
+            !svc.running,
+            "Service '{}' passed Stopped filter but running=true",
+            svc.name
+        );
     }
 }

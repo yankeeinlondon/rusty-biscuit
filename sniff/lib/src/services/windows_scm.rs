@@ -27,13 +27,13 @@ pub(crate) fn list_windows_scm_services() -> Vec<Service> {
 
 #[cfg(target_os = "windows")]
 fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
+    use windows::core::PCWSTR;
     use windows::Win32::Foundation::ERROR_MORE_DATA;
     use windows::Win32::System::Services::{
-        CloseServiceHandle, ENUM_SERVICE_STATUS_PROCESSW, EnumServicesStatusExW, OpenSCManagerW,
+        CloseServiceHandle, EnumServicesStatusExW, OpenSCManagerW, ENUM_SERVICE_STATUS_PROCESSW,
         SC_ENUM_PROCESS_INFO, SC_HANDLE, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_RUNNING,
         SERVICE_STATE_ALL, SERVICE_STATUS_PROCESS, SERVICE_WIN32,
     };
-    use windows::core::PCWSTR;
 
     let scm: SC_HANDLE =
         unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_ENUMERATE_SERVICE)? };
@@ -113,6 +113,50 @@ fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
 #[cfg(any(target_os = "windows", test))]
 const SERVICE_RUNNING_STATE: u32 = 4;
 
+/// The Windows `SERVICE_STOPPED` state code (`dwCurrentState == 1`).
+#[cfg(any(target_os = "windows", test))]
+const SERVICE_STOPPED_STATE: u32 = 1;
+
+/// The Windows `SERVICE_START_PENDING` state code (`dwCurrentState == 2`).
+#[cfg(any(target_os = "windows", test))]
+const SERVICE_START_PENDING_STATE: u32 = 2;
+
+/// The Windows `SERVICE_STOP_PENDING` state code (`dwCurrentState == 3`).
+#[cfg(any(target_os = "windows", test))]
+const SERVICE_STOP_PENDING_STATE: u32 = 3;
+
+/// The Windows `SERVICE_CONTINUE_PENDING` state code (`dwCurrentState == 5`).
+#[cfg(any(target_os = "windows", test))]
+const SERVICE_CONTINUE_PENDING_STATE: u32 = 5;
+
+/// The Windows `SERVICE_PAUSE_PENDING` state code (`dwCurrentState == 6`).
+#[cfg(any(target_os = "windows", test))]
+const SERVICE_PAUSE_PENDING_STATE: u32 = 6;
+
+/// The Windows `SERVICE_PAUSED` state code (`dwCurrentState == 7`).
+#[cfg(any(target_os = "windows", test))]
+const SERVICE_PAUSED_STATE: u32 = 7;
+
+/// Classifies a raw Windows SCM `dwCurrentState` code into a filterable
+/// service-state category.
+///
+/// This is a pure function so it can be unit-tested on any platform.
+///
+/// ## Returns
+///
+/// - `Some(true)` for running states (`SERVICE_RUNNING`).
+/// - `Some(false)` for stopped states (`SERVICE_STOPPED`).
+/// - `None` for pending / transitional states (start-pending, stop-pending,
+///   continue-pending, pause-pending, paused).
+#[cfg(any(target_os = "windows", test))]
+fn classify_scm_state(current_state: u32) -> Option<bool> {
+    match current_state {
+        SERVICE_RUNNING_STATE => Some(true),
+        SERVICE_STOPPED_STATE => Some(false),
+        _ => None,
+    }
+}
+
 /// Convert raw SCM status fields into a [`Service`].
 ///
 /// This is a pure function extracted so that state-code-to-`running`
@@ -126,7 +170,7 @@ fn service_from_raw_status(name: String, current_state: u32, process_id: u32) ->
         } else {
             None
         },
-        running: current_state == SERVICE_RUNNING_STATE,
+        running: classify_scm_state(current_state).unwrap_or(false),
         status: Some(current_state as i32),
     }
 }
@@ -203,5 +247,110 @@ mod tests {
         for svc in &services {
             assert!(!svc.name.is_empty(), "service name should not be empty");
         }
+    }
+
+    #[test]
+    fn test_classify_scm_state_running() {
+        assert_eq!(classify_scm_state(SERVICE_RUNNING_STATE), Some(true));
+    }
+
+    #[test]
+    fn test_classify_scm_state_stopped() {
+        assert_eq!(classify_scm_state(SERVICE_STOPPED_STATE), Some(false));
+    }
+
+    #[test]
+    fn test_classify_scm_state_start_pending() {
+        assert_eq!(classify_scm_state(SERVICE_START_PENDING_STATE), None);
+    }
+
+    #[test]
+    fn test_classify_scm_state_stop_pending() {
+        assert_eq!(classify_scm_state(SERVICE_STOP_PENDING_STATE), None);
+    }
+
+    #[test]
+    fn test_classify_scm_state_continue_pending() {
+        assert_eq!(classify_scm_state(SERVICE_CONTINUE_PENDING_STATE), None);
+    }
+
+    #[test]
+    fn test_classify_scm_state_pause_pending() {
+        assert_eq!(classify_scm_state(SERVICE_PAUSE_PENDING_STATE), None);
+    }
+
+    #[test]
+    fn test_classify_scm_state_paused() {
+        assert_eq!(classify_scm_state(SERVICE_PAUSED_STATE), None);
+    }
+
+    #[test]
+    fn test_service_from_raw_status_pending_states_not_running() {
+        let pending_states = [
+            SERVICE_START_PENDING_STATE,
+            SERVICE_STOP_PENDING_STATE,
+            SERVICE_CONTINUE_PENDING_STATE,
+            SERVICE_PAUSE_PENDING_STATE,
+            SERVICE_PAUSED_STATE,
+        ];
+        for state in pending_states {
+            let svc = service_from_raw_status(format!("Svc-{state}").into(), state, 0);
+            assert!(
+                !svc.running,
+                "service with SCM state {state} should not be marked running"
+            );
+        }
+    }
+
+    #[test]
+    fn test_service_state_filter_running() {
+        use crate::services::ServiceState;
+
+        let services = vec![
+            service_from_raw_status("RunningSvc".into(), SERVICE_RUNNING_STATE, 100),
+            service_from_raw_status("StoppedSvc".into(), SERVICE_STOPPED_STATE, 0),
+            service_from_raw_status("PendingSvc".into(), SERVICE_START_PENDING_STATE, 0),
+        ];
+
+        let running: Vec<_> = services
+            .iter()
+            .filter(|s| ServiceState::Running.matches(Some(s.running)))
+            .collect();
+        assert_eq!(running.len(), 1);
+        assert_eq!(running[0].name, "RunningSvc");
+    }
+
+    #[test]
+    fn test_service_state_filter_stopped() {
+        use crate::services::ServiceState;
+
+        let services = vec![
+            service_from_raw_status("RunningSvc".into(), SERVICE_RUNNING_STATE, 100),
+            service_from_raw_status("StoppedSvc".into(), SERVICE_STOPPED_STATE, 0),
+            service_from_raw_status("AnotherStopped".into(), SERVICE_STOPPED_STATE, 0),
+        ];
+
+        let stopped: Vec<_> = services
+            .iter()
+            .filter(|s| ServiceState::Stopped.matches(Some(s.running)))
+            .collect();
+        assert_eq!(stopped.len(), 2);
+    }
+
+    #[test]
+    fn test_service_state_filter_all() {
+        use crate::services::ServiceState;
+
+        let services = vec![
+            service_from_raw_status("RunningSvc".into(), SERVICE_RUNNING_STATE, 100),
+            service_from_raw_status("StoppedSvc".into(), SERVICE_STOPPED_STATE, 0),
+            service_from_raw_status("PendingSvc".into(), SERVICE_START_PENDING_STATE, 0),
+        ];
+
+        let all: Vec<_> = services
+            .iter()
+            .filter(|s| ServiceState::All.matches(Some(s.running)))
+            .collect();
+        assert_eq!(all.len(), 3);
     }
 }
