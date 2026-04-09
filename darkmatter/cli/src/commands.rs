@@ -32,7 +32,11 @@ impl ResolvedTheme {
         let prose = cli.theme.unwrap_or_else(detect_prose_theme);
         let code = cli.code_theme.unwrap_or_else(|| detect_code_theme(prose));
         let color_mode = detect_color_mode();
-        Self { prose, code, color_mode }
+        Self {
+            prose,
+            code,
+            color_mode,
+        }
     }
 }
 

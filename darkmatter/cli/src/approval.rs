@@ -84,8 +84,8 @@ fn write_prompt<W: Write>(
     let header = Prose::new("\u{26a0}  <bold><yellow>Shell Approval Required</yellow></bold>")
         .render_optimistic(None);
     let source_label = Prose::new("<dim>Source:</dim>").render_optimistic(None);
-    let source_value =
-        Prose::new(format!("<bold>{source_desc}:{}</bold>", request.origin)).render_optimistic(None);
+    let source_value = Prose::new(format!("<bold>{source_desc}:{}</bold>", request.origin))
+        .render_optimistic(None);
     let cmd_label = Prose::new("<dim>Command:</dim>").render_optimistic(None);
     let cmd_value = Prose::new(format!(
         "<bold><cyan>{}</cyan></bold>",

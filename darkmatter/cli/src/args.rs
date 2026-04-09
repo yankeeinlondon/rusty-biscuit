@@ -665,9 +665,13 @@ mod tests {
 
     #[test]
     fn compose_allow_shell_timeout_flag_parses() {
-        let cli = Cli::try_parse_from(["md", "compose", "doc.md", "--allow-shell-timeout"]).unwrap();
+        let cli =
+            Cli::try_parse_from(["md", "compose", "doc.md", "--allow-shell-timeout"]).unwrap();
         match cli.command {
-            Some(Command::Compose { allow_shell_timeout, .. }) => assert!(allow_shell_timeout),
+            Some(Command::Compose {
+                allow_shell_timeout,
+                ..
+            }) => assert!(allow_shell_timeout),
             _ => panic!("Expected Compose command"),
         }
     }
@@ -685,7 +689,10 @@ mod tests {
     fn compose_allow_shell_timeout_defaults_false() {
         let cli = Cli::try_parse_from(["md", "compose", "doc.md"]).unwrap();
         match cli.command {
-            Some(Command::Compose { allow_shell_timeout, .. }) => assert!(!allow_shell_timeout),
+            Some(Command::Compose {
+                allow_shell_timeout,
+                ..
+            }) => assert!(!allow_shell_timeout),
             _ => panic!("Expected Compose command"),
         }
     }
