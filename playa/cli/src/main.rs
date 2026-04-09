@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use clap::builder::PossibleValue;
-use clap::{CommandFactory, Parser, Subcommand, ValueHint};
+use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 use sniff::programs::InstalledHeadlessAudio;
 
@@ -54,8 +54,8 @@ struct Cli {
     command: Option<Command>,
 
     /// Audio file to play (shorthand for `playa play <file>`)
-    #[arg(value_name = "AUDIO_FILE", value_hint = ValueHint::FilePath)]
-    audio_file: Option<PathBuf>,
+    #[arg(value_name = "AUDIO_FILE", value_parser = AudioFileParser)]
+    audio_file: Option<String>,
 
     #[command(flatten)]
     playback: PlaybackOptions,
@@ -66,8 +66,8 @@ enum Command {
     /// Play an audio file
     Play {
         /// Audio file to play
-        #[arg(value_name = "AUDIO_FILE", value_hint = ValueHint::FilePath)]
-        audio_file: PathBuf,
+        #[arg(value_name = "AUDIO_FILE", value_parser = AudioFileParser)]
+        audio_file: String,
 
         #[command(flatten)]
         playback: PlaybackOptions,
@@ -128,6 +128,71 @@ impl clap::builder::TypedValueParser for EffectNameParser {
             .map(|e| PossibleValue::new(e.name()).help(e.description()));
         Some(Box::new(values))
     }
+}
+
+const AUDIO_EXTENSIONS: &[&str] = &[
+    "wav", "wave", "aif", "aiff", "flac", "mp3", "ogg", "oga", "m4a", "mp4", "webm",
+];
+
+/// Value parser that suggests audio files and directories for shell completion.
+#[derive(Clone)]
+struct AudioFileParser;
+
+impl clap::builder::TypedValueParser for AudioFileParser {
+    type Value = String;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        value
+            .to_str()
+            .map(String::from)
+            .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        if std::env::var_os("COMPLETE").is_none() {
+            return None;
+        }
+
+        let last_arg = std::env::args().last().unwrap_or_default();
+        let mut dir_path = PathBuf::from(".");
+        let mut prefix = String::new();
+
+        if let Some(pos) = last_arg.rfind(std::path::MAIN_SEPARATOR) {
+            let (dir, _) = last_arg.split_at(pos + 1);
+            dir_path = PathBuf::from(dir);
+            prefix = dir.to_string();
+        }
+
+        let mut values = Vec::new();
+        
+        if let Ok(entries) = std::fs::read_dir(&dir_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                let full_name = format!("{}{}", prefix, name);
+
+                if path.is_dir() {
+                    let name = format!("{}{}", full_name, std::path::MAIN_SEPARATOR);
+                    let leaked: &'static str = Box::leak(name.into_boxed_str());
+                    values.push(PossibleValue::new(leaked));
+                } else if let Some(ext) = path.extension() {
+                    let ext = ext.to_string_lossy().to_lowercase();
+                    if AUDIO_EXTENSIONS.contains(&ext.as_str()) {
+                        let leaked: &'static str = Box::leak(full_name.into_boxed_str());
+                        values.push(PossibleValue::new(leaked));
+                    }
+                }
+            }
+        }
+
+        Some(Box::new(values.into_iter()))
+    }
+
 }
 
 /// Value parser that suggests common volume levels for shell completion
@@ -421,12 +486,12 @@ async fn run_cli() {
             audio_file,
             playback,
         }) => {
-            play_file(&audio_file, &playback).await;
+            play_file(Path::new(&audio_file), &playback).await;
         }
         None => {
             // Default: play the audio file if provided
             if let Some(ref audio_file) = cli.audio_file {
-                play_file(audio_file, &cli.playback).await;
+                play_file(Path::new(audio_file), &cli.playback).await;
             } else {
                 // No subcommand and no file - show help
                 let _ = Cli::command().print_help();
@@ -464,12 +529,12 @@ fn run_cli_sync() {
             audio_file,
             playback,
         }) => {
-            play_file_sync(&audio_file, &playback);
+            play_file_sync(Path::new(&audio_file), &playback);
         }
         None => {
             // Default: play the audio file if provided
             if let Some(ref audio_file) = cli.audio_file {
-                play_file_sync(audio_file, &cli.playback);
+                play_file_sync(Path::new(audio_file), &cli.playback);
             } else {
                 // No subcommand and no file - show help
                 let _ = Cli::command().print_help();
@@ -480,7 +545,7 @@ fn run_cli_sync() {
 }
 
 #[cfg(feature = "audio-ducking")]
-async fn play_file(path: &PathBuf, opts: &PlaybackOptions) {
+async fn play_file(path: &Path, opts: &PlaybackOptions) {
     let playa = match Playa::from_path(path) {
         Ok(p) => opts.apply_to_playa(p),
         Err(error) => {
@@ -550,7 +615,7 @@ async fn play_effect(name: &str, opts: &PlaybackOptions) {
 }
 
 #[cfg(not(feature = "audio-ducking"))]
-fn play_file_sync(path: &PathBuf, opts: &PlaybackOptions) {
+fn play_file_sync(path: &Path, opts: &PlaybackOptions) {
     let playa = match Playa::from_path(path) {
         Ok(p) => opts.apply_to_playa(p),
         Err(error) => {
@@ -1221,7 +1286,7 @@ mod tests {
     fn background_flag_detected_for_playback_target() {
         let cli = Cli {
             command: Some(Command::Play {
-                audio_file: PathBuf::from("tone.wav"),
+                audio_file: "tone.wav".to_string(),
                 playback: PlaybackOptions {
                     background: true,
                     ..base_playback_options()
