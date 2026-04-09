@@ -1,18 +1,23 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::Json5;
 use regex::Regex;
 use tracing::{debug, info, warn};
 
 use crate::actions::{CompiledMapper, HookAction, Mapper};
 use crate::config::atomic::atomic_write;
+use crate::config::claudine_config::{ClaudineConfig, ClaudineMessengerConfig, MessengerProviderConfig};
+use crate::config::migration;
 use crate::error::{ClaudineError, Result};
 use crate::events::{
     AgenticEvent, CanonicalProviderSettings, GlobalSettings, HookerConfig, LinkingSettings,
     Provider,
 };
-use crate::messaging::RuntimeMessagingSettings;
-use crate::services::{ProtectConfig, ProtectPosture};
+use crate::messaging::{MessagingRouteConfig, RuntimeMessagingSettings, ScopedMessagingSettings};
+use crate::services::protect::catalog::ProtectPlatform;
+use crate::services::protect::config::{ProtectConfig, ProtectRuleToggles};
+use crate::services::protect::service::ProtectService;
 
 /// Candidate file names for user-level configuration.
 const USER_CONFIG_NAMES: &[&str] = &[".claudine/config.json"];
@@ -26,10 +31,11 @@ pub struct RuntimeConfig {
     settings: GlobalSettings,
     messaging: RuntimeMessagingSettings,
     providers: HashMap<Provider, RuntimeProviderConfig>,
+    protect_service: Option<ProtectService>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct RuntimeProviderConfig {
+pub(crate) struct RuntimeProviderConfig {
     events: HashMap<AgenticEvent, RuntimeEventBinding>,
 }
 
@@ -53,6 +59,11 @@ impl RuntimeConfig {
         &self.messaging
     }
 
+    /// Get the cached protect service, if available.
+    pub fn protect_service(&self) -> Option<&ProtectService> {
+        self.protect_service.as_ref()
+    }
+
     /// Get an event binding for a specific provider and event.
     pub fn get_binding(
         &self,
@@ -62,6 +73,23 @@ impl RuntimeConfig {
         self.providers
             .get(&provider)
             .and_then(|provider_config| provider_config.events.get(event))
+    }
+}
+
+impl RuntimeConfig {
+    /// Build a RuntimeConfig directly for testing.
+    #[cfg(test)]
+    pub fn new_for_test(
+        settings: GlobalSettings,
+        providers: HashMap<Provider, RuntimeProviderConfig>,
+        protect_service: Option<ProtectService>,
+    ) -> Self {
+        Self {
+            settings,
+            messaging: RuntimeMessagingSettings::default(),
+            providers,
+            protect_service,
+        }
     }
 }
 
@@ -84,6 +112,25 @@ impl RuntimeEventBinding {
     /// Per-action compiled mapper metadata aligned with [`Self::actions`].
     pub fn compiled_mappers(&self) -> &[Option<CompiledMapper>] {
         &self.compiled_mappers
+    }
+
+    /// Build a RuntimeEventBinding directly for testing.
+    #[cfg(test)]
+    pub fn new_for_test(enabled: bool, actions: Vec<HookAction>, matcher: Option<Regex>) -> Self {
+        let compiled_mappers = vec![None; actions.len()];
+        Self {
+            enabled,
+            actions,
+            matcher,
+            compiled_mappers,
+        }
+    }
+}
+
+#[cfg(test)]
+impl RuntimeProviderConfig {
+    pub fn new_for_test(events: HashMap<AgenticEvent, RuntimeEventBinding>) -> Self {
+        Self { events }
     }
 }
 
@@ -230,6 +277,12 @@ fn compile_runtime_config_with_messaging(
         );
     }
 
+    let protect_service = settings
+        .protect
+        .as_ref()
+        .map(|protect| ProtectService::new(protect.clone(), ProtectPlatform::current()))
+        .transpose()?;
+
     Ok(RuntimeConfig {
         settings,
         messaging: RuntimeMessagingSettings {
@@ -237,6 +290,7 @@ fn compile_runtime_config_with_messaging(
             repo: repo_messaging,
         },
         providers: runtime_providers,
+        protect_service,
     })
 }
 
@@ -274,6 +328,202 @@ fn compile_mapper(
             })?;
             Ok(CompiledMapper::Regex { pattern: compiled })
         }
+    }
+}
+
+// ==========================================================================
+// CanonicalRuntimeConfig (compiled from the new ClaudineConfig)
+// ==========================================================================
+
+/// Runtime configuration compiled from the new [`ClaudineConfig`].
+///
+/// Unlike the old [`RuntimeConfig`] which indexes by provider+event,
+/// this indexes by canonical event only.
+#[derive(Debug, Clone)]
+pub struct CanonicalRuntimeConfig {
+    pub(crate) config: ClaudineConfig,
+    pub(crate) messaging: RuntimeMessagingSettings,
+    pub(crate) protect_service: Option<ProtectService>,
+    pub(crate) events: HashMap<AgenticEvent, RuntimeEventBinding>,
+}
+
+impl CanonicalRuntimeConfig {
+    /// Get the underlying [`ClaudineConfig`].
+    pub fn config(&self) -> &ClaudineConfig {
+        &self.config
+    }
+
+    /// Get runtime messaging settings.
+    pub fn messaging(&self) -> &RuntimeMessagingSettings {
+        &self.messaging
+    }
+
+    /// Get the cached protect service, if available.
+    pub fn protect_service(&self) -> Option<&ProtectService> {
+        self.protect_service.as_ref()
+    }
+
+    /// Get an event binding for a canonical event.
+    pub fn get_binding(&self, event: &AgenticEvent) -> Option<&RuntimeEventBinding> {
+        self.events.get(event)
+    }
+}
+
+/// Compile a [`ClaudineConfig`] into a [`CanonicalRuntimeConfig`].
+///
+/// This iterates the flat event→actions map, compiles regex mappers for
+/// `Call` actions, builds the protect service if enabled, and bridges
+/// messenger settings to the existing [`RuntimeMessagingSettings`] type.
+pub fn compile_canonical_runtime(
+    config: ClaudineConfig,
+    _repo_root: Option<&Path>,
+) -> Result<CanonicalRuntimeConfig> {
+    // 1. Compile event bindings
+    let mut events = HashMap::new();
+    for (event, actions) in &config.actions {
+        let compiled_mappers = actions
+            .iter()
+            .map(|action| compile_canonical_action_mapper(action, *event))
+            .collect::<Result<Vec<_>>>()?;
+
+        events.insert(
+            *event,
+            RuntimeEventBinding {
+                enabled: true,
+                actions: actions.clone(),
+                matcher: None,
+                compiled_mappers,
+            },
+        );
+    }
+
+    // 2. Build ProtectService if enabled
+    let protect_service = if config.protect.enabled {
+        Some(ProtectService::new(
+            config.protect.clone(),
+            ProtectPlatform::current(),
+        )?)
+    } else {
+        None
+    };
+
+    // 3. Bridge messenger config to RuntimeMessagingSettings
+    let messaging = config
+        .messenger
+        .as_ref()
+        .map(bridge_messenger_to_runtime)
+        .unwrap_or_default();
+
+    Ok(CanonicalRuntimeConfig {
+        config,
+        messaging,
+        protect_service,
+        events,
+    })
+}
+
+/// Compile mapper metadata for a single action in the canonical config.
+///
+/// Same logic as [`compile_action_mapper`] but without a provider context,
+/// since canonical events are provider-agnostic.
+fn compile_canonical_action_mapper(
+    action: &HookAction,
+    event: AgenticEvent,
+) -> Result<Option<CompiledMapper>> {
+    let HookAction::Call { mapper, .. } = action else {
+        return Ok(None);
+    };
+
+    mapper
+        .as_ref()
+        .map(|mapper| compile_canonical_mapper(mapper, event))
+        .transpose()
+}
+
+/// Compile a single mapper without provider context.
+fn compile_canonical_mapper(mapper: &Mapper, event: AgenticEvent) -> Result<CompiledMapper> {
+    match mapper {
+        Mapper::JsonField { field } => Ok(CompiledMapper::JsonField {
+            field: field.clone(),
+        }),
+        Mapper::JsonObject => Ok(CompiledMapper::JsonObject),
+        Mapper::ExitCode => Ok(CompiledMapper::ExitCode),
+        Mapper::Regex { pattern } => {
+            let compiled = Regex::new(pattern).map_err(|error| {
+                ClaudineError::TemplateError(format!(
+                    "invalid mapper regex for event={event}: {error} ({pattern})"
+                ))
+            })?;
+            Ok(CompiledMapper::Regex { pattern: compiled })
+        }
+    }
+}
+
+/// Bridge [`ClaudineMessengerConfig`] to [`RuntimeMessagingSettings`].
+///
+/// The new config uses [`MessengerProviderConfig`] variants while the
+/// existing runtime uses [`MessagingRouteConfig`]. This function converts
+/// between the two and wraps the result as a user-scope
+/// [`ScopedMessagingSettings`].
+fn bridge_messenger_to_runtime(messenger: &ClaudineMessengerConfig) -> RuntimeMessagingSettings {
+    let configs: HashMap<String, MessagingRouteConfig> = messenger
+        .configurations
+        .iter()
+        .map(|(name, provider_cfg)| (name.clone(), bridge_provider_config(provider_cfg)))
+        .collect();
+
+    let scoped = ScopedMessagingSettings {
+        active: messenger.active_config.clone(),
+        configs,
+    };
+
+    RuntimeMessagingSettings {
+        user: Some(scoped),
+        repo: None,
+    }
+}
+
+/// Convert a single [`MessengerProviderConfig`] to [`MessagingRouteConfig`].
+fn bridge_provider_config(cfg: &MessengerProviderConfig) -> MessagingRouteConfig {
+    match cfg {
+        MessengerProviderConfig::Discord {
+            channel_id,
+            bot_token_env,
+        } => MessagingRouteConfig::Discord {
+            channel_id: channel_id.clone(),
+            bot_token: None,
+            bot_token_env: bot_token_env.clone(),
+        },
+        MessengerProviderConfig::Slack {
+            channel_id,
+            bot_token_env,
+        } => MessagingRouteConfig::Slack {
+            channel_id: channel_id.clone(),
+            bot_token: None,
+            bot_token_env: bot_token_env.clone(),
+        },
+        MessengerProviderConfig::Signal {
+            recipient,
+            rpc_url_env,
+            account_env,
+        } => MessagingRouteConfig::Signal {
+            recipient: recipient.clone(),
+            rpc_url: None,
+            rpc_url_env: rpc_url_env.clone(),
+            account: None,
+            account_env: account_env.clone(),
+        },
+        MessengerProviderConfig::Whatsapp {
+            recipient,
+            access_token_env,
+            phone_number_id_env,
+        } => MessagingRouteConfig::WhatsApp {
+            recipient: recipient.clone(),
+            access_token: None,
+            access_token_env: access_token_env.clone(),
+            phone_number_id: None,
+            phone_number_id_env: phone_number_id_env.clone(),
+        },
     }
 }
 
@@ -384,6 +634,110 @@ pub fn save_config(config: &HookerConfig) -> Result<PathBuf> {
     Ok(path)
 }
 
+// ==========================================================================
+// ClaudineConfig (new flat format) loading, merging, and saving
+// ==========================================================================
+
+/// Load and validate a [`ClaudineConfig`].
+///
+/// If `user_path` is `Some`, it is used directly; otherwise the default
+/// user config path is resolved via [`user_config_path()`].
+///
+/// When the file contains the old per-provider format, it is backed up to
+/// `<path>.bak` and [`ClaudineError::ConfigNotFound`] is returned so that
+/// the caller can run the interactive migration wizard.
+///
+/// If `repo_root` is provided, the repo-level config at
+/// `{repo_root}/.claudine/config.json` is loaded and merged on top of the
+/// user config.
+///
+/// ## Errors
+///
+/// Returns [`ClaudineError::ConfigNotFound`] when the config file does not
+/// exist or was detected as the old format and backed up.
+/// Returns other errors for I/O failures, parse errors, or validation
+/// failures.
+pub fn load_claudine_config(
+    user_path: Option<&Path>,
+    repo_root: Option<&Path>,
+) -> Result<ClaudineConfig> {
+    let path = user_path
+        .map(PathBuf::from)
+        .unwrap_or_else(user_config_path);
+
+    if !path.is_file() {
+        return Err(ClaudineError::ConfigNotFound(path));
+    }
+
+    let raw = std::fs::read_to_string(&path)?;
+    let value = parse_json5_to_value(&raw)?;
+
+    if migration::is_old_format(&value) {
+        migration::backup_old_config(&path)?;
+        return Err(ClaudineError::ConfigNotFound(path));
+    }
+
+    let mut config: ClaudineConfig =
+        serde_json::from_value(value).map_err(ClaudineError::JsonParse)?;
+    debug!(?path, "Loaded ClaudineConfig (user)");
+
+    // Merge repo-level config if present
+    if let Some(root) = repo_root {
+        let repo_path = root.join(REPO_CONFIG_NAME);
+        if repo_path.is_file() {
+            let repo_raw = std::fs::read_to_string(&repo_path)?;
+            let repo_value = parse_json5_to_value(&repo_raw)?;
+            let repo_config: ClaudineConfig =
+                serde_json::from_value(repo_value).map_err(ClaudineError::JsonParse)?;
+            debug!(?repo_path, "Loaded ClaudineConfig (repo)");
+            merge_claudine_configs(&mut config, &repo_config);
+        }
+    }
+
+    config.validate()?;
+    Ok(config)
+}
+
+/// Save a [`ClaudineConfig`] to disk as pretty-printed JSON.
+///
+/// Creates parent directories if they do not exist and writes atomically.
+///
+/// ## Errors
+///
+/// Returns errors if serialization fails or the file cannot be written.
+pub fn save_claudine_config(config: &ClaudineConfig, path: &Path) -> Result<()> {
+    let json = serde_json::to_string_pretty(config)?;
+    atomic_write(path, json.as_bytes())?;
+    info!(?path, "Saved ClaudineConfig");
+    Ok(())
+}
+
+/// Merge a repo-level [`ClaudineConfig`] into a user-level config.
+///
+/// Merge rules:
+/// - `canonical_provider`: repo overrides user if repo has `Some`.
+/// - `actions`: per-event replacement — if repo defines actions for an event,
+///   that vector fully replaces the user's entry for the same event.
+fn merge_claudine_configs(user: &mut ClaudineConfig, repo: &ClaudineConfig) {
+    // canonical_provider: repo overrides user if set
+    if repo.canonical_provider.is_some() {
+        user.canonical_provider = repo.canonical_provider;
+    }
+
+    // actions: per-event replacement
+    for (event, repo_actions) in &repo.actions {
+        user.actions.insert(*event, repo_actions.clone());
+    }
+}
+
+/// Parse a raw string as JSON5 and return a [`serde_json::Value`].
+fn parse_json5_to_value(raw: &str) -> Result<serde_json::Value> {
+    let json5 = Json5::from_str(raw).map_err(|e| {
+        ClaudineError::ConfigValidation(format!("JSON5 parse error: {e}"))
+    })?;
+    Ok(json5.as_json_value().clone())
+}
+
 /// Remove unsupported events from the config.
 ///
 /// For each provider, removes events that are not supported via hooks.
@@ -465,27 +819,76 @@ fn merge_protect_configs(
 ) -> Option<ProtectConfig> {
     match (user, repo) {
         (None, None) => None,
-        (Some(user_cfg), None) => Some(user_cfg.clone()),
-        (None, Some(repo_cfg)) => Some(repo_cfg.clone()),
+        (Some(u), None) => Some(u.clone()),
+        (None, Some(r)) => Some(r.clone()),
         (Some(user_cfg), Some(repo_cfg)) => {
-            let mut merged = user_cfg.merge_with(repo_cfg);
-            let allow_downgrade =
-                user_cfg.allow_repo_posture_downgrade || repo_cfg.allow_repo_posture_downgrade;
+            let enabled = user_cfg.enabled || repo_cfg.enabled;
+            let rules = merge_rule_toggles(&user_cfg.rules, &repo_cfg.rules);
 
-            if !allow_downgrade {
-                if user_cfg.posture == ProtectPosture::Strict
-                    && merged.posture != ProtectPosture::Strict
-                {
-                    merged.posture = ProtectPosture::Strict;
-                }
+            // Combine custom patterns: repo first, then user
+            let mut custom_patterns = repo_cfg.custom_patterns.clone();
+            custom_patterns.extend(user_cfg.custom_patterns.iter().cloned());
 
-                if user_cfg.enabled && !merged.enabled {
-                    merged.enabled = true;
-                }
-            }
-
-            Some(merged)
+            Some(ProtectConfig {
+                enabled,
+                rules,
+                custom_patterns,
+            })
         }
+    }
+}
+
+/// Merge rule toggles: repo overrides user per-group.
+fn merge_rule_toggles(user: &ProtectRuleToggles, repo: &ProtectRuleToggles) -> ProtectRuleToggles {
+    ProtectRuleToggles {
+        filesystem_destruction: repo
+            .filesystem_destruction
+            .clone()
+            .or_else(|| user.filesystem_destruction.clone()),
+        disk_manipulation: repo
+            .disk_manipulation
+            .clone()
+            .or_else(|| user.disk_manipulation.clone()),
+        remote_execution: repo
+            .remote_execution
+            .clone()
+            .or_else(|| user.remote_execution.clone()),
+        git_destructive: repo
+            .git_destructive
+            .clone()
+            .or_else(|| user.git_destructive.clone()),
+        system_sabotage: repo
+            .system_sabotage
+            .clone()
+            .or_else(|| user.system_sabotage.clone()),
+        network_sabotage: repo
+            .network_sabotage
+            .clone()
+            .or_else(|| user.network_sabotage.clone()),
+        container_cloud: repo
+            .container_cloud
+            .clone()
+            .or_else(|| user.container_cloud.clone()),
+        database_nukes: repo
+            .database_nukes
+            .clone()
+            .or_else(|| user.database_nukes.clone()),
+        obfuscated_execution: repo
+            .obfuscated_execution
+            .clone()
+            .or_else(|| user.obfuscated_execution.clone()),
+        prompt_injection: repo
+            .prompt_injection
+            .clone()
+            .or_else(|| user.prompt_injection.clone()),
+        credential_exfiltration: repo
+            .credential_exfiltration
+            .clone()
+            .or_else(|| user.credential_exfiltration.clone()),
+        sensitive_paths: repo
+            .sensitive_paths
+            .clone()
+            .or_else(|| user.sensitive_paths.clone()),
     }
 }
 
@@ -536,8 +939,13 @@ fn merge_canonical_providers(
 mod tests {
     use super::*;
     use crate::actions::*;
+    use crate::config::claudine_config::DefaultSounds;
     use crate::events::*;
-    use crate::services::{ProtectConfig, ProtectPosture};
+    use crate::services::protect::config::RuleGroupDetailedConfig;
+    use crate::services::protect::{
+        CustomPattern, ProtectConfig, ProtectRuleToggles, RuleGroupConfig,
+    };
+
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -563,6 +971,8 @@ mod tests {
             enabled: true,
             actions: vec![HookAction::Speak {
                 message: msg.to_string(),
+                voice: None,
+                gender: None,
             }],
             matcher: None,
         }
@@ -641,7 +1051,7 @@ mod tests {
         let claude = &loaded.providers[&Provider::Claude];
         assert_eq!(claude.events.len(), 1); // Only session_start, no turn_complete
         match &claude.events[&AgenticEvent::SessionStart].actions[0] {
-            HookAction::Speak { message } => assert_eq!(message, "repo session"),
+            HookAction::Speak { message, .. } => assert_eq!(message, "repo session"),
             _ => panic!("Expected Speak"),
         }
     }
@@ -734,75 +1144,6 @@ mod tests {
         let tts = merged.settings.tts.unwrap();
         assert_eq!(tts.provider.as_deref(), Some("espeak"));
         assert_eq!(tts.rate, Some(1.5));
-    }
-
-    #[test]
-    fn merge_protect_does_not_silently_weaken_strict_user_posture() {
-        let user = HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings {
-                protect: Some(ProtectConfig {
-                    enabled: true,
-                    posture: ProtectPosture::Strict,
-                    ..ProtectConfig::default()
-                }),
-                ..GlobalSettings::default()
-            },
-            providers: HashMap::new(),
-        };
-
-        let repo = HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings {
-                protect: Some(ProtectConfig {
-                    enabled: false,
-                    posture: ProtectPosture::Advisory,
-                    ..ProtectConfig::default()
-                }),
-                ..GlobalSettings::default()
-            },
-            providers: HashMap::new(),
-        };
-
-        let merged = merge_configs(user, repo);
-        let protect = merged.settings.protect.expect("missing merged protect");
-        assert!(protect.enabled);
-        assert_eq!(protect.posture, ProtectPosture::Strict);
-    }
-
-    #[test]
-    fn merge_protect_allows_explicit_repo_downgrade() {
-        let user = HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings {
-                protect: Some(ProtectConfig {
-                    enabled: true,
-                    posture: ProtectPosture::Strict,
-                    ..ProtectConfig::default()
-                }),
-                ..GlobalSettings::default()
-            },
-            providers: HashMap::new(),
-        };
-
-        let repo = HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings {
-                protect: Some(ProtectConfig {
-                    enabled: false,
-                    posture: ProtectPosture::Advisory,
-                    allow_repo_posture_downgrade: true,
-                    ..ProtectConfig::default()
-                }),
-                ..GlobalSettings::default()
-            },
-            providers: HashMap::new(),
-        };
-
-        let merged = merge_configs(user, repo);
-        let protect = merged.settings.protect.expect("missing merged protect");
-        assert!(!protect.enabled);
-        assert_eq!(protect.posture, ProtectPosture::Advisory);
     }
 
     #[test]
@@ -1384,5 +1725,504 @@ mod tests {
             messaging.user.as_ref().unwrap().active.as_deref(),
             Some("my-slack")
         );
+    }
+
+    #[test]
+    fn merge_protect_preserves_user_custom_patterns_when_repo_has_config() {
+        let user = ProtectConfig {
+            enabled: true,
+            rules: ProtectRuleToggles::default(),
+            custom_patterns: vec![CustomPattern {
+                name: "user_pattern".to_string(),
+                pattern: "user_danger".to_string(),
+            }],
+        };
+        let repo = ProtectConfig {
+            enabled: true,
+            rules: ProtectRuleToggles::default(),
+            custom_patterns: vec![],
+        };
+        let merged = merge_protect_configs(Some(&user), Some(&repo)).unwrap();
+        assert_eq!(
+            merged.custom_patterns.len(),
+            1,
+            "user custom_patterns should be preserved"
+        );
+        assert_eq!(merged.custom_patterns[0].name, "user_pattern");
+    }
+
+    #[test]
+    fn merge_protect_combines_custom_patterns_from_both_scopes() {
+        let user = ProtectConfig {
+            enabled: true,
+            rules: ProtectRuleToggles::default(),
+            custom_patterns: vec![CustomPattern {
+                name: "user_pattern".to_string(),
+                pattern: "user_danger".to_string(),
+            }],
+        };
+        let repo = ProtectConfig {
+            enabled: true,
+            rules: ProtectRuleToggles::default(),
+            custom_patterns: vec![CustomPattern {
+                name: "repo_pattern".to_string(),
+                pattern: "repo_danger".to_string(),
+            }],
+        };
+        let merged = merge_protect_configs(Some(&user), Some(&repo)).unwrap();
+        assert_eq!(
+            merged.custom_patterns.len(),
+            2,
+            "both custom_patterns should be present"
+        );
+    }
+
+    #[test]
+    fn merge_protect_preserves_user_group_toggles() {
+        let mut user = ProtectConfig::default();
+        user.rules.git_destructive = Some(RuleGroupConfig::Toggle(false));
+        let repo = ProtectConfig::default();
+        let merged = merge_protect_configs(Some(&user), Some(&repo)).unwrap();
+        assert_eq!(
+            merged.rules.git_destructive,
+            Some(RuleGroupConfig::Toggle(false)),
+            "user group toggle should be preserved when repo doesn't set it"
+        );
+    }
+
+    #[test]
+    fn merge_protect_repo_group_toggle_overrides_user() {
+        let mut user = ProtectConfig::default();
+        user.rules.git_destructive = Some(RuleGroupConfig::Toggle(false));
+        let mut repo = ProtectConfig::default();
+        repo.rules.git_destructive = Some(RuleGroupConfig::Toggle(true));
+        let merged = merge_protect_configs(Some(&user), Some(&repo)).unwrap();
+        assert_eq!(
+            merged.rules.git_destructive,
+            Some(RuleGroupConfig::Toggle(true)),
+            "repo group toggle should override user"
+        );
+    }
+
+    #[test]
+    fn merge_protect_preserves_user_allow_paths() {
+        let mut user = ProtectConfig::default();
+        user.rules.filesystem_destruction =
+            Some(RuleGroupConfig::Detailed(RuleGroupDetailedConfig {
+                enabled: true,
+                allow_paths: vec!["node_modules".to_string()],
+            }));
+        let repo = ProtectConfig::default();
+        let merged = merge_protect_configs(Some(&user), Some(&repo)).unwrap();
+        match &merged.rules.filesystem_destruction {
+            Some(RuleGroupConfig::Detailed(d)) => {
+                assert!(d.allow_paths.contains(&"node_modules".to_string()));
+            }
+            other => panic!("expected Detailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_protect_user_only_returns_user() {
+        let mut user = ProtectConfig::default();
+        user.custom_patterns = vec![CustomPattern {
+            name: "test".to_string(),
+            pattern: "test".to_string(),
+        }];
+        let merged = merge_protect_configs(Some(&user), None).unwrap();
+        assert_eq!(merged.custom_patterns.len(), 1);
+    }
+
+    #[test]
+    fn merge_protect_repo_only_returns_repo() {
+        let mut repo = ProtectConfig::default();
+        repo.rules.git_destructive = Some(RuleGroupConfig::Toggle(false));
+        let merged = merge_protect_configs(None, Some(&repo)).unwrap();
+        assert_eq!(
+            merged.rules.git_destructive,
+            Some(RuleGroupConfig::Toggle(false))
+        );
+    }
+
+    #[test]
+    fn merge_protect_none_none_returns_none() {
+        assert!(merge_protect_configs(None, None).is_none());
+    }
+
+    #[test]
+    fn runtime_config_propagates_protect_service_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = serde_json::json!({
+            "version": "1.0",
+            "settings": {
+                "protect": {
+                    "enabled": true,
+                    "custom_patterns": [
+                        { "name": "bad", "pattern": "[invalid(" }
+                    ]
+                }
+            },
+            "providers": {}
+        });
+
+        let path = tmp.path().join(".claudine/config.json");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, serde_json::to_string(&config).unwrap()).unwrap();
+
+        let result = load_runtime_config(Some(&path), None);
+        assert!(
+            result.is_err(),
+            "should propagate ProtectService construction error, not swallow it"
+        );
+    }
+
+    // =====================================================================
+    // ClaudineConfig loading / saving / merging tests
+    // =====================================================================
+
+    #[test]
+    fn load_claudine_config_from_json5() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join(".claudine");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let json5_content = r#"{
+            // TTS auto-detect
+            tts: true,
+            logging: true,
+            protect: true,
+            preferred_agent: "claude",
+            actions: {
+                human_in_the_loop: [
+                    { type: "sound_effect", effect: "doorbell", },
+                ],
+            },
+        }"#;
+        std::fs::write(config_dir.join("config.json"), json5_content).unwrap();
+
+        let config =
+            load_claudine_config(Some(&config_dir.join("config.json")), None).unwrap();
+        assert!(config.logging);
+        assert!(config
+            .actions
+            .contains_key(&crate::events::AgenticEvent::HumanInTheLoop));
+    }
+
+    #[test]
+    fn load_claudine_config_detects_old_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join(".claudine");
+        std::fs::create_dir_all(&config_dir).unwrap();
+
+        let old = r#"{"version":"1.0","settings":{},"providers":{}}"#;
+        let path = config_dir.join("config.json");
+        std::fs::write(&path, old).unwrap();
+
+        let result = load_claudine_config(Some(&path), None);
+        assert!(result.is_err());
+        assert!(config_dir.join("config.json.bak").exists());
+    }
+
+    #[test]
+    fn merge_repo_canonical_provider_overrides_user() {
+        let mut user = ClaudineConfig {
+            canonical_provider: Some(Provider::Claude),
+            ..ClaudineConfig::default()
+        };
+        let repo = ClaudineConfig {
+            canonical_provider: Some(Provider::Gemini),
+            ..ClaudineConfig::default()
+        };
+        merge_claudine_configs(&mut user, &repo);
+        assert_eq!(user.canonical_provider, Some(Provider::Gemini));
+    }
+
+    #[test]
+    fn merge_repo_actions_replace_user_per_event() {
+        let mut user = ClaudineConfig::default();
+        user.actions.insert(
+            AgenticEvent::SessionStart,
+            vec![HookAction::SoundEffect {
+                effect: "user-sound".to_string(),
+                volume: 1.0,
+                speed: 1.0,
+            }],
+        );
+        user.actions.insert(
+            AgenticEvent::TurnComplete,
+            vec![HookAction::Report { handler: None }],
+        );
+
+        let mut repo = ClaudineConfig::default();
+        repo.actions.insert(
+            AgenticEvent::SessionStart,
+            vec![HookAction::SoundEffect {
+                effect: "repo-sound".to_string(),
+                volume: 0.5,
+                speed: 1.0,
+            }],
+        );
+
+        merge_claudine_configs(&mut user, &repo);
+
+        // SessionStart replaced by repo
+        let session_start = &user.actions[&AgenticEvent::SessionStart];
+        assert_eq!(session_start.len(), 1);
+        if let HookAction::SoundEffect { effect, .. } = &session_start[0] {
+            assert_eq!(effect, "repo-sound");
+        } else {
+            panic!("Expected SoundEffect");
+        }
+
+        // TurnComplete untouched
+        assert!(user.actions.contains_key(&AgenticEvent::TurnComplete));
+    }
+
+    #[test]
+    fn save_and_reload_claudine_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".claudine/config.json");
+
+        let config = ClaudineConfig::default();
+        save_claudine_config(&config, &path).unwrap();
+
+        let loaded = load_claudine_config(Some(&path), None).unwrap();
+        assert_eq!(loaded.preferred_agent, config.preferred_agent);
+        assert_eq!(loaded.logging, config.logging);
+    }
+
+    // =====================================================================
+    // CanonicalRuntimeConfig tests
+    // =====================================================================
+
+    #[test]
+    fn compile_canonical_runtime_indexes_by_event() {
+        let mut config = ClaudineConfig::default();
+        config.actions.insert(
+            AgenticEvent::HumanInTheLoop,
+            vec![HookAction::SoundEffect {
+                effect: "doorbell".to_string(),
+                volume: 1.0,
+                speed: 1.0,
+            }],
+        );
+        config.default_sounds = DefaultSounds::default();
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        assert!(runtime.get_binding(&AgenticEvent::HumanInTheLoop).is_some());
+        assert!(runtime.get_binding(&AgenticEvent::SessionStart).is_none());
+    }
+
+    #[test]
+    fn compile_canonical_runtime_builds_protect() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = true;
+        config.default_sounds = DefaultSounds::default();
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        assert!(runtime.protect_service().is_some());
+    }
+
+    #[test]
+    fn compile_canonical_runtime_no_protect_when_disabled() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        assert!(runtime.protect_service().is_none());
+    }
+
+    #[test]
+    fn compile_canonical_runtime_compiles_call_mappers() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Call {
+                command: "echo".to_string(),
+                args: Some(vec!["allow because safe".to_string()]),
+                mapper: Some(Mapper::Regex {
+                    pattern: r"(?P<decision>allow|deny)\s+because\s+(?P<reason>.*)".to_string(),
+                }),
+                timeout_ms: None,
+            }],
+        );
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let binding = runtime
+            .get_binding(&AgenticEvent::BeforeTool)
+            .expect("missing binding");
+        assert_eq!(binding.actions().len(), 1);
+        assert_eq!(binding.compiled_mappers().len(), 1);
+        assert!(binding.compiled_mappers()[0].is_some());
+    }
+
+    #[test]
+    fn compile_canonical_runtime_fails_on_invalid_mapper_regex() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.actions.insert(
+            AgenticEvent::BeforeTool,
+            vec![HookAction::Call {
+                command: "echo".to_string(),
+                args: None,
+                mapper: Some(Mapper::Regex {
+                    pattern: "[invalid(".to_string(),
+                }),
+                timeout_ms: None,
+            }],
+        );
+
+        let error = compile_canonical_runtime(config, None).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("invalid mapper regex"));
+        assert!(message.contains("before_tool"));
+    }
+
+    #[test]
+    fn compile_canonical_runtime_bridges_messenger_config() {
+        use crate::config::claudine_config::{ClaudineMessengerConfig, MessengerProviderConfig};
+
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.messenger = Some(ClaudineMessengerConfig {
+            active_config: Some("alerts".to_string()),
+            configurations: HashMap::from([(
+                "alerts".to_string(),
+                MessengerProviderConfig::Discord {
+                    channel_id: "999".to_string(),
+                    bot_token_env: "DISCORD_BOT_TOKEN".to_string(),
+                },
+            )]),
+        });
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let messaging = runtime.messaging();
+        assert!(messaging.user.is_some());
+        assert_eq!(
+            messaging.user.as_ref().unwrap().active.as_deref(),
+            Some("alerts")
+        );
+        assert!(messaging.user.as_ref().unwrap().configs.contains_key("alerts"));
+    }
+
+    #[test]
+    fn compile_canonical_runtime_no_messenger_gives_empty_messaging() {
+        let mut config = ClaudineConfig::default();
+        config.protect.enabled = false;
+        config.default_sounds = DefaultSounds::default();
+        config.messenger = None;
+
+        let runtime = compile_canonical_runtime(config, None).unwrap();
+        let messaging = runtime.messaging();
+        assert!(messaging.user.is_none());
+        assert!(messaging.repo.is_none());
+    }
+
+    #[test]
+    fn bridge_provider_config_discord() {
+        let cfg = MessengerProviderConfig::Discord {
+            channel_id: "123".to_string(),
+            bot_token_env: "MY_TOKEN".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::Discord {
+                channel_id,
+                bot_token,
+                bot_token_env,
+            } => {
+                assert_eq!(channel_id, "123");
+                assert_eq!(bot_token, None);
+                assert_eq!(bot_token_env, "MY_TOKEN");
+            }
+            other => panic!("expected Discord, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_provider_config_slack() {
+        let cfg = MessengerProviderConfig::Slack {
+            channel_id: "C456".to_string(),
+            bot_token_env: "SLACK_TOKEN".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::Slack {
+                channel_id,
+                bot_token,
+                bot_token_env,
+            } => {
+                assert_eq!(channel_id, "C456");
+                assert_eq!(bot_token, None);
+                assert_eq!(bot_token_env, "SLACK_TOKEN");
+            }
+            other => panic!("expected Slack, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_provider_config_signal() {
+        let cfg = MessengerProviderConfig::Signal {
+            recipient: "+15551234567".to_string(),
+            rpc_url_env: "SIG_RPC".to_string(),
+            account_env: "SIG_ACCT".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::Signal {
+                recipient,
+                rpc_url,
+                rpc_url_env,
+                account,
+                account_env,
+            } => {
+                assert_eq!(recipient, "+15551234567");
+                assert_eq!(rpc_url, None);
+                assert_eq!(rpc_url_env, "SIG_RPC");
+                assert_eq!(account, None);
+                assert_eq!(account_env, "SIG_ACCT");
+            }
+            other => panic!("expected Signal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bridge_provider_config_whatsapp() {
+        let cfg = MessengerProviderConfig::Whatsapp {
+            recipient: "+15559876543".to_string(),
+            access_token_env: "WA_TOKEN".to_string(),
+            phone_number_id_env: "WA_PHONE".to_string(),
+        };
+        let route = bridge_provider_config(&cfg);
+        match route {
+            MessagingRouteConfig::WhatsApp {
+                recipient,
+                access_token,
+                access_token_env,
+                phone_number_id,
+                phone_number_id_env,
+            } => {
+                assert_eq!(recipient, "+15559876543");
+                assert_eq!(access_token, None);
+                assert_eq!(access_token_env, "WA_TOKEN");
+                assert_eq!(phone_number_id, None);
+                assert_eq!(phone_number_id_env, "WA_PHONE");
+            }
+            other => panic!("expected WhatsApp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn canonical_runtime_exposes_config() {
+        let config = ClaudineConfig::default();
+        let runtime = compile_canonical_runtime(config.clone(), None).unwrap();
+        assert_eq!(runtime.config().preferred_agent, config.preferred_agent);
     }
 }

@@ -59,8 +59,8 @@ pub(crate) enum Commands {
     Handle(commands::handle::HandleArgs),
     /// Generate shell completions.
     Completions(commands::completions::CompletionsArgs),
-    /// Interactive setup wizard.
-    Init(commands::init::InitArgs),
+    /// Manage Claudine configuration with a TUI.
+    Config(commands::config_tui::ConfigArgs),
     /// Re-sync hook registrations with detected agents.
     Sync(commands::sync::SyncArgs),
     /// Show registered hooks for all detected agents.

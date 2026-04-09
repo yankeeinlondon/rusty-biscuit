@@ -4,15 +4,8 @@ use serde_json::{Value, json};
 
 use crate::actions::{HookDecision, HookResponse};
 use crate::events::{AgenticEvent, EventMeta, Provider};
-use crate::permissions::query::{CommandQuery, PathQuery};
-use crate::services::ProtectObservation;
-use crate::services::protect::intent::ProtectIntent;
-use crate::services::protect::observe::default_observe_protect;
 
-use super::{
-    AdapterError, ProviderAdapter, extract_tool_input_path, replace_intents_preserving_completion,
-    str_field,
-};
+use super::{AdapterError, ProviderAdapter, str_field};
 
 pub(crate) struct KimiCodeAdapter;
 
@@ -59,53 +52,6 @@ impl ProviderAdapter for KimiCodeAdapter {
         capture_kimi_usage(&mut meta.extra, usage_source);
 
         Ok((event, meta))
-    }
-
-    fn observe_protect(
-        &self,
-        event: &AgenticEvent,
-        meta: &EventMeta,
-    ) -> Option<ProtectObservation> {
-        let mut obs = default_observe_protect(event, meta)?;
-
-        if let Some(tool_name) = meta.tool_name.as_deref() {
-            let lowered = tool_name.to_ascii_lowercase();
-            let mut intents = Vec::new();
-            let mut replaced = true;
-
-            match lowered.as_str() {
-                "shell" | "execute_command" | "run_command" => {
-                    let cmd = meta.tool_input.as_ref().and_then(|v| {
-                        v.get("command")
-                            .and_then(Value::as_str)
-                            .map(ToOwned::to_owned)
-                            .or_else(|| v.as_str().map(ToOwned::to_owned))
-                    });
-                    if let Some(cmd) = cmd {
-                        intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(&cmd)));
-                    }
-                }
-                "write_file" | "edit_file" | "create_file" | "patch_file" => {
-                    if let Some(path) = extract_tool_input_path(meta) {
-                        intents.push(ProtectIntent::WritePath(PathQuery::file(&path)));
-                    }
-                }
-                "read_file" | "list_files" | "search_files" => {
-                    if let Some(path) = extract_tool_input_path(meta) {
-                        intents.push(ProtectIntent::ReadPath(PathQuery::unknown(&path)));
-                    }
-                }
-                _ => {
-                    replaced = false;
-                }
-            }
-
-            if replaced {
-                replace_intents_preserving_completion(&mut obs, intents);
-            }
-        }
-
-        Some(obs)
     }
 
     fn can_block(&self, event: &AgenticEvent) -> bool {

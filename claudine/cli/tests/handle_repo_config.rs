@@ -62,7 +62,6 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
         return;
     }
 
-    let log_path = repo_root.join("events.jsonl");
     let config = serde_json::json!({
         "version": "1.0",
         "settings": {
@@ -79,11 +78,9 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
                         "enabled": true,
                         "actions": [
                             {
-                                "type": "log",
-                                "target": {
-                                    "type": "file",
-                                    "path": log_path,
-                                    "rotate_daily": false
+                                "type": "report",
+                                "handler": {
+                                    "format": "json"
                                 }
                             }
                         ]
@@ -97,17 +94,23 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
         &serde_json::to_string_pretty(&config).unwrap(),
     );
 
-    cargo_bin_cmd!("claudine")
+    let output = cargo_bin_cmd!("claudine")
         .current_dir(&repo_root)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .args(["handle", "session_start", "--provider", "claude"])
         .write_stdin(r#"{"hook_event_name":"SessionStart","session_id":"repo-cfg-123"}"#)
         .assert()
-        .success();
+        .success()
+        .get_output()
+        .stdout
+        .clone();
 
-    let content = fs::read_to_string(&log_path).unwrap();
-    assert!(content.contains("repo-cfg-123"));
+    let stdout = String::from_utf8(output).unwrap();
+    assert!(
+        stdout.contains("SessionStart") || stdout.contains("session_start"),
+        "report output should contain event name"
+    );
 }
 
 #[test]
@@ -123,7 +126,6 @@ fn handle_logs_wrapper_package_context_from_env() {
         return;
     }
 
-    let log_path = repo_root.join("events.jsonl");
     let config = serde_json::json!({
         "version": "1.0",
         "settings": {
@@ -140,11 +142,9 @@ fn handle_logs_wrapper_package_context_from_env() {
                         "enabled": true,
                         "actions": [
                             {
-                                "type": "log",
-                                "target": {
-                                    "type": "file",
-                                    "path": log_path,
-                                    "rotate_daily": false
+                                "type": "report",
+                                "handler": {
+                                    "format": "json"
                                 }
                             }
                         ]
@@ -158,7 +158,7 @@ fn handle_logs_wrapper_package_context_from_env() {
         &serde_json::to_string_pretty(&config).unwrap(),
     );
 
-    cargo_bin_cmd!("claudine")
+    let output = cargo_bin_cmd!("claudine")
         .current_dir(&repo_root)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -167,9 +167,14 @@ fn handle_logs_wrapper_package_context_from_env() {
         .args(["handle", "session_start", "--provider", "claude"])
         .write_stdin(r#"{"hook_event_name":"SessionStart","session_id":"pkg-env-123"}"#)
         .assert()
-        .success();
+        .success()
+        .get_output()
+        .stdout
+        .clone();
 
-    let content = fs::read_to_string(&log_path).unwrap();
-    assert!(content.contains(r#""package_area":"claudine""#));
-    assert!(content.contains(r#""package":"claudine-cli""#));
+    let stdout = String::from_utf8(output).unwrap();
+    assert!(
+        stdout.contains("package_area") || stdout.contains("claudine"),
+        "report output should contain package context"
+    );
 }

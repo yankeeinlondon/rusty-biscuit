@@ -6,7 +6,7 @@
 
 PolicyEngine answers questions like: can this provider read/write a path, will a command run automatically or be denied, is a domain allowed, can an MCP server/tool be used, can a subagent be spawned, what config change would grant or deny a permission.
 
-It is intentionally separate from `ProtectService`. ProtectService is the runtime intervention layer; PolicyEngine is the source of truth for what the provider is configured to allow, ask, deny, or leave ambiguous.
+It is intentionally separate from `ProtectService`. After the 2026-04-06 Protect refactor, `ProtectService` is a standalone regex-backed deny catalog that blocks dangerous bash commands, sensitive write paths, and MCP prompt-injection payloads with a binary `Allow` or `Block` result. `PolicyEngine` remains the source of truth for what the provider is configured to allow, ask, deny, or leave ambiguous.
 
 ## Built-in Backends
 

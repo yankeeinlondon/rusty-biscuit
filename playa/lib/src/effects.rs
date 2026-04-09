@@ -1728,6 +1728,22 @@ impl SoundEffect {
         let bytes = Arc::new(self.as_bytes().to_vec());
         crate::playback::playa_async(crate::AudioData::Bytes(bytes)).await
     }
+
+    /// Return the kebab-case names of all compiled-in sound effects, sorted alphabetically.
+    ///
+    /// The list reflects only the feature flags enabled at compile time.
+    /// With all features (`sound-effects`) this returns 88 names.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// for name in playa::SoundEffect::all_names() {
+    ///     println!("{name}");
+    /// }
+    /// ```
+    pub fn all_names() -> &'static [&'static str] {
+        effect_durations::EFFECT_NAMES
+    }
 }
 
 /// Normalize an effect name by lowercasing and converting separators.

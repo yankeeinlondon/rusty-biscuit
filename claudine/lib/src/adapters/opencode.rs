@@ -4,16 +4,9 @@ use serde_json::{Value, json};
 use tracing::debug;
 
 use crate::actions::{HookDecision, HookResponse};
-use crate::events::{AgenticEvent, EventMeta, Provider, ToolName};
-use crate::permissions::query::{CommandQuery, PathQuery};
-use crate::services::ProtectObservation;
-use crate::services::protect::intent::ProtectIntent;
-use crate::services::protect::observe::default_observe_protect;
+use crate::events::{AgenticEvent, EventMeta, Provider};
 
-use super::{
-    AdapterError, ProviderAdapter, extract_tool_input_path, replace_intents_preserving_completion,
-    str_field,
-};
+use super::{AdapterError, ProviderAdapter, str_field};
 
 pub(crate) struct OpenCodeAdapter;
 
@@ -128,70 +121,6 @@ impl ProviderAdapter for OpenCodeAdapter {
         }
 
         Ok((event, meta))
-    }
-
-    fn observe_protect(
-        &self,
-        event: &AgenticEvent,
-        meta: &EventMeta,
-    ) -> Option<ProtectObservation> {
-        let mut obs = default_observe_protect(event, meta)?;
-
-        // OpenCode-specific: refine intents from tool name patterns.
-        if let Some(tool_name) = meta.tool_name.as_deref() {
-            let lowered = tool_name.to_ascii_lowercase();
-            let mut intents = Vec::new();
-            let mut replaced = true;
-
-            match lowered.as_str() {
-                "bash" | "shell" | "local_shell" => {
-                    let cmd = meta.tool_input.as_ref().and_then(|v| {
-                        v.get("command")
-                            .and_then(Value::as_str)
-                            .map(ToOwned::to_owned)
-                            .or_else(|| v.as_str().map(ToOwned::to_owned))
-                    });
-                    if let Some(cmd) = cmd {
-                        intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(&cmd)));
-                    }
-                }
-                "write" | "write_file" | "edit" | "edit_file" | "create_file" => {
-                    if let Some(path) = extract_tool_input_path(meta) {
-                        intents.push(ProtectIntent::WritePath(PathQuery::file(&path)));
-                    }
-                }
-                "read" | "read_file" | "list_dir" => {
-                    if let Some(path) = extract_tool_input_path(meta) {
-                        intents.push(ProtectIntent::ReadPath(PathQuery::unknown(&path)));
-                    }
-                }
-                name if ToolName(name.to_owned()).is_mcp_tool() => {
-                    if let Some((server_name, tool_name)) =
-                        ToolName(name.to_owned()).mcp_components()
-                    {
-                        let server = server_name.to_owned();
-                        intents.push(ProtectIntent::UseMcpServer {
-                            server: server.clone(),
-                        });
-                        intents.push(ProtectIntent::UseMcpTool {
-                            server,
-                            tool: tool_name.to_owned(),
-                        });
-                    } else {
-                        replaced = false;
-                    }
-                }
-                _ => {
-                    replaced = false;
-                }
-            }
-
-            if replaced {
-                replace_intents_preserving_completion(&mut obs, intents);
-            }
-        }
-
-        Some(obs)
     }
 
     fn can_block(&self, event: &AgenticEvent) -> bool {

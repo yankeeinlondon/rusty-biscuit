@@ -40,8 +40,14 @@ pub enum RepoAction {
     Packages {
         filter: Vec<String>,
     },
-    Package,
-    PackageArea,
+    Package {
+        no_error: bool,
+        on_error: Option<String>,
+    },
+    PackageArea {
+        no_error: bool,
+        on_error: Option<String>,
+    },
     DirtyPackages {
         filter: Vec<String>,
     },
@@ -568,9 +574,25 @@ pub enum RepoSubcommand {
         filter: Vec<String>,
     },
     /// Output the package name for the current directory
-    Package,
+    Package {
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
     /// Output the package area for the current directory
-    PackageArea,
+    PackageArea {
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
     /// Output only package names that have uncommitted changes
     DirtyPackages {
         /// Filter packages by name (or @area); prefix with ! to exclude
@@ -869,8 +891,20 @@ impl Commands {
                         sub_filter.clone()
                     },
                 },
-                Some(RepoSubcommand::Package) => RepoAction::Package,
-                Some(RepoSubcommand::PackageArea) => RepoAction::PackageArea,
+                Some(RepoSubcommand::Package {
+                    no_error,
+                    on_error,
+                }) => RepoAction::Package {
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
+                Some(RepoSubcommand::PackageArea {
+                    no_error,
+                    on_error,
+                }) => RepoAction::PackageArea {
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
                 Some(RepoSubcommand::DirtyPackages { filter: sub_filter }) => {
                     RepoAction::DirtyPackages {
                         filter: if sub_filter.is_empty() {
@@ -1278,7 +1312,7 @@ mod tests {
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::Package),
+                    repo_subcommand: Some(RepoSubcommand::Package { .. }),
                     ..
                 })
             ));
@@ -1287,7 +1321,7 @@ mod tests {
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::PackageArea),
+                    repo_subcommand: Some(RepoSubcommand::PackageArea { .. }),
                     ..
                 })
             ));

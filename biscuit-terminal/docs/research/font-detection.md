@@ -12,9 +12,9 @@ Detecting a terminal's font, font size, and whether it supports ligatures is a n
 
 Terminal emulators are fundamentally designed to display text using a grid of characters. While they manage fonts internally, they **rarely expose this detailed information** through standardized escape sequences that applications can query. The primary reasons are:
 
-*   **Lack of Standardization**: The ANSI/VT100 standards, which form the basis of most terminal communication, define commands for cursor movement, colors, and screen manipulation, but **not for font introspection**.
-*   **Security and Privacy Concerns**: Allowing arbitrary applications to query detailed font settings could potentially be used for fingerprinting or other undesirable tracking.
-*   **Historical Design**: Terminals were originally hardware devices with fixed fonts. The concept of a user-configurable, queryable font is a relatively modern feature of software emulators.
+* **Lack of Standardization**: The ANSI/VT100 standards, which form the basis of most terminal communication, define commands for cursor movement, colors, and screen manipulation, but **not for font introspection**.
+* **Security and Privacy Concerns**: Allowing arbitrary applications to query detailed font settings could potentially be used for fingerprinting or other undesirable tracking.
+* **Historical Design**: Terminals were originally hardware devices with fixed fonts. The concept of a user-configurable, queryable font is a relatively modern feature of software emulators.
 
 Therefore, we often rely on **indirect methods, heuristics, and terminal-specific extensions** to make educated guesses or query this information.
 
@@ -28,9 +28,9 @@ Detecting the *exact* font family (e.g., "JetBrains Mono", "Fira Code", "SF Mono
 
 The most common approach is **not to detect it directly**, but to:
 
-*   **Assume a Monospace Font**: Terminal applications are designed for monospace fonts. You can safely assume the font is monospace.
-*   **User Configuration**: Ask the user to specify the font in your application's config file. This is the most reliable method.
-*   **Environment Variables**: Check for environment variables that *might* hint at the terminal or font, though this is unreliable. Example: `TERM_PROGRAM` (iTerm2, Terminal.app), `TERMINAL_EMULATOR` (some terminals).
+* **Assume a Monospace Font**: Terminal applications are designed for monospace fonts. You can safely assume the font is monospace.
+* **User Configuration**: Ask the user to specify the font in your application's config file. This is the most reliable method.
+* **Environment Variables**: Check for environment variables that *might* hint at the terminal or font, though this is unreliable. Example: `TERM_PROGRAM` (iTerm2, Terminal.app), `TERMINAL_EMULATOR` (some terminals).
 
 | Method | Description | Reliability |
 | :--- | :--- | :--- |
@@ -43,9 +43,9 @@ The most common approach is **not to detect it directly**, but to:
 
 Some **modern terminal emulators** have added **proprietary escape sequences** to query information about themselves, which might include font details. This is non-standard and won't work everywhere.
 
-*   **kitty**: Uses the `kitty +runpy` command or queries via its socket interface for detailed information, but not via a simple escape sequence.
-*   **iTerm2**: Has a **proprietary escape sequence** `OSC 1337 ; FrontEndName = <value> ST` to set/get front-end properties. However, querying the *font* directly is not a standard feature of this sequence. It's more commonly used for other things like setting the profile or window title.
-*   **WezTerm**: Provides a powerful Lua configuration and API, but querying the font back to the shell isn't a primary use case.
+* **kitty**: Uses the `kitty +runpy` command or queries via its socket interface for detailed information, but not via a simple escape sequence.
+* **iTerm2**: Has a **proprietary escape sequence** `OSC 1337 ; FrontEndName = <value> ST` to set/get front-end properties. However, querying the *font* directly is not a standard feature of this sequence. It's more commonly used for other things like setting the profile or window title.
+* **WezTerm**: Provides a powerful Lua configuration and API, but querying the font back to the shell isn't a primary use case.
 
 > 💡 **Conclusion for Font Family**: **Don't try to detect the font family programmatically.** It's an exercise in frustration. Instead, **assume a monospace font** and provide **user configuration options** for customizing it. This is the standard practice for terminal UI libraries like `tcell`, `termbox`, or libraries in Rust/Go.
 
@@ -65,16 +65,19 @@ printf '\033[14t'
 ```
 
 The terminal will respond with a sequence like:
+
 ```
 \033[4; height; width t
 ```
+
 or
+
 ```
 \033[4; rows; cols; height; width t
 ```
 
-*   `height`, `width`: The window's size in pixels.
-*   `rows`, `cols`: The window's size in characters (cells).
+* `height`, `width`: The window's size in pixels.
+* `rows`, `cols`: The window's size in characters (cells).
 
 **Here's the key insight:** You can calculate the **average cell size** in pixels by dividing the pixel dimensions by the character dimensions:
 
@@ -89,13 +92,15 @@ This `cell_width_pixels` and `cell_height_pixels` give you a very good approxima
 
 A more precise and direct method uses the `CSI Ps q` escape sequence, where `Ps` is a parameter. This is a **device attributes (DA)** query.
 
-*   **Query Primary Device Attributes (DA1)**: `CSI c` or `CSI 0c`. This returns the terminal's ID and features. **Most terminals return a list of supported features in their response.**
-*   **Query Secondary Device Attributes (DA2)**: `CSI > c` or `CSI > 0c`. This returns more detailed information, including the **firmware version** and sometimes the **terminal type**.
+* **Query Primary Device Attributes (DA1)**: `CSI c` or `CSI 0c`. This returns the terminal's ID and features. **Most terminals return a list of supported features in their response.**
+* **Query Secondary Device Attributes (DA2)**: `CSI > c` or `CSI > 0c`. This returns more detailed information, including the **firmware version** and sometimes the **terminal type**.
 
 **Crucially**, some terminals include information about their **cell geometry** in their DA2 response. For example, xterm-based terminals often return a response like:
+
 ```
 \033[> 41 ; 320 ; 0 c
 ```
+
 Here, `320` could be the number of columns or another attribute. **The exact format varies wildly between terminal emulators.** This is not reliable for portable applications.
 
 ### 3.3. Using `tput` or Command-Line Tools
@@ -194,12 +199,13 @@ else:
 ```
 
 > ⚠️ **Important Implementation Notes**:
-> *   The code above is a **simplified illustration**. Reading the response from the terminal correctly and reliably is complex. You must handle:
->     *   Putting the terminal in **raw mode** (`tty.setraw()`) to prevent the shell from processing the response.
->     *   **Reading only the response** and not consuming other input.
->     *   **Timeouts** in case the terminal doesn't respond.
->     *   **Different response formats** from different terminals.
-> *   For production use, rely on **well-tested libraries** like `blessed` (Python), `tcell` (Go), or `termbox` (C/C++) which already implement robust terminal querying, including font size detection.
+>
+> * The code above is a **simplified illustration**. Reading the response from the terminal correctly and reliably is complex. You must handle:
+>     * Putting the terminal in **raw mode** (`tty.setraw()`) to prevent the shell from processing the response.
+>     * **Reading only the response** and not consuming other input.
+>     * **Timeouts** in case the terminal doesn't respond.
+>     * **Different response formats** from different terminals.
+> * For production use, rely on **well-tested libraries** like `blessed` (Python), `tcell` (Go), or `termbox` (C/C++) which already implement robust terminal querying, including font size detection.
 
 ### 3.5. Summary of Font Size Detection
 
@@ -225,9 +231,9 @@ The terminal emulator's **font rendering engine** handles ligatures internally. 
 
 The most practical way to check for ligature support is to **render a known ligature and check if its width is that of a single cell**.
 
-1.  **Send a sequence of characters** that commonly form a ligature, such as `fi`, `fl`, `!=`, `=>`, or `->`.
-2.  **Query the cursor position** before and after sending the sequence using `CSI 6 n` (Device Status Report, DSR).
-3.  If the cursor advanced by **only one cell** for the two-character sequence, it's highly likely that a ligature was rendered.
+1. **Send a sequence of characters** that commonly form a ligature, such as `fi`, `fl`, `!=`, `=>`, or `->`.
+2. **Query the cursor position** before and after sending the sequence using `CSI 6 n` (Device Status Report, DSR).
+3. If the cursor advanced by **only one cell** for the two-character sequence, it's highly likely that a ligature was rendered.
 
 ```bash
 # 1. Save current cursor position
@@ -264,9 +270,9 @@ If you know which terminal emulator is running (e.g., via `TERM_PROGRAM`), you c
 
 Just like with font family, the **most reliable and user-friendly way** to handle ligatures is to **provide a configuration option** for your application.
 
-*   **Default to True**: Assume ligatures are supported, as most modern terminals do.
-*   **Provide an Option**: Allow the user to set `use_ligatures = false` in your config file if they experience issues or prefer them off.
-*   **Document the Requirement**: Clearly state that ligatures require a terminal and font that supports them.
+* **Default to True**: Assume ligatures are supported, as most modern terminals do.
+* **Provide an Option**: Allow the user to set `use_ligatures = false` in your config file if they experience issues or prefer them off.
+* **Document the Requirement**: Clearly state that ligatures require a terminal and font that supports them.
 
 This avoids fragile detection logic and puts the control in the user's hands.
 
@@ -316,11 +322,11 @@ flowchart LR
 
 **Key Principles**:
 
-1.  **Initialize a Library**: Don't start from scratch. Use `blessed` (Python) or `tcell` (Go).
-2.  **Query Grid Size**: Always get the number of columns and lines first (`stdscr.getmaxyx()` in ncurses, or similar).
-3.  **Optionally Query Cell Size**: If your application needs pixel-perfect alignment, use the library's mechanism (or implement `CSI 14 t` if the library doesn't) to get cell width/height in pixels.
-4.  **Make Assumptions**: Assume a monospace font. Assume ligatures are supported.
-5.  **Provide Configuration**: Allow the user to override assumptions (e.g., `disable_ligatures: true`).
+1. **Initialize a Library**: Don't start from scratch. Use `blessed` (Python) or `tcell` (Go).
+2. **Query Grid Size**: Always get the number of columns and lines first (`stdscr.getmaxyx()` in ncurses, or similar).
+3. **Optionally Query Cell Size**: If your application needs pixel-perfect alignment, use the library's mechanism (or implement `CSI 14 t` if the library doesn't) to get cell width/height in pixels.
+4. **Make Assumptions**: Assume a monospace font. Assume ligatures are supported.
+5. **Provide Configuration**: Allow the user to override assumptions (e.g., `disable_ligatures: true`).
 
 ---
 

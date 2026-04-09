@@ -203,10 +203,10 @@ That flexibility is useful, but Claudine does not treat it as a free-form escape
 
 These checks only make sense after the agent has run:
 
-- `file_changed`
-- `file_unchanged`
-- `frontmatter_prop_changed`
-- `frontmatter_prop_unchanged`
+- `file_changed` (only available for _post_ validations)
+- `file_unchanged` (only available for _post_ validations)
+- `frontmatter_prop_changed` (only available for _post_ validations)
+- `frontmatter_prop_unchanged` (only available for _post_ validations)
 - `frontmatter_prop_equals`
 
 These are especially helpful for document-maintenance workflows. If a prompt is supposed to update a body but keep frontmatter stable, Claudine can check both conditions explicitly instead of assuming the provider followed instructions.

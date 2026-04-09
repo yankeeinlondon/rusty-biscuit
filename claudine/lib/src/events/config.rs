@@ -199,7 +199,7 @@ mod tests {
                         "session_start": {
                             "enabled": true,
                             "actions": [
-                                { "type": "sound_effect", "name": "power-up" },
+                                { "type": "sound_effect", "effect": "power-up" },
                                 { "type": "speak", "message": "Session started" }
                             ]
                         },
@@ -212,7 +212,7 @@ mod tests {
                         "tool_error": {
                             "enabled": true,
                             "actions": [
-                                { "type": "sound_effect", "name": "error" }
+                                { "type": "sound_effect", "effect": "error" }
                             ]
                         }
                     }
@@ -232,7 +232,7 @@ mod tests {
                         "session_start": {
                             "enabled": true,
                             "actions": [
-                                { "type": "sound_effect", "name": "power-up" }
+                                { "type": "sound_effect", "effect": "power-up" }
                             ]
                         },
                         "before_tool": {
@@ -297,6 +297,8 @@ mod tests {
                 enabled: true,
                 actions: vec![HookAction::Speak {
                     message: "done".to_string(),
+                    voice: None,
+                    gender: None,
                 }],
                 matcher: None,
             },
@@ -458,16 +460,12 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_invalid_protect_settings() {
+    fn validate_accepts_valid_protect_settings() {
         let config = HookerConfig {
             version: "1.0".to_string(),
             settings: GlobalSettings {
                 protect: Some(ProtectConfig {
-                    completion: crate::services::protect::CompletionPolicy {
-                        enabled: true,
-                        max_retries: 0,
-                        ..crate::services::protect::CompletionPolicy::default()
-                    },
+                    enabled: true,
                     ..ProtectConfig::default()
                 }),
                 ..GlobalSettings::default()
@@ -475,8 +473,8 @@ mod tests {
             providers: HashMap::new(),
         };
 
-        let error = config.validate().unwrap_err().to_string();
-        assert!(error.contains("invalid settings.protect"));
+        // Should validate successfully with default rules
+        config.validate().unwrap();
     }
 
     #[test]
