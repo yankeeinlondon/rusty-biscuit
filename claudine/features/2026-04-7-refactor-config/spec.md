@@ -1,14 +1,8 @@
-# Refactoring Claudine Config, Actions and Protect
+# Refactoring Claudine Config and Actions
 
-This feature combines two significant things:
+This feature simplifies Claudine's configuration model and updates the action system. It does **not** include the Protect refactor, which was completed separately (see [Protect Service](../../docs/topics/protect-service.md)).
 
-1. Refactoring Configuration (e.g., `~/.claudine/config.json`)
-
-    The configuration we use today is a complete mess and causes cognitive overload when in fact what we need is quite simple.
-
-2. Refactoring Protect Feature
-
-    The Protect functionality was recently refactored to take advantage of the underlying `PolicyEngine`. Having the `PolicyEngine` should serve as a much better foundation but currently Protect is way too protective and we need to align it's protection features to the functionality it is meant to serve.
+The configuration we use today is a complete mess and causes cognitive overload when in fact what we need is quite simple.
 
 ## Refactoring Configuration
 
@@ -30,11 +24,11 @@ My current configuration on this host is 557 lines! By the time this feature is 
 - For Logging, a user must only express:
     - Do I want to use it (yes/no)?
 - For Protect:
-    - we will offer a set of protections which can trigger one of three actions: `accept`, `reject`, and `ask`
+    - Protect uses a binary decision model (`Allow` / `Block`) with 12 built-in rule groups (see [Protect Service](../../docs/topics/protect-service.md))
     - we will define a low-impact default configuration 
     - when a user runs `init` they will automatically be signed up for this default set of protections
     - in configuration, the basic setting is a boolean value: `{ protect: true }`
-    - if a user wants to use protect but modify the settings then instead of `true` we will have 
+    - if a user wants to use protect but modify the settings then instead of `true` they provide a `ProtectConfig` object that toggles individual rule groups and adds custom patterns
 
 ### Simplifying Assumptions
 
@@ -42,12 +36,18 @@ My current configuration on this host is 557 lines! By the time this feature is 
     - A user can either turn on or off the `logging` service that is all that's provided via configuration
     - The "actions" configuration does NOT need to add any actions to **log** because we either log all events or none based on the state of the one configuration
 - Protect
-    - When Claudine is initialized we'll assign them the "default" set of protections
-    - User's can turn on or off the service or opt-in/out of a flat list of protections to create a custom config
+    - When Claudine is initialized we'll assign them the "default" set of protections (all 12 built-in rule groups enabled)
+    - Users can turn on or off the service or toggle individual rule groups from the 12 built-in groups to create a custom config
 - User vs Repo Scoping
     - Most configuration is **User** scoped but where both User scoped and Repo scoped are needed it is described explicitly in this spec
     - Repo scoped configuration is NOT stored in the user's config (e.g., ~/.claudine/config.json`) only the repo's configuration (e.g., `{repo-root}/.claudine/config.json`)
-    - If a user runs `claudine setup` in a non git directory then repo scoped UI will not be presented
+    - If a user runs `claudine config` in a non git directory then repo scoped UI will not be presented
+
+### Canonical Events
+
+A key change in this refactor is that actions are bound to **Claudine Events** (canonical, cross-provider) rather than per-provider event bindings. The current config stores actions nested under each provider's event map. The new config uses a flat `actions` map keyed by canonical event names.
+
+Claudine's dispatch pipeline already normalizes provider-native events into canonical events. This change simply moves the user-facing configuration to match that model — users no longer need to think about which provider they're configuring.
 
 ### Config Schema
 
@@ -82,20 +82,37 @@ type ClaudineConfig = {
     /** 
      * whether or not to use the protect service,
      * while also allowing user to override default
-     * protect settings
+     * protect settings.
+     * See: claudine/docs/topics/protect-service.md
      */
     protect: boolean | ProtectConfig;
     /**
-     * Any actions which the user wants to take action
-     * on. These are **Claudine** events not provider
-     * events.
+     * Actions bound to canonical Claudine events (cross-provider).
+     * Each event can have zero or more actions that execute sequentially.
      */
-    actions: Record<ClaudineEvent, ClaudineAction>;
+    actions: Record<ClaudineEvent, ClaudineAction[]>;
 
-    /** the preferred agent to use when a lazy  */
+    /** the preferred agent to use for lazy composition operations */
     preferred_agent: Provider;
+
+    /**
+     * The canonical provider for this scope.
+     * 
+     * In user-scoped config (~/.claudine/config.json): sets the 
+     * default provider used across all repos on this host.
+     * 
+     * In repo-scoped config ({repo}/.claudine/config.json): overrides
+     * the user-scoped canonical provider for this repo only.
+     * The repo-scoped list includes ALL supported providers (not just
+     * those installed on the host).
+     */
+    canonical_provider?: Provider;
 }
 ```
+
+### Migration
+
+This is a clean break from the old configuration format. Existing configs will not be auto-migrated. When Claudine detects an old-format config it will back up the file (e.g., `config.json.bak`) and treat it as if no config exists, triggering the Initialization Process. The new config is simple enough that re-initialization is fast.
 
 ### Lifecycle Processes
 
@@ -121,12 +138,12 @@ After that point a user wanting to _change_ their configuration has two options:
             - then we will offer to install a better one for them
             - if they choose not to install a TTS provider then we set the `tts` setting to `false` to start
     - Messenger
-        - FUTURE: Claudine support this yet but will
-        - For now we can instruct the user on the purpose of Messenger and tell them that by default this will be turned off
+        - We will explain the purpose of Messenger and offer to configure it during initialization
         - Purpose of Messenger:
             - leverages the `messenger` library in this monorepo to send messages to chat applications such as Discord, Slack, WhatsApp, etc.
             - by configuring this a user can be notified of events when they are away from their computer
             - eventually we may even allow them to _respond_ to events remotely
+        - If the user chooses to skip Messenger during init, it can be configured later via `claudine config` (Messenger tab)
     - Preferred Agent
         - When lazy agent operations such as `compose` or `inline-compose` are used _without_ a flag specifying which agent to use, a list of all agent providers will be presented but we want the user's "favorite" agent to be the default choice.
     - Logging and Protect services
@@ -141,7 +158,7 @@ After that point a user wanting to _change_ their configuration has two options:
         - Present with a confirmation prompt `Press enter to complete the Claudine initialization process`
     - When the process concludes we will report:
         - `- the configuration file for <b>Claudine</b> can be found at <a href="~/.claudine/config.json"><blue>~/.claudine/config.json</blue></a>`
-        - `- you can edit this file directly with an editor but we recommend using <green>claudine edit</green> instead`
+        - `- you can edit this file directly with an editor but we recommend using <green>claudine config</green> instead`
 
 
 #### Configuration with the `config` Subcommand
@@ -299,8 +316,10 @@ The User enters the app in **overview mode** and can:
         - will bring up a confirmation dialog to confirm
         - if accepted, will delete all actions for that event
     - pressing `A` will:
-        - bring up a list of events that do not have any actions assigned to
-        - the user will use the up and down arrows to select which event they 
+        - bring up a list of events that do not have any actions assigned to them
+        - the user navigates with up and down arrow keys to highlight an event
+        - pressing ENTER selects that event and opens its Event Modal so the user can add actions to it
+        - pressing ESC dismisses the list without adding an event
     - pressing ENTER or `E` will open the Event Modal for the selected event
         - each event will have 0:M actions configured to be triggered by this event being fired
         - these actions will be listed vertically
@@ -313,6 +332,8 @@ The User enters the app in **overview mode** and can:
 ## Better Action Config
 
 Today we have a functioning schema for configuring Actions (to Events) which is defined in [Configuring Actions](@claudine/docs/topics/configuring-actions.md). This solution isn't terrible but we do want to make a few adjustments.
+
+With this refactor, the `log` action type is removed (the logging _service_ handles all-or-nothing logging). The `fire_and_forget` action type is replaced by `bash`. The `call` and `report` action types are retained as-is from the current implementation.
 
 The built-in actions we provide in Claudine are:
 
@@ -380,6 +401,28 @@ The built-in actions we provide in Claudine are:
             - if `bun` is not found but `node` is, then Javascript files will be executed with `node` (but not Typescript)
     - same rule about allowing JSON5 deserialization applies here too
 
-## Protect Refactor
+5. **report** (existing, unchanged)
 
+    - Print event information to stdout, making it visible in the agent's output stream
+    - Retained as-is from current implementation (see [Configuring Actions](@claudine/docs/topics/configuring-actions.md) for full schema)
+    - same rule about allowing JSON5 deserialization applies here too
 
+6. **call** (existing, unchanged)
+
+    - Execute an external command synchronously and map its output to a `HookResponse`
+    - This is the only action type that can influence agent behavior on blocking events (e.g., `before_tool`, `before_prompt`, `permission_request`)
+    - Retained as-is from current implementation (see [Configuring Actions](@claudine/docs/topics/configuring-actions.md) for full schema)
+    - same rule about allowing JSON5 deserialization applies here too
+
+### Action Type Summary
+
+| Action | Behavior | Status |
+|--------|----------|--------|
+| `sound_effect` | Fire-and-forget audio playback | Updated (`name` → `effect`) |
+| `speak` | Fire-and-forget TTS | Updated (added `voice`, `gender`) |
+| `message` | Fire-and-forget messenger | Unchanged |
+| `bash` | Fire-and-forget shell execution | **New** (replaces `fire_and_forget`) |
+| `report` | Stdout event visibility | Unchanged |
+| `call` | Synchronous with HookResponse | Unchanged |
+
+**Removed**: `log` (replaced by logging service toggle), `fire_and_forget` (replaced by `bash`)

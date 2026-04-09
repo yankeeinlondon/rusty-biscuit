@@ -32,7 +32,7 @@ claudine/lib/src/
 
 Types for hook actions that execute when events fire, and response types for blocking hooks:
 
-- `HookAction` — 7-variant tagged enum: `Speak`, `Log`, `FireAndForget`, `Call`, `Report`, `SoundEffect`, `Message`
+- `HookAction` — 6-variant tagged enum: `SoundEffect`, `Speak`, `Bash`, `Call`, `Report`, `Message`
 - `HookResponse` — Unified response a hook can return to influence agent behavior (decision, reason, updated input, additional context)
 - `HookDecision` — 4-variant enum: `Allow`, `Deny`, `Ask`, `Continue`
 - `LogTarget` — File (with daily rotation) or Server (HTTP POST with timeout)

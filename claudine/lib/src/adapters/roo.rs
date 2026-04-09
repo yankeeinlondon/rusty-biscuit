@@ -2,15 +2,8 @@ use serde_json::Value;
 
 use crate::actions::HookResponse;
 use crate::events::{AgenticEvent, EventMeta, Provider};
-use crate::permissions::query::{CommandQuery, PathQuery};
-use crate::services::ProtectObservation;
-use crate::services::protect::intent::ProtectIntent;
-use crate::services::protect::observe::default_observe_protect;
 
-use super::{
-    AdapterError, ProviderAdapter, extract_tool_input_path, replace_intents_preserving_completion,
-    str_field,
-};
+use super::{AdapterError, ProviderAdapter, str_field};
 
 pub(crate) struct RooAdapter;
 
@@ -55,96 +48,6 @@ impl ProviderAdapter for RooAdapter {
         Ok((event, meta))
     }
 
-    fn observe_protect(
-        &self,
-        event: &AgenticEvent,
-        meta: &EventMeta,
-    ) -> Option<ProtectObservation> {
-        let mut obs = default_observe_protect(event, meta)?;
-
-        if let Some(tool_name) = meta.tool_name.as_deref() {
-            let lowered = tool_name.to_ascii_lowercase();
-            let mut intents = Vec::new();
-            let mut replaced = true;
-
-            match lowered.as_str() {
-                "execute_command" | "shell" => {
-                    let cmd = meta.tool_input.as_ref().and_then(|v| {
-                        v.get("command")
-                            .and_then(Value::as_str)
-                            .map(ToOwned::to_owned)
-                            .or_else(|| v.as_str().map(ToOwned::to_owned))
-                    });
-                    if let Some(cmd) = cmd {
-                        intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(&cmd)));
-                    }
-                }
-                "write_to_file" | "replace_in_file" | "insert_code_block"
-                | "search_and_replace" => {
-                    if let Some(path) = extract_tool_input_path(meta) {
-                        intents.push(ProtectIntent::WritePath(PathQuery::file(&path)));
-                    }
-                }
-                "read_file" | "list_files" | "search_files" | "list_code_definition_names" => {
-                    if let Some(path) = extract_tool_input_path(meta) {
-                        intents.push(ProtectIntent::ReadPath(PathQuery::unknown(&path)));
-                    }
-                }
-                "use_mcp_tool" => {
-                    if let Some(server) = meta
-                        .tool_input
-                        .as_ref()
-                        .and_then(|v| v.get("server_name"))
-                        .and_then(Value::as_str)
-                    {
-                        intents.push(ProtectIntent::UseMcpServer {
-                            server: server.to_owned(),
-                        });
-                        if let Some(tool) = meta
-                            .tool_input
-                            .as_ref()
-                            .and_then(|v| v.get("tool_name"))
-                            .and_then(Value::as_str)
-                        {
-                            intents.push(ProtectIntent::UseMcpTool {
-                                server: server.to_owned(),
-                                tool: tool.to_owned(),
-                            });
-                        }
-                    }
-                }
-                "switch_mode" => {
-                    let target = meta
-                        .tool_input
-                        .as_ref()
-                        .and_then(|v| v.get("mode_slug"))
-                        .and_then(Value::as_str)
-                        .map(ToOwned::to_owned);
-                    intents.push(ProtectIntent::SwitchMode { target });
-                }
-                _ => {
-                    replaced = false;
-                }
-            }
-
-            if replaced {
-                replace_intents_preserving_completion(&mut obs, intents);
-            }
-        }
-
-        // Roo ModeChanged notification → SwitchMode intent.
-        if matches!(event, AgenticEvent::Notification)
-            && let Some(Value::String(mode)) = meta.extra.get("required_action")
-            && mode.contains("mode")
-        {
-            obs.intents.push(ProtectIntent::SwitchMode {
-                target: Some(mode.clone()),
-            });
-        }
-
-        Some(obs)
-    }
-
     fn can_block(&self, _event: &AgenticEvent) -> bool {
         false
     }
@@ -163,17 +66,6 @@ impl ProviderAdapter for RooAdapter {
 
     fn exit_code(&self, _event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
         None
-    }
-
-    fn map_protect_outcome(
-        &self,
-        _event: &AgenticEvent,
-        decision: &crate::services::ProtectDecision,
-    ) -> Result<HookResponse, AdapterError> {
-        Ok(self.map_non_blocking_protect_outcome(
-            decision,
-            "roo: CLI hook channel cannot enforce block directly",
-        ))
     }
 }
 

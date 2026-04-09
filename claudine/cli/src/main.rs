@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
     match command {
         Commands::Handle(args) => commands::handle::run(args).await,
         Commands::Completions(args) => commands::completions::run(args),
-        Commands::Init(args) => commands::init::run(args).await,
+        Commands::Config(args) => commands::config_tui::run(args).await,
         Commands::Sync(args) => commands::sync::run(args).await,
         Commands::Hooks(args) => commands::hooks::run(args, cli.verbose > 0),
         Commands::Actions(args) => commands::actions::run(args, cli.verbose > 0),

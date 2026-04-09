@@ -124,7 +124,7 @@ fn command_name(command: &Commands) -> &'static str {
     match command {
         Commands::Handle(_) => "handle",
         Commands::Completions(_) => "completions",
-        Commands::Init(_) => "init",
+        Commands::Config(_) => "config",
         Commands::Sync(_) => "sync",
         Commands::Hooks(_) => "hooks",
         Commands::Actions(_) => "actions",
