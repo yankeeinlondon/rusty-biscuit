@@ -1048,15 +1048,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let mut sp_artifacts: Vec<super::wrap::system_prompt::SystemPromptArtifact> = Vec::new();
 
     match &effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::None => {}
-        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source } => {
-            if !args.quiet && !args.silent {
-                log::info(&format!(
-                    "system prompt disabled by empty {}",
-                    super::wrap::system_prompt::describe_source(source),
-                ));
-            }
-        }
+        claudine::system_prompt::EffectiveSystemPrompt::None
+        | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
             let application =
                 profile.apply_system_prompt(prepared, !non_interactive_requested, &cwd)?;
@@ -1348,6 +1341,14 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             for message in &deferred_messages {
                 log::message(&crate::output::post_env_message(message, &term));
             }
+
+            crate::output::log_system_prompt(
+                &effective_sp,
+                detail_requested,
+                silent_requested,
+                quiet_requested,
+                &term,
+            );
 
             // Blank line to separate preamble from execution output
             log::message("");

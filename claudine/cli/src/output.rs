@@ -189,6 +189,109 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     }
 }
 
+pub(crate) fn log_system_prompt(
+    effective_sp: &claudine::system_prompt::EffectiveSystemPrompt,
+    verbose: bool,
+    silent: bool,
+    quiet: bool,
+    term: &Terminal,
+) {
+    use biscuit_terminal::utils::color::{Color, Tailwind};
+    use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
+    use darkmatter::markdown::Markdown;
+
+    if silent {
+        return;
+    }
+
+    match effective_sp {
+        claudine::system_prompt::EffectiveSystemPrompt::None => {
+            if verbose && !quiet {
+                let mut block = BlockQuote::new(
+                    RenderableContent::from("the system prompt has not been modified".to_string()),
+                    None::<&str>,
+                )
+                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
+                .with_border("▌ ");
+                block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                log::message(&block.render(term));
+            }
+        }
+        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source: _ } => {
+            if verbose && !quiet {
+                let mut block = BlockQuote::new(
+                    RenderableContent::from("the system prompt has been disabled".to_string()),
+                    None::<&str>,
+                )
+                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
+                .with_border("▌ ");
+                block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                log::message(&block.render(term));
+            }
+        }
+        claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
+            let variant_label = match prepared.mode {
+                claudine::system_prompt::SystemPromptMode::Append => "appended",
+                claudine::system_prompt::SystemPromptMode::Replace => "replaced",
+            };
+            log::message(
+                &Prose::new(format!(
+                    "<bold>System Prompt(<dim><i>{variant_label}</i></dim>)</bold>"
+                ))
+                .render(term),
+            );
+            log::message("");
+
+            let full_text = &prepared.composed_markdown;
+            let line_count = full_text.lines().count();
+            let display_text = if verbose {
+                full_text.clone()
+            } else {
+                full_text.lines().take(25).collect::<Vec<_>>().join("\n")
+            };
+
+            let left_margin: u16 = 2;
+            let right_margin: u16 = 2;
+            let border_width: u16 = 2;
+            let content_width = (term.width() as u16)
+                .saturating_sub(border_width)
+                .saturating_sub(left_margin)
+                .saturating_sub(right_margin);
+            let mut opts = TerminalOptions::default();
+            opts.max_width = Some(content_width);
+            let rendered = match for_terminal(&Markdown::new(display_text.trim()), opts) {
+                Ok(r) => r,
+                Err(_) => display_text.clone(),
+            };
+
+            let mut block = BlockQuote::new(
+                RenderableContent::from(rendered.trim_end().to_string()),
+                None::<&str>,
+            )
+            .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
+            .with_border("▌ ");
+            block.layout_mut().left_margin =
+                biscuit_terminal::utils::layout::Margin::Chars(left_margin as u32);
+            block.layout_mut().right_margin =
+                biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
+            log::message(&block.render(term));
+
+            if !verbose && line_count > 25 {
+                log::message("");
+                log::message(
+                    &Prose::new(
+                        "- <dim>remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</dim>",
+                    )
+                    .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
+                    .render(term),
+                );
+            }
+        }
+    }
+}
+
 /// Print environment variable details (removed, included, added).
 pub(crate) fn log_wrapper_env_details(
     env_plan: &EnvPlan,
