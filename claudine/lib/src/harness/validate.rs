@@ -796,6 +796,7 @@ mod tests {
         PermissionAssessment, ProcessTermination, ValidationEvent, ValidationPhase,
         ValidationRuleId,
     };
+    use std::process::Command;
     use tempfile::TempDir;
 
     struct StaticPermissionProbe {
@@ -845,6 +846,66 @@ mod tests {
             None,
             post_run_markdown,
         )
+    }
+
+    fn approved_shell_command(shell_fragment: &str) -> crate::harness::model::ApprovedRuntimeCommand {
+        crate::harness::model::ApprovedRuntimeCommand {
+            raw: shell_fragment.to_string(),
+            executable: "sh".to_string(),
+            args: vec!["-c".to_string(), shell_fragment.to_string()],
+        }
+    }
+
+    fn init_committed_repo(dir: &TempDir, relative_path: &str, content: &str) -> std::path::PathBuf {
+        assert!(
+            Command::new("git")
+                .arg("init")
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .args(["config", "user.email", "claudine-tests@example.com"])
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .args(["config", "user.name", "Claudine Tests"])
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+
+        let file = dir.path().join(relative_path);
+        if let Some(parent) = file.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&file, content).unwrap();
+
+        assert!(
+            Command::new("git")
+                .args(["add", "."])
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .args(["commit", "-m", "initial"])
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+
+        file
     }
 
     // --- Filesystem checks ---
@@ -1019,6 +1080,118 @@ mod tests {
         let error = result.unwrap_err();
         assert!(error.contains("provider runtime policy denies writes"));
         assert!(error.contains("sandbox is read-only"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shell_command_passes_for_zero_exit_status() {
+        let result = evaluate_single_for_tests(
+            &make_rule(
+                0,
+                ValidationEvent::ShellCommand,
+                ValidationKind::ShellCommand {
+                    command: approved_shell_command("exit 0"),
+                    show_stdout: false,
+                    show_stderr: false,
+                },
+            ),
+            None,
+            None,
+            None,
+        );
+
+        assert!(result.is_ok(), "expected shell command to pass: {result:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shell_command_failure_message_includes_command_and_exit_code() {
+        let result = evaluate_single_for_tests(
+            &make_rule(
+                0,
+                ValidationEvent::ShellCommand,
+                ValidationKind::ShellCommand {
+                    command: approved_shell_command("printf 'boom' >&2; exit 7"),
+                    show_stdout: false,
+                    show_stderr: false,
+                },
+            ),
+            None,
+            None,
+            None,
+        );
+
+        let error = result.unwrap_err();
+        assert!(error.contains("printf 'boom' >&2; exit 7"));
+        assert!(error.contains("code 7"));
+    }
+
+    #[test]
+    fn no_dirty_source_code_passes_for_clean_repo() {
+        let dir = TempDir::new().unwrap();
+        let source_file = init_committed_repo(&dir, "src/main.rs", "fn main() {}\n");
+
+        let result = evaluate_single_for_tests(
+            &make_rule(
+                0,
+                ValidationEvent::NoDirtySourceCode,
+                ValidationKind::NoDirtySourceCode {
+                    root: source_file.parent().unwrap().to_path_buf(),
+                },
+            ),
+            None,
+            None,
+            None,
+        );
+
+        assert!(result.is_ok(), "expected clean repo to pass: {result:?}");
+    }
+
+    #[test]
+    fn no_dirty_source_code_reports_dirty_source_files() {
+        let dir = TempDir::new().unwrap();
+        let source_file = init_committed_repo(&dir, "src/main.rs", "fn main() {}\n");
+        fs::write(&source_file, "fn main() { println!(\"dirty\"); }\n").unwrap();
+
+        let result = evaluate_single_for_tests(
+            &make_rule(
+                0,
+                ValidationEvent::NoDirtySourceCode,
+                ValidationKind::NoDirtySourceCode {
+                    root: source_file.parent().unwrap().to_path_buf(),
+                },
+            ),
+            None,
+            None,
+            None,
+        );
+
+        let error = result.unwrap_err();
+        assert!(error.contains("dirty source code found"));
+        assert!(error.contains("src/main.rs"));
+    }
+
+    #[test]
+    fn has_dirty_source_code_passes_for_modified_source_files() {
+        let dir = TempDir::new().unwrap();
+        let source_file = init_committed_repo(&dir, "src/lib.rs", "pub fn run() {}\n");
+        fs::write(&source_file, "pub fn run() { println!(\"dirty\"); }\n").unwrap();
+
+        let result = evaluate_single_for_tests(
+            &make_rule(
+                0,
+                ValidationEvent::HasDirtySourceCode,
+                ValidationKind::HasDirtySourceCode {
+                    root: source_file.parent().unwrap().to_path_buf(),
+                },
+            ),
+            None,
+            None,
+            None,
+        );
+
+        assert!(
+            result.is_ok(),
+            "expected dirty repo to satisfy has_dirty_source_code: {result:?}"
+        );
     }
 
     #[test]
