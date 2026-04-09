@@ -10,7 +10,7 @@ async = ["tokio"]
 # Audio ducking - attenuate system audio during playback
 audio-ducking = ["tokio"]
 audio-ducking-macos = ["audio-ducking", "coreaudio-sys"]
-audio-ducking-linux = ["audio-ducking", "pulsectl-rs", "alsa"]
+audio-ducking-linux = ["audio-ducking", "pulsectl-rs", "libpulse-binding", "alsa"]
 audio-ducking-windows = ["audio-ducking", "windows"]
 
 # Base native audio — SFX playback with common codecs

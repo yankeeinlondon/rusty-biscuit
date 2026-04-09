@@ -121,6 +121,33 @@ impl LinuxBackend {
         false
     }
 
+    /// Returns true if the given sink input is a valid ducking candidate.
+    ///
+    /// A sink input is a duck candidate when all of the following hold:
+    /// - It is **not** excluded by PID or name (self-exclusion)
+    /// - Its volume is writable (`volume_writable`)
+    /// - It reports having volume (`has_volume`)
+    /// - It is **not** corked (paused / inactive)
+    fn is_target_duck_candidate(&self, app: &ApplicationInfo) -> bool {
+        if self.should_exclude(app) {
+            return false;
+        }
+
+        if !app.volume_writable {
+            return false;
+        }
+
+        if !app.has_volume {
+            return false;
+        }
+
+        if app.corked {
+            return false;
+        }
+
+        true
+    }
+
     /// Converts a volume scalar (0.0-1.0) to a percentage (0-100) for pulsectl.
     fn scalar_to_percent(scalar: f32) -> f64 {
         (scalar * 100.0) as f64
@@ -132,11 +159,6 @@ impl LinuxBackend {
 
     fn units_scalar_to_percent(units: u32, scalar: f32) -> f64 {
         (units as f64 * scalar as f64) / 65536.0 * 100.0
-    }
-
-    /// Converts a pulsectl volume percentage (0-100+) to a scalar (0.0-1.0+).
-    fn percent_to_scalar(percent: f64) -> f32 {
-        (percent / 100.0) as f32
     }
 }
 
@@ -168,11 +190,7 @@ impl DuckingBackend for LinuxBackend {
             cached_volumes.clear();
 
             for app in apps {
-                if self.should_exclude(&app) {
-                    continue;
-                }
-
-                if !app.volume_writable {
+                if !self.is_target_duck_candidate(&app) {
                     continue;
                 }
 
@@ -549,6 +567,56 @@ fn set_alsa_master_volume(volume: f32) -> Result<(), DuckingError> {
 mod tests {
     use super::*;
 
+    fn make_test_app(
+        index: u32,
+        name: Option<&str>,
+        pid: Option<u32>,
+        corked: bool,
+        has_volume: bool,
+        volume_writable: bool,
+    ) -> ApplicationInfo {
+        use libpulse_binding as pulse;
+
+        let mut proplist = pulse::proplist::Proplist::new().unwrap();
+        if let Some(p) = pid {
+            proplist
+                .set_str("application.process.id", &p.to_string())
+                .ok();
+        }
+
+        let mut vol = pulse::volume::ChannelVolumes::default();
+        let _ = vol.set_len(1);
+        vol.set(0, pulse::volume::Volume(65536));
+
+        ApplicationInfo {
+            index,
+            name: name.map(String::from),
+            owner_module: None,
+            client: None,
+            connection_id: 0,
+            sample_spec: pulse::sample::Spec {
+                format: pulse::sample::Format::S16le,
+                channels: 2,
+                rate: 44100,
+            },
+            channel_map: pulse::channelmap::Map::default(),
+            volume: vol,
+            buffer_usec: 0,
+            connection_usec: 0,
+            resample_method: None,
+            driver: None,
+            mute: false,
+            proplist,
+            corked,
+            has_volume,
+            volume_writable,
+            format: pulse::format::Info {
+                encoding: pulse::format::Encoding::PCM,
+                plist: pulse::proplist::Proplist::new().unwrap(),
+            },
+        }
+    }
+
     #[test]
     fn linux_backend_name() {
         let backend = LinuxBackend::new();
@@ -695,6 +763,30 @@ mod tests {
     }
 
     #[test]
+    fn multiple_duck_restore_cycles_no_drift() {
+        let original_units = 49152u32;
+        let cached = CachedPulseVolume::new(original_units);
+        let floor_scalar = 0.2f32;
+
+        for cycle in 0..5 {
+            let duck_target = LinuxBackend::units_scalar_to_percent(cached.avg_units, floor_scalar);
+            let duck_units = (duck_target / 100.0 * 65536.0) as u32;
+            let expected_duck = (original_units as f64 * floor_scalar as f64) as u32;
+            assert_eq!(
+                duck_units, expected_duck,
+                "cycle {cycle}: duck target should be exact"
+            );
+
+            let restore_target = cached.to_percent();
+            let restore_units = (restore_target / 100.0 * 65536.0) as u32;
+            assert_eq!(
+                restore_units, original_units,
+                "cycle {cycle}: restore should snap back to exact cached units"
+            );
+        }
+    }
+
+    #[test]
     fn apply_volume_delta_reports_missing_sink_input() {
         let err = DuckingError::Platform("sink input 999 no longer exists".to_string());
         assert!(
@@ -727,6 +819,158 @@ mod tests {
         let a = CachedPulseVolume::new(32768);
         let b = a.clone();
         assert_eq!(a.avg_units, b.avg_units);
+    }
+
+    #[test]
+    fn should_exclude_by_pid() {
+        let our_pid = std::process::id();
+        let backend = LinuxBackend::new();
+
+        let self_app = make_test_app(1, Some("firefox"), Some(our_pid), false, true, true);
+        assert!(backend.should_exclude(&self_app));
+
+        let other_app = make_test_app(
+            2,
+            Some("firefox"),
+            Some(our_pid.wrapping_add(1)),
+            false,
+            true,
+            true,
+        );
+        assert!(!backend.should_exclude(&other_app));
+    }
+
+    #[test]
+    fn should_exclude_by_name() {
+        let backend = LinuxBackend::new();
+
+        let playa_app = make_test_app(10, Some("playa-sfx"), None, false, true, true);
+        assert!(backend.should_exclude(&playa_app));
+
+        let playa_upper = make_test_app(11, Some("Playa"), None, false, true, true);
+        assert!(backend.should_exclude(&playa_upper));
+
+        let other_app = make_test_app(12, Some("firefox"), None, false, true, true);
+        assert!(!backend.should_exclude(&other_app));
+    }
+
+    #[test]
+    fn should_exclude_by_proplist_name() {
+        use libpulse_binding as pulse;
+
+        let backend = LinuxBackend::new();
+
+        let mut proplist = pulse::proplist::Proplist::new().unwrap();
+        proplist.set_str("application.name", "playa-native").ok();
+
+        let mut vol = pulse::volume::ChannelVolumes::default();
+        let _ = vol.set_len(1);
+        vol.set(0, pulse::volume::Volume(65536));
+
+        let app = ApplicationInfo {
+            index: 20,
+            name: Some("unknown".to_string()),
+            proplist,
+            corked: false,
+            has_volume: true,
+            volume_writable: true,
+            volume: vol,
+            owner_module: None,
+            client: None,
+            connection_id: 0,
+            sample_spec: pulse::sample::Spec {
+                format: pulse::sample::Format::S16le,
+                channels: 2,
+                rate: 44100,
+            },
+            channel_map: pulse::channelmap::Map::default(),
+            buffer_usec: 0,
+            connection_usec: 0,
+            resample_method: None,
+            driver: None,
+            mute: false,
+            format: pulse::format::Info {
+                encoding: pulse::format::Encoding::PCM,
+                plist: pulse::proplist::Proplist::new().unwrap(),
+            },
+        };
+
+        assert!(
+            backend.should_exclude(&app),
+            "should exclude by proplist application.name containing 'playa'"
+        );
+    }
+
+    #[test]
+    fn should_not_exclude_unrelated_app() {
+        let backend = LinuxBackend::new();
+
+        let app = make_test_app(5, Some("spotify"), Some(9999), false, true, true);
+        assert!(!backend.should_exclude(&app));
+    }
+
+    #[test]
+    fn duck_candidate_accepts_active_uncorked_app() {
+        let backend = LinuxBackend::new();
+
+        let app = make_test_app(1, Some("firefox"), Some(9999), false, true, true);
+        assert!(backend.is_target_duck_candidate(&app));
+    }
+
+    #[test]
+    fn duck_candidate_rejects_corked_app() {
+        let backend = LinuxBackend::new();
+
+        let app = make_test_app(1, Some("paused-app"), Some(9999), true, true, true);
+        assert!(
+            !backend.is_target_duck_candidate(&app),
+            "corked (paused) inputs must not be ducked"
+        );
+    }
+
+    #[test]
+    fn duck_candidate_rejects_non_writable_volume() {
+        let backend = LinuxBackend::new();
+
+        let app = make_test_app(1, Some("readonly-app"), Some(9999), false, true, false);
+        assert!(
+            !backend.is_target_duck_candidate(&app),
+            "non-writable volume inputs must not be ducked"
+        );
+    }
+
+    #[test]
+    fn duck_candidate_rejects_no_volume() {
+        let backend = LinuxBackend::new();
+
+        let app = make_test_app(1, Some("novol-app"), Some(9999), false, false, true);
+        assert!(
+            !backend.is_target_duck_candidate(&app),
+            "inputs without volume must not be ducked"
+        );
+    }
+
+    #[test]
+    fn duck_candidate_rejects_self() {
+        let our_pid = std::process::id();
+        let backend = LinuxBackend::new();
+
+        let self_app = make_test_app(1, Some("playa"), Some(our_pid), false, true, true);
+        assert!(
+            !backend.is_target_duck_candidate(&self_app),
+            "playa's own sink input must not be ducked"
+        );
+    }
+
+    #[test]
+    fn duck_candidate_rejects_corked_even_with_volume() {
+        let backend = LinuxBackend::new();
+
+        let app = make_test_app(1, Some("paused-with-vol"), Some(9999), true, true, true);
+        assert!(
+            !backend.is_target_duck_candidate(&app),
+            "corked input must be rejected even with writable volume"
+        );
     }
 
     // Integration tests that actually manipulate volume are marked #[ignore]

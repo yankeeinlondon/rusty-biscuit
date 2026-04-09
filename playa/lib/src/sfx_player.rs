@@ -189,9 +189,14 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
     // Linux: play through PulseAudio with media.role=event.
     #[cfg(all(target_os = "linux", feature = "sfx-native-linux"))]
     {
+        use linux::PulsePlaybackOutcome;
+
         if options.speed.is_none() {
-            if linux::play_sfx_as_event(bytes, options).is_ok() {
-                return Ok(());
+            match linux::play_sfx_as_event(bytes, options) {
+                PulsePlaybackOutcome::PlaybackCompleted | PulsePlaybackOutcome::PlaybackStarted => {
+                    return Ok(());
+                }
+                PulsePlaybackOutcome::SetupFailed(_) => {}
             }
         }
     }
@@ -814,6 +819,23 @@ mod linux {
     use super::{NATIVE_DEVICE_TIMEOUT, PLAYBACK_TIMEOUT};
     use crate::types::PlaybackOptions;
 
+    /// Outcome of a PulseAudio playback attempt.
+    ///
+    /// Distinguishes setup failures (safe to fall back to another player) from
+    /// post-write states (audio was already sent, so another player must NOT
+    /// attempt to play the same clip again).
+    pub(crate) enum PulsePlaybackOutcome {
+        /// PulseAudio setup (context/stream connection) failed before audio was
+        /// written to the server. Safe to fall back to another playback path.
+        SetupFailed(Box<dyn std::error::Error>),
+        /// Audio was written to PulseAudio and the drain completed. Fully done.
+        PlaybackCompleted,
+        /// Audio was written to PulseAudio but the drain timed out or failed.
+        /// The server already received the bytes, so do NOT attempt another
+        /// playback path or the same clip will play twice.
+        PlaybackStarted,
+    }
+
     fn wait_for_pulse_condition<F>(
         mainloop: &mut Mainloop,
         deadline: Instant,
@@ -859,13 +881,42 @@ mod linux {
     ///
     /// All wait loops use deadline-aware nonblocking polling. Context and stream
     /// readiness use `NATIVE_DEVICE_TIMEOUT`; drain uses a clip-derived timeout
-    /// bounded by `PLAYBACK_TIMEOUT`. On timeout the function returns an error
-    /// so the caller can fall back to host player playback.
-    pub fn play_sfx_as_event(
-        bytes: &[u8],
-        options: &PlaybackOptions,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let decoder = rodio::Decoder::new(Cursor::new(bytes.to_vec()))?;
+    /// bounded by `PLAYBACK_TIMEOUT`.
+    ///
+    /// ## Returns
+    ///
+    /// Returns a `PulsePlaybackOutcome` so the caller can decide whether
+    /// falling back to another player is safe. After `PlaybackStarted` or
+    /// `PlaybackCompleted`, the caller must NOT attempt a second playback.
+    pub fn play_sfx_as_event(bytes: &[u8], options: &PlaybackOptions) -> PulsePlaybackOutcome {
+        match play_sfx_as_event_inner(bytes, options) {
+            PlayResult::SetupFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+            PlayResult::WriteFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+            PlayResult::PlaybackCompleted => PulsePlaybackOutcome::PlaybackCompleted,
+            PlayResult::DrainFailed => {
+                eprintln!(
+                    "playa: PulseAudio drain timed out — audio was already written, skipping fallback"
+                );
+                PulsePlaybackOutcome::PlaybackStarted
+            }
+        }
+    }
+
+    /// Internal result that separates every failure phase so `play_sfx_as_event`
+    /// can map post-write drain failures to `PlaybackStarted` instead of
+    /// `SetupFailed`.
+    enum PlayResult {
+        SetupFailed(Box<dyn std::error::Error>),
+        WriteFailed(Box<dyn std::error::Error>),
+        PlaybackCompleted,
+        DrainFailed,
+    }
+
+    fn play_sfx_as_event_inner(bytes: &[u8], options: &PlaybackOptions) -> PlayResult {
+        let decoder = match rodio::Decoder::new(Cursor::new(bytes.to_vec())) {
+            Ok(d) => d,
+            Err(e) => return PlayResult::SetupFailed(e.into()),
+        };
         let channels = decoder.channels();
         let sample_rate = decoder.sample_rate();
 
@@ -893,19 +944,26 @@ mod linux {
         };
 
         if !spec.is_valid() {
-            return Err("invalid PulseAudio sample spec".into());
+            return PlayResult::SetupFailed("invalid PulseAudio sample spec".into());
         }
 
-        let mut mainloop = Mainloop::new().ok_or("failed to create PulseAudio mainloop")?;
+        let mut mainloop = match Mainloop::new() {
+            Some(ml) => ml,
+            None => return PlayResult::SetupFailed("failed to create PulseAudio mainloop".into()),
+        };
 
-        let mut context =
-            Context::new(&mainloop, "playa").ok_or("failed to create PulseAudio context")?;
+        let mut context = match Context::new(&mainloop, "playa") {
+            Some(ctx) => ctx,
+            None => return PlayResult::SetupFailed("failed to create PulseAudio context".into()),
+        };
 
-        context.connect(None, pulse::context::FlagSet::NOFLAGS, None)?;
+        if let Err(e) = context.connect(None, pulse::context::FlagSet::NOFLAGS, None) {
+            return PlayResult::SetupFailed(e.into());
+        }
 
         let context_deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
 
-        wait_for_pulse_condition(
+        if let Err(e) = wait_for_pulse_condition(
             &mut mainloop,
             context_deadline,
             "context connection",
@@ -919,35 +977,60 @@ mod linux {
                 }
                 Ok(false)
             },
-        )?;
+        ) {
+            return PlayResult::SetupFailed(e);
+        }
 
-        let mut proplist = Proplist::new().ok_or("failed to create PulseAudio proplist")?;
-        proplist
+        let mut proplist = match Proplist::new() {
+            Some(pl) => pl,
+            None => return PlayResult::SetupFailed("failed to create PulseAudio proplist".into()),
+        };
+        if proplist
             .set_str(pulse::proplist::properties::MEDIA_ROLE, "event")
-            .map_err(|()| "failed to set media.role property")?;
+            .is_err()
+        {
+            return PlayResult::SetupFailed("failed to set media.role property".into());
+        }
 
-        let mut stream =
-            Stream::new_with_proplist(&mut context, "Sound Effect", &spec, None, &mut proplist)
-                .ok_or("failed to create PulseAudio stream")?;
+        let mut stream = match Stream::new_with_proplist(
+            &mut context,
+            "Sound Effect",
+            &spec,
+            None,
+            &mut proplist,
+        ) {
+            Some(s) => s,
+            None => return PlayResult::SetupFailed("failed to create PulseAudio stream".into()),
+        };
 
-        stream.connect_playback(None, None, pulse::stream::FlagSet::NOFLAGS, None, None)?;
+        if let Err(e) =
+            stream.connect_playback(None, None, pulse::stream::FlagSet::NOFLAGS, None, None)
+        {
+            return PlayResult::SetupFailed(e.into());
+        }
 
         let stream_deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
 
-        wait_for_pulse_condition(&mut mainloop, stream_deadline, "stream connection", || {
-            match stream.get_state() {
-                pulse::stream::State::Ready => return Ok(true),
-                pulse::stream::State::Failed | pulse::stream::State::Terminated => {
-                    return Err("PulseAudio stream connection failed".into());
+        if let Err(e) =
+            wait_for_pulse_condition(&mut mainloop, stream_deadline, "stream connection", || {
+                match stream.get_state() {
+                    pulse::stream::State::Ready => return Ok(true),
+                    pulse::stream::State::Failed | pulse::stream::State::Terminated => {
+                        return Err("PulseAudio stream connection failed".into());
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
-            Ok(false)
-        })?;
+                Ok(false)
+            })
+        {
+            return PlayResult::SetupFailed(e);
+        }
 
         let byte_data: Vec<u8> = samples.iter().flat_map(|s: &f32| s.to_le_bytes()).collect();
 
-        stream.write(&byte_data, None, 0, SeekMode::Relative)?;
+        if let Err(e) = stream.write(&byte_data, None, 0, SeekMode::Relative) {
+            return PlayResult::WriteFailed(e.into());
+        }
 
         let clip_duration = Duration::from_secs_f64(
             samples.len() as f64 / (channels.get() as f64 * effective_rate as f64),
@@ -959,7 +1042,7 @@ mod linux {
 
         let op = stream.drain(None);
 
-        wait_for_pulse_condition(&mut mainloop, drain_deadline, "drain", || {
+        if wait_for_pulse_condition(&mut mainloop, drain_deadline, "drain", || {
             match op.get_state() {
                 pulse::operation::State::Done | pulse::operation::State::Cancelled => {
                     return Ok(true);
@@ -967,12 +1050,18 @@ mod linux {
                 pulse::operation::State::Running => {}
             }
             Ok(false)
-        })?;
+        })
+        .is_err()
+        {
+            stream.disconnect().ok();
+            context.disconnect();
+            return PlayResult::DrainFailed;
+        }
 
         stream.disconnect().ok();
         context.disconnect();
 
-        Ok(())
+        PlayResult::PlaybackCompleted
     }
 
     #[cfg(test)]
@@ -1014,6 +1103,75 @@ mod linux {
             let mut proplist = Proplist::new().expect("should create proplist");
             let result = proplist.set_str(pulse::proplist::properties::MEDIA_ROLE, "event");
             assert!(result.is_ok());
+        }
+
+        #[test]
+        fn playback_started_is_terminal() {
+            let outcome = PulsePlaybackOutcome::PlaybackStarted;
+            let is_terminal = matches!(
+                outcome,
+                PulsePlaybackOutcome::PlaybackStarted | PulsePlaybackOutcome::PlaybackCompleted
+            );
+            assert!(
+                is_terminal,
+                "PlaybackStarted must be treated as terminal (no fallback)"
+            );
+        }
+
+        #[test]
+        fn playback_completed_is_terminal() {
+            let outcome = PulsePlaybackOutcome::PlaybackCompleted;
+            let is_terminal = matches!(
+                outcome,
+                PulsePlaybackOutcome::PlaybackStarted | PulsePlaybackOutcome::PlaybackCompleted
+            );
+            assert!(
+                is_terminal,
+                "PlaybackCompleted must be treated as terminal (no fallback)"
+            );
+        }
+
+        #[test]
+        fn setup_failed_is_not_terminal() {
+            let outcome = PulsePlaybackOutcome::SetupFailed("test".into());
+            let is_terminal = matches!(
+                outcome,
+                PulsePlaybackOutcome::PlaybackStarted | PulsePlaybackOutcome::PlaybackCompleted
+            );
+            assert!(
+                !is_terminal,
+                "SetupFailed must NOT be treated as terminal (fallback allowed)"
+            );
+        }
+
+        #[test]
+        fn play_result_drain_failed_maps_to_playback_started() {
+            let inner = PlayResult::DrainFailed;
+            let outcome = match inner {
+                PlayResult::SetupFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+                PlayResult::WriteFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+                PlayResult::PlaybackCompleted => PulsePlaybackOutcome::PlaybackCompleted,
+                PlayResult::DrainFailed => PulsePlaybackOutcome::PlaybackStarted,
+            };
+            assert!(
+                matches!(outcome, PulsePlaybackOutcome::PlaybackStarted),
+                "DrainFailed must map to PlaybackStarted"
+            );
+        }
+
+        #[test]
+        fn play_result_write_failed_maps_to_setup_failed() {
+            let inner = PlayResult::WriteFailed("write err".into());
+            let outcome = match inner {
+                PlayResult::SetupFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+                PlayResult::WriteFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+                PlayResult::PlaybackCompleted => PulsePlaybackOutcome::PlaybackCompleted,
+                PlayResult::DrainFailed => PulsePlaybackOutcome::PlaybackStarted,
+            };
+            assert!(
+                matches!(outcome, PulsePlaybackOutcome::SetupFailed(_)),
+                "WriteFailed must map to SetupFailed"
+            );
         }
 
         #[test]
