@@ -93,8 +93,16 @@ pub fn detect_locale() -> LocaleInfo {
         .or_else(|| lc_messages.as_deref().filter(|s| is_extractable_locale(s)))
         .or_else(|| lang.as_deref().filter(|s| is_extractable_locale(s)));
 
-    let preferred_language = effective_locale.and_then(extract_language_code);
-    let encoding = effective_locale.and_then(extract_encoding);
+    let (preferred_language, encoding) = if let Some(locale) = effective_locale {
+        (extract_language_code(locale), extract_encoding(locale))
+    } else if let Some(windows_locale) = detect_windows_locale() {
+        (
+            extract_language_code(&windows_locale),
+            extract_encoding(&windows_locale).or_else(|| Some("UTF-8".to_string())),
+        )
+    } else {
+        (None, None)
+    };
 
     LocaleInfo {
         lang,
@@ -105,6 +113,27 @@ pub fn detect_locale() -> LocaleInfo {
         preferred_language,
         encoding,
     }
+}
+
+#[cfg(target_os = "windows")]
+fn detect_windows_locale() -> Option<String> {
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", "(Get-Culture).Name"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.replace('-', "_"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn detect_windows_locale() -> Option<String> {
+    None
 }
 
 /// Checks if a locale string can yield meaningful language/encoding info.
@@ -198,7 +227,7 @@ pub fn extract_encoding(locale: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
+    use crate::test_helpers::{ScopedEnv, ENV_MUTEX};
 
     // ========== Locale Tests ==========
 
