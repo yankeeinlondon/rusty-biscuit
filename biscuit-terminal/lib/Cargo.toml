@@ -53,8 +53,14 @@ libc = "0.2"
 
 [dev-dependencies]
 assert_cmd = "2"
+criterion = { version = "0.5", features = ["html_reports"] }
 expectrl = "0.8.0"
+insta = "1.46"
 predicates = "3"
 proptest = "1.5"
 serial_test = "3"
 tempfile = "3"
+
+[[bench]]
+name = "rendering"
+harness = false

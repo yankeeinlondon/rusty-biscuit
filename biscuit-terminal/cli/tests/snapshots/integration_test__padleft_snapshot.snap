@@ -1,0 +1,6 @@
+---
+source: biscuit-terminal/cli/tests/integration_test.rs
+assertion_line: 1443
+expression: stdout
+---
+                         hello

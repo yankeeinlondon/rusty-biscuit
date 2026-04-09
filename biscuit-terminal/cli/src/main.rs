@@ -546,10 +546,15 @@ fn main() -> color_eyre::Result<()> {
         return Ok(());
     }
 
+    // --silent implies --quiet
+    let quiet = args.quiet || args.silent;
+
     let metadata = collect_metadata();
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&metadata)?);
-    } else {
+        if !args.silent {
+            println!("{}", serde_json::to_string_pretty(&metadata)?);
+        }
+    } else if !quiet {
         print_pretty(&metadata, args.verbose);
     }
 
