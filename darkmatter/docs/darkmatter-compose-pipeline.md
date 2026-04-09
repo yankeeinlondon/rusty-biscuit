@@ -39,7 +39,7 @@ into the most valid form we can deterministically reach.
 #### Pre Ops
 
 - [Frontmatter Interpolation](./inline/fm-interpolation.md) - resolves `{{ variable }}` expressions inside frontmatter values using non-templated (seed) values, `ctx.*`, and `env.*` as inputs. Runs before the effective state is built so downstream stages see resolved values.
-- [Frontmatter Shell Expansion](./inline/fm-shell-expansion.md) - executes `$(cmd)` expressions in top-level frontmatter string values, replacing them with trimmed stdout. Runs after interpolation and before the effective state is built, so later stages see the resolved values. Shares approval flow with body `::shell` directives.
+- [Frontmatter Shell Expansion](./inline/fm-shell-expansion.md) - executes `$(cmd)` expressions in top-level frontmatter string values, replacing them with trimmed stdout. Runs after interpolation and before the effective state is built, so later stages see the resolved values. Shares approval flow with body `::shell` directives, validates malformed expressions as hard errors, and executes independent top-level commands concurrently.
 - [Text Replacement](./inline/text-replacement.md) - when `replace` property in frontmatter is a key/value dictionary we will replace all instances of the _keys_ with the _values_ in the body of the document
 - [Page Blocks](./inline/page-blocks.md) - allow for blocks in the page to be defined, often with _conditional_ logic to determine whether the block should be rendered or removed
 - [Interpolation](./inline/interpolation.md) - looks for handlebars template markers in the page's body and replaces the template markers with data from frontmatter, ENV variables, or [context variables](./topics/context-variables.md).

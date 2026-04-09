@@ -36,6 +36,8 @@ cwd: "$(pwd)::timeout:1"
 - The **entire** frontmatter value must be the shell expression -- embedded expressions like `"prefix $(cmd) suffix"` are not supported.
 - Only top-level string-valued frontmatter properties are scanned. Nested objects and array elements are ignored.
 - The optional `::timeout:<N>` suffix overrides the global shell timeout for that specific command. `N` must be a positive integer of seconds.
+- Once a value matches the `$(` shape, malformed syntax is a hard compose error. Invalid timeout suffixes, tokenizer failures, and rejected executable interpolation are not silently ignored.
+- Closing `)` characters inside quoted arguments are supported, so values like `$(printf ')')` parse correctly.
 
 ## Pipeline Placement
 
@@ -83,19 +85,28 @@ dir: "$(dirname {{file}})"   # only argument is interpolated
 
 Frontmatter shell commands participate in the same approval flow as body `::shell` directives. They are included in preflight discovery and subject to whitelist, blacklist, and interactive approval.
 
+Discovery and runtime execution use the same pre-compose frontmatter preparation path:
+
+- external state is merged first
+- `--set` overrides are applied next
+- frontmatter interpolation runs before scanning/execution
+
+This keeps approval preflight aligned with the commands that real compose will execute.
+
 ## Error Handling
 
-Frontmatter shell expansion has **no error-recovery options**. Any non-zero exit code, missing executable, blacklisted command, or denied approval results in an immediate compose error. This is intentionally simpler than body `::shell` directives.
+Frontmatter shell expansion has **no error-recovery options**. Any non-zero exit code, missing executable, blacklisted command, denied approval, or malformed shell expression results in an immediate compose error. This is intentionally simpler than body `::shell` directives.
 
 Timeout failures follow the timeout behavior configured via `--allow-shell-timeout` (CLI) or `ComposeOptions::with_allow_shell_timeout()` (library).
 
 ## Output Normalization
 
-The stdout from a frontmatter shell command is trimmed of all surrounding whitespace (`.trim()`) before being stored as the frontmatter value.
+- Only `stdout` is written back into frontmatter. Successful `stderr` output is ignored for value storage.
+- The `stdout` from a frontmatter shell command is trimmed of all surrounding whitespace (`.trim()`) before being stored as the frontmatter value.
 
 ## Concurrency
 
-When multiple top-level frontmatter properties contain shell expressions, they execute concurrently. Seed-only interpolation semantics guarantee no cross-dependencies.
+When multiple top-level frontmatter properties contain shell expressions, they execute concurrently after approvals and policy checks have been resolved. Results are written back in deterministic top-level frontmatter iteration order.
 
 ## Timeouts
 

@@ -18,13 +18,14 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
 - **Composition**
     - **Frontmatter support**: YAML parsing with typed access, merge strategies, and insertion-order preservation
     - **Interpolation:** interpolate frontmatter, ENV vars, and context variables into Markdown body
+    - **Frontmatter Shell Expansion:** execute top-level `$(...)` frontmatter values before effective-state construction, storing trimmed `stdout` back into frontmatter
     - **Normalization:** fix heading hierarchy violations, re-level documents
     - **TOC Linking:** hyperlink to each of the headings of another page as a strategy for progressive disclosure
     - **Text Replacement:** Dictionary replacement of terms on a page
     - **Conditional Block Rendering:** Conditionally render parts of a Markdown document based on frontmatter, ENV, and context
     - **Transclusion:** 
         - **Local Documents:** compose your Markdown by transcluding local Markdown files into the structure of a base document in real time (automatic heading rationalization built in)
-        - **Shell Expansion:** provide dynamic content from shell commands with a built-in security solution
+        - **Shell Expansion:** provide dynamic content from body `::shell` commands with a built-in security solution
         - **Document Summarization (future):** summarize a Markdown, PDF, or word document into a section of a Markdown document
         - **Website Summarization (future):** summarize the contents of a particular website and inject into a section of a Markdown document
         - **Website PPT (future):** identify the people, places, and things on a particular website
@@ -59,7 +60,7 @@ Composition is probably the most powerful feature that Darkmatter has to offer. 
 The types of composition each Darkmatter document employs varies considerably but in _all cases_ we run the Markdown through the same well defined Markdown pipeline which will:
 
 - **Inline Pre** prepares the document by mutating the body based on "state" or some external and measurable property
-    - _this includes operations like text replacement, page blocks, interpolation, and shell expansion_
+    - _this includes frontmatter interpolation, frontmatter shell expansion, text replacement, page blocks, interpolation, and body shell expansion_
 - Perform **Transclusions**
     - _there are many types of transclusions a document can employ with directives_
     - _however, the key consistency of transclusion operations regardless of the variant employed, is that transclusion is a **recursive** action!_
@@ -135,6 +136,7 @@ This results in a document which:
 - The [composition](../docs/topics/what-is-composition.md) lifecycle goes through three major **stages**: inline mutation, transclusion, and finally rendering. 
 - Each of these stages has numerous operations which are executed
 - These stages, the operations within these stages, along with concerns like ordering, concurrency and more are covered in detail in the [Darkmatter Composition Pipeline](../docs/darkmatter-compose-pipeline.md) document.
+- Shell expansion details are split across [body shell expansion](../docs/inline/shell-expansion.md) and [frontmatter shell expansion](../docs/inline/fm-shell-expansion.md).
 
 
 ### Rendering Details
