@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use biscuit_speaks::{SpeedLevel, TtsConfig, TtsFailoverStrategy};
+use biscuit_speaks::{TtsConfig, TtsFailoverStrategy};
+#[cfg(test)]
+use biscuit_speaks::SpeedLevel;
 use regex::Regex;
 use serde_json::{Map, Value};
 use tokio::process::Command;
@@ -13,14 +15,13 @@ use crate::actions::{
 };
 use crate::config::claudine_config::{ClaudineConfig, Gender, TtsValue, VoiceSelection};
 use crate::error::Result;
-use crate::events::{AgenticEvent, EventMeta, GlobalSettings};
+use crate::events::{AgenticEvent, EventMeta};
 use crate::messaging::RuntimeMessagingSettings;
 use crate::services::protect::decision::ProtectDecision;
 
 /// Configuration sources supported by the action runner.
 #[derive(Clone, Copy)]
 pub(crate) enum DispatchConfig<'a> {
-    Legacy(&'a GlobalSettings),
     Canonical(&'a ClaudineConfig),
 }
 
@@ -33,7 +34,6 @@ impl DispatchConfig<'_> {
         meta: &EventMeta,
     ) {
         match self {
-            Self::Legacy(settings) => execute_speak(message_template, meta, settings),
             Self::Canonical(config) => execute_speak_from_claudine(
                 message_template,
                 voice_override,
@@ -333,25 +333,7 @@ fn attach_protect_context(
 }
 
 /// Speak a message via biscuit-speaks TTS (fire-and-forget).
-fn execute_speak(message_template: &str, meta: &EventMeta, settings: &GlobalSettings) {
-    let text = interpolate(message_template, meta);
-    if text.is_empty() {
-        return;
-    }
-
-    let config = tts_config_from_settings(settings.tts.as_ref());
-
-    tokio::spawn(async move {
-        if let Err(error) = biscuit_speaks::Speak::new(text)
-            .with_config(config)
-            .play()
-            .await
-        {
-            warn!(%error, "TTS playback failed");
-        }
-    });
-}
-
+#[cfg(test)]
 fn tts_config_from_settings(settings: Option<&crate::events::TtsSettings>) -> TtsConfig {
     let mut config = TtsConfig::new();
     let Some(settings) = settings else {
@@ -975,7 +957,7 @@ mod tests {
             &actions,
             None,
             &meta(),
-            DispatchConfig::Legacy(&GlobalSettings::default()),
+            DispatchConfig::Canonical(&ClaudineConfig::default()),
             &messaging,
             false,
             None,
@@ -1002,7 +984,7 @@ mod tests {
             &actions,
             None,
             &meta(),
-            DispatchConfig::Legacy(&GlobalSettings::default()),
+            DispatchConfig::Canonical(&ClaudineConfig::default()),
             &messaging,
             true,
             None,
