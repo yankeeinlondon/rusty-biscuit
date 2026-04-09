@@ -533,6 +533,16 @@ pub(crate) fn get_git_config(repo: &Repository) -> GitConfig {
         }
     }
 
+    // Git for Windows installs a system-level gitconfig that libgit2 may not
+    // find automatically via its ProgramData search.
+    #[cfg(target_os = "windows")]
+    {
+        let git_for_windows = std::path::Path::new(r"C:\Program Files\Git\etc\gitconfig");
+        if git_for_windows.exists() {
+            let _ = config.add_file(git_for_windows, git2::ConfigLevel::ProgramData, false);
+        }
+    }
+
     GitConfig {
         user_name: config.get_string("user.name").ok(),
         user_email: config.get_string("user.email").ok(),
