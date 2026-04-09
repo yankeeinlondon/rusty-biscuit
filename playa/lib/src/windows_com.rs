@@ -3,12 +3,81 @@
 //! Both the SFX player and the ducking backend need COM initialized on their
 //! thread. This module centralizes the lifecycle so we correctly handle
 //! `S_OK`, `S_FALSE`, and `RPC_E_CHANGED_MODE` without leaking init counts.
+//!
+//! This module also provides a safe helper for converting COM-allocated
+//! `PWSTR` strings to Rust `String` values with automatic memory cleanup.
 
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
 use windows::core::HRESULT;
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
 /// HRESULT for "COM already initialized with a different threading model".
 const RPC_E_CHANGED_MODE: i32 = -2147417850_i32; // 0x80010106
+
+/// Error from COM initialization.
+///
+/// Preserves the original HRESULT for diagnostics and logging.
+#[derive(Debug)]
+pub struct ComInitError {
+    hr: i32,
+}
+
+impl std::fmt::Display for ComInitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "COM initialization failed: HRESULT {:#010X}", self.hr)
+    }
+}
+
+impl std::error::Error for ComInitError {}
+
+impl ComInitError {
+    /// Returns the raw HRESULT value.
+    pub fn hresult(&self) -> i32 {
+        self.hr
+    }
+}
+
+/// Classification of COM initialization outcomes.
+///
+/// Encodes the three success states of `CoInitializeEx` and makes the
+/// uninit policy testable without calling the actual COM API.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum ComInitKind {
+    /// First initialization on this thread (S_OK). Uninitialize on drop.
+    FirstInit,
+    /// Already initialized with same model (S_FALSE). Uninitialize on drop.
+    AlreadySameModel,
+    /// Already initialized with different model (RPC_E_CHANGED_MODE).
+    /// Do not uninitialize on drop — the original owner is responsible.
+    DifferentModel,
+}
+
+impl ComInitKind {
+    /// Classifies a raw HRESULT from `CoInitializeEx`.
+    ///
+    /// ## Returns
+    ///
+    /// - `Ok(FirstInit)` for `S_OK` (0x00000000)
+    /// - `Ok(AlreadySameModel)` for `S_FALSE` (0x00000001)
+    /// - `Ok(DifferentModel)` for `RPC_E_CHANGED_MODE` (0x80010106)
+    /// - `Err(ComInitError)` for any other HRESULT
+    pub(crate) fn from_hresult(hr: i32) -> Result<Self, ComInitError> {
+        match hr {
+            0 => Ok(Self::FirstInit),
+            1 => Ok(Self::AlreadySameModel),
+            RPC_E_CHANGED_MODE => Ok(Self::DifferentModel),
+            other => Err(ComInitError { hr: other }),
+        }
+    }
+
+    /// Whether `CoUninitialize` should be called on cleanup.
+    ///
+    /// Only `FirstInit` and `AlreadySameModel` should uninitialize,
+    /// because those are the cases where this call incremented the
+    /// COM reference count.
+    pub(crate) fn should_uninit(&self) -> bool {
+        matches!(self, Self::FirstInit | Self::AlreadySameModel)
+    }
+}
 
 /// RAII guard for COM initialization on the current thread.
 ///
@@ -18,9 +87,14 @@ const RPC_E_CHANGED_MODE: i32 = -2147417850_i32; // 0x80010106
 ///
 /// If COM was already initialized with a different threading model
 /// (`RPC_E_CHANGED_MODE`), the guard succeeds but skips uninit on drop.
+///
+/// ## Thread Safety
+///
+/// `ComGuard` and any COM interfaces acquired during its lifetime must
+/// not be held across `.await` points in async code. Use `spawn_blocking`
+/// to keep the entire COM lifecycle on one OS thread.
 #[derive(Debug)]
 pub struct ComGuard {
-    /// Whether we should call `CoUninitialize` on drop.
     should_uninit: bool,
 }
 
@@ -29,28 +103,15 @@ impl ComGuard {
     ///
     /// ## Errors
     ///
-    /// Returns the failing `HRESULT` as a string if COM initialization
-    /// fails for a reason other than `RPC_E_CHANGED_MODE`.
-    pub fn new() -> Result<Self, String> {
+    /// Returns [`ComInitError`] if COM initialization fails for a reason
+    /// other than `RPC_E_CHANGED_MODE`.
+    pub fn new() -> Result<Self, ComInitError> {
         let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-
-        match hr {
-            Ok(()) => {
-                // S_OK: first init on this thread — uninit on drop
-                Ok(Self { should_uninit: true })
-            }
-            Err(e) if e.code() == HRESULT(1) => {
-                // S_FALSE: already initialized with same model — uninit on drop
-                Ok(Self { should_uninit: true })
-            }
-            Err(e) if e.code() == HRESULT(RPC_E_CHANGED_MODE) => {
-                // Different threading model, but COM is usable — don't uninit
-                Ok(Self {
-                    should_uninit: false,
-                })
-            }
-            Err(e) => Err(format!("COM initialization failed: {}", e)),
-        }
+        let raw_hr = hr.map_err(|e| e.code()).unwrap_or(HRESULT(0));
+        let kind = ComInitKind::from_hresult(raw_hr.0)?;
+        Ok(Self {
+            should_uninit: kind.should_uninit(),
+        })
     }
 }
 
@@ -61,5 +122,105 @@ impl Drop for ComGuard {
                 CoUninitialize();
             }
         }
+    }
+}
+
+/// Converts a COM-allocated `PWSTR` to a `String` and frees the allocation.
+///
+/// Always frees the COM memory, even if conversion fails. Returns `None` if
+/// the pointer is null or the UTF-16 data cannot be converted to valid UTF-8.
+///
+/// ## Safety
+///
+/// The caller must ensure `pwstr` points to a valid null-terminated UTF-16
+/// string allocated with `CoTaskMemAlloc` (or returned by a COM method that
+/// uses `CoTaskMemAlloc`).
+pub(crate) unsafe fn pwstr_to_string_and_free(pwstr: windows::core::PWSTR) -> Option<String> {
+    if pwstr.is_null() {
+        return None;
+    }
+    let result = pwstr.to_string().ok();
+    windows::Win32::System::Com::CoTaskMemFree(Some(pwstr.0 as *const _));
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_s_ok() {
+        let kind = ComInitKind::from_hresult(0).unwrap();
+        assert_eq!(kind, ComInitKind::FirstInit);
+        assert!(kind.should_uninit());
+    }
+
+    #[test]
+    fn classify_s_false() {
+        let kind = ComInitKind::from_hresult(1).unwrap();
+        assert_eq!(kind, ComInitKind::AlreadySameModel);
+        assert!(kind.should_uninit());
+    }
+
+    #[test]
+    fn classify_rpc_e_changed_mode() {
+        let kind = ComInitKind::from_hresult(RPC_E_CHANGED_MODE).unwrap();
+        assert_eq!(kind, ComInitKind::DifferentModel);
+        assert!(!kind.should_uninit());
+    }
+
+    #[test]
+    fn classify_unknown_failure() {
+        let result = ComInitKind::from_hresult(-2147467259); // E_FAIL 0x80004005
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.hresult(), -2147467259);
+    }
+
+    #[test]
+    fn classify_preserves_hresult_in_error() {
+        let hr = -2147418113i32; // CO_E_NOTINITIALIZED
+        let err = ComInitKind::from_hresult(hr).unwrap_err();
+        assert_eq!(err.hresult(), hr);
+    }
+
+    #[test]
+    fn error_display_contains_hresult() {
+        let err = ComInitError { hr: -2147467259 };
+        let msg = err.to_string();
+        assert!(msg.contains("HRESULT"), "message: {msg}");
+        assert!(msg.contains("80004005"), "message: {msg}");
+    }
+
+    #[test]
+    fn pwstr_to_string_returns_none_for_null() {
+        let result = unsafe { pwstr_to_string_and_free(windows::core::PWSTR::null()) };
+        assert!(result.is_none());
+    }
+
+    #[test]
+    #[ignore = "requires Windows audio device"]
+    fn com_guard_first_init() {
+        let guard = ComGuard::new().expect("first COM init should succeed");
+        assert!(guard.should_uninit);
+    }
+
+    #[test]
+    #[ignore = "requires Windows audio device"]
+    fn com_guard_second_init_same_model() {
+        let _guard1 = ComGuard::new().expect("first COM init");
+        let guard2 = ComGuard::new().expect("second COM init (S_FALSE)");
+        assert!(guard2.should_uninit);
+    }
+
+    #[test]
+    #[ignore = "requires Windows audio device"]
+    fn com_guard_drop_balancing() {
+        {
+            let _g1 = ComGuard::new().unwrap();
+            let _g2 = ComGuard::new().unwrap();
+        }
+        let guard = ComGuard::new().expect("COM init after balanced drops");
+        assert!(guard.should_uninit);
     }
 }

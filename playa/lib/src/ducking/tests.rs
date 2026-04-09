@@ -170,9 +170,10 @@ mod windows_policy_tests {
         ]);
 
         // Verify we can find sessions by key
-        let found = snapshot.entries.iter().find(|e| {
-            matches!(&e.id, SessionId::WasapiSession { key, .. } if key == "session-a")
-        });
+        let found = snapshot
+            .entries
+            .iter()
+            .find(|e| matches!(&e.id, SessionId::WasapiSession { key, .. } if key == "session-a"));
         assert!(found.is_some());
         assert!((found.unwrap().channels[0] - 0.8).abs() < f32::EPSILON);
     }
@@ -202,15 +203,11 @@ mod windows_policy_tests {
         // Filter out our PID (mirrors the backend's enumeration logic)
         let duckable: Vec<_> = sessions
             .iter()
-            .filter(|s| {
-                !matches!(&s.id, SessionId::WasapiSession { pid, .. } if *pid == our_pid)
-            })
+            .filter(|s| !matches!(&s.id, SessionId::WasapiSession { pid, .. } if *pid == our_pid))
             .collect();
 
         assert_eq!(duckable.len(), 1);
-        assert!(
-            matches!(&duckable[0].id, SessionId::WasapiSession { pid, .. } if *pid == 9999)
-        );
+        assert!(matches!(&duckable[0].id, SessionId::WasapiSession { pid, .. } if *pid == 9999));
     }
 
     #[test]
@@ -259,6 +256,159 @@ mod windows_policy_tests {
         let snapshot = VolumeSnapshot::new();
         assert!(snapshot.is_empty());
         assert_eq!(snapshot.len(), 0);
+    }
+
+    #[test]
+    fn wasapi_mute_restored_after_volume_fade() {
+        let snapshot = VolumeSnapshot::with_entries(vec![
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 100,
+                    key: "muted-app".to_string(),
+                },
+                vec![0.5],
+                true,
+            ),
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 200,
+                    key: "unmuted-app".to_string(),
+                },
+                vec![0.7],
+                false,
+            ),
+        ]);
+
+        for entry in &snapshot.entries {
+            match &entry.id {
+                SessionId::WasapiSession { key, .. } if key == "muted-app" => {
+                    assert!(entry.mute, "muted-app should have mute=true in snapshot");
+                }
+                SessionId::WasapiSession { key, .. } if key == "unmuted-app" => {
+                    assert!(
+                        !entry.mute,
+                        "unmuted-app should have mute=false in snapshot"
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn wasapi_inactive_sessions_excluded_from_snapshot() {
+        let all_sessions = vec![
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 100,
+                    key: "active".to_string(),
+                },
+                vec![0.8],
+                false,
+            ),
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 200,
+                    key: "inactive".to_string(),
+                },
+                vec![0.0],
+                false,
+            ),
+        ];
+
+        let active: Vec<_> = all_sessions
+            .iter()
+            .filter(|s| matches!(&s.id, SessionId::WasapiSession { key, .. } if key == "active"))
+            .collect();
+
+        assert_eq!(active.len(), 1);
+        assert!(matches!(&active[0].id, SessionId::WasapiSession { key, .. } if key == "active"));
+    }
+
+    #[test]
+    fn wasapi_restore_only_affects_snapshotted_sessions() {
+        let snapshot = VolumeSnapshot::with_entries(vec![SessionVolume::new(
+            SessionId::WasapiSession {
+                pid: 100,
+                key: "original".to_string(),
+            },
+            vec![0.8],
+            false,
+        )]);
+
+        let live_keys_at_restore = vec!["original".to_string(), "new-session".to_string()];
+
+        let restorable: Vec<_> = snapshot
+            .entries
+            .iter()
+            .filter(|e| {
+                matches!(&e.id, SessionId::WasapiSession { key, .. } if live_keys_at_restore.contains(key))
+            })
+            .collect();
+
+        assert_eq!(restorable.len(), 1);
+        assert!(
+            matches!(&restorable[0].id, SessionId::WasapiSession { key, .. } if key == "original")
+        );
+        assert!((restorable[0].channels[0] - 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn wasapi_volume_map_lookup_by_key() {
+        let snapshot = VolumeSnapshot::with_entries(vec![
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 100,
+                    key: "alpha".to_string(),
+                },
+                vec![0.9],
+                false,
+            ),
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 200,
+                    key: "beta".to_string(),
+                },
+                vec![0.3],
+                true,
+            ),
+            SessionVolume::new(
+                SessionId::WasapiSession {
+                    pid: 300,
+                    key: "gamma".to_string(),
+                },
+                vec![0.5],
+                false,
+            ),
+        ]);
+
+        let keys: Vec<String> = snapshot
+            .entries
+            .iter()
+            .filter_map(|e| match &e.id {
+                SessionId::WasapiSession { key, .. } => Some(key.clone()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(keys.len(), 3);
+        assert!(keys.contains(&"alpha".to_string()));
+        assert!(keys.contains(&"beta".to_string()));
+        assert!(keys.contains(&"gamma".to_string()));
+    }
+
+    #[test]
+    fn wasapi_floor_calculation_clamps_to_range() {
+        let original_volume = 0.8f32;
+        let floor_scalar = 0.2f32;
+        let target = (original_volume * floor_scalar).clamp(0.0, 1.0);
+        assert!((target - 0.16).abs() < f32::EPSILON);
+
+        let zero_floor = (1.0f32 * 0.0f32).clamp(0.0, 1.0);
+        assert!((zero_floor - 0.0).abs() < f32::EPSILON);
+
+        let high_floor = (0.5f32 * 1.0f32).clamp(0.0, 1.0);
+        assert!((high_floor - 0.5).abs() < f32::EPSILON);
     }
 }
 

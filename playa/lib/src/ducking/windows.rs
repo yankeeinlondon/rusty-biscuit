@@ -9,7 +9,14 @@
 //! stored. Each operation creates a fresh `ComGuard`, resolves the endpoint,
 //! and enumerates sessions from scratch. This avoids Send/Sync issues with
 //! COM pointers and keeps the lifetime simple.
+//!
+//! All fade operations run on a blocking thread via `spawn_blocking` so that
+//! the COM apartment stays pinned to a single thread for the duration of
+//! the fade loop. The snapshot operation runs synchronously (no `.await`
+//! points during COM usage) and is safe to call directly from an async
+//! context.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::Win32::{
@@ -25,7 +32,7 @@ use crate::ducking::{
     DuckConfig, DuckResult, DuckingBackend, DuckingError, SessionId, SessionVolume, VolumeSnapshot,
     compute_fade_steps,
 };
-use crate::windows_com::ComGuard;
+use crate::windows_com::{ComGuard, pwstr_to_string_and_free};
 
 /// A live session discovered during enumeration.
 struct LiveSession {
@@ -71,14 +78,17 @@ impl Default for WindowsBackend {
 
 impl DuckingBackend for WindowsBackend {
     fn snapshot(&self) -> DuckResult<'_, VolumeSnapshot> {
+        let our_pid = self.our_pid;
+        let available = self.available.load(Ordering::SeqCst);
+
         Box::pin(async move {
-            if !self.available.load(Ordering::SeqCst) {
+            if !available {
                 return Err(DuckingError::BackendUnavailable(
                     "WASAPI session manager not available".to_string(),
                 ));
             }
 
-            let sessions = enumerate_sessions(self.our_pid)?;
+            let sessions = enumerate_sessions(our_pid)?;
 
             let mut snapshot = VolumeSnapshot::new();
             for s in sessions {
@@ -99,82 +109,32 @@ impl DuckingBackend for WindowsBackend {
     fn fade_to_floor(&self, snapshot: &VolumeSnapshot, config: &DuckConfig) -> DuckResult<'_, ()> {
         let snapshot = snapshot.clone();
         let config = *config;
+        let available = self.available.load(Ordering::SeqCst);
 
         Box::pin(async move {
-            if snapshot.is_empty() {
+            if !available || snapshot.is_empty() {
                 return Ok(());
             }
 
-            let _com = ComGuard::new()
-                .map_err(|e| DuckingError::Platform(format!("COM init failed: {e}")))?;
-
-            let session_mgr = get_session_manager()?;
-
-            for entry in &snapshot.entries {
-                let SessionId::WasapiSession { key, .. } = &entry.id else {
-                    continue;
-                };
-
-                let original_volume = entry.channels.first().copied().unwrap_or(1.0);
-                let target_volume = (original_volume * config.floor_scalar()).clamp(0.0, 1.0);
-                let steps = compute_fade_steps(original_volume, target_volume, &config);
-
-                // Find the live session by key
-                if let Some(simple_vol) = find_simple_volume_by_key(&session_mgr, key) {
-                    for step in steps {
-                        let vol = step.volume.clamp(0.0, 1.0);
-                        let _ = unsafe { simple_vol.SetMasterVolume(vol, std::ptr::null()) };
-                        tokio::time::sleep(std::time::Duration::from_millis(step.delay_ms as u64))
-                            .await;
-                    }
-                }
-            }
-
-            Ok(())
+            tokio::task::spawn_blocking(move || fade_to_floor_blocking(&snapshot, &config))
+                .await
+                .map_err(|e| DuckingError::FadeFailed(format!("blocking task failed: {e}")))?
         })
     }
 
     fn fade_restore(&self, snapshot: &VolumeSnapshot, config: &DuckConfig) -> DuckResult<'_, ()> {
         let snapshot = snapshot.clone();
         let config = *config;
+        let available = self.available.load(Ordering::SeqCst);
 
         Box::pin(async move {
-            if snapshot.is_empty() {
+            if !available || snapshot.is_empty() {
                 return Ok(());
             }
 
-            let _com = ComGuard::new()
-                .map_err(|e| DuckingError::Platform(format!("COM init failed: {e}")))?;
-
-            let session_mgr = get_session_manager()?;
-
-            for entry in &snapshot.entries {
-                let SessionId::WasapiSession { key, .. } = &entry.id else {
-                    continue;
-                };
-
-                let original_volume = entry.channels.first().copied().unwrap_or(1.0);
-
-                // Find the live session by key
-                if let Some(simple_vol) = find_simple_volume_by_key(&session_mgr, key) {
-                    let current_volume = unsafe { simple_vol.GetMasterVolume() }.unwrap_or(0.0);
-                    let steps = compute_fade_steps(current_volume, original_volume, &config);
-
-                    for step in &steps {
-                        let vol = step.volume.clamp(0.0, 1.0);
-                        let _ = unsafe { simple_vol.SetMasterVolume(vol, std::ptr::null()) };
-                        tokio::time::sleep(std::time::Duration::from_millis(step.delay_ms as u64))
-                            .await;
-                    }
-
-                    // Restore mute state after the final volume step
-                    let _ = unsafe {
-                        simple_vol.SetMute(entry.mute.into(), std::ptr::null())
-                    };
-                }
-            }
-
-            Ok(())
+            tokio::task::spawn_blocking(move || fade_restore_blocking(&snapshot, &config))
+                .await
+                .map_err(|e| DuckingError::RestoreFailed(format!("blocking task failed: {e}")))?
         })
     }
 
@@ -218,6 +178,9 @@ fn get_session_manager() -> Result<IAudioSessionManager2, DuckingError> {
 }
 
 /// Enumerates active audio sessions excluding the given PID.
+///
+/// Each session's COM-allocated instance identifier string is converted
+/// to a Rust `String` and freed immediately via [`pwstr_to_string_and_free`].
 fn enumerate_sessions(our_pid: u32) -> Result<Vec<LiveSession>, DuckingError> {
     let _com =
         ComGuard::new().map_err(|e| DuckingError::Platform(format!("COM init failed: {e}")))?;
@@ -227,26 +190,27 @@ fn enumerate_sessions(our_pid: u32) -> Result<Vec<LiveSession>, DuckingError> {
     unsafe {
         let enumerator: IAudioSessionEnumerator = session_mgr
             .GetSessionEnumerator()
-            .map_err(|e| DuckingError::SnapshotFailed(format!("failed to enumerate sessions: {e}")))?;
+            .map_err(|e| {
+                DuckingError::SnapshotFailed(format!("failed to enumerate sessions: {e}"))
+            })?;
 
         let count = enumerator
             .GetCount()
-            .map_err(|e| DuckingError::SnapshotFailed(format!("failed to get session count: {e}")))?;
+            .map_err(|e| {
+                DuckingError::SnapshotFailed(format!("failed to get session count: {e}"))
+            })?;
 
         let mut sessions = Vec::new();
 
         for i in 0..count {
-            // Skip per-session failures
             let Ok(control) = enumerator.GetSession(i) else {
                 continue;
             };
 
-            // Get IAudioSessionControl2 for PID and state
             let Ok(control2): Result<IAudioSessionControl2, _> = control.cast() else {
                 continue;
             };
 
-            // Only keep active sessions
             let Ok(state) = control2.GetState() else {
                 continue;
             };
@@ -254,7 +218,6 @@ fn enumerate_sessions(our_pid: u32) -> Result<Vec<LiveSession>, DuckingError> {
                 continue;
             }
 
-            // Exclude our own process
             let Ok(pid) = control2.GetProcessId() else {
                 continue;
             };
@@ -262,24 +225,16 @@ fn enumerate_sessions(our_pid: u32) -> Result<Vec<LiveSession>, DuckingError> {
                 continue;
             }
 
-            // Get session instance identifier (the unique key)
             let Ok(instance_id_pwstr) = control2.GetSessionInstanceIdentifier() else {
                 continue;
             };
-            let key = instance_id_pwstr.to_string();
+            let Some(key) = (unsafe { pwstr_to_string_and_free(instance_id_pwstr) }) else {
+                continue;
+            };
             if key.is_empty() {
-                // Free the allocated string even on skip
-                windows::Win32::System::Com::CoTaskMemFree(Some(
-                    instance_id_pwstr.0 as *const _ as *const _,
-                ));
                 continue;
             }
-            // Free the COM-allocated string
-            windows::Win32::System::Com::CoTaskMemFree(Some(
-                instance_id_pwstr.0 as *const _ as *const _,
-            ));
 
-            // Get ISimpleAudioVolume
             let Ok(simple_vol): Result<ISimpleAudioVolume, _> = control.cast() else {
                 continue;
             };
@@ -302,38 +257,131 @@ fn enumerate_sessions(our_pid: u32) -> Result<Vec<LiveSession>, DuckingError> {
     }
 }
 
-/// Finds the `ISimpleAudioVolume` for a session matching the given instance key.
-fn find_simple_volume_by_key(
+/// Builds a map from session instance identifier to `ISimpleAudioVolume`.
+///
+/// Enumerates all sessions once and returns a lookup table so that callers
+/// avoid O(n²) re-enumeration per snapshot entry.
+fn build_volume_map(
     session_mgr: &IAudioSessionManager2,
-    target_key: &str,
-) -> Option<ISimpleAudioVolume> {
+) -> Result<HashMap<String, ISimpleAudioVolume>, DuckingError> {
     unsafe {
-        let enumerator = session_mgr.GetSessionEnumerator().ok()?;
-        let count = enumerator.GetCount().ok()?;
+        let enumerator = session_mgr.GetSessionEnumerator().map_err(|e| {
+            DuckingError::SnapshotFailed(format!("failed to enumerate sessions: {e}"))
+        })?;
+
+        let count = enumerator.GetCount().map_err(|e| {
+            DuckingError::SnapshotFailed(format!("failed to get session count: {e}"))
+        })?;
+
+        let mut map = HashMap::new();
 
         for i in 0..count {
             let Ok(control) = enumerator.GetSession(i) else {
                 continue;
             };
+
             let Ok(control2): Result<IAudioSessionControl2, _> = control.cast() else {
                 continue;
             };
+
             let Ok(instance_id_pwstr) = control2.GetSessionInstanceIdentifier() else {
                 continue;
             };
 
-            let key = instance_id_pwstr.to_string();
-            windows::Win32::System::Com::CoTaskMemFree(Some(
-                instance_id_pwstr.0 as *const _ as *const _,
-            ));
-
-            if key == target_key {
-                return control.cast().ok();
+            let Some(key) = (unsafe { pwstr_to_string_and_free(instance_id_pwstr) }) else {
+                continue;
+            };
+            if key.is_empty() {
+                continue;
             }
+
+            let Ok(simple_vol): Result<ISimpleAudioVolume, _> = control.cast() else {
+                continue;
+            };
+
+            map.insert(key, simple_vol);
         }
 
-        None
+        Ok(map)
     }
+}
+
+/// Fades all snapshotted sessions to the configured floor level.
+///
+/// Runs entirely on a single blocking thread so that the COM apartment
+/// stays pinned for the full duration of the fade loop.
+fn fade_to_floor_blocking(
+    snapshot: &VolumeSnapshot,
+    config: &DuckConfig,
+) -> Result<(), DuckingError> {
+    let _com = ComGuard::new()
+        .map_err(|e| DuckingError::Platform(format!("COM init failed: {e}")))?;
+
+    let session_mgr = get_session_manager()?;
+    let volume_map = build_volume_map(&session_mgr)?;
+
+    for entry in &snapshot.entries {
+        let SessionId::WasapiSession { key, .. } = &entry.id else {
+            continue;
+        };
+
+        let Some(simple_vol) = volume_map.get(key) else {
+            continue;
+        };
+
+        let original_volume = entry.channels.first().copied().unwrap_or(1.0);
+        let target_volume = (original_volume * config.floor_scalar()).clamp(0.0, 1.0);
+        let steps = compute_fade_steps(original_volume, target_volume, config);
+
+        for step in steps {
+            let vol = step.volume.clamp(0.0, 1.0);
+            let _ = unsafe { simple_vol.SetMasterVolume(vol, std::ptr::null()) };
+            std::thread::sleep(std::time::Duration::from_millis(step.delay_ms as u64));
+        }
+    }
+
+    Ok(())
+}
+
+/// Restores all snapshotted sessions to their original volume and mute state.
+///
+/// Runs entirely on a single blocking thread so that the COM apartment
+/// stays pinned for the full duration of the fade loop. Sessions that
+/// disappeared since the snapshot are silently skipped. Mute state is
+/// restored only after the final volume step.
+fn fade_restore_blocking(
+    snapshot: &VolumeSnapshot,
+    config: &DuckConfig,
+) -> Result<(), DuckingError> {
+    let _com = ComGuard::new()
+        .map_err(|e| DuckingError::Platform(format!("COM init failed: {e}")))?;
+
+    let session_mgr = get_session_manager()?;
+    let volume_map = build_volume_map(&session_mgr)?;
+
+    for entry in &snapshot.entries {
+        let SessionId::WasapiSession { key, .. } = &entry.id else {
+            continue;
+        };
+
+        let Some(simple_vol) = volume_map.get(key) else {
+            continue;
+        };
+
+        let original_volume = entry.channels.first().copied().unwrap_or(1.0);
+        let current_volume = unsafe { simple_vol.GetMasterVolume() }.unwrap_or(0.0);
+        let steps = compute_fade_steps(current_volume, original_volume, config);
+
+        for step in &steps {
+            let vol = step.volume.clamp(0.0, 1.0);
+            let _ = unsafe { simple_vol.SetMasterVolume(vol, std::ptr::null()) };
+            std::thread::sleep(std::time::Duration::from_millis(step.delay_ms as u64));
+        }
+
+        let _ = unsafe { simple_vol.SetMute(entry.mute.into(), std::ptr::null()) };
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -359,7 +407,6 @@ mod tests {
     #[ignore = "requires Windows audio device"]
     fn windows_backend_availability_probe() {
         let backend = WindowsBackend::new();
-        // On a machine with a default render device, this should succeed
         assert!(
             backend.is_available(),
             "expected WASAPI to be available on this machine"
@@ -401,5 +448,25 @@ mod tests {
             .name(),
             "windows-wasapi"
         );
+    }
+
+    #[test]
+    #[ignore = "requires Windows audio device"]
+    fn snapshot_enumerates_sessions_on_live_device() {
+        let backend = WindowsBackend::new();
+        if !backend.is_available() {
+            eprintln!("Skipping: WASAPI not available");
+            return;
+        }
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let snapshot = rt.block_on(backend.snapshot()).unwrap();
+        assert!(snapshot.len() <= 20, "unexpectedly many sessions");
+    }
+
+    #[test]
+    #[ignore = "requires Windows audio device"]
+    fn com_guard_succeeds_when_com_already_initialized() {
+        let _com1 = ComGuard::new().expect("first COM init");
+        let _com2 = ComGuard::new().expect("second COM init (S_FALSE)");
     }
 }
