@@ -875,3 +875,56 @@ fn test_executable_index_parity_with_which_for_common_programs() {
         );
     }
 }
+
+// ============================================================================
+// Windows Cross-Platform Integration Tests
+// ============================================================================
+
+/// Asserts that `primary_interface` is populated on eligible hosts.
+///
+/// On macOS and Linux a desktop/workstation usually has at least one
+/// non-loopback, up interface with an IPv4 address, so the primary
+/// selector should succeed.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+#[test]
+fn test_network_primary_interface_is_populated() {
+    let result = detect().unwrap();
+    let network = result.network.expect("network should be present");
+
+    if !network.permission_denied && !network.interfaces.is_empty() {
+        assert!(
+            network.primary_interface.is_some(),
+            "primary_interface should be populated when non-loopback interfaces exist"
+        );
+        let primary = network.primary_interface.unwrap();
+        assert!(
+            !primary.is_empty(),
+            "primary_interface name should not be empty"
+        );
+    }
+}
+
+/// Asserts that `services_detailed(ServiceState::All)` returns at least one
+/// service with a non-empty name on supported platforms.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+#[test]
+fn test_services_detailed_returns_non_empty_names() {
+    use sniff::services::{ServiceManager, ServiceState};
+
+    let manager = ServiceManager::detect();
+    let services = manager.services_detailed(ServiceState::All);
+
+    if manager.init_system != sniff::services::InitSystem::Unknown {
+        assert!(
+            !services.is_empty(),
+            "services_detailed(All) should return at least one service for {:?}",
+            manager.init_system
+        );
+        for svc in &services {
+            assert!(
+                !svc.name.is_empty(),
+                "every service should have a non-empty name"
+            );
+        }
+    }
+}
