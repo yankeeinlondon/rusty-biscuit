@@ -28,6 +28,7 @@ use crate::ducking::{
 /// Stores the exact PulseAudio volume units (0–65535 range) captured at
 /// snapshot time. On the final fade or restore step, the backend snaps
 /// to these exact units to prevent cumulative rounding drift.
+#[derive(Clone)]
 struct CachedPulseVolume {
     avg_units: u32,
 }
@@ -125,6 +126,14 @@ impl LinuxBackend {
         (scalar * 100.0) as f64
     }
 
+    fn percent_to_scalar(percent: f64) -> f32 {
+        (percent / 100.0) as f32
+    }
+
+    fn units_scalar_to_percent(units: u32, scalar: f32) -> f64 {
+        (units as f64 * scalar as f64) / 65536.0 * 100.0
+    }
+
     /// Converts a pulsectl volume percentage (0-100+) to a scalar (0.0-1.0+).
     fn percent_to_scalar(percent: f64) -> f32 {
         (percent / 100.0) as f32
@@ -218,10 +227,11 @@ impl DuckingBackend for LinuxBackend {
                 for (i, step) in steps.iter().enumerate() {
                     if is_final_step(i) {
                         if let Some(cached) = cached_volumes.get(index) {
-                            let target_percent =
-                                Self::scalar_to_percent(original_volume * config.floor_scalar());
-                            let exact_percent = target_percent.min(cached.to_percent());
-                            apply_volume_delta(&mut controller, *index, exact_percent);
+                            let exact_percent = Self::units_scalar_to_percent(
+                                cached.avg_units,
+                                config.floor_scalar(),
+                            );
+                            apply_volume_delta(&mut controller, *index, exact_percent)?;
 
                             tokio::time::sleep(std::time::Duration::from_millis(
                                 step.delay_ms as u64,
@@ -232,7 +242,7 @@ impl DuckingBackend for LinuxBackend {
                     }
 
                     let percent = Self::scalar_to_percent(step.volume);
-                    apply_volume_delta(&mut controller, *index, percent);
+                    apply_volume_delta(&mut controller, *index, percent)?;
 
                     tokio::time::sleep(std::time::Duration::from_millis(step.delay_ms as u64))
                         .await;
@@ -279,10 +289,10 @@ impl DuckingBackend for LinuxBackend {
 
                 for (i, step) in steps.iter().enumerate() {
                     if is_final_step(i) {
-                        apply_volume_delta(&mut controller, *index, cached.to_percent());
+                        apply_volume_delta(&mut controller, *index, cached.to_percent())?;
                     } else {
                         let percent = Self::scalar_to_percent(step.volume);
-                        apply_volume_delta(&mut controller, *index, percent);
+                        apply_volume_delta(&mut controller, *index, percent)?;
                     }
 
                     tokio::time::sleep(std::time::Duration::from_millis(step.delay_ms as u64))
@@ -315,16 +325,39 @@ fn units_to_percent(units: u32) -> f64 {
 
 /// Apply a target volume percentage to a sink input by reading the current
 /// volume and issuing the required relative delta.
-fn apply_volume_delta(controller: &mut SinkController, index: u32, target_percent: f64) {
-    if let Ok(Some(app)) = controller.get_app_by_index(index) {
-        let current_percent = app.volume.avg().0 as f64 / 65536.0 * 100.0;
-        let delta = target_percent - current_percent;
-        if delta < 0.0 {
-            let _ = controller.decrease_app_volume_by_percent(index, -delta);
-        } else if delta > 0.0 {
-            let _ = controller.increase_app_volume_by_percent(index, delta);
-        }
+fn apply_volume_delta(
+    controller: &mut SinkController,
+    index: u32,
+    target_percent: f64,
+) -> Result<(), DuckingError> {
+    let app = controller
+        .get_app_by_index(index)
+        .map_err(|e| DuckingError::Platform(format!("failed to get sink input {}: {}", index, e)))?
+        .ok_or_else(|| DuckingError::Platform(format!("sink input {} no longer exists", index)))?;
+
+    let current_percent = app.volume.avg().0 as f64 / 65536.0 * 100.0;
+    let delta = target_percent - current_percent;
+    if delta < 0.0 {
+        controller
+            .decrease_app_volume_by_percent(index, -delta)
+            .map_err(|e| {
+                DuckingError::Platform(format!(
+                    "failed to decrease volume for sink input {}: {}",
+                    index, e
+                ))
+            })?;
+    } else if delta > 0.0 {
+        controller
+            .increase_app_volume_by_percent(index, delta)
+            .map_err(|e| {
+                DuckingError::Platform(format!(
+                    "failed to increase volume for sink input {}: {}",
+                    index, e
+                ))
+            })?;
     }
+
+    Ok(())
 }
 
 /// ALSA fallback backend for systems without PulseAudio.
@@ -597,6 +630,97 @@ mod tests {
 
         let from_approx = (approx_percent / 100.0 * 65536.0) as u32;
         assert_eq!(from_approx, original_units);
+    }
+
+    #[test]
+    fn units_scalar_to_percent_duck_target_from_cached_units() {
+        let full_units = 65536u32;
+        let floor_scalar = 0.2f32;
+        let target = LinuxBackend::units_scalar_to_percent(full_units, floor_scalar);
+        let expected = full_units as f64 * floor_scalar as f64 / 65536.0 * 100.0;
+        assert!(
+            (target - expected).abs() < f64::EPSILON,
+            "duck target should be derived from cached units directly"
+        );
+
+        let half_units = 32768u32;
+        let target_half = LinuxBackend::units_scalar_to_percent(half_units, floor_scalar);
+        let expected_half = half_units as f64 * floor_scalar as f64 / 65536.0 * 100.0;
+        assert!(
+            (target_half - expected_half).abs() < f64::EPSILON,
+            "duck target from half-volume cached units should be exact"
+        );
+    }
+
+    #[test]
+    fn units_scalar_to_percent_restore_target_is_full_cached() {
+        let units = 49152u32;
+        let restore_target = LinuxBackend::units_scalar_to_percent(units, 1.0);
+        let cached_pct = units_to_percent(units);
+        assert!(
+            (restore_target - cached_pct).abs() < f64::EPSILON,
+            "restore at scalar 1.0 should equal cached percent"
+        );
+    }
+
+    #[test]
+    fn units_scalar_to_percent_does_not_rely_on_float_snapshot() {
+        let original_units = 39321u32;
+        let floor_scalar = 0.2f32;
+
+        let from_units = LinuxBackend::units_scalar_to_percent(original_units, floor_scalar);
+
+        let snapshot_scalar = original_units as f32 / 65536.0;
+        let float_derived_pct = LinuxBackend::scalar_to_percent(snapshot_scalar * floor_scalar);
+
+        let from_units_roundtrip = (from_units / 100.0 * 65536.0) as u32;
+        let expected_units = (original_units as f64 * floor_scalar as f64) as u32;
+
+        assert_eq!(
+            from_units_roundtrip, expected_units,
+            "units-based path should produce exact integer units without float intermediary loss"
+        );
+
+        let float_roundtrip = (float_derived_pct / 100.0 * 65536.0) as u32;
+        assert_eq!(
+            from_units_roundtrip, float_roundtrip,
+            "both paths should agree for this value"
+        );
+    }
+
+    #[test]
+    fn apply_volume_delta_reports_missing_sink_input() {
+        let err = DuckingError::Platform("sink input 999 no longer exists".to_string());
+        assert!(
+            err.to_string().contains("no longer exists"),
+            "missing sink input error should be descriptive"
+        );
+    }
+
+    #[test]
+    fn apply_volume_delta_reports_write_failure() {
+        let err = DuckingError::Platform(
+            "failed to decrease volume for sink input 42: write error".to_string(),
+        );
+        assert!(
+            err.to_string().contains("failed to decrease volume"),
+            "write failure should be propagated in error message"
+        );
+
+        let err2 = DuckingError::Platform(
+            "failed to increase volume for sink input 42: write error".to_string(),
+        );
+        assert!(
+            err2.to_string().contains("failed to increase volume"),
+            "increase failure should be propagated in error message"
+        );
+    }
+
+    #[test]
+    fn cached_pulse_volume_is_clone() {
+        let a = CachedPulseVolume::new(32768);
+        let b = a.clone();
+        assert_eq!(a.avg_units, b.avg_units);
     }
 
     // Integration tests that actually manipulate volume are marked #[ignore]

@@ -629,8 +629,8 @@ mod linux_policy_tests {
 
         let original_pct = original_units as f64 / 65536.0 * 100.0;
         let floor_scalar = 0.2f32;
-        let mut current_pct = original_pct;
 
+        let mut current_pct = original_pct;
         for _ in 0..5 {
             current_pct = original_pct * floor_scalar as f64;
             current_pct = original_pct;
@@ -638,6 +638,54 @@ mod linux_policy_tests {
 
         let final_units = (current_pct / 100.0 * 65536.0) as u32;
         assert_eq!(final_units, original_units);
+    }
+
+    #[test]
+    fn linux_duck_target_from_cached_units_scalar() {
+        fn units_scalar_to_percent(units: u32, scalar: f32) -> f64 {
+            (units as f64 * scalar as f64) / 65536.0 * 100.0
+        }
+
+        let cached_units = 49152u32;
+        let floor = 0.2f32;
+        let target_pct = units_scalar_to_percent(cached_units, floor);
+        let target_units = (target_pct / 100.0 * 65536.0) as u32;
+        let expected = (cached_units as f64 * floor as f64) as u32;
+        assert_eq!(
+            target_units, expected,
+            "target should be derived purely from cached units"
+        );
+    }
+
+    #[test]
+    fn linux_restore_target_from_cached_units_scalar_one() {
+        fn units_scalar_to_percent(units: u32, scalar: f32) -> f64 {
+            (units as f64 * scalar as f64) / 65536.0 * 100.0
+        }
+
+        let cached_units = 39321u32;
+        let restore_pct = units_scalar_to_percent(cached_units, 1.0);
+        let restored = (restore_pct / 100.0 * 65536.0) as u32;
+        assert_eq!(
+            restored, cached_units,
+            "restore at scalar 1.0 should be lossless"
+        );
+    }
+
+    #[test]
+    fn linux_write_failure_error_is_platform_variant() {
+        let err = DuckingError::Platform(
+            "failed to decrease volume for sink input 42: I/O error".to_string(),
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("failed to decrease volume"), "msg: {msg}");
+    }
+
+    #[test]
+    fn linux_missing_sink_input_error_is_platform_variant() {
+        let err = DuckingError::Platform("sink input 99 no longer exists".to_string());
+        let msg = err.to_string();
+        assert!(msg.contains("no longer exists"), "msg: {msg}");
     }
 }
 

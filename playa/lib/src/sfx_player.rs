@@ -838,7 +838,7 @@ mod linux {
                 return Err(format!("PulseAudio {} timed out", phase).into());
             }
 
-            std::thread::sleep(Duration::from_millis(1));
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
 
@@ -898,11 +898,11 @@ mod linux {
 
         context.connect(None, pulse::context::FlagSet::NOFLAGS, None)?;
 
-        let ready_deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
+        let context_deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
 
         wait_for_pulse_condition(
             &mut mainloop,
-            ready_deadline,
+            context_deadline,
             "context connection",
             || {
                 match context.get_state() {
@@ -925,29 +925,20 @@ mod linux {
             Stream::new_with_proplist(&mut context, "Sound Effect", &spec, None, &mut proplist)
                 .ok_or("failed to create PulseAudio stream")?;
 
-        stream.connect_playback(
-            None,
-            None,
-            pulse::stream::FlagSet::NOFLAGS,
-            None,
-            None,
-        )?;
+        stream.connect_playback(None, None, pulse::stream::FlagSet::NOFLAGS, None, None)?;
 
-        wait_for_pulse_condition(
-            &mut mainloop,
-            ready_deadline,
-            "stream connection",
-            || {
-                match stream.get_state() {
-                    pulse::stream::State::Ready => return Ok(true),
-                    pulse::stream::State::Failed | pulse::stream::State::Terminated => {
-                        return Err("PulseAudio stream connection failed".into());
-                    }
-                    _ => {}
+        let stream_deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
+
+        wait_for_pulse_condition(&mut mainloop, stream_deadline, "stream connection", || {
+            match stream.get_state() {
+                pulse::stream::State::Ready => return Ok(true),
+                pulse::stream::State::Failed | pulse::stream::State::Terminated => {
+                    return Err("PulseAudio stream connection failed".into());
                 }
-                Ok(false)
-            },
-        )?;
+                _ => {}
+            }
+            Ok(false)
+        })?;
 
         let byte_data: Vec<u8> = samples.iter().flat_map(|s: &f32| s.to_le_bytes()).collect();
 
@@ -963,20 +954,15 @@ mod linux {
 
         let op = stream.drain(None);
 
-        wait_for_pulse_condition(
-            &mut mainloop,
-            drain_deadline,
-            "drain",
-            || {
-                match op.get_state() {
-                    pulse::operation::State::Done | pulse::operation::State::Cancelled => {
-                        return Ok(true);
-                    }
-                    pulse::operation::State::Running => {}
+        wait_for_pulse_condition(&mut mainloop, drain_deadline, "drain", || {
+            match op.get_state() {
+                pulse::operation::State::Done | pulse::operation::State::Cancelled => {
+                    return Ok(true);
                 }
-                Ok(false)
-            },
-        )?;
+                pulse::operation::State::Running => {}
+            }
+            Ok(false)
+        })?;
 
         stream.disconnect().ok();
         context.disconnect();
@@ -1037,10 +1023,7 @@ mod linux {
                 },
             );
             assert!(result.is_ok());
-            assert_eq!(
-                call_count.load(std::sync::atomic::Ordering::SeqCst),
-                1
-            );
+            assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 1);
         }
 
         #[test]
@@ -1079,7 +1062,7 @@ mod linux {
                     return Err(format!("PulseAudio {} timed out", phase).into());
                 }
 
-                std::thread::sleep(Duration::from_millis(1));
+                std::thread::sleep(Duration::from_millis(10));
             }
         }
 
@@ -1093,21 +1076,16 @@ mod linux {
                 .expect("should start connection");
 
             let deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
-            wait_for_pulse_condition(
-                &mut mainloop,
-                deadline,
-                "context connection",
-                || {
-                    match context.get_state() {
-                        pulse::context::State::Ready => return Ok(true),
-                        pulse::context::State::Failed | pulse::context::State::Terminated => {
-                            return Err("PulseAudio context failed".into());
-                        }
-                        _ => {}
+            wait_for_pulse_condition(&mut mainloop, deadline, "context connection", || {
+                match context.get_state() {
+                    pulse::context::State::Ready => return Ok(true),
+                    pulse::context::State::Failed | pulse::context::State::Terminated => {
+                        return Err("PulseAudio context failed".into());
                     }
-                    Ok(false)
-                },
-            )
+                    _ => {}
+                }
+                Ok(false)
+            })
             .expect("context should connect");
 
             context.disconnect();
@@ -1124,21 +1102,16 @@ mod linux {
 
             let deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
 
-            wait_for_pulse_condition(
-                &mut mainloop,
-                deadline,
-                "context connection",
-                || {
-                    match context.get_state() {
-                        pulse::context::State::Ready => return Ok(true),
-                        pulse::context::State::Failed | pulse::context::State::Terminated => {
-                            return Err("PulseAudio context failed".into());
-                        }
-                        _ => {}
+            wait_for_pulse_condition(&mut mainloop, deadline, "context connection", || {
+                match context.get_state() {
+                    pulse::context::State::Ready => return Ok(true),
+                    pulse::context::State::Failed | pulse::context::State::Terminated => {
+                        return Err("PulseAudio context failed".into());
                     }
-                    Ok(false)
-                },
-            )
+                    _ => {}
+                }
+                Ok(false)
+            })
             .expect("context should connect");
 
             let spec = Spec {
@@ -1159,21 +1132,16 @@ mod linux {
                 .connect_playback(None, None, pulse::stream::FlagSet::NOFLAGS, None, None)
                 .expect("should connect for playback");
 
-            wait_for_pulse_condition(
-                &mut mainloop,
-                deadline,
-                "stream connection",
-                || {
-                    match stream.get_state() {
-                        pulse::stream::State::Ready => return Ok(true),
-                        pulse::stream::State::Failed | pulse::stream::State::Terminated => {
-                            return Err("PulseAudio stream failed".into());
-                        }
-                        _ => {}
+            wait_for_pulse_condition(&mut mainloop, deadline, "stream connection", || {
+                match stream.get_state() {
+                    pulse::stream::State::Ready => return Ok(true),
+                    pulse::stream::State::Failed | pulse::stream::State::Terminated => {
+                        return Err("PulseAudio stream failed".into());
                     }
-                    Ok(false)
-                },
-            )
+                    _ => {}
+                }
+                Ok(false)
+            })
             .expect("stream should become ready");
 
             stream.disconnect().ok();
