@@ -635,6 +635,37 @@ fn test_compose_shorthand_empty_value() {
 }
 
 #[test]
+fn test_compose_shorthand_empty_key_errors() {
+    md_cmd()
+        .args(["compose", "=value"])
+        .write_stdin("# Test")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Invalid setter '=value'"));
+}
+
+#[test]
+fn test_compose_shorthand_numeric_leading_key_is_treated_as_input_path() {
+    md_cmd()
+        .args(["compose", "9key=value"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Failed to load"))
+        .stderr(predicate::str::contains("9key=value"));
+}
+
+#[test]
+fn test_compose_shorthand_setter_before_file_input() {
+    let tmp = md_file("# Hello {{ iteration }}\n");
+    md_cmd()
+        .args(["compose", "iteration=1"])
+        .arg(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello 1"));
+}
+
+#[test]
 fn test_compose_shorthand_multiple_non_setter_tokens_error() {
     let tmp = md_file("# Test\n");
     md_cmd()

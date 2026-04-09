@@ -79,7 +79,11 @@ pub enum Command {
     /// Compose a document through the compose pipeline.
     Compose {
         /// Positional arguments: input path and/or key=value setters
-        #[arg(value_name = "ARGS", num_args = 0..)]
+        #[arg(
+            value_name = "ARGS",
+            num_args = 0..,
+            add = ArgValueCompleter::new(complete_compose_args)
+        )]
         args: Vec<String>,
 
         /// Default values as JSON; fills in null/missing frontmatter keys without overriding existing values
@@ -431,6 +435,22 @@ fn complete_markdown_files(current: &OsStr) -> Vec<CompletionCandidate> {
     complete_markdown_files_from(Path::new("."), current)
 }
 
+/// Completes compose positionals.
+///
+/// Tokens containing `=` are treated as shorthand setters, so file completion
+/// is suppressed to avoid suggesting markdown paths for setter values.
+fn complete_compose_args(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_compose_args_from(Path::new("."), current)
+}
+
+fn complete_compose_args_from(base_dir: &Path, current: &OsStr) -> Vec<CompletionCandidate> {
+    if current.to_string_lossy().contains('=') {
+        Vec::new()
+    } else {
+        complete_markdown_files_from(base_dir, current)
+    }
+}
+
 fn complete_markdown_files_from(base_dir: &Path, current: &OsStr) -> Vec<CompletionCandidate> {
     let current_str = current.to_string_lossy();
     let mut candidates = Vec::new();
@@ -622,6 +642,28 @@ mod tests {
             .map(|value| normalize_path(&value))
             .collect();
         assert!(deep_values.contains(&"docs/deep/nested.md".to_string()));
+    }
+
+    #[test]
+    fn compose_arg_completion_suggests_files_for_non_setter_tokens() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("README.md"), "# Root").unwrap();
+
+        let values = completion_values(complete_compose_args_from(
+            temp_dir.path(),
+            OsStr::new("REA"),
+        ));
+        assert!(
+            values
+                .iter()
+                .any(|value| normalize_path(value) == "README.md")
+        );
+    }
+
+    #[test]
+    fn compose_arg_completion_skips_file_suggestions_for_setters() {
+        let values = completion_values(complete_compose_args(OsStr::new("name=Al")));
+        assert!(values.is_empty());
     }
 
     #[test]

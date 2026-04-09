@@ -93,6 +93,7 @@ pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
 
 // ── Compose positional classification ─────────────────────────────────
 
+#[derive(Debug)]
 struct ParsedComposeArgs {
     input: Option<PathBuf>,
     shorthand_setters: serde_json::Map<String, serde_json::Value>,
@@ -1344,6 +1345,85 @@ fn read_from_stdin() -> Result<Markdown> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_compose_setter_rejects_empty_key() {
+        let parsed = parse_compose_setter("=value").expect("expected setter parse result");
+        let err = parsed.expect_err("expected empty-key error");
+        assert_eq!(err, "setter key must not be empty");
+    }
+
+    #[test]
+    fn parse_compose_setter_rejects_numeric_leading_key_as_non_setter() {
+        assert!(parse_compose_setter("9key=value").is_none());
+    }
+
+    #[test]
+    fn parse_compose_setter_accepts_hyphenated_and_private_keys() {
+        let hyphenated = parse_compose_setter("my-key=value")
+            .expect("expected setter")
+            .expect("expected valid setter");
+        assert_eq!(hyphenated.0, "my-key");
+        assert_eq!(hyphenated.1, serde_json::Value::String("value".to_string()));
+
+        let private = parse_compose_setter("_private=true")
+            .expect("expected setter")
+            .expect("expected valid setter");
+        assert_eq!(private.0, "_private");
+        assert_eq!(private.1, serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn parse_compose_setter_treats_path_like_keys_as_input_candidates() {
+        assert!(parse_compose_setter("path/key=value").is_none());
+    }
+
+    #[test]
+    fn parse_shorthand_value_parses_primitives_and_falls_back_to_string() {
+        assert_eq!(parse_shorthand_value("true"), serde_json::Value::Bool(true));
+        assert_eq!(parse_shorthand_value("null"), serde_json::Value::Null);
+        assert_eq!(
+            parse_shorthand_value("hello"),
+            serde_json::Value::String("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_compose_positionals_empty_args_have_no_input_or_setters() {
+        let parsed = parse_compose_positionals(&[]).expect("expected parse to succeed");
+        assert!(parsed.input.is_none());
+        assert!(parsed.shorthand_setters.is_empty());
+    }
+
+    #[test]
+    fn parse_compose_positionals_setter_only_args_keep_input_empty() {
+        let args = vec!["iteration=1".to_string(), "draft=false".to_string()];
+        let parsed = parse_compose_positionals(&args).expect("expected parse to succeed");
+        assert!(parsed.input.is_none());
+        assert_eq!(
+            parsed.shorthand_setters.get("iteration"),
+            Some(&serde_json::json!(1))
+        );
+        assert_eq!(
+            parsed.shorthand_setters.get("draft"),
+            Some(&serde_json::json!(false))
+        );
+    }
+
+    #[test]
+    fn parse_compose_positionals_invalid_empty_key_surfaces_error() {
+        let args = vec!["=value".to_string()];
+        let err = parse_compose_positionals(&args).expect_err("expected parse to fail");
+        assert!(err.to_string().contains("Invalid setter '=value'"));
+    }
+
+    #[test]
+    fn parse_compose_positionals_treats_numeric_leading_key_as_input() {
+        let args = vec!["9key=value".to_string()];
+        let parsed = parse_compose_positionals(&args).expect("expected parse to succeed");
+        assert_eq!(parsed.input, Some(PathBuf::from("9key=value")));
+        assert!(parsed.shorthand_setters.is_empty());
+    }
 
     #[test]
     fn wait_args_vscode_returns_wait() {

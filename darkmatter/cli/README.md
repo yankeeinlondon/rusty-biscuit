@@ -102,6 +102,12 @@ md compose README.md --state '{"name":"Alice","env":"prod"}'
 # JSON5 is also accepted (unquoted keys, trailing commas)
 md compose README.md --state '{name: "Alice", env: "prod"}'
 
+# Override values with shorthand setters
+md compose README.md iteration=1 draft=false name=Alice
+
+# Shorthand setters can appear before the input path too
+md compose iteration=1 README.md
+
 # Include frontmatter in output
 md compose README.md --fm
 
