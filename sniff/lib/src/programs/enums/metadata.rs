@@ -1,118 +1,17 @@
-//! Program enums with strum derives for metadata and iteration.
-//!
-//! This module defines enums for each program category with full metadata
-//! lookup support via the `ProgramMetadata` trait. Each category also carries
-//! installation metadata (OS availability, repository URL, installation
-//! methods) previously stored in `inventory.rs`.
-
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::hash::Hash;
-use strum::{Display, EnumCount, EnumIter, EnumString, IntoStaticStr};
+//! Metadata tables and implementations for program categories.
 
 use crate::os::OsType;
+use crate::programs::schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 use crate::programs::types::InstallationMethod;
 
-use super::schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
+use super::categories::{
+    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager,
+    TerminalApp, TtsClient, Utility, ALL_OS, LINUX_ONLY, MACOS_ONLY, UNIX_ONLY, WINDOWS_ONLY,
+};
 
-// ============================================================================
-// OS availability constants for program metadata
-// ============================================================================
-
-pub(crate) static ALL_OS: &[OsType] = &[OsType::MacOS, OsType::Linux, OsType::Windows];
-pub(crate) static UNIX_ONLY: &[OsType] = &[OsType::MacOS, OsType::Linux];
-pub(crate) static MACOS_ONLY: &[OsType] = &[OsType::MacOS];
-pub(crate) static LINUX_ONLY: &[OsType] = &[OsType::Linux];
-pub(crate) static WINDOWS_ONLY: &[OsType] = &[OsType::Windows];
-
-/// Trait bridging category enums to the generic `CategoryDetector<E>`.
-///
-/// Implementors provide category-level metadata and variant indexing
-/// that enables a single generic detector struct to work across all
-/// program categories.
-pub trait CategoryEnum:
-    ProgramMetadata
-    + strum::IntoEnumIterator
-    + strum::EnumCount
-    + Copy
-    + Clone
-    + Eq
-    + Hash
-    + fmt::Debug
-    + fmt::Display
-    + Send
-    + Sync
-    + 'static
-{
-    /// Human-readable category name (e.g., "editors", "utilities").
-    fn category_name() -> &'static str;
-
-    /// Returns the ordinal index of this variant (0-based, contiguous).
-    fn variant_index(&self) -> usize;
-
-    /// Serialization key for JSON output (snake_case variant name).
-    fn serde_key(&self) -> &'static str;
-
-    /// Platform-specific detection override.
-    ///
-    /// Returns `Some(...)` to inject a synthetic detection result instead of
-    /// searching PATH. Used for Windows SAPI which isn't a real executable.
-    fn platform_override(
-        &self,
-    ) -> Option<(std::path::PathBuf, crate::programs::types::ExecutableSource)> {
-        None
-    }
-}
-
-// ============================================================================
-// Editor Enum
-// ============================================================================
-
-/// Text editors and IDEs.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Display,
-    EnumString,
-    EnumIter,
-    EnumCount,
-    IntoStaticStr,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum Editor {
-    Vi,
-    Vim,
-    Neovim,
-    Emacs,
-    XEmacs,
-    Nano,
-    Helix,
-    VSCode,
-    VSCodium,
-    Sublime,
-    Zed,
-    Micro,
-    Kakoune,
-    Amp,
-    Lapce,
-    PhpStorm,
-    IntellijIdea,
-    PyCharm,
-    WebStorm,
-    CLion,
-    GoLand,
-    Rider,
-    TextMate,
-    BBEdit,
-    Geany,
-    Kate,
-}
+pub(crate) static BREW_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
+    "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
+)];
 
 // Editor installation methods
 pub(crate) static VIM_INSTALL: &[InstallationMethod] = &[
@@ -245,7 +144,7 @@ pub(crate) static KATE_INSTALL: &[InstallationMethod] = &[
 ];
 
 /// Metadata lookup table for editors.
-static EDITOR_INFO: &[ProgramInfo] = &[
+pub(crate) static EDITOR_INFO: &[ProgramInfo] = &[
     ProgramInfo {
         binary_name: "vi",
         display_name: "Vi",
@@ -659,60 +558,6 @@ impl CategoryEnum for Editor {
     }
 }
 
-// ============================================================================
-// Utility Enum
-// ============================================================================
-
-/// Modern command-line utilities.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Display,
-    EnumString,
-    EnumIter,
-    EnumCount,
-    IntoStaticStr,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum Utility {
-    Exa,
-    Eza,
-    Ripgrep,
-    Dust,
-    Bat,
-    Fd,
-    Procs,
-    Bottom,
-    Fzf,
-    Zoxide,
-    Starship,
-    Direnv,
-    Jq,
-    Delta,
-    Tealdeer,
-    Lazygit,
-    Gh,
-    Htop,
-    Btop,
-    Tmux,
-    Zellij,
-    Httpie,
-    Curlie,
-    Mise,
-    Hyperfine,
-    Tokei,
-    Xh,
-    Curl,
-    Wget,
-    Iperf3,
-}
-
 // Utility installation methods
 pub(crate) static EXA_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Brew("exa"),
@@ -915,7 +760,7 @@ pub(crate) static IPERF3_INSTALL: &[InstallationMethod] = &[
 ];
 
 /// Metadata lookup table for utilities.
-static UTILITY_INFO: &[ProgramInfo] = &[
+pub(crate) static UTILITY_INFO: &[ProgramInfo] = &[
     ProgramInfo {
         binary_name: "exa",
         display_name: "exa",
@@ -1389,48 +1234,6 @@ impl CategoryEnum for Utility {
     }
 }
 
-// ============================================================================
-// Language Package Manager Enum
-// ============================================================================
-
-/// Language-specific package managers.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Display,
-    EnumString,
-    EnumIter,
-    EnumCount,
-    IntoStaticStr,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum LanguagePackageManager {
-    Npm,
-    Pnpm,
-    Yarn,
-    Bun,
-    Cargo,
-    GoModules,
-    Composer,
-    SwiftPm,
-    Luarocks,
-    Vcpkg,
-    Conan,
-    Nuget,
-    Hex,
-    Pip,
-    Uv,
-    Poetry,
-    Cpan,
-    Cpanm,
-}
-
 // Language package manager installation methods
 pub(crate) static NPM_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Brew("node"),
@@ -1524,7 +1327,7 @@ pub(crate) static CPANM_INSTALL: &[InstallationMethod] = &[
 ];
 
 /// Metadata lookup table for language package managers.
-static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
+pub(crate) static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
     ProgramInfo {
         binary_name: "npm",
         display_name: "npm",
@@ -1818,46 +1621,8 @@ impl CategoryEnum for LanguagePackageManager {
     }
 }
 
-// ============================================================================
-// OS Package Manager Enum
-// ============================================================================
-
-/// Operating system package managers.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Display,
-    EnumString,
-    EnumIter,
-    EnumCount,
-    IntoStaticStr,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum OsPackageManager {
-    Apt,
-    Nala,
-    Brew,
-    Dnf,
-    Pacman,
-    Winget,
-    Chocolatey,
-    Scoop,
-    Nix,
-}
-
-// OS package manager installation methods
-pub(crate) static BREW_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
-    "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
-)];
-
 /// Metadata lookup table for OS package managers.
-static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
+pub(crate) static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
     ProgramInfo {
         binary_name: "apt",
         display_name: "APT",
@@ -2016,45 +1781,6 @@ impl CategoryEnum for OsPackageManager {
     }
 }
 
-// ============================================================================
-// TTS Client Enum
-// ============================================================================
-
-/// Text-to-speech clients.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Display,
-    EnumString,
-    EnumIter,
-    EnumCount,
-    IntoStaticStr,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum TtsClient {
-    Say,
-    Espeak,
-    EspeakNg,
-    Festival,
-    Mimic,
-    Mimic3,
-    Piper,
-    Echogarden,
-    Balcon,
-    WindowsSapi,
-    GttsCli,
-    CoquiTts,
-    SherpaOnnx,
-    KokoroTts,
-    Pico2Wave,
-}
-
 // TTS client installation methods
 pub(crate) static ESPEAK_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Brew("espeak"),
@@ -2097,7 +1823,7 @@ pub(crate) static PICO2WAVE_INSTALL: &[InstallationMethod] = &[
 ];
 
 /// Metadata lookup table for TTS clients.
-static TTS_CLIENT_INFO: &[ProgramInfo] = &[
+pub(crate) static TTS_CLIENT_INFO: &[ProgramInfo] = &[
     ProgramInfo {
         binary_name: "say",
         display_name: "say",
@@ -2364,47 +2090,6 @@ impl CategoryEnum for TtsClient {
     }
 }
 
-// ============================================================================
-// Terminal App Enum
-// ============================================================================
-
-/// Terminal emulators.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Display,
-    EnumString,
-    EnumIter,
-    EnumCount,
-    IntoStaticStr,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum TerminalApp {
-    Alacritty,
-    Kitty,
-    ITerm2,
-    WezTerm,
-    Ghostty,
-    Warp,
-    Rio,
-    Tabby,
-    Foot,
-    GnomeTerminal,
-    Konsole,
-    XfceTerminal,
-    Terminology,
-    St,
-    Xterm,
-    Hyper,
-    WindowsTerminal,
-}
-
 // Terminal app installation methods
 pub(crate) static ALACRITTY_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Brew("alacritty"),
@@ -2478,7 +2163,7 @@ pub(crate) static WINDOWS_TERMINAL_INSTALL: &[InstallationMethod] = &[
 ];
 
 /// Metadata lookup table for terminal apps.
-static TERMINAL_APP_INFO: &[ProgramInfo] = &[
+pub(crate) static TERMINAL_APP_INFO: &[ProgramInfo] = &[
     ProgramInfo {
         binary_name: "alacritty",
         display_name: "Alacritty",
@@ -2496,7 +2181,7 @@ static TERMINAL_APP_INFO: &[ProgramInfo] = &[
     ProgramInfo {
         binary_name: "kitty",
         display_name: "kitty",
-        description: "Fast, feature-rich, GPU-based terminal",
+        description: "Fast, feature-rich GPU-based terminal",
         website: "https://sw.kovidgoyal.net/kitty/",
         version_flag: VersionFlag::Long,
         parse_strategy: VersionParseStrategy::FirstLine,
@@ -2757,43 +2442,6 @@ impl CategoryEnum for TerminalApp {
     }
 }
 
-// ============================================================================
-// Headless Audio Player Enum
-// ============================================================================
-
-/// Headless audio players for CLI/background playback.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Display,
-    EnumString,
-    EnumIter,
-    EnumCount,
-    IntoStaticStr,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum HeadlessAudio {
-    Mpv,
-    Ffplay,
-    Vlc,
-    MPlayer,
-    GstreamerGstPlay,
-    Sox,
-    Mpg123,
-    Ogg123,
-    AlsaAplay,
-    MacOsAfplay,
-    PulseaudioPaplay,
-    PulseaudioPacat,
-    Pipewire,
-}
-
 // Headless audio player installation methods
 pub(crate) static MPV_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Brew("mpv"),
@@ -2869,7 +2517,7 @@ pub(crate) static PIPEWIRE_INSTALL: &[InstallationMethod] = &[
 ];
 
 /// Metadata lookup table for headless audio players.
-static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
+pub(crate) static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
     ProgramInfo {
         binary_name: "mpv",
         display_name: "mpv",
@@ -3088,39 +2736,6 @@ impl CategoryEnum for HeadlessAudio {
     }
 }
 
-// ============================================================================
-// AI CLI Enum
-// ============================================================================
-
-/// AI-powered command-line interface tools.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    Display,
-    EnumString,
-    EnumIter,
-    EnumCount,
-    IntoStaticStr,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum AiCli {
-    Claude,
-    Opencode,
-    Roo,
-    GeminiCli,
-    Aider,
-    Codex,
-    Goose,
-    KimiCli,
-    QwenCli,
-}
-
 // AI CLI installation methods
 pub(crate) static CLAUDE_INSTALL: &[InstallationMethod] =
     &[InstallationMethod::Npm("@anthropic-ai/claude-code")];
@@ -3153,7 +2768,7 @@ pub(crate) static QWEN_CLI_INSTALL: &[InstallationMethod] = &[
 ];
 
 /// Metadata lookup table for AI CLI tools.
-static AI_CLI_INFO: &[ProgramInfo] = &[
+pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
     ProgramInfo {
         binary_name: "claude",
         display_name: "Claude Code",
@@ -3309,165 +2924,5 @@ impl CategoryEnum for AiCli {
             AiCli::KimiCli => "kimi_cli",
             AiCli::QwenCli => "qwen_cli",
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use strum::IntoEnumIterator;
-
-    #[test]
-    fn test_editor_count_matches_info() {
-        assert_eq!(Editor::COUNT, EDITOR_INFO.len());
-    }
-
-    #[test]
-    fn test_ai_cli_count_matches_info() {
-        assert_eq!(AiCli::COUNT, AI_CLI_INFO.len());
-    }
-
-    #[test]
-    fn test_utility_count_matches_info() {
-        assert_eq!(Utility::COUNT, UTILITY_INFO.len());
-    }
-
-    #[test]
-    fn test_lang_pkg_mgr_count_matches_info() {
-        assert_eq!(LanguagePackageManager::COUNT, LANG_PKG_MGR_INFO.len());
-    }
-
-    #[test]
-    fn test_os_pkg_mgr_count_matches_info() {
-        assert_eq!(OsPackageManager::COUNT, OS_PKG_MGR_INFO.len());
-    }
-
-    #[test]
-    fn test_tts_client_count_matches_info() {
-        assert_eq!(TtsClient::COUNT, TTS_CLIENT_INFO.len());
-    }
-
-    #[test]
-    fn test_terminal_app_count_matches_info() {
-        assert_eq!(TerminalApp::COUNT, TERMINAL_APP_INFO.len());
-    }
-
-    #[test]
-    fn test_headless_audio_count_matches_info() {
-        assert_eq!(HeadlessAudio::COUNT, HEADLESS_AUDIO_INFO.len());
-    }
-
-    #[test]
-    fn test_editor_metadata_access() {
-        let vim = Editor::Vim;
-        assert_eq!(vim.binary_name(), "vim");
-        assert_eq!(vim.display_name(), "Vim");
-        assert!(vim.website().starts_with("https://"));
-    }
-
-    #[test]
-    fn test_enum_iteration() {
-        let count = Editor::iter().count();
-        assert_eq!(count, Editor::COUNT);
-    }
-
-    #[test]
-    fn test_category_enum_trait_on_editor() {
-        assert_eq!(Editor::category_name(), "editors");
-        assert_eq!(Editor::Vi.variant_index(), 0);
-        assert_eq!(Editor::Kate.variant_index(), Editor::COUNT - 1);
-
-        // Verify all variant indices are unique and in range
-        let mut seen = std::collections::HashSet::new();
-        for editor in Editor::iter() {
-            let idx = editor.variant_index();
-            assert!(
-                idx < Editor::COUNT,
-                "{:?} index {} >= COUNT {}",
-                editor,
-                idx,
-                Editor::COUNT
-            );
-            assert!(seen.insert(idx), "{:?} has duplicate index {}", editor, idx);
-        }
-    }
-
-    #[test]
-    fn test_all_category_enums_cover_all_programs() {
-        use crate::programs::inventory::Program;
-        use strum::EnumCount;
-
-        let category_total = Editor::COUNT
-            + Utility::COUNT
-            + LanguagePackageManager::COUNT
-            + OsPackageManager::COUNT
-            + TtsClient::COUNT
-            + TerminalApp::COUNT
-            + HeadlessAudio::COUNT
-            + AiCli::COUNT;
-
-        let program_total = Program::iter().count();
-        assert_eq!(
-            category_total, program_total,
-            "Category enum total ({}) != Program::iter() count ({})",
-            category_total, program_total
-        );
-    }
-
-    #[test]
-    fn test_program_mapping_is_bijective() {
-        use crate::programs::inventory::Program;
-        use std::collections::HashSet;
-
-        let mut seen = HashSet::new();
-
-        macro_rules! check_category {
-            ($enum_type:ty) => {
-                for variant in <$enum_type>::iter() {
-                    let program = Program::from(variant);
-                    let key = format!("{:?}", program);
-                    assert!(
-                        seen.insert(key.clone()),
-                        "Duplicate Program mapping from {:?} -> {}",
-                        variant, key
-                    );
-                }
-            };
-        }
-
-        check_category!(Editor);
-        check_category!(Utility);
-        check_category!(LanguagePackageManager);
-        check_category!(OsPackageManager);
-        check_category!(TtsClient);
-        check_category!(TerminalApp);
-        check_category!(HeadlessAudio);
-        check_category!(AiCli);
-    }
-
-    #[test]
-    fn test_category_variant_indices_are_contiguous() {
-        macro_rules! check_indices {
-            ($enum_type:ty) => {{
-                let mut indices: Vec<usize> = <$enum_type>::iter()
-                    .map(|v| v.variant_index())
-                    .collect();
-                indices.sort();
-                let expected: Vec<usize> = (0..<$enum_type>::COUNT).collect();
-                assert_eq!(
-                    indices, expected,
-                    "{} variant indices are not contiguous",
-                    std::any::type_name::<$enum_type>()
-                );
-            }};
-        }
-        check_indices!(Editor);
-        check_indices!(Utility);
-        check_indices!(LanguagePackageManager);
-        check_indices!(OsPackageManager);
-        check_indices!(TtsClient);
-        check_indices!(TerminalApp);
-        check_indices!(HeadlessAudio);
-        check_indices!(AiCli);
     }
 }
