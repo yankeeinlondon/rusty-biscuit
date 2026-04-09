@@ -156,3 +156,43 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         ])
         .split(popup_layout[1])[1]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use insta::assert_debug_snapshot;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn build_modal_hotkey_line_formats_pairs() {
+        let line = build_modal_hotkey_line(&[("ENTER", "Select"), ("ESC", "Cancel")]);
+        let text = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+
+        assert!(text.contains("ENTER: Select"));
+        assert!(text.contains("ESC: Cancel"));
+        assert!(text.contains("│"));
+    }
+
+    #[test]
+    fn render_list_modal_matches_snapshot() {
+        let backend = TestBackend::new(60, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_list_modal_with_hotkeys(
+                    frame,
+                    frame.area(),
+                    "Pick Provider",
+                    &["Claude".into(), "Codex".into(), "Gemini".into()],
+                    1,
+                    &[("ENTER", "Select"), ("ESC", "Cancel")],
+                );
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer().clone();
+        assert_debug_snapshot!("list_modal_buffer", buffer);
+    }
+}

@@ -54,3 +54,42 @@ impl Widget for Toggle<'_> {
         Paragraph::new(line).render(area, buf);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row_text(buf: &Buffer) -> String {
+        (0..buf.area.width)
+            .map(|x| buf[(x, 0)].symbol().chars().next().unwrap_or(' '))
+            .collect::<String>()
+    }
+
+    #[test]
+    fn toggle_renders_active_on_state() {
+        let area = Rect::new(0, 0, 24, 1);
+        let mut buf = Buffer::empty(area);
+
+        Toggle::new("Logging", true, true).render(area, &mut buf);
+
+        let row = row_text(&buf);
+        assert!(row.contains("Logging:  On / Off"));
+
+        let on_index = row.find("On").unwrap() as u16;
+        assert_eq!(buf[(on_index, 0)].fg, Color::Green);
+    }
+
+    #[test]
+    fn toggle_renders_inactive_off_state() {
+        let area = Rect::new(0, 0, 24, 1);
+        let mut buf = Buffer::empty(area);
+
+        Toggle::new("Protect", false, false).render(area, &mut buf);
+
+        let row = row_text(&buf);
+        assert!(row.contains("Protect:  On / Off"));
+
+        let off_index = row.find("Off").unwrap() as u16;
+        assert_eq!(buf[(off_index, 0)].fg, Color::Red);
+    }
+}

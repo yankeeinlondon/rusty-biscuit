@@ -784,6 +784,7 @@ pub(crate) fn try_format_api_error(line: &str, term: &Terminal) -> Option<String
 mod tests {
     use super::*;
     use biscuit_terminal::terminal::Terminal;
+    use proptest::prelude::*;
 
     /// Create a Terminal without real terminal probing (avoids TTY hangs in tests).
     fn test_terminal() -> Terminal {
@@ -886,5 +887,28 @@ mod tests {
             &term,
         );
         assert!(rendered.contains('\n'));
+    }
+
+    #[test]
+    fn style_cli_switches_only_wraps_switch_tokens() {
+        let styled = style_cli_switches("Use --plain or -v but do not touch email@example.com.");
+        assert!(styled.contains("<blue>--plain</blue>"));
+        assert!(styled.contains("<blue>-v</blue>"));
+        assert!(styled.contains("email@example.com"));
+    }
+
+    proptest! {
+        #[test]
+        fn truncate_args_respects_budget_for_arbitrary_utf8(input in any::<String>(), budget in 0usize..128) {
+            let truncated = truncate_args(&input, budget);
+
+            if input.len() > budget && budget <= 4 {
+                prop_assert_eq!(truncated.as_str(), "...\"");
+            } else {
+                prop_assert!(truncated.len() <= budget);
+            }
+
+            prop_assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
+        }
     }
 }

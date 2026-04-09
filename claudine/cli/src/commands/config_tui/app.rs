@@ -413,3 +413,93 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use claudine::config::claudine_config::ClaudineConfig;
+    use claudine::events::AgenticEvent;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn test_app() -> App {
+        App::new(ClaudineConfig::default(), None, None, false, None, None)
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn overview_enter_switches_to_detail_mode() {
+        let mut app = test_app();
+        app.focused_tab = Tab::Services;
+
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(app.mode, AppMode::Detail);
+        assert_eq!(app.selected_tab, Some(Tab::Services));
+        assert_eq!(app.list_index, 0);
+    }
+
+    #[test]
+    fn detail_escape_returns_to_overview() {
+        let mut app = test_app();
+        app.mode = AppMode::Detail;
+        app.selected_tab = Some(Tab::Actions);
+
+        app.handle_key(key(KeyCode::Esc));
+
+        assert_eq!(app.mode, AppMode::Overview);
+        assert_eq!(app.selected_tab, None);
+    }
+
+    #[test]
+    fn push_and_pop_modal_restore_parent_state() {
+        let mut app = test_app();
+        app.modal = Some(ModalState::EditActions {
+            event: AgenticEvent::SessionStart,
+            highlighted: 1,
+        });
+
+        app.push_modal(ModalState::ActionTypeChooser {
+            event: AgenticEvent::SessionStart,
+            highlighted: 2,
+        });
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::ActionTypeChooser { highlighted: 2, .. })
+        ));
+        assert_eq!(app.modal_stack.len(), 1);
+
+        app.pop_modal();
+        assert!(matches!(
+            app.modal,
+            Some(ModalState::EditActions { highlighted: 1, .. })
+        ));
+    }
+
+    #[test]
+    fn pop_to_edit_actions_unwinds_modal_stack() {
+        let mut app = test_app();
+        app.modal = Some(ModalState::EditActions {
+            event: AgenticEvent::SessionStart,
+            highlighted: 0,
+        });
+        app.push_modal(ModalState::ActionTypeChooser {
+            event: AgenticEvent::SessionStart,
+            highlighted: 0,
+        });
+        app.push_modal(ModalState::TextInput {
+            event: AgenticEvent::SessionStart,
+            action_type: 0,
+            buffer: String::new(),
+            label: "Prompt".to_string(),
+            edit_index: None,
+        });
+
+        app.pop_to_edit_actions();
+
+        assert!(matches!(app.modal, Some(ModalState::EditActions { .. })));
+        assert!(app.modal_stack.is_empty());
+    }
+}

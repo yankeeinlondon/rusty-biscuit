@@ -428,3 +428,103 @@ pub fn handle_protect_rules_modal(app: &mut App, key: KeyEvent) {
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use insta::assert_debug_snapshot;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    use claudine::config::claudine_config::ClaudineConfig;
+    use claudine::services::protect::catalog::RuleGroup;
+
+    use crate::commands::config_tui::app::Tab;
+
+    fn test_app() -> App {
+        let mut app = App::new(ClaudineConfig::default(), None, None, false, None, None);
+        app.mode = AppMode::Detail;
+        app.focused_tab = Tab::Services;
+        app
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn services_render_matches_snapshot() {
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = test_app();
+        app.config.protect.enabled = true;
+
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer().clone();
+        assert_debug_snapshot!("services_tab_buffer", buffer);
+    }
+
+    #[test]
+    fn services_render_handles_narrow_terminal() {
+        let backend = TestBackend::new(40, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = test_app();
+        app.config.protect.enabled = true;
+
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app))
+            .unwrap();
+
+        let content: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(content.contains("Protect"));
+        assert!(content.contains("Default Configuration"));
+    }
+
+    #[test]
+    fn protect_rules_modal_commit_updates_config() {
+        let mut app = test_app();
+        let original_enabled =
+            is_group_enabled(&app.config.protect.rules, RuleGroup::FilesystemDestruction);
+
+        handle_key(&mut app, key(KeyCode::Char('c')));
+        assert!(matches!(app.modal, Some(ModalState::ProtectRules { .. })));
+
+        handle_protect_rules_modal(&mut app, key(KeyCode::Char(' ')));
+        handle_protect_rules_modal(&mut app, key(KeyCode::Enter));
+
+        assert!(app.dirty);
+        assert!(app.modal.is_none());
+        assert_eq!(
+            is_group_enabled(&app.config.protect.rules, RuleGroup::FilesystemDestruction),
+            !original_enabled
+        );
+    }
+
+    #[test]
+    fn protect_rules_modal_escape_discards_staged_changes() {
+        let mut app = test_app();
+        let original_enabled =
+            is_group_enabled(&app.config.protect.rules, RuleGroup::FilesystemDestruction);
+
+        handle_key(&mut app, key(KeyCode::Char('c')));
+        handle_protect_rules_modal(&mut app, key(KeyCode::Char(' ')));
+        handle_protect_rules_modal(&mut app, key(KeyCode::Esc));
+
+        assert!(app.modal.is_none());
+        assert_eq!(
+            is_group_enabled(&app.config.protect.rules, RuleGroup::FilesystemDestruction),
+            original_enabled
+        );
+        assert!(!app.dirty);
+    }
+}
