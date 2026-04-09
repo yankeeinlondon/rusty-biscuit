@@ -42,14 +42,14 @@ pub fn load_or_create_guardrails(repo_root: Option<&Path>) -> String {
     }
 
     // Create .claudine/ directory if needed, then write the default template
-    if let Some(parent) = guardrails_path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            warn!(
-                "failed to create guardrails directory {}: {e}",
-                parent.display()
-            );
-            return DEFAULT_GUARDRAILS.to_string();
-        }
+    if let Some(parent) = guardrails_path.parent()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        warn!(
+            "failed to create guardrails directory {}: {e}",
+            parent.display()
+        );
+        return DEFAULT_GUARDRAILS.to_string();
     }
     if let Err(e) = fs::write(&guardrails_path, DEFAULT_GUARDRAILS) {
         warn!(
