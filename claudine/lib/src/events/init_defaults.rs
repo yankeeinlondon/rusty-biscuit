@@ -1,4 +1,4 @@
-use super::{AgenticEvent, PROVIDERS_DISPLAY_ORDER, Provider};
+use super::{AgenticEvent, Provider, PROVIDERS_DISPLAY_ORDER};
 
 /// A CLI-selectable TTS provider option.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

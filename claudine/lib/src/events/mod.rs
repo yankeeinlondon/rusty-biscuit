@@ -9,21 +9,21 @@ mod resolved_hook;
 
 pub use agentic_event::AgenticEvent;
 pub use config::{
-    CanonicalProviderSettings, EventBinding, GlobalSettings, HookerConfig, LinkingSettings,
-    ProviderConfig, TtsSettings,
+    CanonicalProviderSettings, EventBinding, GlobalSettings, LinkingSettings, TtsSettings,
 };
 pub use environment::{
-    EnvironmentContext, GitContext, HardwareContext, OsContext, RepoContext, detect_environment,
-    detect_environment_fast,
+    detect_environment, detect_environment_fast, EnvironmentContext, GitContext, HardwareContext,
+    OsContext, RepoContext,
 };
 pub use event_meta::{EventMeta, ToolName};
 pub use init_defaults::{
-    INIT_EVENT_DISPLAY_ORDER, INIT_RECOMMENDED_EVENTS, INIT_TTS_PROVIDERS, TtsProviderOption,
-    default_speak_template, quick_start_supported_providers, recommended_sound,
+    default_speak_template, quick_start_supported_providers, recommended_sound, TtsProviderOption,
+    INIT_EVENT_DISPLAY_ORDER, INIT_RECOMMENDED_EVENTS, INIT_TTS_PROVIDERS,
 };
 pub use matrix::{
-    EventNativeMappingCell, EventNativeMappingRow, EventSupportCell, EventSupportRow,
-    NativeEventName, PROVIDERS_DISPLAY_ORDER, event_native_mapping_matrix, event_support_matrix,
+    event_native_mapping_matrix, event_support_matrix, EventNativeMappingCell,
+    EventNativeMappingRow, EventSupportCell, EventSupportRow, NativeEventName,
+    PROVIDERS_DISPLAY_ORDER,
 };
 pub use provider::{EventSupportLevel, Provider};
 pub use resolved_hook::ResolvedHook;
