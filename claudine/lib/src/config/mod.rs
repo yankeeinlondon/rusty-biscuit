@@ -1,12 +1,12 @@
 pub mod atomic;
 pub(crate) mod backup;
-pub mod migration;
-pub mod claudine_config;
 mod claude;
+pub mod claudine_config;
 mod codex;
 mod gemini;
 mod goose;
 mod kimicode;
+pub mod migration;
 mod opencode;
 mod qwen;
 mod roo;

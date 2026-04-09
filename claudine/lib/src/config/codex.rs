@@ -350,9 +350,7 @@ mod tests {
         let configurator = CodexConfigurator;
         let plan = test_plan();
 
-        let result = configurator
-            .register(&plan, Some(tmp.path()))
-            .unwrap();
+        let result = configurator.register(&plan, Some(tmp.path())).unwrap();
         assert!(matches!(
             result,
             RegistrationResult::Registered { event_count: 1 }
@@ -378,9 +376,7 @@ mod tests {
 
         let configurator = CodexConfigurator;
         let plan = test_plan();
-        configurator
-            .register(&plan, Some(tmp.path()))
-            .unwrap();
+        configurator.register(&plan, Some(tmp.path())).unwrap();
 
         let content = fs::read_to_string(&config).unwrap();
         // toml_edit preserves comments
@@ -396,9 +392,7 @@ mod tests {
 
         let configurator = CodexConfigurator;
         let plan = test_plan();
-        configurator
-            .register(&plan, Some(tmp.path()))
-            .unwrap();
+        configurator.register(&plan, Some(tmp.path())).unwrap();
 
         // Wrapper script should be created
         let wrapper_path = tmp.path().join("codex-notify-wrapper.sh");
@@ -530,11 +524,7 @@ mod tests {
         // is_registered sees the direct notify → true
         assert!(configurator.is_registered(Some(tmp.path())).unwrap());
         // But is_in_sync should detect missing wrapper → false
-        assert!(
-            !configurator
-                .is_in_sync(&plan, Some(tmp.path()))
-                .unwrap()
-        );
+        assert!(!configurator.is_in_sync(&plan, Some(tmp.path())).unwrap());
     }
 
     #[test]
@@ -549,11 +539,7 @@ mod tests {
         let plan = test_plan();
 
         // Wrapper path matches but file is missing → out of sync
-        assert!(
-            !configurator
-                .is_in_sync(&plan, Some(tmp.path()))
-                .unwrap()
-        );
+        assert!(!configurator.is_in_sync(&plan, Some(tmp.path())).unwrap());
     }
 
     #[test]
@@ -566,16 +552,10 @@ mod tests {
         let plan = test_plan();
 
         // Register properly (creates wrapper + updates config)
-        configurator
-            .register(&plan, Some(tmp.path()))
-            .unwrap();
+        configurator.register(&plan, Some(tmp.path())).unwrap();
 
         // Now should be in sync
-        assert!(
-            configurator
-                .is_in_sync(&plan, Some(tmp.path()))
-                .unwrap()
-        );
+        assert!(configurator.is_in_sync(&plan, Some(tmp.path())).unwrap());
     }
 
     #[test]

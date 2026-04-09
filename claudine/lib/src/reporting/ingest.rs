@@ -794,7 +794,11 @@ mod tests {
 
         let meta = sample_meta();
         let log_path = logs_dir.join("2026-04-03.jsonl");
-        fs::write(&log_path, format!("{}\n", serde_json::to_string(&meta).unwrap())).unwrap();
+        fs::write(
+            &log_path,
+            format!("{}\n", serde_json::to_string(&meta).unwrap()),
+        )
+        .unwrap();
 
         let summary = sync(&mut conn, &logs_dir, crate::reporting::SyncRequest::All).unwrap();
 
@@ -823,7 +827,8 @@ mod tests {
             m.session_id = Some(session.to_string());
             m.timestamp = Utc.with_ymd_and_hms(2026, 4, 3, ts_hour, 0, 0).unwrap();
             if let Some(pad) = extra_pad {
-                m.extra.insert("_pad".to_string(), serde_json::Value::String(pad));
+                m.extra
+                    .insert("_pad".to_string(), serde_json::Value::String(pad));
             }
             m
         };

@@ -301,6 +301,14 @@ pub struct RepoOverrideConfig {
     pub active_messenger: Option<Option<String>>,
 }
 
+impl RepoOverrideConfig {
+    pub fn is_empty(&self) -> bool {
+        self.canonical_provider.is_none()
+            && self.actions.is_empty()
+            && self.active_messenger.is_none()
+    }
+}
+
 fn deserialize_optional_messenger_override<'de, D>(
     deserializer: D,
 ) -> std::result::Result<Option<Option<String>>, D::Error>
