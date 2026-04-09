@@ -7,49 +7,9 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::str::contains;
 use std::fs;
-use std::path::Path;
 use tempfile::tempdir;
-
-fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                for code in chars.by_ref() {
-                    if ('@'..='~').contains(&code) {
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-        out.push(ch);
-    }
-
-    out
-}
-
-/// Prepend the test's fake bin directory to the real PATH so the
-/// fake provider shadows real binaries while system tools like `cat`
-/// remain available to provider scripts.
-fn augmented_path(fake_bin: &Path) -> std::ffi::OsString {
-    let system_path = std::env::var_os("PATH").unwrap_or_default();
-    let mut paths: Vec<std::path::PathBuf> = vec![fake_bin.to_path_buf()];
-    paths.extend(std::env::split_paths(&system_path));
-    std::env::join_paths(paths).expect("join_paths")
-}
-
-#[cfg(unix)]
-fn write_executable(path: &Path, content: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    fs::write(path, content).unwrap();
-    let mut perms = fs::metadata(path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(path, perms).unwrap();
-}
+mod common;
+use common::{augmented_path, strip_ansi, write_executable};
 
 // ============================================================================
 // Validation tests

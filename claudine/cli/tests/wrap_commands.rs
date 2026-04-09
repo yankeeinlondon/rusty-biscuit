@@ -7,39 +7,9 @@ use predicates::str::contains;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use tempfile::tempdir;
-
-fn write_executable(path: &Path, content: &str) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::write(path, content).unwrap();
-        let mut perms = fs::metadata(path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(path, perms).unwrap();
-    }
-    #[cfg(not(unix))]
-    {
-        fs::write(path, content).unwrap();
-    }
-}
-
-fn write_file(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, content).unwrap();
-}
-
-fn init_git_repo(path: &Path) -> bool {
-    Command::new("git")
-        .arg("init")
-        .current_dir(path)
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
+mod common;
+use common::{init_git_repo, strip_ansi, write, write_executable, write_json};
 
 fn create_claudine_monorepo(workspace: &Path) -> Option<(PathBuf, PathBuf, PathBuf)> {
     let repo_root = workspace.join("repo");
@@ -51,14 +21,14 @@ fn create_claudine_monorepo(workspace: &Path) -> Option<(PathBuf, PathBuf, PathB
     fs::create_dir_all(lib_dir.join("src")).unwrap();
     fs::create_dir_all(&bin_dir).unwrap();
 
-    write_file(
+    write(
         &repo_root.join("Cargo.toml"),
         r#"[workspace]
 resolver = "2"
 members = ["claudine/lib", "claudine/cli"]
 "#,
     );
-    write_file(
+    write(
         &lib_dir.join("Cargo.toml"),
         r#"[package]
 name = "claudine"
@@ -66,8 +36,8 @@ version = "0.1.0"
 edition = "2024"
 "#,
     );
-    write_file(&lib_dir.join("src/lib.rs"), "");
-    write_file(
+    write(&lib_dir.join("src/lib.rs"), "");
+    write(
         &launch_dir.join("Cargo.toml"),
         r#"[package]
 name = "claudine-cli"
@@ -75,7 +45,7 @@ version = "0.1.0"
 edition = "2024"
 "#,
     );
-    write_file(&launch_dir.join("src/main.rs"), "fn main() {}\n");
+    write(&launch_dir.join("src/main.rs"), "fn main() {}\n");
 
     if !init_git_repo(&repo_root) {
         return None;
@@ -111,39 +81,10 @@ fn redact_temp_home(input: &str) -> String {
     format!("{}HOME=<redacted>{}", &input[..start], &after[end..])
 }
 
-fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                for code in chars.by_ref() {
-                    if ('@'..='~').contains(&code) {
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-        out.push(ch);
-    }
-
-    out
-}
-
 fn today_log_path(home: &Path) -> std::path::PathBuf {
     home.join(".claudine")
         .join("logs")
         .join(format!("{}.jsonl", Local::now().format("%Y-%m-%d")))
-}
-
-fn write_json<T: serde::Serialize>(path: &Path, value: &T) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, serde_json::to_string_pretty(value).unwrap()).unwrap();
 }
 
 fn make_server(id: &str) -> McpServer {
@@ -1688,7 +1629,7 @@ fn compose_interactive_preflight_with_whitelisted_command() {
 
     write_executable(
         &path_dir.join("codex"),
-        "#!/bin/sh\necho 'provider-launched' >&2\nexit 0\n",
+        "#!/bin/sh\ncat > /dev/null\necho 'provider-launched' >&2\nexit 0\n",
     );
 
     // Include system dirs so shell expansion can find `echo`.
@@ -1746,6 +1687,7 @@ fn compose_skips_shell_hidden_by_false_block() {
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -2346,7 +2288,7 @@ fn compose_opencode_launches_child_from_repo_root() {
     let env_path = workspace.path().join("env.txt");
     let args_path = workspace.path().join("args.txt");
     let md_file = repo_root.join("prompts/test.md");
-    write_file(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
+    write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
 
     write_executable(
         &bin_dir.join("opencode"),
@@ -2398,7 +2340,7 @@ fn compose_opencode_launches_from_repo_root_for_package_prompt_refs() {
     let env_path = workspace.path().join("env-package.txt");
     let args_path = workspace.path().join("args-package.txt");
     let md_file = package_root.join("prompts/test.md");
-    write_file(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
+    write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
 
     write_executable(
         &bin_dir.join("opencode"),
