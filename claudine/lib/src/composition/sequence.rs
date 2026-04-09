@@ -76,13 +76,13 @@ fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, 
     // Expand ~ to HOME directly, since FileReference treats `@` as the
     // magic-search prefix and there is no dedicated tilde form.
     if let Some(rest) = raw.strip_prefix('~') {
-        let home = std::env::var("HOME").map_err(|_| {
+        let home = dirs::home_dir().ok_or_else(|| {
             CompositionError::SequenceExternalLoad(format!(
-                "`{raw}`: HOME environment variable is not set"
+                "`{raw}`: unable to resolve home directory"
             ))
         })?;
         let suffix = rest.trim_start_matches('/');
-        return Ok(Path::new(&home).join(suffix));
+        return Ok(home.join(suffix));
     }
 
     if is_file_reference_target(raw) {

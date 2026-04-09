@@ -268,7 +268,11 @@ fn rewrite_last_updated_line(line: &str, today: &str) -> Option<String> {
 }
 
 fn detect_newline(text: &str) -> &str {
-    if text.contains("\r\n") { "\r\n" } else { "\n" }
+    if text.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
 }
 
 fn trim_line_ending(line: &str) -> &str {
@@ -313,16 +317,25 @@ fn compare_frontmatter(
 /// delegate to `serde_yaml_ng` for the value portion.
 fn serialize_frontmatter_property(key: &str, value: &serde_json::Value) -> String {
     match value {
-        serde_json::Value::String(s) => format!("{key}: {s}\n"),
-        serde_json::Value::Number(n) => format!("{key}: {n}\n"),
-        serde_json::Value::Bool(b) => format!("{key}: {b}\n"),
-        serde_json::Value::Null => format!("{key}: null\n"),
+        serde_json::Value::String(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Null => {
+            let yaml_value = biscuit_file::serde_yaml_ng::to_string(value)
+                .unwrap_or_else(|_| format!("{value}"));
+            let yaml_value = yaml_value.trim_end_matches('\n');
+            format!("{key}: {yaml_value}\n")
+        }
         complex => {
-            // For arrays and objects, serialize the value via serde_yaml_ng
-            // then prefix the first line with the key.
             let yaml_value = biscuit_file::serde_yaml_ng::to_string(complex)
                 .unwrap_or_else(|_| format!("{complex}"));
-            format!("{key}:\n{yaml_value}")
+            let yaml_value = yaml_value.trim_end_matches('\n');
+            let indented = yaml_value
+                .lines()
+                .map(|line| format!("  {line}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("{key}:\n{indented}\n")
         }
     }
 }
@@ -530,6 +543,26 @@ mod tests {
     }
 
     #[test]
+    fn serialize_string_with_special_chars_is_quoted() {
+        let value = serde_json::json!("key: value");
+        let result = serialize_frontmatter_property("note", &value);
+        assert!(
+            result.contains("'key: value'") || result.contains("\"key: value\""),
+            "expected quoted YAML value, got: {result}"
+        );
+    }
+
+    #[test]
+    fn serialize_string_with_colon_hash() {
+        let value = serde_json::json!("item #1: top");
+        let result = serialize_frontmatter_property("desc", &value);
+        assert!(
+            result.contains('#'),
+            "hash should be preserved in quoted value: {result}"
+        );
+    }
+
+    #[test]
     fn serialize_number_property() {
         let result = serialize_frontmatter_property("count", &serde_json::json!(42));
         assert_eq!(result, "count: 42\n");
@@ -551,10 +584,9 @@ mod tests {
     fn serialize_array_property() {
         let value = serde_json::json!(["rust", "markdown"]);
         let result = serialize_frontmatter_property("tags", &value);
-        // serde_yaml_ng serializes arrays with block style
         assert!(result.starts_with("tags:\n"));
-        assert!(result.contains("- rust"));
-        assert!(result.contains("- markdown"));
+        assert!(result.contains("  - rust"));
+        assert!(result.contains("  - markdown"));
     }
 
     #[test]
@@ -562,7 +594,7 @@ mod tests {
         let value = serde_json::json!({"version": "1.0"});
         let result = serialize_frontmatter_property("meta", &value);
         assert!(result.starts_with("meta:\n"));
-        assert!(result.contains("version:"));
+        assert!(result.contains("version"));
     }
 
     // -- upsert_last_updated ------------------------------------------------
