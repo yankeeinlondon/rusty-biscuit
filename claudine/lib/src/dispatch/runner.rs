@@ -700,6 +700,10 @@ fn apply_mapper(
         Mapper::JsonField { field } => map_json_field(field, output),
         Mapper::JsonObject => map_json_object(output),
         Mapper::Regex { pattern } => {
+            tracing::debug!(
+                pattern,
+                "apply_mapper: compiled_mapper not provided, falling back to per-call regex compilation"
+            );
             let regex = Regex::new(pattern)?;
             map_regex_with_compiled(&regex, output)
         }

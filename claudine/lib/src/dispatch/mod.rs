@@ -909,6 +909,88 @@ mod tests {
         );
     }
 
+    #[test]
+    fn finalize_response_returns_non_blocking_ack_for_fire_and_forget_events() {
+        let adapter = adapters::adapter_for(Provider::Claude);
+
+        let outcome = finalize_response(
+            adapter,
+            &AgenticEvent::SessionStart,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(outcome.response, Some(json!({})));
+        assert_eq!(outcome.exit_code, None);
+    }
+
+    #[test]
+    fn finalize_response_keeps_blocking_events_empty_without_hook_response() {
+        let adapter = adapters::adapter_for(Provider::Claude);
+
+        let outcome = finalize_response(
+            adapter,
+            &AgenticEvent::BeforeTool,
+            true,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(outcome.response, None);
+        assert_eq!(outcome.exit_code, None);
+    }
+
+    #[test]
+    fn finalize_response_formats_blocking_payload_and_exit_code() {
+        let adapter = adapters::adapter_for(Provider::Gemini);
+        let response = HookResponse {
+            decision: Some(HookDecision::Deny),
+            reason: Some("blocked by tests".to_string()),
+            ..HookResponse::default()
+        };
+
+        let outcome = finalize_response(
+            adapter,
+            &AgenticEvent::BeforeTool,
+            true,
+            Some(response),
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome.response,
+            Some(json!({"error": "blocked by tests"}))
+        );
+        assert_eq!(outcome.exit_code, Some(2));
+    }
+
+    #[test]
+    fn finalize_response_preserves_protect_context() {
+        let adapter = adapters::adapter_for(Provider::Codex);
+        let protect_pre = ProtectDecision::allow();
+        let protect_post = ProtectDecision::allow();
+
+        let outcome = finalize_response(
+            adapter,
+            &AgenticEvent::AfterTool,
+            false,
+            None,
+            Some(protect_pre.clone()),
+            Some(protect_post.clone()),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.protect_pre, Some(protect_pre));
+        assert_eq!(outcome.protect_post, Some(protect_post));
+    }
+
     #[tokio::test]
     async fn dispatch_loads_repo_scoped_config_from_environment_context() {
         let repo = tempfile::tempdir().unwrap();
