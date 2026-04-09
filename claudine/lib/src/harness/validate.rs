@@ -444,9 +444,12 @@ fn check_shell_command(
     show_stderr: bool,
 ) -> CheckResult {
     let timeout = std::time::Duration::from_secs(60);
-    let (exit_code, stdout, stderr) =
-        crate::harness::shell::execute_approved_command(command, None, timeout)
-            .map_err(|e| format!("shell command '{}' failed: {e}", command.raw))?;
+    let (exit_code, stdout, stderr) = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(
+            crate::harness::shell::execute_approved_command(command, None, timeout),
+        )
+    })
+    .map_err(|e| format!("shell command '{}' failed: {e}", command.raw))?;
 
     if show_stdout && !stdout.trim().is_empty() {
         eprintln!("{stdout}");
