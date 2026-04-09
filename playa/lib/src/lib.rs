@@ -2,6 +2,8 @@ mod audio;
 mod channels;
 mod detection;
 mod error;
+#[cfg(feature = "sfx-native")]
+mod native_audio;
 mod playa;
 mod playback;
 mod player;

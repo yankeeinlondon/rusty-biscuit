@@ -28,14 +28,22 @@
 //! and PulseAudio's equivalent use this property to optionally duck other
 //! audio during event sounds. Falls back to the default rodio output if
 //! PulseAudio is not available (e.g., ALSA-only systems).
+//!
+//! Native SFX playback never terminates the process. If a native device-open
+//! operation times out, playa disables further native playback attempts for
+//! the rest of the process and future calls fall back to host playback.
 
 use std::io::Cursor;
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use thiserror::Error;
 
+use crate::native_audio::{
+    NATIVE_DEVICE_TIMEOUT, NativeAudioFailureKind, log_native_audio_disabled_once,
+    native_audio_available, open_with_channel_fallback, run_with_timeout,
+    trip_native_audio_breaker,
+};
 use crate::types::PlaybackOptions;
 
 /// Maximum time to wait for native audio playback to complete before
@@ -43,30 +51,74 @@ use crate::types::PlaybackOptions;
 /// an audio device becomes unresponsive.
 const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Maximum time to wait for an audio device to open.
-const DEVICE_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
-
 /// Open an SFX audio stream with a timeout.
 ///
-/// Runs the device-opening logic on a background thread and waits up to
-/// `timeout` for a result. Returns `DeviceOpenTimeout` if the audio device
-/// does not respond in time, instead of blocking the calling thread
-/// indefinitely or terminating the process.
+/// Resolves an optional requested channel and opens the requested or default
+/// SFX output path within a single bounded deadline.
 fn open_sfx_stream_with_timeout(
     timeout: Duration,
     options: &PlaybackOptions,
 ) -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
-    let opts = options.clone();
-    let (tx, rx) = mpsc::channel();
+    let deadline = Instant::now() + timeout;
+    open_with_channel_fallback(
+        options.channel.as_deref(),
+        deadline,
+        crate::channels::find_device_by_id_or_name_with_timeout,
+        open_device_stream_with_timeout,
+        open_default_sfx_stream_with_timeout,
+        || SfxPlaybackError::DeviceOpenTimeout(timeout.as_secs()),
+    )
+}
 
-    std::thread::spawn(move || {
-        let _ = tx.send(open_sfx_stream(&opts));
-    });
-
-    match rx.recv_timeout(timeout) {
-        Ok(result) => result.map_err(SfxPlaybackError::Stream),
-        Err(_) => Err(SfxPlaybackError::DeviceOpenTimeout(timeout.as_secs())),
+fn open_device_stream_with_timeout(
+    device: rodio::Device,
+    timeout: Duration,
+) -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
+    if timeout.is_zero() {
+        return Err(SfxPlaybackError::DeviceOpenTimeout(
+            NATIVE_DEVICE_TIMEOUT.as_secs(),
+        ));
     }
+
+    run_with_timeout(
+        timeout,
+        move || {
+            DeviceSinkBuilder::from_device(device)
+                .and_then(|builder| builder.open_stream())
+                .map_err(SfxPlaybackError::Stream)
+        },
+        sfx_device_open_timeout,
+    )
+}
+
+fn open_default_sfx_stream_with_timeout(
+    timeout: Duration,
+) -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
+    if timeout.is_zero() {
+        return Err(SfxPlaybackError::DeviceOpenTimeout(
+            NATIVE_DEVICE_TIMEOUT.as_secs(),
+        ));
+    }
+
+    run_with_timeout(timeout, open_default_sfx_stream, sfx_device_open_timeout)
+}
+
+fn open_default_sfx_stream() -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
+    #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
+    {
+        if let Ok(Some(device)) = macos::find_system_sound_device()
+            && let Ok(stream) = DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
+        {
+            return Ok(stream);
+        }
+    }
+
+    DeviceSinkBuilder::open_default_sink().map_err(SfxPlaybackError::Stream)
+}
+
+fn sfx_device_open_timeout(timeout: Duration) -> SfxPlaybackError {
+    trip_native_audio_breaker(NativeAudioFailureKind::DeviceOpenTimeout);
+    SfxPlaybackError::DeviceOpenTimeout(timeout.as_secs())
 }
 
 /// Errors from native SFX playback.
@@ -75,6 +127,10 @@ pub enum SfxPlaybackError {
     /// Failed to open an audio output stream.
     #[error("failed to open audio stream: {0}")]
     Stream(#[from] rodio::DeviceSinkError),
+
+    /// Native playback was disabled earlier in this process.
+    #[error("native playback is disabled for this process after an earlier device-open timeout")]
+    NativePlaybackDisabled,
 
     /// Audio device did not respond within the allotted time.
     #[error("audio device did not respond within {0}s")]
@@ -99,7 +155,9 @@ pub enum SfxPlaybackError {
 /// `sfx-native-macos`, routes audio to the system sound device (which the
 /// user can configure separately from the default output in System Settings
 /// → Sound). Falls back to the default output device if the system sound
-/// device can't be found or is the same as the default.
+/// device can't be found or is the same as the default. A device-open timeout
+/// disables future native playback attempts for the current process so callers
+/// can fall back directly to host playback.
 ///
 /// ## Errors
 ///
@@ -107,6 +165,11 @@ pub enum SfxPlaybackError {
 /// audio data can't be decoded. Callers should fall back to host player
 /// delegation on error.
 pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlaybackError> {
+    if !native_audio_available() {
+        log_native_audio_disabled_once();
+        return Err(SfxPlaybackError::NativePlaybackDisabled);
+    }
+
     // Windows: play through WASAPI with AudioCategory_SoundEffects.
     #[cfg(all(target_os = "windows", feature = "sfx-native-windows"))]
     {
@@ -125,7 +188,8 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
         // Fall through to default rodio path on error.
     }
 
-    let mut stream = open_sfx_stream_with_timeout(DEVICE_OPEN_TIMEOUT, options)?;
+    let source = Decoder::new(Cursor::new(bytes.to_vec()))?;
+    let mut stream = open_sfx_stream_with_timeout(NATIVE_DEVICE_TIMEOUT, options)?;
     stream.log_on_drop(false);
     let player = Player::connect_new(stream.mixer());
 
@@ -136,7 +200,6 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
         player.set_speed(speed);
     }
 
-    let source = Decoder::new(Cursor::new(bytes.to_vec()))?;
     player.append(source);
     wait_with_timeout(&player, PLAYBACK_TIMEOUT)?;
 
@@ -163,37 +226,6 @@ fn wait_with_timeout(player: &Player, timeout: Duration) -> Result<(), SfxPlayba
     }
     Ok(())
 }
-
-/// Open an audio output stream targeting the OS sound effects channel.
-///
-/// On macOS with `sfx-native-macos`, attempts to route to the system sound
-/// device. Falls back to the default output device on all other platforms
-/// or if device lookup fails.
-pub(crate) fn open_sfx_stream(
-    options: &PlaybackOptions,
-) -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
-    if let Some(channel_name) = &options.channel
-        && let Some(device) = crate::channels::find_device_by_id_or_name(channel_name)
-        && let Ok(stream) = DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
-    {
-        return Ok(stream);
-    }
-
-    #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
-    {
-        if let Ok(Some(device)) = macos::find_system_sound_device()
-            && let Ok(stream) = DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
-        {
-            return Ok(stream);
-        }
-    }
-
-    DeviceSinkBuilder::open_default_sink()
-}
-
-// ============================================================================
-// macOS: System sound device routing
-// ============================================================================
 
 #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
 pub(crate) mod macos {
@@ -1039,5 +1071,26 @@ mod tests {
         let err = SfxPlaybackError::Decode(rodio::decoder::DecoderError::UnrecognizedFormat);
         let msg = err.to_string();
         assert!(msg.contains("decode"), "error message: {msg}");
+    }
+
+    #[test]
+    fn play_sfx_short_circuits_when_native_audio_is_disabled() {
+        let _guard = crate::native_audio::lock_native_audio_test_state();
+        crate::native_audio::trip_native_audio_breaker(NativeAudioFailureKind::DeviceOpenTimeout);
+
+        let result = play_sfx(&[0u8; 4], &PlaybackOptions::default());
+        assert!(matches!(
+            result,
+            Err(SfxPlaybackError::NativePlaybackDisabled)
+        ));
+    }
+
+    #[test]
+    fn decode_errors_do_not_trip_native_audio_breaker() {
+        let _guard = crate::native_audio::lock_native_audio_test_state();
+
+        let result = play_sfx(&[0u8; 4], &PlaybackOptions::default());
+        assert!(matches!(result, Err(SfxPlaybackError::Decode(_))));
+        assert!(crate::native_audio::native_audio_available());
     }
 }

@@ -7,16 +7,24 @@
 //!
 //! Formats that symphonia cannot decode (currently only Opus) fall back to
 //! host player delegation automatically.
+//!
+//! Native playback never terminates the process. If a native device-open
+//! operation times out, playa disables further native playback attempts for
+//! the rest of the process and future calls fall back to host players.
 
 use std::fs::File;
 use std::io::{BufReader, Cursor};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use thiserror::Error;
 
 use crate::audio::AudioData;
+use crate::native_audio::{
+    NATIVE_DEVICE_TIMEOUT, NativeAudioFailureKind, log_native_audio_disabled_once,
+    native_audio_available, open_with_channel_fallback, run_with_timeout,
+    trip_native_audio_breaker,
+};
 use crate::types::{AudioFileFormat, AudioFormat, Codec, PlaybackOptions};
 
 /// Maximum time to wait for native audio playback to complete.
@@ -24,39 +32,65 @@ use crate::types::{AudioFileFormat, AudioFormat, Codec, PlaybackOptions};
 /// should use a host player (mpv, ffplay, etc.).
 const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Maximum time to wait for an audio device to open.
-const DEVICE_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
-
 /// Open an audio output stream with a timeout.
 ///
-/// Runs the device-opening logic on a background thread and waits up to
-/// `timeout` for a result. Returns `DeviceOpenTimeout` if the audio device
-/// does not respond in time, instead of blocking the calling thread
-/// indefinitely or terminating the process.
+/// Resolves an optional requested channel and opens the requested or default
+/// device within a single bounded deadline.
 fn open_stream_with_timeout(
     timeout: Duration,
     options: &PlaybackOptions,
 ) -> Result<rodio::MixerDeviceSink, NativePlaybackError> {
-    let channel_name = options.channel.clone();
-    let (tx, rx) = mpsc::channel();
+    let deadline = Instant::now() + timeout;
+    open_with_channel_fallback(
+        options.channel.as_deref(),
+        deadline,
+        crate::channels::find_device_by_id_or_name_with_timeout,
+        open_device_stream_with_timeout,
+        open_default_stream_with_timeout,
+        || NativePlaybackError::DeviceOpenTimeout(timeout.as_secs()),
+    )
+}
 
-    std::thread::spawn(move || {
-        let result = if let Some(ref name) = channel_name {
-            if let Some(device) = crate::channels::find_device_by_id_or_name(name) {
-                DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
-            } else {
-                DeviceSinkBuilder::open_default_sink()
-            }
-        } else {
-            DeviceSinkBuilder::open_default_sink()
-        };
-        let _ = tx.send(result);
-    });
-
-    match rx.recv_timeout(timeout) {
-        Ok(result) => result.map_err(NativePlaybackError::Stream),
-        Err(_) => Err(NativePlaybackError::DeviceOpenTimeout(timeout.as_secs())),
+fn open_device_stream_with_timeout(
+    device: rodio::Device,
+    timeout: Duration,
+) -> Result<rodio::MixerDeviceSink, NativePlaybackError> {
+    if timeout.is_zero() {
+        return Err(NativePlaybackError::DeviceOpenTimeout(
+            NATIVE_DEVICE_TIMEOUT.as_secs(),
+        ));
     }
+
+    run_with_timeout(
+        timeout,
+        move || {
+            DeviceSinkBuilder::from_device(device)
+                .and_then(|builder| builder.open_stream())
+                .map_err(NativePlaybackError::Stream)
+        },
+        native_device_open_timeout,
+    )
+}
+
+fn open_default_stream_with_timeout(
+    timeout: Duration,
+) -> Result<rodio::MixerDeviceSink, NativePlaybackError> {
+    if timeout.is_zero() {
+        return Err(NativePlaybackError::DeviceOpenTimeout(
+            NATIVE_DEVICE_TIMEOUT.as_secs(),
+        ));
+    }
+
+    run_with_timeout(
+        timeout,
+        || DeviceSinkBuilder::open_default_sink().map_err(NativePlaybackError::Stream),
+        native_device_open_timeout,
+    )
+}
+
+fn native_device_open_timeout(timeout: Duration) -> NativePlaybackError {
+    trip_native_audio_breaker(NativeAudioFailureKind::DeviceOpenTimeout);
+    NativePlaybackError::DeviceOpenTimeout(timeout.as_secs())
 }
 
 /// Errors from native audio playback.
@@ -69,6 +103,10 @@ pub enum NativePlaybackError {
     /// Native playback does not support URL sources.
     #[error("native playback does not support URL sources")]
     UrlNotSupported,
+
+    /// Native playback was disabled earlier in this process.
+    #[error("native playback is disabled for this process after an earlier device-open timeout")]
+    NativePlaybackDisabled,
 
     /// Failed to open an audio output stream.
     #[error("failed to open audio stream: {0}")]
@@ -117,7 +155,9 @@ pub fn can_decode_natively(format: AudioFormat) -> bool {
 ///
 /// Attempts in-process decoding and playback through the default audio output
 /// device. Returns an error if the format is unsupported, the source is a URL,
-/// or decoding/playback fails.
+/// or decoding/playback fails. A device-open timeout disables future native
+/// playback attempts for the current process so callers can fall back directly
+/// to host playback.
 ///
 /// ## Errors
 ///
@@ -131,6 +171,11 @@ pub fn play_native(
 ) -> Result<(), NativePlaybackError> {
     if !can_decode_natively(format) {
         return Err(NativePlaybackError::UnsupportedFormat(format));
+    }
+
+    if !native_audio_available() {
+        log_native_audio_disabled_once();
+        return Err(NativePlaybackError::NativePlaybackDisabled);
     }
 
     match audio {
@@ -161,7 +206,7 @@ fn play_source(
     source: Decoder<impl std::io::Read + std::io::Seek + Send + Sync + 'static>,
     options: &PlaybackOptions,
 ) -> Result<(), NativePlaybackError> {
-    let stream = open_stream_with_timeout(DEVICE_OPEN_TIMEOUT, options)?;
+    let stream = open_stream_with_timeout(NATIVE_DEVICE_TIMEOUT, options)?;
     let player = Player::connect_new(stream.mixer());
 
     if let Some(vol) = options.volume {
@@ -321,5 +366,32 @@ mod tests {
         let err = NativePlaybackError::Decode(rodio::decoder::DecoderError::UnrecognizedFormat);
         let msg = err.to_string();
         assert!(msg.contains("decode"), "error message: {msg}");
+    }
+
+    #[test]
+    fn play_native_short_circuits_when_native_audio_is_disabled() {
+        let _guard = crate::native_audio::lock_native_audio_test_state();
+        crate::native_audio::trip_native_audio_breaker(NativeAudioFailureKind::DeviceOpenTimeout);
+
+        let data = AudioData::Bytes(std::sync::Arc::new(vec![0u8; 4]));
+        let format = AudioFormat::new(AudioFileFormat::Mp3, Some(Codec::Mp3));
+        let result = play_native(&data, format, &PlaybackOptions::default());
+
+        assert!(matches!(
+            result,
+            Err(NativePlaybackError::NativePlaybackDisabled)
+        ));
+    }
+
+    #[test]
+    fn decode_errors_do_not_trip_native_audio_breaker() {
+        let _guard = crate::native_audio::lock_native_audio_test_state();
+
+        let data = AudioData::Bytes(std::sync::Arc::new(vec![0u8; 4]));
+        let format = AudioFormat::new(AudioFileFormat::Mp3, Some(Codec::Mp3));
+        let result = play_native(&data, format, &PlaybackOptions::default());
+
+        assert!(matches!(result, Err(NativePlaybackError::Decode(_))));
+        assert!(crate::native_audio::native_audio_available());
     }
 }

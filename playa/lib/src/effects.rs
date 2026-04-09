@@ -1361,7 +1361,9 @@ impl SoundEffect {
     ///
     /// When the `sfx-native` feature is enabled, options are applied directly
     /// via rodio's Player. Otherwise, control depends on the host player's
-    /// capabilities.
+    /// capabilities. If a native device-open operation times out, playa
+    /// disables further native playback attempts for the rest of the process
+    /// and this method falls back directly to host playback on later calls.
     pub fn play_with_options(
         self,
         options: &crate::PlaybackOptions,
