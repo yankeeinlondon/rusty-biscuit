@@ -34,7 +34,6 @@ use std::{
 };
 use tracing::{debug, instrument, warn};
 
-#[cfg(target_os = "windows")]
 mod windows_scm;
 
 // =============================================================================
@@ -388,7 +387,6 @@ impl ServiceManager {
             InitSystem::Systemd => list_systemd_services(),
             InitSystem::OpenRc => list_openrc_services(),
             InitSystem::Runit => list_runit_services(),
-            #[cfg(target_os = "windows")]
             InitSystem::WindowsScm => windows_scm::list_windows_scm_services(),
             _ => Vec::new(),
         };

@@ -584,6 +584,7 @@ fn parse_windows_default_route_interface_ip(output: &str) -> Option<std::net::Ip
     best.map(|(ip, _)| ip)
 }
 
+#[cfg(any(target_os = "windows", test))]
 fn interface_name_for_ipv4(
     interfaces: &[NetworkInterface],
     address: std::net::Ipv4Addr,
