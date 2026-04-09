@@ -1,15 +1,11 @@
 use crate::{Result, SniffError};
 use biscuit_file::serde_yaml_ng;
 use biscuit_file::toml_crate;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use tracing::{debug, instrument};
+use tracing::debug;
 
-use crate::filesystem::file_types::{
-    FileAssociation, FileAssociationStats, FileInventory, FrameworkStats, ProgrammingLanguage,
-    ProgrammingLanguageStats, is_command_runner_filename,
-};
+use crate::filesystem::file_types::{FileAssociation, FileInventory, is_command_runner_filename};
 
 use super::types::*;
 

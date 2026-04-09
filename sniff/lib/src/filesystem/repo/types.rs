@@ -1,5 +1,4 @@
-use crate::{Result, SniffError};
-use biscuit_file::serde_yaml_ng;
+use crate::Result;
 use biscuit_file::toml_crate;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -7,10 +6,9 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
 
 use crate::filesystem::file_types::{
-    FileAssociation, FileAssociationStats, FileInventory, FrameworkStats, ProgrammingLanguage,
-    ProgrammingLanguageStats, is_command_runner_filename,
+    FileAssociationStats, FileInventory, FrameworkStats, ProgrammingLanguage,
+    ProgrammingLanguageStats,
 };
-use crate::filesystem::languages::LanguageBreakdown;
 use crate::filesystem::repo::detection::{
     canonicalize_path, is_fixture_manifest, is_generated_manifest,
 };

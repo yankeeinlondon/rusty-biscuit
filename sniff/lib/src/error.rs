@@ -109,6 +109,10 @@ pub enum SniffError {
         message: String,
     },
 
+    /// Invalid period specifier for recent-commits queries.
+    #[error("invalid period specifier: '{0}'. Expected duration (e.g., 3d, 1w), date (YYYY-MM-DD), hash, 'today', or 'yesterday'.")]
+    InvalidPeriod(String),
+
     /// Rate limited by the hosting provider API.
     #[error("rate limited by {provider} API{}", retry_after.map(|s| format!(", retry after {}s", s)).unwrap_or_default())]
     RateLimited {

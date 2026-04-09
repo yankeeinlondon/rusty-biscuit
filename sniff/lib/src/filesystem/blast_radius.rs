@@ -8,11 +8,11 @@ use git2::Repository;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
-use crate::filesystem::FileAssociation;
-use crate::filesystem::docs::{MarkdownMeta, detect_docs};
+use crate::filesystem::docs::{detect_docs, MarkdownMeta};
 use crate::filesystem::file_types::{lookup_exact_filename, lookup_extension};
 use crate::filesystem::git::get_commit_files;
 use crate::filesystem::repo::detect_repo;
+use crate::filesystem::FileAssociation;
 use crate::{Result, SniffError};
 
 // ---------------------------------------------------------------------------
@@ -58,6 +58,27 @@ pub fn is_source_code_path(path: &Path) -> bool {
                     | FileAssociation::FrameworkFile
                     | FileAssociation::Styling
             );
+        }
+    }
+
+    false
+}
+
+/// Returns `true` if the path refers to a documentation file.
+///
+/// Checks file extensions (`.md`, `.mdx`, `.rst`, `.txt`, `.adoc`) and the
+/// file-type registry for `FileAssociation::Documentation`.
+pub fn is_documentation_path(path: &Path) -> bool {
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let lower = ext.to_ascii_lowercase();
+        if matches!(lower.as_str(), "md" | "mdx" | "rst" | "txt" | "adoc") {
+            return true;
+        }
+    }
+
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if let Some(desc) = lookup_extension(ext) {
+            return matches!(desc.association, FileAssociation::Documentation);
         }
     }
 

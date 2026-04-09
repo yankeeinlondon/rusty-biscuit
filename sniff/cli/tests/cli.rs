@@ -1388,11 +1388,9 @@ fn test_repo_staged_files_json_uses_new_shape() {
     assert_eq!(json["scope"], "staged", "scope should be lowercase");
     assert_eq!(json["kind"], "all_files", "kind should be snake_case");
     let paths = json["paths"].as_array().expect("paths should be an array");
-    assert!(
-        paths
-            .iter()
-            .any(|p| p.as_str().unwrap().contains("main.rs"))
-    );
+    assert!(paths
+        .iter()
+        .any(|p| p.as_str().unwrap().contains("main.rs")));
 }
 
 #[test]
@@ -1773,4 +1771,225 @@ fn test_repo_unstaged_source_code_returns_modified_only() {
         !stdout.contains("a.rs"),
         "Should not contain staged file a.rs"
     );
+}
+
+// ============================================================================
+// Recent Commits CLI Integration Tests (Step 14)
+// ============================================================================
+
+#[test]
+fn test_repo_recent_commits_default_period() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args(["--base", path.to_str().unwrap(), "repo", "recent-commits"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_recent_commits_with_period() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "1d",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_recent_commits_with_json() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    // JSON output should contain commit fields
+    assert!(
+        stdout.contains("\"commits\""),
+        "JSON should have commits array"
+    );
+    assert!(
+        stdout.contains("\"period_label\""),
+        "JSON should have period_label"
+    );
+}
+
+#[test]
+fn test_repo_recent_commits_with_plain() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--plain",
+        ])
+        .output()
+        .expect("failed to run sniff");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Plain output should not have ANSI escape codes
+    assert!(
+        !stdout.contains("\x1b["),
+        "Plain output should not have ANSI escape codes"
+    );
+}
+
+#[test]
+fn test_repo_source_code_changes() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "source-code-changes",
+            "1w",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_source_code_changes_with_json() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "source-code-changes",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("\"commits\""),
+        "JSON should have commits array"
+    );
+}
+
+#[test]
+fn test_repo_documentation_changes() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "docs/guide.md", "# Guide\n");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "documentation-changes",
+            "1w",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_documentation_changes_with_json() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "docs/guide.md", "# Guide\n");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "documentation-changes",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("\"commits\""),
+        "JSON should have commits array"
+    );
+}
+
+#[test]
+fn test_repo_recent_commits_no_error_flag() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    // Use a future date - valid period that returns no commits
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "2099-01-01",
+            "--no-error",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_recent_commits_invalid_period_error() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "invalid-period",
+        ])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_repo_recent_commits_on_error_flag() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "2099-01-01",
+            "--on-error",
+            "No recent commits",
+            "--plain",
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("No recent commits"));
 }

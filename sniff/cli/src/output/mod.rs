@@ -10,6 +10,7 @@ mod just;
 mod network;
 mod os;
 mod programs;
+pub(crate) mod recent_commits;
 mod remote;
 mod services;
 mod topics;

@@ -1,7 +1,7 @@
 use sniff::filesystem::ProgrammingLanguage;
 use sniff::os::NtpStatus;
 use sniff::{detect, detect_with_config, SniffConfig};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 mod fixtures;
@@ -1000,4 +1000,327 @@ fn test_services_detailed_stopped_filter_windows() {
             svc.name
         );
     }
+}
+
+// ============================================================================
+// Recent Commits Integration Tests (Step 13)
+// ============================================================================
+
+use chrono::{Duration, Utc};
+use git2::Repository;
+use std::fs;
+
+/// Create a temporary git repo with a single commit containing a Rust source file.
+fn create_recent_commits_repo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    let src_dir = dir.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("src/main.rs")).unwrap();
+    index.write().unwrap();
+
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "feat(cli): add main entry point\n\n- added src/main.rs\n- basic main function",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+/// Create a temporary git repo with multiple commits for testing duration filtering.
+fn create_multi_commit_repo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    fs::write(dir.path().join("README.md"), "# Test\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("README.md")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+        .unwrap();
+
+    let src_dir = dir.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("lib.rs"), "pub fn foo() {}").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("src/lib.rs")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "feat(lib): add foo function",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+#[test]
+fn test_get_recent_commits_by_duration_returns_commits() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok(), "Query should succeed: {:?}", result);
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty(), "Should find at least one commit");
+    assert_eq!(
+        set.commits[0].description,
+        "feat(cli): add main entry point"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_by_duration_empty_for_old_period() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(0), "last 0 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    assert!(
+        set.commits.is_empty(),
+        "Should find no commits for 0-day duration"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_by_date_returns_commits() {
+    use sniff::filesystem::get_recent_commits_by_date;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let today = Utc::now().date_naive();
+    let result = get_recent_commits_by_date(&path, today);
+    assert!(result.is_ok(), "Query should succeed: {:?}", result);
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty(), "Should find commits since today");
+}
+
+#[test]
+fn test_get_recent_commits_by_date_future_date_returns_empty() {
+    use chrono::NaiveDate;
+    use sniff::filesystem::get_recent_commits_by_date;
+
+    let (_dir, path) = create_recent_commits_repo();
+    // Query for a date in the future - git commits have "now" timestamps
+    let future_date = NaiveDate::from_ymd_opt(2099, 12, 31).unwrap();
+    let result = get_recent_commits_by_date(&path, future_date);
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    // All commits are "now", so none should be after 2099
+    assert!(
+        set.commits.is_empty(),
+        "Should find no commits after far-future date"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_by_hash_resolves_commit() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let head_hash = head.id().to_string();
+
+    let result = get_recent_commits_by_hash(&path, &head_hash);
+    assert!(result.is_ok(), "Query should succeed: {:?}", result);
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty(), "Should find the commit by hash");
+    assert!(set.commits[0].hash.contains(&head_hash[..8]));
+}
+
+#[test]
+fn test_get_recent_commits_by_hash_partial() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let short_hash = &head.id().to_string()[..7];
+
+    let result = get_recent_commits_by_hash(&path, short_hash);
+    assert!(
+        result.is_ok(),
+        "Query should succeed with partial hash: {:?}",
+        result
+    );
+    let set = result.unwrap();
+    assert!(
+        !set.commits.is_empty(),
+        "Should resolve partial hash to commit"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_includes_files() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty());
+    assert!(!set.commits[0].files.is_empty(), "Commit should have files");
+    assert!(set.commits[0].files.iter().any(|f| f.contains("main.rs")));
+}
+
+#[test]
+fn test_get_recent_commits_preserves_bullet_points() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty());
+    assert!(
+        !set.commits[0].bullet_points.is_empty(),
+        "Should parse bullet points"
+    );
+    assert!(set.commits[0]
+        .bullet_points
+        .iter()
+        .any(|b| b.contains("added src/main.rs")));
+}
+
+#[test]
+fn test_get_recent_commits_describe_produces_markdown() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    let md = set.describe(true);
+    assert!(md.contains("## "), "Should have section headers");
+    assert!(md.contains("**Commit:**"), "Should have commit hash");
+    assert!(md.contains("**Files:**"), "Should have files section");
+    assert!(md.contains("**Description:**"), "Should have description");
+}
+
+#[test]
+fn test_get_recent_commits_source_code_changes_filters() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    let md = set.source_code_changes(true);
+    assert!(
+        md.contains("Source Code Changes"),
+        "Should have source code section"
+    );
+    assert!(md.contains("main.rs"), "Should include .rs files");
+}
+
+#[test]
+fn test_get_recent_commits_documentation_changes_filters() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    fs::write(dir.path().join("README.md"), "# Test\n").unwrap();
+    let src_dir = dir.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("lib.rs"), "pub fn foo() {}").unwrap();
+
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("README.md")).unwrap();
+    index.add_path(std::path::Path::new("src/lib.rs")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "add readme and lib", &tree, &[])
+        .unwrap();
+
+    let result = get_recent_commits_by_duration(dir.path(), Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    let md = set.documentation_changes(true);
+    assert!(
+        md.contains("Documentation Changes"),
+        "Should have docs section"
+    );
+    assert!(md.contains("README.md"), "Should include markdown");
+    assert!(!md.contains("lib.rs"), "Should not include .rs in docs");
+}
+
+#[test]
+fn test_get_recent_commits_not_a_repo_error() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let result = get_recent_commits_by_duration(dir.path(), Duration::days(1), "last 1 day");
+    assert!(result.is_err(), "Should error on non-repo directory");
+}
+
+#[test]
+fn test_commit_desc_set_filter_by_package() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let mut set = result.unwrap();
+
+    set.filter_by_package("nonexistent");
+    assert!(set.commits.iter().all(|c| {
+        c.packages
+            .as_ref()
+            .map_or(true, |pkgs| pkgs.iter().any(|p| p == "nonexistent"))
+    }));
+}
+
+#[test]
+fn test_commit_desc_set_filter_by_package_area() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let mut set = result.unwrap();
+
+    set.filter_by_package_area("nonexistent");
+    assert!(set.commits.iter().all(|c| {
+        c.package_areas
+            .as_ref()
+            .map_or(true, |areas| areas.iter().any(|a| a == "nonexistent"))
+    }));
 }
