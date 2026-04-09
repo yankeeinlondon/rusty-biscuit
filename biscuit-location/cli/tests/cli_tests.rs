@@ -2,7 +2,7 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 
 fn cmd() -> Command {
-    let mut c = Command::cargo_bin("where").unwrap();
+    let mut c = Command::cargo_bin("geo").unwrap();
     // Keep output deterministic across local machines and CI.
     c.env_remove("FORCE_COLOR");
     c.env_remove("RUST_LOG");
@@ -245,13 +245,7 @@ fn conflicting_json_plain_rejected() {
 #[test]
 fn conflicting_verbose_quiet_rejected() {
     cmd()
-        .args([
-            "-v",
-            "--quiet",
-            "distance",
-            "34.05,-118.24",
-            "40.71,-74.01",
-        ])
+        .args(["-v", "--quiet", "distance", "34.05,-118.24", "40.71,-74.01"])
         .assert()
         .failure()
         .code(2);
@@ -264,12 +258,7 @@ fn conflicting_verbose_quiet_rejected() {
 #[test]
 fn verbose_emits_tracing_to_stderr() {
     cmd()
-        .args([
-            "-vv",
-            "distance",
-            "34.0522,-118.2437",
-            "40.7128,-74.0060",
-        ])
+        .args(["-vv", "distance", "34.0522,-118.2437", "40.7128,-74.0060"])
         .assert()
         .success()
         .stdout(predicate::str::contains("km"))
@@ -309,7 +298,7 @@ fn completions_bash_generates_script() {
         .args(["completions", "bash"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("_where"))
+        .stdout(predicate::str::contains("_geo"))
         .stdout(predicate::str::contains("complete"));
 }
 
@@ -319,7 +308,7 @@ fn completions_zsh_generates_script() {
         .args(["completions", "zsh"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("#compdef where"));
+        .stdout(predicate::str::contains("#compdef geo"));
 }
 
 #[test]
@@ -328,7 +317,7 @@ fn completions_fish_generates_script() {
         .args(["completions", "fish"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("where"));
+        .stdout(predicate::str::contains("geo"));
 }
 
 #[test]
@@ -340,7 +329,7 @@ fn completions_requires_shell_name() {
 // Runtime command paths
 // ---------------------------------------------------------------------------
 
-/// `where ip` with no database configured must surface the resolution error
+/// `geo ip` with no database configured must surface the resolution error
 /// on stderr with exit code 1, not crash or silently succeed.
 #[test]
 fn ip_without_db_reports_missing_database() {
@@ -353,7 +342,7 @@ fn ip_without_db_reports_missing_database() {
         .stderr(predicate::str::contains("MaxMind database not found"));
 }
 
-/// `where ip` JSON error envelope must stay on stderr so stdout stays clean.
+/// `geo ip` JSON error envelope must stay on stderr so stdout stays clean.
 #[test]
 fn ip_without_db_json_error_on_stderr() {
     let out = cmd()
@@ -375,7 +364,7 @@ fn ip_without_db_json_error_on_stderr() {
     );
 }
 
-/// `where distance gps <coords>` must emit a clear "no GPS fix" message when
+/// `geo distance gps <coords>` must emit a clear "no GPS fix" message when
 /// the host has no fix available — NOT the old `internal error: ...` form.
 ///
 /// On macOS, the host may have location services denied for this CLI. In that
@@ -412,7 +401,7 @@ fn distance_gps_reports_no_gps_fix_cleanly() {
     }
 }
 
-/// `where reverse --timeout` must propagate a sub-second timeout so the
+/// `geo reverse --timeout` must propagate a sub-second timeout so the
 /// request fails fast when the network is slow or unreachable. This exercises
 /// the reverse-timeout CLI flag threaded into `LocationConfig.reverse.timeout`.
 #[test]
@@ -421,13 +410,7 @@ fn reverse_timeout_flag_is_honored() {
     // timeout flag is not threaded into the config, the default 10s timeout
     // would apply and this test would hang.
     let out = cmd()
-        .args([
-            "reverse",
-            "34.0522",
-            "-118.2437",
-            "--timeout",
-            "1",
-        ])
+        .args(["reverse", "34.0522", "-118.2437", "--timeout", "1"])
         .timeout(std::time::Duration::from_secs(10))
         .output()
         .expect("spawn failed");
@@ -480,5 +463,8 @@ fn distance_json_has_no_maps_url() {
         .clone();
     let text = String::from_utf8(out).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert!(parsed.get("maps_url").is_none(), "unexpected maps_url: {parsed}");
+    assert!(
+        parsed.get("maps_url").is_none(),
+        "unexpected maps_url: {parsed}"
+    );
 }
