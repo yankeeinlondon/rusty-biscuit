@@ -81,7 +81,8 @@ impl std::fmt::Display for ExecutableSource {
 ///
 /// 1. Using a package manager (OS level _or_ Language specific)
 /// 2. Downloading a bash script and executing it locally
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "manager", content = "target", rename_all = "snake_case")]
 pub enum InstallationMethod {
     // Language Package Managers
     /// Default Node.js package manager. [Website](https://www.npmjs.com)
@@ -1372,6 +1373,34 @@ mod tests {
         let detector: CategoryDetector<Editor> = serde_json::from_str(json).unwrap();
         assert!(detector.is_installed(Editor::Vim));
         assert!(!detector.is_installed(Editor::VSCode));
+    }
+
+    // ============================================
+    // InstallationMethod Serialize tests
+    // ============================================
+
+    #[test]
+    fn test_installation_method_serializes_with_manager_target_shape() {
+        let method = InstallationMethod::Brew("ripgrep");
+        let json = serde_json::to_string(&method).unwrap();
+        assert_eq!(json, r#"{"manager":"brew","target":"ripgrep"}"#);
+    }
+
+    #[test]
+    fn test_installation_method_serializes_remote_bash_as_tagged_shape() {
+        let method = InstallationMethod::RemoteBash("https://sh.rustup.rs");
+        let json = serde_json::to_string(&method).unwrap();
+        assert_eq!(
+            json,
+            r#"{"manager":"remote_bash","target":"https://sh.rustup.rs"}"#
+        );
+    }
+
+    #[test]
+    fn test_installation_method_serializes_cargo_as_tagged_shape() {
+        let method = InstallationMethod::Cargo("bat");
+        let json = serde_json::to_string(&method).unwrap();
+        assert_eq!(json, r#"{"manager":"cargo","target":"bat"}"#);
     }
 
     // ============================================
