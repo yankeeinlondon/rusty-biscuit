@@ -1,6 +1,15 @@
 use std::path::PathBuf;
 
-pub const DEFAULT_NON_INTERACTIVE_SYSTEM_PROMPT: &str = "\n**IMPORTANT:** this is a non-interactive prompt; do not request permission or ask the caller questions!\n";
+pub const DEFAULT_NON_INTERACTIVE_SYSTEM_PROMPT: &str = r#"
+**IMPORTANT:** this is a non-interactive prompt; do not request permission or ask the caller questions!
+
+## Shell restrictions
+
+Do not run commands that require an interactive terminal or follow-up stdin input.
+Avoid REPLs, editors, pagers, prompts, and any command that waits for user input.
+Prefer one-shot commands and explicit non-interactive flags.
+If a task would require sending more input to a running command, choose a different approach.
+"#;
 
 /// Whether a system prompt should append to or replace the provider's default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

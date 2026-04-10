@@ -35,26 +35,14 @@ pub fn prose_escape(s: &str) -> String {
 
 /// Emit the source-file existence status.
 pub fn report_source_file(original_ref: &str, resolved_path: &Path, term: &Terminal) {
-    let ref_escaped = prose_escape(original_ref);
-    let path_display = resolved_path.display().to_string();
-
     if resolved_path.exists() {
-        let filepath = resolved_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path_display.clone());
-        let filepath_escaped = prose_escape(&filepath);
-        let abs_escaped = prose_escape(&path_display);
         emit_status(
-            &format!(
-                "the file reference <blue-500>{ref_escaped}</blue-500> to the \
-                 <blue-500><a href=\"{abs_escaped}\">{filepath_escaped}</a></blue-500> \
-                 file on this host"
-            ),
+            &source_file_success_markup(resolved_path),
             StatusState::Success,
             term,
         );
     } else {
+        let ref_escaped = prose_escape(original_ref);
         emit_status(
             &format!(
                 "the file reference <blue-500>{ref_escaped}</blue-500> \
@@ -64,6 +52,22 @@ pub fn report_source_file(original_ref: &str, resolved_path: &Path, term: &Termi
             term,
         );
     }
+}
+
+fn source_file_success_markup(resolved_path: &Path) -> String {
+    let path_display = resolved_path.display().to_string();
+    let filepath = resolved_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or(path_display);
+    let filepath_escaped = prose_escape(&filepath);
+    let abs_escaped = prose_escape(&resolved_path.display().to_string());
+
+    format!(
+        "the file reference was resolved to \
+         <blue-500><a href=\"{abs_escaped}\">{filepath_escaped}</a></blue-500> \
+         file on this host"
+    )
 }
 
 /// Emit the discovery header for a validation phase.
@@ -211,6 +215,18 @@ mod tests {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         // Should not panic; emits a success status
         report_source_file("@my-ref", tmp.path(), &term);
+    }
+
+    #[test]
+    fn source_file_success_markup_uses_resolved_filename_link_text() {
+        let path = Path::new("/tmp/_details.md");
+
+        assert_eq!(
+            source_file_success_markup(path),
+            "the file reference was resolved to \
+             <blue-500><a href=\"/tmp/_details.md\">_details.md</a></blue-500> \
+             file on this host"
+        );
     }
 
     #[test]
