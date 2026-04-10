@@ -842,24 +842,60 @@ impl Commands {
     pub fn install_command_args(&self) -> Option<(InstallCommandKind, &InstallCommandArgs)> {
         use Commands::*;
         match self {
-            Programs { action: Some(AllProgramAction::Install(args)) } => Some((InstallCommandKind::Install, args)),
-            Programs { action: Some(AllProgramAction::InstallPlan(args)) } => Some((InstallCommandKind::InstallPlan, args)),
-            Editors { action: Some(EditorAction::Install(args)) } => Some((InstallCommandKind::Install, args)),
-            Editors { action: Some(EditorAction::InstallPlan(args)) } => Some((InstallCommandKind::InstallPlan, args)),
-            Utilities { action: Some(UtilityAction::Install(args)) } => Some((InstallCommandKind::Install, args)),
-            Utilities { action: Some(UtilityAction::InstallPlan(args)) } => Some((InstallCommandKind::InstallPlan, args)),
-            LanguagePackageManagers { action: Some(LangPkgMgrAction::Install(args)) } => Some((InstallCommandKind::Install, args)),
-            LanguagePackageManagers { action: Some(LangPkgMgrAction::InstallPlan(args)) } => Some((InstallCommandKind::InstallPlan, args)),
-            OsPackageManagers { action: Some(OsPkgMgrAction::Install(args)) } => Some((InstallCommandKind::Install, args)),
-            OsPackageManagers { action: Some(OsPkgMgrAction::InstallPlan(args)) } => Some((InstallCommandKind::InstallPlan, args)),
-            TtsClients { action: Some(TtsClientAction::Install(args)) } => Some((InstallCommandKind::Install, args)),
-            TtsClients { action: Some(TtsClientAction::InstallPlan(args)) } => Some((InstallCommandKind::InstallPlan, args)),
-            TerminalApps { action: Some(TerminalAppAction::Install(args)) } => Some((InstallCommandKind::Install, args)),
-            TerminalApps { action: Some(TerminalAppAction::InstallPlan(args)) } => Some((InstallCommandKind::InstallPlan, args)),
-            Audio { action: Some(AudioAction::Install(args)) } => Some((InstallCommandKind::Install, args)),
-            Audio { action: Some(AudioAction::InstallPlan(args)) } => Some((InstallCommandKind::InstallPlan, args)),
-            Agents { action: Some(AgentAction::Install(args)) } => Some((InstallCommandKind::Install, args)),
-            Agents { action: Some(AgentAction::InstallPlan(args)) } => Some((InstallCommandKind::InstallPlan, args)),
+            Programs {
+                action: Some(AllProgramAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            Programs {
+                action: Some(AllProgramAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            Editors {
+                action: Some(EditorAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            Editors {
+                action: Some(EditorAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            Utilities {
+                action: Some(UtilityAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            Utilities {
+                action: Some(UtilityAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            LanguagePackageManagers {
+                action: Some(LangPkgMgrAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            LanguagePackageManagers {
+                action: Some(LangPkgMgrAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            OsPackageManagers {
+                action: Some(OsPkgMgrAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            OsPackageManagers {
+                action: Some(OsPkgMgrAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            TtsClients {
+                action: Some(TtsClientAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            TtsClients {
+                action: Some(TtsClientAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            TerminalApps {
+                action: Some(TerminalAppAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            TerminalApps {
+                action: Some(TerminalAppAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            Audio {
+                action: Some(AudioAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            Audio {
+                action: Some(AudioAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            Agents {
+                action: Some(AgentAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            Agents {
+                action: Some(AgentAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
             _ => None,
         }
     }
@@ -2292,11 +2328,15 @@ mod tests {
         #[test]
         fn editors_install_via_and_no_sudo_parse() {
             let cli = parse_args(&[
-                "editors", "install", "vim",
-                "--via", "brew",
+                "editors",
+                "install",
+                "vim",
+                "--via",
+                "brew",
                 "--no-sudo",
                 "--force",
-            ]).unwrap();
+            ])
+            .unwrap();
             if let Some(Commands::Editors {
                 action: Some(EditorAction::Install(args)),
             }) = cli.command

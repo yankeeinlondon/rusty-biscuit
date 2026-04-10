@@ -49,10 +49,21 @@ fn install_dry_run_does_not_execute() {
 #[test]
 fn install_via_unknown_manager_errors_with_valid_list() {
     cargo_bin_cmd!("sniff")
-        .args(["editors", "install", "vim", "--via", "nonexistent-mgr", "--dry-run", "-y"])
+        .args([
+            "editors",
+            "install",
+            "vim",
+            "--via",
+            "nonexistent-mgr",
+            "--dry-run",
+            "-y",
+        ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("valid manager").or(predicate::str::contains("Unknown manager")));
+        .stderr(
+            predicate::str::contains("valid manager")
+                .or(predicate::str::contains("Unknown manager")),
+        );
 }
 
 /// Helper: point HOME at a tempdir so HostCapabilities doesn't touch the real
@@ -98,13 +109,7 @@ fn install_plan_no_sudo_never_selects_sudo_method() {
     // We can't force a deterministic host, but we can assert that any
     // selected option has requires_sudo = false when --no-sudo is passed.
     let output = cargo_bin_cmd!("sniff")
-        .args([
-            "editors",
-            "install-plan",
-            "vim",
-            "--no-sudo",
-            "--json",
-        ])
+        .args(["editors", "install-plan", "vim", "--no-sudo", "--json"])
         .assert()
         .success()
         .get_output()
@@ -113,7 +118,10 @@ fn install_plan_no_sudo_never_selects_sudo_method() {
     let json: Value = serde_json::from_str(&stdout).unwrap();
     if json["successful"] == Value::Bool(true) {
         let options = json["options"].as_array().unwrap();
-        let chosen = options.iter().find(|o| o["choose"] == Value::Bool(true)).unwrap();
+        let chosen = options
+            .iter()
+            .find(|o| o["choose"] == Value::Bool(true))
+            .unwrap();
         assert_eq!(chosen["requires_sudo"], Value::Bool(false));
     }
 }

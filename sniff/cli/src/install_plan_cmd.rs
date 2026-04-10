@@ -66,9 +66,7 @@ fn render_success_line(program: &str, chosen: &InstallPlanOption) -> String {
             "The <blue>{program}</blue> is installable using <b>{method}</b> but it requires root privileges so we will include the use of <yellow>sudo</yellow> so this installation method will succeed."
         )
     } else {
-        format!(
-            "The <blue>{program}</blue> will be installed using the <b>{method}</b>."
-        )
+        format!("The <blue>{program}</blue> will be installed using the <b>{method}</b>.")
     }
 }
 

@@ -400,13 +400,19 @@ mod tests {
     #[test]
     fn resolve_program_editor_by_binary() {
         let resolved = resolve_program("vim").unwrap();
-        assert!(matches!(resolved, ResolvedProgram::Editor(sniff::programs::Editor::Vim)));
+        assert!(matches!(
+            resolved,
+            ResolvedProgram::Editor(sniff::programs::Editor::Vim)
+        ));
     }
 
     #[test]
     fn resolve_program_utility_alternate() {
         let resolved = resolve_program("rg").unwrap();
-        assert!(matches!(resolved, ResolvedProgram::Utility(sniff::programs::Utility::Ripgrep)));
+        assert!(matches!(
+            resolved,
+            ResolvedProgram::Utility(sniff::programs::Utility::Ripgrep)
+        ));
     }
 
     #[test]
