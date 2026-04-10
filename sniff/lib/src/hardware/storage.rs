@@ -94,19 +94,51 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
             let total_bytes = entry.f_blocks * block_size;
             let available_bytes = entry.f_bavail * block_size;
 
+            let kind = detect_storage_kind_macos(device_name.as_ref());
+
             storage.push(StorageInfo {
                 name: device_name.into_owned(),
                 mount_point: PathBuf::from(mount_point.as_ref()),
                 total_bytes,
                 available_bytes,
                 file_system: fstype.into_owned(),
-                kind: StorageKind::Unknown,
+                kind,
                 is_removable: false,
             });
         }
 
         storage
     }
+}
+
+#[cfg(target_os = "macos")]
+fn detect_storage_kind_macos(device: &str) -> StorageKind {
+    let dev_name = std::path::Path::new(device)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    if dev_name.is_empty() {
+        return StorageKind::Unknown;
+    }
+    let output = match std::process::Command::new("diskutil")
+        .args(["info", dev_name])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return StorageKind::Unknown,
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("Solid State:") {
+            if trimmed.contains("Yes") {
+                return StorageKind::Ssd;
+            } else if trimmed.contains("No") {
+                return StorageKind::Hdd;
+            }
+        }
+    }
+    StorageKind::Unknown
 }
 
 #[cfg(target_os = "linux")]
@@ -180,6 +212,7 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
         let block_size = stat.f_frsize as u64;
         let total_bytes = stat.f_blocks * block_size;
         let available_bytes = stat.f_bavail * block_size;
+        let kind = detect_storage_kind_linux(device);
 
         storage.push(StorageInfo {
             name: device.to_string(),
@@ -187,12 +220,29 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
             total_bytes,
             available_bytes,
             file_system: fstype.to_string(),
-            kind: StorageKind::Unknown,
+            kind,
             is_removable: false,
         });
     }
 
     storage
+}
+
+#[cfg(target_os = "linux")]
+fn detect_storage_kind_linux(device: &str) -> StorageKind {
+    let dev_name = std::path::Path::new(device)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    if dev_name.is_empty() {
+        return StorageKind::Unknown;
+    }
+    let rotational_path = format!("/sys/block/{dev_name}/queue/rotational");
+    match std::fs::read_to_string(&rotational_path) {
+        Ok(s) if s.trim() == "0" => StorageKind::Ssd,
+        Ok(s) if s.trim() == "1" => StorageKind::Hdd,
+        _ => StorageKind::Unknown,
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]

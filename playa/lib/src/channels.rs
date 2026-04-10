@@ -15,6 +15,14 @@ use rodio::cpal::{
 #[cfg(feature = "sfx-native")]
 const DEVICE_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Outcome categories for bounded audio device lookup.
+#[cfg(feature = "sfx-native")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeviceLookupError {
+    /// The platform audio subsystem did not respond before the caller deadline.
+    TimedOut,
+}
+
 /// Information about a native output channel (audio device).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputChannel {
@@ -128,13 +136,13 @@ fn get_output_channels_inner()
     Ok(channels)
 }
 
-/// Finds an output device by its slugified id or exact name.
-///
-/// Guarded by a timeout to prevent hanging when the audio subsystem is
-/// unresponsive. Returns `None` on timeout (caller should fall back to
-/// the default device or host player).
+/// Finds an output device by its slugified id or exact name using a caller
+/// provided timeout.
 #[cfg(feature = "sfx-native")]
-pub fn find_device_by_id_or_name(id_or_name: &str) -> Option<rodio::Device> {
+pub(crate) fn find_device_by_id_or_name_with_timeout(
+    id_or_name: &str,
+    timeout: Duration,
+) -> Result<Option<rodio::Device>, DeviceLookupError> {
     let name = id_or_name.to_string();
     let (tx, rx) = mpsc::channel();
 
@@ -142,14 +150,10 @@ pub fn find_device_by_id_or_name(id_or_name: &str) -> Option<rodio::Device> {
         let _ = tx.send(find_device_by_id_or_name_inner(&name));
     });
 
-    match rx.recv_timeout(DEVICE_PROBE_TIMEOUT) {
-        Ok(result) => result,
-        Err(_) => {
-            eprintln!(
-                "playa: audio device lookup timed out after {}s",
-                DEVICE_PROBE_TIMEOUT.as_secs()
-            );
-            None
+    match rx.recv_timeout(timeout) {
+        Ok(result) => Ok(result),
+        Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
+            Err(DeviceLookupError::TimedOut)
         }
     }
 }

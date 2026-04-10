@@ -2,10 +2,18 @@ mod audio;
 mod channels;
 mod detection;
 mod error;
+#[cfg(feature = "sfx-native")]
+mod native_audio;
 mod playa;
 mod playback;
 mod player;
 mod types;
+
+#[cfg(all(
+    target_os = "windows",
+    any(feature = "sfx-native-windows", feature = "audio-ducking-windows")
+))]
+mod windows_com;
 
 #[cfg(feature = "audio-ducking")]
 pub mod ducking;

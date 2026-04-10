@@ -392,6 +392,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 std::process::exit(0);
             }
+            crate::args::RepoAction::RecentCommits { .. }
+            | crate::args::RepoAction::SourceCodeChanges { .. }
+            | crate::args::RepoAction::DocumentationChanges { .. } => {
+                return crate::output::recent_commits::handle_recent_commits_command(
+                    action,
+                    base_dir.as_deref(),
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                );
+            }
             _ => {
                 // Other RepoAction variants (Structure, GitStatus, Deps, etc.)
                 // are handled after full detection below
@@ -1000,7 +1011,7 @@ fn path_list_format(args: &FileListArgs) -> PathListFormat {
 /// - `--no-error`: exit 0 with no output.
 /// - `--on-error <msg>`: render message to stderr.
 /// - `--on-error` + `--no-error`: render message to stdout, exit 0.
-fn handle_no_results(
+pub(crate) fn handle_no_results(
     no_error: bool,
     on_error: &Option<String>,
     plain: bool,

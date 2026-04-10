@@ -1,7 +1,7 @@
 use sniff::filesystem::ProgrammingLanguage;
 use sniff::os::NtpStatus;
-use sniff::{SniffConfig, detect, detect_with_config};
-use std::path::PathBuf;
+use sniff::{detect, detect_with_config, SniffConfig};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 mod fixtures;
@@ -117,18 +117,14 @@ fn test_detect_language_uses_package_boundary_from_nested_workspace() {
 
     assert_eq!(languages.primary, Some(ProgrammingLanguage::Rust));
     assert_eq!(languages.total_files_scanned, 2);
-    assert!(
-        languages
-            .languages
-            .iter()
-            .any(|lang| lang.language == ProgrammingLanguage::Rust)
-    );
-    assert!(
-        !languages
-            .languages
-            .iter()
-            .any(|lang| lang.language == ProgrammingLanguage::TypeScript)
-    );
+    assert!(languages
+        .languages
+        .iter()
+        .any(|lang| lang.language == ProgrammingLanguage::Rust));
+    assert!(!languages
+        .languages
+        .iter()
+        .any(|lang| lang.language == ProgrammingLanguage::TypeScript));
 }
 
 // === Regression tests for JSON serialization of partial results ===
@@ -320,7 +316,7 @@ fn test_detect_timezone_returns_valid_offset() {
 /// Tests that detect_os_type matches the current platform.
 #[test]
 fn test_detect_os_type_matches_platform() {
-    use sniff::hardware::{OsType, detect_os_type};
+    use sniff::hardware::{detect_os_type, OsType};
 
     let os_type = detect_os_type();
 
@@ -366,7 +362,7 @@ fn test_detect_os_type_matches_platform() {
 #[cfg(target_os = "macos")]
 #[test]
 fn test_macos_package_managers_finds_expected_managers() {
-    use sniff::hardware::{SystemPackageManager, detect_macos_package_managers};
+    use sniff::hardware::{detect_macos_package_managers, SystemPackageManager};
 
     let managers = detect_macos_package_managers();
 
@@ -857,7 +853,7 @@ fn test_os_summary_has_no_time_data() {
 
 #[test]
 fn test_executable_index_parity_with_which_for_common_programs() {
-    use sniff::programs::{ExecutableIndex, find_program_with_source};
+    use sniff::programs::{find_program_with_source, ExecutableIndex};
 
     let index = ExecutableIndex::build();
 
@@ -874,4 +870,453 @@ fn test_executable_index_parity_with_which_for_common_programs() {
             prog, which_found, index_found
         );
     }
+}
+
+// ============================================================================
+// Windows Cross-Platform Integration Tests
+// ============================================================================
+
+/// Asserts that `primary_interface` is populated on eligible hosts.
+///
+/// On macOS and Linux a desktop/workstation usually has at least one
+/// non-loopback, up interface with an IPv4 address, so the primary
+/// selector should succeed.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+#[test]
+fn test_network_primary_interface_is_populated() {
+    let result = detect().unwrap();
+    let network = result.network.expect("network should be present");
+
+    let has_eligible_interface = !network.permission_denied
+        && network
+            .interfaces
+            .iter()
+            .any(|i| !i.flags.is_loopback && !i.ipv4_addresses.is_empty() && i.flags.is_up);
+
+    if has_eligible_interface {
+        assert!(
+            network.primary_interface.is_some(),
+            "primary_interface should be populated when a non-loopback IPv4 interface exists"
+        );
+        let primary = network.primary_interface.unwrap();
+        assert!(
+            !primary.is_empty(),
+            "primary_interface name should not be empty"
+        );
+    }
+}
+
+/// Asserts that `services_detailed(ServiceState::All)` returns at least one
+/// service with a non-empty name on supported platforms.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+#[test]
+fn test_services_detailed_returns_non_empty_names() {
+    use sniff::services::{ServiceManager, ServiceState};
+
+    let manager = ServiceManager::detect();
+    let services = manager.services_detailed(ServiceState::All);
+
+    if manager.init_system != sniff::services::InitSystem::Unknown {
+        assert!(
+            !services.is_empty(),
+            "services_detailed(All) should return at least one service for {:?}",
+            manager.init_system
+        );
+        for svc in &services {
+            assert!(
+                !svc.name.is_empty(),
+                "every service should have a non-empty name"
+            );
+        }
+    }
+}
+
+/// On Windows the default `detect_timezone()` code path should populate the
+/// `timezone` field via `tzutil`.  This test locks down the runtime contract
+/// on an actual Windows host without using the plan-based opt-in path.
+#[cfg(target_os = "windows")]
+#[test]
+fn test_detect_timezone_windows_populates_timezone_name() {
+    let time_info = sniff::hardware::detect_timezone();
+
+    assert!(
+        time_info.timezone.is_some(),
+        "detect_timezone() should populate timezone on Windows via tzutil"
+    );
+
+    let tz = time_info.timezone.unwrap();
+    assert!(!tz.is_empty(), "timezone name should not be empty");
+
+    // IANA names contain '/' (e.g. "America/Los_Angeles").  Unmapped Windows
+    // IDs typically contain "Standard" or "Daylight" but never '/'.
+    // Either way the value should be non-empty and valid.
+    assert!(
+        tz.len() >= 3,
+        "timezone name should be at least 3 characters, got: '{tz}'"
+    );
+}
+
+/// On Windows `services_detailed(Running)` should return only services whose
+/// SCM state is `SERVICE_RUNNING`.
+#[cfg(target_os = "windows")]
+#[test]
+fn test_services_detailed_running_filter_windows() {
+    use sniff::services::{ServiceManager, ServiceState};
+
+    let manager = ServiceManager::detect();
+    let all = manager.services_detailed(ServiceState::All);
+    let running = manager.services_detailed(ServiceState::Running);
+
+    // Running should be a subset of all
+    assert!(
+        running.len() <= all.len(),
+        "Running services ({}) should not exceed total ({})",
+        running.len(),
+        all.len()
+    );
+
+    for svc in &running {
+        assert!(
+            svc.running,
+            "Service '{}' passed Running filter but running=false",
+            svc.name
+        );
+    }
+}
+
+/// On Windows `services_detailed(Stopped)` should return only stopped services.
+#[cfg(target_os = "windows")]
+#[test]
+fn test_services_detailed_stopped_filter_windows() {
+    use sniff::services::{ServiceManager, ServiceState};
+
+    let manager = ServiceManager::detect();
+    let stopped = manager.services_detailed(ServiceState::Stopped);
+
+    for svc in &stopped {
+        assert!(
+            !svc.running,
+            "Service '{}' passed Stopped filter but running=true",
+            svc.name
+        );
+    }
+}
+
+// ============================================================================
+// Recent Commits Integration Tests (Step 13)
+// ============================================================================
+
+use chrono::{Duration, Utc};
+use git2::Repository;
+use std::fs;
+
+/// Create a temporary git repo with a single commit containing a Rust source file.
+fn create_recent_commits_repo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    let src_dir = dir.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("src/main.rs")).unwrap();
+    index.write().unwrap();
+
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "feat(cli): add main entry point\n\n- added src/main.rs\n- basic main function",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+/// Create a temporary git repo with multiple commits for testing duration filtering.
+fn create_multi_commit_repo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    fs::write(dir.path().join("README.md"), "# Test\n").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("README.md")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+        .unwrap();
+
+    let src_dir = dir.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("lib.rs"), "pub fn foo() {}").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("src/lib.rs")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "feat(lib): add foo function",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+#[test]
+fn test_get_recent_commits_by_duration_returns_commits() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok(), "Query should succeed: {:?}", result);
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty(), "Should find at least one commit");
+    assert_eq!(
+        set.commits[0].description,
+        "feat(cli): add main entry point"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_by_duration_empty_for_old_period() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(0), "last 0 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    assert!(
+        set.commits.is_empty(),
+        "Should find no commits for 0-day duration"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_by_date_returns_commits() {
+    use sniff::filesystem::get_recent_commits_by_date;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let today = Utc::now().date_naive();
+    let result = get_recent_commits_by_date(&path, today);
+    assert!(result.is_ok(), "Query should succeed: {:?}", result);
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty(), "Should find commits since today");
+}
+
+#[test]
+fn test_get_recent_commits_by_date_future_date_returns_empty() {
+    use chrono::NaiveDate;
+    use sniff::filesystem::get_recent_commits_by_date;
+
+    let (_dir, path) = create_recent_commits_repo();
+    // Query for a date in the future - git commits have "now" timestamps
+    let future_date = NaiveDate::from_ymd_opt(2099, 12, 31).unwrap();
+    let result = get_recent_commits_by_date(&path, future_date);
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    // All commits are "now", so none should be after 2099
+    assert!(
+        set.commits.is_empty(),
+        "Should find no commits after far-future date"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_by_hash_resolves_commit() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let head_hash = head.id().to_string();
+
+    let result = get_recent_commits_by_hash(&path, &head_hash);
+    assert!(result.is_ok(), "Query should succeed: {:?}", result);
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty(), "Should find the commit by hash");
+    assert!(set.commits[0].hash.contains(&head_hash[..8]));
+}
+
+#[test]
+fn test_get_recent_commits_by_hash_partial() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let short_hash = &head.id().to_string()[..7];
+
+    let result = get_recent_commits_by_hash(&path, short_hash);
+    assert!(
+        result.is_ok(),
+        "Query should succeed with partial hash: {:?}",
+        result
+    );
+    let set = result.unwrap();
+    assert!(
+        !set.commits.is_empty(),
+        "Should resolve partial hash to commit"
+    );
+}
+
+#[test]
+fn test_get_recent_commits_includes_files() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty());
+    assert!(!set.commits[0].files.is_empty(), "Commit should have files");
+    assert!(set.commits[0].files.iter().any(|f| f.contains("main.rs")));
+}
+
+#[test]
+fn test_get_recent_commits_preserves_bullet_points() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    assert!(!set.commits.is_empty());
+    assert!(
+        !set.commits[0].bullet_points.is_empty(),
+        "Should parse bullet points"
+    );
+    assert!(set.commits[0]
+        .bullet_points
+        .iter()
+        .any(|b| b.contains("added src/main.rs")));
+}
+
+#[test]
+fn test_get_recent_commits_describe_produces_markdown() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    let md = set.describe(true);
+    assert!(md.contains("## "), "Should have section headers");
+    assert!(md.contains("**Commit:**"), "Should have commit hash");
+    assert!(md.contains("**Files:**"), "Should have files section");
+    assert!(md.contains("**Description:**"), "Should have description");
+}
+
+#[test]
+fn test_get_recent_commits_source_code_changes_filters() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    let md = set.source_code_changes(true);
+    assert!(
+        md.contains("Source Code Changes"),
+        "Should have source code section"
+    );
+    assert!(md.contains("main.rs"), "Should include .rs files");
+}
+
+#[test]
+fn test_get_recent_commits_documentation_changes_filters() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    fs::write(dir.path().join("README.md"), "# Test\n").unwrap();
+    let src_dir = dir.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("lib.rs"), "pub fn foo() {}").unwrap();
+
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("README.md")).unwrap();
+    index.add_path(std::path::Path::new("src/lib.rs")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "add readme and lib", &tree, &[])
+        .unwrap();
+
+    let result = get_recent_commits_by_duration(dir.path(), Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let set = result.unwrap();
+    let md = set.documentation_changes(true);
+    assert!(
+        md.contains("Documentation Changes"),
+        "Should have docs section"
+    );
+    assert!(md.contains("README.md"), "Should include markdown");
+    assert!(!md.contains("lib.rs"), "Should not include .rs in docs");
+}
+
+#[test]
+fn test_get_recent_commits_not_a_repo_error() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let result = get_recent_commits_by_duration(dir.path(), Duration::days(1), "last 1 day");
+    assert!(result.is_err(), "Should error on non-repo directory");
+}
+
+#[test]
+fn test_commit_desc_set_filter_by_package_not_a_monorepo() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let mut set = result.unwrap();
+
+    let result = set.filter_by_package("nonexistent");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err, sniff::SniffError::NotAMonorepo(_)));
+}
+
+#[test]
+fn test_commit_desc_set_filter_by_package_area_not_a_monorepo() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days");
+    assert!(result.is_ok());
+    let mut set = result.unwrap();
+
+    let result = set.filter_by_package_area("nonexistent");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err, sniff::SniffError::NotAMonorepo(_)));
 }

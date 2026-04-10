@@ -1550,42 +1550,8 @@ mod tests {
 
     mod path_parsing_tests {
         use super::*;
-        use std::sync::Mutex;
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
         use tempfile::TempDir;
-
-        // Mutex to ensure env var tests don't interfere with each other
-        static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-        /// RAII guard for temporarily setting environment variables in tests.
-        struct ScopedEnv {
-            vars: Vec<(String, Option<String>)>,
-        }
-
-        impl ScopedEnv {
-            fn new() -> Self {
-                Self { vars: Vec::new() }
-            }
-
-            fn set(&mut self, key: &str, value: &str) -> &mut Self {
-                let original = std::env::var(key).ok();
-                self.vars.push((key.to_string(), original));
-                // SAFETY: Tests are run single-threaded with ENV_MUTEX protection
-                unsafe { std::env::set_var(key, value) };
-                self
-            }
-        }
-
-        impl Drop for ScopedEnv {
-            fn drop(&mut self) {
-                for (key, original) in self.vars.iter().rev() {
-                    // SAFETY: Restoring original values; tests are single-threaded
-                    match original {
-                        Some(value) => unsafe { std::env::set_var(key, value) },
-                        None => unsafe { std::env::remove_var(key) },
-                    }
-                }
-            }
-        }
 
         #[test]
         fn test_get_path_dirs_parses_valid_dirs() {
