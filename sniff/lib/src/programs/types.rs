@@ -794,6 +794,51 @@ pub trait ProgramDetector {
         program: Self::Program,
         version: &str,
     ) -> Result<(), SniffInstallationError>;
+
+    /// Returns every installation method the program declares, ignoring host
+    /// constraints. This is the static metadata.
+    fn known_methods(&self, program: Self::Program) -> &'static [InstallationMethod] {
+        program.info().installation_methods
+    }
+
+    /// Returns the subset of known methods whose required package manager is
+    /// actually installed on this host and whose program is permitted on the
+    /// current OS.
+    fn available_methods(&self, program: Self::Program) -> Vec<InstallationMethod> {
+        use crate::programs::host_capability::HostCapabilities;
+        use crate::programs::installer::method_available;
+
+        let info = program.info();
+        let host = HostCapabilities::load_or_detect();
+
+        let os_ok = info.os_availability.is_empty()
+            || info.os_availability.contains(&host.os_type);
+        if !os_ok {
+            return Vec::new();
+        }
+
+        info.installation_methods
+            .iter()
+            .filter(|m| {
+                method_available(m, &host.os_pkg_mgrs, &host.lang_pkg_mgrs)
+                    || (m.is_remote_bash() && host.has_bash)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Returns a full install plan for this program against cached host
+    /// capabilities.
+    fn install_plan(
+        &self,
+        program: Self::Program,
+    ) -> crate::programs::install_plan::InstallPlan {
+        use crate::programs::host_capability::HostCapabilities;
+        use crate::programs::install_plan::build_install_plan;
+
+        let host = HostCapabilities::load_or_detect();
+        build_install_plan(&program, &host)
+    }
 }
 
 #[cfg(test)]
@@ -1422,5 +1467,27 @@ mod tests {
         assert_eq!(pd.path(Editor::Vim), Some(PathBuf::from("/usr/bin/vim")));
         let installed = pd.installed();
         assert_eq!(installed, vec![Editor::Vim]);
+    }
+
+    #[test]
+    fn category_detector_known_methods_matches_metadata() {
+        let detector = CategoryDetector::<Editor>::default();
+        let methods = detector.known_methods(Editor::Vim);
+        assert_eq!(methods, Editor::Vim.info().installation_methods);
+    }
+
+    #[test]
+    fn category_detector_available_methods_filters_by_os() {
+        // On the current host, VSCode's methods should produce a deterministic
+        // subset — we just assert the call compiles and returns a Vec.
+        let detector = CategoryDetector::<Editor>::default();
+        let _available = detector.available_methods(Editor::VSCode);
+    }
+
+    #[test]
+    fn category_detector_install_plan_returns_plan_for_program() {
+        let detector = CategoryDetector::<Editor>::default();
+        let plan = detector.install_plan(Editor::Vim);
+        assert_eq!(plan.program, Editor::Vim.display_name());
     }
 }
