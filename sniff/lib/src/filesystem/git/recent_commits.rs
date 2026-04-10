@@ -236,12 +236,7 @@ pub fn get_recent_commits_by_date(base_dir: &Path, date: NaiveDate) -> Result<Co
         .to_path_buf();
 
     let since = date.and_hms_opt(0, 0, 0).unwrap_or_default().and_utc();
-    let until = date
-        .succ_opt()
-        .unwrap_or(date)
-        .and_hms_opt(0, 0, 0)
-        .unwrap_or_default()
-        .and_utc();
+    let until = Utc::now();
     let repo_info = detect_repo(&repo_root)?;
 
     let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
@@ -268,16 +263,15 @@ pub fn get_recent_commits_by_hash(base_dir: &Path, hash: &str) -> Result<CommitD
         debug!(hash = hash, error = %e, "could not resolve hash");
         SniffError::Git(e)
     })?;
-    let commit = obj.peel_to_commit().map_err(|e| {
+    let target_commit = obj.peel_to_commit().map_err(|e| {
         debug!(hash = hash, error = %e, "could not peel to commit");
         SniffError::Git(e)
     })?;
+    let target_oid = target_commit.id();
 
-    let since = DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default();
-    let until = Utc::now();
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
+    let commits = collect_commits_from_hash_to_head(&repo, target_oid, repo_info.as_ref());
     let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
     let short_hash = &hash[..hash.len().min(8)];
     let period_label = format!("since commit {}", short_hash);
@@ -305,6 +299,9 @@ fn collect_commits_in_range(
     let Ok(mut revwalk) = repo.revwalk() else {
         return commits;
     };
+    revwalk
+        .set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
+        .ok();
     if revwalk.push_head().is_err() {
         return commits;
     }
@@ -327,6 +324,147 @@ fn collect_commits_in_range(
         if commit_time >= until {
             continue;
         }
+
+        let sha = oid.to_string();
+        let files_raw = get_commit_files(repo, &sha);
+        let files: Vec<String> = files_raw
+            .iter()
+            .map(|(p, _)| p.to_string_lossy().to_string())
+            .collect();
+
+        if files.is_empty() {
+            continue;
+        }
+
+        let message = commit.message().unwrap_or("").trim();
+        let (description, bullet_points) = parse_commit_message(message);
+
+        let (commit_packages, commit_package_areas) = if is_monorepo {
+            if let Some(pkgs) = packages {
+                let mut pkg_set: BTreeSet<String> = BTreeSet::new();
+                let mut area_set: BTreeSet<String> = BTreeSet::new();
+
+                for file_path in &files_raw {
+                    let file_path_buf = &file_path.0;
+                    for pkg in pkgs.iter() {
+                        if file_path_buf.starts_with(&pkg.relative) {
+                            pkg_set.insert(pkg.name.clone());
+                            area_set.insert(pkg.package_area.clone());
+                        }
+                    }
+                }
+
+                (
+                    Some(pkg_set.into_iter().collect()),
+                    Some(area_set.into_iter().collect()),
+                )
+            } else {
+                (Some(vec![]), Some(vec![]))
+            }
+        } else {
+            (None, None)
+        };
+
+        commits.push(CommitDesc {
+            hash: sha,
+            datetime: commit_time.to_rfc3339(),
+            packages: commit_packages,
+            package_areas: commit_package_areas,
+            files,
+            description,
+            bullet_points,
+        });
+    }
+
+    commits
+}
+
+fn collect_commits_from_hash_to_head(
+    repo: &Repository,
+    target_oid: git2::Oid,
+    repo_info_opt: Option<&crate::filesystem::repo::RepoInfo>,
+) -> Vec<CommitDesc> {
+    let mut commits = Vec::new();
+
+    let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
+    let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
+
+    if let Ok(target_commit) = repo.find_commit(target_oid) {
+        let commit_time =
+            DateTime::from_timestamp(target_commit.time().seconds(), 0).unwrap_or_default();
+        let sha = target_oid.to_string();
+        let files_raw = get_commit_files(repo, &sha);
+        let files: Vec<String> = files_raw
+            .iter()
+            .map(|(p, _)| p.to_string_lossy().to_string())
+            .collect();
+
+        if !files.is_empty() {
+            let message = target_commit.message().unwrap_or("").trim();
+            let (description, bullet_points) = parse_commit_message(message);
+
+            let (commit_packages, commit_package_areas) = if is_monorepo {
+                if let Some(pkgs) = packages {
+                    let mut pkg_set: BTreeSet<String> = BTreeSet::new();
+                    let mut area_set: BTreeSet<String> = BTreeSet::new();
+
+                    for file_path in &files_raw {
+                        let file_path_buf = &file_path.0;
+                        for pkg in pkgs.iter() {
+                            if file_path_buf.starts_with(&pkg.relative) {
+                                pkg_set.insert(pkg.name.clone());
+                                area_set.insert(pkg.package_area.clone());
+                            }
+                        }
+                    }
+
+                    (
+                        Some(pkg_set.into_iter().collect()),
+                        Some(area_set.into_iter().collect()),
+                    )
+                } else {
+                    (Some(vec![]), Some(vec![]))
+                }
+            } else {
+                (None, None)
+            };
+
+            commits.push(CommitDesc {
+                hash: sha,
+                datetime: commit_time.to_rfc3339(),
+                packages: commit_packages,
+                package_areas: commit_package_areas,
+                files,
+                description,
+                bullet_points,
+            });
+        }
+    }
+
+    let Ok(mut revwalk) = repo.revwalk() else {
+        return commits;
+    };
+    revwalk
+        .set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
+        .ok();
+
+    if revwalk.push_head().is_err() {
+        return commits;
+    }
+
+    if revwalk.hide(target_oid).is_err() {
+        return commits;
+    }
+
+    for oid_result in revwalk {
+        let Ok(oid) = oid_result else {
+            continue;
+        };
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
+
+        let commit_time = DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default();
 
         let sha = oid.to_string();
         let files_raw = get_commit_files(repo, &sha);
@@ -510,9 +648,9 @@ fn extract_display_date(datetime: &str) -> String {
 // ---------------------------------------------------------------------------
 
 impl CommitDescSet {
-    pub fn filter_by_package(&mut self, package_name: &str) {
+    pub fn filter_by_package(&mut self, package_name: &str) -> Result<()> {
         let Some(ref packages) = self.packages else {
-            return;
+            return Err(SniffError::NotAMonorepo(self.repo_root.clone()));
         };
 
         let package_lower = package_name.to_ascii_lowercase();
@@ -520,8 +658,11 @@ impl CommitDescSet {
             .iter()
             .find(|p| p.name.eq_ignore_ascii_case(&package_lower));
         let Some(pkg) = pkg else {
-            self.commits.clear();
-            return;
+            let valid: Vec<String> = packages.iter().map(|p| p.name.clone()).collect();
+            return Err(SniffError::UnknownPackage {
+                name: package_name.to_string(),
+                valid: valid.join(", "),
+            });
         };
 
         let pkg_relative = PathBuf::from(&pkg.relative);
@@ -556,11 +697,12 @@ impl CommitDescSet {
         }
 
         self.commits.retain(|c| !c.files.is_empty());
+        Ok(())
     }
 
-    pub fn filter_by_package_area(&mut self, area_name: &str) {
+    pub fn filter_by_package_area(&mut self, area_name: &str) -> Result<()> {
         let Some(ref packages) = self.packages else {
-            return;
+            return Err(SniffError::NotAMonorepo(self.repo_root.clone()));
         };
 
         let area_lower = area_name.to_ascii_lowercase();
@@ -573,8 +715,16 @@ impl CommitDescSet {
             .collect();
 
         if matching_packages.is_empty() {
-            self.commits.clear();
-            return;
+            let valid: Vec<String> = packages
+                .iter()
+                .map(|p| p.package_area.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            return Err(SniffError::UnknownPackageArea {
+                area: area_name.to_string(),
+                valid: valid.join(", "),
+            });
         }
 
         let package_roots: Vec<PathBuf> = matching_packages
@@ -615,6 +765,7 @@ impl CommitDescSet {
         }
 
         self.commits.retain(|c| !c.files.is_empty());
+        Ok(())
     }
 }
 
@@ -1059,7 +1210,7 @@ mod tests {
         #[test]
         fn filter_by_package_narrows_files_within_commits() {
             let mut set = cross_package_set();
-            set.filter_by_package("pkg-a");
+            let _ = set.filter_by_package("pkg-a");
 
             assert_eq!(set.commits.len(), 2);
 
@@ -1075,17 +1226,19 @@ mod tests {
         }
 
         #[test]
-        fn filter_by_package_removes_non_matching_commits() {
+        fn filter_by_package_unknown_returns_error() {
             let mut set = cross_package_set();
-            set.filter_by_package("nonexistent");
+            let result = set.filter_by_package("nonexistent");
 
-            assert!(set.commits.is_empty());
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(matches!(err, crate::SniffError::UnknownPackage { .. }));
         }
 
         #[test]
         fn filter_by_package_area_prefix_matching() {
             let mut set = cross_package_set();
-            set.filter_by_package_area("apps");
+            let _ = set.filter_by_package_area("apps");
 
             for commit in &set.commits {
                 for file in &commit.files {
@@ -1101,7 +1254,7 @@ mod tests {
         #[test]
         fn filter_by_package_area_includes_nested_areas() {
             let mut set = cross_package_set();
-            set.filter_by_package_area("apps");
+            let _ = set.filter_by_package_area("apps");
 
             assert!(!set.commits.is_empty());
             for commit in &set.commits {
@@ -1113,17 +1266,19 @@ mod tests {
         }
 
         #[test]
-        fn filter_by_package_area_empty_for_nonexistent() {
+        fn filter_by_package_area_unknown_returns_error() {
             let mut set = cross_package_set();
-            set.filter_by_package_area("nonexistent");
+            let result = set.filter_by_package_area("nonexistent");
 
-            assert!(set.commits.is_empty());
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(matches!(err, crate::SniffError::UnknownPackageArea { .. }));
         }
 
         #[test]
         fn filter_preserves_packages_after_file_filtering() {
             let mut set = cross_package_set();
-            set.filter_by_package("pkg-b");
+            let _ = set.filter_by_package("pkg-b");
 
             assert_eq!(set.commits.len(), 1);
             let commit = &set.commits[0];

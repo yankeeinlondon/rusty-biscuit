@@ -1292,7 +1292,7 @@ fn test_get_recent_commits_not_a_repo_error() {
 }
 
 #[test]
-fn test_commit_desc_set_filter_by_package() {
+fn test_commit_desc_set_filter_by_package_not_a_monorepo() {
     use sniff::filesystem::get_recent_commits_by_duration;
 
     let (_dir, path) = create_recent_commits_repo();
@@ -1300,16 +1300,14 @@ fn test_commit_desc_set_filter_by_package() {
     assert!(result.is_ok());
     let mut set = result.unwrap();
 
-    set.filter_by_package("nonexistent");
-    assert!(set.commits.iter().all(|c| {
-        c.packages
-            .as_ref()
-            .map_or(true, |pkgs| pkgs.iter().any(|p| p == "nonexistent"))
-    }));
+    let result = set.filter_by_package("nonexistent");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err, sniff::SniffError::NotAMonorepo(_)));
 }
 
 #[test]
-fn test_commit_desc_set_filter_by_package_area() {
+fn test_commit_desc_set_filter_by_package_area_not_a_monorepo() {
     use sniff::filesystem::get_recent_commits_by_duration;
 
     let (_dir, path) = create_recent_commits_repo();
@@ -1317,10 +1315,8 @@ fn test_commit_desc_set_filter_by_package_area() {
     assert!(result.is_ok());
     let mut set = result.unwrap();
 
-    set.filter_by_package_area("nonexistent");
-    assert!(set.commits.iter().all(|c| {
-        c.package_areas
-            .as_ref()
-            .map_or(true, |areas| areas.iter().any(|a| a == "nonexistent"))
-    }));
+    let result = set.filter_by_package_area("nonexistent");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err, sniff::SniffError::NotAMonorepo(_)));
 }

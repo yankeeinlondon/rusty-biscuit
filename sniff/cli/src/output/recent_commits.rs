@@ -54,14 +54,15 @@ pub(crate) fn handle_recent_commits_command(
     };
 
     if let Some(ref pkg) = package {
-        commit_set.filter_by_package(pkg);
+        commit_set.filter_by_package(pkg)?;
     }
     if let Some(ref area) = package_area {
-        commit_set.filter_by_package_area(area);
+        commit_set.filter_by_package_area(area)?;
     }
 
     if commit_set.commits.is_empty() {
-        return handle_no_results(no_error, &on_error, plain);
+        let msg = on_error.clone().unwrap_or_else(|| "none found".to_string());
+        return handle_no_results(no_error, &Some(msg), plain);
     }
 
     if json {
@@ -76,7 +77,8 @@ pub(crate) fn handle_recent_commits_command(
     };
 
     if markdown.is_empty() {
-        return handle_no_results(no_error, &on_error, plain);
+        let msg = on_error.clone().unwrap_or_else(|| "none found".to_string());
+        return handle_no_results(no_error, &Some(msg), plain);
     }
 
     if plain {
