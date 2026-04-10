@@ -4,7 +4,7 @@ use std::path::Path;
 use claudine::events::Provider;
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{Result, bail, eyre};
 
 // ---------------------------------------------------------------------------
 // Output format enum (universal --output flag)
@@ -51,7 +51,6 @@ impl PromptDelivery {
 /// extraction (at the entrypoint) and delivery (via `prompt_delivery`).
 /// Provider flag-injection methods (`apply_entrypoint`,
 /// `apply_non_interactive_flags`) never see or mutate the prompt text.
-#[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PromptSource {
     /// No prompt provided. Valid only for interactive sessions or
@@ -65,7 +64,7 @@ pub(crate) enum PromptSource {
     InheritStdin,
 }
 
-#[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
+#[allow(dead_code)] // first production caller lands in Task 13 (direct-wrap) / Task 14 (composition); drop this attr then
 impl PromptSource {
     /// Returns the inline prompt text if this source is `Inline`.
     pub(crate) fn as_inline(&self) -> Option<&str> {
@@ -96,7 +95,6 @@ impl PromptSource {
 /// Used by `extract_prompt_source_from_passthrough` to find a prompt in
 /// raw passthrough arguments without embedding per-provider logic in a
 /// central match.
-#[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PromptArgConventions {
     /// Value-taking flags that carry the prompt string when present,
@@ -113,7 +111,6 @@ pub(crate) struct PromptArgConventions {
     pub value_taking_flags: &'static [&'static str],
 }
 
-#[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
 impl PromptArgConventions {
     /// Conventions for a provider that accepts only a positional prompt
     /// after an entrypoint subcommand (e.g. Codex `exec`, OpenCode `run`).
@@ -126,9 +123,13 @@ impl PromptArgConventions {
     }
 }
 
-/// Value-taking flags understood by every provider. Keeps the extractor
-/// from mistaking their values for positional prompts.
-#[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
+/// Value-taking flags recognized by the prompt extractor across every
+/// wrapped provider. This is intentionally the UNION of every provider's
+/// value-taking flags, not a per-provider list — the extractor's job is
+/// to avoid mistaking a flag's value for a positional prompt, and
+/// over-skipping an unknown flag's value is harmless. Per-provider
+/// `prompt_arg_conventions` implementations can swap in a narrower list
+/// if a future provider needs it.
 const COMMON_VALUE_TAKING_FLAGS: &[&str] = &[
     "-m",
     "--model",
@@ -447,8 +448,7 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// remove a prompt from raw passthrough args. Every provider that
     /// supports non-interactive mode must implement this; the default
     /// returns "positional-only, no entrypoint" which works for Claude
-    /// and Kimi (prompt as bare positional, no subcommand).
-    #[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
+    /// (prompt as bare positional, no subcommand).
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
         PromptArgConventions {
             prompt_flags: &[],
@@ -1887,6 +1887,153 @@ fn option_value(args: &[String], option: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt extraction — consolidates the old extract_user_prompt /
+// find_prompt_location / strip_prompt_from_args per-provider logic into
+// one provider-blind algorithm that dispatches on PromptArgConventions.
+// ---------------------------------------------------------------------------
+
+/// Extract a prompt from raw passthrough args, returning the cleaned
+/// args and the typed `PromptSource`.
+///
+/// This is the *single* place in the codebase that knows how to locate
+/// a prompt inside provider passthrough arguments. It replaces the
+/// previous per-provider extractors (`extract_user_prompt`,
+/// `find_prompt_location`, `strip_prompt_from_args`) and the inline
+/// positional-to-flag shuffling that used to live in
+/// `apply_non_interactive` for Gemini and Qwen.
+///
+/// Precedence (highest wins):
+/// 1. A prompt-carrying flag from `prompt_arg_conventions().prompt_flags`
+///    (e.g. `--prompt VALUE`, `-p=VALUE`)
+/// 2. A bare positional arg (after skipping the entrypoint subcommand
+///    and any value-taking flags)
+/// 3. `has_piped_stdin == true` → `PromptSource::InheritStdin`
+/// 4. Otherwise → `PromptSource::None`
+///
+/// Whenever a flag or positional is returned as the prompt, it is
+/// removed from the returned `Vec<String>` so downstream trait methods
+/// see clean args with zero prompt characters.
+///
+/// ## Errors
+///
+/// Returns an error if a prompt-carrying flag appears in `passthrough`
+/// without a following value (e.g. a bare trailing `--prompt`). Silent
+/// fall-through in that case would drop the user's intent — piped
+/// stdin, if present, would take its place. Surface the problem at
+/// extraction time instead.
+#[allow(dead_code)] // first production caller lands in Task 13 (direct-wrap) / Task 14 (composition); drop this attr then
+pub(crate) fn extract_prompt_source_from_passthrough(
+    profile: &dyn WrapperProfile,
+    passthrough: &[String],
+    has_piped_stdin: bool,
+) -> Result<(Vec<String>, PromptSource)> {
+    let conv = profile.prompt_arg_conventions();
+    let mut args: Vec<String> = passthrough.to_vec();
+
+    // 1. Look for a prompt-carrying flag.
+    if let Some((prompt, indices)) = find_prompt_flag(&args, conv.prompt_flags)? {
+        // Remove the matched indices in reverse order so earlier
+        // indices stay valid while splicing.
+        for idx in indices.iter().rev() {
+            args.remove(*idx);
+        }
+        return Ok((args, PromptSource::Inline(prompt)));
+    }
+
+    // 2. Look for a positional prompt, skipping the entrypoint (if any)
+    //    and any value-taking flags.
+    if let Some(idx) = find_positional_prompt_index(&args, &conv) {
+        let prompt = args.remove(idx);
+        return Ok((args, PromptSource::Inline(prompt)));
+    }
+
+    // 3. Piped stdin.
+    if has_piped_stdin {
+        return Ok((args, PromptSource::InheritStdin));
+    }
+
+    // 4. No prompt.
+    Ok((args, PromptSource::None))
+}
+
+/// Find a prompt delivered via one of `prompt_flags`. Returns the prompt
+/// text and the argv indices to remove.
+///
+/// Supports four shapes:
+/// - `--prompt VALUE`      → two indices
+/// - `--prompt=VALUE`      → one index
+/// - `-p VALUE`            → two indices
+/// - `-p=VALUE`            → one index
+fn find_prompt_flag(
+    args: &[String],
+    prompt_flags: &[&str],
+) -> Result<Option<(String, Vec<usize>)>> {
+    for (idx, arg) in args.iter().enumerate() {
+        for flag in prompt_flags {
+            if arg == flag {
+                let value = args.get(idx + 1).cloned().ok_or_else(|| {
+                    eyre!("prompt flag `{flag}` requires a value but none was provided")
+                })?;
+                return Ok(Some((value, vec![idx, idx + 1])));
+            }
+            let inline_prefix = format!("{flag}=");
+            if let Some(value) = arg.strip_prefix(&inline_prefix) {
+                return Ok(Some((value.to_string(), vec![idx])));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Find the index of the first positional prompt candidate in `args`,
+/// honoring the entrypoint skip and the set of value-taking flags.
+fn find_positional_prompt_index(
+    args: &[String],
+    conv: &PromptArgConventions,
+) -> Option<usize> {
+    let mut skip_next = false;
+    for (idx, arg) in args.iter().enumerate() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+
+        // Skip the entrypoint subcommand if it matches at index 0.
+        if idx == 0
+            && let Some(entry) = conv.entrypoint
+            && arg == entry
+        {
+            continue;
+        }
+
+        if arg == "--" {
+            return (idx + 1 < args.len()).then_some(idx + 1);
+        }
+
+        // Skip value-taking flags so their values are not mistaken for
+        // positional prompts. Handle both `--flag value` and
+        // `--flag=value` shapes.
+        if let Some(eq_idx) = arg.find('=')
+            && conv
+                .value_taking_flags
+                .iter()
+                .any(|flag| arg[..eq_idx] == **flag)
+        {
+            continue;
+        }
+        if conv.value_taking_flags.iter().any(|flag| arg == *flag) {
+            skip_next = true;
+            continue;
+        }
+
+        if !arg.starts_with('-') {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2467,5 +2614,192 @@ mod tests {
         let conv = profile(Provider::QwenCode).prompt_arg_conventions();
         assert_eq!(conv.prompt_flags, &["-p", "--prompt"]);
         assert_eq!(conv.entrypoint, None);
+    }
+
+    // -- extract_prompt_source_from_passthrough ----------------------------
+
+    fn extract(
+        provider: Provider,
+        passthrough: &[&str],
+        has_piped_stdin: bool,
+    ) -> (Vec<String>, PromptSource) {
+        let args: Vec<String> = passthrough.iter().map(|s| s.to_string()).collect();
+        extract_prompt_source_from_passthrough(profile(provider), &args, has_piped_stdin)
+            .expect("extract_prompt_source_from_passthrough should succeed")
+    }
+
+    #[test]
+    fn extract_claude_no_args_yields_none() {
+        let (args, source) = extract(Provider::Claude, &[], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::None);
+    }
+
+    #[test]
+    fn extract_claude_bare_positional_yields_inline() {
+        let (args, source) = extract(Provider::Claude, &["hello"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hello".to_string()));
+    }
+
+    #[test]
+    fn extract_claude_piped_stdin_yields_inherit_stdin() {
+        let (args, source) = extract(Provider::Claude, &[], true);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::InheritStdin);
+    }
+
+    #[test]
+    fn extract_claude_flag_before_positional_is_preserved() {
+        let (args, source) = extract(
+            Provider::Claude,
+            &["--model", "opus", "fix the bug"],
+            false,
+        );
+        assert_eq!(args, vec!["--model", "opus"]);
+        assert_eq!(source, PromptSource::Inline("fix the bug".to_string()));
+    }
+
+    #[test]
+    fn extract_codex_skips_exec_entrypoint() {
+        let (args, source) = extract(Provider::Codex, &["exec", "do it"], false);
+        assert_eq!(args, vec!["exec"]);
+        assert_eq!(source, PromptSource::Inline("do it".to_string()));
+    }
+
+    #[test]
+    fn extract_codex_without_exec_still_finds_positional() {
+        let (args, source) = extract(Provider::Codex, &["--json", "task"], false);
+        assert_eq!(args, vec!["--json"]);
+        assert_eq!(source, PromptSource::Inline("task".to_string()));
+    }
+
+    #[test]
+    fn extract_gemini_long_prompt_flag() {
+        let (args, source) =
+            extract(Provider::Gemini, &["--prompt", "hi"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hi".to_string()));
+    }
+
+    #[test]
+    fn extract_gemini_short_prompt_flag() {
+        let (args, source) = extract(Provider::Gemini, &["-p", "hi"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hi".to_string()));
+    }
+
+    #[test]
+    fn extract_gemini_inline_prompt_flag() {
+        let (args, source) =
+            extract(Provider::Gemini, &["--prompt=hi"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hi".to_string()));
+    }
+
+    #[test]
+    fn extract_gemini_positional_prompt_after_model_flag() {
+        let (args, source) = extract(
+            Provider::Gemini,
+            &["--model", "flash", "explain this"],
+            false,
+        );
+        assert_eq!(args, vec!["--model", "flash"]);
+        assert_eq!(source, PromptSource::Inline("explain this".to_string()));
+    }
+
+    #[test]
+    fn extract_gemini_positional_skips_approval_mode_value() {
+        let (args, source) = extract(
+            Provider::Gemini,
+            &["--approval-mode", "yolo", "explain this"],
+            false,
+        );
+        assert_eq!(args, vec!["--approval-mode", "yolo"]);
+        assert_eq!(source, PromptSource::Inline("explain this".to_string()));
+    }
+
+    #[test]
+    fn extract_goose_text_flag() {
+        let (args, source) =
+            extract(Provider::Goose, &["run", "-t", "hello"], false);
+        assert_eq!(args, vec!["run"]);
+        assert_eq!(source, PromptSource::Inline("hello".to_string()));
+    }
+
+    #[test]
+    fn extract_kimi_prompt_flag() {
+        let (args, source) = extract(Provider::KimiCode, &["--prompt", "hi"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hi".to_string()));
+    }
+
+    #[test]
+    fn extract_opencode_skips_run_entrypoint() {
+        let (args, source) =
+            extract(Provider::OpenCode, &["run", "build it"], false);
+        assert_eq!(args, vec!["run"]);
+        assert_eq!(source, PromptSource::Inline("build it".to_string()));
+    }
+
+    #[test]
+    fn extract_qwen_long_prompt_flag() {
+        let (args, source) =
+            extract(Provider::QwenCode, &["--prompt", "hi"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hi".to_string()));
+    }
+
+    #[test]
+    fn extract_flags_only_returns_none_when_no_piped_stdin() {
+        let (args, source) =
+            extract(Provider::Codex, &["exec", "--json"], false);
+        assert_eq!(args, vec!["exec", "--json"]);
+        assert_eq!(source, PromptSource::None);
+    }
+
+    #[test]
+    fn extract_flags_only_with_piped_stdin_returns_inherit_stdin() {
+        let (args, source) = extract(Provider::Codex, &["exec", "--json"], true);
+        assert_eq!(args, vec!["exec", "--json"]);
+        assert_eq!(source, PromptSource::InheritStdin);
+    }
+
+    #[test]
+    fn extract_dangling_prompt_flag_returns_error() {
+        // Regression test: a prompt flag with no following value must
+        // surface as an error rather than silently falling through to the
+        // positional / stdin / None branches. Silent fall-through is the
+        // original DRY-providers bug this refactor exists to prevent.
+        let args: Vec<String> = vec!["--prompt".to_string()];
+        let err =
+            extract_prompt_source_from_passthrough(profile(Provider::Gemini), &args, false)
+                .expect_err("dangling --prompt must return an error");
+        let message = err.to_string();
+        assert!(
+            message.contains("--prompt"),
+            "error message should mention the flag: {message}"
+        );
+        assert!(
+            message.contains("requires a value"),
+            "error message should mention missing value: {message}"
+        );
+    }
+
+    #[test]
+    fn extract_positional_with_equals_is_not_mistaken_for_flag() {
+        // Regression test: a positional argument containing `=` (e.g.
+        // an env-var-style token like `KEY=VALUE`) must not be mistaken
+        // for a value-taking flag by `find_positional_prompt_index`.
+        // `KEY` is not in the known value-taking flag list, so `KEY=VALUE`
+        // must be treated as the first positional prompt (not skipped), and
+        // the second positional remains in args.
+        let (args, source) =
+            extract(Provider::Claude, &["KEY=VALUE", "the actual prompt"], false);
+        assert_eq!(args, vec!["the actual prompt".to_string()]);
+        assert_eq!(
+            source,
+            PromptSource::Inline("KEY=VALUE".to_string())
+        );
     }
 }
