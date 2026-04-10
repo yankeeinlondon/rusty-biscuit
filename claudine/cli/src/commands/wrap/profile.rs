@@ -1709,16 +1709,14 @@ impl WrapperProfile for GooseWrapper {
         Ok(app)
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
+    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
+        if !non_interactive {
+            return;
+        }
         let entrypoint = "run";
         if args.first().is_none_or(|first| first != entrypoint) {
             args.insert(0, entrypoint.to_string());
         }
-
-        // NOTE: prompt validation is deferred to validate_final_args() because
-        // the prompt may not be in args yet (e.g. composition pipelines
-        // compute delivery after non-interactive setup).
-        Ok(())
     }
 
     fn apply_model(
