@@ -219,10 +219,39 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Error messages may contain `<blue>` Prose tags for styled rendering.
     fn reject_direct_yolo(&self, args: &[String]) -> Result<()>;
 
-    // -- Non-interactive mode ------------------------------------------------
+    // -- Non-interactive mode -----------------------------------------------
 
-    /// Apply non-interactive mode to `args`.
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()>;
+    /// Inject the provider's entrypoint subcommand (if any) and any
+    /// mode-agnostic launch flags. Called in BOTH interactive and
+    /// non-interactive pipelines because some entrypoints (e.g. Codex
+    /// `exec`, OpenCode `run`) are needed in both.
+    ///
+    /// `non_interactive` is true when the wrap is running in
+    /// non-interactive mode, so providers whose entrypoint is
+    /// conditional on the mode (Claude: `--print`; Kimi: `--print`) can
+    /// decide here.
+    ///
+    /// Default: no-op.
+    fn apply_entrypoint(&self, _args: &mut Vec<String>, _non_interactive: bool) {}
+
+    /// Reject mode-conflict flags (e.g. `-i` / `--prompt-interactive`)
+    /// when the pipeline is running in non-interactive mode. Runs only
+    /// in non-interactive pipelines. Providers that do NOT have such
+    /// conflicting flags use the default no-op.
+    ///
+    /// Default: no-op.
+    fn apply_non_interactive_flags(&self, _args: &mut [String]) -> Result<()> {
+        Ok(())
+    }
+
+    /// **Deprecated** — shim retained during Phase 2-3 of the DRY
+    /// providers refactor so callers remain unchanged. Will be removed
+    /// in Phase 5 (Task 16). New providers should implement
+    /// `apply_entrypoint` and `apply_non_interactive_flags` instead.
+    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
+        self.apply_entrypoint(args, true);
+        self.apply_non_interactive_flags(args)
+    }
 
     /// Apply provider-specific defaults for non-interactive mode (e.g.
     /// OpenCode's default model injection). Default: no-op.
