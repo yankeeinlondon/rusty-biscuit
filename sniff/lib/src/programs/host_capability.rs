@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::os::{OsType, detect_os_type};
+use crate::os::{LinuxFamily, OsType, detect_linux_distro, detect_os_type};
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::pkg_mngrs::{
     InstalledLanguagePackageManagers, InstalledOsPackageManagers,
@@ -56,14 +56,19 @@ impl HostCapabilities {
     /// Does not touch disk cache; call [`HostCapabilities::load_or_detect`]
     /// (added in a later task) for the cached path.
     pub fn detect() -> Self {
+        let os_type = detect_os_type();
+        let is_wsl = detect_is_wsl();
+        let linux_family = detect_linux_distro().map(|d| d.family);
+        let default_pm = default_os_package_manager_for(os_type, linux_family);
+
         Self {
-            os_type: detect_os_type(),
-            is_wsl: false, // filled in by Task 7
+            os_type,
+            is_wsl,
             has_bash: detect_has_bash(),
             os_pkg_mgrs: InstalledOsPackageManagers::new(),
             lang_pkg_mgrs: InstalledLanguagePackageManagers::new(),
             can_sudo: detect_can_sudo(),
-            default_os_package_manager: None, // filled in by Task 7
+            default_os_package_manager: default_pm,
             verified_lang_pkg_mgrs: HashSet::new(),
             npm_global_prefix_writable: None,
             detected_at: Utc::now(),
@@ -73,6 +78,58 @@ impl HostCapabilities {
 
 fn detect_has_bash() -> bool {
     which::which("bash").is_ok()
+}
+
+// ---------------------------------------------------------------------------
+// Default OS package manager
+// ---------------------------------------------------------------------------
+
+/// Returns the OS package manager that should be considered the "default" for
+/// the given host. Linux delegates to the distro family; non-Linux uses the
+/// hard-coded canonical manager.
+///
+/// Returns `None` when the OS has no known default (e.g. BSDs, unknown Linux
+/// family) — the plan builder falls through to the alternative-OS-PM bucket.
+pub fn default_os_package_manager_for(
+    os: OsType,
+    linux_family: Option<LinuxFamily>,
+) -> Option<OsPackageManager> {
+    match os {
+        OsType::MacOS => Some(OsPackageManager::Brew),
+        OsType::Windows => Some(OsPackageManager::Winget),
+        OsType::Linux => match linux_family {
+            Some(LinuxFamily::Debian) => Some(OsPackageManager::Apt),
+            Some(LinuxFamily::RedHat) => Some(OsPackageManager::Dnf),
+            Some(LinuxFamily::Arch) => Some(OsPackageManager::Pacman),
+            Some(LinuxFamily::SUSE) => None, // zypper not modelled yet
+            Some(LinuxFamily::NixOS) => Some(OsPackageManager::Nix),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WSL detection
+// ---------------------------------------------------------------------------
+
+fn detect_is_wsl() -> bool {
+    if !cfg!(target_os = "linux") {
+        return false;
+    }
+    if let Ok(version) = std::fs::read_to_string("/proc/version") {
+        let lower = version.to_lowercase();
+        if lower.contains("microsoft") || lower.contains("wsl") {
+            return true;
+        }
+    }
+    if let Ok(osrelease) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
+        let lower = osrelease.to_lowercase();
+        if lower.contains("microsoft") || lower.contains("wsl") {
+            return true;
+        }
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +221,65 @@ mod sudo_tests {
     #[test]
     fn no_signals_returns_false() {
         assert!(!decide_can_sudo(&SudoProbes::default()));
+    }
+}
+
+#[cfg(test)]
+mod default_pm_tests {
+    use super::*;
+    use crate::os::LinuxFamily;
+
+    #[test]
+    fn debian_maps_to_apt() {
+        assert_eq!(
+            default_os_package_manager_for(OsType::Linux, Some(LinuxFamily::Debian)),
+            Some(OsPackageManager::Apt)
+        );
+    }
+
+    #[test]
+    fn redhat_maps_to_dnf() {
+        assert_eq!(
+            default_os_package_manager_for(OsType::Linux, Some(LinuxFamily::RedHat)),
+            Some(OsPackageManager::Dnf)
+        );
+    }
+
+    #[test]
+    fn arch_maps_to_pacman() {
+        assert_eq!(
+            default_os_package_manager_for(OsType::Linux, Some(LinuxFamily::Arch)),
+            Some(OsPackageManager::Pacman)
+        );
+    }
+
+    #[test]
+    fn macos_maps_to_brew() {
+        assert_eq!(
+            default_os_package_manager_for(OsType::MacOS, None),
+            Some(OsPackageManager::Brew)
+        );
+    }
+
+    #[test]
+    fn windows_maps_to_winget() {
+        assert_eq!(
+            default_os_package_manager_for(OsType::Windows, None),
+            Some(OsPackageManager::Winget)
+        );
+    }
+
+    #[test]
+    fn unknown_linux_family_returns_none() {
+        assert_eq!(
+            default_os_package_manager_for(OsType::Linux, Some(LinuxFamily::Other)),
+            None
+        );
+    }
+
+    #[test]
+    fn linux_without_family_returns_none() {
+        assert_eq!(default_os_package_manager_for(OsType::Linux, None), None);
     }
 }
 
