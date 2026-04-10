@@ -1044,47 +1044,6 @@ fn create_recent_commits_repo() -> (tempfile::TempDir, PathBuf) {
     (dir, path)
 }
 
-/// Create a temporary git repo with multiple commits for testing duration filtering.
-fn create_multi_commit_repo() -> (tempfile::TempDir, PathBuf) {
-    let dir = tempfile::TempDir::new().unwrap();
-    let repo = Repository::init(dir.path()).unwrap();
-
-    let mut config = repo.config().unwrap();
-    config.set_str("user.email", "test@test.com").unwrap();
-    config.set_str("user.name", "Test User").unwrap();
-
-    fs::write(dir.path().join("README.md"), "# Test\n").unwrap();
-    let mut index = repo.index().unwrap();
-    index.add_path(std::path::Path::new("README.md")).unwrap();
-    index.write().unwrap();
-    let tree_id = index.write_tree().unwrap();
-    let tree = repo.find_tree(tree_id).unwrap();
-    let sig = repo.signature().unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
-        .unwrap();
-
-    let src_dir = dir.path().join("src");
-    fs::create_dir_all(&src_dir).unwrap();
-    fs::write(src_dir.join("lib.rs"), "pub fn foo() {}").unwrap();
-    let mut index = repo.index().unwrap();
-    index.add_path(std::path::Path::new("src/lib.rs")).unwrap();
-    index.write().unwrap();
-    let tree_id = index.write_tree().unwrap();
-    let tree = repo.find_tree(tree_id).unwrap();
-    repo.commit(
-        Some("HEAD"),
-        &sig,
-        &sig,
-        "feat(lib): add foo function",
-        &tree,
-        &[],
-    )
-    .unwrap();
-
-    let path = dir.path().to_path_buf();
-    (dir, path)
-}
-
 #[test]
 fn test_get_recent_commits_by_duration_returns_commits() {
     use sniff::filesystem::get_recent_commits_by_duration;
@@ -1319,4 +1278,387 @@ fn test_commit_desc_set_filter_by_package_area_not_a_monorepo() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(matches!(err, sniff::SniffError::NotAMonorepo(_)));
+}
+
+// ============================================================================
+// Recent Commits — Multi-commit and hash boundary tests
+// ============================================================================
+
+/// Helper: commit a file to an existing repo with a custom message and return
+/// the resulting commit hash.
+fn commit_file_with_message(
+    repo: &Repository,
+    dir: &std::path::Path,
+    relative: &str,
+    content: &str,
+    message: &str,
+) -> git2::Oid {
+    let full = dir.join(relative);
+    if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(&full, content).unwrap();
+
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new(relative)).unwrap();
+    index.write().unwrap();
+
+    let sig = repo.signature().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])
+        .unwrap()
+}
+
+#[test]
+fn test_hash_boundary_returns_inclusive_range() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Initial commit (will be the boundary)
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    let boundary_oid = repo
+        .commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+        .unwrap();
+
+    // Second commit
+    let _oid2 =
+        commit_file_with_message(&repo, dir.path(), "src/a.rs", "fn a() {}", "commit two");
+    // Third commit (HEAD)
+    let _oid3 =
+        commit_file_with_message(&repo, dir.path(), "src/b.rs", "fn b() {}", "commit three");
+
+    let boundary_hash = boundary_oid.to_string();
+    let result = get_recent_commits_by_hash(dir.path(), &boundary_hash).unwrap();
+
+    // Should include all 3 commits: HEAD, commit two, initial (boundary)
+    assert_eq!(
+        result.commits.len(),
+        3,
+        "Should include HEAD down to and including the boundary commit"
+    );
+
+    // Newest-first order: commit three, commit two, initial
+    assert_eq!(result.commits[0].description, "commit three");
+    assert_eq!(result.commits[1].description, "commit two");
+    assert_eq!(result.commits[2].description, "initial commit");
+
+    // The last commit should be the boundary
+    assert!(result.commits[2].hash.starts_with(&boundary_hash[..8]));
+}
+
+#[test]
+fn test_hash_boundary_head_itself_returns_single_commit() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+    let head_hash = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+
+    let result = get_recent_commits_by_hash(&path, &head_hash).unwrap();
+    assert_eq!(
+        result.commits.len(),
+        1,
+        "When hash == HEAD, should return only HEAD itself"
+    );
+    assert!(result.commits[0].hash.starts_with(&head_hash[..8]));
+}
+
+#[test]
+fn test_hash_non_ancestor_returns_error() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Initial commit on main
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    let root_oid = repo
+        .commit(Some("HEAD"), &sig, &sig, "root", &tree, &[])
+        .unwrap();
+
+    // Branch off: create an orphan-like commit on a side branch
+    let branch_oid =
+        commit_file_with_message(&repo, dir.path(), "src/main.rs", "fn main() {}", "on main");
+
+    // Create a detached side branch from root
+    repo.set_head_detached(root_oid).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    let side_oid = commit_file_with_message(
+        &repo,
+        dir.path(),
+        "side.txt",
+        "side content",
+        "side branch commit",
+    );
+
+    // Switch back to main branch commit
+    repo.set_head_detached(branch_oid).unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+
+    // Try to query from the side commit — it's not an ancestor of HEAD
+    let result = get_recent_commits_by_hash(dir.path(), &side_oid.to_string());
+    assert!(
+        result.is_err(),
+        "Non-ancestor hash should produce an error"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, sniff::SniffError::HashNotReachable { .. }),
+        "Expected HashNotReachable, got: {:?}",
+        err
+    );
+}
+
+#[test]
+fn test_hash_boundary_commits_are_newest_first() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Create 5 commits
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "commit 1", &tree, &[])
+        .unwrap();
+
+    let oid2 =
+        commit_file_with_message(&repo, dir.path(), "src/a.rs", "fn a() {}", "commit 2");
+    commit_file_with_message(&repo, dir.path(), "src/b.rs", "fn b() {}", "commit 3");
+    commit_file_with_message(&repo, dir.path(), "src/c.rs", "fn c() {}", "commit 4");
+    commit_file_with_message(&repo, dir.path(), "src/d.rs", "fn d() {}", "commit 5");
+
+    // Query from commit 2 to HEAD
+    let result = get_recent_commits_by_hash(dir.path(), &oid2.to_string()).unwrap();
+
+    assert_eq!(result.commits.len(), 4, "Should include commits 2-5");
+
+    // Verify newest-first ordering
+    assert_eq!(result.commits[0].description, "commit 5");
+    assert_eq!(result.commits[1].description, "commit 4");
+    assert_eq!(result.commits[2].description, "commit 3");
+    assert_eq!(result.commits[3].description, "commit 2");
+}
+
+// ============================================================================
+// Recent Commits — Monorepo package filtering integration tests
+// ============================================================================
+
+/// Create a monorepo-style temp repo with Cargo workspace and multiple packages.
+fn create_monorepo_repo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Create workspace Cargo.toml
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["pkg-a/lib", "pkg-b/lib"]
+"#,
+    )
+    .unwrap();
+
+    // Package A
+    let pkg_a = dir.path().join("pkg-a/lib");
+    fs::create_dir_all(pkg_a.join("src")).unwrap();
+    fs::write(
+        pkg_a.join("Cargo.toml"),
+        r#"[package]
+name = "pkg-a"
+version = "0.1.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    fs::write(pkg_a.join("src/lib.rs"), "pub fn a() {}").unwrap();
+
+    // Package B
+    let pkg_b = dir.path().join("pkg-b/lib");
+    fs::create_dir_all(pkg_b.join("src")).unwrap();
+    fs::write(
+        pkg_b.join("Cargo.toml"),
+        r#"[package]
+name = "pkg-b"
+version = "0.1.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    fs::write(pkg_b.join("src/lib.rs"), "pub fn b() {}").unwrap();
+
+    // Commit everything
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "initial monorepo setup",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    // Second commit: change only pkg-a
+    fs::write(pkg_a.join("src/lib.rs"), "pub fn a() { /* v2 */ }").unwrap();
+    let mut index = repo.index().unwrap();
+    index
+        .add_path(Path::new("pkg-a/lib/src/lib.rs"))
+        .unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "update pkg-a library",
+        &tree,
+        &[&head],
+    )
+    .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+#[test]
+fn test_monorepo_filter_by_package_narrows_commits() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_monorepo_repo();
+    let mut result =
+        get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days").unwrap();
+
+    // Before filtering, commits touch both packages
+    assert!(result.commits.len() >= 2);
+
+    result.filter_by_package("pkg-a").unwrap();
+
+    // After filtering, all commit files should be under pkg-a/
+    for commit in &result.commits {
+        for file in &commit.files {
+            assert!(
+                file.starts_with("pkg-a/"),
+                "Expected file under pkg-a/, got: {}",
+                file
+            );
+        }
+    }
+}
+
+#[test]
+fn test_monorepo_filter_by_package_rewrites_top_level_packages() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_monorepo_repo();
+    let mut result =
+        get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days").unwrap();
+
+    // Before filtering, packages should contain both pkg-a and pkg-b
+    let pkgs_before = result.packages.as_ref().unwrap();
+    assert!(
+        pkgs_before.len() >= 2,
+        "Monorepo should have at least 2 packages"
+    );
+
+    result.filter_by_package("pkg-a").unwrap();
+
+    // After filtering, top-level packages should only contain pkg-a
+    let pkgs_after = result.packages.as_ref().unwrap();
+    assert_eq!(
+        pkgs_after.len(),
+        1,
+        "Top-level packages should be narrowed to the filtered package"
+    );
+    assert_eq!(pkgs_after[0].name, "pkg-a");
+}
+
+#[test]
+fn test_monorepo_filter_by_package_area_rewrites_top_level_packages() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_monorepo_repo();
+    let mut result =
+        get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days").unwrap();
+
+    result.filter_by_package_area("pkg-a").unwrap();
+
+    // After filtering by area "pkg-a", only pkg-a packages remain
+    let pkgs_after = result.packages.as_ref().unwrap();
+    assert!(
+        pkgs_after.iter().all(|p| p.package_area == "pkg-a"),
+        "Top-level packages should only include packages from the filtered area"
+    );
+}
+
+#[test]
+fn test_monorepo_json_output_scoped_after_filter() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_monorepo_repo();
+    let mut result =
+        get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days").unwrap();
+
+    result.filter_by_package("pkg-a").unwrap();
+
+    // Serialize to JSON and verify packages field is scoped
+    let json_str = serde_json::to_string_pretty(&result).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+    let packages = json["packages"].as_array().unwrap();
+    assert_eq!(
+        packages.len(),
+        1,
+        "JSON packages should be scoped to the filter"
+    );
+    assert_eq!(packages[0]["name"], "pkg-a");
+
+    // Verify no file paths reference pkg-b
+    assert!(
+        !json_str.contains("pkg-b"),
+        "Filtered JSON should not contain references to pkg-b"
+    );
 }
