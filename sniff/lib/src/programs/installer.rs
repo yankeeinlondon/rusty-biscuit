@@ -163,6 +163,7 @@ pub(crate) fn method_available(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn select_best_method<'a>(
     methods: &'a [InstallationMethod],
     os_pkg_mgrs: &InstalledOsPackageManagers,

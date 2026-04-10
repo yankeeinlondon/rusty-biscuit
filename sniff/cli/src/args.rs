@@ -267,6 +267,7 @@ pub enum InstallCommandKind {
 
 macro_rules! define_program_action {
     ($action_name:ident, $candidates_fn:ident, $program_enum:ty) => {
+        #[allow(dead_code)]
         fn $candidates_fn() -> Vec<clap_complete::engine::CompletionCandidate> {
             use clap_complete::engine::CompletionCandidate;
             use sniff::programs::ProgramMetadata;
@@ -331,6 +332,7 @@ define_program_action!(
 define_program_action!(AgentAction, agent_candidates, sniff::programs::AiCli);
 
 /// Generates merged completion candidates across all program categories.
+#[allow(dead_code)]
 fn all_program_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
     let mut all = editor_candidates();
     all.extend(utility_candidates());
@@ -813,6 +815,7 @@ impl Commands {
     }
 
     /// Returns true if this command has a plain `install` action (not `install-plan`).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_install_action(&self) -> bool {
         self.install_command_args()
             .map(|(k, _)| k == InstallCommandKind::Install)
@@ -820,6 +823,7 @@ impl Commands {
     }
 
     /// Returns true if this command is an `install-plan` action.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_install_plan_action(&self) -> bool {
         self.install_command_args()
             .map(|(k, _)| k == InstallCommandKind::InstallPlan)
@@ -827,6 +831,7 @@ impl Commands {
     }
 
     /// Returns the program name from an install-like action, if present.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn install_program_name(&self) -> Option<&str> {
         self.install_command_args()
             .and_then(|(_, args)| args.program.as_deref())
@@ -1255,10 +1260,11 @@ Commands:
     sniff blast-radius    Find docs affected by changed source files
 
   Programs:
-    sniff programs        Show all installed programs
-    sniff editors         Show editors (supports 'install' subcommand)
-    sniff utilities       Show utilities
-    sniff agents          Show AI agent CLI tools
+    sniff programs                        Show all installed programs
+    sniff programs install-plan <name>    Explain how a program would be installed
+    sniff editors                         Show editors (supports 'install' and 'install-plan')
+    sniff utilities                       Show utilities
+    sniff agents                          Show AI agent CLI tools
 
   Services:
     sniff services        Show running services

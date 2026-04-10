@@ -119,22 +119,6 @@ pub enum ResolvedProgram {
     AiCli(sniff::programs::AiCli),
 }
 
-impl ResolvedProgram {
-    pub fn display_name(&self) -> &'static str {
-        use sniff::programs::ProgramMetadata;
-        match self {
-            Self::Editor(e) => e.display_name(),
-            Self::Utility(u) => u.display_name(),
-            Self::LanguagePackageManager(m) => m.display_name(),
-            Self::OsPackageManager(m) => m.display_name(),
-            Self::TtsClient(c) => c.display_name(),
-            Self::TerminalApp(t) => t.display_name(),
-            Self::HeadlessAudio(a) => a.display_name(),
-            Self::AiCli(a) => a.display_name(),
-        }
-    }
-}
-
 /// Resolve a program name scoped to a specific output filter category.
 ///
 /// For `OutputFilter::Programs`, falls back to the cross-category
@@ -197,81 +181,6 @@ pub fn resolve_program(name: &str) -> Result<ResolvedProgram, ResolveError> {
         "Unknown program '{}'. Searched categories: editors, utilities, language package managers, OS package managers, TTS clients, terminal apps, headless audio, AI agents",
         name
     )))
-}
-
-// ---------------------------------------------------------------------------
-// Direct install (single program by name)
-// ---------------------------------------------------------------------------
-
-macro_rules! direct_install_category {
-    ($name:expr, $resolve_fn:ident, $detector_type:ty) => {{
-        let program = $resolve_fn($name)?;
-        let detector = <$detector_type>::new();
-        if detector.is_installed(program) {
-            println!("{} is already installed.", program.display_name());
-            return Ok(());
-        }
-        if !detector.installable(program) {
-            return Err(
-                format!("{} is not installable on this OS.", program.display_name()).into(),
-            );
-        }
-        println!("Installing {}...", program.display_name());
-        detector.install(program)?;
-        println!("Successfully installed {}.", program.display_name());
-        Ok(())
-    }};
-}
-
-pub fn direct_install(filter: OutputFilter, name: &str) -> Result<(), Box<dyn Error>> {
-    match filter {
-        OutputFilter::Editors => {
-            direct_install_category!(name, resolve_editor, sniff::programs::InstalledEditors)
-        }
-        OutputFilter::Utilities => {
-            direct_install_category!(name, resolve_utility, sniff::programs::InstalledUtilities)
-        }
-        OutputFilter::LanguagePackageManagers => {
-            direct_install_category!(
-                name,
-                resolve_lang_pkg_mgr,
-                sniff::programs::InstalledLanguagePackageManagers
-            )
-        }
-        OutputFilter::OsPackageManagers => {
-            direct_install_category!(
-                name,
-                resolve_os_pkg_mgr,
-                sniff::programs::InstalledOsPackageManagers
-            )
-        }
-        OutputFilter::TtsClients => {
-            direct_install_category!(
-                name,
-                resolve_tts_client,
-                sniff::programs::InstalledTtsClients
-            )
-        }
-        OutputFilter::TerminalApps => {
-            direct_install_category!(
-                name,
-                resolve_terminal_app,
-                sniff::programs::InstalledTerminalApps
-            )
-        }
-        OutputFilter::HeadlessAudio => {
-            direct_install_category!(name, resolve_audio, sniff::programs::InstalledHeadlessAudio)
-        }
-        OutputFilter::AiClients => {
-            direct_install_category!(name, resolve_agent, sniff::programs::InstalledAiClients)
-        }
-        OutputFilter::Programs => {
-            Err("internal error: OutputFilter::Programs reached legacy direct_install; \
-                 use install_plan_cmd::dispatch instead"
-                .into())
-        }
-        _ => unreachable!("direct_install only called for program filters"),
-    }
 }
 
 // ---------------------------------------------------------------------------

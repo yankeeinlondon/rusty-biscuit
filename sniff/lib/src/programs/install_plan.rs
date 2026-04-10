@@ -103,8 +103,9 @@ impl InstallPlan {
 }
 
 /// Why a given method would run (or not) on this host, before priority is
-/// applied. Used internally by the bucket selector in Task 12.
+/// applied. Used internally by the bucket selector.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct MethodFact {
     pub kind: InstallationMethod,
     pub os_supported: bool,
