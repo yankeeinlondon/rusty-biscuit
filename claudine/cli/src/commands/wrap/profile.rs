@@ -714,7 +714,13 @@ impl WrapperProfile for CodexWrapper {
         Ok(())
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
+    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
+        // Codex `exec` is the non-interactive entrypoint; interactive
+        // sessions use the default TUI (no `exec`). Only inject when
+        // the caller is running non-interactively.
+        if !non_interactive {
+            return;
+        }
         let entrypoint = "exec";
         let aliases: &[&str] = &["e"];
         if !args
@@ -723,11 +729,6 @@ impl WrapperProfile for CodexWrapper {
         {
             args.insert(0, entrypoint.to_string());
         }
-
-        // NOTE: prompt validation is deferred to validate_final_args() because
-        // the prompt may not be in args yet (e.g. composition pipelines
-        // compute delivery after non-interactive setup).
-        Ok(())
     }
 
     fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
