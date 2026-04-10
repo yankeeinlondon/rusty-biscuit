@@ -734,15 +734,8 @@ mod tests {
     fn finalize_response_keeps_blocking_events_empty_without_hook_response() {
         let adapter = adapters::adapter_for(Provider::Claude);
 
-        let outcome = finalize_response(
-            adapter,
-            &AgenticEvent::BeforeTool,
-            true,
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+        let outcome =
+            finalize_response(adapter, &AgenticEvent::BeforeTool, true, None, None, None).unwrap();
 
         assert_eq!(outcome.response, None);
         assert_eq!(outcome.exit_code, None);
@@ -767,10 +760,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(
-            outcome.response,
-            Some(json!({"error": "blocked by tests"}))
-        );
+        assert_eq!(outcome.response, Some(json!({"error": "blocked by tests"})));
         assert_eq!(outcome.exit_code, Some(2));
     }
 
@@ -831,8 +821,7 @@ mod tests {
             ..EnvironmentContext::default()
         };
 
-        let claudine_config =
-            loader::load_claudine_config(Some(&config_path), None).unwrap();
+        let claudine_config = loader::load_claudine_config(Some(&config_path), None).unwrap();
         let runtime_config =
             loader::compile_canonical_runtime(claudine_config, Some(repo.path())).unwrap();
         let runtime = DispatchRuntimeContext {
@@ -907,8 +896,7 @@ mod tests {
             ..EnvironmentContext::default()
         };
 
-        let claudine_config =
-            loader::load_claudine_config(Some(&config_path), None).unwrap();
+        let claudine_config = loader::load_claudine_config(Some(&config_path), None).unwrap();
         let runtime_config =
             loader::compile_canonical_runtime(claudine_config, Some(repo.path())).unwrap();
         let runtime = DispatchRuntimeContext {

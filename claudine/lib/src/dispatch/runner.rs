@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use biscuit_speaks::{TtsConfig, TtsFailoverStrategy};
 #[cfg(test)]
 use biscuit_speaks::SpeedLevel;
+use biscuit_speaks::{TtsConfig, TtsFailoverStrategy};
 use regex::Regex;
 use serde_json::{Map, Value};
 use tokio::process::Command;

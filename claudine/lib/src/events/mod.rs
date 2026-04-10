@@ -12,18 +12,17 @@ pub use config::{
     CanonicalProviderSettings, EventBinding, GlobalSettings, LinkingSettings, TtsSettings,
 };
 pub use environment::{
-    detect_environment, detect_environment_fast, EnvironmentContext, GitContext, HardwareContext,
-    OsContext, RepoContext,
+    EnvironmentContext, GitContext, HardwareContext, OsContext, RepoContext, detect_environment,
+    detect_environment_fast,
 };
 pub use event_meta::{EventMeta, ToolName};
 pub use init_defaults::{
-    default_speak_template, quick_start_supported_providers, recommended_sound, TtsProviderOption,
-    INIT_EVENT_DISPLAY_ORDER, INIT_RECOMMENDED_EVENTS, INIT_TTS_PROVIDERS,
+    INIT_EVENT_DISPLAY_ORDER, INIT_RECOMMENDED_EVENTS, INIT_TTS_PROVIDERS, TtsProviderOption,
+    default_speak_template, quick_start_supported_providers, recommended_sound,
 };
 pub use matrix::{
-    event_native_mapping_matrix, event_support_matrix, EventNativeMappingCell,
-    EventNativeMappingRow, EventSupportCell, EventSupportRow, NativeEventName,
-    PROVIDERS_DISPLAY_ORDER,
+    EventNativeMappingCell, EventNativeMappingRow, EventSupportCell, EventSupportRow,
+    NativeEventName, PROVIDERS_DISPLAY_ORDER, event_native_mapping_matrix, event_support_matrix,
 };
 pub use provider::{EventSupportLevel, Provider};
 pub use resolved_hook::ResolvedHook;
