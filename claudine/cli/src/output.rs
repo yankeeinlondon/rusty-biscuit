@@ -2,6 +2,7 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::discovery::eval::strip_ansi_codes;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
@@ -21,6 +22,18 @@ pub(crate) enum ComposeDisplay {
     Compose,
     /// Inline composition (`claudine inline-compose`).
     InlineCompose,
+}
+
+fn trim_trailing_blank_rendered_lines(rendered: &str) -> String {
+    let mut lines: Vec<&str> = rendered.lines().collect();
+    while let Some(last) = lines.last() {
+        if strip_ansi_codes(last).trim().is_empty() {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
+    lines.join("\n")
 }
 
 /// Print the one-line header: `Claudine ▸ Provider [badges] prompt`
@@ -168,7 +181,7 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     // Wrap in a BlockQuote with green border, left margin, and no additional
     // word wrapping (Darkmatter already wrapped to the correct width).
     let mut block = BlockQuote::new(
-        RenderableContent::from(rendered.trim_end().to_string()),
+        RenderableContent::from(trim_trailing_blank_rendered_lines(&rendered)),
         None::<&str>,
     )
     .with_left_block_color(Color::Tailwind(Tailwind::Green700))
@@ -247,12 +260,6 @@ pub(crate) fn log_system_prompt(
             log::message("");
 
             let full_text = &prepared.composed_markdown;
-            let line_count = full_text.lines().count();
-            let display_text = if verbose {
-                full_text.clone()
-            } else {
-                full_text.lines().take(25).collect::<Vec<_>>().join("\n")
-            };
 
             let left_margin: u16 = 2;
             let right_margin: u16 = 2;
@@ -263,13 +270,13 @@ pub(crate) fn log_system_prompt(
                 .saturating_sub(right_margin);
             let mut opts = TerminalOptions::default();
             opts.max_width = Some(content_width);
-            let rendered = match for_terminal(&Markdown::new(display_text.trim()), opts) {
+            let rendered = match for_terminal(&Markdown::new(full_text.trim()), opts) {
                 Ok(r) => r,
-                Err(_) => display_text.clone(),
+                Err(_) => full_text.clone(),
             };
 
             let mut block = BlockQuote::new(
-                RenderableContent::from(rendered.trim_end().to_string()),
+                RenderableContent::from(trim_trailing_blank_rendered_lines(&rendered)),
                 None::<&str>,
             )
             .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
@@ -279,17 +286,6 @@ pub(crate) fn log_system_prompt(
             block.layout_mut().right_margin =
                 biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
             log::message(&block.render(term));
-
-            if !verbose && line_count > 25 {
-                log::message("");
-                log::message(
-                    &Prose::new(
-                        "- <dim>remaining prompt truncated for brevity, use <blue>--verbose</blue> to show entire prompt</dim>",
-                    )
-                    .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
-                    .render(term),
-                );
-            }
         }
     }
 }
@@ -972,6 +968,15 @@ mod tests {
         let rendered = format_launch_directory(Path::new("/tmp/project"));
         assert!(rendered.contains("starting agent in"));
         assert!(rendered.contains("/tmp/project"));
+    }
+
+    #[test]
+    fn trim_trailing_blank_rendered_lines_removes_plain_and_ansi_blank_lines() {
+        let rendered = "first\nsecond\n\x1b[32m\x1b[0m\n\n";
+        assert_eq!(
+            trim_trailing_blank_rendered_lines(rendered),
+            "first\nsecond"
+        );
     }
 
     #[test]
