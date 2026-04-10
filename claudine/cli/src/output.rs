@@ -9,9 +9,9 @@ use claudine::badges::{COMPOSE, INLINE_COMPOSE, INTERACTIVE, REPO_FLAG, SEQUENCE
 use claudine::events::Provider;
 use std::path::Path;
 
+use crate::commands::wrap::McpRuntimeInfo;
 use crate::commands::wrap::env::EnvPlan;
 use crate::commands::wrap::profile::WrapperProfile;
-use crate::commands::wrap::McpRuntimeInfo;
 use crate::log;
 
 /// Context for compose/inline-compose mode display in the header.
@@ -40,11 +40,13 @@ pub(crate) fn log_wrapper_header(
     env_plan: &EnvPlan,
     term: &Terminal,
 ) {
-    let mut header_parts: Vec<String> = vec![Prose::new(format!(
-        "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold>",
-        profile.provider()
-    ))
-    .render(term)];
+    let mut header_parts: Vec<String> = vec![
+        Prose::new(format!(
+            "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold>",
+            profile.provider()
+        ))
+        .render(term),
+    ];
 
     if yolo_requested {
         header_parts.push(YOLO.to_string());
@@ -128,8 +130,8 @@ pub(crate) fn log_wrapper_header(
 /// are rendered with a truncation notice.
 pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     use biscuit_terminal::utils::color::{Color, Tailwind};
-    use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
     use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     log::message(&Prose::new("<bold>Agent Prompt:</bold>").render(term));
     log::message("");
@@ -197,8 +199,8 @@ pub(crate) fn log_system_prompt(
     term: &Terminal,
 ) {
     use biscuit_terminal::utils::color::{Color, Tailwind};
-    use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
     use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     if silent {
         return;
@@ -771,8 +773,8 @@ pub(crate) fn render_assistant_markdown_with_options(
     term: &Terminal,
     options: Option<&darkmatter::markdown::output::terminal::TerminalOptions>,
 ) -> String {
-    use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
     use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     let owned;
     let opts = match options {
