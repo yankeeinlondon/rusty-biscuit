@@ -98,6 +98,7 @@ pub mod enums;
 pub mod find_program;
 pub mod headless_audio;
 pub mod host_capability;
+pub mod install_plan;
 pub mod installer;
 pub mod inventory;
 pub mod macos_bundle;
@@ -125,6 +126,9 @@ pub use headless_audio::InstalledHeadlessAudio;
 pub use host_capability::{
     HostCapabilities, HostCapabilityCacheFile, default_cache_path,
     load_host_capabilities_from, save_host_capabilities_to, CACHE_SCHEMA_VERSION,
+};
+pub use install_plan::{
+    InstallPlan, InstallPlanOption, InstallPlanReason, build_install_plan,
 };
 pub use installer::{
     InstallOptions, InstallResult, execute_install, execute_versioned_install, get_install_command,
