@@ -159,9 +159,7 @@ pub enum SniffInstallationError {
 
     /// A remote-bash installation was selected but execution has not been
     /// authorized by the caller.
-    #[error(
-        "Installing {pkg} via remote bash requires explicit consent (url: {url})"
-    )]
+    #[error("Installing {pkg} via remote bash requires explicit consent (url: {url})")]
     RemoteBashConsentRequired { pkg: String, url: String },
 }
 

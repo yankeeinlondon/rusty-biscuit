@@ -124,12 +124,10 @@ pub use find_program::{
 };
 pub use headless_audio::InstalledHeadlessAudio;
 pub use host_capability::{
-    HostCapabilities, HostCapabilityCacheFile, default_cache_path,
-    load_host_capabilities_from, save_host_capabilities_to, CACHE_SCHEMA_VERSION,
+    CACHE_SCHEMA_VERSION, HostCapabilities, HostCapabilityCacheFile, default_cache_path,
+    load_host_capabilities_from, save_host_capabilities_to,
 };
-pub use install_plan::{
-    InstallPlan, InstallPlanOption, InstallPlanReason, build_install_plan,
-};
+pub use install_plan::{InstallPlan, InstallPlanOption, InstallPlanReason, build_install_plan};
 pub use installer::{
     InstallOptions, InstallResult, execute_install, execute_versioned_install, get_install_command,
     get_versioned_install_command,
