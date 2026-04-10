@@ -316,9 +316,9 @@ fn collect_commits_in_range(
     let Ok(mut revwalk) = repo.revwalk() else {
         return commits;
     };
-    revwalk
-        .set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
-        .ok();
+    // Pure TIME sort guarantees monotonic newest-first ordering, making the
+    // early `break` below safe even when commit timestamps are skewed.
+    revwalk.set_sorting(git2::Sort::TIME).ok();
     if revwalk.push_head().is_err() {
         return commits;
     }
@@ -348,10 +348,6 @@ fn collect_commits_in_range(
             .iter()
             .map(|(p, _)| p.to_string_lossy().to_string())
             .collect();
-
-        if files.is_empty() {
-            continue;
-        }
 
         let message = commit.message().unwrap_or("").trim();
         let (description, bullet_points) = parse_commit_message(message);
@@ -437,46 +433,44 @@ fn collect_commits_from_hash_to_head(
             .map(|(p, _)| p.to_string_lossy().to_string())
             .collect();
 
-        if !files.is_empty() {
-            let message = commit.message().unwrap_or("").trim();
-            let (description, bullet_points) = parse_commit_message(message);
+        let message = commit.message().unwrap_or("").trim();
+        let (description, bullet_points) = parse_commit_message(message);
 
-            let (commit_packages, commit_package_areas) = if is_monorepo {
-                if let Some(pkgs) = packages {
-                    let mut pkg_set: BTreeSet<String> = BTreeSet::new();
-                    let mut area_set: BTreeSet<String> = BTreeSet::new();
+        let (commit_packages, commit_package_areas) = if is_monorepo {
+            if let Some(pkgs) = packages {
+                let mut pkg_set: BTreeSet<String> = BTreeSet::new();
+                let mut area_set: BTreeSet<String> = BTreeSet::new();
 
-                    for file_path in &files_raw {
-                        let file_path_buf = &file_path.0;
-                        for pkg in pkgs.iter() {
-                            if file_path_buf.starts_with(&pkg.relative) {
-                                pkg_set.insert(pkg.name.clone());
-                                area_set.insert(pkg.package_area.clone());
-                            }
+                for file_path in &files_raw {
+                    let file_path_buf = &file_path.0;
+                    for pkg in pkgs.iter() {
+                        if file_path_buf.starts_with(&pkg.relative) {
+                            pkg_set.insert(pkg.name.clone());
+                            area_set.insert(pkg.package_area.clone());
                         }
                     }
-
-                    (
-                        Some(pkg_set.into_iter().collect()),
-                        Some(area_set.into_iter().collect()),
-                    )
-                } else {
-                    (Some(vec![]), Some(vec![]))
                 }
-            } else {
-                (None, None)
-            };
 
-            commits.push(CommitDesc {
-                hash: sha,
-                datetime: commit_time.to_rfc3339(),
-                packages: commit_packages,
-                package_areas: commit_package_areas,
-                files,
-                description,
-                bullet_points,
-            });
-        }
+                (
+                    Some(pkg_set.into_iter().collect()),
+                    Some(area_set.into_iter().collect()),
+                )
+            } else {
+                (Some(vec![]), Some(vec![]))
+            }
+        } else {
+            (None, None)
+        };
+
+        commits.push(CommitDesc {
+            hash: sha,
+            datetime: commit_time.to_rfc3339(),
+            packages: commit_packages,
+            package_areas: commit_package_areas,
+            files,
+            description,
+            bullet_points,
+        });
 
         // Stop after including the target commit
         if oid == target_oid {
