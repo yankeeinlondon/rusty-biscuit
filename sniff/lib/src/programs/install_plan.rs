@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::error::SniffInstallationError;
 use crate::os::OsType;
-use crate::programs::enums::LanguagePackageManager;
+use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::host_capability::HostCapabilities;
 use crate::programs::installer::{InstallOptions, InstallResult, method_available};
 use crate::programs::schema::ProgramMetadata;
@@ -175,16 +175,203 @@ fn is_lang_manager_verified(method: &InstallationMethod, host: &HostCapabilities
     }
 }
 
-/// Stub plan builder. Tasks 11 and 12 replace this with the real implementation.
+/// Priority buckets for install plan selection. The earliest matching bucket
+/// whose fact is eligible wins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Bucket {
+    DefaultOsPm,
+    VerifiedPnpm,
+    NpmNoSudo,
+    AltOsPm,
+    RemoteBash,
+    Cargo,
+    SudoNpm,
+    Other,
+}
+
+/// Returns true if the given OS package manager corresponds to the given
+/// installation method. Uses direct enum-variant matching to avoid the
+/// `manager_binary()` / `serde_key()` mismatch for Chocolatey (`"choco"` vs
+/// `"chocolatey"`).
+fn os_pm_matches_method(pm: &OsPackageManager, method: &InstallationMethod) -> bool {
+    use InstallationMethod as IM;
+    matches!(
+        (pm, method),
+        (OsPackageManager::Apt, IM::Apt(_))
+            | (OsPackageManager::Nala, IM::Nala(_))
+            | (OsPackageManager::Brew, IM::Brew(_))
+            | (OsPackageManager::Dnf, IM::Dnf(_))
+            | (OsPackageManager::Pacman, IM::Pacman(_))
+            | (OsPackageManager::Winget, IM::Winget(_))
+            | (OsPackageManager::Chocolatey, IM::Chocolatey(_))
+            | (OsPackageManager::Scoop, IM::Scoop(_))
+            | (OsPackageManager::Nix, IM::Nix(_))
+    )
+}
+
+fn bucket_for(fact: &MethodFact, host: &HostCapabilities) -> Bucket {
+    // Default OS PM bucket: method manager matches host default PM
+    if fact.kind.is_os_package_manager()
+        && host
+            .default_os_package_manager
+            .as_ref()
+            .is_some_and(|pm| os_pm_matches_method(pm, &fact.kind))
+    {
+        return Bucket::DefaultOsPm;
+    }
+    match &fact.kind {
+        InstallationMethod::Pnpm(_) if fact.lang_manager_verified => Bucket::VerifiedPnpm,
+        InstallationMethod::Pnpm(_) => Bucket::Other,
+        InstallationMethod::Npm(_) => {
+            match host.npm_global_prefix_writable {
+                Some(false) if host.can_sudo => Bucket::SudoNpm,
+                Some(false) => Bucket::Other,
+                _ => Bucket::NpmNoSudo,
+            }
+        }
+        _ if fact.kind.is_os_package_manager() => Bucket::AltOsPm,
+        InstallationMethod::RemoteBash(_) => Bucket::RemoteBash,
+        InstallationMethod::Cargo(_) => Bucket::Cargo,
+        _ => Bucket::Other,
+    }
+}
+
+fn bucket_order() -> [Bucket; 7] {
+    [
+        Bucket::DefaultOsPm,
+        Bucket::VerifiedPnpm,
+        Bucket::NpmNoSudo,
+        Bucket::AltOsPm,
+        Bucket::RemoteBash,
+        Bucket::Cargo,
+        Bucket::SudoNpm,
+    ]
+}
+
+/// Build an install plan for a program against the given host capabilities.
 pub fn build_install_plan<P: ProgramMetadata>(
     program: &P,
-    _host: &HostCapabilities,
+    host: &HostCapabilities,
 ) -> InstallPlan {
+    let info = program.info();
+    let facts: Vec<MethodFact> = info
+        .installation_methods
+        .iter()
+        .map(|m| derive_method_fact(m, info.os_availability, host))
+        .collect();
+
+    // Find the first bucket with an eligible fact.
+    let mut chosen_index: Option<usize> = None;
+    'outer: for bucket in bucket_order() {
+        for (idx, fact) in facts.iter().enumerate() {
+            if fact.eligible_without_priority && bucket_for(fact, host) == bucket {
+                chosen_index = Some(idx);
+                break 'outer;
+            }
+        }
+    }
+
+    let options: Vec<InstallPlanOption> = facts
+        .iter()
+        .enumerate()
+        .map(|(i, fact)| {
+            let choose = chosen_index == Some(i);
+            let (reason_type, reason) = if choose {
+                (
+                    InstallPlanReason::Selected,
+                    format!(
+                        "chosen — {}{}",
+                        bucket_description(bucket_for(fact, host)),
+                        if fact.requires_sudo { " (requires sudo)" } else { "" }
+                    ),
+                )
+            } else if fact.eligible_without_priority
+                && bucket_for(fact, host) != Bucket::Other
+            {
+                // Eligible and in a real bucket, just outranked by a higher one.
+                (
+                    InstallPlanReason::LowerPriorityAlternative,
+                    "a higher-priority method was chosen".to_string(),
+                )
+            } else {
+                // Either ineligible, or eligible but relegated to Bucket::Other
+                // (e.g. unverified pnpm).  Use blocking_reason_for for a precise
+                // reason type.
+                let reason_type = blocking_reason_for(fact, host);
+                let reason = explain_blocking_reason(fact, reason_type);
+                (reason_type, reason)
+            };
+            InstallPlanOption {
+                kind: fact.kind.clone(),
+                requires_sudo: fact.requires_sudo,
+                choose,
+                reason_type,
+                reason,
+            }
+        })
+        .collect();
+
     InstallPlan {
         program: program.display_name().to_string(),
         website: program.website(),
-        successful: false,
-        options: Vec::new(),
+        successful: chosen_index.is_some(),
+        options,
+    }
+}
+
+fn bucket_description(bucket: Bucket) -> &'static str {
+    match bucket {
+        Bucket::DefaultOsPm => "default OS package manager",
+        Bucket::VerifiedPnpm => "verified pnpm global",
+        Bucket::NpmNoSudo => "user-writable npm global",
+        Bucket::AltOsPm => "alternative OS package manager",
+        Bucket::RemoteBash => "remote bash installer",
+        Bucket::Cargo => "cargo install",
+        Bucket::SudoNpm => "sudo-gated npm global",
+        Bucket::Other => "other",
+    }
+}
+
+fn blocking_reason_for(fact: &MethodFact, host: &HostCapabilities) -> InstallPlanReason {
+    if let Some(reason) = fact.blocking_reason {
+        return reason;
+    }
+    // Unverified pnpm: the manager is installed but has no globally-installed
+    // packages, so we refuse to pick it blindly.
+    if matches!(&fact.kind, InstallationMethod::Pnpm(_))
+        && !fact.lang_manager_verified
+        && host
+            .lang_pkg_mgrs
+            .is_installed(LanguagePackageManager::Pnpm)
+    {
+        return InstallPlanReason::RequiresUnverifiedLangManager;
+    }
+    InstallPlanReason::Unknown
+}
+
+fn explain_blocking_reason(fact: &MethodFact, reason: InstallPlanReason) -> String {
+    match reason {
+        InstallPlanReason::NoOsSupport => {
+            format!("{} does not run on this OS", fact.kind.manager_name())
+        }
+        InstallPlanReason::ManagerNotInstalled => format!(
+            "{} is not installed on this host",
+            fact.kind.manager_binary()
+        ),
+        InstallPlanReason::RequiresSudoNotAvailable => format!(
+            "{} requires sudo and the current user cannot sudo",
+            fact.kind.manager_name()
+        ),
+        InstallPlanReason::RequiresUnverifiedLangManager => format!(
+            "{} is installed but has no globally-installed packages — not choosing it blindly",
+            fact.kind.manager_name()
+        ),
+        InstallPlanReason::Unknown => {
+            "no other bucket accepted this method".to_string()
+        }
+        InstallPlanReason::Selected | InstallPlanReason::LowerPriorityAlternative => {
+            unreachable!()
+        }
     }
 }
 
@@ -306,5 +493,178 @@ mod tests {
         let chosen = plan.chosen().expect("chosen option");
         assert!(matches!(chosen.kind, InstallationMethod::Brew("bat")));
         assert_eq!(plan.failed_with_reason().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    use crate::os::OsType;
+    use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
+    use crate::programs::host_capability::HostCapabilities;
+    use crate::programs::schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
+    use crate::programs::types::InstallationMethod;
+
+    struct FakeProgram {
+        info: &'static ProgramInfo,
+    }
+    impl ProgramMetadata for FakeProgram {
+        fn info(&self) -> &'static ProgramInfo {
+            self.info
+        }
+    }
+
+    static BREW_AND_CARGO: ProgramInfo = ProgramInfo {
+        binary_name: "bat",
+        display_name: "bat",
+        description: "cat clone",
+        website: "https://github.com/sharkdp/bat",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: &[OsType::MacOS, OsType::Linux],
+        repo: None,
+        installation_methods: &[
+            InstallationMethod::Brew("bat"),
+            InstallationMethod::Cargo("bat"),
+        ],
+    };
+
+    fn host_macos_with_brew() -> HostCapabilities {
+        let os_pkg_mgrs = serde_json::from_str(r#"{"brew": true}"#).unwrap();
+        let lang_pkg_mgrs = serde_json::from_str(r#"{"cargo": true}"#).unwrap();
+        HostCapabilities {
+            os_type: OsType::MacOS,
+            default_os_package_manager: Some(OsPackageManager::Brew),
+            os_pkg_mgrs,
+            lang_pkg_mgrs,
+            has_bash: true,
+            ..HostCapabilities::default()
+        }
+    }
+
+    #[test]
+    fn brew_wins_over_cargo_on_macos() {
+        let host = host_macos_with_brew();
+        let plan = build_install_plan(&FakeProgram { info: &BREW_AND_CARGO }, &host);
+        assert!(plan.successful);
+        let chosen = plan.chosen().expect("chosen");
+        assert!(matches!(chosen.kind, InstallationMethod::Brew("bat")));
+        assert_eq!(chosen.reason_type, InstallPlanReason::Selected);
+
+        let cargo_opt = plan
+            .options
+            .iter()
+            .find(|o| matches!(o.kind, InstallationMethod::Cargo(_)))
+            .unwrap();
+        assert!(!cargo_opt.choose);
+        assert_eq!(cargo_opt.reason_type, InstallPlanReason::LowerPriorityAlternative);
+    }
+
+    static LINUX_APT_ONLY: ProgramInfo = ProgramInfo {
+        binary_name: "htop",
+        display_name: "htop",
+        description: "interactive process viewer",
+        website: "https://htop.dev",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: &[OsType::Linux],
+        repo: None,
+        installation_methods: &[InstallationMethod::Apt("htop")],
+    };
+
+    #[test]
+    fn apt_without_sudo_is_rejected_with_reason() {
+        let os_pkg_mgrs = serde_json::from_str(r#"{"apt": true}"#).unwrap();
+        let host = HostCapabilities {
+            os_type: OsType::Linux,
+            default_os_package_manager: Some(OsPackageManager::Apt),
+            os_pkg_mgrs,
+            can_sudo: false,
+            ..HostCapabilities::default()
+        };
+        let plan = build_install_plan(&FakeProgram { info: &LINUX_APT_ONLY }, &host);
+        assert!(!plan.successful);
+        let apt = &plan.options[0];
+        assert!(!apt.choose);
+        assert_eq!(apt.reason_type, InstallPlanReason::RequiresSudoNotAvailable);
+    }
+
+    #[test]
+    fn apt_with_sudo_is_selected() {
+        let os_pkg_mgrs = serde_json::from_str(r#"{"apt": true}"#).unwrap();
+        let host = HostCapabilities {
+            os_type: OsType::Linux,
+            default_os_package_manager: Some(OsPackageManager::Apt),
+            os_pkg_mgrs,
+            can_sudo: true,
+            ..HostCapabilities::default()
+        };
+        let plan = build_install_plan(&FakeProgram { info: &LINUX_APT_ONLY }, &host);
+        assert!(plan.successful);
+        let apt = plan.chosen().unwrap();
+        assert!(apt.requires_sudo);
+    }
+
+    static PNPM_AND_NPM: ProgramInfo = ProgramInfo {
+        binary_name: "typescript",
+        display_name: "TypeScript",
+        description: "Typed JavaScript",
+        website: "https://www.typescriptlang.org",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: &[],
+        repo: None,
+        installation_methods: &[
+            InstallationMethod::Pnpm("typescript"),
+            InstallationMethod::Npm("typescript"),
+        ],
+    };
+
+    #[test]
+    fn verified_pnpm_beats_npm() {
+        let lang_pkg_mgrs = serde_json::from_str(r#"{"pnpm": true, "npm": true}"#).unwrap();
+        let mut host = HostCapabilities {
+            os_type: OsType::Linux,
+            lang_pkg_mgrs,
+            npm_global_prefix_writable: Some(true),
+            ..HostCapabilities::default()
+        };
+        host.verified_lang_pkg_mgrs.insert(LanguagePackageManager::Pnpm);
+        let plan = build_install_plan(&FakeProgram { info: &PNPM_AND_NPM }, &host);
+        let chosen = plan.chosen().unwrap();
+        assert!(matches!(chosen.kind, InstallationMethod::Pnpm(_)));
+    }
+
+    #[test]
+    fn unverified_pnpm_gets_unverified_reason_and_falls_through_to_npm() {
+        let lang_pkg_mgrs = serde_json::from_str(r#"{"pnpm": true, "npm": true}"#).unwrap();
+        let host = HostCapabilities {
+            os_type: OsType::Linux,
+            lang_pkg_mgrs,
+            npm_global_prefix_writable: Some(true),
+            ..HostCapabilities::default()
+        };
+        let plan = build_install_plan(&FakeProgram { info: &PNPM_AND_NPM }, &host);
+        let chosen = plan.chosen().unwrap();
+        assert!(matches!(chosen.kind, InstallationMethod::Npm(_)));
+
+        let pnpm_opt = plan
+            .options
+            .iter()
+            .find(|o| matches!(o.kind, InstallationMethod::Pnpm(_)))
+            .unwrap();
+        assert_eq!(
+            pnpm_opt.reason_type,
+            InstallPlanReason::RequiresUnverifiedLangManager
+        );
     }
 }
