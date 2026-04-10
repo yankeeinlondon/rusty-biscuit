@@ -268,11 +268,7 @@ fn rewrite_last_updated_line(line: &str, today: &str) -> Option<String> {
 }
 
 fn detect_newline(text: &str) -> &str {
-    if text.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    }
+    if text.contains("\r\n") { "\r\n" } else { "\n" }
 }
 
 fn trim_line_ending(line: &str) -> &str {

@@ -445,9 +445,9 @@ fn check_shell_command(
 ) -> CheckResult {
     let timeout = std::time::Duration::from_secs(60);
     let (exit_code, stdout, stderr) = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(
-            crate::harness::shell::execute_approved_command(command, None, timeout),
-        )
+        tokio::runtime::Handle::current().block_on(crate::harness::shell::execute_approved_command(
+            command, None, timeout,
+        ))
     })
     .map_err(|e| format!("shell command '{}' failed: {e}", command.raw))?;
 
@@ -848,7 +848,9 @@ mod tests {
         )
     }
 
-    fn approved_shell_command(shell_fragment: &str) -> crate::harness::model::ApprovedRuntimeCommand {
+    fn approved_shell_command(
+        shell_fragment: &str,
+    ) -> crate::harness::model::ApprovedRuntimeCommand {
         crate::harness::model::ApprovedRuntimeCommand {
             raw: shell_fragment.to_string(),
             executable: "sh".to_string(),
@@ -856,7 +858,11 @@ mod tests {
         }
     }
 
-    fn init_committed_repo(dir: &TempDir, relative_path: &str, content: &str) -> std::path::PathBuf {
+    fn init_committed_repo(
+        dir: &TempDir,
+        relative_path: &str,
+        content: &str,
+    ) -> std::path::PathBuf {
         assert!(
             Command::new("git")
                 .arg("init")

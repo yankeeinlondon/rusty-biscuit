@@ -7,12 +7,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
 use darkmatter::markdown::compose::shell_expansion::{
-    check_builtin_blacklist, check_user_blacklist, check_whitelist, normalize_command,
-    resolve_policy_paths, ShellApprovalHandler, ShellExpansionOptions,
+    ShellApprovalHandler, ShellExpansionOptions, check_builtin_blacklist, check_user_blacklist,
+    check_whitelist, normalize_command, resolve_policy_paths,
 };
-use darkmatter::markdown::compose::ComposeSource;
 
 use crate::harness::error::HarnessError;
 use crate::harness::model::ApprovedRuntimeCommand;
@@ -364,8 +364,8 @@ mod tests {
     use darkmatter::markdown::compose::shell_expansion::{
         ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
     };
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct CapturingHandler {
         captured: Arc<Mutex<Option<ShellApprovalRequest>>>,

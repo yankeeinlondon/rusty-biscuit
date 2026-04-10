@@ -403,9 +403,12 @@ pub(crate) fn execute_composition_request_inner(
             package_area_root: None,
             package_root: None,
         });
-    let effective_sp =
-        claudine::system_prompt::resolve_and_prepare(&request.system_prompt_args, &launch_context)
-            .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
+        &request.system_prompt_args,
+        &launch_context,
+        effective_non_interactive,
+    )
+    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
 
     let mut sp_artifacts: Vec<super::system_prompt::SystemPromptArtifact> = Vec::new();
 
