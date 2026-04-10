@@ -7,8 +7,7 @@ use std::path::PathBuf;
 
 use chrono::{Duration, Utc};
 use sniff::programs::host_capability::{
-    HostCapabilities, load_host_capabilities_from, save_host_capabilities_to,
-    CACHE_SCHEMA_VERSION,
+    CACHE_SCHEMA_VERSION, HostCapabilities, load_host_capabilities_from, save_host_capabilities_to,
 };
 
 fn tmp_cache_path() -> (tempfile::TempDir, PathBuf) {
@@ -62,4 +61,25 @@ fn wrong_schema_version_returns_none() {
     });
     std::fs::write(&path, serde_json::to_string(&envelope).unwrap()).unwrap();
     assert!(load_host_capabilities_from(&path).is_none());
+}
+
+/// A cache file that was written on another machine (or under a different
+/// hostname — e.g. a renamed host or a synced home directory) must be
+/// treated as a miss instead of producing a plan against the wrong host.
+#[test]
+fn hostname_mismatch_returns_none() {
+    let (_dir, path) = tmp_cache_path();
+    let envelope = serde_json::json!({
+        "schema_version": CACHE_SCHEMA_VERSION,
+        "hostname": "this-hostname-should-never-match-anything-real-zzz99",
+        "os": HostCapabilities::default().os_type,
+        "is_wsl": false,
+        "expires_at": (Utc::now() + Duration::days(30)).to_rfc3339(),
+        "capabilities": HostCapabilities::default(),
+    });
+    std::fs::write(&path, serde_json::to_string(&envelope).unwrap()).unwrap();
+    assert!(
+        load_host_capabilities_from(&path).is_none(),
+        "hostname mismatch must invalidate the cache"
+    );
 }
