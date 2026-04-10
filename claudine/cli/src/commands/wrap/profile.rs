@@ -789,14 +789,27 @@ impl WrapperProfile for CodexWrapper {
 
     fn prompt_delivery(
         &self,
-        _args: &[String],
+        args: &[String],
         prompt: &str,
-        _non_interactive: bool,
+        non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        // Codex accepts a positional prompt after the "exec" entrypoint and
-        // all flags. Append so the child argv is consistent with the old
-        // pipeline: [exec, ...flags, prompt].
-        Ok(PromptDelivery::AppendArgs(vec![prompt.to_string()]))
+        if non_interactive {
+            // In non-interactive mode, deliver via stdin to avoid ENAMETOOLONG
+            // errors when prompt-file content exceeds OS argument length limits.
+            // Codex exec reads from stdin when no positional prompt is provided.
+            Ok(PromptDelivery::Stdin(prompt.to_string()))
+        } else {
+            // Interactive: insert as positional after "exec"
+            let insert_at = if args.first().is_some_and(|f| f == "exec" || f == "e") {
+                1
+            } else {
+                0
+            };
+            Ok(PromptDelivery::InsertArgs {
+                index: insert_at,
+                args: vec![prompt.to_string()],
+            })
+        }
     }
 
     fn validate_final_args(
@@ -1185,15 +1198,16 @@ impl WrapperProfile for KimiWrapper {
         &self,
         _args: &[String],
         prompt: &str,
-        _non_interactive: bool,
+        non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        // Kimi uses the --prompt flag for all prompt delivery; the only
-        // distinction between interactive and non-interactive is whether
-        // --print is included (handled by apply_entrypoint).
-        Ok(PromptDelivery::AppendArgs(vec![
-            "--prompt".to_string(),
-            prompt.to_string(),
-        ]))
+        if non_interactive {
+            Ok(PromptDelivery::Stdin(prompt.to_string()))
+        } else {
+            Ok(PromptDelivery::AppendArgs(vec![
+                "--prompt".to_string(),
+                prompt.to_string(),
+            ]))
+        }
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {

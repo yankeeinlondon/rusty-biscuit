@@ -191,11 +191,13 @@ fn wrapper_preserves_passthrough_args_and_injects_env() {
     fs::create_dir_all(&path_dir).unwrap();
     let args_path = workspace.path().join("args.txt");
     let env_path = workspace.path().join("env.txt");
+    let stdin_path = workspace.path().join("stdin.txt");
 
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+cat > "$CLAUDINE_STDIN_FILE"
 {
   printf 'AGENT=%s\n' "$AGENT"
   printf 'YOLO=%s\n' "$YOLO"
@@ -211,6 +213,7 @@ exit 0
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["codex", "--yolo", "--", "--json", "summarize repo"])
         .assert()
         .success();
@@ -222,10 +225,12 @@ exit 0
         vec![
             "exec",
             "--json",
-            "summarize repo",
             "--dangerously-bypass-approvals-and-sandbox",
         ]
     );
+
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert_eq!(stdin, "summarize repo");
 
     let env_lines = fs::read_to_string(&env_path).unwrap();
     assert!(env_lines.contains("AGENT=codex"));
@@ -345,11 +350,13 @@ fn wrapper_consumes_non_interactive_alias_from_passthrough() {
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
     let args_path = workspace.path().join("args.txt");
+    let stdin_path = workspace.path().join("stdin.txt");
 
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+cat > "$CLAUDINE_STDIN_FILE"
 exit 0
 "#,
     );
@@ -358,13 +365,17 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["codex", "--json", "summarize repo"])
         .assert()
         .success();
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert_eq!(args, vec!["exec", "--json", "summarize repo"]);
+    assert_eq!(args, vec!["exec", "--json"]);
+
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert_eq!(stdin, "summarize repo");
 }
 
 #[cfg(unix)]
@@ -791,11 +802,13 @@ fn kimi_wrapper_non_interactive_appends_print() {
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
     let args_path = workspace.path().join("args.txt");
+    let stdin_path = workspace.path().join("stdin.txt");
 
     write_executable(
         &path_dir.join("kimi"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+cat > "$CLAUDINE_STDIN_FILE"
 exit 0
 "#,
     );
@@ -804,6 +817,7 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["kimi", "hi"])
         .assert()
         .success();
@@ -811,7 +825,8 @@ exit 0
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
     assert!(args.contains(&"--print"));
-    assert!(args.contains(&"hi"));
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert_eq!(stdin, "hi");
 }
 
 // ---------------------------------------------------------------------------
