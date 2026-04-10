@@ -546,102 +546,45 @@ impl<E: CategoryEnum> ProgramDetector for CategoryDetector<E> {
     }
 
     fn installable(&self, program: E) -> bool {
-        let info = program.info();
-        if info.installation_methods.is_empty() {
-            return false;
-        }
-
-        let os_availability = info.os_availability;
-        if !os_availability.is_empty() {
-            let os_type = crate::os::detect_os_type();
-            if !os_availability.contains(&os_type) {
-                return false;
-            }
-        }
-
-        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
-        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
-
-        info.installation_methods.iter().any(|method| {
-            crate::programs::installer::method_available(method, &os_pkg_mgrs, &lang_pkg_mgrs)
-        })
+        self.install_plan(program).successful
     }
 
     fn install(&self, program: E) -> Result<(), SniffInstallationError> {
-        let info = program.info();
-
-        if info.installation_methods.is_empty() {
-            return Err(SniffInstallationError::NotInstallableOnOs {
+        let plan = self.install_plan(program);
+        if !plan.successful {
+            return Err(SniffInstallationError::NoViableMethod {
                 pkg: program.display_name().to_string(),
-                os: "unknown".to_string(),
+                detail: format!(
+                    "evaluated {} method(s); none are runnable",
+                    plan.options.len()
+                ),
             });
         }
-
-        let os_availability = info.os_availability;
-        if !os_availability.is_empty() {
-            let os_type = crate::os::detect_os_type();
-            if !os_availability.contains(&os_type) {
-                return Err(SniffInstallationError::NotInstallableOnOs {
-                    pkg: program.display_name().to_string(),
-                    os: os_type.to_string(),
-                });
-            }
-        }
-
-        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
-        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
-        let method = crate::programs::installer::select_best_method(
-            info.installation_methods,
-            &os_pkg_mgrs,
-            &lang_pkg_mgrs,
-        )
-        .ok_or_else(|| SniffInstallationError::MissingPackageManager {
-            pkg: program.display_name().to_string(),
-            manager: "package manager".to_string(),
-        })?;
-
-        let _result = crate::programs::installer::execute_install(
-            method,
-            &crate::programs::installer::InstallOptions::default(),
-        )?;
+        let _ = plan.execute(&crate::programs::installer::InstallOptions::default())?;
         Ok(())
     }
 
     fn install_version(&self, program: E, version: &str) -> Result<(), SniffInstallationError> {
-        let info = program.info();
-
-        if info.installation_methods.is_empty() {
-            return Err(SniffInstallationError::NotInstallableOnOs {
+        let plan = self.install_plan(program);
+        let chosen = plan
+            .chosen()
+            .ok_or_else(|| SniffInstallationError::NoViableMethod {
                 pkg: program.display_name().to_string(),
-                os: "unknown".to_string(),
+                detail: format!(
+                    "evaluated {} method(s); none are runnable",
+                    plan.options.len()
+                ),
+            })?;
+
+        if matches!(chosen.kind, InstallationMethod::RemoteBash(_)) {
+            return Err(SniffInstallationError::RemoteBashConsentRequired {
+                pkg: program.display_name().to_string(),
+                url: chosen.kind.package_name().to_string(),
             });
         }
 
-        let os_availability = info.os_availability;
-        if !os_availability.is_empty() {
-            let os_type = crate::os::detect_os_type();
-            if !os_availability.contains(&os_type) {
-                return Err(SniffInstallationError::NotInstallableOnOs {
-                    pkg: program.display_name().to_string(),
-                    os: os_type.to_string(),
-                });
-            }
-        }
-
-        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
-        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
-        let method = crate::programs::installer::select_best_method(
-            info.installation_methods,
-            &os_pkg_mgrs,
-            &lang_pkg_mgrs,
-        )
-        .ok_or_else(|| SniffInstallationError::MissingPackageManager {
-            pkg: program.display_name().to_string(),
-            manager: "package manager".to_string(),
-        })?;
-
-        let _result = crate::programs::installer::execute_versioned_install(
-            method,
+        let _ = crate::programs::installer::execute_versioned_install(
+            &chosen.kind,
             version,
             &crate::programs::installer::InstallOptions::default(),
         )?;
@@ -1489,5 +1432,20 @@ mod tests {
         let detector = CategoryDetector::<Editor>::default();
         let plan = detector.install_plan(Editor::Vim);
         assert_eq!(plan.program, Editor::Vim.display_name());
+    }
+
+    #[test]
+    fn installable_mirrors_plan_successful() {
+        use strum::IntoEnumIterator;
+        let detector = CategoryDetector::<Editor>::default();
+        for editor in Editor::iter() {
+            let plan = detector.install_plan(editor);
+            assert_eq!(
+                detector.installable(editor),
+                plan.successful,
+                "installable() must mirror install_plan().successful for {:?}",
+                editor
+            );
+        }
     }
 }
