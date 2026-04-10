@@ -97,6 +97,7 @@ pub mod editors;
 pub mod enums;
 pub mod find_program;
 pub mod headless_audio;
+pub mod host_capability;
 pub mod installer;
 pub mod inventory;
 pub mod macos_bundle;
@@ -121,6 +122,7 @@ pub use find_program::{
     find_programs_with_source_from_index, find_programs_with_source_parallel,
 };
 pub use headless_audio::InstalledHeadlessAudio;
+pub use host_capability::HostCapabilities;
 pub use installer::{
     InstallOptions, InstallResult, execute_install, execute_versioned_install, get_install_command,
     get_versioned_install_command,
