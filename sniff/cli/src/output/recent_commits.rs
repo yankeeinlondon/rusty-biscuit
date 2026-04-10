@@ -15,8 +15,15 @@ pub(crate) fn handle_recent_commits_command(
     plain: bool,
     _verbose: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (period, actions, package, package_area, no_error, on_error, mode) =
-        extract_action_params(action);
+    let RecentCommitsParams {
+        period,
+        actions,
+        package,
+        package_area,
+        no_error,
+        on_error,
+        mode,
+    } = extract_action_params(action);
 
     let period_str = period.as_deref().unwrap_or("3d");
     let specifier = parse_period(period_str)?;
@@ -105,17 +112,17 @@ enum RecentCommitsMode {
     DocumentationChanges,
 }
 
-fn extract_action_params(
-    action: &RepoAction,
-) -> (
-    Option<String>,
-    Vec<RecentCommitActionArg>,
-    Option<String>,
-    Option<String>,
-    bool,
-    Option<String>,
-    RecentCommitsMode,
-) {
+struct RecentCommitsParams {
+    period: Option<String>,
+    actions: Vec<RecentCommitActionArg>,
+    package: Option<String>,
+    package_area: Option<String>,
+    no_error: bool,
+    on_error: Option<String>,
+    mode: RecentCommitsMode,
+}
+
+fn extract_action_params(action: &RepoAction) -> RecentCommitsParams {
     match action {
         RepoAction::RecentCommits {
             period,
@@ -124,45 +131,45 @@ fn extract_action_params(
             package_area,
             no_error,
             on_error,
-        } => (
-            period.clone(),
-            actions.clone(),
-            package.clone(),
-            package_area.clone(),
-            *no_error,
-            on_error.clone(),
-            RecentCommitsMode::RecentCommits,
-        ),
+        } => RecentCommitsParams {
+            period: period.clone(),
+            actions: actions.clone(),
+            package: package.clone(),
+            package_area: package_area.clone(),
+            no_error: *no_error,
+            on_error: on_error.clone(),
+            mode: RecentCommitsMode::RecentCommits,
+        },
         RepoAction::SourceCodeChanges {
             period,
             package,
             package_area,
             no_error,
             on_error,
-        } => (
-            period.clone(),
-            Vec::new(),
-            package.clone(),
-            package_area.clone(),
-            *no_error,
-            on_error.clone(),
-            RecentCommitsMode::SourceCodeChanges,
-        ),
+        } => RecentCommitsParams {
+            period: period.clone(),
+            actions: Vec::new(),
+            package: package.clone(),
+            package_area: package_area.clone(),
+            no_error: *no_error,
+            on_error: on_error.clone(),
+            mode: RecentCommitsMode::SourceCodeChanges,
+        },
         RepoAction::DocumentationChanges {
             period,
             package,
             package_area,
             no_error,
             on_error,
-        } => (
-            period.clone(),
-            Vec::new(),
-            package.clone(),
-            package_area.clone(),
-            *no_error,
-            on_error.clone(),
-            RecentCommitsMode::DocumentationChanges,
-        ),
+        } => RecentCommitsParams {
+            period: period.clone(),
+            actions: Vec::new(),
+            package: package.clone(),
+            package_area: package_area.clone(),
+            no_error: *no_error,
+            on_error: on_error.clone(),
+            mode: RecentCommitsMode::DocumentationChanges,
+        },
         _ => unreachable!(),
     }
 }
