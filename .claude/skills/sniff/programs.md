@@ -18,7 +18,7 @@ Parallel detection across 8 categories with macOS app bundle support.
 ## Usage
 
 ```rust
-use sniff_lib::programs::ProgramsInfo;
+use sniff::programs::ProgramsInfo;
 
 let programs = ProgramsInfo::detect();
 println!("Editors: {:?}", programs.editors);
@@ -36,7 +36,7 @@ for editor in &programs.editors {
 PATH lookup with `/Applications` fallback:
 
 ```rust
-use sniff_lib::programs::find_program_with_source;
+use sniff::programs::find_program_with_source;
 
 let (path, source) = find_program_with_source("code");
 match source {
@@ -67,8 +67,14 @@ sniff agents                     # AI agent/CLI tools
 
 **JSON output:**
 ```bash
-sniff programs --json                    # Simple format (backward compatible)
-sniff programs --json --json-format full # Rich metadata (display name, description, website, version, source)
+sniff programs --json            # JSON with full metadata
+```
+
+**Install subcommand (per category or all):**
+```bash
+sniff editors install            # Interactive picker
+sniff editors install nvim       # Install specific program
+sniff programs install           # Pick from all categories
 ```
 
 ## Adding a Program Category
