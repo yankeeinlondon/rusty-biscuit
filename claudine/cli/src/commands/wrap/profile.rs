@@ -982,23 +982,9 @@ impl WrapperProfile for GeminiWrapper {
         true
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
+    fn apply_non_interactive_flags(&self, args: &mut [String]) -> Result<()> {
         if has_flag(args, "-i") || has_flag(args, "--prompt-interactive") {
             bail!("--non-interactive conflicts with interactive prompt mode for gemini");
-        }
-        if has_flag(args, "-p") || has_flag(args, "--prompt") {
-            return Ok(());
-        }
-        // Convert a bare positional prompt to --prompt so Gemini CLI
-        // runs in explicit headless mode even when stdin is a TTY.
-        //
-        // NOTE: prompt validation is deferred to validate_final_args() because
-        // the prompt may not be in args yet (e.g. composition pipelines
-        // compute delivery after non-interactive setup).
-        if let Some(index) = find_first_positional(args) {
-            let prompt = args.remove(index);
-            args.push("--prompt".to_string());
-            args.push(prompt);
         }
         Ok(())
     }
@@ -2282,91 +2268,23 @@ mod tests {
         assert!(error.to_string().contains("conflicts"));
     }
 
+    /// Regression test for the composition pipeline path: non-interactive
+    /// flag application must NOT bail when args are empty, because the
+    /// prompt arrives later via `prompt_delivery`.
     #[test]
-    fn gemini_non_interactive_converts_positional_to_prompt_flag() {
-        let p = profile(Provider::Gemini);
-        let mut args = vec!["hi".to_string()];
-
-        p.apply_non_interactive(&mut args).unwrap();
-
-        assert_eq!(args, vec!["--prompt", "hi"]);
-    }
-
-    #[test]
-    fn gemini_non_interactive_preserves_existing_prompt_flag() {
-        let p = profile(Provider::Gemini);
-        let mut args = vec!["--prompt".to_string(), "hi".to_string()];
-
-        p.apply_non_interactive(&mut args).unwrap();
-
-        assert_eq!(args, vec!["--prompt", "hi"]);
-    }
-
-    #[test]
-    fn gemini_non_interactive_converts_positional_with_other_flags() {
-        let p = profile(Provider::Gemini);
-        let mut args = vec![
-            "--model".to_string(),
-            "flash".to_string(),
-            "explain this".to_string(),
-        ];
-
-        p.apply_non_interactive(&mut args).unwrap();
-
-        assert_eq!(args, vec!["--model", "flash", "--prompt", "explain this"]);
-    }
-
-    #[test]
-    fn gemini_non_interactive_skips_approval_mode_value() {
-        let p = profile(Provider::Gemini);
-        let mut args = vec![
-            "--approval-mode".to_string(),
-            "yolo".to_string(),
-            "explain this".to_string(),
-        ];
-
-        p.apply_non_interactive(&mut args).unwrap();
-
-        // "yolo" must stay as --approval-mode's value, not be stolen as a positional
-        assert_eq!(
-            args,
-            vec!["--approval-mode", "yolo", "--prompt", "explain this"]
-        );
-    }
-
-    /// Regression test for the composition pipeline path: `apply_non_interactive`
-    /// must NOT bail when args are empty, because composition pipelines deliver
-    /// the prompt after non-interactive setup via `prompt_delivery`.
-    #[test]
-    fn gemini_non_interactive_allows_empty_args_for_composition() {
+    fn gemini_apply_non_interactive_flags_allows_empty_args_for_composition() {
         let p = profile(Provider::Gemini);
         let mut args: Vec<String> = Vec::new();
-
-        p.apply_non_interactive(&mut args).unwrap();
-        // No bail — prompt will be added later via prompt_delivery.
+        p.apply_non_interactive_flags(&mut args).unwrap();
         assert!(args.is_empty());
     }
 
     #[test]
-    fn gemini_non_interactive_rejects_missing_prompt_at_final_validation() {
+    fn gemini_apply_non_interactive_flags_rejects_interactive_mode_flags() {
         let p = profile(Provider::Gemini);
-        let mut args: Vec<String> = Vec::new();
-
-        p.apply_non_interactive(&mut args).unwrap();
-        let err = p.validate_final_args(&args, true, false).unwrap_err();
-        assert!(err.to_string().contains("requires a prompt"));
-    }
-
-    #[test]
-    fn gemini_final_validation_accepts_prompt_delivered_later() {
-        let p = profile(Provider::Gemini);
-        // Simulate composition flow: empty args, then prompt_delivery appends --prompt.
-        let mut args: Vec<String> = Vec::new();
-        p.apply_non_interactive(&mut args).unwrap();
-        p.prompt_delivery(&args, "composed body", true)
-            .unwrap()
-            .apply_to(&mut args);
-        p.validate_final_args(&args, true, false).unwrap();
+        let mut args = vec!["-i".to_string()];
+        let err = p.apply_non_interactive_flags(&mut args).unwrap_err();
+        assert!(err.to_string().contains("conflicts"));
     }
 
     #[test]
