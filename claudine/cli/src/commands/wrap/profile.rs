@@ -40,6 +40,53 @@ impl PromptDelivery {
     }
 }
 
+// ---------------------------------------------------------------------------
+// PromptSource — typed prompt input to the wrap pipeline
+// ---------------------------------------------------------------------------
+
+/// A prompt supplied to the wrap pipeline, already extracted from any
+/// CLI passthrough or composition source.
+///
+/// The wrap pipeline holds the prompt as this typed value between
+/// extraction (at the entrypoint) and delivery (via `prompt_delivery`).
+/// Provider flag-injection methods (`apply_entrypoint`,
+/// `apply_non_interactive_flags`) never see or mutate the prompt text.
+#[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PromptSource {
+    /// No prompt provided. Valid only for interactive sessions or
+    /// when stdin will be inherited from the parent (the child reads
+    /// the TTY directly).
+    None,
+    /// A text prompt to be placed by `prompt_delivery`.
+    Inline(String),
+    /// The caller is forwarding piped stdin from its own stdin.
+    /// The pipeline should not seed stdin; the child inherits it.
+    InheritStdin,
+}
+
+#[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
+impl PromptSource {
+    /// Returns the inline prompt text if this source is `Inline`.
+    pub(crate) fn as_inline(&self) -> Option<&str> {
+        match self {
+            Self::Inline(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Returns true when the source carries no prompt at all.
+    pub(crate) fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    /// Returns true when a prompt reaches the child by any means
+    /// (inline delivery OR inherited stdin).
+    pub(crate) fn has_prompt_or_stdin(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
 impl std::fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1733,6 +1780,34 @@ mod tests {
 
     fn profile(provider: Provider) -> &'static dyn WrapperProfile {
         profile_for_provider(provider).unwrap()
+    }
+
+    // -- PromptSource tests ------------------------------------------------
+
+    #[test]
+    fn prompt_source_as_inline_returns_text_for_inline_variant() {
+        let source = PromptSource::Inline("hello".to_string());
+        assert_eq!(source.as_inline(), Some("hello"));
+    }
+
+    #[test]
+    fn prompt_source_as_inline_returns_none_for_non_inline_variants() {
+        assert_eq!(PromptSource::None.as_inline(), None);
+        assert_eq!(PromptSource::InheritStdin.as_inline(), None);
+    }
+
+    #[test]
+    fn prompt_source_is_none_only_true_for_none_variant() {
+        assert!(PromptSource::None.is_none());
+        assert!(!PromptSource::Inline("hi".to_string()).is_none());
+        assert!(!PromptSource::InheritStdin.is_none());
+    }
+
+    #[test]
+    fn prompt_source_has_prompt_or_stdin_accepts_inline_and_stdin() {
+        assert!(!PromptSource::None.has_prompt_or_stdin());
+        assert!(PromptSource::Inline("x".to_string()).has_prompt_or_stdin());
+        assert!(PromptSource::InheritStdin.has_prompt_or_stdin());
     }
 
     // -- require_prompt_or_stdin shared helper ------------------------------
