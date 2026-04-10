@@ -7,7 +7,7 @@ use tracing::debug;
 
 use crate::filesystem::blast_radius::{is_documentation_path, is_source_code_path};
 use crate::filesystem::git::detection::get_commit_files;
-use crate::filesystem::repo::detect_repo;
+use crate::filesystem::repo::{detect_repo, Package};
 use crate::{Result, SniffError};
 
 // ---------------------------------------------------------------------------
@@ -166,6 +166,8 @@ pub struct CommitDescSet {
     pub commits: Vec<CommitDesc>,
     pub period_label: String,
     pub repo_root: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packages: Option<Vec<Package>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -184,15 +186,44 @@ pub fn get_recent_commits_by_duration(
         .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?
         .to_path_buf();
 
-    let since = Utc::now() - duration;
+    let until = Utc::now();
+    let since = until - duration;
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_since(&repo, since, repo_info.as_ref());
+    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
+    let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
 
     Ok(CommitDescSet {
         commits,
         period_label: period_label.to_string(),
         repo_root,
+        packages,
+    })
+}
+
+pub fn get_recent_commits_in_range(
+    base_dir: &Path,
+    since: DateTime<Utc>,
+    until: DateTime<Utc>,
+    period_label: &str,
+) -> Result<CommitDescSet> {
+    let repo = Repository::discover(base_dir)
+        .map_err(|_| SniffError::NotARepository(base_dir.to_path_buf()))?;
+    let repo_root = repo
+        .workdir()
+        .ok_or_else(|| SniffError::NotARepository(base_dir.to_path_buf()))?
+        .to_path_buf();
+
+    let repo_info = detect_repo(&repo_root)?;
+
+    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
+    let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
+
+    Ok(CommitDescSet {
+        commits,
+        period_label: period_label.to_string(),
+        repo_root,
+        packages,
     })
 }
 
@@ -205,15 +236,23 @@ pub fn get_recent_commits_by_date(base_dir: &Path, date: NaiveDate) -> Result<Co
         .to_path_buf();
 
     let since = date.and_hms_opt(0, 0, 0).unwrap_or_default().and_utc();
+    let until = date
+        .succ_opt()
+        .unwrap_or(date)
+        .and_hms_opt(0, 0, 0)
+        .unwrap_or_default()
+        .and_utc();
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_since(&repo, since, repo_info.as_ref());
+    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
+    let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
     let period_label = format!("since {}", date);
 
     Ok(CommitDescSet {
         commits,
         period_label,
         repo_root,
+        packages,
     })
 }
 
@@ -235,9 +274,11 @@ pub fn get_recent_commits_by_hash(base_dir: &Path, hash: &str) -> Result<CommitD
     })?;
 
     let since = DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default();
+    let until = Utc::now();
     let repo_info = detect_repo(&repo_root)?;
 
-    let commits = collect_commits_since(&repo, since, repo_info.as_ref());
+    let commits = collect_commits_in_range(&repo, since, until, repo_info.as_ref());
+    let packages = repo_info.as_ref().and_then(|ri| ri.packages.clone());
     let short_hash = &hash[..hash.len().min(8)];
     let period_label = format!("since commit {}", short_hash);
 
@@ -245,6 +286,7 @@ pub fn get_recent_commits_by_hash(base_dir: &Path, hash: &str) -> Result<CommitD
         commits,
         period_label,
         repo_root,
+        packages,
     })
 }
 
@@ -252,9 +294,10 @@ pub fn get_recent_commits_by_hash(base_dir: &Path, hash: &str) -> Result<CommitD
 // Internal commit walker
 // ---------------------------------------------------------------------------
 
-fn collect_commits_since(
+fn collect_commits_in_range(
     repo: &Repository,
     since: DateTime<Utc>,
+    until: DateTime<Utc>,
     repo_info_opt: Option<&crate::filesystem::repo::RepoInfo>,
 ) -> Vec<CommitDesc> {
     let mut commits = Vec::new();
@@ -281,6 +324,9 @@ fn collect_commits_since(
         if commit_time < since {
             break;
         }
+        if commit_time >= until {
+            continue;
+        }
 
         let sha = oid.to_string();
         let files_raw = get_commit_files(repo, &sha);
@@ -302,9 +348,9 @@ fn collect_commits_since(
                 let mut area_set: BTreeSet<String> = BTreeSet::new();
 
                 for file_path in &files_raw {
-                    let path_str = file_path.0.to_string_lossy();
+                    let file_path_buf = &file_path.0;
                     for pkg in pkgs.iter() {
-                        if path_str.starts_with(pkg.relative.as_str()) {
+                        if file_path_buf.starts_with(&pkg.relative) {
                             pkg_set.insert(pkg.name.clone());
                             area_set.insert(pkg.package_area.clone());
                         }
@@ -465,35 +511,110 @@ fn extract_display_date(datetime: &str) -> String {
 
 impl CommitDescSet {
     pub fn filter_by_package(&mut self, package_name: &str) {
+        let Some(ref packages) = self.packages else {
+            return;
+        };
+
         let package_lower = package_name.to_ascii_lowercase();
-        self.commits.retain(|commit| {
-            commit
-                .packages
-                .as_ref()
-                .is_some_and(|pkgs| pkgs.iter().any(|p| p.eq_ignore_ascii_case(&package_lower)))
-        });
+        let pkg = packages
+            .iter()
+            .find(|p| p.name.eq_ignore_ascii_case(&package_lower));
+        let Some(pkg) = pkg else {
+            self.commits.clear();
+            return;
+        };
+
+        let pkg_relative = PathBuf::from(&pkg.relative);
 
         for commit in &mut self.commits {
-            if let Some(ref mut pkgs) = commit.packages {
-                pkgs.retain(|p| p.eq_ignore_ascii_case(&package_lower));
+            let filtered_files: Vec<String> = commit
+                .files
+                .iter()
+                .filter(|f| PathBuf::from(f).starts_with(&pkg_relative))
+                .cloned()
+                .collect();
+
+            commit.files = filtered_files;
+
+            if commit.files.is_empty() {
+                continue;
             }
+
+            let mut new_pkgs = BTreeSet::new();
+            let mut new_areas = BTreeSet::new();
+            for file_path in &commit.files {
+                let path = PathBuf::from(file_path);
+                for p in packages.iter() {
+                    if path.starts_with(PathBuf::from(&p.relative)) {
+                        new_pkgs.insert(p.name.clone());
+                        new_areas.insert(p.package_area.clone());
+                    }
+                }
+            }
+            commit.packages = Some(new_pkgs.into_iter().collect());
+            commit.package_areas = Some(new_areas.into_iter().collect());
         }
+
+        self.commits.retain(|c| !c.files.is_empty());
     }
 
     pub fn filter_by_package_area(&mut self, area_name: &str) {
+        let Some(ref packages) = self.packages else {
+            return;
+        };
+
         let area_lower = area_name.to_ascii_lowercase();
-        self.commits.retain(|commit| {
-            commit
-                .package_areas
-                .as_ref()
-                .is_some_and(|areas| areas.iter().any(|a| a.eq_ignore_ascii_case(&area_lower)))
-        });
+        let matching_packages: Vec<&Package> = packages
+            .iter()
+            .filter(|p| {
+                let pkg_area = p.package_area.to_ascii_lowercase();
+                pkg_area == area_lower || pkg_area.starts_with(&format!("{area_lower}/"))
+            })
+            .collect();
+
+        if matching_packages.is_empty() {
+            self.commits.clear();
+            return;
+        }
+
+        let package_roots: Vec<PathBuf> = matching_packages
+            .iter()
+            .map(|p| PathBuf::from(&p.relative))
+            .collect();
 
         for commit in &mut self.commits {
-            if let Some(ref mut areas) = commit.package_areas {
-                areas.retain(|a| a.eq_ignore_ascii_case(&area_lower));
+            let filtered_files: Vec<String> = commit
+                .files
+                .iter()
+                .filter(|f| {
+                    let path = PathBuf::from(f);
+                    package_roots.iter().any(|root| path.starts_with(root))
+                })
+                .cloned()
+                .collect();
+
+            commit.files = filtered_files;
+
+            if commit.files.is_empty() {
+                continue;
             }
+
+            let mut new_pkgs = BTreeSet::new();
+            let mut new_areas = BTreeSet::new();
+            for file_path in &commit.files {
+                let path = PathBuf::from(file_path);
+                for p in packages.iter() {
+                    if path.starts_with(PathBuf::from(&p.relative)) {
+                        new_pkgs.insert(p.name.clone());
+                        new_areas.insert(p.package_area.clone());
+                    }
+                }
+            }
+            commit.packages = Some(new_pkgs.into_iter().collect());
+            commit.package_areas = Some(new_areas.into_iter().collect());
         }
+
+        self.commits.retain(|c| !c.files.is_empty());
     }
 }
 
@@ -692,6 +813,7 @@ mod tests {
                 }],
                 period_label: "last 3 days".to_string(),
                 repo_root: PathBuf::from("/repo"),
+                packages: None,
             }
         }
 
@@ -755,9 +877,261 @@ mod tests {
                 }],
                 period_label: "last 3 days".to_string(),
                 repo_root: PathBuf::from("/repo"),
+                packages: None,
             };
             let md = set.source_code_changes(true);
             assert!(md.is_empty());
+        }
+    }
+
+    mod filtering_tests {
+        use super::*;
+        use crate::filesystem::repo::Package;
+
+        fn make_packages() -> Vec<Package> {
+            vec![
+                Package {
+                    path: PathBuf::from("/repo/pkg-a"),
+                    relative: String::from("pkg-a"),
+                    package_area: String::from("pkg"),
+                    name: String::from("pkg-a"),
+                    ecosystem: crate::filesystem::repo::PackageEcosystem::Cargo,
+                    discovery_sources: vec![],
+                    nested_packages: vec![],
+                    primary_language: None,
+                    secondary_languages: vec![],
+                    languages: vec![],
+                    frameworks: vec![],
+                    file_associations: vec![],
+                    configuration: vec![],
+                    documentation: vec![],
+                    editor_config: None,
+                    command_runner: vec![],
+                    package_managers: vec![],
+                    version: None,
+                    features: vec![],
+                    depends_on: vec![],
+                    used_by: vec![],
+                    dependencies: None,
+                    dev_dependencies: None,
+                    peer_dependencies: None,
+                    optional_dependencies: None,
+                    is_updatable: None,
+                    has_major_update: None,
+                    is_excluded: false,
+                },
+                Package {
+                    path: PathBuf::from("/repo/pkg-b"),
+                    relative: String::from("pkg-b"),
+                    package_area: String::from("pkg"),
+                    name: String::from("pkg-b"),
+                    ecosystem: crate::filesystem::repo::PackageEcosystem::Cargo,
+                    discovery_sources: vec![],
+                    nested_packages: vec![],
+                    primary_language: None,
+                    secondary_languages: vec![],
+                    languages: vec![],
+                    frameworks: vec![],
+                    file_associations: vec![],
+                    configuration: vec![],
+                    documentation: vec![],
+                    editor_config: None,
+                    command_runner: vec![],
+                    package_managers: vec![],
+                    version: None,
+                    features: vec![],
+                    depends_on: vec![],
+                    used_by: vec![],
+                    dependencies: None,
+                    dev_dependencies: None,
+                    peer_dependencies: None,
+                    optional_dependencies: None,
+                    is_updatable: None,
+                    has_major_update: None,
+                    is_excluded: false,
+                },
+                Package {
+                    path: PathBuf::from("/repo/apps/web"),
+                    relative: String::from("apps/web"),
+                    package_area: String::from("apps"),
+                    name: String::from("apps-web"),
+                    ecosystem: crate::filesystem::repo::PackageEcosystem::Node,
+                    discovery_sources: vec![],
+                    nested_packages: vec![],
+                    primary_language: None,
+                    secondary_languages: vec![],
+                    languages: vec![],
+                    frameworks: vec![],
+                    file_associations: vec![],
+                    configuration: vec![],
+                    documentation: vec![],
+                    editor_config: None,
+                    command_runner: vec![],
+                    package_managers: vec![],
+                    version: None,
+                    features: vec![],
+                    depends_on: vec![],
+                    used_by: vec![],
+                    dependencies: None,
+                    dev_dependencies: None,
+                    peer_dependencies: None,
+                    optional_dependencies: None,
+                    is_updatable: None,
+                    has_major_update: None,
+                    is_excluded: false,
+                },
+                Package {
+                    path: PathBuf::from("/repo/apps/browser"),
+                    relative: String::from("apps/browser"),
+                    package_area: String::from("apps"),
+                    name: String::from("apps-browser"),
+                    ecosystem: crate::filesystem::repo::PackageEcosystem::Node,
+                    discovery_sources: vec![],
+                    nested_packages: vec![],
+                    primary_language: None,
+                    secondary_languages: vec![],
+                    languages: vec![],
+                    frameworks: vec![],
+                    file_associations: vec![],
+                    configuration: vec![],
+                    documentation: vec![],
+                    editor_config: None,
+                    command_runner: vec![],
+                    package_managers: vec![],
+                    version: None,
+                    features: vec![],
+                    depends_on: vec![],
+                    used_by: vec![],
+                    dependencies: None,
+                    dev_dependencies: None,
+                    peer_dependencies: None,
+                    optional_dependencies: None,
+                    is_updatable: None,
+                    has_major_update: None,
+                    is_excluded: false,
+                },
+            ]
+        }
+
+        fn cross_package_set() -> CommitDescSet {
+            CommitDescSet {
+                commits: vec![
+                    CommitDesc {
+                        hash: "abc123".to_string(),
+                        datetime: "2026-04-09T14:30:00+00:00".to_string(),
+                        packages: Some(vec!["pkg-a".to_string(), "pkg-b".to_string()]),
+                        package_areas: Some(vec!["pkg".to_string()]),
+                        files: vec![
+                            "pkg-a/src/lib.rs".to_string(),
+                            "pkg-b/src/main.rs".to_string(),
+                        ],
+                        description: "cross-package commit".to_string(),
+                        bullet_points: vec![],
+                    },
+                    CommitDesc {
+                        hash: "def456".to_string(),
+                        datetime: "2026-04-09T13:00:00+00:00".to_string(),
+                        packages: Some(vec!["pkg-a".to_string()]),
+                        package_areas: Some(vec!["pkg".to_string()]),
+                        files: vec!["pkg-a/src/lib.rs".to_string()],
+                        description: "pkg-a only".to_string(),
+                        bullet_points: vec![],
+                    },
+                    CommitDesc {
+                        hash: "ghi789".to_string(),
+                        datetime: "2026-04-09T12:00:00+00:00".to_string(),
+                        packages: Some(vec!["apps-web".to_string(), "apps-browser".to_string()]),
+                        package_areas: Some(vec!["apps".to_string()]),
+                        files: vec![
+                            "apps/web/src/index.ts".to_string(),
+                            "apps/browser/src/main.ts".to_string(),
+                        ],
+                        description: "apps commit".to_string(),
+                        bullet_points: vec![],
+                    },
+                ],
+                period_label: "last 3 days".to_string(),
+                repo_root: PathBuf::from("/repo"),
+                packages: Some(make_packages()),
+            }
+        }
+
+        #[test]
+        fn filter_by_package_narrows_files_within_commits() {
+            let mut set = cross_package_set();
+            set.filter_by_package("pkg-a");
+
+            assert_eq!(set.commits.len(), 2);
+
+            for commit in &set.commits {
+                for file in &commit.files {
+                    assert!(
+                        file.starts_with("pkg-a/"),
+                        "File {} should be under pkg-a/",
+                        file
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn filter_by_package_removes_non_matching_commits() {
+            let mut set = cross_package_set();
+            set.filter_by_package("nonexistent");
+
+            assert!(set.commits.is_empty());
+        }
+
+        #[test]
+        fn filter_by_package_area_prefix_matching() {
+            let mut set = cross_package_set();
+            set.filter_by_package_area("apps");
+
+            for commit in &set.commits {
+                for file in &commit.files {
+                    assert!(
+                        file.starts_with("apps/"),
+                        "File {} should be under apps/",
+                        file
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn filter_by_package_area_includes_nested_areas() {
+            let mut set = cross_package_set();
+            set.filter_by_package_area("apps");
+
+            assert!(!set.commits.is_empty());
+            for commit in &set.commits {
+                assert!(
+                    commit.files.iter().all(|f| f.starts_with("apps/")),
+                    "All files should be under apps/ area"
+                );
+            }
+        }
+
+        #[test]
+        fn filter_by_package_area_empty_for_nonexistent() {
+            let mut set = cross_package_set();
+            set.filter_by_package_area("nonexistent");
+
+            assert!(set.commits.is_empty());
+        }
+
+        #[test]
+        fn filter_preserves_packages_after_file_filtering() {
+            let mut set = cross_package_set();
+            set.filter_by_package("pkg-b");
+
+            assert_eq!(set.commits.len(), 1);
+            let commit = &set.commits[0];
+            assert!(commit
+                .packages
+                .as_ref()
+                .unwrap()
+                .contains(&"pkg-b".to_string()));
         }
     }
 }

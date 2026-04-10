@@ -1,3 +1,4 @@
+use chrono::Utc;
 use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
 use darkmatter::markdown::Markdown;
 
@@ -32,17 +33,19 @@ pub(crate) fn handle_recent_commits_command(
         }
         PeriodSpecifier::Today => {
             let label = "today".to_string();
-            sniff::filesystem::get_recent_commits_by_duration(
-                dir,
-                chrono::Duration::days(1),
-                &label,
-            )?
+            let now = Utc::now();
+            let today_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+            sniff::filesystem::get_recent_commits_in_range(dir, today_start, now, &label)?
         }
         PeriodSpecifier::Yesterday => {
             let label = "yesterday".to_string();
-            sniff::filesystem::get_recent_commits_by_duration(
+            let now = Utc::now();
+            let today_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+            let yesterday_start = today_start - chrono::Duration::days(1);
+            sniff::filesystem::get_recent_commits_in_range(
                 dir,
-                chrono::Duration::days(1),
+                yesterday_start,
+                today_start,
                 &label,
             )?
         }
