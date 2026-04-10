@@ -252,6 +252,8 @@ use crate::providers::host::SayProvider;
 
 #[cfg(target_os = "windows")]
 use crate::providers::host::SapiProvider;
+#[cfg(target_os = "macos")]
+use crate::providers::host::SayProvider;
 use crate::traits::TtsVoiceInventory;
 
 /// Populate the cache for a single provider.
