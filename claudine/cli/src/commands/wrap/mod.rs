@@ -1042,8 +1042,12 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 package_root: None,
             }
         });
-    let effective_sp = claudine::system_prompt::resolve_and_prepare(&sp_args, &launch_context)
-        .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
+        &sp_args,
+        &launch_context,
+        non_interactive_requested,
+    )
+    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
 
     let mut sp_artifacts: Vec<super::wrap::system_prompt::SystemPromptArtifact> = Vec::new();
 
