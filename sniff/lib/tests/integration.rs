@@ -1662,3 +1662,200 @@ fn test_monorepo_json_output_scoped_after_filter() {
         "Filtered JSON should not contain references to pkg-b"
     );
 }
+
+// ============================================================================
+// Recent Commits — Empty commit tests
+// ============================================================================
+
+/// Helper: create an empty commit (no file changes) in an existing repo.
+fn commit_empty(repo: &Repository, message: &str) -> git2::Oid {
+    let sig = repo.signature().unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let tree = head.tree().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])
+        .unwrap()
+}
+
+#[test]
+fn test_empty_commit_included_in_duration_query() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+
+    // Add an empty commit on top of HEAD
+    commit_empty(&repo, "chore: empty marker");
+
+    let result = get_recent_commits_by_duration(&path, Duration::days(7), "last 7 days").unwrap();
+
+    // Should have 2 commits: the empty marker and the original
+    assert_eq!(
+        result.commits.len(),
+        2,
+        "Empty commit should be included in results"
+    );
+    assert_eq!(result.commits[0].description, "chore: empty marker");
+    assert!(
+        result.commits[0].files.is_empty(),
+        "Empty commit should have files: []"
+    );
+    assert_eq!(
+        result.commits[1].description,
+        "feat(cli): add main entry point"
+    );
+}
+
+#[test]
+fn test_empty_commit_as_hash_boundary() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let (_dir, path) = create_recent_commits_repo();
+    let repo = Repository::open(&path).unwrap();
+
+    // Add an empty commit, then a real commit on top
+    let empty_oid = commit_empty(&repo, "chore: empty boundary");
+    commit_file_with_message(&repo, &path, "src/extra.rs", "fn extra() {}", "feat: extra");
+
+    // Query from the empty boundary commit to HEAD — should be inclusive
+    let result = get_recent_commits_by_hash(&path, &empty_oid.to_string()).unwrap();
+
+    assert_eq!(
+        result.commits.len(),
+        2,
+        "Should include HEAD and the empty boundary commit"
+    );
+    assert_eq!(result.commits[0].description, "feat: extra");
+    assert_eq!(result.commits[1].description, "chore: empty boundary");
+    assert!(
+        result.commits[1].files.is_empty(),
+        "Empty boundary commit should have files: []"
+    );
+}
+
+#[test]
+fn test_empty_head_included_in_hash_query() {
+    use sniff::filesystem::get_recent_commits_by_hash;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Initial commit with a file
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = repo.signature().unwrap();
+    let boundary_oid = repo
+        .commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+        .unwrap();
+
+    // Second commit with a file
+    commit_file_with_message(&repo, dir.path(), "src/a.rs", "fn a() {}", "commit two");
+
+    // HEAD is an empty commit
+    commit_empty(&repo, "chore: empty head");
+
+    let result = get_recent_commits_by_hash(dir.path(), &boundary_oid.to_string()).unwrap();
+
+    assert_eq!(
+        result.commits.len(),
+        3,
+        "Should include empty HEAD, commit two, and boundary"
+    );
+    assert_eq!(result.commits[0].description, "chore: empty head");
+    assert!(result.commits[0].files.is_empty());
+    assert_eq!(result.commits[1].description, "commit two");
+    assert_eq!(result.commits[2].description, "initial commit");
+}
+
+// ============================================================================
+// Recent Commits — Skewed timestamp tests
+// ============================================================================
+
+/// Helper: commit a file with a custom timestamp (seconds since epoch).
+fn commit_file_with_timestamp(
+    repo: &Repository,
+    dir: &std::path::Path,
+    relative: &str,
+    content: &str,
+    message: &str,
+    epoch_secs: i64,
+) -> git2::Oid {
+    let full = dir.join(relative);
+    if let Some(parent) = full.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(&full, content).unwrap();
+
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new(relative)).unwrap();
+    index.write().unwrap();
+
+    let sig = git2::Signature::new("Test User", "test@test.com", &git2::Time::new(epoch_secs, 0))
+        .unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])
+        .unwrap()
+}
+
+#[test]
+fn test_skewed_head_does_not_hide_newer_parent() {
+    use sniff::filesystem::get_recent_commits_by_duration;
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo = Repository::init(dir.path()).unwrap();
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test User").unwrap();
+
+    // Parent commit: recent timestamp (now)
+    let now_secs = Utc::now().timestamp();
+    fs::write(dir.path().join("init.txt"), "init").unwrap();
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("init.txt")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let parent_sig =
+        git2::Signature::new("Test User", "test@test.com", &git2::Time::new(now_secs, 0)).unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &parent_sig,
+        &parent_sig,
+        "recent parent",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    // HEAD commit: very old timestamp (year 2000)
+    let old_epoch = 946684800_i64; // 2000-01-01T00:00:00Z
+    commit_file_with_timestamp(
+        &repo,
+        dir.path(),
+        "src/main.rs",
+        "fn main() {}",
+        "old head",
+        old_epoch,
+    );
+
+    // Query for last 7 days — the parent commit is within range
+    let result = get_recent_commits_by_duration(dir.path(), Duration::days(7), "last 7 days");
+    assert!(result.is_ok(), "Query should succeed: {:?}", result);
+    let set = result.unwrap();
+
+    // The recent parent should be found even though HEAD is old
+    let descriptions: Vec<&str> = set.commits.iter().map(|c| c.description.as_str()).collect();
+    assert!(
+        descriptions.contains(&"recent parent"),
+        "Should find the recent parent commit despite old HEAD. Got: {:?}",
+        descriptions
+    );
+}

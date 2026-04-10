@@ -2249,3 +2249,193 @@ fn test_repo_recent_commits_unknown_package_error() {
         .assert()
         .failure();
 }
+
+// ============================================================================
+// Recent Commits CLI — Empty commit and exact payload tests
+// ============================================================================
+
+#[test]
+fn test_repo_recent_commits_json_includes_empty_commits() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    // Create an empty commit on top
+    let repo = git2::Repository::open(&path).unwrap();
+    let sig = repo.signature().unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let tree = head.tree().unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "chore: empty marker",
+        &tree,
+        &[&head],
+    )
+    .unwrap();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
+    let commits = json["commits"].as_array().expect("Should have commits array");
+
+    // Find the empty commit
+    let empty = commits
+        .iter()
+        .find(|c| c["description"].as_str() == Some("chore: empty marker"));
+    assert!(empty.is_some(), "Empty commit should appear in JSON output");
+    let empty = empty.unwrap();
+    let files = empty["files"].as_array().expect("Should have files array");
+    assert!(files.is_empty(), "Empty commit should have files: []");
+}
+
+#[test]
+fn test_repo_recent_commits_json_exact_commit_fields() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
+    let commits = json["commits"].as_array().expect("Should have commits array");
+
+    // Should have at least 2 commits (initial + add file)
+    assert!(
+        commits.len() >= 2,
+        "Should have at least 2 commits, got {}",
+        commits.len()
+    );
+
+    // Verify each commit has required fields
+    for commit in commits {
+        assert!(commit["hash"].is_string(), "Commit should have hash");
+        assert!(
+            commit["datetime"].is_string(),
+            "Commit should have datetime"
+        );
+        assert!(commit["files"].is_array(), "Commit should have files array");
+        assert!(
+            commit["description"].is_string(),
+            "Commit should have description"
+        );
+        assert!(
+            commit["bullet_points"].is_array(),
+            "Commit should have bullet_points"
+        );
+    }
+}
+
+#[test]
+fn test_repo_source_code_changes_json_exact_fields() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "source-code-changes",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
+    let commits = json["commits"].as_array().expect("Should have commits array");
+
+    // At least one commit should have a .rs file
+    let has_rs_file = commits.iter().any(|c| {
+        c["files"]
+            .as_array()
+            .is_some_and(|files| files.iter().any(|f| f.as_str().is_some_and(|s| s.ends_with(".rs"))))
+    });
+    assert!(has_rs_file, "Source code changes should include .rs files");
+}
+
+#[test]
+fn test_repo_documentation_changes_json_exact_fields() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "docs/guide.md", "# Guide\n");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "documentation-changes",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
+    let commits = json["commits"].as_array().expect("Should have commits array");
+
+    // At least one commit should have a .md file
+    let has_md_file = commits.iter().any(|c| {
+        c["files"]
+            .as_array()
+            .is_some_and(|files| files.iter().any(|f| f.as_str().is_some_and(|s| s.ends_with(".md"))))
+    });
+    assert!(has_md_file, "Documentation changes should include .md files");
+}
+
+#[test]
+fn test_repo_recent_commits_plain_output_exact_structure() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    let output = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--plain",
+        ])
+        .output()
+        .expect("failed to run sniff");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Plain output should contain markdown structure
+    assert!(
+        stdout.contains("**Commit:**"),
+        "Plain output should have commit markers"
+    );
+    assert!(
+        stdout.contains("**Files:**"),
+        "Plain output should have files section"
+    );
+    assert!(
+        stdout.contains("**Description:**"),
+        "Plain output should have description"
+    );
+    assert!(
+        stdout.contains("src/main.rs"),
+        "Plain output should list the committed file"
+    );
+}
