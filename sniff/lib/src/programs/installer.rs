@@ -53,6 +53,12 @@ pub struct InstallOptions {
     pub skip_confirm: bool,
     /// Timeout in seconds for the installation command.
     pub timeout_secs: u64,
+    /// Whether the caller has explicitly approved executing a RemoteBash method.
+    ///
+    /// Defaults to `false`. The plan executor returns
+    /// `SniffInstallationError::RemoteBashConsentRequired` if the selected
+    /// option is `RemoteBash` and this flag is `false`.
+    pub approve_remote_bash: bool,
 }
 
 impl Default for InstallOptions {
@@ -61,6 +67,7 @@ impl Default for InstallOptions {
             dry_run: false,
             skip_confirm: false,
             timeout_secs: DEFAULT_TIMEOUT_SECS,
+            approve_remote_bash: false,
         }
     }
 }
@@ -89,6 +96,12 @@ impl InstallOptions {
     /// Sets the timeout for the installation command.
     pub fn with_timeout(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
+        self
+    }
+
+    /// Sets whether RemoteBash execution is pre-approved.
+    pub fn with_approve_remote_bash(mut self, approve: bool) -> Self {
+        self.approve_remote_bash = approve;
         self
     }
 }
@@ -771,5 +784,17 @@ mod tests {
         let method = InstallationMethod::Brew("ripgrep");
         let cmd = get_install_command(&method).unwrap();
         assert!(cmd.contains("brew install ripgrep"));
+    }
+
+    #[test]
+    fn test_install_options_default_does_not_approve_remote_bash() {
+        let opts = InstallOptions::default();
+        assert!(!opts.approve_remote_bash);
+    }
+
+    #[test]
+    fn test_install_options_with_approve_remote_bash_sets_flag() {
+        let opts = InstallOptions::default().with_approve_remote_bash(true);
+        assert!(opts.approve_remote_bash);
     }
 }
