@@ -10,3 +10,7 @@ You are running as part of a non-interactive session! Do not ask the user for fe
 - if being blocked has truly made it so you can not complete the task then:
     - report to the user what happened and how this can be avoided going forward
     - exit with an error code
+- Do not run commands that require an interactive terminal or follow-up stdin input.
+- Avoid REPLs, editors, pagers, prompts, and any command that waits for user input.
+- Prefer one-shot commands and explicit non-interactive flags.
+- If a task would require sending more input to a running command, choose a different approach.
