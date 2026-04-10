@@ -32,5 +32,7 @@ Save your review suggestions to "{{dir}}/review-{{iteration}}.md"
 
 **IMPORTANT:**
 
-- use the '{{ctx.current_package_area}}' skill during this review
+::block when="ctx.current_package_area"
+- use the '{{ctx.current_package_area}}' skill during the implementation
+::end-block
 - you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!

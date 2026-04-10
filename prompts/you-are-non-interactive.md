@@ -1,0 +1,10 @@
+- you are running as part of a non-interactive session! Do not ask the user for feedback or permissions as they can not answer!
+    - if there was a tool call you wanted to make but were not able to:
+        - let the user know that happened
+        - find an alternative way of getting the information you need
+    - if there was a file you didn't have read permission to while attempt to read:
+        - let the user know that happened
+        - find an alternative way of getting the information you need
+    - if being blocked has truly made it so you can not complete the task then:
+        - report to the user what happened and how this can be avoided going forward
+        - exit with an error code
