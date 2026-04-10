@@ -488,11 +488,7 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
         }
 
         // Extract the long name after " - "
-        let name = trimmed
-            .split(" - ")
-            .nth(1)
-            .unwrap_or(trimmed)
-            .to_string();
+        let name = trimmed.split(" - ").nth(1).unwrap_or(trimmed).to_string();
 
         let name_upper = name.to_uppercase();
         let kind = if name_upper.contains("HDMI") {
@@ -506,11 +502,7 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
         };
 
         // Extract card index for a stable UID
-        let uid = trimmed
-            .split_whitespace()
-            .next()
-            .unwrap_or("0")
-            .to_string();
+        let uid = trimmed.split_whitespace().next().unwrap_or("0").to_string();
 
         devices.push(AudioDeviceInfo {
             name,

@@ -428,17 +428,9 @@ fn find_primary_interface_fallback(interfaces: &[NetworkInterface]) -> Option<St
 /// | 0     | Virtual / unrecognized (lowest priority) |
 fn interface_priority(iface: &NetworkInterface) -> u8 {
     if is_physical_interface(&iface.name) {
-        if iface.flags.is_running {
-            4
-        } else {
-            3
-        }
+        if iface.flags.is_running { 4 } else { 3 }
     } else if !is_virtual_interface(&iface.name) {
-        if iface.flags.is_running {
-            2
-        } else {
-            1
-        }
+        if iface.flags.is_running { 2 } else { 1 }
     } else {
         0
     }
@@ -470,15 +462,15 @@ fn is_physical_interface(name: &str) -> bool {
     matches!(
         lower.as_str(),
         "ethernet"
-        | "ethernet 2"
-        | "ethernet 3"
-        | "wi-fi"
-        | "wi-fi 2"
-        | "wi-fi 3"
-        | "local area connection"
-        | "local area connection 2"
-        | "local area connection 3"
-        | "network bridge"
+            | "ethernet 2"
+            | "ethernet 3"
+            | "wi-fi"
+            | "wi-fi 2"
+            | "wi-fi 3"
+            | "local area connection"
+            | "local area connection 2"
+            | "local area connection 3"
+            | "network bridge"
     )
 }
 
@@ -1190,15 +1182,15 @@ mod tests {
     #[test]
     fn test_primary_interface_recognizes_physical_patterns() {
         let physical_patterns = vec![
-            "en0",     // macOS/BSD
-            "en1",     // macOS/BSD
-            "eth0",    // Linux Ethernet
-            "eth1",    // Linux Ethernet
-            "wlan0",   // Linux WiFi
-            "wlp3s0",  // Linux WiFi with PCI naming
-            "enp0s31", // Linux with predictable naming
-            "Ethernet",      // Windows
-            "Wi-Fi",         // Windows
+            "en0",                   // macOS/BSD
+            "en1",                   // macOS/BSD
+            "eth0",                  // Linux Ethernet
+            "eth1",                  // Linux Ethernet
+            "wlan0",                 // Linux WiFi
+            "wlp3s0",                // Linux WiFi with PCI naming
+            "enp0s31",               // Linux with predictable naming
+            "Ethernet",              // Windows
+            "Wi-Fi",                 // Windows
             "Local Area Connection", // Windows
         ];
 

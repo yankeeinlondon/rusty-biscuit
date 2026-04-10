@@ -227,7 +227,7 @@ pub fn extract_encoding(locale: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::{ScopedEnv, ENV_MUTEX};
+    use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
 
     // ========== Locale Tests ==========
 

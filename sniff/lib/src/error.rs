@@ -114,7 +114,9 @@ pub enum SniffError {
     HashNotReachable { hash: String },
 
     /// Invalid period specifier for recent-commits queries.
-    #[error("invalid period specifier: '{0}'. Expected duration (e.g., 3d, 1w), date (YYYY-MM-DD), hash, 'today', or 'yesterday'.")]
+    #[error(
+        "invalid period specifier: '{0}'. Expected duration (e.g., 3d, 1w), date (YYYY-MM-DD), hash, 'today', or 'yesterday'."
+    )]
     InvalidPeriod(String),
 
     /// Rate limited by the hosting provider API.

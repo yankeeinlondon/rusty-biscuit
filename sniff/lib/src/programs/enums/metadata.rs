@@ -4,8 +4,8 @@ use crate::programs::schema::{ProgramInfo, ProgramMetadata, VersionFlag, Version
 use crate::programs::types::InstallationMethod;
 
 use super::categories::{
-    AiCli, CategoryEnum, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager,
-    TerminalApp, TtsClient, Utility, ALL_OS, LINUX_ONLY, MACOS_ONLY, UNIX_ONLY, WINDOWS_ONLY,
+    ALL_OS, AiCli, CategoryEnum, Editor, HeadlessAudio, LINUX_ONLY, LanguagePackageManager,
+    MACOS_ONLY, OsPackageManager, TerminalApp, TtsClient, UNIX_ONLY, Utility, WINDOWS_ONLY,
 };
 
 pub(crate) static BREW_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(

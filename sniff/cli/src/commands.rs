@@ -42,7 +42,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         command = ?cli.command.as_ref().map(|c| format!("{c:?}")),
         json = cli.json,
         plain = cli.plain,
-    ).entered();
+    )
+    .entered();
 
     // Handle --completions first (prints setup instructions)
     if let Some(shell) = cli.completions {
@@ -606,10 +607,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Handle Package/PackageArea early returns (need detection result but not enrichment)
     if let Some(ref action) = repo_action {
         match action {
-            crate::args::RepoAction::Package {
-                no_error,
-                on_error,
-            } => {
+            crate::args::RepoAction::Package { no_error, on_error } => {
                 let rendered =
                     output::render_repo_package(&result, base_dir.as_deref(), cli.verbose);
                 if rendered.is_empty() {
@@ -618,10 +616,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{rendered}");
                 return Ok(());
             }
-            crate::args::RepoAction::PackageArea {
-                no_error,
-                on_error,
-            } => {
+            crate::args::RepoAction::PackageArea { no_error, on_error } => {
                 let rendered = output::render_repo_package_area(&result, base_dir.as_deref());
                 if rendered.is_empty() {
                     return handle_no_results(*no_error, on_error, cli.plain);

@@ -27,13 +27,13 @@ pub(crate) fn list_windows_scm_services() -> Vec<Service> {
 
 #[cfg(target_os = "windows")]
 fn enumerate_windows_scm_services() -> windows::core::Result<Vec<Service>> {
-    use windows::core::PCWSTR;
     use windows::Win32::Foundation::ERROR_MORE_DATA;
     use windows::Win32::System::Services::{
-        CloseServiceHandle, EnumServicesStatusExW, OpenSCManagerW, ENUM_SERVICE_STATUS_PROCESSW,
+        CloseServiceHandle, ENUM_SERVICE_STATUS_PROCESSW, EnumServicesStatusExW, OpenSCManagerW,
         SC_ENUM_PROCESS_INFO, SC_HANDLE, SC_MANAGER_ENUMERATE_SERVICE, SERVICE_RUNNING,
         SERVICE_STATE_ALL, SERVICE_STATUS_PROCESS, SERVICE_WIN32,
     };
+    use windows::core::PCWSTR;
 
     let scm: SC_HANDLE =
         unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_ENUMERATE_SERVICE)? };

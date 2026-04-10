@@ -1201,11 +1201,8 @@ pub fn detect_windows_package_managers() -> SystemPackageManagers {
         .or_else(|| {
             // Fall back to PATH — only treat as MSYS2 if the resolved path
             // contains "msys" (distinguishes from native Arch/WSL pacman)
-            command_exists_in_path("pacman", &path_dirs).filter(|p| {
-                p.to_string_lossy()
-                    .to_ascii_lowercase()
-                    .contains("msys")
-            })
+            command_exists_in_path("pacman", &path_dirs)
+                .filter(|p| p.to_string_lossy().to_ascii_lowercase().contains("msys"))
         });
     if let Some(path) = msys2_pacman_path {
         let manager = SystemPackageManager::Msys2Pacman;
