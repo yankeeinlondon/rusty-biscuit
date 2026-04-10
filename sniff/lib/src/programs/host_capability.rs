@@ -4,6 +4,8 @@
 //! for the contract this module implements.
 
 use std::collections::HashSet;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -226,6 +228,148 @@ impl HostCapabilities {
         let mut host = Self::detect();
         host.verified_lang_pkg_mgrs = detect_verified_lang_pkg_mgrs(&host.lang_pkg_mgrs);
         host.npm_global_prefix_writable = detect_npm_global_prefix_writable();
+        host
+    }
+}
+
+// ---------------------------------------------------------------------------
+// On-disk capability cache
+// ---------------------------------------------------------------------------
+
+/// Current on-disk schema version for the host capability cache.
+///
+/// Increment this constant whenever the `HostCapabilityCacheFile` structure
+/// changes in a backward-incompatible way. A version mismatch causes
+/// [`load_host_capabilities_from`] to discard the old file and return `None`.
+pub const CACHE_SCHEMA_VERSION: u32 = 1;
+
+/// 90-day TTL for cached host capabilities.
+const CACHE_TTL: chrono::Duration = chrono::Duration::days(90);
+
+/// On-disk envelope wrapping a [`HostCapabilities`] snapshot.
+///
+/// The envelope stores metadata needed to validate the cache on next load:
+/// schema version for forward-compatibility gating, hostname for
+/// cross-machine invalidation (future use), OS summary fields for quick
+/// inspection, and an `expires_at` timestamp computed from `detected_at +
+/// CACHE_TTL`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostCapabilityCacheFile {
+    pub schema_version: u32,
+    pub hostname: String,
+    pub os: OsType,
+    pub is_wsl: bool,
+    pub expires_at: DateTime<Utc>,
+    pub capabilities: HostCapabilities,
+}
+
+/// Returns the default cache path: `~/.sniff-programs.json`.
+///
+/// Returns `None` when the home directory cannot be resolved — callers should
+/// skip caching and run a live detection in that case.
+pub fn default_cache_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".sniff-programs.json"))
+}
+
+/// Loads capabilities from a cache file if the cache is fresh and the schema
+/// version matches.
+///
+/// Returns `None` on cache miss, stale entry, corrupt JSON, or schema drift.
+/// This function never panics.
+pub fn load_host_capabilities_from(path: &Path) -> Option<HostCapabilities> {
+    let bytes = std::fs::read(path).ok()?;
+    let envelope: HostCapabilityCacheFile = serde_json::from_slice(&bytes).ok()?;
+    if envelope.schema_version != CACHE_SCHEMA_VERSION {
+        return None;
+    }
+    if envelope.expires_at < Utc::now() {
+        return None;
+    }
+    Some(envelope.capabilities)
+}
+
+/// Saves capabilities atomically to `path` using a write-then-rename strategy.
+///
+/// The file is written to a `.json.tmp` sibling, fsynced, then renamed over
+/// the target so readers never observe a partial write. On Unix, the final
+/// file is chmod'd to 0o600 to prevent other users from reading host metadata.
+///
+/// ## Errors
+///
+/// Returns an `io::Error` if the parent directory cannot be created, the temp
+/// file cannot be written, or the rename fails.
+pub fn save_host_capabilities_to(
+    path: &Path,
+    host: &HostCapabilities,
+) -> std::io::Result<()> {
+    let envelope = HostCapabilityCacheFile {
+        schema_version: CACHE_SCHEMA_VERSION,
+        hostname: sysinfo::System::host_name().unwrap_or_default(),
+        os: host.os_type,
+        is_wsl: host.is_wsl,
+        expires_at: host.detected_at + CACHE_TTL,
+        capabilities: host.clone(),
+    };
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let tmp = path.with_extension("json.tmp");
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&serde_json::to_vec_pretty(&envelope)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+
+    Ok(())
+}
+
+impl HostCapabilities {
+    /// Returns cached capabilities if fresh, otherwise detects and writes a
+    /// new cache file.
+    ///
+    /// Errors writing the cache are silently ignored so callers always get a
+    /// usable result even when the home directory is read-only.
+    pub fn load_or_detect() -> Self {
+        let path = default_cache_path();
+        if let Some(ref p) = path
+            && let Some(host) = load_host_capabilities_from(p)
+        {
+            return host;
+        }
+        let host = Self::detect();
+        if let Some(ref p) = path {
+            let _ = save_host_capabilities_to(p, &host);
+        }
+        host
+    }
+
+    /// As [`HostCapabilities::load_or_detect`], but uses
+    /// [`HostCapabilities::detect_with_verification`] on a cache miss.
+    ///
+    /// When `force_refresh` is `true`, the cache is bypassed entirely and a
+    /// fresh detection is written back to disk.
+    pub fn load_or_detect_with_verification(force_refresh: bool) -> Self {
+        let path = default_cache_path();
+        if !force_refresh
+            && let Some(ref p) = path
+            && let Some(host) = load_host_capabilities_from(p)
+        {
+            return host;
+        }
+        let host = Self::detect_with_verification();
+        if let Some(ref p) = path {
+            let _ = save_host_capabilities_to(p, &host);
+        }
         host
     }
 }

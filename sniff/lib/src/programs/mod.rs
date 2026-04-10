@@ -122,7 +122,10 @@ pub use find_program::{
     find_programs_with_source_from_index, find_programs_with_source_parallel,
 };
 pub use headless_audio::InstalledHeadlessAudio;
-pub use host_capability::HostCapabilities;
+pub use host_capability::{
+    HostCapabilities, HostCapabilityCacheFile, default_cache_path,
+    load_host_capabilities_from, save_host_capabilities_to, CACHE_SCHEMA_VERSION,
+};
 pub use installer::{
     InstallOptions, InstallResult, execute_install, execute_versioned_install, get_install_command,
     get_versioned_install_command,
