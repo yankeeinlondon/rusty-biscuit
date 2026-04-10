@@ -11,6 +11,8 @@ A session becomes non-interactive when:
 
 In non-interactive mode, Claudine instructs the wrapped provider to emit structured JSON output instead of plain text. Each provider has its own protocol and flags:
 
+Non-interactive runs also force a safety appendix into the effective system prompt. Claudine looks for `<repo-root>/.claudine/non-interactive.md`, then `~/.claudine/non-interactive.md`, and otherwise falls back to a built-in warning that tells the provider not to ask permission questions or request user input.
+
 | Provider | Protocol | Flag(s) Applied |
 |----------|----------|-----------------|
 | Claude | StreamJson | `--print --output-format stream-json` |

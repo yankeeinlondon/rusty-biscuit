@@ -2,6 +2,8 @@
 
 The system-prompt refactor moved prompt resolution into a shared library pipeline and turned provider delivery into a launch-plan mutation step. Claudine now resolves a file-backed system prompt once, composes it through Darkmatter, and then lets each wrapped provider apply it with its own runtime strategy.
 
+Non-interactive sessions add one more layer on top of that shared pipeline: a mandatory safety appendix that tells the provider not to request permission or ask follow-up questions. This appendix is appended after any resolved system prompt content, or becomes the full effective prompt when no other system prompt exists.
+
 ## Command Surfaces
 
 System prompt handling is available on all wrapped provider subcommands:
@@ -44,7 +46,8 @@ The library pipeline lives in `claudine/lib/src/system_prompt/`:
 1. `LaunchContext::from_cwd()` detects the launch workspace from the directory Claudine was started in
 2. `resolve_system_prompt_source()` picks either an explicit file or a discovered `system-prompt.md`
 3. `prepare_system_prompt()` composes the selected file through Darkmatter
-4. providers apply the prepared result through `WrapperProfile::apply_system_prompt()`
+4. non-interactive sessions append `.claudine/non-interactive.md`, `~/.claudine/non-interactive.md`, or the built-in fallback message
+5. providers apply the prepared result through `WrapperProfile::apply_system_prompt()`
 
 `EffectiveSystemPrompt` is the handoff type between resolution/preparation and runtime delivery:
 
@@ -92,6 +95,26 @@ Important disable rule:
 
 - an empty composed body stops the search and produces `EffectiveSystemPrompt::Disabled`
 - Claudine does not continue to lower-priority `system-prompt.md` locations after that
+
+## Non-Interactive Appendix
+
+When the wrapped session is non-interactive, Claudine appends an extra safety prompt after the resolved system prompt body. The lookup order is:
+
+1. `<repo-root>/.claudine/non-interactive.md`
+2. `~/.claudine/non-interactive.md`
+3. built-in fallback:
+
+```md
+**IMPORTANT:** this is a non-interactive prompt; do not request permission or ask the caller questions!
+```
+
+Behavior:
+
+- the appendix is composed through Darkmatter when it comes from a file
+- if a discovered appendix file composes to an empty body, Claudine falls through to the next candidate
+- if there is already an effective system prompt, the appendix is appended after it
+- if there is no effective system prompt, the appendix becomes the full system prompt
+- explicit `--replace-system-prompt` keeps replace-mode semantics even after the appendix is added
 
 ## Provider Delivery
 
