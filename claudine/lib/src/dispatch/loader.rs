@@ -498,7 +498,6 @@ mod tests {
     use crate::events::*;
 
     use std::collections::HashMap;
-    use std::path::PathBuf;
 
     #[test]
     fn user_config_path_returns_default_when_none_exists() {

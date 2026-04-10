@@ -278,6 +278,7 @@ fn default_protect() -> ProtectConfig {
 /// all fields are optional, so a repo file that contains only
 /// `{ "canonical_provider": "gemini" }` will deserialize successfully.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RepoOverrideConfig {
     /// Override the canonical provider for this repo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
