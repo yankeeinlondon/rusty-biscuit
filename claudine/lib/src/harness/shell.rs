@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::compose::ComposeSource;
+use darkmatter::markdown::compose::ShellCommandOrigin;
 use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
 use darkmatter::markdown::compose::shell_expansion::{
     ShellApprovalHandler, ShellExpansionOptions, check_builtin_blacklist, check_user_blacklist,
@@ -107,7 +108,9 @@ pub fn validate_and_approve_command_parts(
         Some(path) => ComposeSource::File(path.to_path_buf()),
         None => policy_source.clone(),
     };
-    let display_line = source_line.unwrap_or(0);
+    let display_origin = ShellCommandOrigin::Body {
+        line: source_line.unwrap_or(0),
+    };
 
     let shell_opts = ShellExpansionOptions {
         timeout: std::time::Duration::from_secs(30),
@@ -181,7 +184,7 @@ pub fn validate_and_approve_command_parts(
     if let Some(ref handler) = options.approval_handler {
         let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
             source: display_source.clone(),
-            line: display_line,
+            origin: display_origin,
             raw_command: raw.clone(),
             executable: executable.to_string(),
             args: args.clone(),
@@ -532,7 +535,8 @@ mod tests {
             "request should carry the real source file, not a dummy path"
         );
         assert_eq!(
-            captured.line, 42,
+            captured.origin,
+            darkmatter::markdown::compose::ShellCommandOrigin::Body { line: 42 },
             "request should carry the real line number"
         );
     }
