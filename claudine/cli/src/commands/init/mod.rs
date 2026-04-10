@@ -130,9 +130,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         }
     };
 
-    let first_agent = selected_agents
-        .first()
-        .expect("at least one agent");
+    let first_agent = selected_agents.first().expect("at least one agent");
 
     let mut actions = HashMap::new();
     let hook_events = provider_hook_events(first_agent.provider);
@@ -179,9 +177,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         protect,
         actions,
         preferred_agent: first_agent.provider,
-        canonical_provider: canonical_provider.and_then(|_| {
-            preference.first().copied()
-        }),
+        canonical_provider: canonical_provider.and_then(|_| preference.first().copied()),
         default_sounds: DefaultSounds::default(),
     };
 
@@ -435,10 +431,7 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         .filter(|provider| !provider_hook_events(*provider).is_empty())
         .collect();
 
-    let preferred_agent = quick_providers
-        .first()
-        .copied()
-        .unwrap_or(Provider::Claude);
+    let preferred_agent = quick_providers.first().copied().unwrap_or(Provider::Claude);
 
     let mut actions = HashMap::new();
     if let Some(&first_provider) = quick_providers.first() {
@@ -589,9 +582,7 @@ fn create_quick_provider_events(provider: Provider) -> HashMap<AgenticEvent, Eve
 mod tests {
     use super::*;
 
-    fn config_with_actions(
-        events: Vec<(AgenticEvent, Vec<HookAction>)>,
-    ) -> ClaudineConfig {
+    fn config_with_actions(events: Vec<(AgenticEvent, Vec<HookAction>)>) -> ClaudineConfig {
         let actions = events.into_iter().collect();
 
         ClaudineConfig {
