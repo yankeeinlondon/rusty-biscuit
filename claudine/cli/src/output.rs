@@ -147,7 +147,6 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     log::message(&Prose::new("<bold>Agent Prompt:</bold>").render(term));
-    log::message("");
 
     let display_text = if verbose {
         prompt.to_string()
@@ -253,11 +252,10 @@ pub(crate) fn log_system_prompt(
             };
             log::message(
                 &Prose::new(format!(
-                    "<bold>System Prompt(<dim><i>{variant_label}</i></dim>)</bold>"
+                    "<bold>System Prompt(<dim><i>{variant_label}</i></dim>):</bold>"
                 ))
                 .render(term),
             );
-            log::message("");
 
             let full_text = &prepared.composed_markdown;
 

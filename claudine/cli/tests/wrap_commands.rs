@@ -293,7 +293,7 @@ fn wrapper_reports_removed_sensitive_env_names() {
     fs::create_dir_all(fake_home.join(".codex")).unwrap();
 
     write_executable(
-        &path_dir.join("codex"),
+        &path_dir.join("opencode"),
         r#"#!/bin/sh
 exit 0
 "#,
@@ -915,7 +915,7 @@ exit 0
         "Quiet mode should suppress env details but stderr was: {stderr}"
     );
     assert!(
-        stderr_plain.contains("System Prompt(appended)"),
+        stderr_plain.contains("System Prompt(appended):"),
         "Quiet mode should still show the system prompt when set but stderr was: {stderr}"
     );
 
