@@ -81,7 +81,7 @@ pub fn collect_auditable_commands(
         for directive in directives {
             commands.push(AuditedCommand {
                 source: AuditedCommandSource::ComposeSourceLine {
-                    line: directive.line,
+                    line: directive.origin.line_number(),
                 },
                 raw: directive.raw_command.clone(),
                 executable: directive.executable.clone(),

@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
 
 use crate::error::Result;
-use crate::events::{AgenticEvent, HookerConfig, Provider};
+use crate::events::{AgenticEvent, Provider};
 
 use super::atomic::atomic_write;
 use super::backup::create_backup;
 use super::claudine_handle_command;
-use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
+use super::trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
 
 /// Minimal valid config.toml for Codex CLI.
 ///
@@ -39,7 +39,7 @@ impl AgentConfigurator for CodexConfigurator {
 
     fn register(
         &self,
-        config: &HookerConfig,
+        plan: &ProviderHookPlan,
         config_dir: Option<&Path>,
     ) -> Result<RegistrationResult> {
         let toml_path = config_path(config_dir);
@@ -54,16 +54,12 @@ impl AgentConfigurator for CodexConfigurator {
         }
 
         // Check if already in sync (Codex only supports turn_complete)
-        if self.is_in_sync(config, config_dir)? {
+        if self.is_in_sync(plan, config_dir)? {
             return Ok(RegistrationResult::Skipped(SkipReason::AlreadyRegistered));
         }
 
         // Check if we should register (turn_complete is enabled in config)
-        let should_register = config
-            .providers
-            .get(&Provider::Codex)
-            .and_then(|p| p.events.get(&AgenticEvent::TurnComplete))
-            .is_some_and(|b| b.enabled);
+        let should_register = plan.events.contains(&AgenticEvent::TurnComplete);
 
         if !should_register {
             // Config exists but turn_complete is disabled - deregister
@@ -190,15 +186,11 @@ impl CodexConfigurator {
     /// a legacy direct-notify registration (`["claudine", "handle"]`) that
     /// is missing the wrapper script. The wrapper is required because Codex
     /// passes the JSON payload as argv[1] but `claudine handle` reads stdin.
-    fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
+    fn is_in_sync(&self, plan: &ProviderHookPlan, config_dir: Option<&Path>) -> Result<bool> {
         let is_registered = self.is_registered(config_dir)?;
 
         // Codex only supports turn_complete
-        let should_be_registered = config
-            .providers
-            .get(&Provider::Codex)
-            .and_then(|p| p.events.get(&AgenticEvent::TurnComplete))
-            .is_some_and(|b| b.enabled);
+        let should_be_registered = plan.events.contains(&AgenticEvent::TurnComplete);
 
         if is_registered != should_be_registered {
             return Ok(false);
@@ -336,30 +328,16 @@ fn wrapper_script_path(config_dir: Option<&Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use tempfile::TempDir;
 
-    use crate::events::{AgenticEvent, EventBinding, GlobalSettings, ProviderConfig};
+    use crate::events::AgenticEvent;
 
     use super::*;
 
-    fn test_config() -> HookerConfig {
-        let mut events = HashMap::new();
-        events.insert(
-            AgenticEvent::TurnComplete,
-            EventBinding {
-                enabled: true,
-                actions: vec![],
-                matcher: None,
-            },
-        );
-        let mut providers = HashMap::new();
-        providers.insert(Provider::Codex, ProviderConfig { events });
-        HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings::default(),
-            providers,
+    fn test_plan() -> ProviderHookPlan {
+        ProviderHookPlan {
+            events: vec![AgenticEvent::TurnComplete],
+            canonical_for: None,
         }
     }
 
@@ -370,11 +348,9 @@ mod tests {
         fs::write(&config, "# Codex config\nmodel = \"o3\"\n").unwrap();
 
         let configurator = CodexConfigurator;
-        let hooker_config = test_config();
+        let plan = test_plan();
 
-        let result = configurator
-            .register(&hooker_config, Some(tmp.path()))
-            .unwrap();
+        let result = configurator.register(&plan, Some(tmp.path())).unwrap();
         assert!(matches!(
             result,
             RegistrationResult::Registered { event_count: 1 }
@@ -399,10 +375,8 @@ mod tests {
         .unwrap();
 
         let configurator = CodexConfigurator;
-        let hooker_config = test_config();
-        configurator
-            .register(&hooker_config, Some(tmp.path()))
-            .unwrap();
+        let plan = test_plan();
+        configurator.register(&plan, Some(tmp.path())).unwrap();
 
         let content = fs::read_to_string(&config).unwrap();
         // toml_edit preserves comments
@@ -417,10 +391,8 @@ mod tests {
         fs::write(&config, "notify = [\"my-tool\", \"done\"]\n").unwrap();
 
         let configurator = CodexConfigurator;
-        let hooker_config = test_config();
-        configurator
-            .register(&hooker_config, Some(tmp.path()))
-            .unwrap();
+        let plan = test_plan();
+        configurator.register(&plan, Some(tmp.path())).unwrap();
 
         // Wrapper script should be created
         let wrapper_path = tmp.path().join("codex-notify-wrapper.sh");
@@ -494,9 +466,9 @@ mod tests {
         // - If CLI is not installed → returns NotDetected
         let tmp = TempDir::new().unwrap();
         let configurator = CodexConfigurator;
-        let config = test_config();
+        let plan = test_plan();
 
-        let result = configurator.register(&config, Some(tmp.path())).unwrap();
+        let result = configurator.register(&plan, Some(tmp.path())).unwrap();
 
         if configurator.is_cli_installed() {
             // CLI installed: should create config and register
@@ -547,16 +519,12 @@ mod tests {
         .unwrap();
 
         let configurator = CodexConfigurator;
-        let hooker_config = test_config();
+        let plan = test_plan();
 
         // is_registered sees the direct notify → true
         assert!(configurator.is_registered(Some(tmp.path())).unwrap());
         // But is_in_sync should detect missing wrapper → false
-        assert!(
-            !configurator
-                .is_in_sync(&hooker_config, Some(tmp.path()))
-                .unwrap()
-        );
+        assert!(!configurator.is_in_sync(&plan, Some(tmp.path())).unwrap());
     }
 
     #[test]
@@ -568,14 +536,10 @@ mod tests {
         fs::write(&config, format!("notify = [\"{}\"]\n", wrapper.display())).unwrap();
 
         let configurator = CodexConfigurator;
-        let hooker_config = test_config();
+        let plan = test_plan();
 
         // Wrapper path matches but file is missing → out of sync
-        assert!(
-            !configurator
-                .is_in_sync(&hooker_config, Some(tmp.path()))
-                .unwrap()
-        );
+        assert!(!configurator.is_in_sync(&plan, Some(tmp.path())).unwrap());
     }
 
     #[test]
@@ -585,19 +549,13 @@ mod tests {
         fs::write(&config, "model = \"o3\"\n").unwrap();
 
         let configurator = CodexConfigurator;
-        let hooker_config = test_config();
+        let plan = test_plan();
 
         // Register properly (creates wrapper + updates config)
-        configurator
-            .register(&hooker_config, Some(tmp.path()))
-            .unwrap();
+        configurator.register(&plan, Some(tmp.path())).unwrap();
 
         // Now should be in sync
-        assert!(
-            configurator
-                .is_in_sync(&hooker_config, Some(tmp.path()))
-                .unwrap()
-        );
+        assert!(configurator.is_in_sync(&plan, Some(tmp.path())).unwrap());
     }
 
     #[test]

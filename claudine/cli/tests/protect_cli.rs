@@ -1,50 +1,14 @@
 use std::fs;
-use std::path::Path;
-use std::process::{self};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use serde_json::Value;
-
-fn test_root() -> std::path::PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("claudine-protect-it-{}-{nonce}", process::id()));
-    fs::create_dir_all(&root).unwrap();
-    root
-}
-
-fn write(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, content).unwrap();
-}
-
-#[test]
-fn init_quick_writes_protect_defaults() {
-    let root = test_root();
-    let home = root.join("home");
-    fs::create_dir_all(&home).unwrap();
-
-    cargo_bin_cmd!("claudine")
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
-        .args(["init", "--quick"])
-        .assert()
-        .success();
-
-    let config_path = home.join(".claudine/config.json");
-    let config: Value = serde_json::from_str(&fs::read_to_string(config_path).unwrap()).unwrap();
-    assert_eq!(config["settings"]["protect"]["enabled"], true);
-    assert_eq!(config["settings"]["protect"]["posture"], "balanced");
-}
+mod common;
+use common::{TestWorkspace, write};
 
 #[test]
 fn handle_json_includes_protect_decisions() {
-    let root = test_root();
+    let workspace = TestWorkspace::named("claudine-protect-it");
+    let root = workspace.path();
     let home = root.join("home");
     fs::create_dir_all(&home).unwrap();
 

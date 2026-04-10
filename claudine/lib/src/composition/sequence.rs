@@ -76,13 +76,13 @@ fn resolve_sequence_reference(raw: &str, source_path: &Path) -> Result<PathBuf, 
     // Expand ~ to HOME directly, since FileReference treats `@` as the
     // magic-search prefix and there is no dedicated tilde form.
     if let Some(rest) = raw.strip_prefix('~') {
-        let home = std::env::var("HOME").map_err(|_| {
+        let home = dirs::home_dir().ok_or_else(|| {
             CompositionError::SequenceExternalLoad(format!(
-                "`{raw}`: HOME environment variable is not set"
+                "`{raw}`: unable to resolve home directory"
             ))
         })?;
         let suffix = rest.trim_start_matches('/');
-        return Ok(Path::new(&home).join(suffix));
+        return Ok(home.join(suffix));
     }
 
     if is_file_reference_target(raw) {
@@ -372,7 +372,9 @@ mod tests {
     use super::*;
     use darkmatter::markdown::{Frontmatter, Markdown};
     use serde_json::json;
+    use serial_test::serial;
     use std::fs;
+    use std::process::Command;
     use tempfile::TempDir;
 
     use crate::composition::types::ResolvedCompositionSource;
@@ -398,6 +400,17 @@ mod tests {
             original_text,
             markdown,
         }
+    }
+
+    fn init_git_repo(path: &Path) {
+        assert!(
+            Command::new("git")
+                .arg("init")
+                .current_dir(path)
+                .status()
+                .unwrap()
+                .success()
+        );
     }
 
     // -- resolve_sequence_plan: no sequence key --------------------------------
@@ -760,6 +773,157 @@ template:
         let plan = resolve_sequence_plan(&source).unwrap().unwrap();
         assert_eq!(plan.steps.len(), 1);
         assert_eq!(plan.steps[0].name, "one");
+    }
+
+    #[test]
+    fn magic_reference_resolves_from_source_git_root() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        let prompts_dir = dir.path().join("prompts");
+        fs::create_dir_all(&prompts_dir).unwrap();
+        let target = prompts_dir.join("steps.yaml");
+        fs::write(&target, "sequence:\n  - alpha\n").unwrap();
+
+        let source_path = dir.path().join("docs/guide.md");
+        fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        fs::write(&source_path, "---\n---\nbody\n").unwrap();
+
+        let resolved = resolve_sequence_reference("@prompts/steps.yaml", &source_path).unwrap();
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            target.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn package_reference_resolves_from_current_package_area() {
+        let dir = TempDir::new().unwrap();
+        init_git_repo(dir.path());
+
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            r#"[workspace]
+resolver = "2"
+members = ["claudine/lib"]
+"#,
+        )
+        .unwrap();
+
+        let package_root = dir.path().join("claudine");
+        fs::create_dir_all(package_root.join("lib/src")).unwrap();
+        fs::write(
+            package_root.join("lib/Cargo.toml"),
+            r#"[package]
+name = "claudine"
+version = "0.1.0"
+edition = "2024"
+"#,
+        )
+        .unwrap();
+        fs::write(package_root.join("lib/src/lib.rs"), "pub fn run() {}\n").unwrap();
+
+        let target = package_root.join("README.md");
+        fs::write(&target, "# Claudine\n").unwrap();
+
+        let source_path = package_root.join("lib/docs/guide.md");
+        fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        fs::write(&source_path, "---\n---\nbody\n").unwrap();
+
+        let resolved = resolve_sequence_reference("!README.md", &source_path).unwrap();
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            target.canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn vault_reference_uses_vault_environment_roots() {
+        let dir = TempDir::new().unwrap();
+        let vault_root = dir.path().join("vault");
+        let target = vault_root.join("notes/steps.yaml");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&target, "sequence:\n  - alpha\n").unwrap();
+
+        let source_path = dir.path().join("docs/source.md");
+        fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        fs::write(&source_path, "---\n---\nbody\n").unwrap();
+
+        unsafe {
+            std::env::set_var("VAULT", &vault_root);
+        }
+        let resolved = resolve_sequence_reference("vault:notes/steps.yaml", &source_path).unwrap();
+        unsafe {
+            std::env::remove_var("VAULT");
+        }
+
+        assert_eq!(resolved, target);
+    }
+
+    #[test]
+    #[serial]
+    fn env_reference_expands_environment_variables() {
+        let dir = TempDir::new().unwrap();
+        let target_dir = dir.path().join("shared");
+        let target = target_dir.join("steps.yaml");
+        fs::create_dir_all(&target_dir).unwrap();
+        fs::write(&target, "sequence:\n  - alpha\n").unwrap();
+
+        let source_path = dir.path().join("docs/source.md");
+        fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        fs::write(&source_path, "---\n---\nbody\n").unwrap();
+
+        unsafe {
+            std::env::set_var("SEQ_ROOT", &target_dir);
+        }
+        let resolved = resolve_sequence_reference("{{SEQ_ROOT}}/steps.yaml", &source_path).unwrap();
+        unsafe {
+            std::env::remove_var("SEQ_ROOT");
+        }
+
+        assert_eq!(resolved, target);
+    }
+
+    #[test]
+    #[serial]
+    fn tilde_reference_expands_against_home_directory() {
+        let dir = TempDir::new().unwrap();
+        let home_dir = dir.path().join("home");
+        fs::create_dir_all(&home_dir).unwrap();
+
+        let source_path = dir.path().join("docs/source.md");
+        fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        fs::write(&source_path, "---\n---\nbody\n").unwrap();
+
+        unsafe {
+            std::env::set_var("HOME", &home_dir);
+        }
+        let resolved = resolve_sequence_reference("~/steps.yaml", &source_path).unwrap();
+        unsafe {
+            std::env::remove_var("HOME");
+        }
+
+        assert_eq!(resolved, home_dir.join("steps.yaml"));
+    }
+
+    #[test]
+    #[serial]
+    fn missing_environment_variable_surface_is_preserved() {
+        let dir = TempDir::new().unwrap();
+        let source_path = dir.path().join("docs/source.md");
+        fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        fs::write(&source_path, "---\n---\nbody\n").unwrap();
+
+        unsafe {
+            std::env::remove_var("SEQ_ROOT");
+        }
+        let error =
+            resolve_sequence_reference("{{SEQ_ROOT}}/steps.yaml", &source_path).unwrap_err();
+
+        assert!(
+            matches!(error, CompositionError::SequenceExternalLoad(ref msg) if msg.contains("SEQ_ROOT"))
+        );
     }
 
     #[test]

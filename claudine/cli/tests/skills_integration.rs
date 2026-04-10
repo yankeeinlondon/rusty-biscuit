@@ -1,50 +1,10 @@
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::Path;
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::str::contains;
-
-struct TestWorkspace {
-    root: PathBuf,
-}
-
-static TEST_NONCE: AtomicU64 = AtomicU64::new(0);
-
-impl TestWorkspace {
-    fn new() -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let unique = TEST_NONCE.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "claudine-skills-it-{}-{nonce}-{unique}",
-            process::id()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        Self { root }
-    }
-
-    fn path(&self) -> &Path {
-        &self.root
-    }
-}
-
-impl Drop for TestWorkspace {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
-}
-
-fn write(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, content).unwrap();
-}
+mod common;
+use common::{TestWorkspace, write};
 
 fn setup_skill(base: &Path, name: &str, description: &str) {
     write(

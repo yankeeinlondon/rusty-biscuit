@@ -121,7 +121,7 @@ pub struct SharedComposeArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Show only the header line; suppress env details and info messages.
+    /// Suppress env details and info messages, but still show the system prompt when set.
     #[arg(short = 'q', long)]
     pub quiet: bool,
 

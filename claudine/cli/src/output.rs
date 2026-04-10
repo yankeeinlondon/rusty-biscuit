@@ -2,6 +2,7 @@ use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::discovery::eval::strip_ansi_codes;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
@@ -21,6 +22,18 @@ pub(crate) enum ComposeDisplay {
     Compose,
     /// Inline composition (`claudine inline-compose`).
     InlineCompose,
+}
+
+fn trim_trailing_blank_rendered_lines(rendered: &str) -> String {
+    let mut lines: Vec<&str> = rendered.lines().collect();
+    while let Some(last) = lines.last() {
+        if strip_ansi_codes(last).trim().is_empty() {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
+    lines.join("\n")
 }
 
 /// Print the one-line header: `Claudine ▸ Provider [badges] prompt`
@@ -134,7 +147,6 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     log::message(&Prose::new("<bold>Agent Prompt:</bold>").render(term));
-    log::message("");
 
     let display_text = if verbose {
         prompt.to_string()
@@ -168,7 +180,7 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     // Wrap in a BlockQuote with green border, left margin, and no additional
     // word wrapping (Darkmatter already wrapped to the correct width).
     let mut block = BlockQuote::new(
-        RenderableContent::from(rendered.trim_end().to_string()),
+        RenderableContent::from(trim_trailing_blank_rendered_lines(&rendered)),
         None::<&str>,
     )
     .with_left_block_color(Color::Tailwind(Tailwind::Green700))
@@ -188,6 +200,91 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
             .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
             .render(term),
         );
+    }
+}
+
+pub(crate) fn log_system_prompt(
+    effective_sp: &claudine::system_prompt::EffectiveSystemPrompt,
+    verbose: bool,
+    silent: bool,
+    quiet: bool,
+    term: &Terminal,
+) {
+    use biscuit_terminal::utils::color::{Color, Tailwind};
+    use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+
+    if silent {
+        return;
+    }
+
+    match effective_sp {
+        claudine::system_prompt::EffectiveSystemPrompt::None => {
+            if verbose && !quiet {
+                let mut block = BlockQuote::new(
+                    RenderableContent::from("the system prompt has not been modified".to_string()),
+                    None::<&str>,
+                )
+                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
+                .with_border("▌ ");
+                block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                log::message(&block.render(term));
+            }
+        }
+        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source: _ } => {
+            if verbose && !quiet {
+                let mut block = BlockQuote::new(
+                    RenderableContent::from("the system prompt has been disabled".to_string()),
+                    None::<&str>,
+                )
+                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
+                .with_border("▌ ");
+                block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                log::message(&block.render(term));
+            }
+        }
+        claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
+            let variant_label = match prepared.mode {
+                claudine::system_prompt::SystemPromptMode::Append => "appended",
+                claudine::system_prompt::SystemPromptMode::Replace => "replaced",
+            };
+            log::message(
+                &Prose::new(format!(
+                    "<bold>System Prompt(<dim><i>{variant_label}</i></dim>):</bold>"
+                ))
+                .render(term),
+            );
+
+            let full_text = &prepared.composed_markdown;
+
+            let left_margin: u16 = 2;
+            let right_margin: u16 = 2;
+            let border_width: u16 = 2;
+            let content_width = (term.width() as u16)
+                .saturating_sub(border_width)
+                .saturating_sub(left_margin)
+                .saturating_sub(right_margin);
+            let mut opts = TerminalOptions::default();
+            opts.max_width = Some(content_width);
+            let rendered = match for_terminal(&Markdown::new(full_text.trim()), opts) {
+                Ok(r) => r,
+                Err(_) => full_text.clone(),
+            };
+
+            let mut block = BlockQuote::new(
+                RenderableContent::from(trim_trailing_blank_rendered_lines(&rendered)),
+                None::<&str>,
+            )
+            .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
+            .with_border("▌ ");
+            block.layout_mut().left_margin =
+                biscuit_terminal::utils::layout::Margin::Chars(left_margin as u32);
+            block.layout_mut().right_margin =
+                biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
+            log::message(&block.render(term));
+        }
     }
 }
 
@@ -325,7 +422,11 @@ pub(crate) fn log_dry_run(
 
 pub(crate) fn summarize_value(key: &str, value: &str) -> String {
     if key == "AGENT_PARAMS" && value.len() > 120 {
-        return format!("{}...", &value[..117]);
+        let mut end = 117;
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        return format!("{}...", &value[..end]);
     }
     value.to_string()
 }
@@ -782,6 +883,7 @@ pub(crate) fn try_format_api_error(line: &str, term: &Terminal) -> Option<String
 mod tests {
     use super::*;
     use biscuit_terminal::terminal::Terminal;
+    use proptest::prelude::*;
 
     /// Create a Terminal without real terminal probing (avoids TTY hangs in tests).
     fn test_terminal() -> Terminal {
@@ -867,6 +969,15 @@ mod tests {
     }
 
     #[test]
+    fn trim_trailing_blank_rendered_lines_removes_plain_and_ansi_blank_lines() {
+        let rendered = "first\nsecond\n\x1b[32m\x1b[0m\n\n";
+        assert_eq!(
+            trim_trailing_blank_rendered_lines(rendered),
+            "first\nsecond"
+        );
+    }
+
+    #[test]
     fn truncate_args_respects_char_boundaries() {
         // Multi-byte chars: each é is 2 bytes
         let args = "ééééééééééé";
@@ -884,5 +995,28 @@ mod tests {
             &term,
         );
         assert!(rendered.contains('\n'));
+    }
+
+    #[test]
+    fn style_cli_switches_only_wraps_switch_tokens() {
+        let styled = style_cli_switches("Use --plain or -v but do not touch email@example.com.");
+        assert!(styled.contains("<blue>--plain</blue>"));
+        assert!(styled.contains("<blue>-v</blue>"));
+        assert!(styled.contains("email@example.com"));
+    }
+
+    proptest! {
+        #[test]
+        fn truncate_args_respects_budget_for_arbitrary_utf8(input in any::<String>(), budget in 0usize..128) {
+            let truncated = truncate_args(&input, budget);
+
+            if input.len() > budget && budget <= 4 {
+                prop_assert_eq!(truncated.as_str(), "...\"");
+            } else {
+                prop_assert!(truncated.len() <= budget);
+            }
+
+            prop_assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
+        }
     }
 }

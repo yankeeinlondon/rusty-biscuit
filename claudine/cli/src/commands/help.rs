@@ -87,7 +87,7 @@ fn groups() -> Vec<CommandGroup> {
         CommandGroup {
             name: "Administration",
             commands: vec![
-                cmd("init", "Interactive setup wizard"),
+                cmd("config", "Manage Claudine configuration with a TUI"),
                 cmd("sync", "Re-sync hook registrations with detected agents"),
                 cmd("uninstall", "Remove Claudine hooks from all agents"),
                 cmd("providers", "Show provider capability matrix"),

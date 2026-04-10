@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::error::Result;
-use crate::events::{HookerConfig, Provider};
+use crate::events::Provider;
 
-use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
+use super::trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
 
 pub(crate) struct QwenConfigurator;
 
@@ -17,7 +17,7 @@ impl AgentConfigurator for QwenConfigurator {
 
     fn register(
         &self,
-        _config: &HookerConfig,
+        _plan: &ProviderHookPlan,
         config_dir: Option<&Path>,
     ) -> Result<RegistrationResult> {
         let settings_path = config_path(config_dir);
@@ -88,32 +88,16 @@ fn config_path(config_dir: Option<&Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use tempfile::TempDir;
 
-    use crate::events::{AgenticEvent, EventBinding, GlobalSettings, ProviderConfig};
+    use crate::events::AgenticEvent;
 
     use super::*;
 
-    fn test_config(events: Vec<AgenticEvent>) -> HookerConfig {
-        let mut event_map = HashMap::new();
-        for event in events {
-            event_map.insert(
-                event,
-                EventBinding {
-                    enabled: true,
-                    actions: vec![],
-                    matcher: None,
-                },
-            );
-        }
-        let mut providers = HashMap::new();
-        providers.insert(Provider::QwenCode, ProviderConfig { events: event_map });
-        HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings::default(),
-            providers,
+    fn test_plan(events: Vec<AgenticEvent>) -> ProviderHookPlan {
+        ProviderHookPlan {
+            events,
+            canonical_for: None,
         }
     }
 
@@ -121,7 +105,7 @@ mod tests {
     fn register_skips_when_not_detected() {
         let tmp = TempDir::new().unwrap();
         let configurator = QwenConfigurator;
-        let config = test_config(vec![AgenticEvent::TurnComplete]);
+        let config = test_plan(vec![AgenticEvent::TurnComplete]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
         assert!(matches!(
@@ -137,7 +121,7 @@ mod tests {
         fs::write(&settings, r#"{"model": "qwen-coder"}"#).unwrap();
 
         let configurator = QwenConfigurator;
-        let config = test_config(vec![AgenticEvent::TurnComplete]);
+        let config = test_plan(vec![AgenticEvent::TurnComplete]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
         assert!(matches!(

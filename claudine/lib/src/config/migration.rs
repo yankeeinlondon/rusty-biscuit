@@ -30,9 +30,7 @@ pub fn is_old_format(value: &serde_json::Value) -> bool {
         return true;
     }
 
-    OLD_PROVIDER_KEYS
-        .iter()
-        .any(|key| obj.contains_key(*key))
+    OLD_PROVIDER_KEYS.iter().any(|key| obj.contains_key(*key))
 }
 
 /// Renames the config file at `config_path` to `<config_path>.bak`.

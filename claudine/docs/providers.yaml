@@ -3,25 +3,53 @@ template:
     desc: "{{name}} (_site: {{site}}, repo: {{ repo || 'n/a' }}_)"
 list:
     - name: Claude Code
-      file: ./claude.md
+      file: claude.md
+      user_dir: "~/.claude"
+      repo_dir: ".claude"
+      vendor: Anthropic
       site: https://code.claude.com/docs/en/overview
       repo:
     - name: Codex CLI
-      file: ./codex.md
+      file: codex.md
+      user_dir: "~/.codex"
+      repo_dir: ".codex"
+      vendor: OpenAI
       site: https://developers.openai.com/codex/cli
       best_practices: https://developers.openai.com/codex/learn/best-practices
       repo: https://github.com/openai/codex
     - name: Gemini CLI
       file: gemini.md
+      user_dir: "~/.gemini"
+      repo_dir: ".gemini"
+      vendor: Google
+      site: https://geminicli.com/
+      repo: https://github.com/google-gemini/gemini-cli
     - name: Goose CLI
       file: goose.md
+      vendor: Block
       site: https://block.github.io/goose/
       repo: https://github.com/block/goose
     - name: Kimi Code CLI
       file: ./kimi.md
+      vendor: Moonshot AI
       site: https://moonshotai.github.io/kimi-cli/
       repo: https://github.com/MoonshotAI/kimi-cli
     - name: OpenCode CLI
-      file: ./opencode.md
+      file: opencode.md
+      user_dir: "~/.config/opencode"
+      repo_dir: ".opencode"
+      vendor: Anomalyco
       site: https://opencode.ai
       repo: https://github.com/anomalyco/opencode
+    - name: Qwen CLI
+      file: qwen-cli.md
+      vendor: Alibaba Cloud
+      site: https://qwenlm.github.io/qwen-code-docs/en/users/overview
+      repo: https://github.com/QwenLM/qwen-code
+    - name: Roo Code
+      file: roo-code.md
+      user_dir: "~/.roo"
+      repo_dir: ".roo"
+      vendor: Roo Code, Inc.
+      site: https://roocode.com/
+      repo: https://github.com/RooCodeInc/Roo-Code

@@ -1,56 +1,12 @@
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{self, Command};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use assert_cmd::cargo::cargo_bin_cmd;
-
-struct TestWorkspace {
-    root: PathBuf,
-}
-
-impl TestWorkspace {
-    fn new() -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("claudine-handle-repo-it-{}-{nonce}", process::id()));
-        fs::create_dir_all(&root).unwrap();
-        Self { root }
-    }
-
-    fn path(&self) -> &Path {
-        &self.root
-    }
-}
-
-impl Drop for TestWorkspace {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
-}
-
-fn write(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, content).unwrap();
-}
-
-fn init_git_repo(path: &Path) -> bool {
-    Command::new("git")
-        .arg("init")
-        .current_dir(path)
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
+mod common;
+use common::{TestWorkspace, init_git_repo, write};
 
 #[test]
 fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
-    let workspace = TestWorkspace::new();
+    let workspace = TestWorkspace::named("claudine-handle-repo-it");
     let home_dir = workspace.path().join("home");
     let repo_root = workspace.path().join("repo");
     fs::create_dir_all(&home_dir).unwrap();
@@ -62,36 +18,34 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
         return;
     }
 
-    let config = serde_json::json!({
-        "version": "1.0",
-        "settings": {
-            "linking": {
-                "canonical_provider": {
-                    "repo_skill": "claude"
-                }
-            }
-        },
-        "providers": {
-            "claude": {
-                "events": {
-                    "session_start": {
-                        "enabled": true,
-                        "actions": [
-                            {
-                                "type": "report",
-                                "handler": {
-                                    "format": "json"
-                                }
-                            }
-                        ]
+    // Minimal user config (required by load_claudine_config before repo merge).
+    let user_config = serde_json::json!({
+        "preferred_agent": "claude",
+        "tts": false,
+        "logging": false,
+        "protect": { "enabled": false }
+    });
+    write(
+        &home_dir.join(".claudine/config.json"),
+        &serde_json::to_string_pretty(&user_config).unwrap(),
+    );
+
+    // Repo override config (only contains overridable fields).
+    let repo_config = serde_json::json!({
+        "actions": {
+            "session_start": [
+                {
+                    "type": "report",
+                    "handler": {
+                        "format": "json"
                     }
                 }
-            }
+            ]
         }
     });
     write(
         &repo_root.join(".claudine/config.json"),
-        &serde_json::to_string_pretty(&config).unwrap(),
+        &serde_json::to_string_pretty(&repo_config).unwrap(),
     );
 
     let output = cargo_bin_cmd!("claudine")
@@ -115,7 +69,7 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
 
 #[test]
 fn handle_logs_wrapper_package_context_from_env() {
-    let workspace = TestWorkspace::new();
+    let workspace = TestWorkspace::named("claudine-handle-repo-it");
     let home_dir = workspace.path().join("home");
     let repo_root = workspace.path().join("repo");
     fs::create_dir_all(&home_dir).unwrap();
@@ -126,36 +80,34 @@ fn handle_logs_wrapper_package_context_from_env() {
         return;
     }
 
-    let config = serde_json::json!({
-        "version": "1.0",
-        "settings": {
-            "linking": {
-                "canonical_provider": {
-                    "repo_skill": "claude"
-                }
-            }
-        },
-        "providers": {
-            "claude": {
-                "events": {
-                    "session_start": {
-                        "enabled": true,
-                        "actions": [
-                            {
-                                "type": "report",
-                                "handler": {
-                                    "format": "json"
-                                }
-                            }
-                        ]
+    // Minimal user config (required by load_claudine_config before repo merge).
+    let user_config = serde_json::json!({
+        "preferred_agent": "claude",
+        "tts": false,
+        "logging": false,
+        "protect": { "enabled": false }
+    });
+    write(
+        &home_dir.join(".claudine/config.json"),
+        &serde_json::to_string_pretty(&user_config).unwrap(),
+    );
+
+    // Repo override config (only contains overridable fields).
+    let repo_config = serde_json::json!({
+        "actions": {
+            "session_start": [
+                {
+                    "type": "report",
+                    "handler": {
+                        "format": "json"
                     }
                 }
-            }
+            ]
         }
     });
     write(
         &repo_root.join(".claudine/config.json"),
-        &serde_json::to_string_pretty(&config).unwrap(),
+        &serde_json::to_string_pretty(&repo_config).unwrap(),
     );
 
     let output = cargo_bin_cmd!("claudine")

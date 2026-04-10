@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use toml_edit::{DocumentMut, Item};
 
 use crate::error::{ClaudineError, Result};
@@ -17,6 +17,7 @@ use crate::permissions::change::{
     CommandPattern, PolicyChange, PolicyChangeOp, PolicyChangeTarget, PolicyPersistence,
 };
 use crate::permissions::context::{CliPolicyInput, PolicyContext};
+use crate::permissions::json_utils::ensure_json_value;
 use crate::permissions::mutation::{
     ConfigEditPlan, OneShotMutationPlan, PersistentMutationPlan, PolicyMutationPlan,
 };
@@ -835,21 +836,6 @@ fn build_one_shot_plan(change: &PolicyChange) -> Option<OneShotMutationPlan> {
         env: BTreeMap::new(),
         fidelity: MappingFidelity::Approximate,
     })
-}
-
-fn ensure_json_value<'a>(root: &'a mut Value, path: &[&str]) -> &'a mut Value {
-    let mut current = root;
-    for key in path {
-        if !current.is_object() {
-            *current = Value::Object(Map::new());
-        }
-        current = current
-            .as_object_mut()
-            .expect("object")
-            .entry((*key).to_owned())
-            .or_insert(Value::Null);
-    }
-    current
 }
 
 fn first_source_id(native: &NativeEffectivePolicy) -> String {

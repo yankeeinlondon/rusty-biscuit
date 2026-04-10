@@ -44,7 +44,7 @@ pub fn run(args: UninstallArgs) -> Result<()> {
     log::message("");
     log::message("Claudine has been uninstalled.");
     if args.keep_config {
-        log::message("Config files preserved. Run `claudine init` to re-register.");
+        log::message("Config files preserved. Run `claudine sync` to re-register hooks.");
     }
     Ok(())
 }
