@@ -753,7 +753,12 @@ mod tests {
 
     #[test]
     fn test_content_change_added() {
-        let change = ContentChange::added(vec!["New Section".to_string()], HeadingLevel::H2, 10, "New Section");
+        let change = ContentChange::added(
+            vec!["New Section".to_string()],
+            HeadingLevel::H2,
+            10,
+            "New Section",
+        );
         assert!(matches!(change.action, ChangeAction::Added));
         assert!(change.original_path.is_none());
         assert!(change.new_path.is_some());
@@ -761,7 +766,12 @@ mod tests {
 
     #[test]
     fn test_content_change_removed() {
-        let change = ContentChange::removed(vec!["Old Section".to_string()], HeadingLevel::H2, 5, "Old Section");
+        let change = ContentChange::removed(
+            vec!["Old Section".to_string()],
+            HeadingLevel::H2,
+            5,
+            "Old Section",
+        );
         assert!(matches!(change.action, ChangeAction::Removed));
         assert!(change.original_path.is_some());
         assert!(change.new_path.is_none());

@@ -4,6 +4,7 @@
 
 - [Compose](./docs/topics/what-is-composition.md) documents together dynamically
 - Render to [multiple output formats](./docs/topics/output-formats.md)
+- Compose supports both body `::shell` expansion and top-level frontmatter `$(...)` shell expansion with shared approval and timeout controls
 - Report on [differences/changes](./docs/topics/delta.md), TOC, graph dependencies, and more
 - Provides auto-completions via [shell completions](./docs/cli/completions.md) in the terminal and the [LSP](./lsp/README.md) in an editor.
 
@@ -22,6 +23,7 @@ For details, choose one or more of the packages in this package area.
 - to get details on the **Composition Pipeline** in Darkmatter read: [Darkmatter Composition Pipeline](./docs/darkmatter-compose-pipeline.md)
 - to get details on the **Rendering Pipeline** in Darkmatter read: [Darkmatter Render Pipeline](./docs/darkmatter-rendering-pipeline.md)
 - for more information on how to use CLI read: [Darkmatter CLI](./docs/cli/index.md)
+- for shell expansion details read: [Body Shell Expansion](./docs/inline/shell-expansion.md) and [Frontmatter Shell Expansion](./docs/inline/fm-shell-expansion.md)
 - Other topics you may be interested in:
     - [What is Composition?](./docs/topics/what-is-composition.md)
     - [Transclusion](./docs/topics/transclusion.md)

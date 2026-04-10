@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PerfMetricKind {
     FrontmatterInterpolation,
+    FrontmatterShellExpansion,
     EffectiveStateBuild,
     TextReplacement,
     PageBlocks,
@@ -31,6 +32,7 @@ impl PerfMetricKind {
     fn stage(self) -> ComposeStage {
         match self {
             Self::FrontmatterInterpolation => ComposeStage::FrontmatterInterpolation,
+            Self::FrontmatterShellExpansion => ComposeStage::FrontmatterShellExpansion,
             Self::EffectiveStateBuild => ComposeStage::EffectiveStateBuild,
             Self::TextReplacement => ComposeStage::TextReplacement,
             Self::PageBlocks => ComposeStage::PageBlocks,
@@ -49,6 +51,7 @@ impl PerfMetricKind {
     fn all() -> &'static [PerfMetricKind] {
         &[
             Self::FrontmatterInterpolation,
+            Self::FrontmatterShellExpansion,
             Self::EffectiveStateBuild,
             Self::TextReplacement,
             Self::PageBlocks,
@@ -71,7 +74,7 @@ pub(crate) struct PerfCollector {
     enabled: bool,
     start: Option<Instant>,
     /// Fixed-size array indexed by `PerfMetricKind` ordinal.
-    durations: [(Duration, usize); 12],
+    durations: [(Duration, usize); 13],
 }
 
 impl PerfCollector {
@@ -81,7 +84,7 @@ impl PerfCollector {
         Self {
             enabled,
             start: if enabled { Some(Instant::now()) } else { None },
-            durations: [(Duration::ZERO, 0); 12],
+            durations: [(Duration::ZERO, 0); 13],
         }
     }
 
@@ -220,7 +223,9 @@ mod tests {
         let esb_idx = stages
             .iter()
             .position(|s| *s == ComposeStage::EffectiveStateBuild);
-        let norm_idx = stages.iter().position(|s| *s == ComposeStage::Normalization);
+        let norm_idx = stages
+            .iter()
+            .position(|s| *s == ComposeStage::Normalization);
         assert!(esb_idx < norm_idx);
     }
 }

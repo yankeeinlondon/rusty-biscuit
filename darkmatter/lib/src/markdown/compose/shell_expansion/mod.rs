@@ -44,11 +44,42 @@ pub use policy::{
 pub use store::resolve_policy_paths;
 pub use types::{
     ErrorHandling, ErrorHandlingOutcome, ShellApprovalDecision, ShellApprovalHandler,
-    ShellApprovalRequest, ShellCommandEntry, ShellDirective, ShellExpansionError,
-    ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths, ShellRuleSet,
+    ShellApprovalRequest, ShellCommandEntry, ShellCommandOrigin, ShellDirective,
+    ShellExpansionError, ShellExpansionOptions, ShellExpansionRuntime, ShellPolicyPaths,
+    ShellRuleSet, ShellTimeoutBehavior,
 };
 
 use crate::markdown::compose::ComposeOptions;
+use crate::markdown::compose::types::ComposeWarning;
+
+/// A directive that has passed alias resolution, policy checks, and approval.
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedShellDirective {
+    pub effective: ShellDirective,
+    pub display_command: String,
+}
+
+/// Detailed output from executing a prepared shell directive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DirectiveExecutionResult {
+    pub stdout: String,
+    pub stderr: String,
+    pub warnings: Vec<ComposeWarning>,
+}
+
+impl DirectiveExecutionResult {
+    /// Returns stdout and stderr combined using the body-shell contract.
+    pub fn combined_output(&self) -> String {
+        let mut output = self.stdout.clone();
+        if !self.stderr.is_empty() {
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&self.stderr);
+        }
+        output
+    }
+}
 
 /// Executes a shell directive with policy enforcement and approval flow.
 ///
@@ -66,7 +97,7 @@ use crate::markdown::compose::ComposeOptions;
 /// ## Examples
 ///
 /// ```no_run
-/// use darkmatter::markdown::compose::shell_expansion::{execute_directive, types::{ErrorHandling, ShellDirective, ShellExpansionRuntime, ShellPolicyPaths}};
+/// use darkmatter::markdown::compose::shell_expansion::{execute_directive, types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionRuntime, ShellPolicyPaths}};
 /// use darkmatter::markdown::compose::ComposeOptions;
 /// use std::path::PathBuf;
 ///
@@ -75,8 +106,9 @@ use crate::markdown::compose::ComposeOptions;
 ///     executable: "echo".to_string(),
 ///     args: vec!["hello".to_string()],
 ///     span: 0..10,
-///     line: 1,
+///     origin: ShellCommandOrigin::Body { line: 1 },
 ///     error_handling: ErrorHandling::default(),
+///     timeout_override: None,
 /// };
 /// let options = ComposeOptions::new();
 /// let policy_paths = ShellPolicyPaths {
@@ -92,8 +124,35 @@ pub fn execute_directive(
     policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<String, ShellExpansionError> {
+    Ok(
+        execute_directive_detailed(directive, options, policy_paths, shell_runtime)?
+            .combined_output(),
+    )
+}
+
+/// Executes a shell directive with policy enforcement and returns stdout,
+/// stderr, and any non-fatal warnings.
+pub(crate) fn execute_directive_detailed(
+    directive: &ShellDirective,
+    options: &ComposeOptions,
+    policy_paths: &ShellPolicyPaths,
+    shell_runtime: &mut ShellExpansionRuntime,
+) -> Result<DirectiveExecutionResult, ShellExpansionError> {
+    let prepared = prepare_directive(directive, options, policy_paths, shell_runtime)?;
+    execute_prepared_directive(&prepared, options)
+}
+
+/// Resolves aliases, applies policy checks, and records approval decisions
+/// without executing the command yet.
+pub(crate) fn prepare_directive(
+    directive: &ShellDirective,
+    options: &ComposeOptions,
+    policy_paths: &ShellPolicyPaths,
+    shell_runtime: &mut ShellExpansionRuntime,
+) -> Result<PreparedShellDirective, ShellExpansionError> {
     // Resolve alias if the executable is not found on PATH
     let (effective, alias_name) = resolve_or_passthrough(directive);
+    let display_command = display_command(directive, alias_name.as_deref());
 
     let normalized = normalize_command(&effective.executable, &effective.args);
 
@@ -102,11 +161,14 @@ pub fn execute_directive(
     // The caller (Claudine) has already verified every command.
     if let Some(ref approved) = options.pre_approved_commands {
         if approved.contains(&normalized) {
-            return execute_and_handle_errors(&effective, options, &directive.error_handling);
+            return Ok(PreparedShellDirective {
+                effective,
+                display_command,
+            });
         } else {
             return Err(ShellExpansionError::NotPreApproved {
-                command: display_command(directive, alias_name.as_deref()),
-                line: directive.line,
+                command: display_command,
+                origin: directive.origin.clone(),
                 source_desc: match &options.source {
                     crate::markdown::compose::ComposeSource::File(p) => {
                         format!(" (in {})", p.display())
@@ -122,9 +184,9 @@ pub fn execute_directive(
     // 1. Check built-in blacklist (against resolved command)
     if let Some(reason) = check_builtin_blacklist(&effective.executable, &effective.args) {
         return Err(ShellExpansionError::Blacklisted {
-            command: display_command(directive, alias_name.as_deref()),
+            command: display_command,
             reason,
-            line: directive.line,
+            origin: directive.origin.clone(),
         });
     }
 
@@ -136,9 +198,9 @@ pub fn execute_directive(
         &normalized,
     ) {
         return Err(ShellExpansionError::Blacklisted {
-            command: display_command(directive, alias_name.as_deref()),
+            command: display_command,
             reason: "user blacklist".to_string(),
-            line: directive.line,
+            origin: directive.origin.clone(),
         });
     }
 
@@ -148,19 +210,25 @@ pub fn execute_directive(
         &effective.executable,
         &normalized,
     ) {
-        return execute_and_handle_errors(&effective, options, &directive.error_handling);
+        return Ok(PreparedShellDirective {
+            effective,
+            display_command,
+        });
     }
 
     // 4. Check allow-once
     if runtime_snapshot.allow_once.contains(&normalized) {
-        return execute_and_handle_errors(&effective, options, &directive.error_handling);
+        return Ok(PreparedShellDirective {
+            effective,
+            display_command,
+        });
     }
 
     // 5. Request approval or fail
     if let Some(ref handler) = options.shell_approval_handler {
         let request = ShellApprovalRequest {
             source: options.source.clone(),
-            line: directive.line,
+            origin: directive.origin.clone(),
             raw_command: effective.raw_command.clone(),
             executable: effective.executable.clone(),
             args: effective.args.clone(),
@@ -174,39 +242,82 @@ pub fn execute_directive(
             ShellApprovalDecision::AllowExactPersist => {
                 store::append_whitelist_exact(policy_paths, &normalized)?;
                 shell_runtime.persist_whitelist_exact(normalized);
-                execute_and_handle_errors(&effective, options, &directive.error_handling)
+                Ok(PreparedShellDirective {
+                    effective,
+                    display_command,
+                })
             }
             ShellApprovalDecision::AllowCommandPersist => {
                 store::append_whitelist_prefix(policy_paths, &effective.executable)?;
                 shell_runtime.persist_whitelist_prefix(effective.executable.clone());
-                execute_and_handle_errors(&effective, options, &directive.error_handling)
+                Ok(PreparedShellDirective {
+                    effective,
+                    display_command,
+                })
             }
             ShellApprovalDecision::AllowOnce => {
                 shell_runtime.allow_once(normalized);
-                execute_and_handle_errors(&effective, options, &directive.error_handling)
+                Ok(PreparedShellDirective {
+                    effective,
+                    display_command,
+                })
             }
             ShellApprovalDecision::Deny => Err(ShellExpansionError::Denied {
-                command: display_command(directive, alias_name.as_deref()),
-                line: directive.line,
+                command: display_command,
+                origin: directive.origin.clone(),
             }),
             ShellApprovalDecision::BlacklistPersist => {
                 store::append_blacklist_exact(policy_paths, &normalized)?;
                 shell_runtime.persist_blacklist_exact(normalized);
                 Err(ShellExpansionError::Blacklisted {
-                    command: display_command(directive, alias_name.as_deref()),
+                    command: display_command,
                     reason: "user blacklisted".to_string(),
-                    line: directive.line,
+                    origin: directive.origin.clone(),
                 })
             }
         }
     } else {
         Err(ShellExpansionError::ApprovalRequired {
-            command: display_command(directive, alias_name.as_deref()),
+            command: display_command,
             whitelist_path: policy_paths.whitelist.clone(),
             blacklist_path: policy_paths.blacklist.clone(),
-            line: directive.line,
+            origin: directive.origin.clone(),
         })
     }
+}
+
+/// Executes a previously prepared directive and converts timeout fallbacks into
+/// compose warnings.
+pub(crate) fn execute_prepared_directive(
+    prepared: &PreparedShellDirective,
+    options: &ComposeOptions,
+) -> Result<DirectiveExecutionResult, ShellExpansionError> {
+    let execution = execute_and_handle_errors(
+        &prepared.effective,
+        options,
+        &prepared.effective.error_handling,
+    )?;
+
+    let mut warnings = Vec::new();
+    if let Some(timeout) = execution.timeout_fallback {
+        let warning = ComposeWarning::new(
+            "shell_expansion",
+            format!(
+                "Shell command timed out after {timeout:?} at {}: '{}'; replaced with an empty string",
+                prepared.effective.origin, prepared.display_command
+            ),
+        );
+        warnings.push(match prepared.effective.origin {
+            ShellCommandOrigin::Body { line } => warning.at_line(line),
+            ShellCommandOrigin::Frontmatter { .. } => warning,
+        });
+    }
+
+    Ok(DirectiveExecutionResult {
+        stdout: execution.stdout,
+        stderr: execution.stderr,
+        warnings,
+    })
 }
 
 /// Executes a command and applies error handling rules to `ExecutionFailed` errors.
@@ -218,9 +329,9 @@ fn execute_and_handle_errors(
     effective: &ShellDirective,
     options: &ComposeOptions,
     error_handling: &types::ErrorHandling,
-) -> Result<String, ShellExpansionError> {
+) -> Result<executor::CommandExecution, ShellExpansionError> {
     let shell_opts = options.shell_options();
-    let result = executor::execute_command(effective, &shell_opts, &options.source);
+    let result = executor::execute_command_detailed(effective, &shell_opts, &options.source);
 
     // Fast path: no error handling configured or command succeeded
     if error_handling.is_empty() || result.is_ok() {
@@ -236,7 +347,9 @@ fn execute_and_handle_errors(
         }) => {
             let outcome = error_handling.resolve(*code, stderr);
             match outcome {
-                types::ErrorHandlingOutcome::Replace(text) => Ok(text),
+                types::ErrorHandlingOutcome::Replace(text) => Ok(
+                    executor::CommandExecution::from_streams(text, String::new()),
+                ),
                 types::ErrorHandlingOutcome::Enrich(enrichment) => {
                     // Re-construct the error with enrichment appended to stderr
                     match result {
@@ -245,7 +358,7 @@ fn execute_and_handle_errors(
                             code,
                             stdout,
                             stderr,
-                            line,
+                            origin,
                         }) => {
                             let enriched_stderr = if stderr.is_empty() {
                                 enrichment
@@ -257,7 +370,7 @@ fn execute_and_handle_errors(
                                 code,
                                 stdout,
                                 stderr: enriched_stderr,
-                                line,
+                                origin,
                             })
                         }
                         _ => unreachable!(),
@@ -299,8 +412,9 @@ fn resolve_or_passthrough(directive: &ShellDirective) -> (ShellDirective, Option
             executable: resolved.executable,
             args: merged_args,
             span: directive.span.clone(),
-            line: directive.line,
+            origin: directive.origin.clone(),
             error_handling: directive.error_handling.clone(),
+            timeout_override: directive.timeout_override,
         };
 
         return (effective, Some(resolved.alias_name));

@@ -23,8 +23,8 @@ mod types;
 
 pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode, PreludeNode};
 
-use crate::markdown::normalize::HeadingLevel as OurHeadingLevel;
 use crate::markdown::Markdown;
+use crate::markdown::normalize::HeadingLevel as OurHeadingLevel;
 use biscuit_file::serde_yaml_ng;
 use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 use pulldown_cmark::{Event, HeadingLevel as PulldownHeadingLevel, Parser, Tag, TagEnd};
@@ -345,7 +345,11 @@ impl From<&Markdown> for MarkdownToc {
             .flatten()
             .or_else(|| {
                 // Check for single H1
-                let h1s: Vec<_> = toc.structure.iter().filter(|n| n.level == OurHeadingLevel::H1).collect();
+                let h1s: Vec<_> = toc
+                    .structure
+                    .iter()
+                    .filter(|n| n.level == OurHeadingLevel::H1)
+                    .collect();
                 if h1s.len() == 1 {
                     Some(h1s[0].title.clone())
                 } else {

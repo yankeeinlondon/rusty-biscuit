@@ -434,7 +434,12 @@ pub fn transclusion_caption(context: &ReferenceInsertionContext) -> String {
         .section_heading_text
         .as_deref()
         .map(|h| {
-            let hashes = "#".repeat(context.section_heading_level.unwrap_or(HeadingLevel::H2).hash_count());
+            let hashes = "#".repeat(
+                context
+                    .section_heading_level
+                    .unwrap_or(HeadingLevel::H2)
+                    .hash_count(),
+            );
             format!(" into the '{hashes} {h}' section")
         })
         .unwrap_or_default();

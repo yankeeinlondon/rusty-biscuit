@@ -29,9 +29,20 @@ When the Darkmatter compose pipeline reaches the Shell Expansion stage, it will 
 
     - If a command does not complete in 10 seconds (by default) then we will exit with an error
         - `<red><b>ERROR:</b></red> the shell command '{command}' in {file} took too long to complete (10 seconds) and was terminated. The Darkmatter pipeline has exited.`
+    - The timeout can be changed with `--timeout <seconds>` in the CLI or `ComposeOptions::with_shell_timeout()` in the library.
+    - If timeout fallback is enabled via `--allow-shell-timeout` or `ComposeOptions::with_allow_shell_timeout(true)`, a timed out command is replaced with an empty string and compose emits a warning instead of failing.
     - If the command outputs nothing in STDOUT or STDERR while returning a 0 exit code (aka, no error) then we simply remove the `::shell` instruction line.
     - If the shell command's exit code is _not_ 0 (aka, there was an error when running the command) then we will exit the pipeline with an error:
         - `<red><b>ERROR:</b></red> the shell command '{command}' in {file} exited with an error code of {error_code}. The Darkmatter pipeline has exited.\n\n<b>STDOUT:</b> {stdout}\n\n<b>STDERR:</b>{stderr}`
+
+## Frontmatter Variant
+
+Darkmatter also supports shell expansion in top-level frontmatter string values using `$(...)`.
+
+- Documentation: [Frontmatter Shell Expansion](./fm-shell-expansion.md)
+- Frontmatter shell expansion stores trimmed `stdout` only
+- Body `::shell` expansion stores combined `stdout` + `stderr`
+- Both variants share the same policy, whitelist/blacklist, approval, and timeout infrastructure
 
 ## Blacklisted Commands and Syntax
 
