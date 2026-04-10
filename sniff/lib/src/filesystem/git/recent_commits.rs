@@ -123,10 +123,7 @@ fn parse_commit_message(message: &str) -> (String, Vec<String>) {
         }
 
         if !para_description_parts.is_empty() {
-            if !first_para_consumed {
-                description = para_description_parts.join(" ");
-                first_para_consumed = true;
-            } else if description.is_empty() {
+            if !first_para_consumed || description.is_empty() {
                 description = para_description_parts.join(" ");
                 first_para_consumed = true;
             } else {

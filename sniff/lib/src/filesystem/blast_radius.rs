@@ -76,10 +76,10 @@ pub fn is_documentation_path(path: &Path) -> bool {
         None => return false,
     };
 
-    if let Some(desc) = lookup_exact_filename(file_name) {
-        if matches!(desc.association, FileAssociation::Documentation) {
-            return true;
-        }
+    if let Some(desc) = lookup_exact_filename(file_name)
+        && matches!(desc.association, FileAssociation::Documentation)
+    {
+        return true;
     }
 
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
