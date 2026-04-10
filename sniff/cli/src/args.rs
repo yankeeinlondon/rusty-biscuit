@@ -78,6 +78,7 @@ pub enum RepoAction {
     HasMergeConflict,
     RecentCommits {
         period: Option<String>,
+        actions: Vec<RecentCommitActionArg>,
         package: Option<String>,
         package_area: Option<String>,
         no_error: bool,
@@ -233,8 +234,10 @@ macro_rules! define_program_action {
 
             <$program_enum>::iter()
                 .flat_map(|p| {
-                    let mut candidates = vec![CompletionCandidate::new(p.binary_name())
-                        .help(Some(p.description().into()))];
+                    let mut candidates = vec![
+                        CompletionCandidate::new(p.binary_name())
+                            .help(Some(p.description().into())),
+                    ];
                     let snake = p.to_string();
                     if snake != p.binary_name() {
                         candidates.push(
@@ -666,6 +669,9 @@ pub enum RepoSubcommand {
     RecentCommits {
         /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
         period: Option<String>,
+        /// Filter to conventional commit actions; repeat to OR multiple actions together
+        #[arg(long = "action", value_enum, value_name = "ACTION")]
+        actions: Vec<RecentCommitActionArg>,
         /// Scope to a specific package
         #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
@@ -1052,12 +1058,14 @@ impl Commands {
                 Some(RepoSubcommand::DirtyFiles(args)) => RepoAction::DirtyFiles(args.clone()),
                 Some(RepoSubcommand::RecentCommits {
                     period,
+                    actions,
                     package,
                     package_area,
                     no_error,
                     on_error,
                 }) => RepoAction::RecentCommits {
                     period: period.clone(),
+                    actions: actions.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                     no_error: *no_error,
@@ -1164,6 +1172,30 @@ pub enum ServiceStateArg {
     #[default]
     Running,
     Stopped,
+}
+
+/// Conventional commit action filter for `repo recent-commits`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum RecentCommitActionArg {
+    Feat,
+    Chore,
+    Refactor,
+    Test,
+    Style,
+    Fix,
+}
+
+impl RecentCommitActionArg {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Feat => "feat",
+            Self::Chore => "chore",
+            Self::Refactor => "refactor",
+            Self::Test => "test",
+            Self::Style => "style",
+            Self::Fix => "fix",
+        }
+    }
 }
 
 pub const HELP_TEMPLATE: &str = "\
@@ -1498,6 +1530,27 @@ mod tests {
         }
 
         #[test]
+        fn repo_recent_commits_actions_parse() {
+            let cli = parse_args(&[
+                "repo",
+                "recent-commits",
+                "--action",
+                "feat",
+                "--action",
+                "fix",
+            ])
+            .unwrap();
+
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::RecentCommits { actions, .. }),
+                    ..
+                }) if actions == vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix]
+            ));
+        }
+
+        #[test]
         fn editors_install_no_name_parses() {
             let cli = parse_args(&["editors", "install"]).unwrap();
             if let Some(Commands::Editors {
@@ -1696,6 +1749,31 @@ mod tests {
                 assert_eq!(filter, vec!["top-level".to_string()]);
             } else {
                 panic!("Expected Deps action");
+            }
+
+            let cmd = Commands::Repo {
+                latest_versions: false,
+                filter: vec![],
+                repo_subcommand: Some(RepoSubcommand::RecentCommits {
+                    period: Some("1w".to_string()),
+                    actions: vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix],
+                    package: None,
+                    package_area: None,
+                    no_error: false,
+                    on_error: None,
+                }),
+            };
+            if let Some(RepoAction::RecentCommits {
+                period, actions, ..
+            }) = cmd.to_repo_action()
+            {
+                assert_eq!(period.as_deref(), Some("1w"));
+                assert_eq!(
+                    actions,
+                    vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix]
+                );
+            } else {
+                panic!("Expected RecentCommits action");
             }
         }
 

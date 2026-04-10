@@ -1,10 +1,10 @@
 use chrono::Utc;
-use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
-use sniff::filesystem::git::{parse_period, PeriodSpecifier};
+use sniff::filesystem::git::{PeriodSpecifier, parse_period};
 
-use crate::args::RepoAction;
+use crate::args::{RecentCommitActionArg, RepoAction};
 use crate::commands::handle_no_results;
 use crate::output::emit_text;
 
@@ -15,7 +15,8 @@ pub(crate) fn handle_recent_commits_command(
     plain: bool,
     _verbose: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (period, package, package_area, no_error, on_error, mode) = extract_action_params(action);
+    let (period, actions, package, package_area, no_error, on_error, mode) =
+        extract_action_params(action);
 
     let period_str = period.as_deref().unwrap_or("3d");
     let specifier = parse_period(period_str)?;
@@ -58,6 +59,9 @@ pub(crate) fn handle_recent_commits_command(
     }
     if let Some(ref area) = package_area {
         commit_set.filter_by_package_area(area)?;
+    }
+    if !actions.is_empty() {
+        commit_set.filter_by_actions(actions.iter().copied().map(RecentCommitActionArg::as_str));
     }
 
     if commit_set.commits.is_empty() {
@@ -105,6 +109,7 @@ fn extract_action_params(
     action: &RepoAction,
 ) -> (
     Option<String>,
+    Vec<RecentCommitActionArg>,
     Option<String>,
     Option<String>,
     bool,
@@ -114,12 +119,14 @@ fn extract_action_params(
     match action {
         RepoAction::RecentCommits {
             period,
+            actions,
             package,
             package_area,
             no_error,
             on_error,
         } => (
             period.clone(),
+            actions.clone(),
             package.clone(),
             package_area.clone(),
             *no_error,
@@ -134,6 +141,7 @@ fn extract_action_params(
             on_error,
         } => (
             period.clone(),
+            Vec::new(),
             package.clone(),
             package_area.clone(),
             *no_error,
@@ -148,6 +156,7 @@ fn extract_action_params(
             on_error,
         } => (
             period.clone(),
+            Vec::new(),
             package.clone(),
             package_area.clone(),
             *no_error,
