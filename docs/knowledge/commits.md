@@ -12,7 +12,7 @@
 
 - When committing agent/skill files in `.claude/`, use `docs(<area>)` as the prefix for documentation restructuring changes
 
-- Subagents may see a different set of staged files than what the user specifies in the prompt (due to concurrent work or a filtered list). When this happens, verify with `git status` and if more files are staged than assigned, use `git reset HEAD` to unstage everything, then `git add` only the assigned files. This is the only way to commit only specific files when other unrelated files are also staged. Never use `git reset *` (with a glob) as that can corrupt staged state. **Never use `git reset --hard`** — it wipes both the staging area AND working tree changes, destroying all uncommitted work. Use `git reset HEAD` (without `--hard`) to only unstage.
+- Subagents may see a different set of staged files than what the user specifies in the prompt (due to concurrent work or a filtered list). When this happens, but the subagent should only commit those files the orchestrator has asked it to.
 
 - When multiple related files are staged together (e.g., a directory rename like `transform/` → `compose/`), git commits them as an atomic unit. In such cases, subagents will not be able to split them into separate granular commits even if semantically distinct groups were planned - the files must be committed together as they were staged
 
@@ -29,8 +29,6 @@
 - When using `git commit -m "message" -- path1 path2`, the `--` separator before paths combined with `-m` can cause git to source the commit message from a cached staged template instead of the inline message. To avoid this, place paths before `-m` (e.g., `git commit file1 file2 -m "message"`) or use `git commit --only -- path1 path2 -m "message"` for explicit path-limited commits with a custom message.
 
 - The `--only` flag in `git commit --only -- path -m "message"` only works with already-tracked files. For new (untracked) files, `--only` will fail with "fatal: you must specify path to commit with -c or -C". For new files, ensure they are staged via `git add` before committing, then use `git commit file1 file2 -m "message"` with paths before `-m`.
-
-- When multiple subagents commit concurrently to the same branch, they may create overlapping or duplicate commits. The orchestrator can use `git reset --soft <before-subagents>` to restore all changes to staging, then re-commit them properly in separate atomic commits. Always verify the final state with `git log --oneline` and `git diff <parent> --stat` before assuming the job is complete.
 
 - A commit can be "on" a branch (reachable from it via `git branch --contains`) but NOT an ancestor of the current HEAD. This happens when HEAD has moved forward after the branch diverged. Subagents using `git log --oneline -n` only see ancestry-path commits and will miss reachable-but-not-ancestor commits. To see all commits on a branch regardless of ancestry, use `git log --all --oneline | head -n` or `git branch -v --contains <commit>` to check if a specific commit is reachable.
 
