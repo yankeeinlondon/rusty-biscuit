@@ -62,7 +62,7 @@ impl HostCapabilities {
             has_bash: detect_has_bash(),
             os_pkg_mgrs: InstalledOsPackageManagers::new(),
             lang_pkg_mgrs: InstalledLanguagePackageManagers::new(),
-            can_sudo: false, // filled in by Task 6
+            can_sudo: detect_can_sudo(),
             default_os_package_manager: None, // filled in by Task 7
             verified_lang_pkg_mgrs: HashSet::new(),
             npm_global_prefix_writable: None,
@@ -73,6 +73,98 @@ impl HostCapabilities {
 
 fn detect_has_bash() -> bool {
     which::which("bash").is_ok()
+}
+
+// ---------------------------------------------------------------------------
+// Sudo detection
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+struct SudoProbes {
+    group_membership: bool,
+    sudo_n_true: bool,
+}
+
+/// Pure decision function over the probe results.
+///
+/// First positive signal wins; if none fire, returns `false`.
+fn decide_can_sudo(probes: &SudoProbes) -> bool {
+    probes.group_membership || probes.sudo_n_true
+}
+
+#[cfg(unix)]
+fn probe_group_membership() -> bool {
+    use std::process::Command;
+
+    // `id -Gn` prints space-separated group names for the current user.
+    let Ok(output) = Command::new("id").arg("-Gn").output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let groups = String::from_utf8_lossy(&output.stdout);
+    groups
+        .split_whitespace()
+        .any(|g| matches!(g, "wheel" | "sudo" | "admin"))
+}
+
+#[cfg(not(unix))]
+fn probe_group_membership() -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn probe_sudo_n_true() -> bool {
+    use std::process::Command;
+
+    let Ok(output) = Command::new("sudo").args(["-n", "true"]).output() else {
+        return false;
+    };
+    output.status.success()
+}
+
+#[cfg(not(unix))]
+fn probe_sudo_n_true() -> bool {
+    false
+}
+
+fn detect_can_sudo() -> bool {
+    // On native Windows we never claim sudo; WSL is detected as Linux and
+    // goes through the Unix probes.
+    if cfg!(all(windows, not(target_env = "gnu"))) {
+        return false;
+    }
+    decide_can_sudo(&SudoProbes {
+        group_membership: probe_group_membership(),
+        sudo_n_true: probe_sudo_n_true(),
+    })
+}
+
+#[cfg(test)]
+mod sudo_tests {
+    use super::*;
+
+    #[test]
+    fn group_membership_wins() {
+        assert!(decide_can_sudo(&SudoProbes {
+            group_membership: true,
+            sudo_n_true: false,
+        }));
+    }
+
+    #[test]
+    fn sudo_n_true_wins() {
+        assert!(decide_can_sudo(&SudoProbes {
+            group_membership: false,
+            sudo_n_true: true,
+        }));
+    }
+
+    #[test]
+    fn no_signals_returns_false() {
+        assert!(!decide_can_sudo(&SudoProbes::default()));
+    }
 }
 
 #[cfg(test)]
