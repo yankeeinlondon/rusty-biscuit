@@ -64,7 +64,6 @@ pub(crate) enum PromptSource {
     InheritStdin,
 }
 
-#[allow(dead_code)] // first production caller lands in Task 13 (direct-wrap) / Task 14 (composition); drop this attr then
 impl PromptSource {
     /// Returns the inline prompt text if this source is `Inline`.
     pub(crate) fn as_inline(&self) -> Option<&str> {
@@ -75,6 +74,7 @@ impl PromptSource {
     }
 
     /// Returns true when the source carries no prompt at all.
+    #[allow(dead_code)] // used in Task 14 (composition path) and Task 17 cleanup
     pub(crate) fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
@@ -789,27 +789,14 @@ impl WrapperProfile for CodexWrapper {
 
     fn prompt_delivery(
         &self,
-        args: &[String],
+        _args: &[String],
         prompt: &str,
-        non_interactive: bool,
+        _non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        if non_interactive {
-            // In non-interactive mode, deliver via stdin to avoid ENAMETOOLONG
-            // errors when prompt-file content exceeds OS argument length limits.
-            // Codex exec reads from stdin when no positional prompt is provided.
-            Ok(PromptDelivery::Stdin(prompt.to_string()))
-        } else {
-            // Interactive: insert as positional after "exec"
-            let insert_at = if args.first().is_some_and(|f| f == "exec" || f == "e") {
-                1
-            } else {
-                0
-            };
-            Ok(PromptDelivery::InsertArgs {
-                index: insert_at,
-                args: vec![prompt.to_string()],
-            })
-        }
+        // Codex accepts a positional prompt after the "exec" entrypoint and
+        // all flags. Append so the child argv is consistent with the old
+        // pipeline: [exec, ...flags, prompt].
+        Ok(PromptDelivery::AppendArgs(vec![prompt.to_string()]))
     }
 
     fn validate_final_args(
@@ -1198,16 +1185,15 @@ impl WrapperProfile for KimiWrapper {
         &self,
         _args: &[String],
         prompt: &str,
-        non_interactive: bool,
+        _non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        if non_interactive {
-            Ok(PromptDelivery::Stdin(prompt.to_string()))
-        } else {
-            Ok(PromptDelivery::AppendArgs(vec![
-                "--prompt".to_string(),
-                prompt.to_string(),
-            ]))
-        }
+        // Kimi uses the --prompt flag for all prompt delivery; the only
+        // distinction between interactive and non-interactive is whether
+        // --print is included (handled by apply_entrypoint).
+        Ok(PromptDelivery::AppendArgs(vec![
+            "--prompt".to_string(),
+            prompt.to_string(),
+        ]))
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
@@ -1917,7 +1903,6 @@ fn option_value(args: &[String], option: &str) -> Option<String> {
 /// fall-through in that case would drop the user's intent — piped
 /// stdin, if present, would take its place. Surface the problem at
 /// extraction time instead.
-#[allow(dead_code)] // first production caller lands in Task 13 (direct-wrap) / Task 14 (composition); drop this attr then
 pub(crate) fn extract_prompt_source_from_passthrough(
     profile: &dyn WrapperProfile,
     passthrough: &[String],
@@ -2041,7 +2026,6 @@ fn find_positional_prompt_index(
 ///
 /// Otherwise bails with a provider-agnostic error message that
 /// interpolates `provider_name` so the user knows which wrap failed.
-#[allow(dead_code)] // first production caller lands in Task 13 (direct-wrap) / Task 14 (composition); drop this attr then
 pub(crate) fn require_prompt_present(
     provider_name: &str,
     non_interactive: bool,

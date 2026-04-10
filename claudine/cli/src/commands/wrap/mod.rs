@@ -947,11 +947,28 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
 
-    // Determine if a prompt is present (implies non-interactive by default)
-    let has_prompt = has_prompt_source(&child_args, None);
+    // In the direct-wrap path the child inherits stdin automatically —
+    // we don't need to detect or seed it. Pass false so that a non-tty
+    // test environment (or any shell running without an attached terminal)
+    // doesn't accidentally classify the session as non-interactive.
+    // Composition (Task 14) is where InheritStdin / stdin_seed matters.
+    let has_piped_stdin = false;
 
-    // Default: interactive when no prompt, non-interactive when prompt present
-    // --interactive/-i overrides the default back to interactive
+    // Extract the prompt up-front into a typed PromptSource, leaving
+    // child_args free of any prompt characters. Downstream apply_*
+    // methods see clean args; prompt_delivery is the only code path
+    // that places the prompt back in.
+    let (extracted_args, prompt_source) =
+        profile::extract_prompt_source_from_passthrough(
+            profile,
+            &child_args,
+            has_piped_stdin,
+        )?;
+    child_args = extracted_args;
+
+    // Default: non-interactive when a prompt reaches the child, interactive
+    // otherwise. --interactive/-i overrides the default back to interactive.
+    let has_prompt = prompt_source.has_prompt_or_stdin();
     let non_interactive_requested = if interactive_requested {
         false
     } else {
@@ -982,6 +999,25 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         ));
     }
 
+    // Prompt delivery: re-insert the inline prompt into child argv (or set
+    // stdin_seed for providers that consume it from stdin). This happens
+    // before apply_yolo so that the prompt occupies its natural position in
+    // the arg list — consistent with the ordering the old pipeline produced.
+    let effective_non_interactive = non_interactive_requested;
+    let stdin_seed: Option<String> = if let Some(prompt) = prompt_source.as_inline() {
+        profile
+            .prompt_delivery(&child_args, prompt, effective_non_interactive)?
+            .apply_to(&mut child_args)
+    } else {
+        None
+    };
+
+    profile::require_prompt_present(
+        profile.binary(),
+        effective_non_interactive,
+        &prompt_source,
+    )?;
+
     profile.reject_direct_yolo(&child_args)?;
     reject_retired_composition_flags(&child_args)?;
 
@@ -992,8 +1028,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         yolo_enabled = false;
     }
 
+    profile.apply_entrypoint(&mut child_args, non_interactive_requested);
+
     if non_interactive_requested {
-        profile.apply_non_interactive(&mut child_args)?;
+        profile.apply_non_interactive_flags(&mut child_args)?;
         // Only apply default model if the user didn't pass --model explicitly
         // (apply_model handles it below when args.model is Some).
         if args.model.is_none() {
@@ -1101,12 +1139,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         needs_mcp_shadow_home,
         None,
     )?;
-    let stdin_seed: Option<String> = None;
-
-    // -- Final argument validation -------------------------------------------
-    let effective_non_interactive = non_interactive_requested;
-    profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
-
     if args.timeout.is_some() && !effective_non_interactive {
         return Err(eyre!(
             "--timeout can only be used in non-interactive mode \
@@ -1296,7 +1328,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
     switch_process_cwd(child_cwd)?;
 
-    let prompt_display = extract_user_prompt(&args.passthrough);
+    let prompt_display = prompt_source.as_inline().map(|s| s.to_string());
     let dispatch_context = HashMap::new();
 
     // Interactive override: user explicitly forced -i with a prompt present
@@ -3561,6 +3593,7 @@ fn print_wrapper_help(provider: Provider) {
 
 /// Returns true if a prompt string is present — either as a remaining
 /// non-switch arg in `child_args` or via stdin.
+#[allow(dead_code)] // only called from tests; production path removed in Task 13; delete in Task 17
 fn has_prompt_source(child_args: &[String], stdin_seed: Option<&str>) -> bool {
     if stdin_seed.is_some() {
         return true;
