@@ -754,28 +754,21 @@ pub trait ProgramDetector {
         let info = program.info();
         let host = HostCapabilities::load_or_detect();
 
-        let os_ok = info.os_availability.is_empty()
-            || info.os_availability.contains(&host.os_type);
+        let os_ok = info.os_availability.is_empty() || info.os_availability.contains(&host.os_type);
         if !os_ok {
             return Vec::new();
         }
 
         info.installation_methods
             .iter()
-            .filter(|m| {
-                method_available(m, &host.os_pkg_mgrs, &host.lang_pkg_mgrs)
-                    || (m.is_remote_bash() && host.has_bash)
-            })
+            .filter(|m| method_available(m, &host))
             .cloned()
             .collect()
     }
 
     /// Returns a full install plan for this program against cached host
     /// capabilities.
-    fn install_plan(
-        &self,
-        program: Self::Program,
-    ) -> crate::programs::install_plan::InstallPlan {
+    fn install_plan(&self, program: Self::Program) -> crate::programs::install_plan::InstallPlan {
         use crate::programs::host_capability::HostCapabilities;
         use crate::programs::install_plan::build_install_plan;
 

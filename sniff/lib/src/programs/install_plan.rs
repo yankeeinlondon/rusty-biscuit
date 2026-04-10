@@ -9,7 +9,9 @@ use crate::error::SniffInstallationError;
 use crate::os::OsType;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::host_capability::HostCapabilities;
-use crate::programs::installer::{execute_install, InstallOptions, InstallResult, method_available};
+use crate::programs::installer::{
+    InstallOptions, InstallResult, execute_install, method_available,
+};
 use crate::programs::schema::ProgramMetadata;
 use crate::programs::types::InstallationMethod;
 
@@ -70,26 +72,25 @@ impl InstallPlan {
 
     /// Execute the chosen installation option.
     ///
-    /// Returns `NoViableMethod` if no option was marked as chosen. Returns
-    /// `RemoteBashConsentRequired` if the chosen option is a `RemoteBash`
-    /// method and `opts.approve_remote_bash` is `false`. Otherwise delegates
-    /// to `execute_install`.
-    pub fn execute(
-        &self,
-        opts: &InstallOptions,
-    ) -> Result<InstallResult, SniffInstallationError> {
-        let chosen = self.chosen().ok_or_else(|| {
-            SniffInstallationError::NoViableMethod {
+    /// Returns `NoViableMethod` if no option was marked as chosen. For a
+    /// chosen `RemoteBash` method, dry-runs render the shell command without
+    /// approval, but non-dry-run execution returns
+    /// `RemoteBashConsentRequired` unless `opts.approve_remote_bash` is
+    /// `true`. Otherwise delegates to `execute_install`.
+    pub fn execute(&self, opts: &InstallOptions) -> Result<InstallResult, SniffInstallationError> {
+        let chosen = self
+            .chosen()
+            .ok_or_else(|| SniffInstallationError::NoViableMethod {
                 pkg: self.program.clone(),
                 detail: format!(
                     "no runnable method (considered {} option(s))",
                     self.options.len()
                 ),
-            }
-        })?;
+            })?;
 
         if matches!(chosen.kind, InstallationMethod::RemoteBash(_))
             && !opts.approve_remote_bash
+            && !opts.dry_run
         {
             let url = chosen.kind.package_name().to_string();
             return Err(SniffInstallationError::RemoteBashConsentRequired {
@@ -128,8 +129,7 @@ pub(crate) fn derive_method_fact(
     host: &HostCapabilities,
 ) -> MethodFact {
     let os_supported = os_availability.is_empty() || os_availability.contains(&host.os_type);
-    let manager_installed = method_available(method, &host.os_pkg_mgrs, &host.lang_pkg_mgrs)
-        || (method.is_remote_bash() && host.has_bash);
+    let manager_installed = method_available(method, host);
     let requires_sudo = method_requires_sudo(method, host);
     let lang_manager_verified = is_lang_manager_verified(method, host);
 
@@ -160,8 +160,13 @@ pub(crate) fn derive_method_fact(
 
 /// Returns whether this method needs `sudo` on the current host.
 fn method_requires_sudo(method: &InstallationMethod, host: &HostCapabilities) -> bool {
-    let unix_sudo_method =
-        matches!(method, InstallationMethod::Apt(_) | InstallationMethod::Nala(_) | InstallationMethod::Dnf(_) | InstallationMethod::Pacman(_));
+    let unix_sudo_method = matches!(
+        method,
+        InstallationMethod::Apt(_)
+            | InstallationMethod::Nala(_)
+            | InstallationMethod::Dnf(_)
+            | InstallationMethod::Pacman(_)
+    );
     if unix_sudo_method {
         return true;
     }
@@ -178,21 +183,21 @@ fn method_requires_sudo(method: &InstallationMethod, host: &HostCapabilities) ->
 
 fn is_lang_manager_verified(method: &InstallationMethod, host: &HostCapabilities) -> bool {
     match method {
-        InstallationMethod::Npm(_) => {
-            host.verified_lang_pkg_mgrs.contains(&LanguagePackageManager::Npm)
-        }
-        InstallationMethod::Pnpm(_) => {
-            host.verified_lang_pkg_mgrs.contains(&LanguagePackageManager::Pnpm)
-        }
-        InstallationMethod::Yarn(_) => {
-            host.verified_lang_pkg_mgrs.contains(&LanguagePackageManager::Yarn)
-        }
-        InstallationMethod::Bun(_) => {
-            host.verified_lang_pkg_mgrs.contains(&LanguagePackageManager::Bun)
-        }
-        InstallationMethod::Cargo(_) => {
-            host.verified_lang_pkg_mgrs.contains(&LanguagePackageManager::Cargo)
-        }
+        InstallationMethod::Npm(_) => host
+            .verified_lang_pkg_mgrs
+            .contains(&LanguagePackageManager::Npm),
+        InstallationMethod::Pnpm(_) => host
+            .verified_lang_pkg_mgrs
+            .contains(&LanguagePackageManager::Pnpm),
+        InstallationMethod::Yarn(_) => host
+            .verified_lang_pkg_mgrs
+            .contains(&LanguagePackageManager::Yarn),
+        InstallationMethod::Bun(_) => host
+            .verified_lang_pkg_mgrs
+            .contains(&LanguagePackageManager::Bun),
+        InstallationMethod::Cargo(_) => host
+            .verified_lang_pkg_mgrs
+            .contains(&LanguagePackageManager::Cargo),
         _ => false,
     }
 }
@@ -244,13 +249,11 @@ fn bucket_for(fact: &MethodFact, host: &HostCapabilities) -> Bucket {
     match &fact.kind {
         InstallationMethod::Pnpm(_) if fact.lang_manager_verified => Bucket::VerifiedPnpm,
         InstallationMethod::Pnpm(_) => Bucket::Other,
-        InstallationMethod::Npm(_) => {
-            match host.npm_global_prefix_writable {
-                Some(false) if host.can_sudo => Bucket::SudoNpm,
-                Some(false) => Bucket::Other,
-                _ => Bucket::NpmNoSudo,
-            }
-        }
+        InstallationMethod::Npm(_) => match host.npm_global_prefix_writable {
+            Some(false) if host.can_sudo => Bucket::SudoNpm,
+            Some(false) => Bucket::Other,
+            _ => Bucket::NpmNoSudo,
+        },
         _ if fact.kind.is_os_package_manager() => Bucket::AltOsPm,
         InstallationMethod::RemoteBash(_) => Bucket::RemoteBash,
         InstallationMethod::Cargo(_) => Bucket::Cargo,
@@ -271,10 +274,7 @@ fn bucket_order() -> [Bucket; 7] {
 }
 
 /// Build an install plan for a program against the given host capabilities.
-pub fn build_install_plan<P: ProgramMetadata>(
-    program: &P,
-    host: &HostCapabilities,
-) -> InstallPlan {
+pub fn build_install_plan<P: ProgramMetadata>(program: &P, host: &HostCapabilities) -> InstallPlan {
     let info = program.info();
     let facts: Vec<MethodFact> = info
         .installation_methods
@@ -304,12 +304,14 @@ pub fn build_install_plan<P: ProgramMetadata>(
                     format!(
                         "chosen — {}{}",
                         bucket_description(bucket_for(fact, host)),
-                        if fact.requires_sudo { " (requires sudo)" } else { "" }
+                        if fact.requires_sudo {
+                            " (requires sudo)"
+                        } else {
+                            ""
+                        }
                     ),
                 )
-            } else if fact.eligible_without_priority
-                && bucket_for(fact, host) != Bucket::Other
-            {
+            } else if fact.eligible_without_priority && bucket_for(fact, host) != Bucket::Other {
                 // Eligible and in a real bucket, just outranked by a higher one.
                 (
                     InstallPlanReason::LowerPriorityAlternative,
@@ -388,9 +390,7 @@ fn explain_blocking_reason(fact: &MethodFact, reason: InstallPlanReason) -> Stri
             "{} is installed but has no globally-installed packages — not choosing it blindly",
             fact.kind.manager_name()
         ),
-        InstallPlanReason::Unknown => {
-            "no other bucket accepted this method".to_string()
-        }
+        InstallPlanReason::Unknown => "no other bucket accepted this method".to_string(),
         InstallPlanReason::Selected | InstallPlanReason::LowerPriorityAlternative => {
             unreachable!()
         }
@@ -444,7 +444,10 @@ mod fact_tests {
         let fact = derive_method_fact(&method, &[], &host);
         assert!(!fact.manager_installed);
         assert!(!fact.eligible_without_priority);
-        assert_eq!(fact.blocking_reason, Some(InstallPlanReason::ManagerNotInstalled));
+        assert_eq!(
+            fact.blocking_reason,
+            Some(InstallPlanReason::ManagerNotInstalled)
+        );
     }
 
     #[test]
@@ -553,9 +556,7 @@ mod execute_tests {
         HostCapabilities {
             os_type: OsType::MacOS,
             os_pkg_mgrs,
-            default_os_package_manager: Some(
-                crate::programs::enums::OsPackageManager::Brew,
-            ),
+            default_os_package_manager: Some(crate::programs::enums::OsPackageManager::Brew),
             has_bash: true,
             ..HostCapabilities::default()
         }
@@ -618,11 +619,14 @@ mod execute_tests {
                 reason: "remote bash installer".into(),
             }],
         };
-        // Even dry-run errors today because execute_install rejects RemoteBash
-        // at the build_install_command layer. The contract is: dry-run of a
-        // remote-bash plan is still rejected by the underlying executor.
-        let result = plan.execute(&InstallOptions::dry_run());
-        assert!(result.is_err());
+        // Dry-run renders the curl|bash command without execution or consent.
+        let result = plan.execute(&InstallOptions::dry_run()).unwrap();
+        assert!(!result.executed);
+        assert!(
+            result
+                .command
+                .contains("curl -sSfL 'https://sh.rustup.rs' | bash")
+        );
     }
 }
 
@@ -632,7 +636,9 @@ mod selection_tests {
     use crate::os::OsType;
     use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
     use crate::programs::host_capability::HostCapabilities;
-    use crate::programs::schema::{ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
+    use crate::programs::schema::{
+        ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy,
+    };
     use crate::programs::types::InstallationMethod;
 
     struct FakeProgram {
@@ -678,7 +684,12 @@ mod selection_tests {
     #[test]
     fn brew_wins_over_cargo_on_macos() {
         let host = host_macos_with_brew();
-        let plan = build_install_plan(&FakeProgram { info: &BREW_AND_CARGO }, &host);
+        let plan = build_install_plan(
+            &FakeProgram {
+                info: &BREW_AND_CARGO,
+            },
+            &host,
+        );
         assert!(plan.successful);
         let chosen = plan.chosen().expect("chosen");
         assert!(matches!(chosen.kind, InstallationMethod::Brew("bat")));
@@ -690,7 +701,10 @@ mod selection_tests {
             .find(|o| matches!(o.kind, InstallationMethod::Cargo(_)))
             .unwrap();
         assert!(!cargo_opt.choose);
-        assert_eq!(cargo_opt.reason_type, InstallPlanReason::LowerPriorityAlternative);
+        assert_eq!(
+            cargo_opt.reason_type,
+            InstallPlanReason::LowerPriorityAlternative
+        );
     }
 
     static LINUX_APT_ONLY: ProgramInfo = ProgramInfo {
@@ -718,7 +732,12 @@ mod selection_tests {
             can_sudo: false,
             ..HostCapabilities::default()
         };
-        let plan = build_install_plan(&FakeProgram { info: &LINUX_APT_ONLY }, &host);
+        let plan = build_install_plan(
+            &FakeProgram {
+                info: &LINUX_APT_ONLY,
+            },
+            &host,
+        );
         assert!(!plan.successful);
         let apt = &plan.options[0];
         assert!(!apt.choose);
@@ -735,7 +754,12 @@ mod selection_tests {
             can_sudo: true,
             ..HostCapabilities::default()
         };
-        let plan = build_install_plan(&FakeProgram { info: &LINUX_APT_ONLY }, &host);
+        let plan = build_install_plan(
+            &FakeProgram {
+                info: &LINUX_APT_ONLY,
+            },
+            &host,
+        );
         assert!(plan.successful);
         let apt = plan.chosen().unwrap();
         assert!(apt.requires_sudo);
@@ -768,8 +792,14 @@ mod selection_tests {
             npm_global_prefix_writable: Some(true),
             ..HostCapabilities::default()
         };
-        host.verified_lang_pkg_mgrs.insert(LanguagePackageManager::Pnpm);
-        let plan = build_install_plan(&FakeProgram { info: &PNPM_AND_NPM }, &host);
+        host.verified_lang_pkg_mgrs
+            .insert(LanguagePackageManager::Pnpm);
+        let plan = build_install_plan(
+            &FakeProgram {
+                info: &PNPM_AND_NPM,
+            },
+            &host,
+        );
         let chosen = plan.chosen().unwrap();
         assert!(matches!(chosen.kind, InstallationMethod::Pnpm(_)));
     }
@@ -783,7 +813,12 @@ mod selection_tests {
             npm_global_prefix_writable: Some(true),
             ..HostCapabilities::default()
         };
-        let plan = build_install_plan(&FakeProgram { info: &PNPM_AND_NPM }, &host);
+        let plan = build_install_plan(
+            &FakeProgram {
+                info: &PNPM_AND_NPM,
+            },
+            &host,
+        );
         let chosen = plan.chosen().unwrap();
         assert!(matches!(chosen.kind, InstallationMethod::Npm(_)));
 

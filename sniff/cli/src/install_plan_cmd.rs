@@ -419,4 +419,95 @@ mod tests {
         };
         assert!(!should_require_remote_bash_consent(&plan));
     }
+
+    fn plan_with_brew_chosen_and_cargo_alternative() -> InstallPlan {
+        InstallPlan {
+            program: "bat".into(),
+            website: "https://github.com/sharkdp/bat",
+            successful: true,
+            options: vec![
+                InstallPlanOption {
+                    kind: InstallationMethod::Brew("bat"),
+                    requires_sudo: false,
+                    choose: true,
+                    reason_type: InstallPlanReason::Selected,
+                    reason: "default OS package manager".into(),
+                },
+                InstallPlanOption {
+                    kind: InstallationMethod::Cargo("bat"),
+                    requires_sudo: false,
+                    choose: false,
+                    reason_type: InstallPlanReason::LowerPriorityAlternative,
+                    reason: "brew was chosen".into(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn apply_via_overrides_chosen_with_lower_priority_alternative() {
+        let mut plan = plan_with_brew_chosen_and_cargo_alternative();
+        apply_via(&mut plan, "cargo").expect("cargo should be a valid override");
+        let chosen = plan.chosen().expect("a chosen option");
+        assert!(matches!(chosen.kind, InstallationMethod::Cargo(_)));
+        assert_eq!(chosen.reason_type, InstallPlanReason::Selected);
+        assert!(plan.successful);
+        // Previously-chosen brew becomes a LowerPriorityAlternative.
+        let brew = plan
+            .options
+            .iter()
+            .find(|o| matches!(o.kind, InstallationMethod::Brew(_)))
+            .unwrap();
+        assert!(!brew.choose);
+        assert_eq!(
+            brew.reason_type,
+            InstallPlanReason::LowerPriorityAlternative
+        );
+    }
+
+    #[test]
+    fn apply_via_is_noop_when_manager_already_chosen() {
+        let mut plan = plan_with_brew_chosen_and_cargo_alternative();
+        apply_via(&mut plan, "brew").expect("brew is already selected and should succeed");
+        let chosen = plan.chosen().expect("a chosen option");
+        assert!(matches!(chosen.kind, InstallationMethod::Brew(_)));
+    }
+
+    #[test]
+    fn apply_via_unknown_manager_lists_valid_managers() {
+        let mut plan = plan_with_brew_chosen_and_cargo_alternative();
+        let err = apply_via(&mut plan, "definitely-fake").unwrap_err();
+        assert!(err.to_lowercase().contains("unknown manager"));
+        assert!(err.contains("brew"));
+        assert!(err.contains("cargo"));
+    }
+
+    #[test]
+    fn apply_via_rejects_ineligible_method() {
+        // Apt is in the plan but blocked by ManagerNotInstalled — --via apt
+        // cannot silently override that.
+        let mut plan = InstallPlan {
+            program: "vim".into(),
+            website: "https://www.vim.org",
+            successful: true,
+            options: vec![
+                InstallPlanOption {
+                    kind: InstallationMethod::Brew("vim"),
+                    requires_sudo: false,
+                    choose: true,
+                    reason_type: InstallPlanReason::Selected,
+                    reason: "default OS package manager".into(),
+                },
+                InstallPlanOption {
+                    kind: InstallationMethod::Apt("vim"),
+                    requires_sudo: true,
+                    choose: false,
+                    reason_type: InstallPlanReason::ManagerNotInstalled,
+                    reason: "apt is not installed on this host".into(),
+                },
+            ],
+        };
+        let err = apply_via(&mut plan, "apt").unwrap_err();
+        assert!(err.contains("cannot override an unavailable method"));
+    }
 }

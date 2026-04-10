@@ -66,6 +66,45 @@ fn install_via_unknown_manager_errors_with_valid_list() {
         );
 }
 
+/// Verify that `--via <manager>` is plumbed through `install-plan --json`
+/// end-to-end: if `--via` points at a valid, eligible method, that method is
+/// the chosen one in the JSON output. If the host does not have that manager,
+/// the command fails with a clear error instead of crashing. Either branch
+/// exercises the `--via` override path.
+#[test]
+fn install_plan_via_brew_selects_brew_or_fails_cleanly() {
+    let output = cargo_bin_cmd!("sniff")
+        .args(["editors", "install-plan", "vim", "--via", "brew", "--json"])
+        .output()
+        .expect("sniff binary should run");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    if output.status.success() {
+        let json: Value =
+            serde_json::from_str(&stdout).expect("install-plan --json should produce valid JSON");
+        let chosen = json["options"]
+            .as_array()
+            .expect("options array")
+            .iter()
+            .find(|o| o["choose"] == Value::Bool(true))
+            .expect("a chosen option");
+        assert_eq!(
+            chosen["kind"]["manager"].as_str(),
+            Some("brew"),
+            "--via brew should force the brew method when eligible"
+        );
+    } else {
+        // Host has no brew (or brew is blocked): acceptable failure mode is a
+        // descriptive error, not a panic.
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            stderr.contains("cannot override an unavailable method")
+                || stderr.contains("Unknown manager"),
+            "unexpected stderr when brew is unavailable: {stderr}"
+        );
+    }
+}
+
 /// Helper: point HOME at a tempdir so HostCapabilities doesn't touch the real
 /// cache file. Returns the tempdir (must stay alive) and a ready Command.
 fn cmd_with_tmp_home() -> (TempDir, assert_cmd::Command) {

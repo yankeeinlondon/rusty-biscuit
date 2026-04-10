@@ -14,9 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::os::{LinuxFamily, OsType, detect_linux_distro, detect_os_type};
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
-use crate::programs::pkg_mngrs::{
-    InstalledLanguagePackageManagers, InstalledOsPackageManagers,
-};
+use crate::programs::pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -136,9 +134,7 @@ fn parse_npm_global_list(stdout: &str) -> bool {
 
 fn parse_cargo_install_list(stdout: &str) -> bool {
     // `cargo install --list` prints one crate header per line ending in ':'.
-    stdout
-        .lines()
-        .any(|line| line.trim_end().ends_with(':'))
+    stdout.lines().any(|line| line.trim_end().ends_with(':'))
 }
 
 fn probe_npm_verified() -> bool {
@@ -179,25 +175,30 @@ fn probe_cargo_verified() -> bool {
 fn detect_verified_lang_pkg_mgrs(
     lang_pkg_mgrs: &InstalledLanguagePackageManagers,
 ) -> HashSet<LanguagePackageManager> {
-    let mut verified = HashSet::new();
+    use rayon::prelude::*;
 
-    if lang_pkg_mgrs.is_installed(LanguagePackageManager::Npm) && probe_npm_verified() {
-        verified.insert(LanguagePackageManager::Npm);
-    }
-    if lang_pkg_mgrs.is_installed(LanguagePackageManager::Pnpm) && probe_pnpm_verified() {
-        verified.insert(LanguagePackageManager::Pnpm);
-    }
-    if lang_pkg_mgrs.is_installed(LanguagePackageManager::Yarn) && probe_yarn_verified() {
-        verified.insert(LanguagePackageManager::Yarn);
-    }
-    if lang_pkg_mgrs.is_installed(LanguagePackageManager::Bun) && probe_bun_verified() {
-        verified.insert(LanguagePackageManager::Bun);
-    }
-    if lang_pkg_mgrs.is_installed(LanguagePackageManager::Cargo) && probe_cargo_verified() {
-        verified.insert(LanguagePackageManager::Cargo);
-    }
+    type ProbeFn = fn() -> bool;
+    let candidates: [(LanguagePackageManager, ProbeFn); 5] = [
+        (LanguagePackageManager::Npm, probe_npm_verified),
+        (LanguagePackageManager::Pnpm, probe_pnpm_verified),
+        (LanguagePackageManager::Yarn, probe_yarn_verified),
+        (LanguagePackageManager::Bun, probe_bun_verified),
+        (LanguagePackageManager::Cargo, probe_cargo_verified),
+    ];
 
-    verified
+    // Each probe has its own timeout and spends most of its time waiting on
+    // a child process, so parallelism here collapses worst-case latency from
+    // `5 × PROBE_TIMEOUT` to roughly `1 × PROBE_TIMEOUT`.
+    candidates
+        .par_iter()
+        .filter_map(|(pm, probe)| {
+            if lang_pkg_mgrs.is_installed(*pm) && probe() {
+                Some(*pm)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn detect_npm_global_prefix_writable() -> Option<bool> {
@@ -271,10 +272,11 @@ pub fn default_cache_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".sniff-programs.json"))
 }
 
-/// Loads capabilities from a cache file if the cache is fresh and the schema
-/// version matches.
+/// Loads capabilities from a cache file if the cache is fresh, the schema
+/// version matches, and the recorded hostname matches the current host.
 ///
-/// Returns `None` on cache miss, stale entry, corrupt JSON, or schema drift.
+/// Returns `None` on cache miss, stale entry, corrupt JSON, schema drift, or
+/// hostname mismatch (e.g. a synced home directory moved between machines).
 /// This function never panics.
 pub fn load_host_capabilities_from(path: &Path) -> Option<HostCapabilities> {
     let bytes = std::fs::read(path).ok()?;
@@ -283,6 +285,13 @@ pub fn load_host_capabilities_from(path: &Path) -> Option<HostCapabilities> {
         return None;
     }
     if envelope.expires_at < Utc::now() {
+        return None;
+    }
+    // A synced home directory (e.g. iCloud/Dropbox) may carry the cache file
+    // across machines. Trusting it blindly leads to plans built against the
+    // wrong package managers, so we invalidate on any mismatch.
+    let current_hostname = sysinfo::System::host_name().unwrap_or_default();
+    if envelope.hostname != current_hostname {
         return None;
     }
     Some(envelope.capabilities)
@@ -298,10 +307,7 @@ pub fn load_host_capabilities_from(path: &Path) -> Option<HostCapabilities> {
 ///
 /// Returns an `io::Error` if the parent directory cannot be created, the temp
 /// file cannot be written, or the rename fails.
-pub fn save_host_capabilities_to(
-    path: &Path,
-    host: &HostCapabilities,
-) -> std::io::Result<()> {
+pub fn save_host_capabilities_to(path: &Path, host: &HostCapabilities) -> std::io::Result<()> {
     let envelope = HostCapabilityCacheFile {
         schema_version: CACHE_SCHEMA_VERSION,
         hostname: sysinfo::System::host_name().unwrap_or_default(),
@@ -318,8 +324,10 @@ pub fn save_host_capabilities_to(
     let tmp = path.with_extension("json.tmp");
     {
         let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(&serde_json::to_vec_pretty(&envelope)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?)?;
+        f.write_all(
+            &serde_json::to_vec_pretty(&envelope)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+        )?;
         f.sync_all()?;
     }
     std::fs::rename(&tmp, path)?;
@@ -637,5 +645,65 @@ mod tests {
         let after = Utc::now();
         assert!(host.detected_at >= before);
         assert!(host.detected_at <= after);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn write_envelope(path: &Path, envelope: &HostCapabilityCacheFile) {
+        let bytes = serde_json::to_vec(envelope).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn sample_envelope(hostname: &str) -> HostCapabilityCacheFile {
+        let host = HostCapabilities::default();
+        HostCapabilityCacheFile {
+            schema_version: CACHE_SCHEMA_VERSION,
+            hostname: hostname.to_string(),
+            os: host.os_type,
+            is_wsl: host.is_wsl,
+            expires_at: host.detected_at + CACHE_TTL,
+            capabilities: host,
+        }
+    }
+
+    #[test]
+    fn load_returns_capabilities_when_hostname_matches() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cache.json");
+        let current = sysinfo::System::host_name().unwrap_or_default();
+        write_envelope(&path, &sample_envelope(&current));
+        let loaded = load_host_capabilities_from(&path);
+        assert!(
+            loaded.is_some(),
+            "expected cache hit with matching hostname"
+        );
+    }
+
+    #[test]
+    fn load_returns_none_when_hostname_differs() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cache.json");
+        // Use a hostname that the current machine will never match.
+        let envelope = sample_envelope("this-hostname-should-never-match-ever-xyz123");
+        write_envelope(&path, &envelope);
+        let loaded = load_host_capabilities_from(&path);
+        assert!(loaded.is_none(), "expected cache miss on hostname mismatch");
+    }
+
+    #[test]
+    fn save_then_load_round_trips() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cache.json");
+        let host = HostCapabilities::default();
+        save_host_capabilities_to(&path, &host).unwrap();
+        let loaded = load_host_capabilities_from(&path);
+        assert!(
+            loaded.is_some(),
+            "expected cache written by save_host_capabilities_to to load back"
+        );
     }
 }
