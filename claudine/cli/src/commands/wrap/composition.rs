@@ -645,15 +645,7 @@ pub(crate) fn execute_composition_request_inner(
             crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
-        if !quiet {
-            crate::output::log_system_prompt(
-                &effective_sp,
-                detail_requested,
-                silent,
-                quiet,
-                &term,
-            );
-        }
+        crate::output::log_system_prompt(&effective_sp, detail_requested, silent, quiet, &term);
 
         if effective_non_interactive {
             crate::output::log_compose_prompt(&request.prepared.prompt, detail_requested, &term);
