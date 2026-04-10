@@ -167,7 +167,11 @@ mod tests {
     #[test]
     fn build_modal_hotkey_line_formats_pairs() {
         let line = build_modal_hotkey_line(&[("ENTER", "Select"), ("ESC", "Cancel")]);
-        let text = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+        let text = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
 
         assert!(text.contains("ENTER: Select"));
         assert!(text.contains("ESC: Cancel"));

@@ -878,7 +878,9 @@ exit 1
 fn wrapper_quiet_suppresses_summary() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
+    let system_prompt = workspace.path().join("system-prompt.md");
     fs::create_dir_all(&path_dir).unwrap();
+    fs::write(&system_prompt, "Quiet mode prompt").unwrap();
 
     write_executable(
         &path_dir.join("codex"),
@@ -891,18 +893,30 @@ exit 0
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
-        .args(["codex", "--quiet", "--", "--version"])
+        .args([
+            "codex",
+            "--quiet",
+            "--append-system-prompt",
+            system_prompt.to_str().unwrap(),
+            "--",
+            "--version",
+        ])
         .assert()
         .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let stderr_plain = strip_ansi(&stderr);
     assert!(
-        stderr.contains("Claudine"),
+        stderr_plain.contains("Claudine"),
         "Quiet mode should show header but stderr was: {stderr}"
     );
     assert!(
-        !stderr.contains("Environment Variables"),
+        !stderr_plain.contains("Environment Variables"),
         "Quiet mode should suppress env details but stderr was: {stderr}"
+    );
+    assert!(
+        stderr_plain.contains("System Prompt(appended)"),
+        "Quiet mode should still show the system prompt when set but stderr was: {stderr}"
     );
 
     // --silent suppresses everything

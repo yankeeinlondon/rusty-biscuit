@@ -45,7 +45,10 @@ fn providers_command_routes_to_stdout() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stdout.contains("Provider"));
     assert!(stdout.contains("Claude"));
-    assert!(stderr.trim().is_empty(), "expected no stderr, got: {stderr}");
+    assert!(
+        stderr.trim().is_empty(),
+        "expected no stderr, got: {stderr}"
+    );
 }
 
 #[test]
@@ -162,7 +165,10 @@ fn completions_write_to_stdout_for_supported_shells() {
             stdout.contains(marker),
             "expected {shell} completion output to contain {marker:?}"
         );
-        assert!(stderr.trim().is_empty(), "expected no stderr, got: {stderr}");
+        assert!(
+            stderr.trim().is_empty(),
+            "expected no stderr, got: {stderr}"
+        );
     }
 }
 
@@ -204,15 +210,18 @@ fn no_color_and_plain_suppress_ansi_output() {
 #[test]
 fn force_color_enables_ansi_in_non_tty_context() {
     let output = cargo_bin_cmd!("claudine")
-            .env("FORCE_COLOR", "1")
-            .args(["sequence", "/tmp/definitely-missing-sequence.md"])
-            .assert()
-            .failure()
-            .get_output()
-            .clone();
+        .env("FORCE_COLOR", "1")
+        .args(["sequence", "/tmp/definitely-missing-sequence.md"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
 
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains('\u{1b}'), "expected ANSI output, got: {stderr}");
+    assert!(
+        stderr.contains('\u{1b}'),
+        "expected ANSI output, got: {stderr}"
+    );
     assert!(strip_ansi(&stderr).contains("Error:"));
 }
 
@@ -228,6 +237,9 @@ fn errors_stay_on_stderr_for_command_failures() {
 
     let stdout = String::from_utf8(output.stdout).unwrap();
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stdout.trim().is_empty(), "expected no stdout, got: {stdout}");
+    assert!(
+        stdout.trim().is_empty(),
+        "expected no stdout, got: {stdout}"
+    );
     assert!(strip_ansi(&stderr).contains("Error:"));
 }
