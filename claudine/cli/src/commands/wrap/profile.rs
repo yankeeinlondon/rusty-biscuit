@@ -1298,23 +1298,9 @@ impl WrapperProfile for QwenWrapper {
         Ok(())
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
+    fn apply_non_interactive_flags(&self, args: &mut [String]) -> Result<()> {
         if has_flag(args, "-i") || has_flag(args, "--prompt-interactive") {
             bail!("--non-interactive conflicts with interactive prompt mode for qwen");
-        }
-        if has_flag(args, "-p") || has_flag(args, "--prompt") {
-            return Ok(());
-        }
-        // Convert a bare positional prompt to --prompt so Qwen CLI
-        // runs in explicit headless mode even when stdin is a TTY.
-        //
-        // NOTE: prompt validation is deferred to validate_final_args() because
-        // the prompt may not be in args yet (e.g. composition pipelines
-        // compute delivery after non-interactive setup).
-        if let Some(index) = find_first_positional(args) {
-            let prompt = args.remove(index);
-            args.push("--prompt".to_string());
-            args.push(prompt);
         }
         Ok(())
     }
@@ -2260,12 +2246,19 @@ mod tests {
     }
 
     #[test]
-    fn qwen_non_interactive_rejects_prompt_interactive() {
+    fn qwen_apply_non_interactive_flags_rejects_prompt_interactive() {
         let p = profile(Provider::QwenCode);
         let mut args = vec!["-i".to_string(), "task".to_string()];
+        let err = p.apply_non_interactive_flags(&mut args).unwrap_err();
+        assert!(err.to_string().contains("conflicts"));
+    }
 
-        let error = p.apply_non_interactive(&mut args).unwrap_err();
-        assert!(error.to_string().contains("conflicts"));
+    #[test]
+    fn qwen_apply_non_interactive_flags_allows_empty_args_for_composition() {
+        let p = profile(Provider::QwenCode);
+        let mut args: Vec<String> = Vec::new();
+        p.apply_non_interactive_flags(&mut args).unwrap();
+        assert!(args.is_empty());
     }
 
     /// Regression test for the composition pipeline path: non-interactive
@@ -2285,49 +2278,6 @@ mod tests {
         let mut args = vec!["-i".to_string()];
         let err = p.apply_non_interactive_flags(&mut args).unwrap_err();
         assert!(err.to_string().contains("conflicts"));
-    }
-
-    #[test]
-    fn qwen_non_interactive_converts_positional_to_prompt_flag() {
-        let p = profile(Provider::QwenCode);
-        let mut args = vec!["hi".to_string()];
-
-        p.apply_non_interactive(&mut args).unwrap();
-
-        assert_eq!(args, vec!["--prompt", "hi"]);
-    }
-
-    /// Regression test for the composition pipeline path: `apply_non_interactive`
-    /// must NOT bail when args are empty, because composition pipelines deliver
-    /// the prompt after non-interactive setup via `prompt_delivery`.
-    #[test]
-    fn qwen_non_interactive_allows_empty_args_for_composition() {
-        let p = profile(Provider::QwenCode);
-        let mut args: Vec<String> = Vec::new();
-
-        p.apply_non_interactive(&mut args).unwrap();
-        assert!(args.is_empty());
-    }
-
-    #[test]
-    fn qwen_non_interactive_rejects_missing_prompt_at_final_validation() {
-        let p = profile(Provider::QwenCode);
-        let mut args: Vec<String> = Vec::new();
-
-        p.apply_non_interactive(&mut args).unwrap();
-        let err = p.validate_final_args(&args, true, false).unwrap_err();
-        assert!(err.to_string().contains("requires a prompt"));
-    }
-
-    #[test]
-    fn qwen_final_validation_accepts_prompt_delivered_later() {
-        let p = profile(Provider::QwenCode);
-        let mut args: Vec<String> = Vec::new();
-        p.apply_non_interactive(&mut args).unwrap();
-        p.prompt_delivery(&args, "composed body", true)
-            .unwrap()
-            .apply_to(&mut args);
-        p.validate_final_args(&args, true, false).unwrap();
     }
 
     #[test]
