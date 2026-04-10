@@ -2,17 +2,15 @@
 
 ## High Level Flow
 
-
-
 | Inline Pre (serial)                                       | Transclusion (concurrent)                                        | Inline Post (serial)                                            | 
 | -------------                                             | -------------                                                    | ---------------                                                 | 
-| [1. Frontmatter Interpolation](./inline/fm-interpolation.md)    | [Block Transclusion 🏁](./transclusion/block-transclusion.md)     | [1. Cleaning 🏁](./inline/cleaning.md)                             |
-| [2. Text Replacement 🏁](./inline/text-replacement.md)    | [Frontmatter Transclusion 🏁](./transclusion/fm-transclusion.md)  | [2. Normalization 🏁](./inline/normalization-and-releveling.md)    |
-| [3. Page Blocks 🏁](./inline/page-blocks.md)              | [Code Block Transclusion 🏁](./transclusion/code-transclusion.md) |                                                                 |
-| [4. Interpolation 🏁](./inline/interpolation.md)          | [TOC Linking 🏁](./inline/toc-linking.md)                         |                                                                 |
-| [5. Shell Expansion 🏁](./inline/shell-expansion.md)                                                            | [AI Prompt Expansion](./transclusion/prompt-expansion.md)         |                                                                 |
-|                                                           | [AI Summarization](./transclusion/summarization.md)               |                                                                 |
-|                                                           | [AI Consolidation](./transclusion/consolidation.md)               |                                                                 |
+| [1. Frontmatter Interpolation 🏁](./inline/fm-interpolation.md)  | [Block Transclusion 🏁](./transclusion/block-transclusion.md) | [1. Cleaning 🏁](./inline/cleaning.md)                             |
+| [2. Frontmatter Shell Expansion 🏁](./inline/fm-shell-expansion.md)| [Frontmatter Transclusion 🏁](./transclusion/fm-transclusion.md)  | [2. Normalization 🏁](./inline/normalization-and-releveling.md)    |
+| [3. Text Replacement 🏁](./inline/text-replacement.md)          | [Code Block Transclusion 🏁](./transclusion/code-transclusion.md) |                                                                 |
+| [4. Page Blocks 🏁](./inline/page-blocks.md)                    | [TOC Linking 🏁](./inline/toc-linking.md)                         |                                                                 |
+| [5. Interpolation 🏁](./inline/interpolation.md)                | [AI Prompt Expansion](./transclusion/prompt-expansion.md)         |                                                                 |
+| [6. Shell Expansion 🏁](./inline/shell-expansion.md)       | [AI Summarization](./transclusion/summarization.md)               |                                                                 |
+|                                                                  | [AI Consolidation](./transclusion/consolidation.md)               |                                                                 |
 
 > **Note:** items marked with `🏁` are implemented
 
@@ -41,6 +39,7 @@ into the most valid form we can deterministically reach.
 #### Pre Ops
 
 - [Frontmatter Interpolation](./inline/fm-interpolation.md) - resolves `{{ variable }}` expressions inside frontmatter values using non-templated (seed) values, `ctx.*`, and `env.*` as inputs. Runs before the effective state is built so downstream stages see resolved values.
+- [Frontmatter Shell Expansion](./inline/fm-shell-expansion.md) - executes `$(cmd)` expressions in top-level frontmatter string values, replacing them with trimmed stdout. Runs after interpolation and before the effective state is built, so later stages see the resolved values. Shares approval flow with body `::shell` directives, validates malformed expressions as hard errors, and executes independent top-level commands concurrently.
 - [Text Replacement](./inline/text-replacement.md) - when `replace` property in frontmatter is a key/value dictionary we will replace all instances of the _keys_ with the _values_ in the body of the document
 - [Page Blocks](./inline/page-blocks.md) - allow for blocks in the page to be defined, often with _conditional_ logic to determine whether the block should be rendered or removed
 - [Interpolation](./inline/interpolation.md) - looks for handlebars template markers in the page's body and replaces the template markers with data from frontmatter, ENV variables, or [context variables](./topics/context-variables.md).

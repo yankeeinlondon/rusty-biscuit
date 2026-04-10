@@ -142,13 +142,11 @@ pub(crate) fn method_available(
     let binary = method.manager_binary();
 
     if method.is_os_package_manager() {
-        OsPackageManager::iter().any(|mgr| {
-            mgr.binary_name() == binary && os_pkg_mgrs.is_installed(mgr)
-        })
+        OsPackageManager::iter()
+            .any(|mgr| mgr.binary_name() == binary && os_pkg_mgrs.is_installed(mgr))
     } else {
-        LanguagePackageManager::iter().any(|mgr| {
-            mgr.binary_name() == binary && lang_pkg_mgrs.is_installed(mgr)
-        })
+        LanguagePackageManager::iter()
+            .any(|mgr| mgr.binary_name() == binary && lang_pkg_mgrs.is_installed(mgr))
     }
 }
 

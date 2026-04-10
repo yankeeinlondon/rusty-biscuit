@@ -9,8 +9,8 @@
 //! backends are automatically selected via `cfg(target_os)`:
 //!
 //! - macOS: CoreAudio virtual master volume
-//! - Windows: WASAPI per-session volume (with endpoint fallback)
-//! - Linux: PulseAudio/PipeWire sink inputs (with ALSA fallback)
+//! - Windows: WASAPI per-session volume
+//! - Linux: PulseAudio/PipeWire per-sink-input ducking (noop fallback)
 //!
 //! ## Example
 //!
@@ -43,6 +43,9 @@ mod macos;
 #[cfg(all(target_os = "macos", feature = "audio-ducking-macos"))]
 mod media_keys;
 
+#[cfg(all(target_os = "windows", feature = "audio-ducking-windows"))]
+mod windows;
+
 #[cfg(all(target_os = "linux", feature = "audio-ducking-linux"))]
 mod linux;
 
@@ -59,6 +62,9 @@ pub use macos::MacOsBackend;
 
 #[cfg(all(target_os = "macos", feature = "audio-ducking-macos"))]
 pub use media_keys::MediaKeysBackend;
+
+#[cfg(all(target_os = "windows", feature = "audio-ducking-windows"))]
+pub use windows::WindowsBackend;
 
 #[cfg(all(target_os = "linux", feature = "audio-ducking-linux"))]
 pub use linux::{AlsaBackend, LinuxBackend};

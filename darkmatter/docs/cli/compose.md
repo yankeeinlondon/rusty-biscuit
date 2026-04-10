@@ -26,6 +26,13 @@ md compose -
 md compose doc.md --state '{"name":"Alice","env":"prod"}'
 md compose doc.md --state '{name: "Alice", env: "prod"}'
 
+# Override values using --set
+md compose doc.md --set '{"name":"Bob"}'
+
+# Override values using shorthand setters
+md compose doc.md name=Bob iteration=1
+md compose - name=Alice draft=false
+
 # Include frontmatter in output
 md compose doc.md --frontmatter
 md compose doc.md --fm
@@ -38,9 +45,27 @@ md compose doc.md --output json
 md compose doc.md --show
 ```
 
+### Shorthand Setter Syntax
+
+Positional arguments matching `key=value` are treated as override setters, equivalent to adding the key-value pair to `--set`. This provides a more ergonomic syntax for common overrides:
+
+```bash
+md compose doc.md iteration=1 draft=false name=Alice
+```
+
+**Value parsing**: Values are parsed as JSON5 with a string fallback. This means:
+- Numbers (`iteration=1`) and booleans (`draft=false`) are parsed as their native types
+- Objects and arrays can use JSON5 syntax: `meta={author:"Alice"}`
+- Unquoted strings are treated as literal strings: `name=Alice`
+- Empty values (`empty=`) resolve to an empty string
+
+**Key grammar**: Keys must match `[A-Za-z_][A-Za-z0-9_-]*`. Tokens with `/`, `:`, or other path-like characters in the key portion are treated as input paths rather than setters. This means `./foo=bar.md` is correctly classified as a file path.
+
+**Limitation**: Shorthand setters only set top-level keys. For nested paths, use `--set` with dot-notation or JSON objects.
+
 ### Arguments
 
-- `[INPUT]`: Markdown file path (supports `@` file references). Use `-` for stdin. If omitted, reads stdin when piped; otherwise errors.
+- `[ARGS]`: Positional arguments — an optional input file path followed by zero or more `key=value` setters. Use `-` for stdin. If no path is provided, reads stdin when piped; otherwise errors.
 
 ### Options
 
@@ -84,18 +109,21 @@ Compose warnings (context merge collisions, partial runtime capture failures, et
 - For markdown/auto: prints composed content and opens markdown artifact.
 - For html/json: opens artifact instead of printing to stdout.
 
-### State Merge Behavior
+### Precedence
 
-The `--state` flag provides **default values** for the document's frontmatter:
+Override values are applied in this order (highest priority last):
 
-- Null or missing frontmatter keys are filled in from `--state`.
-- Existing non-null frontmatter values are preserved (document wins).
-- Accepts both JSON and JSON5 (unquoted keys, trailing commas, comments).
+1. **Document frontmatter** — base values from the document itself
+2. **`--state`** — fills null/missing keys without overriding existing values
+3. **`--set`** — unconditional overwrite of matching keys
+4. **Shorthand `key=value`** — unconditional overwrite, highest CLI priority
+
+Shorthand setters are merged into the same `--set` override map. On key collision, the shorthand value wins.
 
 ```bash
-# Given frontmatter: { stage: "plan", feature: null }
-md compose doc.md --state '{feature: "auth", stage: "build"}'
-# Result: stage stays "plan" (existing), feature becomes "auth" (was null)
+# --state provides defaults, --set overrides, shorthand overrides both
+md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
+# Result: name is "Charlie"
 ```
 
 ### Transform Context

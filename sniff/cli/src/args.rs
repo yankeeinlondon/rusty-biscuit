@@ -40,8 +40,14 @@ pub enum RepoAction {
     Packages {
         filter: Vec<String>,
     },
-    Package,
-    PackageArea,
+    Package {
+        no_error: bool,
+        on_error: Option<String>,
+    },
+    PackageArea {
+        no_error: bool,
+        on_error: Option<String>,
+    },
     DirtyPackages {
         filter: Vec<String>,
     },
@@ -70,6 +76,28 @@ pub enum RepoAction {
     UnstagedSourceCode(FileListArgs),
     DirtyFiles(FileListArgs),
     HasMergeConflict,
+    RecentCommits {
+        period: Option<String>,
+        actions: Vec<RecentCommitActionArg>,
+        package: Option<String>,
+        package_area: Option<String>,
+        no_error: bool,
+        on_error: Option<String>,
+    },
+    SourceCodeChanges {
+        period: Option<String>,
+        package: Option<String>,
+        package_area: Option<String>,
+        no_error: bool,
+        on_error: Option<String>,
+    },
+    DocumentationChanges {
+        period: Option<String>,
+        package: Option<String>,
+        package_area: Option<String>,
+        no_error: bool,
+        on_error: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -206,8 +234,10 @@ macro_rules! define_program_action {
 
             <$program_enum>::iter()
                 .flat_map(|p| {
-                    let mut candidates = vec![CompletionCandidate::new(p.binary_name())
-                        .help(Some(p.description().into()))];
+                    let mut candidates = vec![
+                        CompletionCandidate::new(p.binary_name())
+                            .help(Some(p.description().into())),
+                    ];
                     let snake = p.to_string();
                     if snake != p.binary_name() {
                         candidates.push(
@@ -568,9 +598,25 @@ pub enum RepoSubcommand {
         filter: Vec<String>,
     },
     /// Output the package name for the current directory
-    Package,
+    Package {
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
     /// Output the package area for the current directory
-    PackageArea,
+    PackageArea {
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
     /// Output only package names that have uncommitted changes
     DirtyPackages {
         /// Filter packages by name (or @area); prefix with ! to exclude
@@ -618,6 +664,63 @@ pub enum RepoSubcommand {
     /// Exit 0 if merge conflicts are detected, exit 1 otherwise
     #[command(name = "has-merge-conflict")]
     HasMergeConflict,
+    /// Show recent commits for a period
+    #[command(name = "recent-commits")]
+    RecentCommits {
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        period: Option<String>,
+        /// Filter to conventional commit actions; repeat to OR multiple actions together
+        #[arg(long = "action", value_enum, value_name = "ACTION")]
+        actions: Vec<RecentCommitActionArg>,
+        /// Scope to a specific package
+        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
+    /// Show source code changes for a period
+    #[command(name = "source-code-changes")]
+    SourceCodeChanges {
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        period: Option<String>,
+        /// Scope to a specific package
+        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
+    /// Show documentation changes for a period
+    #[command(name = "documentation-changes")]
+    DocumentationChanges {
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        period: Option<String>,
+        /// Scope to a specific package
+        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
 }
 
 impl Commands {
@@ -869,8 +972,16 @@ impl Commands {
                         sub_filter.clone()
                     },
                 },
-                Some(RepoSubcommand::Package) => RepoAction::Package,
-                Some(RepoSubcommand::PackageArea) => RepoAction::PackageArea,
+                Some(RepoSubcommand::Package { no_error, on_error }) => RepoAction::Package {
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
+                Some(RepoSubcommand::PackageArea { no_error, on_error }) => {
+                    RepoAction::PackageArea {
+                        no_error: *no_error,
+                        on_error: on_error.clone(),
+                    }
+                }
                 Some(RepoSubcommand::DirtyPackages { filter: sub_filter }) => {
                     RepoAction::DirtyPackages {
                         filter: if sub_filter.is_empty() {
@@ -945,6 +1056,47 @@ impl Commands {
                     RepoAction::UnstagedSourceCode(args.clone())
                 }
                 Some(RepoSubcommand::DirtyFiles(args)) => RepoAction::DirtyFiles(args.clone()),
+                Some(RepoSubcommand::RecentCommits {
+                    period,
+                    actions,
+                    package,
+                    package_area,
+                    no_error,
+                    on_error,
+                }) => RepoAction::RecentCommits {
+                    period: period.clone(),
+                    actions: actions.clone(),
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
+                Some(RepoSubcommand::SourceCodeChanges {
+                    period,
+                    package,
+                    package_area,
+                    no_error,
+                    on_error,
+                }) => RepoAction::SourceCodeChanges {
+                    period: period.clone(),
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
+                Some(RepoSubcommand::DocumentationChanges {
+                    period,
+                    package,
+                    package_area,
+                    no_error,
+                    on_error,
+                }) => RepoAction::DocumentationChanges {
+                    period: period.clone(),
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
             }),
             _ => None,
         }
@@ -1022,6 +1174,30 @@ pub enum ServiceStateArg {
     Stopped,
 }
 
+/// Conventional commit action filter for `repo recent-commits`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum RecentCommitActionArg {
+    Feat,
+    Chore,
+    Refactor,
+    Test,
+    Style,
+    Fix,
+}
+
+impl RecentCommitActionArg {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Feat => "feat",
+            Self::Chore => "chore",
+            Self::Refactor => "refactor",
+            Self::Test => "test",
+            Self::Style => "style",
+            Self::Fix => "fix",
+        }
+    }
+}
+
 pub const HELP_TEMPLATE: &str = "\
 {name} {version}
 {about}
@@ -1091,6 +1267,12 @@ Git:
   sniff repo staged-source-code       List staged source code files
   sniff repo dirty-files              List all dirty files
   sniff repo remote origin            Inspect the 'origin' remote
+
+Recent Commits:
+  sniff repo recent-commits           Show commits from last 3 days
+  sniff repo recent-commits 1w        Show commits from last week
+  sniff repo source-code-changes 1w   Source code changes in last week
+  sniff repo documentation-changes 1w Documentation changes in last week
 
 Packages:
   sniff repo packages                 List all package names
@@ -1278,7 +1460,7 @@ mod tests {
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::Package),
+                    repo_subcommand: Some(RepoSubcommand::Package { .. }),
                     ..
                 })
             ));
@@ -1287,7 +1469,7 @@ mod tests {
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::PackageArea),
+                    repo_subcommand: Some(RepoSubcommand::PackageArea { .. }),
                     ..
                 })
             ));
@@ -1344,6 +1526,27 @@ mod tests {
                     repo_subcommand: Some(RepoSubcommand::PackageAreaHasSourceCodeChanges),
                     ..
                 })
+            ));
+        }
+
+        #[test]
+        fn repo_recent_commits_actions_parse() {
+            let cli = parse_args(&[
+                "repo",
+                "recent-commits",
+                "--action",
+                "feat",
+                "--action",
+                "fix",
+            ])
+            .unwrap();
+
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::RecentCommits { actions, .. }),
+                    ..
+                }) if actions == vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix]
             ));
         }
 
@@ -1546,6 +1749,31 @@ mod tests {
                 assert_eq!(filter, vec!["top-level".to_string()]);
             } else {
                 panic!("Expected Deps action");
+            }
+
+            let cmd = Commands::Repo {
+                latest_versions: false,
+                filter: vec![],
+                repo_subcommand: Some(RepoSubcommand::RecentCommits {
+                    period: Some("1w".to_string()),
+                    actions: vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix],
+                    package: None,
+                    package_area: None,
+                    no_error: false,
+                    on_error: None,
+                }),
+            };
+            if let Some(RepoAction::RecentCommits {
+                period, actions, ..
+            }) = cmd.to_repo_action()
+            {
+                assert_eq!(period.as_deref(), Some("1w"));
+                assert_eq!(
+                    actions,
+                    vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix]
+                );
+            } else {
+                panic!("Expected RecentCommits action");
             }
         }
 

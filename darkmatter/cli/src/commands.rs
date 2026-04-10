@@ -32,7 +32,11 @@ impl ResolvedTheme {
         let prose = cli.theme.unwrap_or_else(detect_prose_theme);
         let code = cli.code_theme.unwrap_or_else(|| detect_code_theme(prose));
         let color_mode = detect_color_mode();
-        Self { prose, code, color_mode }
+        Self {
+            prose,
+            code,
+            color_mode,
+        }
     }
 }
 
@@ -87,6 +91,86 @@ pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     }
 }
 
+// ── Compose positional classification ─────────────────────────────────
+
+#[derive(Debug)]
+struct ParsedComposeArgs {
+    input: Option<PathBuf>,
+    shorthand_setters: serde_json::Map<String, serde_json::Value>,
+}
+
+fn parse_compose_setter(
+    token: &str,
+) -> Option<std::result::Result<(String, serde_json::Value), String>> {
+    let eq_pos = token.find('=')?;
+    let key = &token[..eq_pos];
+    let raw_value = &token[eq_pos + 1..];
+
+    if key.is_empty() {
+        return Some(Err("setter key must not be empty".to_string()));
+    }
+
+    let mut chars = key.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return None;
+    }
+
+    for ch in chars {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            continue;
+        }
+        return None;
+    }
+
+    let value = parse_shorthand_value(raw_value);
+    Some(Ok((key.to_string(), value)))
+}
+
+fn parse_shorthand_value(raw: &str) -> serde_json::Value {
+    if raw.is_empty() {
+        return serde_json::Value::String(String::new());
+    }
+    match biscuit_file::Json5::from_str(raw) {
+        Ok(parsed) => parsed.value().clone(),
+        Err(_) => serde_json::Value::String(raw.to_string()),
+    }
+}
+
+fn parse_compose_positionals(args: &[String]) -> Result<ParsedComposeArgs> {
+    let mut input: Option<PathBuf> = None;
+    let mut shorthand_setters = serde_json::Map::new();
+
+    for token in args {
+        match parse_compose_setter(token) {
+            Some(Ok((key, value))) => {
+                shorthand_setters.insert(key, value);
+            }
+            Some(Err(e)) => {
+                return Err(eyre!("Invalid setter '{}': {}", token, e));
+            }
+            None => {
+                if input.is_some() {
+                    return Err(eyre!(
+                        "expected at most one input path, but got multiple: {}",
+                        args.iter()
+                            .filter(|t| parse_compose_setter(t).is_none())
+                            .map(|t| t.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                input = Some(PathBuf::from(token));
+            }
+        }
+    }
+
+    Ok(ParsedComposeArgs {
+        input,
+        shorthand_setters,
+    })
+}
+
 pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
     match command {
         CliCommand::Render {
@@ -108,7 +192,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             run_clean(input.as_ref(), save, indent, mode, cli.verbose > 0)?;
         }
         CliCommand::Compose {
-            input,
+            args,
             state,
             set,
             output,
@@ -122,8 +206,11 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             allow_missing_transclusions,
             allow_any_missing_reference,
             allow_ctx_override,
+            timeout,
+            allow_shell_timeout,
             perf,
         } => {
+            let parsed = parse_compose_positionals(&args)?;
             let mode = resolve_list_spacing(compact, loose);
             let allow = ComposeAllowFlags {
                 hyperlinks: allow_missing_hyperlinks || allow_any_missing_reference,
@@ -131,9 +218,10 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 transclusions: allow_missing_transclusions || allow_any_missing_reference,
             };
             run_compose(
-                input.as_ref(),
+                parsed.input.as_ref(),
                 state.as_deref(),
                 set.as_deref(),
+                parsed.shorthand_setters,
                 output,
                 show,
                 frontmatter,
@@ -141,6 +229,8 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 indent,
                 &allow,
                 allow_ctx_override,
+                timeout,
+                allow_shell_timeout,
                 perf,
                 cli,
             )?;
@@ -333,6 +423,7 @@ pub fn run_compose(
     input: Option<&PathBuf>,
     state_json: Option<&str>,
     set_json: Option<&str>,
+    shorthand_setters: serde_json::Map<String, serde_json::Value>,
     output: OutputFormat,
     show: bool,
     include_frontmatter: bool,
@@ -340,6 +431,8 @@ pub fn run_compose(
     indent: Option<usize>,
     allow: &ComposeAllowFlags,
     allow_ctx_override: bool,
+    timeout_secs: Option<u64>,
+    allow_shell_timeout: bool,
     perf: bool,
     cli: &Cli,
 ) -> Result<()> {
@@ -402,16 +495,28 @@ pub fn run_compose(
     }
 
     // Parse --set as JSON or JSON5
-    if let Some(json_str) = set_json {
-        let parsed = biscuit_file::Json5::from_str(json_str)
-            .wrap_err("Invalid JSON/JSON5 in --set argument")?;
-        let set = parsed.value().clone();
-        if !set.is_object() {
-            return Err(eyre!(
-                "Invalid --set argument: expected a JSON object like {{\"name\":\"Alice\"}}"
-            ));
-        }
-        options = options.with_set_overrides(set);
+    let mut override_map: serde_json::Map<String, serde_json::Value> =
+        if let Some(json_str) = set_json {
+            let parsed = biscuit_file::Json5::from_str(json_str)
+                .wrap_err("Invalid JSON/JSON5 in --set argument")?;
+            let set = parsed.value().clone();
+            if let serde_json::Value::Object(map) = set {
+                map
+            } else {
+                return Err(eyre!(
+                    "Invalid --set argument: expected a JSON object like {{\"name\":\"Alice\"}}"
+                ));
+            }
+        } else {
+            serde_json::Map::new()
+        };
+
+    for (key, value) in shorthand_setters {
+        override_map.insert(key, value);
+    }
+
+    if !override_map.is_empty() {
+        options = options.with_set_overrides(serde_json::Value::Object(override_map));
     }
 
     // ── Reference validation ───────────────────────────────────────────
@@ -475,6 +580,9 @@ pub fn run_compose(
     let is_file_input = resolved_input.is_some();
 
     let shell_opts = ShellExpansionOptions {
+        timeout: timeout_secs
+            .map(|s| std::time::Duration::from_secs(s))
+            .unwrap_or(std::time::Duration::from_secs(10)),
         policy_root: resolved_input.as_ref().and_then(|p| {
             p.parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
@@ -489,6 +597,9 @@ pub fn run_compose(
     };
 
     options = options.with_shell(shell_opts);
+    if allow_shell_timeout {
+        options = options.with_allow_shell_timeout(true);
+    }
     options = options.with_list_spacing(list_spacing);
     options = options.with_allow_ctx_override(allow_ctx_override);
     options = options.with_perf(perf);
@@ -503,58 +614,56 @@ pub fn run_compose(
         use darkmatter::markdown::compose::ShellExpansionError;
 
         match &e {
-            ShellExpansion(ShellExpansionError::ApprovalRequired {
-                command,
-                whitelist_path,
-                ..
-            }) => {
-                let executable = command.split_whitespace().next().unwrap_or(command);
-                eyre!(
-                    "Approval required for '{command}'.\n\
-                     To allow in non-interactive mode, add one of these to {}:\n  \
-                     exact {command}\n  \
-                     prefix {executable}",
-                    whitelist_path.display(),
-                )
-            }
             ShellExpansion(ShellExpansionError::ExecutionFailed {
                 command,
                 code,
                 stderr,
-                line,
+                origin,
                 ..
             }) => {
                 let detail = stderr.trim();
                 if detail.is_empty() {
-                    eyre!("Shell command failed (exit {code}) on line {line}: '{command}'")
+                    eyre!("Shell command failed (exit {code}) at {origin}: '{command}'")
                 } else {
                     eyre!(
-                        "Shell command failed (exit {code}) on line {line}: '{command}'\n{detail}"
+                        "Shell command failed (exit {code}) at {origin}: '{command}'\n{detail}"
                     )
                 }
             }
-            ShellExpansion(ShellExpansionError::CommandNotFound { command, line }) => {
+            ShellExpansion(ShellExpansionError::CommandNotFound { command, origin }) => {
                 eyre!(
-                    "Command not found: '{command}' (line {line})\n\
+                    "Command not found: '{command}' ({origin})\n\
                      Ensure '{command}' is installed and available on your PATH."
                 )
             }
             ShellExpansion(ShellExpansionError::Timeout {
                 command,
                 timeout,
-                line,
+                origin,
             }) => {
-                eyre!("Shell command timed out after {timeout:?} on line {line}: '{command}'")
+                eyre!("Shell command timed out after {timeout:?} at {origin}: '{command}'")
             }
             ShellExpansion(ShellExpansionError::Blacklisted {
                 command,
                 reason,
-                line,
+                origin,
             }) => {
-                eyre!("Blocked command on line {line}: '{command}'\nReason: {reason}")
+                eyre!("Blocked command at {origin}: '{command}'\nReason: {reason}")
             }
-            ShellExpansion(ShellExpansionError::Denied { command, line }) => {
-                eyre!("Command denied on line {line}: '{command}'")
+            ShellExpansion(ShellExpansionError::Denied { command, origin }) => {
+                eyre!("Command denied at {origin}: '{command}'")
+            }
+            ShellExpansion(ShellExpansionError::ApprovalRequired {
+                command,
+                whitelist_path,
+                origin: _,
+                ..
+            }) => {
+                let executable = command.split_whitespace().next().unwrap_or(command);
+                eyre!(
+                    "Approval required for '{command}'.\nTo allow in non-interactive mode, add one of these to {}:\n  exact {command}\n  prefix {executable}",
+                    whitelist_path.display(),
+                )
             }
             _ => eyre!("{e}"),
         }
@@ -1236,6 +1345,85 @@ fn read_from_stdin() -> Result<Markdown> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_compose_setter_rejects_empty_key() {
+        let parsed = parse_compose_setter("=value").expect("expected setter parse result");
+        let err = parsed.expect_err("expected empty-key error");
+        assert_eq!(err, "setter key must not be empty");
+    }
+
+    #[test]
+    fn parse_compose_setter_rejects_numeric_leading_key_as_non_setter() {
+        assert!(parse_compose_setter("9key=value").is_none());
+    }
+
+    #[test]
+    fn parse_compose_setter_accepts_hyphenated_and_private_keys() {
+        let hyphenated = parse_compose_setter("my-key=value")
+            .expect("expected setter")
+            .expect("expected valid setter");
+        assert_eq!(hyphenated.0, "my-key");
+        assert_eq!(hyphenated.1, serde_json::Value::String("value".to_string()));
+
+        let private = parse_compose_setter("_private=true")
+            .expect("expected setter")
+            .expect("expected valid setter");
+        assert_eq!(private.0, "_private");
+        assert_eq!(private.1, serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn parse_compose_setter_treats_path_like_keys_as_input_candidates() {
+        assert!(parse_compose_setter("path/key=value").is_none());
+    }
+
+    #[test]
+    fn parse_shorthand_value_parses_primitives_and_falls_back_to_string() {
+        assert_eq!(parse_shorthand_value("true"), serde_json::Value::Bool(true));
+        assert_eq!(parse_shorthand_value("null"), serde_json::Value::Null);
+        assert_eq!(
+            parse_shorthand_value("hello"),
+            serde_json::Value::String("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_compose_positionals_empty_args_have_no_input_or_setters() {
+        let parsed = parse_compose_positionals(&[]).expect("expected parse to succeed");
+        assert!(parsed.input.is_none());
+        assert!(parsed.shorthand_setters.is_empty());
+    }
+
+    #[test]
+    fn parse_compose_positionals_setter_only_args_keep_input_empty() {
+        let args = vec!["iteration=1".to_string(), "draft=false".to_string()];
+        let parsed = parse_compose_positionals(&args).expect("expected parse to succeed");
+        assert!(parsed.input.is_none());
+        assert_eq!(
+            parsed.shorthand_setters.get("iteration"),
+            Some(&serde_json::json!(1))
+        );
+        assert_eq!(
+            parsed.shorthand_setters.get("draft"),
+            Some(&serde_json::json!(false))
+        );
+    }
+
+    #[test]
+    fn parse_compose_positionals_invalid_empty_key_surfaces_error() {
+        let args = vec!["=value".to_string()];
+        let err = parse_compose_positionals(&args).expect_err("expected parse to fail");
+        assert!(err.to_string().contains("Invalid setter '=value'"));
+    }
+
+    #[test]
+    fn parse_compose_positionals_treats_numeric_leading_key_as_input() {
+        let args = vec!["9key=value".to_string()];
+        let parsed = parse_compose_positionals(&args).expect("expected parse to succeed");
+        assert_eq!(parsed.input, Some(PathBuf::from("9key=value")));
+        assert!(parsed.shorthand_setters.is_empty());
+    }
 
     #[test]
     fn wait_args_vscode_returns_wait() {

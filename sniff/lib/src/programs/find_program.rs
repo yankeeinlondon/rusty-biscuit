@@ -764,9 +764,11 @@ mod tests {
     /// Verifies the index does not include non-executable files.
     #[test]
     fn test_executable_index_excludes_non_executable() {
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
         use std::fs;
         use tempfile::tempdir;
 
+        let _lock = ENV_MUTEX.lock().unwrap();
         let dir = tempdir().unwrap();
         let non_exec = dir.path().join("not-a-program");
         fs::write(&non_exec, "data").unwrap();
@@ -779,15 +781,14 @@ mod tests {
         }
 
         // Temporarily prepend our dir to PATH and build the index
+        let mut env = ScopedEnv::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
         let mut new_path = std::ffi::OsString::from(dir.path());
         new_path.push(":");
         new_path.push(&original_path);
+        env.set_os("PATH", &new_path);
 
-        // Safety: single-threaded test; restored immediately
-        unsafe { std::env::set_var("PATH", &new_path) };
         let index = ExecutableIndex::build();
-        unsafe { std::env::set_var("PATH", &original_path) };
 
         assert!(
             index.find("not-a-program").is_none(),
@@ -799,23 +800,25 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_executable_index_includes_executable() {
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
+        let _lock = ENV_MUTEX.lock().unwrap();
         let dir = tempdir().unwrap();
         let exec = dir.path().join("test-exec-prog");
         fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
         fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
 
+        let mut env = ScopedEnv::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
         let mut new_path = std::ffi::OsString::from(dir.path());
         new_path.push(":");
         new_path.push(&original_path);
+        env.set_os("PATH", &new_path);
 
-        unsafe { std::env::set_var("PATH", &new_path) };
         let index = ExecutableIndex::build();
-        unsafe { std::env::set_var("PATH", &original_path) };
 
         assert!(
             index.find("test-exec-prog").is_some(),

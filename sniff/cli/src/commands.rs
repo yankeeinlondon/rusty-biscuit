@@ -42,7 +42,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         command = ?cli.command.as_ref().map(|c| format!("{c:?}")),
         json = cli.json,
         plain = cli.plain,
-    ).entered();
+    )
+    .entered();
 
     // Handle --completions first (prints setup instructions)
     if let Some(shell) = cli.completions {
@@ -392,6 +393,17 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 std::process::exit(0);
             }
+            crate::args::RepoAction::RecentCommits { .. }
+            | crate::args::RepoAction::SourceCodeChanges { .. }
+            | crate::args::RepoAction::DocumentationChanges { .. } => {
+                return crate::output::recent_commits::handle_recent_commits_command(
+                    action,
+                    base_dir.as_deref(),
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                );
+            }
             _ => {
                 // Other RepoAction variants (Structure, GitStatus, Deps, etc.)
                 // are handled after full detection below
@@ -589,6 +601,30 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         || git.status.untracked_count > 0;
                 }
             }
+        }
+    }
+
+    // Handle Package/PackageArea early returns (need detection result but not enrichment)
+    if let Some(ref action) = repo_action {
+        match action {
+            crate::args::RepoAction::Package { no_error, on_error } => {
+                let rendered =
+                    output::render_repo_package(&result, base_dir.as_deref(), cli.verbose);
+                if rendered.is_empty() {
+                    return handle_no_results(*no_error, on_error, cli.plain);
+                }
+                println!("{rendered}");
+                return Ok(());
+            }
+            crate::args::RepoAction::PackageArea { no_error, on_error } => {
+                let rendered = output::render_repo_package_area(&result, base_dir.as_deref());
+                if rendered.is_empty() {
+                    return handle_no_results(*no_error, on_error, cli.plain);
+                }
+                println!("{rendered}");
+                return Ok(());
+            }
+            _ => {}
         }
     }
 
@@ -970,7 +1006,7 @@ fn path_list_format(args: &FileListArgs) -> PathListFormat {
 /// - `--no-error`: exit 0 with no output.
 /// - `--on-error <msg>`: render message to stderr.
 /// - `--on-error` + `--no-error`: render message to stdout, exit 0.
-fn handle_no_results(
+pub(crate) fn handle_no_results(
     no_error: bool,
     on_error: &Option<String>,
     plain: bool,
@@ -988,9 +1024,9 @@ fn handle_no_results(
             rendered
         };
         if no_error {
-            print!("{text}");
+            println!("{text}");
         } else {
-            eprint!("{text}");
+            eprintln!("{text}");
         }
     }
 

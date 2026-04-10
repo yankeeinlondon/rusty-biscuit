@@ -28,15 +28,28 @@
 //! and PulseAudio's equivalent use this property to optionally duck other
 //! audio during event sounds. Falls back to the default rodio output if
 //! PulseAudio is not available (e.g., ALSA-only systems).
+//!
+//! All PulseAudio wait loops (context connection, stream connection, drain)
+//! use deadline-aware nonblocking polling. If a phase does not complete
+//! within its deadline, the native path fails and playback falls back to
+//! the host player. Playback blocks until completion or timeout.
+//!
+//! Native SFX playback never terminates the process. If a native device-open
+//! operation times out, playa disables further native playback attempts for
+//! the rest of the process and future calls fall back to host playback.
+//! Native Linux errors (including timeouts) fall back to host playback.
 
 use std::io::Cursor;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use rodio::{Decoder, DeviceSinkBuilder, Player};
 use thiserror::Error;
 
+use crate::native_audio::{
+    NATIVE_DEVICE_TIMEOUT, NativeAudioFailureKind, log_native_audio_disabled_once,
+    native_audio_available, open_with_channel_fallback, run_with_timeout,
+    trip_native_audio_breaker,
+};
 use crate::types::PlaybackOptions;
 
 /// Maximum time to wait for native audio playback to complete before
@@ -44,37 +57,74 @@ use crate::types::PlaybackOptions;
 /// an audio device becomes unresponsive.
 const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Maximum time to wait for an audio device to open.
-const DEVICE_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Watchdog that terminates the process if an audio device open hangs.
+/// Open an SFX audio stream with a timeout.
 ///
-/// CoreAudio requires a run loop on the calling thread, so we can't move
-/// device-opening calls to a background thread. Instead, we run them on the
-/// main thread and spawn a watchdog that will abort the process if the call
-/// doesn't complete in time.
-struct DeviceOpenWatchdog {
-    disarmed: Arc<AtomicBool>,
+/// Resolves an optional requested channel and opens the requested or default
+/// SFX output path within a single bounded deadline.
+fn open_sfx_stream_with_timeout(
+    timeout: Duration,
+    options: &PlaybackOptions,
+) -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
+    let deadline = Instant::now() + timeout;
+    open_with_channel_fallback(
+        options.channel.as_deref(),
+        deadline,
+        crate::channels::find_device_by_id_or_name_with_timeout,
+        open_device_stream_with_timeout,
+        open_default_sfx_stream_with_timeout,
+        || SfxPlaybackError::DeviceOpenTimeout(timeout.as_secs()),
+    )
 }
 
-impl DeviceOpenWatchdog {
-    fn start(timeout: Duration) -> Self {
-        let disarmed = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&disarmed);
-        let secs = timeout.as_secs();
-        std::thread::spawn(move || {
-            std::thread::sleep(timeout);
-            if !flag.load(Ordering::Relaxed) {
-                eprintln!("playa: audio device did not respond within {secs}s — aborting");
-                std::process::exit(1);
-            }
-        });
-        Self { disarmed }
+fn open_device_stream_with_timeout(
+    device: rodio::Device,
+    timeout: Duration,
+) -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
+    if timeout.is_zero() {
+        return Err(SfxPlaybackError::DeviceOpenTimeout(
+            NATIVE_DEVICE_TIMEOUT.as_secs(),
+        ));
     }
 
-    fn disarm(self) {
-        self.disarmed.store(true, Ordering::Relaxed);
+    run_with_timeout(
+        timeout,
+        move || {
+            DeviceSinkBuilder::from_device(device)
+                .and_then(|builder| builder.open_stream())
+                .map_err(SfxPlaybackError::Stream)
+        },
+        sfx_device_open_timeout,
+    )
+}
+
+fn open_default_sfx_stream_with_timeout(
+    timeout: Duration,
+) -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
+    if timeout.is_zero() {
+        return Err(SfxPlaybackError::DeviceOpenTimeout(
+            NATIVE_DEVICE_TIMEOUT.as_secs(),
+        ));
     }
+
+    run_with_timeout(timeout, open_default_sfx_stream, sfx_device_open_timeout)
+}
+
+fn open_default_sfx_stream() -> Result<rodio::MixerDeviceSink, SfxPlaybackError> {
+    #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
+    {
+        if let Ok(Some(device)) = macos::find_system_sound_device()
+            && let Ok(stream) = DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
+        {
+            return Ok(stream);
+        }
+    }
+
+    DeviceSinkBuilder::open_default_sink().map_err(SfxPlaybackError::Stream)
+}
+
+fn sfx_device_open_timeout(timeout: Duration) -> SfxPlaybackError {
+    trip_native_audio_breaker(NativeAudioFailureKind::DeviceOpenTimeout);
+    SfxPlaybackError::DeviceOpenTimeout(timeout.as_secs())
 }
 
 /// Errors from native SFX playback.
@@ -83,6 +133,14 @@ pub enum SfxPlaybackError {
     /// Failed to open an audio output stream.
     #[error("failed to open audio stream: {0}")]
     Stream(#[from] rodio::DeviceSinkError),
+
+    /// Native playback was disabled earlier in this process.
+    #[error("native playback is disabled for this process after an earlier device-open timeout")]
+    NativePlaybackDisabled,
+
+    /// Audio device did not respond within the allotted time.
+    #[error("audio device did not respond within {0}s")]
+    DeviceOpenTimeout(u64),
 
     /// Failed to decode audio data.
     #[error("failed to decode audio: {0}")]
@@ -103,7 +161,9 @@ pub enum SfxPlaybackError {
 /// `sfx-native-macos`, routes audio to the system sound device (which the
 /// user can configure separately from the default output in System Settings
 /// → Sound). Falls back to the default output device if the system sound
-/// device can't be found or is the same as the default.
+/// device can't be found or is the same as the default. A device-open timeout
+/// disables future native playback attempts for the current process so callers
+/// can fall back directly to host playback.
 ///
 /// ## Errors
 ///
@@ -111,27 +171,38 @@ pub enum SfxPlaybackError {
 /// audio data can't be decoded. Callers should fall back to host player
 /// delegation on error.
 pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlaybackError> {
+    if !native_audio_available() {
+        log_native_audio_disabled_once();
+        return Err(SfxPlaybackError::NativePlaybackDisabled);
+    }
+
     // Windows: play through WASAPI with AudioCategory_SoundEffects.
     #[cfg(all(target_os = "windows", feature = "sfx-native-windows"))]
     {
-        if windows_sfx::play_sfx_with_category(bytes, options).is_ok() {
-            return Ok(());
+        if options.speed.is_none() {
+            if windows_sfx::play_sfx_with_category(bytes, options).is_ok() {
+                return Ok(());
+            }
         }
-        // Fall through to default rodio path on error.
     }
 
     // Linux: play through PulseAudio with media.role=event.
     #[cfg(all(target_os = "linux", feature = "sfx-native-linux"))]
     {
-        if linux::play_sfx_as_event(bytes, options).is_ok() {
-            return Ok(());
+        use linux::PulsePlaybackOutcome;
+
+        if options.speed.is_none() {
+            match linux::play_sfx_as_event(bytes, options) {
+                PulsePlaybackOutcome::PlaybackCompleted | PulsePlaybackOutcome::PlaybackStarted => {
+                    return Ok(());
+                }
+                PulsePlaybackOutcome::SetupFailed(_) => {}
+            }
         }
-        // Fall through to default rodio path on error.
     }
 
-    let guard = DeviceOpenWatchdog::start(DEVICE_OPEN_TIMEOUT);
-    let mut stream = open_sfx_stream(options).map_err(SfxPlaybackError::Stream)?;
-    guard.disarm();
+    let source = Decoder::new(Cursor::new(bytes.to_vec()))?;
+    let mut stream = open_sfx_stream_with_timeout(NATIVE_DEVICE_TIMEOUT, options)?;
     stream.log_on_drop(false);
     let player = Player::connect_new(stream.mixer());
 
@@ -142,7 +213,6 @@ pub fn play_sfx(bytes: &[u8], options: &PlaybackOptions) -> Result<(), SfxPlayba
         player.set_speed(speed);
     }
 
-    let source = Decoder::new(Cursor::new(bytes.to_vec()))?;
     player.append(source);
     wait_with_timeout(&player, PLAYBACK_TIMEOUT)?;
 
@@ -169,37 +239,6 @@ fn wait_with_timeout(player: &Player, timeout: Duration) -> Result<(), SfxPlayba
     }
     Ok(())
 }
-
-/// Open an audio output stream targeting the OS sound effects channel.
-///
-/// On macOS with `sfx-native-macos`, attempts to route to the system sound
-/// device. Falls back to the default output device on all other platforms
-/// or if device lookup fails.
-pub(crate) fn open_sfx_stream(
-    options: &PlaybackOptions,
-) -> Result<rodio::MixerDeviceSink, rodio::DeviceSinkError> {
-    if let Some(channel_name) = &options.channel
-        && let Some(device) = crate::channels::find_device_by_id_or_name(channel_name)
-        && let Ok(stream) = DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
-    {
-        return Ok(stream);
-    }
-
-    #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
-    {
-        if let Ok(Some(device)) = macos::find_system_sound_device()
-            && let Ok(stream) = DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream())
-        {
-            return Ok(stream);
-        }
-    }
-
-    DeviceSinkBuilder::open_default_sink()
-}
-
-// ============================================================================
-// macOS: System sound device routing
-// ============================================================================
 
 #[cfg(all(target_os = "macos", feature = "sfx-native-macos"))]
 pub(crate) mod macos {
@@ -559,8 +598,10 @@ mod windows_sfx {
             },
             Multimedia::WAVE_FORMAT_IEEE_FLOAT,
         },
-        System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx},
+        System::Com::{CLSCTX_ALL, CoCreateInstance},
     };
+
+    use crate::windows_com::ComGuard;
 
     use crate::types::PlaybackOptions;
 
@@ -573,8 +614,10 @@ mod windows_sfx {
     ///
     /// Uses `AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM` so WASAPI handles sample rate
     /// and channel conversion from the decoded format to the device format.
-    /// Speed is implemented by adjusting the declared sample rate (higher rate =
-    /// faster playback with proportional pitch shift).
+    ///
+    /// Only used when speed is not set. When speed is requested, the rodio
+    /// default path is used instead so `Player::set_speed()` provides
+    /// consistent time-stretch behavior across platforms.
     pub fn play_sfx_with_category(
         bytes: &[u8],
         options: &PlaybackOptions,
@@ -609,8 +652,8 @@ mod windows_sfx {
         };
 
         unsafe {
-            // Initialize COM (ignore error if already initialized on this thread).
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            // Initialize COM via shared guard (handles S_OK, S_FALSE, RPC_E_CHANGED_MODE).
+            let _com = ComGuard::new().map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
             // Get default audio render endpoint.
             let enumerator: IMMDeviceEnumerator =
@@ -716,8 +759,8 @@ mod windows_sfx {
         #[test]
         #[ignore = "requires Windows audio device"]
         fn can_get_default_audio_endpoint() {
+            let _com = ComGuard::new().expect("COM init should succeed");
             unsafe {
-                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
                 let enumerator: IMMDeviceEnumerator =
                     CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                         .expect("should create device enumerator");
@@ -733,8 +776,8 @@ mod windows_sfx {
         #[test]
         #[ignore = "requires Windows audio device"]
         fn can_set_sound_effects_category() {
+            let _com = ComGuard::new().expect("COM init should succeed");
             unsafe {
-                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
                 let enumerator: IMMDeviceEnumerator =
                     CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).unwrap();
                 let device = enumerator
@@ -763,6 +806,7 @@ mod windows_sfx {
 #[cfg(all(target_os = "linux", feature = "sfx-native-linux"))]
 mod linux {
     use std::io::Cursor;
+    use std::time::{Duration, Instant};
 
     use libpulse_binding as pulse;
     use libpulse_binding::mainloop::standard::{IterateResult, Mainloop};
@@ -772,7 +816,57 @@ mod linux {
     use pulse::stream::{SeekMode, Stream};
     use rodio::Source;
 
+    use super::{NATIVE_DEVICE_TIMEOUT, PLAYBACK_TIMEOUT};
     use crate::types::PlaybackOptions;
+
+    /// Outcome of a PulseAudio playback attempt.
+    ///
+    /// Distinguishes setup failures (safe to fall back to another player) from
+    /// post-write states (audio was already sent, so another player must NOT
+    /// attempt to play the same clip again).
+    pub(crate) enum PulsePlaybackOutcome {
+        /// PulseAudio setup (context/stream connection) failed before audio was
+        /// written to the server. Safe to fall back to another playback path.
+        SetupFailed(Box<dyn std::error::Error>),
+        /// Audio was written to PulseAudio and the drain completed. Fully done.
+        PlaybackCompleted,
+        /// Audio was written to PulseAudio but the drain timed out or failed.
+        /// The server already received the bytes, so do NOT attempt another
+        /// playback path or the same clip will play twice.
+        PlaybackStarted,
+    }
+
+    fn wait_for_pulse_condition<F>(
+        mainloop: &mut Mainloop,
+        deadline: Instant,
+        phase: &'static str,
+        mut check: F,
+    ) -> Result<(), Box<dyn std::error::Error>>
+    where
+        F: FnMut() -> Result<bool, Box<dyn std::error::Error>>,
+    {
+        loop {
+            match mainloop.iterate(false) {
+                IterateResult::Success(_) => {}
+                IterateResult::Err(e) => {
+                    return Err(format!("PulseAudio mainloop error: {e}").into());
+                }
+                IterateResult::Quit(_) => {
+                    return Err("PulseAudio mainloop quit unexpectedly".into());
+                }
+            }
+
+            if check()? {
+                return Ok(());
+            }
+
+            if Instant::now() >= deadline {
+                return Err(format!("PulseAudio {} timed out", phase).into());
+            }
+
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     /// Play sound effect bytes through PulseAudio with `media.role=event`.
     ///
@@ -781,33 +875,62 @@ mod linux {
     /// PulseAudio's `module-role-ducking` use this property to optionally duck
     /// other audio during event sounds.
     ///
-    /// Speed is implemented by adjusting the declared sample rate (higher rate =
-    /// faster playback with proportional pitch shift).
-    pub fn play_sfx_as_event(
-        bytes: &[u8],
-        options: &PlaybackOptions,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // Decode audio using rodio's decoder.
-        let decoder = rodio::Decoder::new(Cursor::new(bytes.to_vec()))?;
+    /// Only used when speed is not set. When speed is requested, the rodio
+    /// default path is used instead so `Player::set_speed()` provides
+    /// consistent time-stretch behavior across platforms.
+    ///
+    /// All wait loops use deadline-aware nonblocking polling. Context and stream
+    /// readiness use `NATIVE_DEVICE_TIMEOUT`; drain uses a clip-derived timeout
+    /// bounded by `PLAYBACK_TIMEOUT`.
+    ///
+    /// ## Returns
+    ///
+    /// Returns a `PulsePlaybackOutcome` so the caller can decide whether
+    /// falling back to another player is safe. After `PlaybackStarted` or
+    /// `PlaybackCompleted`, the caller must NOT attempt a second playback.
+    pub fn play_sfx_as_event(bytes: &[u8], options: &PlaybackOptions) -> PulsePlaybackOutcome {
+        match play_sfx_as_event_inner(bytes, options) {
+            PlayResult::SetupFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+            PlayResult::WriteFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+            PlayResult::PlaybackCompleted => PulsePlaybackOutcome::PlaybackCompleted,
+            PlayResult::DrainFailed => {
+                eprintln!(
+                    "playa: PulseAudio drain timed out — audio was already written, skipping fallback"
+                );
+                PulsePlaybackOutcome::PlaybackStarted
+            }
+        }
+    }
+
+    /// Internal result that separates every failure phase so `play_sfx_as_event`
+    /// can map post-write drain failures to `PlaybackStarted` instead of
+    /// `SetupFailed`.
+    enum PlayResult {
+        SetupFailed(Box<dyn std::error::Error>),
+        WriteFailed(Box<dyn std::error::Error>),
+        PlaybackCompleted,
+        DrainFailed,
+    }
+
+    fn play_sfx_as_event_inner(bytes: &[u8], options: &PlaybackOptions) -> PlayResult {
+        let decoder = match rodio::Decoder::new(Cursor::new(bytes.to_vec())) {
+            Ok(d) => d,
+            Err(e) => return PlayResult::SetupFailed(e.into()),
+        };
         let channels = decoder.channels();
         let sample_rate = decoder.sample_rate();
 
-        // Extract primitive values from NonZero types.
         let channels_u8 = channels.get() as u8;
         let sample_rate_u32 = sample_rate.get();
 
-        // Collect all samples as f32 (fine for short SFX clips).
         let mut samples: Vec<f32> = decoder.collect();
 
-        // Apply volume.
         if let Some(vol) = options.volume {
             for s in &mut samples {
                 *s *= vol;
             }
         }
 
-        // Speed: adjust the declared sample rate. PulseAudio resamples from our
-        // declared rate to the device rate, producing the speed-with-pitch effect.
         let effective_rate = if let Some(speed) = options.speed {
             (sample_rate_u32 as f32 * speed) as u32
         } else {
@@ -821,91 +944,124 @@ mod linux {
         };
 
         if !spec.is_valid() {
-            return Err("invalid PulseAudio sample spec".into());
+            return PlayResult::SetupFailed("invalid PulseAudio sample spec".into());
         }
 
-        // Create PulseAudio mainloop (single-threaded, we iterate manually).
-        let mut mainloop = Mainloop::new().ok_or("failed to create PulseAudio mainloop")?;
+        let mut mainloop = match Mainloop::new() {
+            Some(ml) => ml,
+            None => return PlayResult::SetupFailed("failed to create PulseAudio mainloop".into()),
+        };
 
-        // Create and connect context.
-        let mut context =
-            Context::new(&mainloop, "playa").ok_or("failed to create PulseAudio context")?;
+        let mut context = match Context::new(&mainloop, "playa") {
+            Some(ctx) => ctx,
+            None => return PlayResult::SetupFailed("failed to create PulseAudio context".into()),
+        };
 
-        context.connect(None, pulse::context::FlagSet::NOFLAGS, None)?;
+        if let Err(e) = context.connect(None, pulse::context::FlagSet::NOFLAGS, None) {
+            return PlayResult::SetupFailed(e.into());
+        }
 
-        // Wait for context to become ready.
-        loop {
-            iterate_or_fail(&mut mainloop)?;
-            match context.get_state() {
-                pulse::context::State::Ready => break,
-                pulse::context::State::Failed | pulse::context::State::Terminated => {
-                    return Err("PulseAudio context connection failed".into());
+        let context_deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
+
+        if let Err(e) = wait_for_pulse_condition(
+            &mut mainloop,
+            context_deadline,
+            "context connection",
+            || {
+                match context.get_state() {
+                    pulse::context::State::Ready => return Ok(true),
+                    pulse::context::State::Failed | pulse::context::State::Terminated => {
+                        return Err("PulseAudio context connection failed".into());
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
+                Ok(false)
+            },
+        ) {
+            return PlayResult::SetupFailed(e);
         }
 
-        // Create stream proplist with media.role=event.
-        let mut proplist = Proplist::new().ok_or("failed to create PulseAudio proplist")?;
-        proplist
+        let mut proplist = match Proplist::new() {
+            Some(pl) => pl,
+            None => return PlayResult::SetupFailed("failed to create PulseAudio proplist".into()),
+        };
+        if proplist
             .set_str(pulse::proplist::properties::MEDIA_ROLE, "event")
-            .map_err(|()| "failed to set media.role property")?;
-
-        let mut stream =
-            Stream::new_with_proplist(&mut context, "Sound Effect", &spec, None, &mut proplist)
-                .ok_or("failed to create PulseAudio stream")?;
-
-        // Connect stream for playback.
-        stream.connect_playback(
-            None, // default device
-            None, // default buffer attributes
-            pulse::stream::FlagSet::NOFLAGS,
-            None, // no volume override
-            None, // no sync stream
-        )?;
-
-        // Wait for stream to become ready.
-        loop {
-            iterate_or_fail(&mut mainloop)?;
-            match stream.get_state() {
-                pulse::stream::State::Ready => break,
-                pulse::stream::State::Failed | pulse::stream::State::Terminated => {
-                    return Err("PulseAudio stream connection failed".into());
-                }
-                _ => {}
-            }
+            .is_err()
+        {
+            return PlayResult::SetupFailed("failed to set media.role property".into());
         }
 
-        // Convert f32 samples to little-endian byte representation.
+        let mut stream = match Stream::new_with_proplist(
+            &mut context,
+            "Sound Effect",
+            &spec,
+            None,
+            &mut proplist,
+        ) {
+            Some(s) => s,
+            None => return PlayResult::SetupFailed("failed to create PulseAudio stream".into()),
+        };
+
+        if let Err(e) =
+            stream.connect_playback(None, None, pulse::stream::FlagSet::NOFLAGS, None, None)
+        {
+            return PlayResult::SetupFailed(e.into());
+        }
+
+        let stream_deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
+
+        if let Err(e) =
+            wait_for_pulse_condition(&mut mainloop, stream_deadline, "stream connection", || {
+                match stream.get_state() {
+                    pulse::stream::State::Ready => return Ok(true),
+                    pulse::stream::State::Failed | pulse::stream::State::Terminated => {
+                        return Err("PulseAudio stream connection failed".into());
+                    }
+                    _ => {}
+                }
+                Ok(false)
+            })
+        {
+            return PlayResult::SetupFailed(e);
+        }
+
         let byte_data: Vec<u8> = samples.iter().flat_map(|s: &f32| s.to_le_bytes()).collect();
 
-        // Write all audio data. PulseAudio buffers internally.
-        stream.write(&byte_data, None, 0, SeekMode::Relative)?;
-
-        // Drain: wait for all buffered audio to finish playing.
-        let op = stream.drain(None);
-        loop {
-            iterate_or_fail(&mut mainloop)?;
-            match op.get_state() {
-                pulse::operation::State::Done | pulse::operation::State::Cancelled => break,
-                pulse::operation::State::Running => {}
-            }
+        if let Err(e) = stream.write(&byte_data, None, 0, SeekMode::Relative) {
+            return PlayResult::WriteFailed(e.into());
         }
 
-        // Clean up (Drop impls handle the rest).
+        let clip_duration = Duration::from_secs_f64(
+            samples.len() as f64 / (channels.get() as f64 * effective_rate as f64),
+        );
+        let drain_timeout = (clip_duration + Duration::from_secs(5))
+            .min(PLAYBACK_TIMEOUT)
+            .max(NATIVE_DEVICE_TIMEOUT);
+        let drain_deadline = Instant::now() + drain_timeout;
+
+        let op = stream.drain(None);
+
+        if wait_for_pulse_condition(&mut mainloop, drain_deadline, "drain", || {
+            match op.get_state() {
+                pulse::operation::State::Done | pulse::operation::State::Cancelled => {
+                    return Ok(true);
+                }
+                pulse::operation::State::Running => {}
+            }
+            Ok(false)
+        })
+        .is_err()
+        {
+            stream.disconnect().ok();
+            context.disconnect();
+            return PlayResult::DrainFailed;
+        }
+
         stream.disconnect().ok();
         context.disconnect();
 
-        Ok(())
-    }
-
-    /// Iterate the PulseAudio mainloop once, blocking until an event arrives.
-    fn iterate_or_fail(mainloop: &mut Mainloop) -> Result<(), Box<dyn std::error::Error>> {
-        match mainloop.iterate(true) {
-            IterateResult::Success(_) => Ok(()),
-            IterateResult::Err(e) => Err(format!("PulseAudio mainloop error: {e}").into()),
-            IterateResult::Quit(_) => Err("PulseAudio mainloop quit unexpectedly".into()),
-        }
+        PlayResult::PlaybackCompleted
     }
 
     #[cfg(test)]
@@ -950,6 +1106,130 @@ mod linux {
         }
 
         #[test]
+        fn playback_started_is_terminal() {
+            let outcome = PulsePlaybackOutcome::PlaybackStarted;
+            let is_terminal = matches!(
+                outcome,
+                PulsePlaybackOutcome::PlaybackStarted | PulsePlaybackOutcome::PlaybackCompleted
+            );
+            assert!(
+                is_terminal,
+                "PlaybackStarted must be treated as terminal (no fallback)"
+            );
+        }
+
+        #[test]
+        fn playback_completed_is_terminal() {
+            let outcome = PulsePlaybackOutcome::PlaybackCompleted;
+            let is_terminal = matches!(
+                outcome,
+                PulsePlaybackOutcome::PlaybackStarted | PulsePlaybackOutcome::PlaybackCompleted
+            );
+            assert!(
+                is_terminal,
+                "PlaybackCompleted must be treated as terminal (no fallback)"
+            );
+        }
+
+        #[test]
+        fn setup_failed_is_not_terminal() {
+            let outcome = PulsePlaybackOutcome::SetupFailed("test".into());
+            let is_terminal = matches!(
+                outcome,
+                PulsePlaybackOutcome::PlaybackStarted | PulsePlaybackOutcome::PlaybackCompleted
+            );
+            assert!(
+                !is_terminal,
+                "SetupFailed must NOT be treated as terminal (fallback allowed)"
+            );
+        }
+
+        #[test]
+        fn play_result_drain_failed_maps_to_playback_started() {
+            let inner = PlayResult::DrainFailed;
+            let outcome = match inner {
+                PlayResult::SetupFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+                PlayResult::WriteFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+                PlayResult::PlaybackCompleted => PulsePlaybackOutcome::PlaybackCompleted,
+                PlayResult::DrainFailed => PulsePlaybackOutcome::PlaybackStarted,
+            };
+            assert!(
+                matches!(outcome, PulsePlaybackOutcome::PlaybackStarted),
+                "DrainFailed must map to PlaybackStarted"
+            );
+        }
+
+        #[test]
+        fn play_result_write_failed_maps_to_setup_failed() {
+            let inner = PlayResult::WriteFailed("write err".into());
+            let outcome = match inner {
+                PlayResult::SetupFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+                PlayResult::WriteFailed(e) => PulsePlaybackOutcome::SetupFailed(e),
+                PlayResult::PlaybackCompleted => PulsePlaybackOutcome::PlaybackCompleted,
+                PlayResult::DrainFailed => PulsePlaybackOutcome::PlaybackStarted,
+            };
+            assert!(
+                matches!(outcome, PulsePlaybackOutcome::SetupFailed(_)),
+                "WriteFailed must map to SetupFailed"
+            );
+        }
+
+        #[test]
+        fn wait_helper_returns_immediately_when_ready() {
+            let call_count = std::sync::atomic::AtomicUsize::new(0);
+            let result = wait_for_pulse_condition_with_mock(
+                Instant::now() + Duration::from_secs(5),
+                "test",
+                || {
+                    call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(true)
+                },
+            );
+            assert!(result.is_ok());
+            assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        }
+
+        #[test]
+        fn wait_helper_times_out_when_never_ready() {
+            let result = wait_for_pulse_condition_with_mock(
+                Instant::now() + Duration::from_millis(10),
+                "test-phase",
+                || Ok(false),
+            );
+            assert!(result.is_err());
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("test-phase"),
+                "error should contain phase name: {err}"
+            );
+            assert!(
+                err.contains("timed out"),
+                "error should mention timeout: {err}"
+            );
+        }
+
+        fn wait_for_pulse_condition_with_mock<F>(
+            deadline: Instant,
+            phase: &'static str,
+            mut check: F,
+        ) -> Result<(), Box<dyn std::error::Error>>
+        where
+            F: FnMut() -> Result<bool, Box<dyn std::error::Error>>,
+        {
+            loop {
+                if check()? {
+                    return Ok(());
+                }
+
+                if Instant::now() >= deadline {
+                    return Err(format!("PulseAudio {} timed out", phase).into());
+                }
+
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        #[test]
         #[ignore = "requires PulseAudio daemon"]
         fn can_connect_pulseaudio_context() {
             let mut mainloop = Mainloop::new().expect("should create mainloop");
@@ -958,21 +1238,18 @@ mod linux {
                 .connect(None, pulse::context::FlagSet::NOFLAGS, None)
                 .expect("should start connection");
 
-            let start = std::time::Instant::now();
-            let timeout = std::time::Duration::from_secs(5);
-            loop {
-                if start.elapsed() > timeout {
-                    panic!("timed out waiting for PulseAudio context");
-                }
-                iterate_or_fail(&mut mainloop).expect("mainloop iterate failed");
+            let deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
+            wait_for_pulse_condition(&mut mainloop, deadline, "context connection", || {
                 match context.get_state() {
-                    pulse::context::State::Ready => break,
+                    pulse::context::State::Ready => return Ok(true),
                     pulse::context::State::Failed | pulse::context::State::Terminated => {
-                        panic!("PulseAudio context failed");
+                        return Err("PulseAudio context failed".into());
                     }
                     _ => {}
                 }
-            }
+                Ok(false)
+            })
+            .expect("context should connect");
 
             context.disconnect();
         }
@@ -986,19 +1263,20 @@ mod linux {
                 .connect(None, pulse::context::FlagSet::NOFLAGS, None)
                 .expect("should start connection");
 
-            // Wait for context ready.
-            loop {
-                iterate_or_fail(&mut mainloop).expect("mainloop iterate failed");
+            let deadline = Instant::now() + NATIVE_DEVICE_TIMEOUT;
+
+            wait_for_pulse_condition(&mut mainloop, deadline, "context connection", || {
                 match context.get_state() {
-                    pulse::context::State::Ready => break,
+                    pulse::context::State::Ready => return Ok(true),
                     pulse::context::State::Failed | pulse::context::State::Terminated => {
-                        panic!("PulseAudio context failed");
+                        return Err("PulseAudio context failed".into());
                     }
                     _ => {}
                 }
-            }
+                Ok(false)
+            })
+            .expect("context should connect");
 
-            // Create stream with media.role=event.
             let spec = Spec {
                 format: Format::F32le,
                 channels: 1,
@@ -1017,17 +1295,17 @@ mod linux {
                 .connect_playback(None, None, pulse::stream::FlagSet::NOFLAGS, None, None)
                 .expect("should connect for playback");
 
-            // Wait for stream ready.
-            loop {
-                iterate_or_fail(&mut mainloop).expect("mainloop iterate failed");
+            wait_for_pulse_condition(&mut mainloop, deadline, "stream connection", || {
                 match stream.get_state() {
-                    pulse::stream::State::Ready => break,
+                    pulse::stream::State::Ready => return Ok(true),
                     pulse::stream::State::Failed | pulse::stream::State::Terminated => {
-                        panic!("PulseAudio stream failed");
+                        return Err("PulseAudio stream failed".into());
                     }
                     _ => {}
                 }
-            }
+                Ok(false)
+            })
+            .expect("stream should become ready");
 
             stream.disconnect().ok();
             context.disconnect();
@@ -1045,5 +1323,26 @@ mod tests {
         let err = SfxPlaybackError::Decode(rodio::decoder::DecoderError::UnrecognizedFormat);
         let msg = err.to_string();
         assert!(msg.contains("decode"), "error message: {msg}");
+    }
+
+    #[test]
+    fn play_sfx_short_circuits_when_native_audio_is_disabled() {
+        let _guard = crate::native_audio::lock_native_audio_test_state();
+        crate::native_audio::trip_native_audio_breaker(NativeAudioFailureKind::DeviceOpenTimeout);
+
+        let result = play_sfx(&[0u8; 4], &PlaybackOptions::default());
+        assert!(matches!(
+            result,
+            Err(SfxPlaybackError::NativePlaybackDisabled)
+        ));
+    }
+
+    #[test]
+    fn decode_errors_do_not_trip_native_audio_breaker() {
+        let _guard = crate::native_audio::lock_native_audio_test_state();
+
+        let result = play_sfx(&[0u8; 4], &PlaybackOptions::default());
+        assert!(matches!(result, Err(SfxPlaybackError::Decode(_))));
+        assert!(crate::native_audio::native_audio_available());
     }
 }

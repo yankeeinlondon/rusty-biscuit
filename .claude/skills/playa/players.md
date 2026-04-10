@@ -1,6 +1,6 @@
 # Player Capability Scoring
 
-Players are automatically ranked by capability for format-appropriate selection.
+These rankings apply to the host-player fallback path. Playa may use native playback first and only consult this table when it needs or is forced to use an external player.
 
 ## Scoring System
 
@@ -45,7 +45,7 @@ let players = match_players(format);
 let available = match_available_players(format);
 
 // Check specific player
-use sniff_lib::programs::InstalledHeadlessAudio;
+use sniff::programs::InstalledHeadlessAudio;
 let installed = InstalledHeadlessAudio::new();
 if installed.is_installed(player.as_headless_audio()) {
     // Player available

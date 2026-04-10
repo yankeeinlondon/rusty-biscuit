@@ -11,10 +11,11 @@
 
 <ul>
   <li>OS, hardware, network, filesystem detection</li>
-  <li>Program inventory (editors, utilities, package managers, etc.)</li>
+  <li>Program inventory with install support (editors, utilities, package managers, etc.)</li>
   <li>System services and init system detection</li>
-  <li>Git repository and monorepo analysis</li>
-  <li>Cross-platform with automatic provider failover</li>
+  <li>Git repository analysis, monorepo detection, and remote inspection</li>
+  <li>Blast radius analysis, recent commits, and justfile detection</li>
+  <li>Cross-platform (macOS, Linux, Windows)</li>
 </ul>
 </td>
 </tr>
@@ -26,12 +27,13 @@
 
 A comprehensive Rust library for system detection:
 
-- **OS Detection**: Distribution, kernel, architecture, package managers, locale, timezone
-- **Hardware Detection**: CPU (with SIMD), GPU (Metal support), memory, storage
+- **OS Detection**: Distribution, kernel, architecture, package managers, locale, timezone, NTP status
+- **Hardware Detection**: CPU (with SIMD), GPU (Metal support), memory, storage, audio devices
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses plus WAN IP lookup
-- **Filesystem Analysis**: Git repos, monorepo tools, language detection, EditorConfig, document discovery with content hashing (via `biscuit-hash`)
-- **Programs Module**: Detect installed programs across 8 categories
-- **Services Module**: Detect and list system services across init systems
+- **Filesystem Analysis**: Git repos, monorepo tools, language detection, file type classification, EditorConfig, document discovery, blast radius, justfile detection, recent commits
+- **Programs Module**: Detect installed programs across 8 categories with install support
+- **Services Module**: Detect and list system services across 10+ init systems
+- **Remote Inspection**: Query GitHub, GitLab, Gitea, and Bitbucket APIs for repository metadata
 
 See [sniff/lib/README.md](lib/README.md) for detailed API documentation.
 
@@ -39,10 +41,11 @@ See [sniff/lib/README.md](lib/README.md) for detailed API documentation.
 
 A feature-rich CLI exposing all library capabilities:
 
-- **Flexible Output**: Text (with verbosity levels) or JSON
+- **Flexible Output**: Text (with verbosity levels), JSON, or plain text
 - **Subcommand Filtering**: Use subcommands to show specific sections
-- **Deep Mode**: Network queries for remote git branches and package versions
-- **Program Detection**: List installed editors, utilities, package managers, and more
+- **Scoped Enrichment**: `--refresh-remotes` for git sync, `--latest-versions` for dependency updates
+- **Program Detection**: List and install programs across 8 categories
+- **Repository Queries**: Recent commits, source code changes, blast radius analysis
 
 See [sniff/cli/README.md](cli/README.md) for complete CLI documentation.
 
@@ -52,8 +55,11 @@ See [sniff/cli/README.md](cli/README.md) for complete CLI documentation.
 # Install
 cargo install --path sniff/cli
 
-# Detect everything (JSON output)
+# Show help (no subcommand)
 sniff
+
+# Full system info as JSON
+sniff --json
 
 # Show only hardware (text output)
 sniff hardware
@@ -67,8 +73,22 @@ sniff programs
 # Show system services
 sniff services
 
-# Deep mode (queries remotes and registries)
-sniff --deep
+# Show audio devices
+sniff audio-devices
+
+# Detect justfiles and recipes
+sniff just
+
+# Repository analysis
+sniff repo                           # Monorepo structure
+sniff repo recent-commits 1w         # Commits from last week
+sniff repo git-status                # Git status with commit history
+sniff repo remote origin             # Inspect remote repository
+sniff blast-radius                   # Docs affected by dirty changes
+
+# Scoped enrichment (opt-in network queries)
+sniff repo --latest-versions         # Check registries for updates
+sniff repo git-status --refresh-remotes  # Sync remote tracking data
 
 # JSON output for subcommands
 sniff hardware --json
@@ -78,12 +98,13 @@ sniff hardware --json
 
 | Category | Description |
 |----------|-------------|
-| **OS** | Distribution, kernel, architecture, package managers |
-| **Hardware** | CPU, GPU, memory, storage |
+| **OS** | Distribution, kernel, architecture, package managers, locale, timezone, NTP |
+| **Hardware** | CPU (SIMD), GPU (Metal), memory, storage, audio devices |
 | **Network** | Interfaces, IPv4/IPv6 addresses, WAN IP |
-| **Filesystem** | Git repos, monorepos, languages |
-| **Programs** | Editors, utilities, package managers, TTS, terminals, AI tools |
-| **Services** | System services with init system detection |
+| **Filesystem** | Git repos, monorepos, languages, file types, docs, blast radius, justfiles |
+| **Programs** | Editors, utilities, package managers, TTS, terminals, audio, AI tools |
+| **Services** | System services across 10+ init systems |
+| **Remote** | GitHub, GitLab, Gitea, Bitbucket repository metadata |
 
 ## Project Structure
 
@@ -91,24 +112,32 @@ sniff hardware --json
 sniff/
 ├── cli/              # Binary crate (`sniff` command)
 │   ├── src/
-│   │   ├── main.rs   # CLI parsing, config, enrichment
-│   │   └── output/   # Text/JSON rendering with per-topic modules
-│   │       ├── mod.rs, filesystem.rs, hardware.rs, ...
-│   │       └── topics.rs, structure.rs
+│   │   ├── main.rs       # Entry point, tracing initialization
+│   │   ├── args.rs       # Clap subcommands and argument parsing
+│   │   ├── commands.rs   # Command execution logic
+│   │   ├── install.rs    # Program installation interface
+│   │   └── output/       # Text/JSON rendering with per-topic modules
+│   │       ├── mod.rs, filesystem.rs, hardware.rs, os.rs, network.rs
+│   │       ├── programs.rs, services.rs, remote.rs, recent_commits.rs
+│   │       └── topics.rs, just.rs
 │   └── Cargo.toml
-└── lib/              # Library crate
-    ├── src/
-    │   ├── lib.rs                    # Public API, SniffConfig
-    │   ├── os.rs                     # OS detection
-    │   ├── hardware.rs               # CPU, GPU, memory, storage
-    │   ├── network.rs                # Network interfaces
-    │   ├── filesystem/               # Git, repo, languages, docs, ...
-    │   ├── package/                  # Package manager abstraction
-    │   ├── programs/                 # Program detection, inventory, schema, ...
-    │   └── services/                 # System service detection
-    └── Cargo.toml
+├── lib/              # Library crate
+│   ├── src/
+│   │   ├── lib.rs            # Public API: detect(), SniffConfig, DetectionPlan
+│   │   ├── request.rs        # Fine-grained detection control types
+│   │   ├── error.rs          # Error types
+│   │   ├── os/               # OS detection (distro, locale, time, package managers)
+│   │   ├── hardware/         # CPU, GPU, memory, storage, audio devices
+│   │   ├── network/          # Network interfaces
+│   │   ├── filesystem/       # Git, repo, languages, docs, blast radius, file types, just
+│   │   ├── package/          # Package manager abstraction (110+)
+│   │   ├── programs/         # Program detection and install (8 categories)
+│   │   ├── remote/           # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
+│   │   └── services/         # System service detection (10+ init systems)
+│   └── Cargo.toml
+└── docs/             # Package documentation
 ```
 
 ## License
 
-Part of the Dockhand monorepo. See top-level LICENSE file.
+Part of the Rusty Biscuit monorepo. See top-level LICENSE file.

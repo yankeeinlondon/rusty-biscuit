@@ -12,7 +12,9 @@
 //! the appropriate styling.
 
 use super::VisualDiffOptions;
-use super::constants::{BG_ADDED, BG_CHANGED_ADD, BG_CHANGED_DEL, BG_REMOVED, BOLD, DIM, RESET, UNDERLINE};
+use super::constants::{
+    BG_ADDED, BG_CHANGED_ADD, BG_CHANGED_DEL, BG_REMOVED, BOLD, DIM, RESET, UNDERLINE,
+};
 use super::diff::{DiffLine, InlineSpan};
 use super::utils::{filter_with_context, wrap_to_width};
 use biscuit_terminal::utils::UnicodeWidthStr;

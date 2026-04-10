@@ -335,7 +335,7 @@ pub fn format_connection(conn: &Connection) -> ConnectionInfo {
     }
 }
 
-pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
+pub fn print_pretty(metadata: &TerminalMetadata, verbose: u8) {
     let s = crate::types::CliStyles::detect();
 
     println!();
@@ -485,9 +485,6 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
         check(metadata.underline_support.colored)
     );
 
-    // Reserved for future verbose-only output
-    let _ = verbose;
-
     // Multiplexing
     println!("\n{}{}Multiplexing{}", s.bold, s.blue, s.reset);
     println!("  Type:       {:?}", metadata.multiplex);
@@ -534,6 +531,58 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     if let Some(config) = &metadata.config_file {
         println!("\n{}{}Config{}", s.bold, s.blue, s.reset);
         println!("  File:       {}", config);
+    }
+
+    // Verbose-only: environment details
+    if verbose >= 1 {
+        println!("\n{}{}Environment{}", s.bold, s.blue, s.reset);
+        println!(
+            "  TERM:       {}",
+            std::env::var("TERM").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  TERM_PROGRAM: {}",
+            std::env::var("TERM_PROGRAM")
+                .unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  COLORTERM:  {}",
+            std::env::var("COLORTERM").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  NO_COLOR:   {}",
+            if std::env::var("NO_COLOR").is_ok() {
+                format!("{}set{}", s.yellow, s.reset)
+            } else {
+                format!("{}unset{}", s.dim, s.reset)
+            }
+        );
+    }
+
+    // Very verbose: raw detection values
+    if verbose >= 2 {
+        println!("\n{}{}Raw Detection{}", s.bold, s.blue, s.reset);
+        println!(
+            "  TERM_PROGRAM_VERSION: {}",
+            std::env::var("TERM_PROGRAM_VERSION")
+                .unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  LANG:       {}",
+            std::env::var("LANG").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  LC_ALL:     {}",
+            std::env::var("LC_ALL").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  SSH_CLIENT: {}",
+            std::env::var("SSH_CLIENT").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
+        println!(
+            "  TMUX:       {}",
+            std::env::var("TMUX").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+        );
     }
 
     println!();

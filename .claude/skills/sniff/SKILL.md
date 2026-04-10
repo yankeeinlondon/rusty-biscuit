@@ -11,13 +11,14 @@ Cross-platform system detection library and CLI for Rust.
 
 | Category | Detection |
 |----------|-----------|
-| OS | Distribution, kernel, architecture, package managers, locale, timezone |
+| OS | Distribution, kernel, architecture, package managers, locale, timezone, NTP status |
 | Hardware | CPU (with SIMD), GPU (Metal), memory, storage, audio devices |
 | Network | Interface enumeration with IPv4/IPv6, WAN IP |
-| Filesystem | Git repos, monorepos, languages, EditorConfig, document discovery |
-| Programs | 8 categories with macOS bundle support (parallel via Rayon) |
-| Services | 11 init systems (systemd, launchd, OpenRC, runit, etc.) |
+| Filesystem | Git repos, monorepos, languages, file types, EditorConfig, docs, blast radius, justfiles, recent commits |
+| Programs | 8 categories with macOS bundle support and install (parallel via Rayon) |
+| Services | 10+ init systems (systemd, launchd, OpenRC, runit, etc.) |
 | Packages | 110+ package manager abstraction |
+| Remote | GitHub, GitLab, Gitea, Bitbucket repository metadata |
 
 ## API Tiers
 
@@ -97,22 +98,31 @@ let result = detect_with_config(config)?;
 ## CLI
 
 ```bash
-sniff                      # Full system info (JSON output)
+sniff                      # Show help
+sniff --json               # Full system info (JSON output)
 sniff hardware             # Hardware only (text output)
 sniff cpu                  # Just CPU info
+sniff audio-devices        # Audio input/output devices
 sniff programs             # All programs
 sniff editors              # Just editors
+sniff editors install      # Install an editor (interactive)
 sniff agents               # AI CLI tools
 sniff services             # System services
 sniff docs                 # Markdown documents
 sniff topics               # Table of available topics
-sniff structure            # Structural overview
+sniff just                 # Justfiles and recipes
+sniff repo                 # Repository/monorepo structure
+sniff repo git-status      # Git status with commit history
+sniff repo remote origin   # Inspect remote repository
+sniff repo recent-commits 1w  # Commits from last week
+sniff repo source-code-changes today  # Today's source changes
+sniff blast-radius         # Docs affected by dirty changes
 sniff hardware --json      # Subcommand with JSON output
 ```
 
 **Output modes:**
-- No subcommand: JSON (all data)
-- With subcommand: Text (default), `--json` for JSON
+- No subcommand: help (use `--json` for full JSON)
+- With subcommand: Text (default), `--json` for JSON, `--plain` for unstyled
 
 ## Detailed Topics
 

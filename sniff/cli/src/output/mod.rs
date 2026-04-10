@@ -10,6 +10,7 @@ mod just;
 mod network;
 mod os;
 mod programs;
+pub(crate) mod recent_commits;
 mod remote;
 mod services;
 mod topics;
@@ -388,21 +389,11 @@ pub fn render_text(
         }
         OutputFilter::Repo => {
             match repo_action {
-                Some(RepoAction::Package) => {
-                    let rendered = render_repo_package(result, base_dir, verbose);
-                    if rendered.is_empty() {
-                        std::process::exit(1);
-                    }
-                    out.push_str(&rendered);
-                    out.push('\n');
+                Some(RepoAction::Package { .. }) => {
+                    unreachable!("Package is handled as an early return in commands.rs")
                 }
-                Some(RepoAction::PackageArea) => {
-                    let rendered = render_repo_package_area(result, base_dir);
-                    if rendered.is_empty() {
-                        std::process::exit(1);
-                    }
-                    out.push_str(&rendered);
-                    out.push('\n');
+                Some(RepoAction::PackageArea { .. }) => {
+                    unreachable!("PackageArea is handled as an early return in commands.rs")
                 }
                 Some(RepoAction::Packages { filter }) => {
                     let rendered = render_repo_packages(result, filter);

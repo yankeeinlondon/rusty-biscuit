@@ -37,10 +37,12 @@ write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 Three-phase pipeline for document preparation:
 
 **Inline Pre** (serial):
-1. **Text Replacement** - `replace:` frontmatter replaces literal strings
-2. **Page Blocks** - `::block` / `::end-block` conditional regions
-3. **Interpolation** - `{{ variable }}` expressions expand to values
-4. **Shell Expansion** - `::shell` directives execute approved commands
+1. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
+2. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter
+3. **Text Replacement** - `replace:` frontmatter replaces literal strings
+4. **Page Blocks** - `::block` / `::end-block` conditional regions
+5. **Interpolation** - `{{ variable }}` expressions expand to values
+6. **Shell Expansion** - `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
 
 **Transclusion** (prepared serially, resolved concurrently):
 - `::file ./doc.md` - Markdown transclusion with recursive processing
@@ -89,6 +91,13 @@ let options = ComposeOptions::new()
 - `length(x)` - String/array/object length
 - `number(x, default)` - Parse as number
 - `round(x, default)` - Round to integer
+
+### Shell Expansion Notes
+
+- Body `::shell` and top-level frontmatter `$(...)` share policy loading, whitelist/blacklist checks, approval, and timeout behavior.
+- Frontmatter shell expansion stores trimmed `stdout` only and treats malformed matching expressions as hard errors.
+- Independent top-level frontmatter shell commands execute concurrently after approval/policy resolution.
+- `--allow-shell-timeout` / `ComposeOptions::with_allow_shell_timeout(true)` convert timeouts into empty-string replacements plus compose warnings.
 
 ## Detailed Topics
 
