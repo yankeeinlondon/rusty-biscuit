@@ -68,14 +68,11 @@ Rendering methods on `CommitDescSet`:
 
 | Method | Returns | Notes |
 |--------|---------|-------|
-| `describe()` | `String` | Markdown — one section per commit |
-| `describe_for_terminal(term: &Terminal)` | `String` | Uses `darkmatter` to render `describe()` output |
-| `source_code_changes()` | `String` | Markdown — grouped by source file |
-| `source_code_changes_for_terminal(term: &Terminal)` | `String` | Uses `darkmatter` |
-| `documentation_changes()` | `String` | Markdown — grouped by doc file |
-| `documentation_changes_for_terminal(term: &Terminal)` | `String` | Uses `darkmatter` |
+| `describe(plain: bool)` | `String` | Markdown — one section per commit; `plain` strips hyperlinks |
+| `source_code_changes(plain: bool)` | `String` | Markdown — grouped by source file; `plain` strips hyperlinks |
+| `documentation_changes(plain: bool)` | `String` | Markdown — grouped by doc file; `plain` strips hyperlinks |
 
-The `*_for_terminal` methods delegate to the Markdown method and then render through `darkmatter::render_to_terminal()`. This mirrors the existing pattern in the CLI where Markdown text is rendered through darkmatter for terminal display.
+**Note:** Terminal rendering via `darkmatter` is handled in the CLI layer, not in the library. This avoids a cyclic dependency (darkmatter depends on sniff).
 
 ### File classification for `source_code_changes` / `documentation_changes`
 
@@ -249,12 +246,13 @@ Same structure as `source_code_changes()` but filtered to documentation files on
 
 ### Terminal rendering
 
-The `*_for_terminal` methods produce a string by:
+Terminal rendering is handled in the CLI layer (`sniff/cli/src/output/recent_commits.rs`) using `darkmatter`:
 
-1. Generating the Markdown string via the corresponding method.
-2. Rendering through `darkmatter` for terminal output.
+1. The library's Markdown method is called (e.g., `describe(false)`) to generate Markdown with hyperlinks.
+2. The Markdown string is passed to `darkmatter::markdown::Markdown::from()` and then `darkmatter::markdown::output::terminal::for_terminal()`.
+3. When `--plain` is set, the library's plain method is used directly (e.g., `describe(true)`) which omits hyperlinks.
 
-The CLI layer passes `--plain` through to disable hyperlinks and strip escape codes.
+This separation avoids a cyclic dependency between `sniff` and `darkmatter`.
 
 ## Part 4: CLI Integration
 
@@ -389,12 +387,12 @@ A new function in `commands.rs` (or a new submodule `commands/recent_commits.rs`
    - For each `CommitDesc`, retain only files under the matching package/area path.
    - Remove commits with zero remaining files.
    - Retain only matching packages/areas in the metadata.
-5. If the result is empty, delegate to `handle_no_results(no_error, on_error, plain)`.
-6. Output:
-   - `--json`: serialize `CommitDescSet` to JSON.
-   - `RecentCommits`: call `describe_for_terminal()` (or `describe()` when `--plain`).
-   - `SourceCodeChanges`: call `source_code_changes_for_terminal()`.
-   - `DocumentationChanges`: call `documentation_changes_for_terminal()`.
+ 5. If the result is empty, delegate to `handle_no_results(no_error, on_error, plain)`.
+ 6. Output:
+    - `--json`: serialize `CommitDescSet` to JSON.
+    - `RecentCommits`: call `describe(plain)`, render via darkmatter for terminal (unless `--plain`).
+    - `SourceCodeChanges`: call `source_code_changes(plain)`, render via darkmatter for terminal.
+    - `DocumentationChanges`: call `documentation_changes(plain)`, render via darkmatter for terminal.
 
 ### Default period
 
@@ -506,13 +504,13 @@ No new dependencies required:
 
 ## Part 9: Implementation Order
 
-1. **`parse_period` + `PeriodSpecifier`** — pure parsing, easy to test.
-2. **`parse_commit_message`** — pure string parsing.
-3. **`CommitDesc` + `CommitDescSet`** — data types.
-4. **`get_recent_commits_by_*`** — library query functions.
-5. **Rendering methods** — `describe()`, `source_code_changes()`, `documentation_changes()`.
-6. **`is_documentation_path`** — file classification helper.
-7. **CLI args** — new `RepoSubcommand` variants.
-8. **CLI dispatch** — `handle_recent_commits_command`.
-9. **Terminal rendering** — `*_for_terminal` methods via darkmatter.
+ 1. **`parse_period` + `PeriodSpecifier`** — pure parsing, easy to test.
+ 2. **`parse_commit_message`** — pure string parsing.
+ 3. **`CommitDesc` + `CommitDescSet`** — data types.
+ 4. **`get_recent_commits_by_*`** — library query functions.
+ 5. **Rendering methods** — `describe()`, `source_code_changes()`, `documentation_changes()`.
+ 6. **`is_documentation_path`** — file classification helper.
+ 7. **CLI args** — new `RepoSubcommand` variants.
+ 8. **CLI dispatch** — `handle_recent_commits_command`.
+ 9. **Terminal rendering** — darkmatter rendering in CLI layer (not in library to avoid cyclic dep).
 10. **Tests** — unit + integration.

@@ -38,7 +38,7 @@ pub struct CommitDesc {
 
 This struct should also offer the following output functions:
 
-1. `describe()`
+1. `describe(plain: bool)`
 
     Will output the description as valid Markdown content that looks like (for each commit in the set):
 
@@ -52,59 +52,54 @@ This struct should also offer the following output functions:
         - {bullet_points}
     ```
 
-1. `describe_for_terminal(term: &Terminal)`
+    When `plain` is `true`, hyperlinks are omitted and only relative file paths are shown.
 
-    - will use `darkmatter` library to render for the terminal
+1. `source_code_changes(plain: bool)`
 
+     ```md
+     ### Source Code Changes (_since {period}_)
 
-1. `source_code_changes()`
+     - [{relative-source-code-file}](absolute-source-code-file)
+         - {changes-in-period-list}
+     - ...
+     ```
 
-    ```md
-    ### Source Code Changes (_since {period}_)
+     Where the `{changes-in-period-list}` would look like:
+         - `{date} - _{description}_ as part of commit **{commit}**`
+             - {bullet_points}
 
-    - [{relative-source-code-file}](absolute-source-code-file)
-        - {changes-in-period-list}
-    - ...
-    ```
+    When `plain` is `true`, hyperlinks are omitted.
 
-    Where the `{changes-in-period-list}` would look like:
-        - `{date} - _{description}_ as part of commit **{commit}**`
-            - {bullet_points}
+ 1. `documentation_changes(plain: bool)`
 
-1. `source_code_changes_for_terminal(term: &Terminal)`
+     ```md
+     ### Documentation Changes (_since {period}_)
 
-    - uses the `darkmatter` library to render for the terminal
+     - [{relative-documentation-file}](absolute-documentation-file)
+         - {changes-in-period-list}
+     - ...
+     ```
 
-1. `documentation_changes()`
+     Where the `{changes-in-period-list}` would look like:
+         - `{date} - _{description}_ as part of commit **{commit}**`
+             - {bullet_points}
 
-    ```md
-    ### Documentation Changes (_since {period}_)
+    When `plain` is `true`, hyperlinks are omitted.
 
-    - [{relative-documentation-file}]({absolute-documentation-file})
-        - {changes-in-period-list}
-    - ...
-    ```
-
-    Where the `{changes-in-period-list}` would look like:
-        - `{date} - _{description}_ as part of commit **{commit}**`
-            - {bullet_points}
-
-1. `documentation_changes_for_terminal(term: &Terminal)`
-
-    - uses the `darkmatter` library to render for the terminal
+**Note:** Terminal rendering (using `darkmatter`) is handled in the CLI layer, not in the library. The library provides Markdown output only. This avoids a cyclic dependency between the `sniff` library and `darkmatter`.
 
 ## Sniff CLI
 
 The Sniff CLI will use these new library functions to provide the following commands:
 
 - `sniff repo recent-commits <period>`
-    - uses the `describe_for_terminal` function for standard output
+    - uses `describe()` method and renders via darkmatter for standard output
     - uses the serialized data when `--json` is asked for
 - `sniff repo source-code-changes <period>`
-    - uses the `source_code_changes_for_terminal` function for standard output
+    - uses `source_code_changes()` method and renders via darkmatter for standard output
     - uses the serialized data when `--json` is asked for
 - `sniff repo documentation-changes <period>`
-    - uses the `documentation_changes_for_terminal` function for standard output
+    - uses `documentation_changes()` method and renders via darkmatter for standard output
     - uses the serialized data when `--json` is asked for
 
 The `period` parameter should be optional and if left out the default will be 3 days. A user who does use it can provide any of the following:
