@@ -68,7 +68,6 @@ pub struct TimeInfo {
 ///
 /// `Some(String)` containing stdout if the command succeeds, `None` otherwise.
 /// Returns `None` for permission errors, timeouts, or any execution failure.
-#[allow(dead_code)] // Used only on Linux for NTP detection
 pub(crate) fn run_command_with_timeout(
     cmd: &str,
     args: &[&str],
@@ -321,8 +320,8 @@ fn detect_timezone_name() -> Option<String> {
 /// ## Platform Behavior
 ///
 /// - **Linux**: Queries `timedatectl` with a 5-second timeout
-/// - **macOS**: Returns `Unknown` (sntp status check is complex)
-/// - **Windows**: Returns `Unknown` (w32tm query not implemented)
+/// - **macOS**: Queries `sntp` with the server from `/etc/ntp.conf` (5-second timeout)
+/// - **Windows**: Queries `w32tm /query /status` with a 5-second timeout
 ///
 /// ## Returns
 ///
@@ -355,16 +354,35 @@ pub fn detect_ntp_status() -> NtpStatus {
 
 #[cfg(target_os = "macos")]
 pub fn detect_ntp_status() -> NtpStatus {
-    // macOS NTP status detection is complex (requires sntp or systemsetup)
-    // Return Unknown for initial implementation
-    NtpStatus::Unknown
+    // Read the configured NTP server from /etc/ntp.conf, fall back to time.apple.com
+    let server = std::fs::read_to_string("/etc/ntp.conf")
+        .ok()
+        .and_then(|contents| {
+            contents
+                .lines()
+                .find(|line| line.starts_with("server "))
+                .and_then(|line| line.split_whitespace().nth(1))
+                .map(String::from)
+        })
+        .unwrap_or_else(|| "time.apple.com".to_string());
+
+    // sntp ships with macOS and works without admin privileges
+    let output = run_command_with_timeout("sntp", &[&server], 5);
+    match output {
+        // A successful response contains the offset, e.g. "+0.001527 +/- 0.004895 time.apple.com"
+        Some(text) if text.contains("+/-") => NtpStatus::Synchronized,
+        _ => NtpStatus::Unknown,
+    }
 }
 
 #[cfg(target_os = "windows")]
 pub fn detect_ntp_status() -> NtpStatus {
-    // Windows NTP status requires w32tm query
-    // Return Unknown for initial implementation
-    NtpStatus::Unknown
+    let output = run_command_with_timeout("w32tm", &["/query", "/status"], 5);
+    match output {
+        Some(text) if text.contains("Leap Indicator: 0") => NtpStatus::Synchronized,
+        Some(text) if text.contains("Leap Indicator:") => NtpStatus::Unsynchronized,
+        _ => NtpStatus::Unknown,
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
