@@ -1,8 +1,10 @@
 //! Audio device detection module.
 //!
 //! Detects audio hardware devices (inputs, outputs) using platform-specific
-//! APIs. On macOS, uses CoreAudio for device enumeration. On other platforms,
-//! returns an empty result.
+//! APIs:
+//! - **macOS**: CoreAudio for full device enumeration (channels, sample rates)
+//! - **Linux**: Parses `/proc/asound/cards` for ALSA card names
+//! - **Windows**: Queries `Win32_SoundDevice` via `wmic`
 
 use serde::{Deserialize, Serialize};
 
@@ -460,10 +462,129 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
     devices
 }
 
-/// Stub implementation for non-macOS platforms.
+/// Detects audio devices on Linux by parsing `/proc/asound/cards`.
+///
+/// Each card entry has two lines:
+/// ```text
+///  0 [PCH            ]: HDA-Intel - HDA Intel PCH
+///                       HDA Intel PCH at 0xf7d34000 irq 34
+/// ```
+///
+/// The device kind is inferred from the card name (HDMI, USB, Bluetooth).
+/// Channel counts and sample rates are not available from this source.
+#[cfg(target_os = "linux")]
+pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
+    let contents = match std::fs::read_to_string("/proc/asound/cards") {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut devices = Vec::new();
+    for line in contents.lines() {
+        // Card lines start with a number: " 0 [PCH  ]: HDA-Intel - HDA Intel PCH"
+        let trimmed = line.trim();
+        if trimmed.is_empty() || !trimmed.as_bytes()[0].is_ascii_digit() {
+            continue;
+        }
+
+        // Extract the long name after " - "
+        let name = trimmed
+            .split(" - ")
+            .nth(1)
+            .unwrap_or(trimmed)
+            .to_string();
+
+        let name_upper = name.to_uppercase();
+        let kind = if name_upper.contains("HDMI") {
+            AudioDeviceKind::Hdmi
+        } else if name_upper.contains("USB") {
+            AudioDeviceKind::Usb
+        } else if name_upper.contains("BLUETOOTH") || name_upper.contains("BT") {
+            AudioDeviceKind::Bluetooth
+        } else {
+            AudioDeviceKind::BuiltIn
+        };
+
+        // Extract card index for a stable UID
+        let uid = trimmed
+            .split_whitespace()
+            .next()
+            .unwrap_or("0")
+            .to_string();
+
+        devices.push(AudioDeviceInfo {
+            name,
+            uid: format!("card{uid}"),
+            kind,
+            direction: AudioDirection::Output,
+            ..Default::default()
+        });
+    }
+
+    devices
+}
+
+/// Detects audio devices on Windows via `wmic`.
+///
+/// Queries `Win32_SoundDevice` for device names and status. Device kind is
+/// inferred from the name (USB, Bluetooth, HDMI). Channel counts and sample
+/// rates are not available from this source.
+#[cfg(target_os = "windows")]
+pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
+    let output = std::process::Command::new("wmic")
+        .args(["path", "Win32_SoundDevice", "get", "Name,Status"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => return Vec::new(),
+    };
+
+    let mut devices = Vec::new();
+    for (idx, line) in output.lines().skip(1).enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        // wmic output: "Name      Status" — status is the last word
+        let name = line
+            .rsplit_once(char::is_whitespace)
+            .map(|(n, _)| n.trim())
+            .unwrap_or(line)
+            .to_string();
+
+        let name_upper = name.to_uppercase();
+        let kind = if name_upper.contains("HDMI") {
+            AudioDeviceKind::Hdmi
+        } else if name_upper.contains("USB") {
+            AudioDeviceKind::Usb
+        } else if name_upper.contains("BLUETOOTH") {
+            AudioDeviceKind::Bluetooth
+        } else if name_upper.contains("VIRTUAL") {
+            AudioDeviceKind::Virtual
+        } else {
+            AudioDeviceKind::Unknown
+        };
+
+        devices.push(AudioDeviceInfo {
+            name,
+            uid: format!("win-audio-{idx}"),
+            kind,
+            direction: AudioDirection::Output,
+            ..Default::default()
+        });
+    }
+
+    devices
+}
+
+/// Stub implementation for platforms without audio detection.
 ///
 /// Returns an empty vector.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
     Vec::new()
 }
