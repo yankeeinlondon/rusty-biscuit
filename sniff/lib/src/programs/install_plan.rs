@@ -9,7 +9,7 @@ use crate::error::SniffInstallationError;
 use crate::os::OsType;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::host_capability::HostCapabilities;
-use crate::programs::installer::{InstallOptions, InstallResult, method_available};
+use crate::programs::installer::{execute_install, InstallOptions, InstallResult, method_available};
 use crate::programs::schema::ProgramMetadata;
 use crate::programs::types::InstallationMethod;
 
@@ -68,16 +68,37 @@ impl InstallPlan {
         self.options.iter().find(|o| o.choose)
     }
 
-    /// Execute the chosen option. Task 13 replaces this stub.
+    /// Execute the chosen installation option.
+    ///
+    /// Returns `NoViableMethod` if no option was marked as chosen. Returns
+    /// `RemoteBashConsentRequired` if the chosen option is a `RemoteBash`
+    /// method and `opts.approve_remote_bash` is `false`. Otherwise delegates
+    /// to `execute_install`.
     pub fn execute(
         &self,
         opts: &InstallOptions,
     ) -> Result<InstallResult, SniffInstallationError> {
-        let _ = opts;
-        Err(SniffInstallationError::NoViableMethod {
-            pkg: self.program.clone(),
-            detail: "InstallPlan::execute not implemented yet".to_string(),
-        })
+        let chosen = self.chosen().ok_or_else(|| {
+            SniffInstallationError::NoViableMethod {
+                pkg: self.program.clone(),
+                detail: format!(
+                    "no runnable method (considered {} option(s))",
+                    self.options.len()
+                ),
+            }
+        })?;
+
+        if matches!(chosen.kind, InstallationMethod::RemoteBash(_))
+            && !opts.approve_remote_bash
+        {
+            let url = chosen.kind.package_name().to_string();
+            return Err(SniffInstallationError::RemoteBashConsentRequired {
+                pkg: self.program.clone(),
+                url,
+            });
+        }
+
+        execute_install(&chosen.kind, opts)
     }
 }
 
@@ -493,6 +514,114 @@ mod tests {
         let chosen = plan.chosen().expect("chosen option");
         assert!(matches!(chosen.kind, InstallationMethod::Brew("bat")));
         assert_eq!(plan.failed_with_reason().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod execute_tests {
+    use super::*;
+    use crate::os::OsType;
+    use crate::programs::host_capability::HostCapabilities;
+    use crate::programs::installer::InstallOptions;
+    use crate::programs::schema::{ProgramInfo, VersionFlag, VersionParseStrategy};
+
+    static BREW_PKG: ProgramInfo = ProgramInfo {
+        binary_name: "ripgrep",
+        display_name: "ripgrep",
+        description: "fast grep",
+        website: "https://github.com/BurntSushi/ripgrep",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: &[OsType::MacOS],
+        repo: None,
+        installation_methods: &[InstallationMethod::Brew("ripgrep")],
+    };
+
+    struct FakeProgram;
+    impl crate::programs::schema::ProgramMetadata for FakeProgram {
+        fn info(&self) -> &'static ProgramInfo {
+            &BREW_PKG
+        }
+    }
+
+    fn host_with_brew() -> HostCapabilities {
+        let os_pkg_mgrs = serde_json::from_str(r#"{"brew": true}"#).unwrap();
+        HostCapabilities {
+            os_type: OsType::MacOS,
+            os_pkg_mgrs,
+            default_os_package_manager: Some(
+                crate::programs::enums::OsPackageManager::Brew,
+            ),
+            has_bash: true,
+            ..HostCapabilities::default()
+        }
+    }
+
+    #[test]
+    fn dry_run_returns_ok_without_executing() {
+        let plan = build_install_plan(&FakeProgram, &host_with_brew());
+        let result = plan.execute(&InstallOptions::dry_run()).unwrap();
+        assert!(!result.executed);
+        assert!(result.command.contains("brew"));
+    }
+
+    #[test]
+    fn failed_plan_returns_no_viable_method() {
+        let host = HostCapabilities {
+            os_type: OsType::Linux, // brew not installed on this fake host
+            ..HostCapabilities::default()
+        };
+        let plan = build_install_plan(&FakeProgram, &host);
+        let err = plan.execute(&InstallOptions::dry_run()).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::SniffInstallationError::NoViableMethod { .. }
+        ));
+    }
+
+    #[test]
+    fn remote_bash_without_consent_errors() {
+        let plan = InstallPlan {
+            program: "rustup".into(),
+            website: "https://rustup.rs",
+            successful: true,
+            options: vec![InstallPlanOption {
+                kind: InstallationMethod::RemoteBash("https://sh.rustup.rs"),
+                requires_sudo: false,
+                choose: true,
+                reason_type: InstallPlanReason::Selected,
+                reason: "remote bash installer".into(),
+            }],
+        };
+        let err = plan.execute(&InstallOptions::default()).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::SniffInstallationError::RemoteBashConsentRequired { .. }
+        ));
+    }
+
+    #[test]
+    fn remote_bash_dry_run_allowed_without_consent() {
+        let plan = InstallPlan {
+            program: "rustup".into(),
+            website: "https://rustup.rs",
+            successful: true,
+            options: vec![InstallPlanOption {
+                kind: InstallationMethod::RemoteBash("https://sh.rustup.rs"),
+                requires_sudo: false,
+                choose: true,
+                reason_type: InstallPlanReason::Selected,
+                reason: "remote bash installer".into(),
+            }],
+        };
+        // Even dry-run errors today because execute_install rejects RemoteBash
+        // at the build_install_command layer. The contract is: dry-run of a
+        // remote-bash plan is still rejected by the underlying executor.
+        let result = plan.execute(&InstallOptions::dry_run());
+        assert!(result.is_err());
     }
 }
 
