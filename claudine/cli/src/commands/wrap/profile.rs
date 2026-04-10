@@ -87,6 +87,65 @@ impl PromptSource {
     }
 }
 
+// ---------------------------------------------------------------------------
+// PromptArgConventions — per-provider prompt-argv parsing knowledge
+// ---------------------------------------------------------------------------
+
+/// Describes how a provider's native CLI represents a prompt on argv.
+///
+/// Used by `extract_prompt_source_from_passthrough` to find a prompt in
+/// raw passthrough arguments without embedding per-provider logic in a
+/// central match.
+#[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PromptArgConventions {
+    /// Value-taking flags that carry the prompt string when present,
+    /// e.g. `&["-p", "--prompt"]` for Gemini, `&["-t", "--text"]` for
+    /// Goose. Empty for providers that accept only a positional prompt.
+    pub prompt_flags: &'static [&'static str],
+    /// An optional entrypoint subcommand that must be skipped when
+    /// scanning for a positional prompt, e.g. `Some("exec")` for Codex
+    /// or `Some("run")` for OpenCode / Goose. `None` for providers that
+    /// have no subcommand entrypoint.
+    pub entrypoint: Option<&'static str>,
+    /// Additional value-taking flags whose values must not be mistaken
+    /// for a positional prompt, e.g. `&["-m", "--model", "--output-format"]`.
+    pub value_taking_flags: &'static [&'static str],
+}
+
+#[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
+impl PromptArgConventions {
+    /// Conventions for a provider that accepts only a positional prompt
+    /// after an entrypoint subcommand (e.g. Codex `exec`, OpenCode `run`).
+    pub(crate) const fn positional_after(entrypoint: &'static str) -> Self {
+        Self {
+            prompt_flags: &[],
+            entrypoint: Some(entrypoint),
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+        }
+    }
+}
+
+/// Value-taking flags understood by every provider. Keeps the extractor
+/// from mistaking their values for positional prompts.
+#[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
+const COMMON_VALUE_TAKING_FLAGS: &[&str] = &[
+    "-m",
+    "--model",
+    "-o",
+    "--output",
+    "--output-format",
+    "--output-last-message",
+    "--approval-mode",
+    "--config",
+    "-c",
+    "--profile",
+    "--system-prompt",
+    "--sandbox-image",
+    "--auth-type",
+    "--format",
+];
+
 impl std::fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -378,6 +437,24 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// interactive session ends for inline composition closure.
     fn supports_interactive_inline_closure(&self) -> bool {
         false
+    }
+
+    // -- Prompt argv conventions --------------------------------------------
+
+    /// Describe how this provider represents a prompt on argv.
+    ///
+    /// Used by `extract_prompt_source_from_passthrough` to locate and
+    /// remove a prompt from raw passthrough args. Every provider that
+    /// supports non-interactive mode must implement this; the default
+    /// returns "positional-only, no entrypoint" which works for Claude
+    /// and Kimi (prompt as bare positional, no subcommand).
+    #[allow(dead_code)] // first used in Task 3 (extract_prompt_source_from_passthrough); drop this attr then
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions {
+            prompt_flags: &[],
+            entrypoint: None,
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+        }
     }
 }
 
@@ -764,6 +841,10 @@ impl WrapperProfile for CodexWrapper {
     fn supports_interactive_inline_closure(&self) -> bool {
         true
     }
+
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions::positional_after("exec")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,6 +1083,14 @@ impl WrapperProfile for GeminiWrapper {
         args.push("--output-format".to_string());
         args.push("stream-json".to_string());
     }
+
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions {
+            prompt_flags: &["-p", "--prompt"],
+            entrypoint: None,
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1132,6 +1221,14 @@ impl WrapperProfile for KimiWrapper {
         args.push("--print".to_string());
         args.push("--output-format".to_string());
         args.push("stream-json".to_string());
+    }
+
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions {
+            prompt_flags: &["--prompt"],
+            entrypoint: None,
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+        }
     }
 }
 
@@ -1310,6 +1407,14 @@ impl WrapperProfile for QwenWrapper {
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         args.push("--output-format".to_string());
         args.push("stream-json".to_string());
+    }
+
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions {
+            prompt_flags: &["-p", "--prompt"],
+            entrypoint: None,
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+        }
     }
 }
 
@@ -1509,6 +1614,10 @@ impl WrapperProfile for OpencodeWrapper {
         args.push("--format".to_string());
         args.push("json".to_string());
     }
+
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions::positional_after("run")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1631,6 +1740,14 @@ impl WrapperProfile for GooseWrapper {
                 error_message: "--non-interactive for goose requires a prompt after the entrypoint",
             },
         )
+    }
+
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions {
+            prompt_flags: &["-t", "--text"],
+            entrypoint: Some("run"),
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+        }
     }
 }
 
@@ -2299,5 +2416,56 @@ mod tests {
         let warning = p.apply_sandbox(&mut args);
         assert!(warning.is_some());
         assert!(args.is_empty());
+    }
+
+    // -- PromptArgConventions tests -----------------------------------------
+
+    #[test]
+    fn prompt_arg_conventions_claude_uses_defaults() {
+        let conv = profile(Provider::Claude).prompt_arg_conventions();
+        assert!(conv.prompt_flags.is_empty());
+        assert_eq!(conv.entrypoint, None);
+    }
+
+    #[test]
+    fn prompt_arg_conventions_codex_uses_exec_entrypoint() {
+        let conv = profile(Provider::Codex).prompt_arg_conventions();
+        assert_eq!(conv.entrypoint, Some("exec"));
+        assert!(conv.prompt_flags.is_empty());
+    }
+
+    #[test]
+    fn prompt_arg_conventions_gemini_uses_prompt_flags() {
+        let conv = profile(Provider::Gemini).prompt_arg_conventions();
+        assert_eq!(conv.prompt_flags, &["-p", "--prompt"]);
+        assert_eq!(conv.entrypoint, None);
+    }
+
+    #[test]
+    fn prompt_arg_conventions_goose_uses_run_entrypoint_and_text_flags() {
+        let conv = profile(Provider::Goose).prompt_arg_conventions();
+        assert_eq!(conv.entrypoint, Some("run"));
+        assert_eq!(conv.prompt_flags, &["-t", "--text"]);
+    }
+
+    #[test]
+    fn prompt_arg_conventions_kimi_uses_long_prompt_flag_only() {
+        let conv = profile(Provider::KimiCode).prompt_arg_conventions();
+        assert_eq!(conv.prompt_flags, &["--prompt"]);
+        assert_eq!(conv.entrypoint, None);
+    }
+
+    #[test]
+    fn prompt_arg_conventions_opencode_uses_run_entrypoint() {
+        let conv = profile(Provider::OpenCode).prompt_arg_conventions();
+        assert_eq!(conv.entrypoint, Some("run"));
+        assert!(conv.prompt_flags.is_empty());
+    }
+
+    #[test]
+    fn prompt_arg_conventions_qwen_uses_prompt_flags() {
+        let conv = profile(Provider::QwenCode).prompt_arg_conventions();
+        assert_eq!(conv.prompt_flags, &["-p", "--prompt"]);
+        assert_eq!(conv.entrypoint, None);
     }
 }
