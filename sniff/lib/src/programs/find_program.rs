@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::{debug, instrument, trace};
 use which::which;
 
@@ -291,7 +291,10 @@ fn build_bundle_index() -> HashMap<String, PathBuf> {
 
 /// Checks if a bundle exists and returns the path to its executable.
 #[cfg(target_os = "macos")]
-fn check_bundle_executable(bundle_path: &Path, binary_name: &str) -> Option<PathBuf> {
+fn check_bundle_executable(
+    bundle_path: &std::path::Path,
+    binary_name: &str,
+) -> Option<PathBuf> {
     if !bundle_path.exists() {
         return None;
     }
