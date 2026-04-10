@@ -103,6 +103,74 @@ resolve_program!(
 resolve_program!(resolve_agent, sniff::programs::AiCli, "AI agent");
 
 // ---------------------------------------------------------------------------
+// Cross-category resolved program type and resolver
+// ---------------------------------------------------------------------------
+
+/// A program identified by the name the user typed.
+#[derive(Debug, Clone, Copy)]
+pub enum ResolvedProgram {
+    Editor(sniff::programs::Editor),
+    Utility(sniff::programs::Utility),
+    LanguagePackageManager(sniff::programs::LanguagePackageManager),
+    OsPackageManager(sniff::programs::OsPackageManager),
+    TtsClient(sniff::programs::TtsClient),
+    TerminalApp(sniff::programs::TerminalApp),
+    HeadlessAudio(sniff::programs::HeadlessAudio),
+    AiCli(sniff::programs::AiCli),
+}
+
+impl ResolvedProgram {
+    pub fn display_name(&self) -> &'static str {
+        use sniff::programs::ProgramMetadata;
+        match self {
+            Self::Editor(e) => e.display_name(),
+            Self::Utility(u) => u.display_name(),
+            Self::LanguagePackageManager(m) => m.display_name(),
+            Self::OsPackageManager(m) => m.display_name(),
+            Self::TtsClient(c) => c.display_name(),
+            Self::TerminalApp(t) => t.display_name(),
+            Self::HeadlessAudio(a) => a.display_name(),
+            Self::AiCli(a) => a.display_name(),
+        }
+    }
+}
+
+/// Resolve a free-form program name to a specific category enum variant.
+///
+/// Tries each category in a deterministic order. Returns an error listing the
+/// categories searched if no match is found.
+pub fn resolve_program(name: &str) -> Result<ResolvedProgram, ResolveError> {
+    if let Ok(p) = resolve_editor(name) {
+        return Ok(ResolvedProgram::Editor(p));
+    }
+    if let Ok(p) = resolve_utility(name) {
+        return Ok(ResolvedProgram::Utility(p));
+    }
+    if let Ok(p) = resolve_lang_pkg_mgr(name) {
+        return Ok(ResolvedProgram::LanguagePackageManager(p));
+    }
+    if let Ok(p) = resolve_os_pkg_mgr(name) {
+        return Ok(ResolvedProgram::OsPackageManager(p));
+    }
+    if let Ok(p) = resolve_tts_client(name) {
+        return Ok(ResolvedProgram::TtsClient(p));
+    }
+    if let Ok(p) = resolve_terminal_app(name) {
+        return Ok(ResolvedProgram::TerminalApp(p));
+    }
+    if let Ok(p) = resolve_audio(name) {
+        return Ok(ResolvedProgram::HeadlessAudio(p));
+    }
+    if let Ok(p) = resolve_agent(name) {
+        return Ok(ResolvedProgram::AiCli(p));
+    }
+    Err(ResolveError(format!(
+        "Unknown program '{}'. Searched categories: editors, utilities, language package managers, OS package managers, TTS clients, terminal apps, headless audio, AI agents",
+        name
+    )))
+}
+
+// ---------------------------------------------------------------------------
 // Direct install (single program by name)
 // ---------------------------------------------------------------------------
 
@@ -408,5 +476,23 @@ mod tests {
     fn resolve_agent_by_snake_case() {
         let agent = resolve_agent("claude").unwrap();
         assert_eq!(agent, sniff::programs::AiCli::Claude);
+    }
+
+    #[test]
+    fn resolve_program_editor_by_binary() {
+        let resolved = resolve_program("vim").unwrap();
+        assert!(matches!(resolved, ResolvedProgram::Editor(sniff::programs::Editor::Vim)));
+    }
+
+    #[test]
+    fn resolve_program_utility_alternate() {
+        let resolved = resolve_program("rg").unwrap();
+        assert!(matches!(resolved, ResolvedProgram::Utility(sniff::programs::Utility::Ripgrep)));
+    }
+
+    #[test]
+    fn resolve_program_unknown_name_errors() {
+        let err = resolve_program("definitely-not-a-real-program-xyz").unwrap_err();
+        assert!(err.to_string().contains("Unknown program"));
     }
 }
