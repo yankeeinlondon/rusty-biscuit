@@ -371,8 +371,8 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 mod tests {
     use super::*;
     use darkmatter::markdown::{Frontmatter, Markdown};
-    use serial_test::serial;
     use serde_json::json;
+    use serial_test::serial;
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;
@@ -918,9 +918,12 @@ edition = "2024"
         unsafe {
             std::env::remove_var("SEQ_ROOT");
         }
-        let error = resolve_sequence_reference("{{SEQ_ROOT}}/steps.yaml", &source_path).unwrap_err();
+        let error =
+            resolve_sequence_reference("{{SEQ_ROOT}}/steps.yaml", &source_path).unwrap_err();
 
-        assert!(matches!(error, CompositionError::SequenceExternalLoad(ref msg) if msg.contains("SEQ_ROOT")));
+        assert!(
+            matches!(error, CompositionError::SequenceExternalLoad(ref msg) if msg.contains("SEQ_ROOT"))
+        );
     }
 
     #[test]
