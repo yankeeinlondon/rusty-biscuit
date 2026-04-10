@@ -10,6 +10,7 @@ base64 = "0.22"
 biscuit-file = { path = "../../biscuit-file/lib", features = ["toml", "yaml"] }
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"
 ec4rs = "1"
 futures = { version = "0.3", optional = true }
 getifaddrs = "0.6.0"

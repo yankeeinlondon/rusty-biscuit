@@ -531,11 +531,7 @@ pub fn render_text(
             }
         }
         OutputFilter::Language => {
-            if let Some(ref filesystem) = result.filesystem
-                && let Some(ref langs) = filesystem.languages
-            {
-                out.push_str(&render_language_section(langs, verbose));
-            }
+            out.push_str(&render_language_section(result, verbose, base_dir));
         }
         OutputFilter::Files => {
             if let Some(ref filesystem) = result.filesystem

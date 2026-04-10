@@ -35,10 +35,11 @@ Commands:
     sniff blast-radius    Find docs affected by changed source files
 
   Programs:
-    sniff programs        Show all installed programs
-    sniff editors         Show editors (supports 'install' subcommand)
-    sniff utilities       Show utilities
-    sniff agents          Show AI agent CLI tools
+    sniff programs                        Show all installed programs
+    sniff programs install-plan <name>    Explain how a program would be installed
+    sniff editors                         Show editors (supports 'install' and 'install-plan')
+    sniff utilities                       Show utilities
+    sniff agents                          Show AI agent CLI tools
 
   Services:
     sniff services        Show running services
