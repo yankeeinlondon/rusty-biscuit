@@ -269,6 +269,23 @@ pub fn get_recent_commits_by_hash(base_dir: &Path, hash: &str) -> Result<CommitD
     })?;
     let target_oid = target_commit.id();
 
+    // Validate that the target commit is reachable from HEAD
+    let head_commit = repo
+        .head()
+        .and_then(|h| h.peel_to_commit())
+        .map_err(SniffError::Git)?;
+    let head_oid = head_commit.id();
+
+    if target_oid != head_oid
+        && !repo
+            .graph_descendant_of(head_oid, target_oid)
+            .unwrap_or(false)
+    {
+        return Err(SniffError::HashNotReachable {
+            hash: hash.to_string(),
+        });
+    }
+
     let repo_info = detect_repo(&repo_root)?;
 
     let commits = collect_commits_from_hash_to_head(&repo, target_oid, repo_info.as_ref());
@@ -379,6 +396,9 @@ fn collect_commits_in_range(
     commits
 }
 
+/// Walk from HEAD down to (and including) `target_oid`, returning commits in
+/// newest-first order. The caller must have already validated that `target_oid`
+/// is an ancestor of HEAD.
 fn collect_commits_from_hash_to_head(
     repo: &Repository,
     target_oid: git2::Oid,
@@ -386,13 +406,31 @@ fn collect_commits_from_hash_to_head(
 ) -> Vec<CommitDesc> {
     let mut commits = Vec::new();
 
+    let Ok(mut revwalk) = repo.revwalk() else {
+        return commits;
+    };
+    revwalk
+        .set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
+        .ok();
+
+    if revwalk.push_head().is_err() {
+        return commits;
+    }
+
     let packages = repo_info_opt.and_then(|ri| ri.packages.as_ref());
     let is_monorepo = repo_info_opt.is_some_and(|ri| ri.is_monorepo);
 
-    if let Ok(target_commit) = repo.find_commit(target_oid) {
-        let commit_time =
-            DateTime::from_timestamp(target_commit.time().seconds(), 0).unwrap_or_default();
-        let sha = target_oid.to_string();
+    for oid_result in revwalk {
+        let Ok(oid) = oid_result else {
+            continue;
+        };
+        let Ok(commit) = repo.find_commit(oid) else {
+            continue;
+        };
+
+        let commit_time = DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default();
+
+        let sha = oid.to_string();
         let files_raw = get_commit_files(repo, &sha);
         let files: Vec<String> = files_raw
             .iter()
@@ -400,7 +438,7 @@ fn collect_commits_from_hash_to_head(
             .collect();
 
         if !files.is_empty() {
-            let message = target_commit.message().unwrap_or("").trim();
+            let message = commit.message().unwrap_or("").trim();
             let (description, bullet_points) = parse_commit_message(message);
 
             let (commit_packages, commit_package_areas) = if is_monorepo {
@@ -439,82 +477,11 @@ fn collect_commits_from_hash_to_head(
                 bullet_points,
             });
         }
-    }
 
-    let Ok(mut revwalk) = repo.revwalk() else {
-        return commits;
-    };
-    revwalk
-        .set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
-        .ok();
-
-    if revwalk.push_head().is_err() {
-        return commits;
-    }
-
-    if revwalk.hide(target_oid).is_err() {
-        return commits;
-    }
-
-    for oid_result in revwalk {
-        let Ok(oid) = oid_result else {
-            continue;
-        };
-        let Ok(commit) = repo.find_commit(oid) else {
-            continue;
-        };
-
-        let commit_time = DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default();
-
-        let sha = oid.to_string();
-        let files_raw = get_commit_files(repo, &sha);
-        let files: Vec<String> = files_raw
-            .iter()
-            .map(|(p, _)| p.to_string_lossy().to_string())
-            .collect();
-
-        if files.is_empty() {
-            continue;
+        // Stop after including the target commit
+        if oid == target_oid {
+            break;
         }
-
-        let message = commit.message().unwrap_or("").trim();
-        let (description, bullet_points) = parse_commit_message(message);
-
-        let (commit_packages, commit_package_areas) = if is_monorepo {
-            if let Some(pkgs) = packages {
-                let mut pkg_set: BTreeSet<String> = BTreeSet::new();
-                let mut area_set: BTreeSet<String> = BTreeSet::new();
-
-                for file_path in &files_raw {
-                    let file_path_buf = &file_path.0;
-                    for pkg in pkgs.iter() {
-                        if file_path_buf.starts_with(&pkg.relative) {
-                            pkg_set.insert(pkg.name.clone());
-                            area_set.insert(pkg.package_area.clone());
-                        }
-                    }
-                }
-
-                (
-                    Some(pkg_set.into_iter().collect()),
-                    Some(area_set.into_iter().collect()),
-                )
-            } else {
-                (Some(vec![]), Some(vec![]))
-            }
-        } else {
-            (None, None)
-        };
-
-        commits.push(CommitDesc {
-            hash: sha,
-            datetime: commit_time.to_rfc3339(),
-            packages: commit_packages,
-            package_areas: commit_package_areas,
-            files,
-            description,
-            bullet_points,
-        });
     }
 
     commits
@@ -541,14 +508,8 @@ impl CommitDescSet {
                 if plain {
                     out.push_str(&format!("    - {}\n", file));
                 } else {
-                    let abs = self.repo_root.join(file);
-                    let abs_str = abs.to_string_lossy();
-                    let file_url = if abs_str.starts_with('/') {
-                        format!("file://{}", abs_str)
-                    } else {
-                        format!("file://{}", abs_str)
-                    };
-                    out.push_str(&format!("    - [{}]({})\n", file, file_url));
+                    let url = file_url(&self.repo_root.join(file));
+                    out.push_str(&format!("    - [{}]({})\n", file, url));
                 }
             }
 
@@ -602,14 +563,8 @@ impl CommitDescSet {
             if plain {
                 out.push_str(&format!("- {}\n", file));
             } else {
-                let abs = self.repo_root.join(file);
-                let abs_str = abs.to_string_lossy();
-                let file_url = if abs_str.starts_with('/') {
-                    format!("file://{}", abs_str)
-                } else {
-                    format!("file://{}", abs_str)
-                };
-                out.push_str(&format!("- [{}]({})\n", file, file_url));
+                let url = file_url(&self.repo_root.join(file));
+                out.push_str(&format!("- [{}]({})\n", file, url));
             }
 
             for commit in commits {
@@ -633,6 +588,16 @@ impl CommitDescSet {
 enum ChangeKind {
     SourceCode,
     Documentation,
+}
+
+/// Convert an absolute file path to a proper `file://` URI.
+///
+/// Uses `url::Url::from_file_path` for correct cross-platform encoding
+/// (Windows drive letters, spaces, reserved characters).
+fn file_url(path: &Path) -> String {
+    url::Url::from_file_path(path)
+        .map(|u| u.to_string())
+        .unwrap_or_else(|()| format!("file://{}", path.to_string_lossy()))
 }
 
 fn extract_display_date(datetime: &str) -> String {
@@ -697,6 +662,12 @@ impl CommitDescSet {
         }
 
         self.commits.retain(|c| !c.files.is_empty());
+
+        // Rewrite top-level packages to only include the matched package
+        if let Some(ref mut pkgs) = self.packages {
+            pkgs.retain(|p| p.name.eq_ignore_ascii_case(&package_lower));
+        }
+
         Ok(())
     }
 
@@ -765,6 +736,14 @@ impl CommitDescSet {
         }
 
         self.commits.retain(|c| !c.files.is_empty());
+
+        // Rewrite top-level packages to only include those in the matched area
+        let matching_names: BTreeSet<String> =
+            matching_packages.iter().map(|p| p.name.clone()).collect();
+        if let Some(ref mut pkgs) = self.packages {
+            pkgs.retain(|p| matching_names.contains(&p.name));
+        }
+
         Ok(())
     }
 }
@@ -991,7 +970,12 @@ mod tests {
         fn describe_with_hyperlinks() {
             let set = sample_set();
             let md = set.describe(false);
-            assert!(md.contains("](file:///repo/sniff/lib/src/lib.rs)"));
+            // url::Url::from_file_path produces file:///repo/... on Unix
+            assert!(
+                md.contains("](file:///repo/sniff/lib/src/lib.rs)"),
+                "Expected file URI in markdown link, got: {}",
+                md
+            );
         }
 
         #[test]
