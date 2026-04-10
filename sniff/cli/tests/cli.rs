@@ -1993,3 +1993,259 @@ fn test_repo_recent_commits_on_error_flag() {
         .code(1)
         .stderr(predicate::str::contains("No recent commits"));
 }
+
+// ============================================================================
+// Recent Commits CLI — Hash, Package, and Date routing tests
+// ============================================================================
+
+/// Create a monorepo-style test repo for CLI testing.
+fn create_cli_monorepo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+
+    let mut config = repo.config().unwrap();
+    config.set_str("user.email", "test@test.com").unwrap();
+    config.set_str("user.name", "Test").unwrap();
+
+    // Create workspace Cargo.toml
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["pkg-a/lib", "pkg-b/lib"]
+"#,
+    )
+    .unwrap();
+
+    // Package A
+    let pkg_a = dir.path().join("pkg-a/lib");
+    std::fs::create_dir_all(pkg_a.join("src")).unwrap();
+    std::fs::write(
+        pkg_a.join("Cargo.toml"),
+        r#"[package]
+name = "pkg-a"
+version = "0.1.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    std::fs::write(pkg_a.join("src/lib.rs"), "pub fn a() {}").unwrap();
+
+    // Package B
+    let pkg_b = dir.path().join("pkg-b/lib");
+    std::fs::create_dir_all(pkg_b.join("src")).unwrap();
+    std::fs::write(
+        pkg_b.join("Cargo.toml"),
+        r#"[package]
+name = "pkg-b"
+version = "0.1.0"
+edition = "2024"
+"#,
+    )
+    .unwrap();
+    std::fs::write(pkg_b.join("src/lib.rs"), "pub fn b() {}").unwrap();
+
+    // Commit everything
+    let mut index = repo.index().unwrap();
+    index
+        .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
+    index.write().unwrap();
+    let sig = repo.signature().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        "initial monorepo",
+        &tree,
+        &[],
+    )
+    .unwrap();
+
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+#[test]
+fn test_repo_recent_commits_with_hash_period() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+    test_commit_file(&path, "src/lib.rs", "pub fn lib() {}");
+
+    let repo = git2::Repository::open(&path).unwrap();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    // Get the parent commit hash to use as boundary
+    let parent = head.parent(0).unwrap();
+    let parent_hash = parent.id().to_string();
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            &parent_hash,
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        !stdout.is_empty(),
+        "Hash-based query should produce output"
+    );
+}
+
+#[test]
+fn test_repo_recent_commits_with_today_period() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "today",
+            "--plain",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_recent_commits_with_date_period() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file(&path, "src/main.rs", "fn main() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "2020-01-01",
+            "--plain",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_repo_recent_commits_package_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--package",
+            "pkg-a",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        !stdout.is_empty(),
+        "Package-filtered query should produce output"
+    );
+}
+
+#[test]
+fn test_repo_recent_commits_package_area_filter() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file(&path, "pkg-b/lib/src/lib.rs", "pub fn b2() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--package-area",
+            "pkg-b",
+            "--plain",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        !stdout.is_empty(),
+        "Package-area filtered query should produce output"
+    );
+}
+
+#[test]
+fn test_repo_recent_commits_package_json_scoped() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--package",
+            "pkg-a",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    // The packages array should only contain the filtered package
+    if let Some(packages) = json["packages"].as_array() {
+        for pkg in packages {
+            assert_eq!(
+                pkg["name"], "pkg-a",
+                "JSON packages should be scoped to the filter"
+            );
+        }
+    }
+
+    // No files from pkg-b should appear in any commit
+    if let Some(commits) = json["commits"].as_array() {
+        for commit in commits {
+            if let Some(files) = commit["files"].as_array() {
+                for file in files {
+                    let f = file.as_str().unwrap_or("");
+                    assert!(
+                        !f.starts_with("pkg-b/"),
+                        "Filtered JSON should not contain pkg-b files, got: {}",
+                        f
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_repo_recent_commits_unknown_package_error() {
+    let (_dir, path) = create_cli_monorepo();
+    test_commit_file(&path, "pkg-a/lib/src/lib.rs", "pub fn a2() {}");
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--package",
+            "nonexistent",
+        ])
+        .assert()
+        .failure();
+}
