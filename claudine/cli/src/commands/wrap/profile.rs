@@ -1164,11 +1164,10 @@ impl WrapperProfile for KimiWrapper {
         &["KIMI_API_KEY"]
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
-        if !has_flag(args, "--print") {
+    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
+        if non_interactive && !has_flag(args, "--print") {
             args.push("--print".to_string());
         }
-        Ok(())
     }
 
     fn apply_system_prompt(
