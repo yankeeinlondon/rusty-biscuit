@@ -2033,6 +2033,36 @@ fn find_positional_prompt_index(
     None
 }
 
+/// Generic "is the prompt requirement satisfied?" check for the wrap
+/// pipeline. Called from every call site after all `apply_*` methods
+/// have run and `prompt_delivery` has placed any inline prompt.
+///
+/// Returns `Ok(())` when any of the following holds:
+/// - `non_interactive == false` (interactive sessions never require a
+///   preloaded prompt — the user will type one)
+/// - `source.has_prompt_or_stdin()` is true (inline prompt or piped
+///   stdin reaches the child)
+///
+/// Otherwise bails with a provider-agnostic error message that
+/// interpolates `provider_name` so the user knows which wrap failed.
+#[allow(dead_code)] // first production caller lands in Task 13 (direct-wrap) / Task 14 (composition); drop this attr then
+pub(crate) fn require_prompt_present(
+    provider_name: &str,
+    non_interactive: bool,
+    source: &PromptSource,
+) -> Result<()> {
+    if !non_interactive {
+        return Ok(());
+    }
+    if source.has_prompt_or_stdin() {
+        return Ok(());
+    }
+    bail!(
+        "--non-interactive for {provider_name} requires a prompt \
+         (positional, via a prompt flag, or piped on stdin)"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -2801,5 +2831,36 @@ mod tests {
             source,
             PromptSource::Inline("KEY=VALUE".to_string())
         );
+    }
+
+    // -- require_prompt_present tests -----------------------------------------
+
+    #[test]
+    fn require_prompt_present_passes_in_interactive_mode_with_no_source() {
+        require_prompt_present("claude", false, &PromptSource::None).unwrap();
+    }
+
+    #[test]
+    fn require_prompt_present_passes_with_inline_prompt() {
+        require_prompt_present(
+            "claude",
+            true,
+            &PromptSource::Inline("x".to_string()),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn require_prompt_present_passes_with_inherit_stdin() {
+        require_prompt_present("claude", true, &PromptSource::InheritStdin).unwrap();
+    }
+
+    #[test]
+    fn require_prompt_present_fails_non_interactive_with_no_source() {
+        let err =
+            require_prompt_present("codex", true, &PromptSource::None).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("codex"));
+        assert!(message.contains("requires a prompt"));
     }
 }
