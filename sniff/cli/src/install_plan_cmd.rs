@@ -9,7 +9,9 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use inquire::Confirm;
-use sniff::programs::{InstallOptions, InstallPlan, InstallPlanOption, InstallationMethod};
+use sniff::programs::{
+    InstallOptions, InstallPlan, InstallPlanOption, InstallPlanReason, InstallationMethod,
+};
 
 /// Render the plan to a `String` ready for printing to stdout.
 ///
@@ -171,6 +173,136 @@ pub fn execute_install_flow(
     };
     plan.execute(&opts)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch helpers
+// ---------------------------------------------------------------------------
+
+use crate::args::{InstallCommandArgs, InstallCommandKind};
+use crate::install::{ResolveError, ResolvedProgram, resolve_program_in_category};
+use crate::output::OutputFilter;
+
+/// Force the plan to select the method whose `manager_name()` matches
+/// `via_manager`. Returns an error string if no method matches or if the
+/// matched method was not eligible (not runnable on this host).
+fn apply_via(plan: &mut InstallPlan, via_manager: &str) -> Result<(), String> {
+    let matching_indices: Vec<usize> = plan
+        .options
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| o.kind.manager_name() == via_manager)
+        .map(|(i, _)| i)
+        .collect();
+
+    if matching_indices.is_empty() {
+        let valid: Vec<&str> = plan
+            .known_installations()
+            .into_iter()
+            .map(|m| m.manager_name())
+            .collect();
+        return Err(format!(
+            "Unknown manager '{}'. Valid manager names for this program: {}",
+            via_manager,
+            valid.join(", ")
+        ));
+    }
+    if matching_indices.len() > 1 {
+        return Err(format!(
+            "--via {} is ambiguous for this program (more than one method uses the same manager)",
+            via_manager
+        ));
+    }
+
+    let idx = matching_indices[0];
+    if !plan.options[idx].choose {
+        let current_reason = plan.options[idx].reason_type;
+        if current_reason != InstallPlanReason::LowerPriorityAlternative {
+            return Err(format!(
+                "--via {} cannot override an unavailable method (reason: {:?})",
+                via_manager, current_reason
+            ));
+        }
+    }
+
+    // Un-choose everything, then choose the matched option.
+    for o in &mut plan.options {
+        if o.choose {
+            o.choose = false;
+            o.reason_type = InstallPlanReason::LowerPriorityAlternative;
+            o.reason = format!("{} was forced via --via", via_manager);
+        }
+    }
+    plan.options[idx].choose = true;
+    plan.options[idx].reason_type = InstallPlanReason::Selected;
+    plan.options[idx].reason = format!("forced via --via {}", via_manager);
+    plan.successful = true;
+    Ok(())
+}
+
+/// Build a plan for a resolved program, honoring `--force` (cache bypass) and
+/// `--no-sudo` (forces `can_sudo = false`). Uses verification-aware detection
+/// so the pnpm verified bucket can fire.
+pub fn build_plan_for_args(resolved: &ResolvedProgram, args: &InstallCommandArgs) -> InstallPlan {
+    use sniff::programs::HostCapabilities;
+    let mut host = HostCapabilities::load_or_detect_with_verification(args.force);
+    if args.no_sudo {
+        host.can_sudo = false;
+    }
+    use sniff::programs::build_install_plan;
+    match resolved {
+        ResolvedProgram::Editor(p) => build_install_plan(p, &host),
+        ResolvedProgram::Utility(p) => build_install_plan(p, &host),
+        ResolvedProgram::LanguagePackageManager(p) => build_install_plan(p, &host),
+        ResolvedProgram::OsPackageManager(p) => build_install_plan(p, &host),
+        ResolvedProgram::TtsClient(p) => build_install_plan(p, &host),
+        ResolvedProgram::TerminalApp(p) => build_install_plan(p, &host),
+        ResolvedProgram::HeadlessAudio(p) => build_install_plan(p, &host),
+        ResolvedProgram::AiCli(p) => build_install_plan(p, &host),
+    }
+}
+
+/// Top-level dispatch for `sniff <category> install …` and
+/// `sniff <category> install-plan …`.
+///
+/// `filter` scopes name resolution to the category so that error messages name
+/// the correct category (e.g., "Unknown editor" instead of "Unknown program").
+/// Pass `OutputFilter::Programs` to search across all categories.
+pub fn dispatch(
+    kind: InstallCommandKind,
+    args: &InstallCommandArgs,
+    filter: OutputFilter,
+    json: bool,
+    plain: bool,
+) -> Result<(), Box<dyn Error>> {
+    let name = args
+        .program
+        .as_deref()
+        .ok_or("--program is required for plan-aware install commands")?;
+
+    let resolved = resolve_program_in_category(name, filter).map_err(|e: ResolveError| {
+        let boxed: Box<dyn Error> = Box::new(e);
+        boxed
+    })?;
+    let mut plan = build_plan_for_args(&resolved, args);
+
+    if let Some(via) = args.via.as_deref() {
+        apply_via(&mut plan, via).map_err(|s| -> Box<dyn Error> { s.into() })?;
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+        return Ok(());
+    }
+
+    match kind {
+        InstallCommandKind::InstallPlan => {
+            let rendered = render_install_plan(&plan, /* verbose */ true);
+            crate::output::emit_text(&rendered, plain);
+            Ok(())
+        }
+        InstallCommandKind::Install => execute_install_flow(&plan, args.dry_run, args.yes, plain),
+    }
 }
 
 #[cfg(test)]

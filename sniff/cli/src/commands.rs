@@ -71,13 +71,20 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Handle programs mode separately (doesn't use SniffResult)
     if let Some(ref cmd) = cli.command {
         if cmd.is_programs_mode() {
-            // Check for install action FIRST
-            if cmd.is_install_action() {
+            // Plan-aware install or install-plan
+            if let Some((kind, args)) = cmd.install_command_args() {
+                if args.program.is_some() {
+                    let filter = cmd.to_output_filter();
+                    return crate::install_plan_cmd::dispatch(
+                        kind, args, filter, cli.json, cli.plain,
+                    );
+                }
+                // No name: fall through to interactive (Install) or error (InstallPlan)
+                if kind == crate::args::InstallCommandKind::InstallPlan {
+                    return Err("install-plan requires a program name".into());
+                }
                 let filter = cmd.to_output_filter();
-                return match cmd.install_program_name() {
-                    Some(name) => crate::install::direct_install(filter, name),
-                    None => crate::install::interactive_install(filter),
-                };
+                return crate::install::interactive_install(filter);
             }
 
             let programs = detect_programs_for_filter(output_filter);

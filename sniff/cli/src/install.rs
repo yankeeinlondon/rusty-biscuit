@@ -135,6 +135,35 @@ impl ResolvedProgram {
     }
 }
 
+/// Resolve a program name scoped to a specific output filter category.
+///
+/// For `OutputFilter::Programs`, falls back to the cross-category
+/// [`resolve_program`]. For all other program filters, restricts resolution to
+/// the matching category so that error messages name the category correctly
+/// (e.g., "Unknown editor" rather than "Unknown program").
+pub fn resolve_program_in_category(
+    name: &str,
+    filter: crate::output::OutputFilter,
+) -> Result<ResolvedProgram, ResolveError> {
+    use crate::output::OutputFilter;
+    match filter {
+        OutputFilter::Editors => resolve_editor(name).map(ResolvedProgram::Editor),
+        OutputFilter::Utilities => resolve_utility(name).map(ResolvedProgram::Utility),
+        OutputFilter::LanguagePackageManagers => {
+            resolve_lang_pkg_mgr(name).map(ResolvedProgram::LanguagePackageManager)
+        }
+        OutputFilter::OsPackageManagers => {
+            resolve_os_pkg_mgr(name).map(ResolvedProgram::OsPackageManager)
+        }
+        OutputFilter::TtsClients => resolve_tts_client(name).map(ResolvedProgram::TtsClient),
+        OutputFilter::TerminalApps => resolve_terminal_app(name).map(ResolvedProgram::TerminalApp),
+        OutputFilter::HeadlessAudio => resolve_audio(name).map(ResolvedProgram::HeadlessAudio),
+        OutputFilter::AiClients => resolve_agent(name).map(ResolvedProgram::AiCli),
+        // For Programs or any other filter, fall back to cross-category search.
+        _ => resolve_program(name),
+    }
+}
+
 /// Resolve a free-form program name to a specific category enum variant.
 ///
 /// Tries each category in a deterministic order. Returns an error listing the
@@ -237,28 +266,9 @@ pub fn direct_install(filter: OutputFilter, name: &str) -> Result<(), Box<dyn Er
             direct_install_category!(name, resolve_agent, sniff::programs::InstalledAiClients)
         }
         OutputFilter::Programs => {
-            // Search all categories, install first match
-            let categories = [
-                OutputFilter::Editors,
-                OutputFilter::Utilities,
-                OutputFilter::LanguagePackageManagers,
-                OutputFilter::OsPackageManagers,
-                OutputFilter::TtsClients,
-                OutputFilter::TerminalApps,
-                OutputFilter::HeadlessAudio,
-                OutputFilter::AiClients,
-            ];
-
-            for category in categories {
-                if direct_install(category, name).is_ok() {
-                    return Ok(());
-                }
-            }
-
-            Err(format!(
-                "Unknown program '{}'. Use a category subcommand (e.g., sniff editors install {0}) to see valid names.",
-                name
-            ).into())
+            Err("internal error: OutputFilter::Programs reached legacy direct_install; \
+                 use install_plan_cmd::dispatch instead"
+                .into())
         }
         _ => unreachable!("direct_install only called for program filters"),
     }
