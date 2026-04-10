@@ -23,7 +23,7 @@ and preserve blank-line separators between sections.
 │                                                         │
 │ 4. Validation checkpoints  (composition commands only)  │
 │    ✓ validated that agent has read and write permissions │
-│    ✓ resolved the file reference to path/to/file.md     │
+│    ✓ the file reference was resolved to file.md         │
 │    Prompt:                                              │
 │    │ The prompt text …                                  │
 │                                                         │
