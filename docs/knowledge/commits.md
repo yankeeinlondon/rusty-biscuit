@@ -12,7 +12,7 @@
 
 - When committing agent/skill files in `.claude/`, use `docs(<area>)` as the prefix for documentation restructuring changes
 
-- Subagents may see a different set of staged files than what the user specifies in the prompt (due to concurrent work or a filtered list). When this happens, verify with `git status` and if more files are staged than assigned, use `git reset HEAD` to unstage everything, then `git add` only the assigned files. This is the only way to commit only specific files when other unrelated files are also staged. Never use `git reset *` (with a glob) as that can corrupt staged state. **Never use `git reset --hard`** — it wipes both the staging area AND working tree changes, destroying all uncommitted work. Use `git reset HEAD` (without `--hard`) to only unstage.
+- Subagents may see a different set of staged files than what the user specifies in the prompt (due to concurrent work or a filtered list). When this happens, but the subagent should only commit those files the orchestrator has asked it to.
 
 - When multiple related files are staged together (e.g., a directory rename like `transform/` → `compose/`), git commits them as an atomic unit. In such cases, subagents will not be able to split them into separate granular commits even if semantically distinct groups were planned - the files must be committed together as they were staged
 
@@ -30,8 +30,6 @@
 
 - The `--only` flag in `git commit --only -- path -m "message"` only works with already-tracked files. For new (untracked) files, `--only` will fail with "fatal: you must specify path to commit with -c or -C". For new files, ensure they are staged via `git add` before committing, then use `git commit file1 file2 -m "message"` with paths before `-m`.
 
-- When multiple subagents commit concurrently to the same branch, they may create overlapping or duplicate commits. The orchestrator can use `git reset --soft <before-subagents>` to restore all changes to staging, then re-commit them properly in separate atomic commits. Always verify the final state with `git log --oneline` and `git diff <parent> --stat` before assuming the job is complete.
-
 - A commit can be "on" a branch (reachable from it via `git branch --contains`) but NOT an ancestor of the current HEAD. This happens when HEAD has moved forward after the branch diverged. Subagents using `git log --oneline -n` only see ancestry-path commits and will miss reachable-but-not-ancestor commits. To see all commits on a branch regardless of ancestry, use `git log --all --oneline | head -n` or `git branch -v --contains <commit>` to check if a specific commit is reachable.
 
 - Lost commits can be recovered from the reflog. After `git reset` moves HEAD, the old commits remain in `git reflog` with timestamps. Use `git reflog | head -20` to find the hash, then `git cherry-pick -n <hash>` to replay the changes as unstaged working-tree modifications, then re-stage and commit properly. This is the rescue path when a subagent accidentally resets a commit that contained staged changes.
@@ -45,3 +43,5 @@
 - In this Claudine sandbox environment, a writable worktree can still have its git metadata stored outside the writable roots (for example under `/Volumes/.../.git/worktrees/...`). When that happens, `git commit` fails trying to create `index.lock` even though editing files in the worktree succeeds. Check the actual gitdir path before assuming commits are possible from the session.
 
 - When multiple subagents commit concurrently from a shared staging area, `git reset HEAD` (without paths) resets the ENTIRE index, destroying all staged changes from ALL subagents. This means if Subagent A does `git reset HEAD` to isolate its files, Subagent B's staged changes are also wiped out. The orchestrator should NOT have subagents use `git reset HEAD` when operating concurrently — instead, each subagent should verify what is actually staged and work with that state, or the orchestrator should stage files for each subagent sequentially rather than having all subagents manipulate the shared index simultaneously.
+
+- **Orchestrator sequential staging pattern**: To avoid subagent confusion from shared staging state, the orchestrator should stage files for each subagent sequentially before spawning them (e.g., `git add <group1_files> && spawn subagent1`, then `git add <group2_files> && spawn subagent2`). This ensures each subagent sees a clean, isolated staging state and avoids overlap issues where one subagent's files get committed with another subagent's batch.

@@ -60,7 +60,8 @@ Key types:
 - `EventSupportLevel` — `Hook` | `NonHook` | `NotSupported` per provider-event pair
 - `EventMeta` — Normalized event metadata (provider, event, tool name, error, prompt, session ID, timestamps, environment context)
 - `ResolvedHook` — A fully resolved hook binding ready for execution (event, meta, provider, actions, can_block)
-- `HookerConfig` / `ProviderConfig` / `EventBinding` — Configuration types
+- `ClaudineConfig` — Canonical configuration type
+- `EventBinding` — Event binding configuration
 - `GlobalSettings` / `TtsSettings` / `LinkingSettings` / `CanonicalProviderSettings` — Settings types
 - `EnvironmentContext` — Auto-detected OS, hardware, git, and repo context (via `sniff`)
 

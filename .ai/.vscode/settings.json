@@ -12,6 +12,7 @@
         "indicatif",
         "insta",
         "lazydocker",
+        "mermaidjs",
         "nextest",
         "oxker",
         "proptest",

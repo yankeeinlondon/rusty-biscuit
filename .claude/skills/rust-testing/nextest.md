@@ -27,6 +27,13 @@ cargo nextest run test_name
 cargo nextest run -p my_crate
 ```
 
+In monorepos, prefer package-scoped verification while iterating on one area:
+
+```bash
+cargo nextest run -p my_lib
+cargo nextest run -p my_cli
+```
+
 ## Advantages Over cargo test
 
 | Feature | cargo test | cargo nextest |
@@ -104,6 +111,8 @@ retries = 2  # Retry failed tests up to 2 times
 filter = "test(/flaky/)"
 retries = 3
 ```
+
+For PTY or timing-sensitive smoke tests, prefer `#[ignore]` plus a manual command such as `cargo test --test pty_tests -- --ignored` instead of hiding instability behind aggressive retries in the default profile.
 
 ## Slow Test Detection
 
@@ -221,6 +230,10 @@ cargo nextest run --run-ignored
 
 # Generate machine-readable output
 cargo nextest run --message-format json > results.json
+
+# Monorepo-focused commands
+cargo nextest run -p my_crate --fail-fast
+cargo nextest run -p my_cli -E 'test(/routing|completions/)'
 ```
 
 ## Limitations

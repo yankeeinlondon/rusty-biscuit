@@ -48,9 +48,9 @@
 //!
 //! let client = Gitea::with_base_url("https://staging.example.com/v1");
 //! ```
-use crate::shared::{Paginated, RequestParts, SchematicError};
-pub use schematic_definitions::gitea::*;
 use serde::{Deserialize, Serialize};
+pub use schematic_definitions::gitea::*;
+use crate::shared::{Paginated, RequestParts, SchematicError};
 /// Request for `GetRepository` endpoint.
 ///
 /// ## Example
@@ -120,7 +120,11 @@ pub struct GetGitTreeRequest {
 }
 impl GetGitTreeRequest {
     /// Creates a new request with the required path parameters.
-    pub fn new(owner: impl Into<String>, repo: impl Into<String>, sha: impl Into<String>) -> Self {
+    pub fn new(
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+        sha: impl Into<String>,
+    ) -> Self {
         Self {
             owner: owner.into(),
             repo: repo.into(),
@@ -171,7 +175,11 @@ pub struct GetGitTreeRecursiveRequest {
 }
 impl GetGitTreeRecursiveRequest {
     /// Creates a new request with the required path parameters.
-    pub fn new(owner: impl Into<String>, repo: impl Into<String>, sha: impl Into<String>) -> Self {
+    pub fn new(
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+        sha: impl Into<String>,
+    ) -> Self {
         Self {
             owner: owner.into(),
             repo: repo.into(),
@@ -194,8 +202,7 @@ impl GetGitTreeRecursiveRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repos/{}/{}/git/trees/{}?recursive=true",
-            self.owner, self.repo, self.sha
+            "/repos/{}/{}/git/trees/{}?recursive=true", self.owner, self.repo, self.sha
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -434,8 +441,7 @@ impl ListPullRequestFilesRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repos/{}/{}/pulls/{}/files",
-            self.owner, self.repo, self.index
+            "/repos/{}/{}/pulls/{}/files", self.owner, self.repo, self.index
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -693,8 +699,7 @@ impl ListIssueCommentsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repos/{}/{}/issues/{}/comments",
-            self.owner, self.repo, self.index
+            "/repos/{}/{}/issues/{}/comments", self.owner, self.repo, self.index
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -788,8 +793,7 @@ impl ListIssueTimelineRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let mut path = format!(
-            "/repos/{}/{}/issues/{}/timeline",
-            self.owner, self.repo, self.index
+            "/repos/{}/{}/issues/{}/timeline", self.owner, self.repo, self.index
         );
         let mut query_pairs: Vec<(&str, String)> = Vec::new();
         if let Some(ref value) = self.page {
@@ -1059,8 +1063,7 @@ impl GetTagReferenceRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/repos/{}/{}/git/refs/{}",
-            self.owner, self.repo, self.git_ref
+            "/repos/{}/{}/git/refs/{}", self.owner, self.repo, self.git_ref
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -1090,7 +1093,11 @@ pub struct GetAnnotatedTagRequest {
 }
 impl GetAnnotatedTagRequest {
     /// Creates a new request with the required path parameters.
-    pub fn new(owner: impl Into<String>, repo: impl Into<String>, sha: impl Into<String>) -> Self {
+    pub fn new(
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+        sha: impl Into<String>,
+    ) -> Self {
         Self {
             owner: owner.into(),
             repo: repo.into(),
@@ -1300,7 +1307,9 @@ impl GiteaRequest {
             Self::GetRepository(_) => {
                 <GetRepositoryRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::GetGitTree(_) => <GetGitTreeRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::GetGitTree(_) => {
+                <GetGitTreeRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::GetGitTreeRecursive(_) => {
                 <GetGitTreeRecursiveRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1313,15 +1322,21 @@ impl GiteaRequest {
             Self::ListPullRequestFiles(_) => {
                 <ListPullRequestFilesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListIssues(_) => <ListIssuesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
-            Self::GetIssue(_) => <GetIssueRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListIssues(_) => {
+                <ListIssuesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetIssue(_) => {
+                <GetIssueRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::ListIssueComments(_) => {
                 <ListIssueCommentsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
             Self::ListIssueTimeline(_) => {
                 <ListIssueTimelineRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListTags(_) => <ListTagsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListTags(_) => {
+                <ListTagsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::ListReleases(_) => {
                 <ListReleasesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1444,9 +1459,10 @@ impl Gitea {
                 header: "Authorization".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::ApiKey {
-                    header: "Authorization".to_string(),
-                }],
+                explicit: vec![
+                    schematic_define::AuthMethod::ApiKey { header : "Authorization"
+                    .to_string() }
+                ],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "Authorization".to_string(),
                 }),
@@ -1458,7 +1474,9 @@ impl Gitea {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec!["GITEA_TOKEN".to_string()]),
+                        names: schematic_define::EnvList::new(
+                            vec!["GITEA_TOKEN".to_string()],
+                        ),
                         header: "Authorization".to_string(),
                     }),
                     oauth_client_id: None,
@@ -1485,9 +1503,10 @@ impl Gitea {
                 header: "Authorization".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::ApiKey {
-                    header: "Authorization".to_string(),
-                }],
+                explicit: vec![
+                    schematic_define::AuthMethod::ApiKey { header : "Authorization"
+                    .to_string() }
+                ],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "Authorization".to_string(),
                 }),
@@ -1499,7 +1518,9 @@ impl Gitea {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec!["GITEA_TOKEN".to_string()]),
+                        names: schematic_define::EnvList::new(
+                            vec!["GITEA_TOKEN".to_string()],
+                        ),
                         header: "Authorization".to_string(),
                     }),
                     oauth_client_id: None,
@@ -1532,9 +1553,10 @@ impl Gitea {
                 header: "Authorization".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::ApiKey {
-                    header: "Authorization".to_string(),
-                }],
+                explicit: vec![
+                    schematic_define::AuthMethod::ApiKey { header : "Authorization"
+                    .to_string() }
+                ],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "Authorization".to_string(),
                 }),
@@ -1546,7 +1568,9 @@ impl Gitea {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec!["GITEA_TOKEN".to_string()]),
+                        names: schematic_define::EnvList::new(
+                            vec!["GITEA_TOKEN".to_string()],
+                        ),
                         header: "Authorization".to_string(),
                     }),
                     oauth_client_id: None,
@@ -1568,7 +1592,10 @@ impl Gitea {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+    pub fn with_client_and_base_url(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: base_url.into(),
@@ -1577,9 +1604,10 @@ impl Gitea {
                 header: "Authorization".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::ApiKey {
-                    header: "Authorization".to_string(),
-                }],
+                explicit: vec![
+                    schematic_define::AuthMethod::ApiKey { header : "Authorization"
+                    .to_string() }
+                ],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "Authorization".to_string(),
                 }),
@@ -1591,7 +1619,9 @@ impl Gitea {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec!["GITEA_TOKEN".to_string()]),
+                        names: schematic_define::EnvList::new(
+                            vec!["GITEA_TOKEN".to_string()],
+                        ),
                         header: "Authorization".to_string(),
                     }),
                     oauth_client_id: None,
@@ -1728,20 +1758,21 @@ impl Gitea {
                     .as_ref()
                     .map(|api_key| api_key.header.clone())
             });
-        header.and_then(|header| {
-            self.headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|env_name| std::env::var(env_name).ok())
-                })
-                .map(|value| (header, value))
-        })
+        header
+            .and_then(|header| {
+                self.headers
+                    .env_mapping()
+                    .api_key
+                    .as_ref()
+                    .and_then(|api_key| {
+                        api_key
+                            .names
+                            .names()
+                            .iter()
+                            .find_map(|env_name| std::env::var(env_name).ok())
+                    })
+                    .map(|value| (header, value))
+            })
     }
     /// Returns a clone of this client configured with an explicit API key.
     #[must_use]
@@ -1857,9 +1888,7 @@ impl<'a> GiteaVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError>
-            + Send
-            + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -1887,15 +1916,13 @@ impl<'a> GiteaVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError>
-            + Send
-            + Sync
-            + 'static,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
     {
-        self.response_mutators.insert(
-            R::ENDPOINT_ID,
-            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-        );
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -1921,15 +1948,17 @@ impl<'a> GiteaVariantBuilder<'a> {
         let headers = match self.headers {
             Some(headers) => headers,
             None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
-            {
-                self.base.headers.clone().with_env_mapping(
-                    schematic_define::RestApi::legacy_env_mapping_for(
-                        &auth_strategy,
-                        &env_auth,
-                        self.base.env_username.as_deref(),
-                    ),
-                )
+                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
+                self.base
+                    .headers
+                    .clone()
+                    .with_env_mapping(
+                        schematic_define::RestApi::legacy_env_mapping_for(
+                            &auth_strategy,
+                            &env_auth,
+                            self.base.env_username.as_deref(),
+                        ),
+                    )
             }
             None => self.base.headers.clone(),
         };
@@ -1957,10 +1986,12 @@ impl Gitea {
             .explicit
             .iter()
             .map(|method| match method {
-                schematic_define::AuthMethod::BearerToken { header } => match header.as_deref() {
-                    Some(header) => format!("an explicit bearer token in `{header}`"),
-                    None => "an explicit bearer token".to_string(),
-                },
+                schematic_define::AuthMethod::BearerToken { header } => {
+                    match header.as_deref() {
+                        Some(header) => format!("an explicit bearer token in `{header}`"),
+                        None => "an explicit bearer token".to_string(),
+                    }
+                }
                 schematic_define::AuthMethod::ApiKey { header } => {
                     format!("an explicit API key in `{header}`")
                 }
@@ -1976,20 +2007,22 @@ impl Gitea {
     }
     fn env_fallback_var_names(&self) -> Vec<String> {
         match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => self
-                .headers
-                .env_mapping()
-                .bearer_token
-                .as_ref()
-                .map(|list| list.names().to_vec())
-                .unwrap_or_default(),
-            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => self
-                .headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .map(|api_key| api_key.names.names().to_vec())
-                .unwrap_or_default(),
+            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => {
+                self.headers
+                    .env_mapping()
+                    .bearer_token
+                    .as_ref()
+                    .map(|list| list.names().to_vec())
+                    .unwrap_or_default()
+            }
+            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => {
+                self.headers
+                    .env_mapping()
+                    .api_key
+                    .as_ref()
+                    .map(|api_key| api_key.names.names().to_vec())
+                    .unwrap_or_default()
+            }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
                 let mut vars = Vec::new();
                 if let Some(user) = self.headers.env_mapping().basic_user.as_ref() {
@@ -2012,10 +2045,13 @@ impl Gitea {
             options.push(explicit_methods.join(", "));
         }
         if !env_fallback_vars.is_empty() {
-            options.push(format!(
-                "set one of the fallback env vars `{}`",
-                env_fallback_vars.join("`, `")
-            ));
+            options
+                .push(
+                    format!(
+                        "set one of the fallback env vars `{}`", env_fallback_vars
+                        .join("`, `")
+                    ),
+                );
         }
         let mut message = if options.is_empty() {
             "Authentication required.".to_string()
@@ -2034,15 +2070,19 @@ impl Gitea {
             env_fallback_vars,
         }
     }
-    fn apply_env_fallback(&self, headers: schematic_define::Headers) -> schematic_define::Headers {
+    fn apply_env_fallback(
+        &self,
+        headers: schematic_define::Headers,
+    ) -> schematic_define::Headers {
         let env_mapping = self.headers.env_mapping().clone();
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                let token = env_mapping.bearer_token.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let token = env_mapping
+                    .bearer_token
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
                 match (token, header.as_deref()) {
                     (Some(token), Some(header)) => {
                         headers.use_bearer_token_with_header(token, header)
@@ -2052,31 +2092,38 @@ impl Gitea {
                 }
             }
             Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
-                let key = env_mapping.api_key.as_ref().and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let key = env_mapping
+                    .api_key
+                    .as_ref()
+                    .and_then(|api_key| {
+                        api_key
+                            .names
+                            .names()
+                            .iter()
+                            .find_map(|name| std::env::var(name).ok())
+                    });
                 match key {
                     Some(key) => headers.header(header.clone(), key),
                     None => headers,
                 }
             }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let username = env_mapping.basic_user.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
-                let password = env_mapping.basic_pass.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let username = env_mapping
+                    .basic_user
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
+                let password = env_mapping
+                    .basic_pass
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
                 match (username, password) {
-                    (Some(username), Some(password)) => headers.use_basic_auth(username, password),
+                    (Some(username), Some(password)) => {
+                        headers.use_basic_auth(username, password)
+                    }
                     _ => headers,
                 }
             }
@@ -2087,10 +2134,12 @@ impl Gitea {
     fn headers_satisfy_fallback(&self, headers: &schematic_define::Headers) -> bool {
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                header.as_deref().map_or_else(
-                    || headers.has_authorization(),
-                    |header| headers.has_header(header),
-                )
+                header
+                    .as_deref()
+                    .map_or_else(
+                        || headers.has_authorization(),
+                        |header| headers.has_header(header),
+                    )
             }
             Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
                 headers.has_header(header)
@@ -2105,8 +2154,7 @@ impl Gitea {
         if !headers.has_explicit_auth() {
             headers = self.apply_env_fallback(headers);
         }
-        if self.auth_is_required()
-            && !headers.has_explicit_auth()
+        if self.auth_is_required() && !headers.has_explicit_auth()
             && !self.headers_satisfy_fallback(&headers)
         {
             return Err(self.authentication_required_error());
@@ -2229,7 +2277,11 @@ impl Gitea {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)

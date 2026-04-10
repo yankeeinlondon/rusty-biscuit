@@ -31,7 +31,7 @@ Composition:
   inline-compose    Inline composition: generate and replace body
 
 Administration:
-  init              Interactive setup wizard
+  config            Manage Claudine configuration with a TUI
   sync              Re-sync hook registrations with detected agents
   uninstall         Remove Claudine hooks from all agents
   providers         Show provider capability matrix

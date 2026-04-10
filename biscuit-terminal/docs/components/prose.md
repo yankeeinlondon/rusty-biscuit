@@ -1,3 +1,6 @@
+---
+blast_radius: biscuit-terminal/lib/src/components/prose.rs
+---
 # Prose
 
 Styled text component with token and block tag support for rich terminal output. Prose is the primary text styling component in biscuit-terminal, supporting both atomic tokens (`{{bold}}`) and self-closing block tags (`<bold>text</bold>`) that get rendered as ANSI escape codes.

@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+pub const DEFAULT_NON_INTERACTIVE_SYSTEM_PROMPT: &str = "\n**IMPORTANT:** this is a non-interactive prompt; do not request permission or ask the caller questions!\n";
+
 /// Whether a system prompt should append to or replace the provider's default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SystemPromptMode {
@@ -37,6 +39,21 @@ pub enum SystemPromptSource {
         path: PathBuf,
         mode: SystemPromptMode,
     },
+    /// Found via non-interactive safety prompt discovery.
+    NonInteractiveFile {
+        path: PathBuf,
+        scope: StandardPromptScope,
+    },
+    /// Built-in fallback used when no non-interactive file exists.
+    BuiltInNonInteractive,
+}
+
+/// Prepared metadata for the non-interactive safety appendix.
+#[derive(Debug, Clone)]
+pub struct PreparedNonInteractiveAppendix {
+    pub source: SystemPromptSource,
+    pub raw_text: String,
+    pub composed_markdown: String,
 }
 
 /// A system prompt that has been resolved, composed, and is ready for
@@ -49,6 +66,8 @@ pub struct PreparedSystemPrompt {
     pub raw_text: String,
     /// The composed Markdown body (after Darkmatter pipeline).
     pub composed_markdown: String,
+    /// Extra safety instructions appended for non-interactive sessions.
+    pub non_interactive_appendix: Option<PreparedNonInteractiveAppendix>,
 }
 
 /// The outcome of the full resolve -> compose pipeline.

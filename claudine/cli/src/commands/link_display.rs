@@ -6,10 +6,7 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
-use claudine::dispatch::loader::load_config;
-use claudine::linking::{
-    LinkableResource, ProviderSkillPaths, ResourceScope, canonical_provider, capabilities_for,
-};
+use claudine::linking::{LinkableResource, ProviderSkillPaths, capabilities_for};
 
 use crate::log;
 
@@ -28,18 +25,15 @@ pub(crate) trait LinkableResourceDisplay {
 
 pub(crate) fn repo_canonical_needs_init(
     paths: &ProviderSkillPaths,
-    resource: LinkableResource,
+    _resource: LinkableResource,
 ) -> bool {
-    let repo_root = Some(paths.repo_root());
-    match load_config(None, repo_root) {
-        Ok(config) => match &config.settings.linking {
-            Some(linking) => {
-                canonical_provider(&linking.canonical_provider, ResourceScope::Repo, resource)
-                    .is_none()
-            }
-            None => true,
-        },
-        Err(_) => false,
+    let repo_path = paths.repo_root().join(".claudine").join("config.json");
+    if !repo_path.exists() {
+        return true;
+    }
+    match claudine::dispatch::loader::load_claudine_config(Some(&repo_path), None) {
+        Ok(config) => config.canonical_provider.is_none(),
+        Err(_) => true,
     }
 }
 
@@ -47,49 +41,30 @@ pub(crate) fn render_canonical_providers(
     term: &Terminal,
     paths: &ProviderSkillPaths,
     is_git_repo: bool,
-    resource: LinkableResource,
+    _resource: LinkableResource,
 ) {
-    let repo_root = if is_git_repo {
-        Some(paths.repo_root())
-    } else {
-        None
-    };
-
-    let config = match load_config(None, repo_root) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    let Some(linking_settings) = config.settings.linking else {
-        return;
-    };
-
-    let user_canonical = canonical_provider(
-        &linking_settings.canonical_provider,
-        ResourceScope::User,
-        resource,
-    );
+    let user_config = claudine::dispatch::loader::load_claudine_config(None, None).ok();
+    let user_canonical = user_config.as_ref().and_then(|c| c.canonical_provider);
 
     let not_configured = "<i><red>not configured</red></i>";
 
     let user_part = match user_canonical {
-        Some(user) => format!("user: <b>{user}</b>"),
+        Some(p) => format!("user: <b>{p}</b>"),
         None => format!("user: {not_configured}"),
     };
 
     let line = if is_git_repo {
-        let repo_canonical = canonical_provider(
-            &linking_settings.canonical_provider,
-            ResourceScope::Repo,
-            resource,
-        );
+        let repo_path = paths.repo_root().join(".claudine").join("config.json");
+        let repo_config =
+            claudine::dispatch::loader::load_claudine_config(Some(&repo_path), None).ok();
+        let repo_canonical = repo_config.as_ref().and_then(|c| c.canonical_provider);
         let repo_part = match repo_canonical {
-            Some(repo) => format!("repo: <b>{repo}</b>"),
+            Some(p) => format!("repo: <b>{p}</b>"),
             None => format!("repo: {not_configured}"),
         };
-        format!("<blue><b>Canonical Providers:</b></blue> {user_part}, {repo_part}")
+        format!("<blue><b>Canonical Provider:</b></blue> {user_part}, {repo_part}")
     } else {
-        format!("<blue><b>Canonical Providers:</b></blue> {user_part}")
+        format!("<blue><b>Canonical Provider:</b></blue> {user_part}")
     };
 
     log::data(&Prose::new(line).render(term));

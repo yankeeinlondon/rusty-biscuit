@@ -66,4 +66,4 @@ trace/*
 ~$*.docx
 **/debug/*
 Cargo.lock
-.opencode/package-lock.json
+**/Cargo.lock/*

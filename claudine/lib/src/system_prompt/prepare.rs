@@ -3,6 +3,75 @@ use darkmatter::markdown::compose::ComposeOptions;
 
 use crate::system_prompt::types::*;
 
+fn source_path(source: &SystemPromptSource) -> Option<&std::path::Path> {
+    match source {
+        SystemPromptSource::StandardDiscovered { path, .. }
+        | SystemPromptSource::ExplicitFile { path, .. }
+        | SystemPromptSource::NonInteractiveFile { path, .. } => Some(path.as_path()),
+        SystemPromptSource::BuiltInNonInteractive => None,
+    }
+}
+
+fn mode_for_source(source: &SystemPromptSource) -> SystemPromptMode {
+    match source {
+        SystemPromptSource::StandardDiscovered { .. }
+        | SystemPromptSource::NonInteractiveFile { .. }
+        | SystemPromptSource::BuiltInNonInteractive => SystemPromptMode::Append,
+        SystemPromptSource::ExplicitFile { mode, .. } => *mode,
+    }
+}
+
+fn compose_prompt_markdown(
+    source: &SystemPromptSource,
+    raw_text: &str,
+) -> Result<String, crate::error::ClaudineError> {
+    let md: Markdown = raw_text.into();
+    let mut options = ComposeOptions::new();
+    if let Some(path) = source_path(source) {
+        options = options.with_source_file(path);
+    }
+
+    let (composed, _report) = md
+        .compose_with(options)
+        .map_err(|e| crate::error::ClaudineError::SystemPromptComposition(e.to_string()))?;
+
+    Ok(composed.content().to_string())
+}
+
+fn merge_prompt_sections(base: &str, appendix: &str) -> String {
+    let base = base.trim_end();
+    let appendix = appendix.trim();
+
+    if base.is_empty() {
+        appendix.to_string()
+    } else if appendix.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}\n\n{appendix}")
+    }
+}
+
+fn prepare_non_interactive_appendix(
+    context: &crate::system_prompt::context::LaunchContext,
+) -> Result<PreparedNonInteractiveAppendix, crate::error::ClaudineError> {
+    for (source, raw_text) in
+        crate::system_prompt::resolve::resolve_non_interactive_candidates(context)?
+    {
+        let composed_markdown = compose_prompt_markdown(&source, &raw_text)?;
+        let normalized = composed_markdown.trim().to_string();
+        if normalized.is_empty() {
+            continue;
+        }
+        return Ok(PreparedNonInteractiveAppendix {
+            source,
+            raw_text,
+            composed_markdown: normalized,
+        });
+    }
+
+    unreachable!("non-interactive prompt candidates must include a built-in fallback")
+}
+
 /// Compose a resolved system prompt source through Darkmatter and
 /// return the effective result.
 ///
@@ -12,25 +81,8 @@ pub fn prepare_system_prompt(
     source: SystemPromptSource,
     raw_text: &str,
 ) -> Result<EffectiveSystemPrompt, crate::error::ClaudineError> {
-    let source_path = match &source {
-        SystemPromptSource::StandardDiscovered { path, .. } => path,
-        SystemPromptSource::ExplicitFile { path, .. } => path,
-    };
-
-    let mode = match &source {
-        SystemPromptSource::StandardDiscovered { .. } => SystemPromptMode::Append,
-        SystemPromptSource::ExplicitFile { mode, .. } => *mode,
-    };
-
-    // Parse and compose through Darkmatter
-    let md: Markdown = raw_text.into();
-    let options = ComposeOptions::new().with_source_file(source_path);
-
-    let (composed, _report) = md
-        .compose_with(options)
-        .map_err(|e| crate::error::ClaudineError::SystemPromptComposition(e.to_string()))?;
-
-    let composed_markdown = composed.content().to_string();
+    let mode = mode_for_source(&source);
+    let composed_markdown = compose_prompt_markdown(&source, raw_text)?;
 
     // Empty-body check
     if composed_markdown.trim().is_empty() {
@@ -42,6 +94,7 @@ pub fn prepare_system_prompt(
         source,
         raw_text: raw_text.to_string(),
         composed_markdown,
+        non_interactive_appendix: None,
     }))
 }
 
@@ -50,17 +103,60 @@ pub fn resolve_and_prepare(
     args: &SystemPromptArgs,
     context: &crate::system_prompt::context::LaunchContext,
 ) -> Result<EffectiveSystemPrompt, crate::error::ClaudineError> {
-    let Some((source, raw_text)) =
-        crate::system_prompt::resolve::resolve_system_prompt_source(args, context)?
-    else {
-        return Ok(EffectiveSystemPrompt::None);
-    };
-    prepare_system_prompt(source, &raw_text)
+    resolve_and_prepare_for_session(args, context, false)
+}
+
+/// Session-aware convenience: resolve + compose and optionally append
+/// non-interactive safety instructions.
+pub fn resolve_and_prepare_for_session(
+    args: &SystemPromptArgs,
+    context: &crate::system_prompt::context::LaunchContext,
+    non_interactive: bool,
+) -> Result<EffectiveSystemPrompt, crate::error::ClaudineError> {
+    let effective =
+        match crate::system_prompt::resolve::resolve_system_prompt_source(args, context)? {
+            Some((source, raw_text)) => prepare_system_prompt(source, &raw_text)?,
+            None => EffectiveSystemPrompt::None,
+        };
+
+    if !non_interactive {
+        return Ok(effective);
+    }
+
+    let appendix = prepare_non_interactive_appendix(context)?;
+
+    Ok(match effective {
+        EffectiveSystemPrompt::Ready(mut prepared) => {
+            prepared.raw_text = merge_prompt_sections(&prepared.raw_text, &appendix.raw_text);
+            prepared.composed_markdown =
+                merge_prompt_sections(&prepared.composed_markdown, &appendix.composed_markdown);
+            prepared.non_interactive_appendix = Some(appendix);
+            EffectiveSystemPrompt::Ready(prepared)
+        }
+        EffectiveSystemPrompt::Disabled { source } => {
+            let mode = mode_for_source(&source);
+            EffectiveSystemPrompt::Ready(PreparedSystemPrompt {
+                mode,
+                source: appendix.source.clone(),
+                raw_text: appendix.raw_text.clone(),
+                composed_markdown: appendix.composed_markdown.clone(),
+                non_interactive_appendix: None,
+            })
+        }
+        EffectiveSystemPrompt::None => EffectiveSystemPrompt::Ready(PreparedSystemPrompt {
+            mode: SystemPromptMode::Append,
+            source: appendix.source.clone(),
+            raw_text: appendix.raw_text.clone(),
+            composed_markdown: appendix.composed_markdown.clone(),
+            non_interactive_appendix: None,
+        }),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -295,6 +391,201 @@ mod tests {
         match result {
             EffectiveSystemPrompt::Ready(prepared) => {
                 assert_eq!(prepared.mode, SystemPromptMode::Replace);
+            }
+            other => panic!("Expected Ready, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn non_interactive_session_uses_builtin_when_no_prompt_exists() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        let cwd = tmp.path().join("workspace");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&cwd).unwrap();
+
+        unsafe {
+            std::env::set_var("HOME", &home);
+        }
+
+        let args = SystemPromptArgs::default();
+        let context = LaunchContext {
+            cwd: cwd.clone(),
+            repo_root: Some(cwd),
+            package_area_root: None,
+            package_root: None,
+        };
+
+        let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
+
+        unsafe {
+            std::env::remove_var("HOME");
+        }
+
+        match result {
+            EffectiveSystemPrompt::Ready(prepared) => {
+                assert_eq!(prepared.mode, SystemPromptMode::Append);
+                assert_eq!(
+                    prepared.composed_markdown,
+                    DEFAULT_NON_INTERACTIVE_SYSTEM_PROMPT.trim()
+                );
+                assert!(matches!(
+                    prepared.source,
+                    SystemPromptSource::BuiltInNonInteractive
+                ));
+                assert!(prepared.non_interactive_appendix.is_none());
+            }
+            other => panic!("Expected Ready, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn non_interactive_session_appends_repo_prompt() {
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(repo.join(".claudine")).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(repo.join("system-prompt.md"), "Base prompt.").unwrap();
+        std::fs::write(
+            repo.join(".claudine").join("non-interactive.md"),
+            "Repo appendix.",
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("HOME", &home);
+        }
+
+        let args = SystemPromptArgs::default();
+        let context = LaunchContext {
+            cwd: repo.clone(),
+            repo_root: Some(repo.clone()),
+            package_area_root: None,
+            package_root: None,
+        };
+
+        let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
+
+        unsafe {
+            std::env::remove_var("HOME");
+        }
+
+        match result {
+            EffectiveSystemPrompt::Ready(prepared) => {
+                assert_eq!(prepared.mode, SystemPromptMode::Append);
+                assert_eq!(prepared.composed_markdown, "Base prompt.\n\nRepo appendix.");
+                let appendix = prepared
+                    .non_interactive_appendix
+                    .expect("missing non-interactive appendix metadata");
+                assert_eq!(appendix.composed_markdown, "Repo appendix.");
+                assert!(matches!(
+                    appendix.source,
+                    SystemPromptSource::NonInteractiveFile {
+                        scope: StandardPromptScope::Repo,
+                        ..
+                    }
+                ));
+            }
+            other => panic!("Expected Ready, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn non_interactive_session_preserves_replace_mode() {
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(repo.join(".claudine")).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+
+        let replace_path = write_temp_file(repo.as_path(), "replace.md", "Replacement prompt.");
+        std::fs::write(
+            repo.join(".claudine").join("non-interactive.md"),
+            "Repo appendix.",
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("HOME", &home);
+        }
+
+        let args = SystemPromptArgs {
+            replace_file: Some(replace_path.display().to_string()),
+            ..Default::default()
+        };
+        let context = LaunchContext {
+            cwd: repo.clone(),
+            repo_root: Some(repo.clone()),
+            package_area_root: None,
+            package_root: None,
+        };
+
+        let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
+
+        unsafe {
+            std::env::remove_var("HOME");
+        }
+
+        match result {
+            EffectiveSystemPrompt::Ready(prepared) => {
+                assert_eq!(prepared.mode, SystemPromptMode::Replace);
+                assert_eq!(
+                    prepared.composed_markdown,
+                    "Replacement prompt.\n\nRepo appendix."
+                );
+            }
+            other => panic!("Expected Ready, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn non_interactive_session_ignores_empty_base_prompt() {
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(repo.join(".claudine")).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(repo.join("system-prompt.md"), "---\ntitle: Empty\n---\n").unwrap();
+        std::fs::write(
+            repo.join(".claudine").join("non-interactive.md"),
+            "Repo appendix.",
+        )
+        .unwrap();
+
+        unsafe {
+            std::env::set_var("HOME", &home);
+        }
+
+        let args = SystemPromptArgs::default();
+        let context = LaunchContext {
+            cwd: repo.clone(),
+            repo_root: Some(repo.clone()),
+            package_area_root: None,
+            package_root: None,
+        };
+
+        let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
+
+        unsafe {
+            std::env::remove_var("HOME");
+        }
+
+        match result {
+            EffectiveSystemPrompt::Ready(prepared) => {
+                assert_eq!(prepared.mode, SystemPromptMode::Append);
+                assert_eq!(prepared.composed_markdown, "Repo appendix.");
+                assert!(matches!(
+                    prepared.source,
+                    SystemPromptSource::NonInteractiveFile {
+                        scope: StandardPromptScope::Repo,
+                        ..
+                    }
+                ));
             }
             other => panic!("Expected Ready, got {other:?}"),
         }

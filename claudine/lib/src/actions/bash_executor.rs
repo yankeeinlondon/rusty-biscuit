@@ -14,7 +14,15 @@ pub enum ValidatedCommand {
     /// A directly executable binary at the resolved path.
     Direct(String),
     /// A script to be run through an interpreter.
-    Interpreted { interpreter: String, script: String },
+    ///
+    /// `interpreter` is the executable (e.g., `/usr/bin/env`).
+    /// `interpreter_args` are additional args before the script
+    /// (e.g., `["bun"]` for `#!/usr/bin/env bun`).
+    Interpreted {
+        interpreter: String,
+        interpreter_args: Vec<String>,
+        script: String,
+    },
 }
 
 /// Validates a command string for use as a bash action.
@@ -25,10 +33,7 @@ pub enum ValidatedCommand {
 /// the command cannot be found on PATH, or a JS/TS file has no usable interpreter.
 pub fn validate_command(command: &str) -> Result<ValidatedCommand> {
     let path = Path::new(command);
-    let base_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(command);
+    let base_name = path.file_name().and_then(|n| n.to_str()).unwrap_or(command);
 
     if BLOCKED_COMMANDS.contains(&base_name) {
         return Err(ClaudineError::ConfigValidation(format!(
@@ -70,54 +75,60 @@ pub fn validate_command(command: &str) -> Result<ValidatedCommand> {
 /// `node` (node only for `.js`/`.mjs`).
 fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
     let content = std::fs::read_to_string(command).map_err(|e| {
-        ClaudineError::ConfigValidation(format!(
-            "cannot read script `{command}`: {e}"
-        ))
+        ClaudineError::ConfigValidation(format!("cannot read script `{command}`: {e}"))
     })?;
 
-    if let Some(first_line) = content.lines().next() {
-        if let Some(shebang) = first_line.strip_prefix("#!") {
-            let interpreter = shebang.split_whitespace().next().unwrap_or("").to_string();
-            if interpreter.is_empty() {
+    if let Some(first_line) = content.lines().next()
+        && let Some(shebang) = first_line.strip_prefix("#!")
+    {
+        let mut parts = shebang.split_whitespace();
+        let interpreter = parts.next().unwrap_or("").to_string();
+        if interpreter.is_empty() {
+            return Err(ClaudineError::ConfigValidation(format!(
+                "script `{command}` has an empty shebang line"
+            )));
+        }
+        // Capture remaining shebang tokens as interpreter args
+        // (e.g., `#!/usr/bin/env bun` → interpreter="/usr/bin/env", args=["bun"])
+        let interpreter_args: Vec<String> = parts.map(String::from).collect();
+
+        let interpreter_path = Path::new(&interpreter);
+        if interpreter_path.is_absolute() {
+            if !interpreter_path.exists() {
                 return Err(ClaudineError::ConfigValidation(format!(
-                    "script `{command}` has an empty shebang line"
+                    "shebang interpreter `{interpreter}` not found for script `{command}`"
                 )));
             }
-            let interpreter_path = Path::new(&interpreter);
-            if interpreter_path.is_absolute() {
-                if !interpreter_path.exists() {
-                    return Err(ClaudineError::ConfigValidation(format!(
-                        "shebang interpreter `{interpreter}` not found for script `{command}`"
-                    )));
-                }
-            } else {
-                which::which(&interpreter).map_err(|_| {
-                    ClaudineError::ConfigValidation(format!(
-                        "shebang interpreter `{interpreter}` not found on PATH for script `{command}`"
-                    ))
-                })?;
-            }
-            return Ok(ValidatedCommand::Interpreted {
-                interpreter,
-                script: command.to_string(),
-            });
+        } else {
+            which::which(&interpreter).map_err(|_| {
+                ClaudineError::ConfigValidation(format!(
+                    "shebang interpreter `{interpreter}` not found on PATH for script `{command}`"
+                ))
+            })?;
         }
+        return Ok(ValidatedCommand::Interpreted {
+            interpreter,
+            interpreter_args,
+            script: command.to_string(),
+        });
     }
 
     if let Ok(_bun) = which::which("bun") {
         return Ok(ValidatedCommand::Interpreted {
             interpreter: "bun".to_string(),
+            interpreter_args: vec![],
             script: command.to_string(),
         });
     }
 
-    if matches!(extension, "js" | "mjs") {
-        if let Ok(_node) = which::which("node") {
-            return Ok(ValidatedCommand::Interpreted {
-                interpreter: "node".to_string(),
-                script: command.to_string(),
-            });
-        }
+    if matches!(extension, "js" | "mjs")
+        && let Ok(_node) = which::which("node")
+    {
+        return Ok(ValidatedCommand::Interpreted {
+            interpreter: "node".to_string(),
+            interpreter_args: vec![],
+            script: command.to_string(),
+        });
     }
 
     Err(ClaudineError::ConfigValidation(format!(
@@ -126,6 +137,13 @@ fn validate_js_ts(command: &str, extension: &str) -> Result<ValidatedCommand> {
 }
 
 /// Wraps a value in single quotes, escaping any embedded single quotes.
+///
+/// **Note:** This function is provided for callers that need explicit
+/// shell escaping (e.g., building `sh -c` strings). The standard dispatch
+/// path does NOT use this function because it passes interpolated values
+/// through `shell_words::split` and then supplies them as discrete `argv`
+/// entries via `Command::args()`, which preserves variable boundaries
+/// without shell interpretation.
 ///
 /// ## Examples
 ///
@@ -191,5 +209,76 @@ mod tests {
     #[test]
     fn shell_escape_empty_string() {
         assert_eq!(shell_escape(""), "''");
+    }
+
+    #[test]
+    fn shebang_env_bun_parses_interpreter_args() {
+        if !Path::new("/usr/bin/env").exists() {
+            return;
+        }
+
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".ts")
+            .tempfile()
+            .expect("failed to create temp file");
+
+        use std::io::Write;
+        writeln!(tmp, "#!/usr/bin/env bun").unwrap();
+        writeln!(tmp, "console.log('hello');").unwrap();
+
+        let path = tmp.path().to_str().unwrap().to_string();
+        let result = validate_command(&path).expect("validate_command should succeed");
+
+        match result {
+            ValidatedCommand::Interpreted {
+                interpreter,
+                interpreter_args,
+                script,
+            } => {
+                assert_eq!(interpreter, "/usr/bin/env");
+                assert_eq!(interpreter_args, vec!["bun".to_string()]);
+                assert_eq!(script, path);
+            }
+            other => panic!("expected Interpreted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shebang_simple_interpreter_has_no_args() {
+        if !Path::new("/usr/bin/env").exists() {
+            return;
+        }
+
+        // Use /usr/bin/env as the single-token shebang interpreter since we
+        // know it exists (checked above). Real-world shebangs like
+        // `#!/usr/bin/bun` would work identically; we just need something
+        // present on disk.
+        let mut tmp = tempfile::Builder::new()
+            .suffix(".ts")
+            .tempfile()
+            .expect("failed to create temp file");
+
+        use std::io::Write;
+        writeln!(tmp, "#!/usr/bin/env").unwrap();
+        writeln!(tmp, "console.log('hello');").unwrap();
+
+        let path = tmp.path().to_str().unwrap().to_string();
+        let result = validate_command(&path).expect("validate_command should succeed");
+
+        match result {
+            ValidatedCommand::Interpreted {
+                interpreter,
+                interpreter_args,
+                script,
+            } => {
+                assert_eq!(interpreter, "/usr/bin/env");
+                assert!(
+                    interpreter_args.is_empty(),
+                    "expected empty interpreter_args, got {interpreter_args:?}"
+                );
+                assert_eq!(script, path);
+            }
+            other => panic!("expected Interpreted, got {other:?}"),
+        }
     }
 }

@@ -238,7 +238,7 @@ The User enters the app in **overview mode** and can:
                 - they can press `P` to hear that sound effect play
                 - they can press ENTER to change to the selected effect and exit the modal
                 - they can press ESC to exit the modal and rejecting any changes
-            - `A` will pop-up a Sound Effects modal for the "attention" default; behavior identical to "successful" UI described above
+            - `N` will pop-up a Sound Effects modal for the "attention" default; behavior identical to "successful" UI described above
             - `E` will pop-up a Sound Effects modal for the "error" default; behavior identical to "successful" UI described above
 
 1. Services

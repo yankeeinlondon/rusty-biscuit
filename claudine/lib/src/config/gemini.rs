@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::Result;
-use crate::events::{HookerConfig, Provider};
+use crate::events::Provider;
 
 use super::atomic::atomic_write;
 use super::backup::create_backup;
 use super::claudine_handle_command;
-use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
+use super::trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
 
 /// Name prefix used to identify Claudine-managed hooks in Gemini config.
 const CLAUDINE_NAME_PREFIX: &str = "claudine-";
@@ -41,7 +41,7 @@ impl AgentConfigurator for GeminiConfigurator {
 
     fn register(
         &self,
-        config: &HookerConfig,
+        plan: &ProviderHookPlan,
         config_dir: Option<&Path>,
     ) -> Result<RegistrationResult> {
         let settings_path = config_path(config_dir);
@@ -56,7 +56,7 @@ impl AgentConfigurator for GeminiConfigurator {
         }
 
         // Check if already in sync (same events registered as in config)
-        if self.is_in_sync(config, config_dir)? {
+        if self.is_in_sync(plan, config_dir)? {
             return Ok(RegistrationResult::Skipped(SkipReason::AlreadyRegistered));
         }
 
@@ -72,22 +72,16 @@ impl AgentConfigurator for GeminiConfigurator {
             .as_object_mut()
             .unwrap();
 
-        // Get events configured for this provider
-        let provider_config = match config.providers.get(&Provider::Gemini) {
-            Some(pc) => pc,
-            None => {
-                // No config for Gemini - remove all claudine hooks
-                self.deregister(config_dir)?;
-                return Ok(RegistrationResult::Registered { event_count: 0 });
-            }
-        };
+        if plan.events.is_empty() {
+            self.deregister(config_dir)?;
+            return Ok(RegistrationResult::Registered { event_count: 0 });
+        }
 
         // Build set of native event names we want to keep
-        let expected_natives: std::collections::HashSet<String> = provider_config
+        let expected_natives: std::collections::HashSet<String> = plan
             .events
             .iter()
-            .filter(|(_, binding)| binding.enabled)
-            .filter_map(|(event, _)| {
+            .filter_map(|event| {
                 Provider::Gemini
                     .registration_native_event_name(event)
                     .map(str::to_string)
@@ -109,11 +103,7 @@ impl AgentConfigurator for GeminiConfigurator {
         // Second pass: add/update hooks for events in config
         let handle_command = claudine_handle_command(Provider::Gemini);
         let mut event_count = 0;
-        for (event, binding) in &provider_config.events {
-            // Skip disabled events
-            if !binding.enabled {
-                continue;
-            }
+        for event in &plan.events {
             // Skip events that Gemini doesn't support
             let Some(native_name) = Provider::Gemini.registration_native_event_name(event) else {
                 continue;
@@ -229,7 +219,7 @@ impl GeminiConfigurator {
     ///
     /// Returns false if any legacy flat-format entries exist, forcing
     /// re-registration to clean them up.
-    fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
+    fn is_in_sync(&self, plan: &ProviderHookPlan, config_dir: Option<&Path>) -> Result<bool> {
         use std::collections::HashSet;
 
         // Check for legacy flat-format entries that need cleanup
@@ -239,22 +229,16 @@ impl GeminiConfigurator {
 
         let registered: HashSet<String> = self.registered_events(config_dir)?.into_iter().collect();
 
-        let expected: HashSet<String> = config
-            .providers
-            .get(&Provider::Gemini)
-            .map(|p| {
-                p.events
-                    .iter()
-                    .filter(|(event, binding)| {
-                        binding.enabled
-                            && Provider::Gemini
-                                .registration_native_event_name(event)
-                                .is_some()
-                    })
-                    .map(|(event, _)| event.to_string())
-                    .collect()
+        let expected: HashSet<String> = plan
+            .events
+            .iter()
+            .filter(|event| {
+                Provider::Gemini
+                    .registration_native_event_name(event)
+                    .is_some()
             })
-            .unwrap_or_default();
+            .map(|event| event.to_string())
+            .collect();
 
         Ok(registered == expected)
     }
@@ -346,32 +330,16 @@ fn config_path(config_dir: Option<&Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use tempfile::TempDir;
 
-    use crate::events::{AgenticEvent, EventBinding, GlobalSettings, ProviderConfig};
+    use crate::events::AgenticEvent;
 
     use super::*;
 
-    fn test_config(events: Vec<AgenticEvent>) -> HookerConfig {
-        let mut event_map = HashMap::new();
-        for event in events {
-            event_map.insert(
-                event,
-                EventBinding {
-                    enabled: true,
-                    actions: vec![],
-                    matcher: None,
-                },
-            );
-        }
-        let mut providers = HashMap::new();
-        providers.insert(Provider::Gemini, ProviderConfig { events: event_map });
-        HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings::default(),
-            providers,
+    fn test_plan(events: Vec<AgenticEvent>) -> ProviderHookPlan {
+        ProviderHookPlan {
+            events,
+            canonical_for: None,
         }
     }
 
@@ -382,7 +350,7 @@ mod tests {
         fs::write(&settings, r#"{"hooks": {}}"#).unwrap();
 
         let configurator = GeminiConfigurator;
-        let config = test_config(vec![AgenticEvent::BeforePrompt, AgenticEvent::TurnComplete]);
+        let config = test_plan(vec![AgenticEvent::BeforePrompt, AgenticEvent::TurnComplete]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
         match result {
@@ -407,7 +375,7 @@ mod tests {
         fs::write(&settings, r#"{"hooks": {}}"#).unwrap();
 
         let configurator = GeminiConfigurator;
-        let config = test_config(vec![AgenticEvent::TurnComplete]);
+        let config = test_plan(vec![AgenticEvent::TurnComplete]);
         configurator.register(&config, Some(tmp.path())).unwrap();
 
         let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
@@ -513,11 +481,11 @@ mod tests {
         let configurator = GeminiConfigurator;
 
         // First register with one event
-        let config1 = test_config(vec![AgenticEvent::BeforePrompt]);
+        let config1 = test_plan(vec![AgenticEvent::BeforePrompt]);
         configurator.register(&config1, Some(tmp.path())).unwrap();
 
         // Re-register with two events
-        let config2 = test_config(vec![AgenticEvent::BeforePrompt, AgenticEvent::TurnComplete]);
+        let config2 = test_plan(vec![AgenticEvent::BeforePrompt, AgenticEvent::TurnComplete]);
         let result = configurator.register(&config2, Some(tmp.path())).unwrap();
 
         match result {
@@ -541,11 +509,11 @@ mod tests {
         let configurator = GeminiConfigurator;
 
         // First register with two events
-        let config1 = test_config(vec![AgenticEvent::BeforePrompt, AgenticEvent::TurnComplete]);
+        let config1 = test_plan(vec![AgenticEvent::BeforePrompt, AgenticEvent::TurnComplete]);
         configurator.register(&config1, Some(tmp.path())).unwrap();
 
         // Re-register with only one event
-        let config2 = test_config(vec![AgenticEvent::BeforePrompt]);
+        let config2 = test_plan(vec![AgenticEvent::BeforePrompt]);
         configurator.register(&config2, Some(tmp.path())).unwrap();
 
         // Verify only before_prompt remains
@@ -560,7 +528,7 @@ mod tests {
         // - If CLI is not installed → returns NotDetected
         let tmp = TempDir::new().unwrap();
         let configurator = GeminiConfigurator;
-        let config = test_config(vec![AgenticEvent::BeforePrompt]);
+        let config = test_plan(vec![AgenticEvent::BeforePrompt]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
 

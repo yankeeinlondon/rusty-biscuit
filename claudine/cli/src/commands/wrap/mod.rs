@@ -855,7 +855,7 @@ pub struct WrapperArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Show only the header line; suppress env details and info messages.
+    /// Suppress env details and info messages, but still show the system prompt when set.
     #[arg(short = 'q', long)]
     pub quiet: bool,
 
@@ -1042,21 +1042,18 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                 package_root: None,
             }
         });
-    let effective_sp = claudine::system_prompt::resolve_and_prepare(&sp_args, &launch_context)
-        .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
+        &sp_args,
+        &launch_context,
+        non_interactive_requested,
+    )
+    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
 
     let mut sp_artifacts: Vec<super::wrap::system_prompt::SystemPromptArtifact> = Vec::new();
 
     match &effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::None => {}
-        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source } => {
-            if !args.quiet && !args.silent {
-                log::info(&format!(
-                    "system prompt disabled by empty {}",
-                    super::wrap::system_prompt::describe_source(source),
-                ));
-            }
-        }
+        claudine::system_prompt::EffectiveSystemPrompt::None
+        | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
             let application =
                 profile.apply_system_prompt(prepared, !non_interactive_requested, &cwd)?;
@@ -1305,7 +1302,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     // Interactive override: user explicitly forced -i with a prompt present
     let interactive_override = interactive_requested && has_prompt;
 
-    // Output verbosity: --silent suppresses everything, --quiet shows header only
+    // Output verbosity: --silent suppresses everything, --quiet hides env/info preamble
+    // but still shows the system prompt when one is active.
     if !silent_requested {
         // Header line (shown for both default and --quiet)
         crate::output::log_wrapper_header(
@@ -1324,7 +1322,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &term,
         );
 
-        // Everything below is suppressed by --quiet
         if !quiet_requested {
             crate::output::log_wrapper_env_details(&env_plan, mcp_runtime.as_ref(), &term, verbose);
 
@@ -1348,8 +1345,24 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             for message in &deferred_messages {
                 log::message(&crate::output::post_env_message(message, &term));
             }
+        }
 
-            // Blank line to separate preamble from execution output
+        crate::output::log_system_prompt(
+            &effective_sp,
+            detail_requested,
+            silent_requested,
+            quiet_requested,
+            &term,
+        );
+
+        // Blank line to separate preamble from execution output. Keep it aligned with
+        // whichever preamble blocks were actually emitted.
+        if !quiet_requested
+            || matches!(
+                effective_sp,
+                claudine::system_prompt::EffectiveSystemPrompt::Ready(_)
+            )
+        {
             log::message("");
         }
     }
@@ -3533,7 +3546,7 @@ fn print_wrapper_help(provider: Provider) {
           \x20     --rsp <FILE>             Replace the provider's system prompt with contents from a file\n\
           \x20 -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)\n\
          \x20     --dry-run             Show what would be executed without launching the child\n\
-         \x20 -q, --quiet              Show only the header line; suppress env details and info\n\
+         \x20 -q, --quiet              Suppress env details and info; still show the system prompt when set\n\
          \x20     --silent              Suppress all Claudine preflight output\n\
          \x20     --operation <OP>      Set the OPERATION env var for the wrapped session\n\
          \x20     --sandbox             Enable provider-specific sandboxing\n\

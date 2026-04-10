@@ -391,6 +391,7 @@ dependencies = [
  "serde_yaml_ng",
  "thiserror 2.0.18",
  "toml",
+ "tracing",
  "walkdir",
 ]
 
@@ -4547,6 +4548,7 @@ dependencies = [
  "strum",
  "sysinfo",
  "thiserror 2.0.18",
+ "tracing",
  "urlencoding",
  "walkdir",
  "which",

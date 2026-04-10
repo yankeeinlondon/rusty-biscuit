@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 biscuit-file = { path = "../../biscuit-file/lib" }
+biscuit-speaks = { path = "../../biscuit-speaks/lib" }
 claudine = { path = "../lib" }
 playa = { path = "../../playa/lib", features = ["sound-effects"] }
 sniff = { path = "../../sniff/lib" }
@@ -47,3 +48,4 @@ predicates = "3"
 insta = { version = "1.34", features = ["json"] }
 expectrl = "0.8"
 proptest = "1.4"
+serial_test = "3"

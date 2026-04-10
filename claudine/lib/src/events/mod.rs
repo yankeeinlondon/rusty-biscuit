@@ -9,8 +9,7 @@ mod resolved_hook;
 
 pub use agentic_event::AgenticEvent;
 pub use config::{
-    CanonicalProviderSettings, EventBinding, GlobalSettings, HookerConfig, LinkingSettings,
-    ProviderConfig, TtsSettings,
+    CanonicalProviderSettings, EventBinding, GlobalSettings, LinkingSettings, TtsSettings,
 };
 pub use environment::{
     EnvironmentContext, GitContext, HardwareContext, OsContext, RepoContext, detect_environment,

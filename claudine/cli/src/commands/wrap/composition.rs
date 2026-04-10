@@ -403,22 +403,18 @@ pub(crate) fn execute_composition_request_inner(
             package_area_root: None,
             package_root: None,
         });
-    let effective_sp =
-        claudine::system_prompt::resolve_and_prepare(&request.system_prompt_args, &launch_context)
-            .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
+        &request.system_prompt_args,
+        &launch_context,
+        effective_non_interactive,
+    )
+    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
 
     let mut sp_artifacts: Vec<super::system_prompt::SystemPromptArtifact> = Vec::new();
 
     match &effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::None => {}
-        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source } => {
-            if !quiet && !silent {
-                log::info(&format!(
-                    "system prompt disabled by empty {}",
-                    super::system_prompt::describe_source(source),
-                ));
-            }
-        }
+        claudine::system_prompt::EffectiveSystemPrompt::None
+        | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
             let application =
                 profile.apply_system_prompt(prepared, !effective_non_interactive, &launch_cwd)?;
@@ -547,8 +543,11 @@ pub(crate) fn execute_composition_request_inner(
             },
         )
     } else {
-        match claudine::dispatch::loader::load_runtime_config(None, effective_repo_root) {
-            Ok(config) => (config.settings().clone(), config.messaging().clone()),
+        match claudine::dispatch::loader::load_claudine_config(None, effective_repo_root) {
+            Ok(config) => (
+                claudine::dispatch::loader::bridge_tts_settings(&config),
+                claudine::dispatch::loader::bridge_messaging_settings(&config),
+            ),
             Err(_) => (
                 claudine::events::GlobalSettings::default(),
                 claudine::messaging::RuntimeMessagingSettings {
@@ -645,19 +644,24 @@ pub(crate) fn execute_composition_request_inner(
     let env_context = claudine::events::detect_environment_fast(env_detect_root);
 
     if !silent {
-        // Everything below is suppressed by --quiet (consistent with direct-wrap)
         if !quiet && (request.session_interactive || detail_requested) {
             crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
-        // Composed prompt block: shown in non-interactive mode only.  In
-        // interactive mode the prompt is delivered into the session (via
-        // positional arg or stdin), making preamble display redundant.
+        crate::output::log_system_prompt(&effective_sp, detail_requested, silent, quiet, &term);
+
+        if matches!(
+            effective_sp,
+            claudine::system_prompt::EffectiveSystemPrompt::Ready(_)
+        ) && effective_non_interactive
+        {
+            crate::log::message("");
+        }
+
         if effective_non_interactive {
             crate::output::log_compose_prompt(&request.prepared.prompt, detail_requested, &term);
         }
 
-        // Blank line to separate preamble from execution output
         if !quiet {
             crate::log::message("");
         }
@@ -1466,8 +1470,9 @@ fn load_config_favorite(cwd: &Path) -> Option<Provider> {
         .ok()
         .flatten()
         .map(|info| info.repo_root);
-    let config = claudine::dispatch::loader::load_config(None, repo_root.as_deref()).ok()?;
-    config.settings.linking?.preference.first().copied()
+    let config =
+        claudine::dispatch::loader::load_claudine_config(None, repo_root.as_deref()).ok()?;
+    Some(config.preferred_agent)
 }
 
 // -- Legacy composition session event --------------------------------------
