@@ -109,6 +109,10 @@ pub enum SniffError {
         message: String,
     },
 
+    /// The specified commit hash is not an ancestor of HEAD.
+    #[error("commit {hash} is not reachable from HEAD")]
+    HashNotReachable { hash: String },
+
     /// Invalid period specifier for recent-commits queries.
     #[error("invalid period specifier: '{0}'. Expected duration (e.g., 3d, 1w), date (YYYY-MM-DD), hash, 'today', or 'yesterday'.")]
     InvalidPeriod(String),
