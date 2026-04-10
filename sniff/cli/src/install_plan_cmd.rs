@@ -3,10 +3,13 @@
 //! See `sniff/features/2026-04-10-program-install-improvements/spec.md`
 //! section "CLI: Updated `install` Behavior" for the messaging contract.
 
+use std::error::Error;
+
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
-use sniff::programs::{InstallPlan, InstallPlanOption, InstallationMethod};
+use inquire::Confirm;
+use sniff::programs::{InstallOptions, InstallPlan, InstallPlanOption, InstallationMethod};
 
 /// Render the plan to a `String` ready for printing to stdout.
 ///
@@ -94,6 +97,82 @@ fn render_failure_block(plan: &InstallPlan, terminal: &Terminal) -> String {
     out
 }
 
+/// Returns true if the plan's chosen option is a `RemoteBash` method, in
+/// which case the CLI must prompt for a second explicit confirmation even
+/// when `--yes` is passed.
+pub fn should_require_remote_bash_consent(plan: &InstallPlan) -> bool {
+    plan.chosen()
+        .is_some_and(|o| matches!(o.kind, InstallationMethod::RemoteBash(_)))
+}
+
+/// Exit code for ctrl-c / interrupted prompts.
+pub const EXIT_INTERRUPTED: i32 = 130;
+
+/// Full "render + confirm + execute" flow. Called by the CLI dispatcher for
+/// `sniff <category> install <name>`.
+pub fn execute_install_flow(
+    plan: &InstallPlan,
+    dry_run: bool,
+    skip_confirm: bool,
+    plain: bool,
+) -> Result<(), Box<dyn Error>> {
+    // 1. Render
+    let rendered = render_install_plan(plan, /* verbose */ false);
+    crate::output::emit_text(&rendered, plain);
+
+    // 2. Failure: exit cleanly, nothing to do
+    if !plan.successful {
+        return Ok(());
+    }
+
+    // 3. Base confirmation
+    if !dry_run && !skip_confirm {
+        match Confirm::new("Proceed with installation?")
+            .with_default(true)
+            .prompt()
+        {
+            Ok(true) => {}
+            Ok(false) => return Ok(()),
+            Err(inquire::InquireError::OperationCanceled) => return Ok(()),
+            Err(inquire::InquireError::OperationInterrupted) => {
+                std::process::exit(EXIT_INTERRUPTED)
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    // 4. Remote-bash extra confirmation (never skipped)
+    let remote_bash = should_require_remote_bash_consent(plan);
+    if remote_bash && !dry_run {
+        eprintln!();
+        let warning = "<yellow>Warning:</yellow> this will download and execute a remote shell script. Continue?";
+        let terminal = Terminal::default();
+        eprintln!("{}", Prose::new(warning).render(&terminal));
+        match Confirm::new("I understand; proceed with remote-bash install?")
+            .with_default(false)
+            .prompt()
+        {
+            Ok(true) => {}
+            Ok(false) => return Ok(()),
+            Err(inquire::InquireError::OperationCanceled) => return Ok(()),
+            Err(inquire::InquireError::OperationInterrupted) => {
+                std::process::exit(EXIT_INTERRUPTED)
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    // 5. Execute
+    let opts = InstallOptions {
+        dry_run,
+        skip_confirm: true,
+        timeout_secs: 120,
+        approve_remote_bash: remote_bash,
+    };
+    plan.execute(&opts)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +254,39 @@ mod tests {
         });
         let verbose = render_install_plan(&plan, true);
         assert!(verbose.contains("skipped cargo"));
+    }
+
+    #[test]
+    fn should_require_remote_bash_consent_returns_true_for_remote_bash() {
+        let plan = InstallPlan {
+            program: "rustup".into(),
+            website: "https://rustup.rs",
+            successful: true,
+            options: vec![InstallPlanOption {
+                kind: InstallationMethod::RemoteBash("https://sh.rustup.rs"),
+                requires_sudo: false,
+                choose: true,
+                reason_type: InstallPlanReason::Selected,
+                reason: "remote bash installer".into(),
+            }],
+        };
+        assert!(should_require_remote_bash_consent(&plan));
+    }
+
+    #[test]
+    fn should_require_remote_bash_consent_false_for_brew() {
+        let plan = InstallPlan {
+            program: "vim".into(),
+            website: "https://www.vim.org",
+            successful: true,
+            options: vec![InstallPlanOption {
+                kind: InstallationMethod::Brew("vim"),
+                requires_sudo: false,
+                choose: true,
+                reason_type: InstallPlanReason::Selected,
+                reason: "default OS package manager".into(),
+            }],
+        };
+        assert!(!should_require_remote_bash_consent(&plan));
     }
 }
