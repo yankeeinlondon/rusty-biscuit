@@ -310,6 +310,15 @@ spec:
     #!/usr/bin/env bash
     just _implement-spec "$(fd spec.md | rg "features/2" | fzf --border --border-label "Specification File" --header "choose the specification file" --height=15)" || ( echo "bye" && exit 1 )
 
+# Create a technical design document from a specification file
+design feat="":
+    #!/usr/bin/env bash
+    echo -e "We will create a tech-design.md document in the same directory as your specification file"
+    if [[ -z "${feat}" ]]; then
+        fd spec.md | rg "features|fixes" | rg "{{feat}}"
+    else
+        fd spec.md | rg "features|fixes"
+    fi
 
 # review this package using the Codex CLI
 review *args="":
