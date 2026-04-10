@@ -1,6 +1,6 @@
 use sniff::filesystem::ProgrammingLanguage;
 use sniff::os::NtpStatus;
-use sniff::{detect, detect_with_config, SniffConfig};
+use sniff::{SniffConfig, detect, detect_with_config};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -117,14 +117,18 @@ fn test_detect_language_uses_package_boundary_from_nested_workspace() {
 
     assert_eq!(languages.primary, Some(ProgrammingLanguage::Rust));
     assert_eq!(languages.total_files_scanned, 2);
-    assert!(languages
-        .languages
-        .iter()
-        .any(|lang| lang.language == ProgrammingLanguage::Rust));
-    assert!(!languages
-        .languages
-        .iter()
-        .any(|lang| lang.language == ProgrammingLanguage::TypeScript));
+    assert!(
+        languages
+            .languages
+            .iter()
+            .any(|lang| lang.language == ProgrammingLanguage::Rust)
+    );
+    assert!(
+        !languages
+            .languages
+            .iter()
+            .any(|lang| lang.language == ProgrammingLanguage::TypeScript)
+    );
 }
 
 // === Regression tests for JSON serialization of partial results ===
@@ -316,7 +320,7 @@ fn test_detect_timezone_returns_valid_offset() {
 /// Tests that detect_os_type matches the current platform.
 #[test]
 fn test_detect_os_type_matches_platform() {
-    use sniff::hardware::{detect_os_type, OsType};
+    use sniff::hardware::{OsType, detect_os_type};
 
     let os_type = detect_os_type();
 
@@ -362,7 +366,7 @@ fn test_detect_os_type_matches_platform() {
 #[cfg(target_os = "macos")]
 #[test]
 fn test_macos_package_managers_finds_expected_managers() {
-    use sniff::hardware::{detect_macos_package_managers, SystemPackageManager};
+    use sniff::hardware::{SystemPackageManager, detect_macos_package_managers};
 
     let managers = detect_macos_package_managers();
 
@@ -853,7 +857,7 @@ fn test_os_summary_has_no_time_data() {
 
 #[test]
 fn test_executable_index_parity_with_which_for_common_programs() {
-    use sniff::programs::{find_program_with_source, ExecutableIndex};
+    use sniff::programs::{ExecutableIndex, find_program_with_source};
 
     let index = ExecutableIndex::build();
 
@@ -1167,10 +1171,12 @@ fn test_get_recent_commits_preserves_bullet_points() {
         !set.commits[0].bullet_points.is_empty(),
         "Should parse bullet points"
     );
-    assert!(set.commits[0]
-        .bullet_points
-        .iter()
-        .any(|b| b.contains("added src/main.rs")));
+    assert!(
+        set.commits[0]
+            .bullet_points
+            .iter()
+            .any(|b| b.contains("added src/main.rs"))
+    );
 }
 
 #[test]
@@ -1334,8 +1340,7 @@ fn test_hash_boundary_returns_inclusive_range() {
         .unwrap();
 
     // Second commit
-    let _oid2 =
-        commit_file_with_message(&repo, dir.path(), "src/a.rs", "fn a() {}", "commit two");
+    let _oid2 = commit_file_with_message(&repo, dir.path(), "src/a.rs", "fn a() {}", "commit two");
     // Third commit (HEAD)
     let _oid3 =
         commit_file_with_message(&repo, dir.path(), "src/b.rs", "fn b() {}", "commit three");
@@ -1365,7 +1370,13 @@ fn test_hash_boundary_head_itself_returns_single_commit() {
 
     let (_dir, path) = create_recent_commits_repo();
     let repo = Repository::open(&path).unwrap();
-    let head_hash = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+    let head_hash = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
 
     let result = get_recent_commits_by_hash(&path, &head_hash).unwrap();
     assert_eq!(
@@ -1421,10 +1432,7 @@ fn test_hash_non_ancestor_returns_error() {
 
     // Try to query from the side commit — it's not an ancestor of HEAD
     let result = get_recent_commits_by_hash(dir.path(), &side_oid.to_string());
-    assert!(
-        result.is_err(),
-        "Non-ancestor hash should produce an error"
-    );
+    assert!(result.is_err(), "Non-ancestor hash should produce an error");
     let err = result.unwrap_err();
     assert!(
         matches!(err, sniff::SniffError::HashNotReachable { .. }),
@@ -1454,8 +1462,7 @@ fn test_hash_boundary_commits_are_newest_first() {
     repo.commit(Some("HEAD"), &sig, &sig, "commit 1", &tree, &[])
         .unwrap();
 
-    let oid2 =
-        commit_file_with_message(&repo, dir.path(), "src/a.rs", "fn a() {}", "commit 2");
+    let oid2 = commit_file_with_message(&repo, dir.path(), "src/a.rs", "fn a() {}", "commit 2");
     commit_file_with_message(&repo, dir.path(), "src/b.rs", "fn b() {}", "commit 3");
     commit_file_with_message(&repo, dir.path(), "src/c.rs", "fn c() {}", "commit 4");
     commit_file_with_message(&repo, dir.path(), "src/d.rs", "fn d() {}", "commit 5");
@@ -1543,9 +1550,7 @@ edition = "2024"
     // Second commit: change only pkg-a
     fs::write(pkg_a.join("src/lib.rs"), "pub fn a() { /* v2 */ }").unwrap();
     let mut index = repo.index().unwrap();
-    index
-        .add_path(Path::new("pkg-a/lib/src/lib.rs"))
-        .unwrap();
+    index.add_path(Path::new("pkg-a/lib/src/lib.rs")).unwrap();
     index.write().unwrap();
     let tree_id = index.write_tree().unwrap();
     let tree = repo.find_tree(tree_id).unwrap();
@@ -1796,8 +1801,12 @@ fn commit_file_with_timestamp(
     index.add_path(std::path::Path::new(relative)).unwrap();
     index.write().unwrap();
 
-    let sig = git2::Signature::new("Test User", "test@test.com", &git2::Time::new(epoch_secs, 0))
-        .unwrap();
+    let sig = git2::Signature::new(
+        "Test User",
+        "test@test.com",
+        &git2::Time::new(epoch_secs, 0),
+    )
+    .unwrap();
     let tree_id = index.write_tree().unwrap();
     let tree = repo.find_tree(tree_id).unwrap();
     let head = repo.head().unwrap().peel_to_commit().unwrap();

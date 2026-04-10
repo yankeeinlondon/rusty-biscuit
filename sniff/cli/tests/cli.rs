@@ -1256,6 +1256,11 @@ fn create_test_repo() -> (tempfile::TempDir, PathBuf) {
 
 /// Commit a file to the test repo.
 fn test_commit_file(repo_path: &Path, relative: &str, content: &str) {
+    test_commit_file_with_message(repo_path, relative, content, "add file");
+}
+
+/// Commit a file to the test repo with a custom commit message.
+fn test_commit_file_with_message(repo_path: &Path, relative: &str, content: &str, message: &str) {
     let full = repo_path.join(relative);
     if let Some(parent) = full.parent() {
         std::fs::create_dir_all(parent).unwrap();
@@ -1271,7 +1276,7 @@ fn test_commit_file(repo_path: &Path, relative: &str, content: &str) {
     let tree_id = index.write_tree().unwrap();
     let tree = repo.find_tree(tree_id).unwrap();
     let head = repo.head().unwrap().peel_to_commit().unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "add file", &tree, &[&head])
+    repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&head])
         .unwrap();
 }
 
@@ -1388,9 +1393,11 @@ fn test_repo_staged_files_json_uses_new_shape() {
     assert_eq!(json["scope"], "staged", "scope should be lowercase");
     assert_eq!(json["kind"], "all_files", "kind should be snake_case");
     let paths = json["paths"].as_array().expect("paths should be an array");
-    assert!(paths
-        .iter()
-        .any(|p| p.as_str().unwrap().contains("main.rs")));
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.as_str().unwrap().contains("main.rs"))
+    );
 }
 
 #[test]
@@ -2053,15 +2060,8 @@ edition = "2024"
     let sig = repo.signature().unwrap();
     let tree_id = index.write_tree().unwrap();
     let tree = repo.find_tree(tree_id).unwrap();
-    repo.commit(
-        Some("HEAD"),
-        &sig,
-        &sig,
-        "initial monorepo",
-        &tree,
-        &[],
-    )
-    .unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "initial monorepo", &tree, &[])
+        .unwrap();
 
     let path = dir.path().to_path_buf();
     (dir, path)
@@ -2092,10 +2092,7 @@ fn test_repo_recent_commits_with_hash_period() {
         .success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(
-        !stdout.is_empty(),
-        "Hash-based query should produce output"
-    );
+    assert!(!stdout.is_empty(), "Hash-based query should produce output");
 }
 
 #[test]
@@ -2132,6 +2129,105 @@ fn test_repo_recent_commits_with_date_period() {
         ])
         .assert()
         .success();
+}
+
+#[test]
+fn test_repo_recent_commits_action_filter_single_action() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(
+        &path,
+        "src/feature.rs",
+        "pub fn feature() {}",
+        "feat(cli): add action filter",
+    );
+    test_commit_file_with_message(
+        &path,
+        "src/fix.rs",
+        "pub fn fix() {}",
+        "fix(cli): tighten recent commit filtering",
+    );
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--action",
+            "feat",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
+    let commits = json["commits"]
+        .as_array()
+        .expect("Should have commits array");
+
+    assert_eq!(commits.len(), 1, "Only feat commits should remain");
+    assert_eq!(
+        commits[0]["description"].as_str(),
+        Some("feat(cli): add action filter")
+    );
+}
+
+#[test]
+fn test_repo_recent_commits_action_filter_or_semantics() {
+    let (_dir, path) = create_test_repo();
+    test_commit_file_with_message(
+        &path,
+        "src/feature.rs",
+        "pub fn feature() {}",
+        "feat(cli): add action filter",
+    );
+    test_commit_file_with_message(
+        &path,
+        "src/refactor.rs",
+        "pub fn refactor() {}",
+        "refactor(cli): simplify commit filtering",
+    );
+    test_commit_file_with_message(
+        &path,
+        "src/fix.rs",
+        "pub fn fix() {}",
+        "fix(cli): tighten recent commit filtering",
+    );
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "--action",
+            "feat",
+            "--action",
+            "refactor",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
+    let commits = json["commits"]
+        .as_array()
+        .expect("Should have commits array");
+    let descriptions: Vec<&str> = commits
+        .iter()
+        .filter_map(|commit| commit["description"].as_str())
+        .collect();
+
+    assert_eq!(
+        descriptions.len(),
+        2,
+        "feat and refactor commits should remain"
+    );
+    assert!(descriptions.contains(&"feat(cli): add action filter"));
+    assert!(descriptions.contains(&"refactor(cli): simplify commit filtering"));
+    assert!(!descriptions.contains(&"fix(cli): tighten recent commit filtering"));
 }
 
 #[test]
@@ -2287,7 +2383,9 @@ fn test_repo_recent_commits_json_includes_empty_commits() {
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"].as_array().expect("Should have commits array");
+    let commits = json["commits"]
+        .as_array()
+        .expect("Should have commits array");
 
     // Find the empty commit
     let empty = commits
@@ -2317,7 +2415,9 @@ fn test_repo_recent_commits_json_exact_commit_fields() {
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"].as_array().expect("Should have commits array");
+    let commits = json["commits"]
+        .as_array()
+        .expect("Should have commits array");
 
     // Should have at least 2 commits (initial + add file)
     assert!(
@@ -2363,13 +2463,17 @@ fn test_repo_source_code_changes_json_exact_fields() {
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"].as_array().expect("Should have commits array");
+    let commits = json["commits"]
+        .as_array()
+        .expect("Should have commits array");
 
     // At least one commit should have a .rs file
     let has_rs_file = commits.iter().any(|c| {
-        c["files"]
-            .as_array()
-            .is_some_and(|files| files.iter().any(|f| f.as_str().is_some_and(|s| s.ends_with(".rs"))))
+        c["files"].as_array().is_some_and(|files| {
+            files
+                .iter()
+                .any(|f| f.as_str().is_some_and(|s| s.ends_with(".rs")))
+        })
     });
     assert!(has_rs_file, "Source code changes should include .rs files");
 }
@@ -2392,15 +2496,22 @@ fn test_repo_documentation_changes_json_exact_fields() {
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     let json: Value = serde_json::from_str(&stdout).expect("Output should be valid JSON");
-    let commits = json["commits"].as_array().expect("Should have commits array");
+    let commits = json["commits"]
+        .as_array()
+        .expect("Should have commits array");
 
     // At least one commit should have a .md file
     let has_md_file = commits.iter().any(|c| {
-        c["files"]
-            .as_array()
-            .is_some_and(|files| files.iter().any(|f| f.as_str().is_some_and(|s| s.ends_with(".md"))))
+        c["files"].as_array().is_some_and(|files| {
+            files
+                .iter()
+                .any(|f| f.as_str().is_some_and(|s| s.ends_with(".md")))
+        })
     });
-    assert!(has_md_file, "Documentation changes should include .md files");
+    assert!(
+        has_md_file,
+        "Documentation changes should include .md files"
+    );
 }
 
 #[test]
