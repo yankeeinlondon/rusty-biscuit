@@ -9,8 +9,8 @@ use claudine::services::protect::config::{
 };
 use claudine::services::protect::service::{ProtectRequest, ProtectService};
 use claudine::stream::parser::NullSink;
-use claudine::stream::{create_parser, ParserConfig};
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use claudine::stream::{ParserConfig, create_parser};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use tempfile::TempDir;
 
 fn bench_protect_service(c: &mut Criterion) {
