@@ -8,11 +8,11 @@ use git2::Repository;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, instrument};
 
-use crate::filesystem::docs::{detect_docs, MarkdownMeta};
+use crate::filesystem::FileAssociation;
+use crate::filesystem::docs::{MarkdownMeta, detect_docs};
 use crate::filesystem::file_types::{lookup_exact_filename, lookup_extension};
 use crate::filesystem::git::get_commit_files;
 use crate::filesystem::repo::detect_repo;
-use crate::filesystem::FileAssociation;
 use crate::{Result, SniffError};
 
 // ---------------------------------------------------------------------------

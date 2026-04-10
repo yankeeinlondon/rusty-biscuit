@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use tracing::debug;
 
 use crate::filesystem::blast_radius::{is_documentation_path, is_source_code_path};
+use crate::filesystem::git::ConventionalCommit;
 use crate::filesystem::git::detection::get_commit_files;
-use crate::filesystem::repo::{detect_repo, Package};
+use crate::filesystem::repo::{Package, detect_repo};
 use crate::{Result, SniffError};
 
 // ---------------------------------------------------------------------------
@@ -604,6 +605,27 @@ fn extract_display_date(datetime: &str) -> String {
 // ---------------------------------------------------------------------------
 
 impl CommitDescSet {
+    pub fn filter_by_actions<I, S>(&mut self, actions: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let allowed: BTreeSet<String> = actions
+            .into_iter()
+            .map(|action| action.as_ref().to_ascii_lowercase())
+            .collect();
+
+        if allowed.is_empty() {
+            return;
+        }
+
+        self.commits.retain(|commit| {
+            ConventionalCommit::parse(&commit.description)
+                .operation
+                .is_some_and(|operation| allowed.contains(&operation.to_ascii_lowercase()))
+        });
+    }
+
     pub fn filter_by_package(&mut self, package_name: &str) -> Result<()> {
         let Some(ref packages) = self.packages else {
             return Err(SniffError::NotAMonorepo(self.repo_root.clone()));
@@ -1014,6 +1036,56 @@ mod tests {
         use super::*;
         use crate::filesystem::repo::Package;
 
+        #[test]
+        fn filter_by_actions_keeps_matching_conventional_commits() {
+            let mut set = CommitDescSet {
+                commits: vec![
+                    CommitDesc {
+                        hash: "feat1234".to_string(),
+                        datetime: "2026-04-09T14:30:00+00:00".to_string(),
+                        packages: None,
+                        package_areas: None,
+                        files: vec!["src/lib.rs".to_string()],
+                        description: "feat(sniff): add action filtering".to_string(),
+                        bullet_points: vec![],
+                    },
+                    CommitDesc {
+                        hash: "fix12345".to_string(),
+                        datetime: "2026-04-09T13:30:00+00:00".to_string(),
+                        packages: None,
+                        package_areas: None,
+                        files: vec!["src/lib.rs".to_string()],
+                        description: "fix(sniff): preserve filtered output".to_string(),
+                        bullet_points: vec![],
+                    },
+                    CommitDesc {
+                        hash: "plain123".to_string(),
+                        datetime: "2026-04-09T12:30:00+00:00".to_string(),
+                        packages: None,
+                        package_areas: None,
+                        files: vec!["src/lib.rs".to_string()],
+                        description: "ship it".to_string(),
+                        bullet_points: vec![],
+                    },
+                ],
+                period_label: "last 3 days".to_string(),
+                repo_root: PathBuf::from("/repo"),
+                packages: None,
+            };
+
+            set.filter_by_actions(["feat", "fix"]);
+
+            assert_eq!(set.commits.len(), 2);
+            assert_eq!(
+                set.commits[0].description,
+                "feat(sniff): add action filtering"
+            );
+            assert_eq!(
+                set.commits[1].description,
+                "fix(sniff): preserve filtered output"
+            );
+        }
+
         fn make_packages() -> Vec<Package> {
             vec![
                 Package {
@@ -1257,11 +1329,13 @@ mod tests {
 
             assert_eq!(set.commits.len(), 1);
             let commit = &set.commits[0];
-            assert!(commit
-                .packages
-                .as_ref()
-                .unwrap()
-                .contains(&"pkg-b".to_string()));
+            assert!(
+                commit
+                    .packages
+                    .as_ref()
+                    .unwrap()
+                    .contains(&"pkg-b".to_string())
+            );
         }
     }
 }

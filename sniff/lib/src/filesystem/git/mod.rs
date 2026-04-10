@@ -8,7 +8,7 @@ pub use detection::{
 };
 pub use recent_commits::{
     CommitDesc, CommitDescSet, PeriodSpecifier, get_recent_commits_by_date,
-    get_recent_commits_by_hash, get_recent_commits_by_duration, get_recent_commits_in_range,
+    get_recent_commits_by_duration, get_recent_commits_by_hash, get_recent_commits_in_range,
     parse_period,
 };
 pub use types::{
