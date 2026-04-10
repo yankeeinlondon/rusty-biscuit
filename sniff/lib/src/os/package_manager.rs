@@ -1123,8 +1123,8 @@ pub fn detect_macos_package_managers() -> SystemPackageManagers {
 /// - This function should only be called on Windows systems
 /// - The caller is responsible for platform checking via `#[cfg(target_os = "windows")]`
 /// - DISM is always detected if present at the standard Windows system path
-/// - MSYS2 pacman is distinguished from native pacman by checking the known
-///   MSYS2 installation path (`C:\msys64\usr\bin\pacman.exe`)
+/// - MSYS2 pacman is detected at known install paths (`C:\msys64`, `C:\msys32`)
+///   and via PATH if the resolved path contains "msys"
 #[must_use]
 pub fn detect_windows_package_managers() -> SystemPackageManagers {
     let path_dirs = get_path_dirs();
@@ -1189,14 +1189,29 @@ pub fn detect_windows_package_managers() -> SystemPackageManagers {
         }
     }
 
-    // Check for MSYS2 pacman at known location
-    // MSYS2 typically installs to C:\msys64 and provides a Unix-like environment
-    let msys2_pacman_path = PathBuf::from(r"C:\msys64\usr\bin\pacman.exe");
-    if msys2_pacman_path.is_file() {
+    // Check for MSYS2 pacman at known locations, then fall back to PATH
+    let msys2_known_paths = [
+        PathBuf::from(r"C:\msys64\usr\bin\pacman.exe"),
+        PathBuf::from(r"C:\msys32\usr\bin\pacman.exe"),
+    ];
+    let msys2_pacman_path = msys2_known_paths
+        .iter()
+        .find(|p| p.is_file())
+        .cloned()
+        .or_else(|| {
+            // Fall back to PATH — only treat as MSYS2 if the resolved path
+            // contains "msys" (distinguishes from native Arch/WSL pacman)
+            command_exists_in_path("pacman", &path_dirs).filter(|p| {
+                p.to_string_lossy()
+                    .to_ascii_lowercase()
+                    .contains("msys")
+            })
+        });
+    if let Some(path) = msys2_pacman_path {
         let manager = SystemPackageManager::Msys2Pacman;
         managers.push(DetectedPackageManager {
             manager,
-            path: msys2_pacman_path.to_string_lossy().to_string(),
+            path: path.to_string_lossy().to_string(),
             is_primary: false,
             commands: get_commands_for_manager(manager),
         });
