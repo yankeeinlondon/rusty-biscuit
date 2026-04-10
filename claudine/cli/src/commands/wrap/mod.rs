@@ -3488,6 +3488,7 @@ fn takes_value(arg: &str) -> bool {
             | "-o"
             | "--output"
             | "--output-format"
+            | "--output-last-message"
             | "--approval-mode"
             | "--config"
             | "-c"
@@ -3778,6 +3779,45 @@ mod tests {
         assert_eq!(
             extract_user_prompt(&["hello world".to_string()]),
             Some("hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn codex_prompt_location_skips_output_last_message_value() {
+        let args = vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "--output-last-message".to_string(),
+            "/tmp/last-message.txt".to_string(),
+            "actual prompt".to_string(),
+        ];
+
+        assert_eq!(
+            find_prompt_location(Provider::Codex, &args),
+            Some(PromptLocation::Value(4))
+        );
+    }
+
+    #[test]
+    fn strip_prompt_from_args_preserves_output_last_message_pair_for_codex() {
+        let mut args = vec![
+            "exec".to_string(),
+            "--json".to_string(),
+            "--output-last-message".to_string(),
+            "/tmp/last-message.txt".to_string(),
+            "actual prompt".to_string(),
+        ];
+
+        strip_prompt_from_args(Provider::Codex, &mut args);
+
+        assert_eq!(
+            args,
+            vec![
+                "exec".to_string(),
+                "--json".to_string(),
+                "--output-last-message".to_string(),
+                "/tmp/last-message.txt".to_string(),
+            ]
         );
     }
 

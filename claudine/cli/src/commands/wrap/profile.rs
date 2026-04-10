@@ -1559,6 +1559,7 @@ fn find_first_positional(args: &[String]) -> Option<usize> {
             || arg == "--model"
             || arg == "--output-format"
             || arg == "-o"
+            || arg == "--output-last-message"
             || arg == "--auth-type"
             || arg == "--sandbox-image"
             || arg == "--approval-mode"
