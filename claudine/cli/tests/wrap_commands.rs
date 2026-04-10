@@ -197,7 +197,7 @@ fn wrapper_preserves_passthrough_args_and_injects_env() {
         &path_dir.join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
-cat > "$CLAUDINE_STDIN_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
 {
   printf 'AGENT=%s\n' "$AGENT"
   printf 'YOLO=%s\n' "$YOLO"
@@ -356,7 +356,7 @@ fn wrapper_consumes_non_interactive_alias_from_passthrough() {
         &path_dir.join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
-cat > "$CLAUDINE_STDIN_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
 exit 0
 "#,
     );
@@ -808,7 +808,7 @@ fn kimi_wrapper_non_interactive_appends_print() {
         &path_dir.join("kimi"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
-cat > "$CLAUDINE_STDIN_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
 exit 0
 "#,
     );
@@ -2433,7 +2433,7 @@ fn compose_supports_mcp_runtime_and_tag_cleanup() {
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
-cat > "$CLAUDINE_STDIN_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
 {
   printf 'HOME=%s\n' "$HOME"
 } > "$CLAUDINE_ENV_FILE"
