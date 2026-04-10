@@ -4,6 +4,8 @@
 //! for the contract this module implements.
 
 use std::collections::HashSet;
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -13,6 +15,8 @@ use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::pkg_mngrs::{
     InstalledLanguagePackageManagers, InstalledOsPackageManagers,
 };
+
+const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Shared input to `build_install_plan`.
 ///
@@ -78,6 +82,152 @@ impl HostCapabilities {
 
 fn detect_has_bash() -> bool {
     which::which("bash").is_ok()
+}
+
+// ---------------------------------------------------------------------------
+// Verification probes
+// ---------------------------------------------------------------------------
+
+/// Runs a command with a short timeout and returns its stdout on success.
+fn run_probe(program: &str, args: &[&str]) -> Option<String> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                use std::io::Read;
+                let mut out = String::new();
+                if let Some(mut stdout) = child.stdout.take() {
+                    let _ = stdout.read_to_string(&mut out);
+                }
+                return Some(out);
+            }
+            Ok(Some(_)) => return None,
+            Ok(None) => {}
+            Err(_) => return None,
+        }
+        if start.elapsed() >= PROBE_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn parse_npm_global_list(stdout: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) else {
+        return false;
+    };
+    value
+        .get("dependencies")
+        .and_then(|d| d.as_object())
+        .is_some_and(|obj| !obj.is_empty())
+}
+
+fn parse_cargo_install_list(stdout: &str) -> bool {
+    // `cargo install --list` prints one crate header per line ending in ':'.
+    stdout
+        .lines()
+        .any(|line| line.trim_end().ends_with(':'))
+}
+
+fn probe_npm_verified() -> bool {
+    run_probe("npm", &["ls", "-g", "--depth=0", "--json"])
+        .as_deref()
+        .map(parse_npm_global_list)
+        .unwrap_or(false)
+}
+
+fn probe_pnpm_verified() -> bool {
+    run_probe("pnpm", &["ls", "-g", "--depth=0", "--json"])
+        .as_deref()
+        .map(parse_npm_global_list) // same shape
+        .unwrap_or(false)
+}
+
+fn probe_bun_verified() -> bool {
+    run_probe("bun", &["pm", "ls", "-g"])
+        .as_deref()
+        .map(|s| s.lines().any(|l| !l.trim().is_empty()))
+        .unwrap_or(false)
+}
+
+fn probe_yarn_verified() -> bool {
+    run_probe("yarn", &["global", "list", "--json"])
+        .as_deref()
+        .map(|s| s.lines().any(|l| l.trim().starts_with('{')))
+        .unwrap_or(false)
+}
+
+fn probe_cargo_verified() -> bool {
+    run_probe("cargo", &["install", "--list"])
+        .as_deref()
+        .map(parse_cargo_install_list)
+        .unwrap_or(false)
+}
+
+fn detect_verified_lang_pkg_mgrs(
+    lang_pkg_mgrs: &InstalledLanguagePackageManagers,
+) -> HashSet<LanguagePackageManager> {
+    let mut verified = HashSet::new();
+
+    if lang_pkg_mgrs.is_installed(LanguagePackageManager::Npm) && probe_npm_verified() {
+        verified.insert(LanguagePackageManager::Npm);
+    }
+    if lang_pkg_mgrs.is_installed(LanguagePackageManager::Pnpm) && probe_pnpm_verified() {
+        verified.insert(LanguagePackageManager::Pnpm);
+    }
+    if lang_pkg_mgrs.is_installed(LanguagePackageManager::Yarn) && probe_yarn_verified() {
+        verified.insert(LanguagePackageManager::Yarn);
+    }
+    if lang_pkg_mgrs.is_installed(LanguagePackageManager::Bun) && probe_bun_verified() {
+        verified.insert(LanguagePackageManager::Bun);
+    }
+    if lang_pkg_mgrs.is_installed(LanguagePackageManager::Cargo) && probe_cargo_verified() {
+        verified.insert(LanguagePackageManager::Cargo);
+    }
+
+    verified
+}
+
+fn detect_npm_global_prefix_writable() -> Option<bool> {
+    let prefix = run_probe("npm", &["prefix", "-g"])?;
+    let path = std::path::Path::new(prefix.trim());
+    if !path.exists() {
+        return Some(false);
+    }
+    let marker = path.join(".sniff-writable-check");
+    match std::fs::File::create(&marker) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&marker);
+            Some(true)
+        }
+        Err(_) => Some(false),
+    }
+}
+
+impl HostCapabilities {
+    /// Detect host facts plus verification probes.
+    ///
+    /// This runs global-list commands for each installed language package
+    /// manager and checks whether the npm global prefix is user-writable. Each
+    /// probe has a 2-second timeout and its failure mode is "unverified", not
+    /// fatal. Call the cheaper [`HostCapabilities::detect`] when you don't
+    /// need these extra signals.
+    pub fn detect_with_verification() -> Self {
+        let mut host = Self::detect();
+        host.verified_lang_pkg_mgrs = detect_verified_lang_pkg_mgrs(&host.lang_pkg_mgrs);
+        host.npm_global_prefix_writable = detect_npm_global_prefix_writable();
+        host
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +430,40 @@ mod default_pm_tests {
     #[test]
     fn linux_without_family_returns_none() {
         assert_eq!(default_os_package_manager_for(OsType::Linux, None), None);
+    }
+}
+
+#[cfg(test)]
+mod verification_tests {
+    use super::*;
+
+    #[test]
+    fn parse_npm_global_list_finds_entries() {
+        let json = r#"{"dependencies":{"typescript":{"version":"5.0.0"}}}"#;
+        assert!(parse_npm_global_list(json));
+    }
+
+    #[test]
+    fn parse_npm_global_list_handles_empty() {
+        let json = r#"{"dependencies":{}}"#;
+        assert!(!parse_npm_global_list(json));
+    }
+
+    #[test]
+    fn parse_npm_global_list_handles_malformed() {
+        assert!(!parse_npm_global_list("not json"));
+    }
+
+    #[test]
+    fn parse_cargo_install_list_finds_entries() {
+        let output = "bat v0.24.0:\n    bat\nripgrep v14.1.0:\n    rg\n";
+        assert!(parse_cargo_install_list(output));
+    }
+
+    #[test]
+    fn parse_cargo_install_list_handles_empty() {
+        assert!(!parse_cargo_install_list(""));
+        assert!(!parse_cargo_install_list("\n\n"));
     }
 }
 
