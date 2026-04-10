@@ -245,8 +245,10 @@ use sniff::programs::InstalledTtsClients;
 
 use crate::providers::cloud::ElevenLabsProvider;
 use crate::providers::host::{
-    ESpeakProvider, EchogardenProvider, GttsProvider, KokoroTtsProvider, SayProvider,
+    ESpeakProvider, EchogardenProvider, GttsProvider, KokoroTtsProvider,
 };
+#[cfg(target_os = "macos")]
+use crate::providers::host::SayProvider;
 
 #[cfg(target_os = "windows")]
 use crate::providers::host::SapiProvider;
