@@ -10,7 +10,7 @@ When we run Claudine in a non-interactive `compose`/`inline-compose` sessions, w
 When a non-interactive session starts up we will:
 
 1. validate that the referenced file exists
-    - success: `the file reference <blue-500>{ref}</blue-500> to the <blue-500><a href={absolute_path}>{filepath}</a></blue-500> file on this host`
+    - success: `the file reference was resolved to <blue-500><a href={absolute_path}>{filepath}</a></blue-500> file on this host`
     - failure: `the file reference <blue-500>{ref}</blue-500> found no match on host computer!`
 2. Shell Command Audit
       - before we do anything else we need to check for all shell commands in the pre and post validations as well as the page we're about to **compose**
@@ -24,4 +24,3 @@ When a non-interactive session starts up we will:
        - if there are no handlers then report the error and exit with an error code
        - if there are error handlers:
            - Status::from_prose("an <red>error</red> was encountered while processing <blue>{file}</blue>, engaging registered handlers.")
-
