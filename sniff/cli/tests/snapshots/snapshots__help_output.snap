@@ -1,5 +1,6 @@
 ---
 source: sniff/cli/tests/snapshots.rs
+assertion_line: 117
 expression: "normalize_text(&run_stdout(&[\"--help\"]))"
 ---
 sniff 0.1.0
@@ -9,6 +10,7 @@ Usage: sniff [OPTIONS] [COMMAND]
 
   -b, --base <BASE>  Base directory for filesystem analysis
       --json         Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
+      --perf         Include structured performance timings and counters in the output
   -v, --verbose...   Increase output verbosity
       --plain        Strip terminal escape codes from text output
   -h, --help         Print help
