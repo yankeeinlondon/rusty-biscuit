@@ -4,11 +4,12 @@ Before any Claudine wrapper session launches a provider, it needs to know that e
 
 ## Why This Exists
 
-Shell commands can appear in three places during a Claudine session:
+Shell commands can appear in four places during a Claudine session:
 
 1. **Template `::shell` directives** — Darkmatter's compose pipeline executes these during document composition. A prompt like `commit.md` might contain `::shell sniff repo packages` to inject dynamic content.
-2. **Harness pre-checks and post-checks** — validation rules of type `shell_command` run before and after the provider session.
-3. **Harness handlers** — recovery actions that include shell commands. These are conditional (they only fire when a specific failure occurs) but they still need pre-authorization because there is no opportunity to prompt the user mid-session.
+2. **Frontmatter `$(cmd)` expressions** — top-level frontmatter string values of the form `$(command arg ...)` are evaluated by Darkmatter's frontmatter shell expansion phase, with the command's trimmed `stdout` written back into the frontmatter. Example: `today: $(date +%Y-%m-%d)`.
+3. **Harness pre-checks and post-checks** — validation rules of type `shell_command` run before and after the provider session.
+4. **Harness handlers** — recovery actions that include shell commands. These are conditional (they only fire when a specific failure occurs) but they still need pre-authorization because there is no opportunity to prompt the user mid-session.
 
 Without pre-flight, a shell command that lacks whitelist coverage would either block the process waiting for interactive approval that will never come (in a non-interactive session) or fail with a confusing error deep inside the composition pipeline. The pre-flight eliminates both problems by resolving all approvals upfront.
 
@@ -94,7 +95,7 @@ The approval cache is an in-memory `HashMap<String, CachedApprovalDecision>` wra
 
 Claudine and Darkmatter each have shell approval infrastructure, but they serve different roles during pre-flight:
 
-**Darkmatter's role is discovery.** It knows how to walk the document graph — following transclusions, resolving interpolation, parsing `::shell` directives. It exposes a function (`collect_shell_commands`) that returns every shell command in the document tree. It does not check any policy files or make any approval decisions during this call.
+**Darkmatter's role is discovery.** It knows how to walk the document graph — following transclusions, resolving interpolation, parsing `::shell` directives, and scanning top-level frontmatter values for `$(...)` shell expressions. It exposes a function (`collect_shell_commands`) that returns every shell command in the document tree. It does not check any policy files or make any approval decisions during this call.
 
 **Claudine's role is authorization.** It takes the list from Darkmatter, combines it with commands from the harness, checks everything against the whitelist, and prompts the user for anything that is missing. Claudine is the single source of truth for what is allowed.
 
@@ -163,4 +164,12 @@ Shell-based validations (`shell_command` in pre-checks and post-checks) and shel
 
 ### Sequence Execution
 
-When running a sequence (`claudine compose` with a `sequence` frontmatter property), the pre-flight runs once per step during the discovery phase. Each step builds its own `ComposeOptions` (because `--set` overlays differ per step) but shares the same approval cache across all steps. Cumulatively approved commands are merged and passed to each step's composition run. A command approved on step 1 is not re-prompted on step 5.
+When running a sequence (`claudine sequence <file>`, declared via the `sequence` frontmatter property), the sequence orchestrator runs a single upfront discovery loop before any provider session starts. For each step it:
+
+1. Builds the step-specific `ComposeOptions` (because `--set` overlays differ per step).
+2. Runs the **template pre-flight** to discover and approve `::shell` directives (and frontmatter `$(...)` expressions) for that step.
+3. Prepares the composition so the effective frontmatter is available.
+4. Parses the harness plan from the effective frontmatter and runs the **harness pre-flight** to approve `shell_command` validations and `deviate`/`handle` recovery actions for that step.
+5. Caches the prepared composition for reuse during execution.
+
+All steps share the same approval cache, so a command approved on step 1 is not re-prompted on step 5. Cumulatively approved commands are merged and passed to each step's composition run. Once the discovery loop finishes, **every shell command across every step — template and harness — has already been approved**, and the operator can walk away while the sequence executes. A failure during Phase 1 (bad template, unparseable harness plan, denied approval) aborts the whole sequence before any step runs.
