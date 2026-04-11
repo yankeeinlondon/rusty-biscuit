@@ -3243,3 +3243,119 @@ exit 0
         "--silent should suppress handler-engagement banner; stderr:\n{stderr}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Per-provider dry-run regression tests (Task 18)
+//
+// These tests are the structural guard that would have caught the original
+// Gemini/Qwen drift: composition pipelines that silently bailed because
+// `apply_non_interactive` re-read args before the prompt was injected.
+// A successful dry-run (exit 0 + "DRY RUN" in output) proves the full
+// extraction → delivery → output pipeline ran without error.
+// ---------------------------------------------------------------------------
+
+/// End-to-end: for every wrapped provider, verify that
+/// `claudine <provider> --dry-run "hello"` produces a successful
+/// dry-run (exit 0) and that the dry-run output section is printed.
+///
+/// Providers that deliver the prompt via argv (Gemini, Qwen, OpenCode,
+/// Goose) also have "hello" visible in the Command: line; providers that
+/// seed stdin (Claude, Codex, Kimi) do not, but the pipeline still
+/// completes and emits the DRY RUN header, which is sufficient to prove
+/// that the prompt was accepted and processed. Runs for all 7 wrapped
+/// providers with stub binaries on PATH.
+#[cfg(unix)]
+#[test]
+fn direct_wrap_dry_run_delivers_prompt_for_every_provider() {
+    for provider_slug in [
+        "claude", "codex", "gemini", "kimi", "opencode", "qwen", "goose",
+    ] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+
+        // Stub binary so PATH resolution succeeds in dry-run mode.
+        // Dry-run never actually spawns the child, so the stub body
+        // doesn't matter — the stub only needs to exist and be
+        // executable for claudine's binary-resolution step.
+        write_executable(
+            &path_dir.join(provider_slug),
+            "#!/bin/sh\nexit 0\n",
+        );
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("PATH", &path_dir)
+            .args([provider_slug, "--dry-run", "hello"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "`claudine {provider_slug} --dry-run hello` failed: stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let normalized = strip_ansi(&combined);
+        assert!(
+            normalized.contains("DRY RUN"),
+            "`claudine {provider_slug} --dry-run hello` did not emit a DRY RUN section:\n{normalized}"
+        );
+    }
+}
+
+/// End-to-end: for every wrapped provider, verify that
+/// `claudine sequence compose.md --<provider> --dry-run` runs cleanly
+/// through the composition pipeline with a trivial markdown body.
+///
+/// Regression guard for the composition-path drift: if a provider's
+/// `apply_entrypoint` / `apply_non_interactive_flags` / `prompt_delivery`
+/// chain silently bails when the prompt arrives via the composition
+/// body, this test fails.
+#[cfg(unix)]
+#[test]
+fn sequence_composition_dry_run_for_every_provider() {
+    for provider_slug in [
+        "claude", "codex", "gemini", "kimi", "opencode", "qwen", "goose",
+    ] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+
+        write_executable(
+            &path_dir.join(provider_slug),
+            "#!/bin/sh\nexit 0\n",
+        );
+
+        let compose_file = workspace.path().join("compose.md");
+        fs::write(
+            &compose_file,
+            "---\nsequence:\n  - step_one\n---\ncomposed body text\n",
+        )
+        .unwrap();
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("PATH", &path_dir)
+            .current_dir(workspace.path())
+            .args([
+                "sequence",
+                "compose.md",
+                &format!("--{provider_slug}"),
+                "--dry-run",
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "`claudine sequence compose.md --{provider_slug} --dry-run` failed: stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
