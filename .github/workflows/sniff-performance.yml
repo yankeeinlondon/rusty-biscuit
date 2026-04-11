@@ -1,0 +1,66 @@
+name: sniff-performance
+
+# Artifact-only phase: run a narrow bench subset on every PR that
+# touches `sniff/**`, the workspace Cargo.toml, or this workflow, and
+# upload the Criterion HTML report as an artifact. This is phase A of
+# the staged CI rollout described in
+# `sniff/features/2026-04-11-performance-testing/plan.md` — the build
+# does not fail on regressions yet because the runner noise profile has
+# not been characterized.
+
+on:
+  pull_request:
+    paths:
+      - "sniff/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/sniff-performance.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: sniff-performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sniff-bench:
+    name: Criterion (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: sniff-bench
+
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev libgit2-dev
+
+      - name: Run narrow Criterion subset
+        env:
+          CARGO_TERM_COLOR: always
+        run: |
+          cargo bench -p sniff --bench perf -- \
+            --save-baseline ci \
+            "system/detect_summary" \
+            "system_full/detect_full" \
+            "filesystem_git/git_summary_monorepo" \
+            "filesystem_repo/repo_structure_monorepo" \
+            "inventory/programs_detect"
+
+      - name: Upload Criterion report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sniff-criterion-report
+          path: target/criterion
+          if-no-files-found: warn
+          retention-days: 14
