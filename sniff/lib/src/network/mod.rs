@@ -713,7 +713,7 @@ fn parse_bsd_route_dump(buffer: &[u8]) -> Option<String> {
 fn is_default_bsd_route_message(header: &libc::rt_msghdr, message: &[u8]) -> bool {
     let data = &message[std::mem::size_of::<libc::rt_msghdr>()..];
     let destination =
-        sockaddr_from_route_message(data, header.rtm_addrs as i32, libc::RTAX_DST as usize);
+        sockaddr_from_route_message(data, header.rtm_addrs, libc::RTAX_DST as usize);
     let Some(destination) = destination else {
         return false;
     };
@@ -822,14 +822,7 @@ fn command_output(program: &str, args: &[&str]) -> Option<String> {
     String::from_utf8(output.stdout).ok()
 }
 
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "dragonfly",
-    test
-))]
+#[cfg(test)]
 fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
     output.lines().find_map(|line| {
         line.trim()

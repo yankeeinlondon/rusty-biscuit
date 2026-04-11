@@ -138,9 +138,7 @@ pub fn detect_filesystem_with_request(
             Some(handle) => handle.join().unwrap()?,
             None => None,
         };
-        let formatting = formatting_handle
-            .map(|handle| handle.join().unwrap())
-            .flatten();
+        let formatting = formatting_handle.and_then(|handle| handle.join().unwrap());
         let shared_view = shared_view_handle.map(|handle| handle.join().unwrap());
 
         let repo_detection_root = if request.repo.is_some() {
