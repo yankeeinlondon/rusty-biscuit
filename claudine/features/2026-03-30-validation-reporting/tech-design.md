@@ -163,7 +163,7 @@ For a normal non-interactive run with checks, the visible order becomes:
 
 The spec's exact source-file messages should be preserved:
 
-- success: `the file reference <blue-500>{ref}</blue-500> to the <blue-500><a href="{absolute_path}">{filepath}</a></blue-500> file on this host`
+- success: `the file reference was resolved to <blue-500><a href="{absolute_path}">{filepath}</a></blue-500> file on this host`
 - failure: `the file reference <blue-500>{ref}</blue-500> found no match on host computer!`
 
 All user-controlled fragments inserted into `Prose` markup must be escaped before interpolation.

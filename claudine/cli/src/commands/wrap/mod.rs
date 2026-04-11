@@ -748,6 +748,75 @@ pub(crate) fn wrap_terminal() -> Terminal {
     crate::log::terminal()
 }
 
+/// Shared startup detection results for the direct wrap path.
+///
+/// Populated by a single `sniff::detect_with_plan` call and consumed by
+/// three independent downstream structures that would otherwise each
+/// trigger their own full repo walk.
+pub(crate) struct WrapStartupDetection {
+    pub(crate) env_context: EnvironmentContext,
+    pub(crate) launch_context: claudine::system_prompt::LaunchContext,
+    pub(crate) launch_workspace: env::LaunchWorkspaceContext,
+}
+
+/// Run one sniff-based filesystem scan and build every startup context
+/// the direct wrap path needs from the shared result.
+///
+/// On a cold filesystem cache in a large monorepo the previous pipeline
+/// walked the tree 3-5 times (once in `detect_environment_fast`, once in
+/// `LaunchContext::from_cwd`, and twice inside `build_child_env`). This
+/// helper collapses that into a single scan and then builds the three
+/// consumer contexts from borrowed data, falling back to empty contexts
+/// on detection errors so startup never blocks on an unrelated failure.
+pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
+    use sniff::request::*;
+
+    let plan = DetectionPlan::new()
+        .base_dir(cwd.to_path_buf())
+        .without_os()
+        .without_hardware()
+        .without_network()
+        .filesystem(
+            FilesystemRequest::new()
+                .git(GitRequest::summary())
+                .repo(RepoRequest::structure())
+                .without_file_inventory()
+                .without_docs()
+                .without_formatting(),
+        );
+
+    let result = sniff::detect_with_plan(plan).unwrap_or(sniff::SniffResult {
+        os: None,
+        hardware: None,
+        network: None,
+        filesystem: None,
+    });
+
+    let launch_context = claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
+
+    let (git_root, repo) = result
+        .filesystem
+        .as_ref()
+        .map(|f| {
+            (
+                f.git.as_ref().map(|g| g.repo_root.clone()),
+                f.repo.as_ref().cloned(),
+            )
+        })
+        .unwrap_or((None, None));
+
+    let launch_workspace =
+        env::launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref());
+
+    let env_context = claudine::events::environment_context_from_sniff_result(result);
+
+    WrapStartupDetection {
+        env_context,
+        launch_context,
+        launch_workspace,
+    }
+}
+
 pub(crate) fn switch_process_cwd(child_cwd: &Path) -> Result<()> {
     let current = std::env::current_dir()?;
     if current != child_cwd {
@@ -923,15 +992,24 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         )
     })?;
     let cwd = std::env::current_dir()?;
-    let env_context = claudine::events::detect_environment_fast(&cwd);
+
+    // One sniff-based scan produces the raw git + repo-structure data that
+    // the rest of startup needs. The result is consumed by three separate
+    // consumers (EnvironmentContext, LaunchContext, LaunchWorkspaceContext)
+    // without ever walking the filesystem again — this avoids the 3-5
+    // redundant tree walks the earlier pipeline performed.
+    let startup = detect_wrap_startup(&cwd);
+    let env_context = startup.env_context;
+    let launch_context = startup.launch_context;
+    let launch_workspace = startup.launch_workspace;
+
     let term = wrap_terminal();
 
-    let clients = InstalledAiClients::new();
     let binary_path = info_span!(
         "wrapper_binary_resolution",
         provider = %provider,
     )
-    .in_scope(|| resolve_binary_path(profile, &clients))?;
+    .in_scope(|| resolve_binary_path_direct(profile))?;
 
     let raw_agent_params: Vec<String> = std::env::args().skip(2).collect();
     let mut child_args = args.passthrough.clone();
@@ -947,11 +1025,28 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
 
-    // Determine if a prompt is present (implies non-interactive by default)
-    let has_prompt = has_prompt_source(&child_args, None);
+    // In the direct-wrap path the child inherits stdin automatically —
+    // we don't need to detect or seed it. Pass false so that a non-tty
+    // test environment (or any shell running without an attached terminal)
+    // doesn't accidentally classify the session as non-interactive.
+    // Composition (Task 14) is where InheritStdin / stdin_seed matters.
+    let has_piped_stdin = false;
 
-    // Default: interactive when no prompt, non-interactive when prompt present
-    // --interactive/-i overrides the default back to interactive
+    // Extract the prompt up-front into a typed PromptSource, leaving
+    // child_args free of any prompt characters. Downstream apply_*
+    // methods see clean args; prompt_delivery is the only code path
+    // that places the prompt back in.
+    let (extracted_args, mut prompt_source) =
+        profile::extract_prompt_source_from_passthrough(
+            profile,
+            &child_args,
+            has_piped_stdin,
+        )?;
+    child_args = extracted_args;
+
+    // Default: non-interactive when a prompt reaches the child, interactive
+    // otherwise. --interactive/-i overrides the default back to interactive.
+    let has_prompt = prompt_source.has_prompt_or_stdin();
     let non_interactive_requested = if interactive_requested {
         false
     } else {
@@ -982,6 +1077,25 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         ));
     }
 
+    // Prompt delivery: re-insert the inline prompt into child argv (or set
+    // stdin_seed for providers that consume it from stdin). This happens
+    // before apply_yolo so that the prompt occupies its natural position in
+    // the arg list — consistent with the ordering the old pipeline produced.
+    let effective_non_interactive = non_interactive_requested;
+    let stdin_seed: Option<String> = if let Some(prompt) = prompt_source.as_inline() {
+        profile
+            .prompt_delivery(&child_args, prompt, effective_non_interactive)?
+            .apply_to(&mut child_args)
+    } else {
+        None
+    };
+
+    profile::require_prompt_present(
+        profile.binary(),
+        effective_non_interactive,
+        &prompt_source,
+    )?;
+
     profile.reject_direct_yolo(&child_args)?;
     reject_retired_composition_flags(&child_args)?;
 
@@ -992,8 +1106,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         yolo_enabled = false;
     }
 
+    profile.apply_entrypoint(&mut child_args, non_interactive_requested);
+
     if non_interactive_requested {
-        profile.apply_non_interactive(&mut child_args)?;
+        profile.apply_non_interactive_flags(&mut child_args)?;
         // Only apply default model if the user didn't pass --model explicitly
         // (apply_model handles it below when args.model is Some).
         if args.model.is_none() {
@@ -1033,15 +1149,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         append_file: args.append_system_prompt.clone(),
         replace_file: args.replace_system_prompt.clone(),
     };
-    let launch_context =
-        claudine::system_prompt::LaunchContext::from_cwd(&cwd).unwrap_or_else(|_| {
-            claudine::system_prompt::LaunchContext {
-                cwd: cwd.clone(),
-                repo_root: None,
-                package_area_root: None,
-                package_root: None,
-            }
-        });
     let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
         &sp_args,
         &launch_context,
@@ -1088,25 +1195,18 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let needs_mcp_shadow_home = (args.mcp || !args.mcp_use.is_empty())
         && matches!(provider, Provider::Codex | Provider::Gemini);
 
-    let mut env_plan = env::build_child_env(
+    let mut env_plan = env::build_child_env_with_launch(
         profile,
         provider,
         &args.include,
         yolo_enabled,
         !non_interactive_requested,
         &raw_agent_params,
-        &cwd,
         &env_overrides,
         repo_requested,
         needs_mcp_shadow_home,
-        None,
+        launch_workspace,
     )?;
-    let stdin_seed: Option<String> = None;
-
-    // -- Final argument validation -------------------------------------------
-    let effective_non_interactive = non_interactive_requested;
-    profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
-
     if args.timeout.is_some() && !effective_non_interactive {
         return Err(eyre!(
             "--timeout can only be used in non-interactive mode \
@@ -1136,7 +1236,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         let catalog =
             McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
         let (cleaned_prompt, prompt_tags) =
-            extract_tags_from_child_args(provider, &mut child_args, lex_tags);
+            extract_tags_from_prompt(prompt_source.as_inline(), lex_tags);
+        if let Some(ref cleaned) = cleaned_prompt {
+            prompt_source = profile::PromptSource::Inline(cleaned.clone());
+        }
         let prompt_is_interactive =
             std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
         let mut session = compute_session_set(
@@ -1296,7 +1399,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
 
     switch_process_cwd(child_cwd)?;
 
-    let prompt_display = extract_user_prompt(&args.passthrough);
+    let prompt_display = prompt_source.as_inline().map(|s| s.to_string());
     let dispatch_context = HashMap::new();
 
     // Interactive override: user explicitly forced -i with a prompt present
@@ -1394,8 +1497,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     };
 
     let wrapper_harness = {
-        let base_prompt =
-            extract_prompt_from_child_args(provider, &child_args, stdin_seed.as_deref());
+        let base_prompt = prompt_source.as_inline().map(|s| s.to_string())
+            .or_else(|| stdin_seed.clone());
         let harness_source = base_prompt.as_ref().and_then(|_| {
             find_wrapper_harness_source(provider, env_plan.repo_root.as_deref(), &cwd)
         });
@@ -1458,7 +1561,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         };
 
         let mut harness_base_args = child_args.clone();
-        strip_prompt_from_args(provider, &mut harness_base_args);
         if !use_structured {
             profile.prepare_captured_output(&mut harness_base_args);
         }
@@ -1607,55 +1709,6 @@ fn merge_frontmatter_overlay(
         } else {
             overlay.insert(key.clone(), value.clone());
         }
-    }
-}
-
-pub(crate) fn strip_prompt_from_args(provider: Provider, args: &mut Vec<String>) {
-    match provider {
-        Provider::Gemini | Provider::QwenCode => {
-            let mut index = 0;
-            while index < args.len() {
-                if args[index] == "--prompt" || args[index] == "-p" {
-                    if index + 1 < args.len() {
-                        args.drain(index..=index + 1);
-                    } else {
-                        args.remove(index);
-                    }
-                    return;
-                }
-                if args[index].starts_with("--prompt=") || args[index].starts_with("-p=") {
-                    args.remove(index);
-                    return;
-                }
-                index += 1;
-            }
-        }
-        Provider::Goose => {
-            if let Some(index) = args.iter().position(|arg| arg == "-t" || arg == "--text") {
-                if index + 1 < args.len() {
-                    args.drain(index..=index + 1);
-                } else {
-                    args.remove(index);
-                }
-            }
-        }
-        Provider::Codex | Provider::OpenCode => {
-            if let Some(location) = find_prompt_location(provider, args) {
-                match location {
-                    PromptLocation::Value(index) => {
-                        if index < args.len() {
-                            args.remove(index);
-                        }
-                    }
-                    PromptLocation::Inline { index, .. } => {
-                        if index < args.len() {
-                            args.remove(index);
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
     }
 }
 
@@ -1913,10 +1966,15 @@ fn build_harness_launch(
     state.next_prompt_override = None;
 
     let prompt = strip_prompt_tags_for_provider(provider, &materialized.prompt);
+    let prompt_source = profile::PromptSource::Inline(prompt.clone());
     let stdin_seed = profile
         .prompt_delivery(&args, &prompt, effective_non_interactive)?
         .apply_to(&mut args);
-    profile.validate_final_args(&args, effective_non_interactive, stdin_seed.is_some())?;
+    profile::require_prompt_present(
+        profile.binary(),
+        effective_non_interactive,
+        &prompt_source,
+    )?;
 
     let mut env = base_env.clone();
     for (key, value) in &materialized.env_overrides {
@@ -3060,14 +3118,24 @@ pub(crate) fn resolve_binary_path(
     clients: &InstalledAiClients,
 ) -> Result<PathBuf> {
     let ai_cli = profile.provider().sniff_ai_cli();
-    clients.path(ai_cli).ok_or_else(|| {
-        eyre!(
-            "cannot run wrapped {} session because '{}' is not installed or not on PATH (docs: {})",
-            profile.provider(),
-            profile.binary(),
-            profile.provider().docs_url()
-        )
-    })
+    clients.path(ai_cli).ok_or_else(|| binary_missing_error(profile))
+}
+
+/// Resolve the child binary path directly via `which`, without scanning the
+/// entire set of known AI CLIs. Used on the hot path of the direct wrapper
+/// so we don't pay for a full PATH walk over ~9 binaries when only one is
+/// needed.
+pub(crate) fn resolve_binary_path_direct(profile: &dyn WrapperProfile) -> Result<PathBuf> {
+    which::which(profile.binary()).map_err(|_| binary_missing_error(profile))
+}
+
+fn binary_missing_error(profile: &dyn WrapperProfile) -> color_eyre::eyre::Error {
+    eyre!(
+        "cannot run wrapped {} session because '{}' is not installed or not on PATH (docs: {})",
+        profile.provider(),
+        profile.binary(),
+        profile.provider().docs_url()
+    )
 }
 
 fn model_value_from_args(args: &[String]) -> Option<String> {
@@ -3341,42 +3409,19 @@ fn format_verbose_summary_details_prose(
     Some(format!("<dim>{}</dim>", parts.join(" \u{00b7} ")))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PromptLocation {
-    Value(usize),
-    Inline { index: usize, prefix: &'static str },
-}
-
-fn extract_tags_from_child_args(
-    provider: Provider,
-    args: &mut [String],
+fn extract_tags_from_prompt(
+    prompt: Option<&str>,
     extract_tags: fn(&str) -> (String, Vec<String>),
 ) -> (Option<String>, Vec<String>) {
-    let Some(location) = find_prompt_location(provider, args) else {
+    let Some(prompt) = prompt else {
         return (None, Vec::new());
     };
-
-    let prompt = match location {
-        PromptLocation::Value(index) => args[index].clone(),
-        PromptLocation::Inline { index, prefix } => args[index]
-            .strip_prefix(prefix)
-            .unwrap_or_default()
-            .to_string(),
-    };
-
-    let (cleaned_prompt, tags) = extract_tags(&prompt);
+    let (cleaned, tags) = extract_tags(prompt);
     if tags.is_empty() {
-        return (None, tags);
+        (None, Vec::new())
+    } else {
+        (Some(cleaned), tags)
     }
-
-    match location {
-        PromptLocation::Value(index) => args[index] = cleaned_prompt.clone(),
-        PromptLocation::Inline { index, prefix } => {
-            args[index] = format!("{prefix}{cleaned_prompt}");
-        }
-    }
-
-    (Some(cleaned_prompt), tags)
 }
 
 fn bootstrap_mcp_state(repo_root: Option<&std::path::Path>) -> Result<bool> {
@@ -3420,112 +3465,6 @@ fn bootstrap_mcp_state(repo_root: Option<&std::path::Path>) -> Result<bool> {
     Ok(true)
 }
 
-fn find_prompt_location(provider: Provider, args: &[String]) -> Option<PromptLocation> {
-    match provider {
-        Provider::Gemini => find_gemini_prompt_location(args),
-        Provider::Codex => find_positional_prompt_location(args, 0),
-        Provider::OpenCode => find_positional_prompt_location(args, 0),
-        _ => None,
-    }
-}
-
-fn find_gemini_prompt_location(args: &[String]) -> Option<PromptLocation> {
-    for (index, arg) in args.iter().enumerate() {
-        if arg == "--prompt" || arg == "-p" {
-            return (index + 1 < args.len()).then_some(PromptLocation::Value(index + 1));
-        }
-        if arg.starts_with("--prompt=") {
-            return Some(PromptLocation::Inline {
-                index,
-                prefix: "--prompt=",
-            });
-        }
-        if arg.starts_with("-p=") {
-            return Some(PromptLocation::Inline {
-                index,
-                prefix: "-p=",
-            });
-        }
-    }
-
-    find_positional_prompt_location(args, 0)
-}
-
-fn find_positional_prompt_location(args: &[String], start_index: usize) -> Option<PromptLocation> {
-    let mut skip_next = false;
-
-    for (index, arg) in args.iter().enumerate().skip(start_index) {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-
-        if index == 0 && (arg == "exec" || arg == "run" || arg == "e") {
-            continue;
-        }
-
-        if arg == "--" {
-            return (index + 1 < args.len()).then_some(PromptLocation::Value(index + 1));
-        }
-
-        if takes_value(arg) {
-            skip_next = !arg.contains('=');
-            continue;
-        }
-
-        if !arg.starts_with('-') {
-            return Some(PromptLocation::Value(index));
-        }
-    }
-
-    None
-}
-
-fn takes_value(arg: &str) -> bool {
-    matches!(
-        arg,
-        "-m" | "--model"
-            | "-o"
-            | "--output"
-            | "--output-format"
-            | "--approval-mode"
-            | "--config"
-            | "-c"
-            | "--profile"
-            | "--system-prompt"
-            | "--sandbox-image"
-    )
-}
-
-/// Extract the user's prompt string from the raw passthrough args.
-/// Returns the first non-switch argument, if any.
-fn extract_user_prompt(passthrough: &[String]) -> Option<String> {
-    passthrough
-        .iter()
-        .find(|arg| !arg.starts_with('-'))
-        .cloned()
-}
-
-fn extract_prompt_from_child_args(
-    provider: Provider,
-    child_args: &[String],
-    stdin_seed: Option<&str>,
-) -> Option<String> {
-    if let Some(seed) = stdin_seed {
-        return Some(seed.to_string());
-    }
-
-    find_prompt_location(provider, child_args)
-        .and_then(|location| match location {
-            PromptLocation::Value(index) => child_args.get(index).cloned(),
-            PromptLocation::Inline { index, prefix } => child_args
-                .get(index)
-                .and_then(|value| value.strip_prefix(prefix))
-                .map(ToOwned::to_owned),
-        })
-        .or_else(|| extract_user_prompt(child_args))
-}
-
 fn print_wrapper_help(provider: Provider) {
     let slug = provider.as_slug();
     println!(
@@ -3556,16 +3495,6 @@ fn print_wrapper_help(provider: Provider) {
          \x20     --strict              Treat unresolved or ambiguous MCP tags as hard errors\n\
          \x20 -h, --help               Print help"
     );
-}
-
-/// Returns true if a prompt string is present — either as a remaining
-/// non-switch arg in `child_args` or via stdin.
-fn has_prompt_source(child_args: &[String], stdin_seed: Option<&str>) -> bool {
-    if stdin_seed.is_some() {
-        return true;
-    }
-    // Check for a non-switch positional arg in passthrough
-    child_args.iter().any(|arg| !arg.starts_with('-'))
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -3748,37 +3677,6 @@ mod tests {
         // Old flags should NOT be consumed by Claudine
         assert!(!extracted.interactive);
         assert_eq!(args, vec!["-n", "--non-interactive", "--ni", "task"]);
-    }
-
-    #[test]
-    fn has_prompt_source_detects_positional_arg() {
-        // No prompt → no prompt source
-        assert!(!has_prompt_source(&[], None));
-
-        // Non-switch arg in child_args → prompt source
-        assert!(has_prompt_source(&["fix the bug".to_string()], None));
-
-        // Switch-only args → no prompt source
-        assert!(!has_prompt_source(&["--json".to_string()], None));
-
-        // stdin_seed → prompt source
-        assert!(has_prompt_source(&[], Some("hello")));
-    }
-
-    #[test]
-    fn extract_user_prompt_finds_first_non_switch() {
-        assert_eq!(
-            extract_user_prompt(&["--json".to_string(), "fix bug".to_string()]),
-            Some("fix bug".to_string())
-        );
-        assert_eq!(
-            extract_user_prompt(&["--json".to_string(), "--verbose".to_string()]),
-            None
-        );
-        assert_eq!(
-            extract_user_prompt(&["hello world".to_string()]),
-            Some("hello world".to_string())
-        );
     }
 
     #[test]
@@ -4039,29 +3937,23 @@ mod tests {
     #[test]
     fn extracts_tags_from_codex_prompt_position() {
         let _ = make_catalog_with_servers(&["calendar"]);
-        let mut args = vec![
-            "exec".to_string(),
-            "--json".to_string(),
-            "fix #calendar bugs".to_string(),
-        ];
+        let prompt = "fix #calendar bugs";
 
-        let (cleaned, tags) = extract_tags_from_child_args(Provider::Codex, &mut args, lex_tags);
+        let (cleaned, tags) = extract_tags_from_prompt(Some(prompt), lex_tags);
 
         assert_eq!(tags, vec!["calendar"]);
         assert_eq!(cleaned.as_deref(), Some("fix bugs"));
-        assert_eq!(args[2], "fix bugs");
     }
 
     #[test]
     fn extracts_tags_from_gemini_prompt_flag() {
         let _ = make_catalog_with_servers(&["slack"]);
-        let mut args = vec!["--prompt".to_string(), "debug #slack auth".to_string()];
+        let prompt = "debug #slack auth";
 
-        let (cleaned, tags) = extract_tags_from_child_args(Provider::Gemini, &mut args, lex_tags);
+        let (cleaned, tags) = extract_tags_from_prompt(Some(prompt), lex_tags);
 
         assert_eq!(tags, vec!["slack"]);
         assert_eq!(cleaned.as_deref(), Some("debug auth"));
-        assert_eq!(args[1], "debug auth");
     }
 
     #[cfg(test)]

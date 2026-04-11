@@ -46,16 +46,29 @@ impl LaunchContext {
         let result = sniff::detect_with_plan(plan)
             .map_err(|e| crate::error::ClaudineError::LaunchContextDetection(e.to_string()))?;
 
-        let fs = result.filesystem;
+        Ok(Self::from_sniff_result(&result, cwd))
+    }
+
+    /// Build a launch context from a pre-computed `SniffResult`.
+    ///
+    /// Use this when the caller already has the output of
+    /// `sniff::detect_with_plan` (for example because another component
+    /// in the same startup path needs an `EnvironmentContext` from the
+    /// same plan) and wants to avoid triggering a second filesystem walk.
+    ///
+    /// The caller is responsible for supplying a plan that includes at
+    /// least git summary + repo structure, otherwise the resulting
+    /// context will have no `repo_root` / package scopes.
+    pub fn from_sniff_result(result: &sniff::SniffResult, cwd: &Path) -> Self {
+        let fs = result.filesystem.as_ref();
         let git_root = fs
-            .as_ref()
             .and_then(|f| f.git.as_ref())
             .map(|g| g.repo_root.clone());
-        let repo = fs.and_then(|f| f.repo);
+        let repo = fs.and_then(|f| f.repo.as_ref());
 
         let (package_root, package_area_root) = match repo {
-            Some(ref repo) if repo.is_monorepo => {
-                if let Some(ref packages) = repo.packages {
+            Some(repo) if repo.is_monorepo => {
+                if let Some(packages) = repo.packages.as_deref() {
                     let pkg_root = select_package_root(cwd, packages);
                     let area_root = select_package_area_root(cwd, &repo.root, packages);
                     (pkg_root, area_root)
@@ -66,12 +79,12 @@ impl LaunchContext {
             _ => (None, None),
         };
 
-        Ok(LaunchContext {
+        LaunchContext {
             cwd: canonical_or_self(cwd),
             repo_root: git_root.map(|p| canonical_or_self(&p)),
             package_area_root: package_area_root.map(|p| canonical_or_self(&p)),
             package_root: package_root.map(|p| canonical_or_self(&p)),
-        })
+        }
     }
 
     /// Deduplicated search directories in precedence order.
