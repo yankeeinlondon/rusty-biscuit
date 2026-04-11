@@ -1,4 +1,5 @@
 use crate::Result;
+use crate::performance;
 use crate::request::NetworkRequest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -7,6 +8,8 @@ use std::net::IpAddr;
 use std::process::Command;
 #[cfg(feature = "network")]
 use std::sync::Mutex;
+use std::time::Instant;
+use tracing::Level;
 #[cfg(feature = "network")]
 use tracing::{debug, info};
 use tracing::{instrument, warn};
@@ -140,13 +143,31 @@ pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkIn
     // Run WAN IP lookup concurrently with local interface enumeration
     // so neither blocks the other.
     std::thread::scope(|s| {
+        let collector = performance::current_collector();
         let wan_handle = if request.include_wan_ip {
-            Some(s.spawn(move || detect_wan_ip(request.force_refresh)))
+            Some(s.spawn(move || {
+                performance::with_current_collector(collector, || {
+                    let started = Instant::now();
+                    let result = detect_wan_ip(request.force_refresh);
+                    performance::record_logged_stage(
+                        "network.wan_ip",
+                        started.elapsed(),
+                        Level::DEBUG,
+                    );
+                    result
+                })
+            }))
         } else {
             None
         };
 
+        let local_started = Instant::now();
         let local_result = detect_local_interfaces();
+        performance::record_logged_stage(
+            "network.local_interfaces",
+            local_started.elapsed(),
+            Level::DEBUG,
+        );
 
         let wan_ip_address = wan_handle.map(|h| h.join().unwrap()).unwrap_or(None);
 
@@ -304,16 +325,23 @@ impl WanIpDetector {
 #[cfg(feature = "network")]
 fn detect_wan_ip(force_refresh: bool) -> Option<String> {
     // Check cache first (unless refresh is forced)
+    if force_refresh {
+        performance::increment_counter("network.wan_ip.cache_forced_refreshes", 1);
+    }
     if !force_refresh
         && let Ok(guard) = WAN_IP_CACHE.lock()
         && let Some(entry) = guard.as_ref()
     {
         if entry.fetched_at.elapsed() < WAN_IP_TTL {
+            performance::increment_counter("network.wan_ip.cache_hits", 1);
             debug!("WAN IP served from cache");
             return entry.value.clone();
         }
+        performance::increment_counter("network.wan_ip.cache_expired", 1);
         debug!("WAN IP cache expired");
     }
+
+    performance::increment_counter("network.wan_ip.cache_misses", 1);
 
     // Fetch fresh value
     let value = WanIpDetector::new().detect();

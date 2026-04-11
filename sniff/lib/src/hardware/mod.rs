@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use tracing::Level;
 use tracing::instrument;
 
 use crate::Result;
+use crate::performance;
 use crate::request::HardwareRequest;
 
 mod audio;
@@ -66,12 +69,15 @@ pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<Hardwar
     // a ~10s init delay. With only the `core_audio` feature enabled
     // on `coreaudio-sys`, init is ~1.5s. Detecting audio before GPU
     // avoids any potential Metal framework interference.
+    let audio_started = Instant::now();
     let audio_devices = if request.include_audio {
         detect_audio_devices()
     } else {
         Vec::new()
     };
+    performance::record_logged_stage("hardware.audio", audio_started.elapsed(), Level::DEBUG);
 
+    let core_started = Instant::now();
     let sys = System::new_with_specifics(
         RefreshKind::nothing()
             .with_cpu(CpuRefreshKind::everything())
@@ -114,18 +120,23 @@ pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<Hardwar
         free_swap: sys.free_swap(),
         used_swap: sys.used_swap(),
     };
+    performance::record_logged_stage("hardware.core", core_started.elapsed(), Level::DEBUG);
 
+    let storage_started = Instant::now();
     let storage = if request.include_storage {
         storage::detect_storage()
     } else {
         Vec::new()
     };
+    performance::record_logged_stage("hardware.storage", storage_started.elapsed(), Level::DEBUG);
 
+    let gpu_started = Instant::now();
     let gpu = if request.include_gpu {
         detect_gpus()
     } else {
         Vec::new()
     };
+    performance::record_logged_stage("hardware.gpu", gpu_started.elapsed(), Level::DEBUG);
 
     Ok(HardwareInfo {
         cpu,

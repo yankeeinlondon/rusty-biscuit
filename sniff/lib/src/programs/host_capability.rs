@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::os::{LinuxFamily, OsType, detect_linux_distro, detect_os_type};
+use crate::performance;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 
@@ -352,8 +353,10 @@ impl HostCapabilities {
         if let Some(ref p) = path
             && let Some(host) = load_host_capabilities_from(p)
         {
+            performance::increment_counter("programs.host_capability.cache_hits", 1);
             return host;
         }
+        performance::increment_counter("programs.host_capability.cache_misses", 1);
         let host = Self::detect();
         if let Some(ref p) = path {
             let _ = save_host_capabilities_to(p, &host);
@@ -368,12 +371,17 @@ impl HostCapabilities {
     /// fresh detection is written back to disk.
     pub fn load_or_detect_with_verification(force_refresh: bool) -> Self {
         let path = default_cache_path();
+        if force_refresh {
+            performance::increment_counter("programs.host_capability.cache_forced_refreshes", 1);
+        }
         if !force_refresh
             && let Some(ref p) = path
             && let Some(host) = load_host_capabilities_from(p)
         {
+            performance::increment_counter("programs.host_capability.cache_hits", 1);
             return host;
         }
+        performance::increment_counter("programs.host_capability.cache_misses", 1);
         let host = Self::detect_with_verification();
         if let Some(ref p) = path {
             let _ = save_host_capabilities_to(p, &host);

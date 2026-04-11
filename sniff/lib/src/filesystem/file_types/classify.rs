@@ -5,10 +5,13 @@ use super::model::{
 };
 use super::registry;
 use crate::Result;
+use crate::performance;
 use ignore::{DirEntry, WalkBuilder};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
+use tracing::trace;
 
 const MAX_FILES: usize = 10_000;
 const READ_LIMIT: usize = 8 * 1024;
@@ -21,6 +24,7 @@ pub fn scan_file_inventory_with_exclusions(
     root: &Path,
     exclude_roots: &[PathBuf],
 ) -> Result<FileInventory> {
+    let started = Instant::now();
     let scope = FileScanScope {
         root: root.to_path_buf(),
         exclude_roots: exclude_roots
@@ -54,9 +58,21 @@ pub fn scan_file_inventory_with_exclusions(
         .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
         .take(MAX_FILES)
     {
+        let callback_started = Instant::now();
         total_files_scanned += 1;
+        performance::increment_counter("filesystem.file_inventory.files_scanned", 1);
         classifications.push(classify_file(root, entry.path()));
+        performance::record_stage(
+            "filesystem.file_inventory.walk.entry",
+            callback_started.elapsed(),
+        );
     }
+
+    performance::record_logged_stage(
+        "filesystem.file_inventory.scan",
+        started.elapsed(),
+        tracing::Level::DEBUG,
+    );
 
     Ok(FileInventory {
         scope,
@@ -93,6 +109,7 @@ fn is_excluded_entry(entry: &DirEntry, exclude_roots: &[PathBuf]) -> bool {
 }
 
 fn classify_file(root: &Path, path: &Path) -> FileClassification {
+    let started = Instant::now();
     let relative_path = path.strip_prefix(root).unwrap_or(path).to_path_buf();
     let file_name = path
         .file_name()
@@ -101,36 +118,44 @@ fn classify_file(root: &Path, path: &Path) -> FileClassification {
     let extension = path.extension().and_then(|value| value.to_str());
 
     if let Some(descriptor) = registry::lookup_exact_filename(file_name) {
-        return FileClassification {
-            path: relative_path,
-            association: descriptor.association,
-            language: descriptor.language,
-            language_type: descriptor.language_type,
-            framework: descriptor.framework,
-            related_languages: Vec::new(),
-            confidence: ClassificationConfidence::Exact,
-            source: ClassificationSource::ExactFilename,
-        };
+        return finish_classification(
+            relative_path,
+            FileClassification {
+                path: PathBuf::new(),
+                association: descriptor.association,
+                language: descriptor.language,
+                language_type: descriptor.language_type,
+                framework: descriptor.framework,
+                related_languages: Vec::new(),
+                confidence: ClassificationConfidence::Exact,
+                source: ClassificationSource::ExactFilename,
+            },
+            started,
+        );
     }
 
     if let Some(descriptor) = registry::lookup_basename_pattern(file_name) {
-        return FileClassification {
-            path: relative_path,
-            association: descriptor.association,
-            language: descriptor.language,
-            language_type: descriptor.language_type,
-            framework: descriptor.framework,
-            related_languages: vec![ProgrammingLanguage::TypeScript],
-            confidence: ClassificationConfidence::High,
-            source: ClassificationSource::ExactFilename,
-        };
+        return finish_classification(
+            relative_path,
+            FileClassification {
+                path: PathBuf::new(),
+                association: descriptor.association,
+                language: descriptor.language,
+                language_type: descriptor.language_type,
+                framework: descriptor.framework,
+                related_languages: vec![ProgrammingLanguage::TypeScript],
+                confidence: ClassificationConfidence::High,
+                source: ClassificationSource::ExactFilename,
+            },
+            started,
+        );
     }
 
     if let Some(ext) = extension
         && let Some(descriptor) = registry::lookup_extension(ext)
     {
         let mut classification = FileClassification {
-            path: relative_path,
+            path: PathBuf::new(),
             association: descriptor.association,
             language: descriptor.language,
             language_type: descriptor.language_type,
@@ -143,50 +168,137 @@ fn classify_file(root: &Path, path: &Path) -> FileClassification {
         if descriptor.association == FileAssociation::FrameworkFile
             && let Some(framework) = descriptor.framework
         {
+            let framework_started = Instant::now();
             let (related_languages, confidence, source) =
                 framework::related_languages(framework, path);
+            performance::record_stage(
+                "filesystem.file_inventory.classify.framework",
+                framework_started.elapsed(),
+            );
             classification.related_languages = related_languages;
             classification.confidence = confidence;
             classification.source = source;
         }
 
-        return classification;
+        return finish_classification(relative_path, classification, started);
     }
 
     let header = read_prefix(path, READ_LIMIT);
     if let Some(ref bytes) = header {
-        if let Some(classification) = classify_by_shebang(bytes, &relative_path) {
-            return classification;
+        if let Some(classification) = classify_by_shebang(bytes) {
+            return finish_classification(relative_path, classification, started);
         }
-        if let Some(classification) = classify_by_binary_signature(path, bytes, &relative_path) {
-            return classification;
+        if let Some(classification) = classify_by_binary_signature(path, bytes) {
+            return finish_classification(relative_path, classification, started);
         }
-        if is_probably_text(bytes)
-            && let Ok(Some(detection)) = hyperpolyglot::detect(path)
-            && let Some(language) = ProgrammingLanguage::from_hyperpolyglot(detection.language())
-        {
-            return FileClassification {
-                path: relative_path,
-                association: FileAssociation::ProgrammingLanguage,
-                language: Some(language),
-                language_type: Some(language.language_type()),
-                framework: None,
-                related_languages: Vec::new(),
-                confidence: ClassificationConfidence::Low,
-                source: ClassificationSource::Fallback,
-            };
+        if is_probably_text(bytes) {
+            performance::increment_counter(
+                "filesystem.file_inventory.files_classified_by_content",
+                1,
+            );
+            let hyperpolyglot_started = Instant::now();
+            let detection = hyperpolyglot::detect(path);
+            let hyperpolyglot_elapsed = hyperpolyglot_started.elapsed();
+            performance::record_stage(
+                "filesystem.file_inventory.classify.hyperpolyglot",
+                hyperpolyglot_elapsed,
+            );
+            trace!(
+                path = %relative_path.display(),
+                duration_ms = performance::duration_ms(hyperpolyglot_elapsed),
+                "hyperpolyglot probe complete"
+            );
+            if let Ok(Some(detection)) = detection
+                && let Some(language) =
+                    ProgrammingLanguage::from_hyperpolyglot(detection.language())
+            {
+                performance::increment_counter(
+                    "filesystem.file_inventory.files_classified_by_hyperpolyglot",
+                    1,
+                );
+                return finish_classification(
+                    relative_path,
+                    FileClassification {
+                        path: PathBuf::new(),
+                        association: FileAssociation::ProgrammingLanguage,
+                        language: Some(language),
+                        language_type: Some(language.language_type()),
+                        framework: None,
+                        related_languages: Vec::new(),
+                        confidence: ClassificationConfidence::Low,
+                        source: ClassificationSource::Fallback,
+                    },
+                    started,
+                );
+            }
         }
     }
 
-    FileClassification {
-        path: relative_path,
-        association: FileAssociation::Unknown,
-        language: None,
-        language_type: None,
-        framework: None,
-        related_languages: Vec::new(),
-        confidence: ClassificationConfidence::Low,
-        source: ClassificationSource::Fallback,
+    finish_classification(
+        relative_path,
+        FileClassification {
+            path: PathBuf::new(),
+            association: FileAssociation::Unknown,
+            language: None,
+            language_type: None,
+            framework: None,
+            related_languages: Vec::new(),
+            confidence: ClassificationConfidence::Low,
+            source: ClassificationSource::Fallback,
+        },
+        started,
+    )
+}
+
+fn finish_classification(
+    relative_path: PathBuf,
+    mut classification: FileClassification,
+    started: Instant,
+) -> FileClassification {
+    classification.path = relative_path;
+    let duration = started.elapsed();
+    performance::increment_counter("filesystem.file_inventory.files_classified", 1);
+    performance::increment_counter(classification_counter_name(&classification), 1);
+    performance::record_stage(classification_stage_name(&classification), duration);
+    trace!(
+        path = %classification.path.display(),
+        source = ?classification.source,
+        association = ?classification.association,
+        duration_ms = performance::duration_ms(duration),
+        "file classified"
+    );
+    classification
+}
+
+fn classification_stage_name(classification: &FileClassification) -> &'static str {
+    match classification.source {
+        ClassificationSource::ExactFilename => "filesystem.file_inventory.classify.exact_filename",
+        ClassificationSource::Extension => "filesystem.file_inventory.classify.extension",
+        ClassificationSource::Shebang => "filesystem.file_inventory.classify.shebang",
+        ClassificationSource::EmbeddedLanguageHint => {
+            "filesystem.file_inventory.classify.embedded_language_hint"
+        }
+        ClassificationSource::BinarySignature => {
+            "filesystem.file_inventory.classify.binary_signature"
+        }
+        ClassificationSource::Fallback => "filesystem.file_inventory.classify.fallback",
+    }
+}
+
+fn classification_counter_name(classification: &FileClassification) -> &'static str {
+    match classification.source {
+        ClassificationSource::ExactFilename => {
+            "filesystem.file_inventory.classified_exact_filename"
+        }
+        ClassificationSource::Extension => "filesystem.file_inventory.classified_extension",
+        ClassificationSource::Shebang => "filesystem.file_inventory.classified_shebang",
+        ClassificationSource::EmbeddedLanguageHint => {
+            "filesystem.file_inventory.classified_embedded_language_hint"
+        }
+        ClassificationSource::BinarySignature => {
+            "filesystem.file_inventory.classified_binary_signature"
+        }
+        ClassificationSource::Fallback => "filesystem.file_inventory.classified_fallback",
     }
 }
 
@@ -198,7 +310,7 @@ fn read_prefix(path: &Path, limit: usize) -> Option<Vec<u8>> {
     Some(buffer)
 }
 
-fn classify_by_shebang(bytes: &[u8], relative_path: &Path) -> Option<FileClassification> {
+fn classify_by_shebang(bytes: &[u8]) -> Option<FileClassification> {
     let content = std::str::from_utf8(bytes).ok()?;
     let first_line = content.lines().next()?;
     let shebang = first_line.strip_prefix("#!")?.trim();
@@ -212,8 +324,10 @@ fn classify_by_shebang(bytes: &[u8], relative_path: &Path) -> Option<FileClassif
 
     let descriptor = registry::shebang_descriptor(interpreter)?;
 
+    performance::increment_counter("filesystem.file_inventory.files_classified_by_content", 1);
+
     Some(FileClassification {
-        path: relative_path.to_path_buf(),
+        path: PathBuf::new(),
         association: descriptor.association,
         language: descriptor.language,
         language_type: descriptor.language_type,
@@ -224,11 +338,7 @@ fn classify_by_shebang(bytes: &[u8], relative_path: &Path) -> Option<FileClassif
     })
 }
 
-fn classify_by_binary_signature(
-    path: &Path,
-    bytes: &[u8],
-    relative_path: &Path,
-) -> Option<FileClassification> {
+fn classify_by_binary_signature(path: &Path, bytes: &[u8]) -> Option<FileClassification> {
     let association = if bytes.starts_with(b"%PDF-") {
         FileAssociation::Binary
     } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n")
@@ -267,8 +377,10 @@ fn classify_by_binary_signature(
         return None;
     };
 
+    performance::increment_counter("filesystem.file_inventory.files_classified_by_content", 1);
+
     Some(FileClassification {
-        path: relative_path.to_path_buf(),
+        path: PathBuf::new(),
         association,
         language: None,
         language_type: None,

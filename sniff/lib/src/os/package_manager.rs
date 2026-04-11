@@ -6,9 +6,12 @@
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
+use tracing::trace;
 
 use super::OsType;
 use super::distro::LinuxFamily;
+use crate::performance;
 
 // ============================================================================
 // Package Manager Detection Infrastructure
@@ -338,9 +341,17 @@ pub struct SystemPackageManagers {
 /// Returns an empty vector if PATH is not set or contains no valid directories.
 #[must_use]
 pub fn get_path_dirs() -> Vec<PathBuf> {
+    let started = Instant::now();
     let path_var = match std::env::var("PATH") {
         Ok(p) => p,
-        Err(_) => return Vec::new(),
+        Err(_) => {
+            performance::record_logged_stage(
+                "os.path_dirs",
+                started.elapsed(),
+                tracing::Level::DEBUG,
+            );
+            return Vec::new();
+        }
     };
 
     #[cfg(target_os = "windows")]
@@ -348,12 +359,15 @@ pub fn get_path_dirs() -> Vec<PathBuf> {
     #[cfg(not(target_os = "windows"))]
     let separator = ':';
 
-    path_var
+    let dirs: Vec<PathBuf> = path_var
         .split(separator)
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
-        .collect()
+        .collect();
+    performance::increment_counter("os.path.directories_available", dirs.len() as u64);
+    performance::record_logged_stage("os.path_dirs", started.elapsed(), tracing::Level::DEBUG);
+    dirs
 }
 
 /// Checks if a command exists in the given PATH directories.
@@ -387,24 +401,73 @@ pub fn get_path_dirs() -> Vec<PathBuf> {
 /// `Some(PathBuf)` with the full path if found, `None` otherwise.
 #[must_use]
 pub fn command_exists_in_path(cmd: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
+    let started = Instant::now();
+    performance::increment_counter("os.path.command_checks", 1);
     #[cfg(target_os = "windows")]
     {
-        command_exists_in_path_windows(cmd, path_dirs)
+        let (result, checked_dirs) = command_exists_in_path_windows(cmd, path_dirs);
+        let duration = started.elapsed();
+        record_command_probe(
+            cmd,
+            path_dirs.len(),
+            checked_dirs,
+            result.is_some(),
+            duration,
+        );
+        result
     }
     #[cfg(not(target_os = "windows"))]
     {
-        command_exists_in_path_unix(cmd, path_dirs)
+        let (result, checked_dirs) = command_exists_in_path_unix(cmd, path_dirs);
+        let duration = started.elapsed();
+        record_command_probe(
+            cmd,
+            path_dirs.len(),
+            checked_dirs,
+            result.is_some(),
+            duration,
+        );
+        result
     }
+}
+
+fn record_command_probe(
+    cmd: &str,
+    path_dir_count: usize,
+    checked_dirs: usize,
+    found: bool,
+    duration: std::time::Duration,
+) {
+    performance::record_stage(format!("os.command_exists_in_path.{cmd}"), duration);
+    performance::increment_counter("os.path.directories_scanned", checked_dirs as u64);
+    performance::increment_counter(
+        if found {
+            "os.path.command_hits"
+        } else {
+            "os.path.command_misses"
+        },
+        1,
+    );
+    trace!(
+        command = cmd,
+        path_dir_count,
+        checked_dirs,
+        found,
+        duration_ms = performance::duration_ms(duration),
+        "PATH command probe complete"
+    );
 }
 
 /// Unix implementation of command existence check.
 ///
 /// Checks if the file exists and has the executable bit set.
 #[cfg(not(target_os = "windows"))]
-fn command_exists_in_path_unix(cmd: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
+fn command_exists_in_path_unix(cmd: &str, path_dirs: &[PathBuf]) -> (Option<PathBuf>, usize) {
     use std::os::unix::fs::PermissionsExt;
 
+    let mut checked_dirs = 0;
     for dir in path_dirs {
+        checked_dirs += 1;
         let candidate = dir.join(cmd);
         if candidate.is_file() {
             // Check executable permission
@@ -412,23 +475,25 @@ fn command_exists_in_path_unix(cmd: &str, path_dirs: &[PathBuf]) -> Option<PathB
                 let mode = metadata.permissions().mode();
                 // Check if any execute bit is set (owner, group, or other)
                 if mode & 0o111 != 0 {
-                    return Some(candidate);
+                    return (Some(candidate), checked_dirs);
                 }
             }
         }
     }
-    None
+    (None, checked_dirs)
 }
 
 /// Windows implementation of command existence check.
 ///
 /// Checks for the command with common executable extensions.
 #[cfg(target_os = "windows")]
-fn command_exists_in_path_windows(cmd: &str, path_dirs: &[PathBuf]) -> Option<PathBuf> {
+fn command_exists_in_path_windows(cmd: &str, path_dirs: &[PathBuf]) -> (Option<PathBuf>, usize) {
     // Windows executable extensions in priority order
     const EXTENSIONS: &[&str] = &[".exe", ".cmd", ".bat", ".com", ""];
 
+    let mut checked_dirs = 0;
     for dir in path_dirs {
+        checked_dirs += 1;
         for ext in EXTENSIONS {
             let filename = if ext.is_empty() {
                 cmd.to_string()
@@ -437,11 +502,11 @@ fn command_exists_in_path_windows(cmd: &str, path_dirs: &[PathBuf]) -> Option<Pa
             };
             let candidate = dir.join(&filename);
             if candidate.is_file() {
-                return Some(candidate);
+                return (Some(candidate), checked_dirs);
             }
         }
     }
-    None
+    (None, checked_dirs)
 }
 
 /// Returns the command database entry for a package manager.

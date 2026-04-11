@@ -1,7 +1,10 @@
 use crate::Result;
+use crate::performance;
 use crate::request::{FilesystemRequest, GitRequest};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
+use tracing::Level;
 use tracing::instrument;
 
 pub mod blast_radius;
@@ -71,16 +74,19 @@ pub fn detect_filesystem_with_request(
     request: &FilesystemRequest,
 ) -> Result<FilesystemInfo> {
     // Stage 1: Git detection
+    let git_started = Instant::now();
     let git = match &request.git {
         Some(git_request) => git::detect_git_with_request(root, git_request)?,
         None => None,
     };
+    performance::record_logged_stage("filesystem.git", git_started.elapsed(), Level::DEBUG);
 
     // Stage 2: Repo detection
     // When full repo detection is requested, also capture the shared file
     // inventory it already builds so Stage 3 can reuse it instead of
     // rescanning the tree.
     let repo_root_path = git.as_ref().map(|g| g.repo_root.as_path()).unwrap_or(root);
+    let repo_started = Instant::now();
     let (repo, repo_inventory) = match &request.repo {
         Some(repo_request) => {
             if repo_request.structure_only {
@@ -91,10 +97,12 @@ pub fn detect_filesystem_with_request(
         }
         None => (None, None),
     };
+    performance::record_logged_stage("filesystem.repo", repo_started.elapsed(), Level::DEBUG);
 
     // Stage 3: File inventory and language breakdown
     // When full repo detection already scanned the tree, reuse that
     // inventory (filtered to the target scope) instead of walking again.
+    let inventory_started = Instant::now();
     let (files, languages) = if request.include_file_inventory {
         let inventory = match repo.as_ref().and_then(|r| r.package_for_dir(root)) {
             Some(package) => {
@@ -135,15 +143,27 @@ pub fn detect_filesystem_with_request(
     } else {
         (None, None)
     };
+    performance::record_logged_stage(
+        "filesystem.inventory",
+        inventory_started.elapsed(),
+        Level::DEBUG,
+    );
 
     // Stage 4: Formatting
+    let formatting_started = Instant::now();
     let formatting = if request.include_formatting {
         detect_formatting(root).ok().flatten()
     } else {
         None
     };
+    performance::record_logged_stage(
+        "filesystem.formatting",
+        formatting_started.elapsed(),
+        Level::DEBUG,
+    );
 
     // Stage 5: Docs
+    let docs_started = Instant::now();
     let docs = if request.include_docs {
         match (
             git.as_ref(),
@@ -161,6 +181,7 @@ pub fn detect_filesystem_with_request(
     } else {
         None
     };
+    performance::record_logged_stage("filesystem.docs", docs_started.elapsed(), Level::DEBUG);
 
     Ok(FilesystemInfo {
         languages,
