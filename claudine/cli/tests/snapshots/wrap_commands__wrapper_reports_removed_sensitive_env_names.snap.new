@@ -1,0 +1,51 @@
+---
+source: claudine/cli/tests/wrap_commands.rs
+assertion_line: 316
+expression: redact_temp_home(&redact_session_id(&strip_ansi(&stderr)))
+---
+
+Claudine ▸ Codex  Interactive  PACKAGE_NAME: claudine-cli (area: claudine)
+
+Environment Variables:
+• INTERNAL_TOKEN
+• OPENAI_API_KEY
+• AGENT=codex
+• AGENT_PARAMS=["--include","OPENAI_API_KEY","--","--version"]
+• CLAUDINE_SESSION_ID=<redacted>
+• HOME=<redacted>
+• INTERACTIVE=true
+• PACKAGE=claudine-cli
+• PACKAGE_AREA=claudine
+• YOLO=false
+
+- Info: potentially dangerous ENV variables were removed; if you need one of
+   these to be included use the --include <ENV> CLI switch
+System Prompt(appended):
+  ▌ ## Context
+  ▌ 
+  ▌ - you are working in the **rusty-biscuit** monorepo
+  ▌ - this session was started with a focus on the **claudine** package area
+  ▌ 
+  ▌     - you must use the 'claudine' agent skill
+  ▌ 
+  ▌ ## Best Practices
+  ▌ 
+  ▌ - when rendering to the terminal ALWAYS use the `biscuit-terminal` and
+  ▌ `darkmatter` skills!
+  ▌ 
+  ▌     - leverage the [`Prose`](biscuit-terminal/docs/components/prose.md)
+  ▌ struct from biscuit-terminal for rich text (color, style), hyperlinks
+  ▌ (OS8), and more
+  ▌ 
+  ▌ - when attempting to do host discovery (hardware, software, os, file-
+  ▌ system, repo/git) you should use the `sniff` skill
+  ▌ - when doing file conversions between JSON, YAML, TOML always use the
+  ▌ `biscuit-file` skill
+  ▌ - whenever you are attempt to convert a string based file reference to a
+  ▌ real file path in the filesystem you should use `FileReference` struct
+  ▌ from `biscuit-file` and use the `biscuit-file` skill
+
+(node:31593) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `codex --trace-deprecation ...` to show where the warning was created)
+[remote-connections/window-context] load_remote_control_unauthed errorMessage="Sign in to ChatGPT in Codex Desktop to load remote control environments." errorName=Error errorStack="Error: Sign in to ChatGPT in Codex Desktop to load remote control environments.\n    at kn (/Applications/Codex.app/Contents/Resources/app.asar/.vite/build/main-BctBUwXr.js:72:3174)\n    at runNextTicks (node:internal/process/task_queues:64:5)\n    at process.processImmediate (node:internal/timers:472:9)\n    at async On (/Applications/Codex.app/Contents/Resources/app.asar/.vite/build/main-BctBUwXr.js:72:2471)\n    at async Mn (/Applications/Codex.app/Contents/Resources/app.asar/.vite/build/main-BctBUwXr.js:72:3490)\n    at async Td.loadRemoteControlConnections (/Applications/Codex.app/Contents/Resources/app.asar/.vite/build/main-BctBUwXr.js:87:13811)\n    at async Td.loadRemoteConnections (/Applications/Codex.app/Contents/Resources/app.asar/.vite/build/main-BctBUwXr.js:87:13013)\n    at async Td.refreshRemoteConnections (/Applications/Codex.app/Contents/Resources/app.asar/.vite/build/main-BctBUwXr.js:87:8347)"
+[worker-manager] Worker exited code=1

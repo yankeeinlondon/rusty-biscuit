@@ -59,7 +59,7 @@ The `--frontmatter-prompt` pipeline should work like a normal non-interactive ag
 
 All validation checks are rendered as styled check lines:
 
-- `✓ resolved the file reference to <link>` — on file resolution
+- `✓ the file reference was resolved to <link>` — on file resolution
 - Prompt displayed as a truncated blockquote (max 10 lines) before execution
 - `✓ {Agent} agent completed successfully` — or `⤫ {Agent} agent exited with error (code N)`
 - `✓ Agent updated the target document's body` — body hash changed

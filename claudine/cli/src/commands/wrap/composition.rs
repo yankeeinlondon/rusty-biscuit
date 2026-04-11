@@ -36,7 +36,7 @@ use super::{
     StructuredSummaryDetails, WrapperHarnessPermissionProbe,
     build_harness_shell_options_with_cache, emit_stream_summary_no_separator_with_context,
     emit_stream_summary_with_context, materialized_harness_prompt_from_prepared,
-    resolve_binary_path, run_harness_loop, strip_prompt_from_args, structured_verbosity,
+    resolve_binary_path, run_harness_loop, structured_verbosity,
     switch_process_cwd, wrap_terminal,
 };
 use crate::log;
@@ -359,8 +359,10 @@ pub(crate) fn execute_composition_request_inner(
         // Note: yolo support already consumed at env_plan build time
     }
 
+    profile.apply_entrypoint(&mut child_args, effective_non_interactive);
+
     if effective_non_interactive {
-        profile.apply_non_interactive(&mut child_args)?;
+        profile.apply_non_interactive_flags(&mut child_args)?;
         // Only apply default model if --model was not explicitly provided.
         if request.model.is_none() {
             profile.apply_non_interactive_defaults(&mut child_args);
@@ -483,6 +485,11 @@ pub(crate) fn execute_composition_request_inner(
     // task body and may stop parsing subsequent flags. Appending the prompt too
     // early can silently disable structured-output flags, leaving Claudine
     // waiting forever for a stream the provider never enters.
+    //
+    // Snapshot args before prompt delivery so the harness loop gets a
+    // prompt-free base (the harness manages prompt delivery itself).
+    let args_before_prompt = child_args.clone();
+    let prompt_source = super::profile::PromptSource::Inline(effective_prompt.clone());
     let stdin_seed = profile
         .prompt_delivery(&child_args, &effective_prompt, effective_non_interactive)?
         .apply_to(&mut child_args);
@@ -490,7 +497,11 @@ pub(crate) fn execute_composition_request_inner(
     let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
     let child_cwd = env_plan.child_cwd.as_path();
 
-    profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
+    super::profile::require_prompt_present(
+        profile.binary(),
+        effective_non_interactive,
+        &prompt_source,
+    )?;
 
     let sp_display_lines = super::system_prompt::describe_effective(&effective_sp);
 
@@ -689,8 +700,7 @@ pub(crate) fn execute_composition_request_inner(
             next_resume_session_id: None,
         };
 
-        let mut harness_base_args = child_args.clone();
-        strip_prompt_from_args(provider, &mut harness_base_args);
+        let mut harness_base_args = args_before_prompt.clone();
         if !use_structured {
             profile.prepare_captured_output(&mut harness_base_args);
         }
