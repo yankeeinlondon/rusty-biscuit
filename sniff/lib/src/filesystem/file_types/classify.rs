@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::trace;
 
-const MAX_FILES: usize = 10_000;
+pub(crate) const MAX_FILES: usize = 10_000;
 const READ_LIMIT: usize = 8 * 1024;
 
 pub fn scan_file_inventory(root: &Path) -> Result<FileInventory> {
@@ -93,22 +93,20 @@ fn is_excluded_entry(entry: &DirEntry, exclude_roots: &[PathBuf]) -> bool {
         return false;
     }
 
+    entry
+        .file_name()
+        .to_str()
+        .is_some_and(should_skip_directory_name)
+}
+
+pub(crate) fn should_skip_directory_name(name: &str) -> bool {
     matches!(
-        entry.file_name().to_str(),
-        Some(
-            ".git"
-                | ".turbo"
-                | "node_modules"
-                | "target"
-                | "vendor"
-                | "dist"
-                | "build"
-                | "__pycache__"
-        )
+        name,
+        ".git" | ".turbo" | "node_modules" | "target" | "vendor" | "dist" | "build" | "__pycache__"
     )
 }
 
-fn classify_file(root: &Path, path: &Path) -> FileClassification {
+pub(crate) fn classify_file(root: &Path, path: &Path) -> FileClassification {
     let started = Instant::now();
     let relative_path = path.strip_prefix(root).unwrap_or(path).to_path_buf();
     let file_name = path

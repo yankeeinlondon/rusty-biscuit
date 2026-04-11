@@ -5,6 +5,7 @@ mod model;
 mod registry;
 
 pub use aggregate::{summarize_file_inventory, summarize_languages};
+pub(crate) use classify::{MAX_FILES, classify_file, should_skip_directory_name};
 pub use classify::{
     project_package_inventory, scan_file_inventory, scan_file_inventory_with_exclusions,
 };
