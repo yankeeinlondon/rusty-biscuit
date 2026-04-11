@@ -93,14 +93,21 @@ let result = detect_with_config(config)?;
 
 ```rust
 use sniff::{
-    hardware::detect_hardware,
+    hardware::{detect_hardware, detect_hardware_summary},
     network::detect_network,
-    os::detect_os,
+    os::{detect_os, detect_os_with_request},
+    filesystem::git::GitRepo,
+    filesystem::repo::detect_repo_structure,
+    request::OsRequest,
 };
+use std::path::Path;
 
-// Detect only hardware
+// Detect only hardware (full, includes audio + GPU + storage)
 let hw = detect_hardware()?;
 println!("CPU: {} ({})", hw.cpu.brand, hw.cpu.arch);
+
+// Lightweight hardware summary: CPU + memory only, skips ~1.5s audio detection
+let hw_summary = detect_hardware_summary()?;
 
 // Detect only network
 let net = detect_network()?;
@@ -108,10 +115,16 @@ for iface in &net.interfaces {
     println!("Interface: {}", iface.name);
 }
 
-// Detect only OS
-let os = detect_os()?;
+// OS with tuned detail level (skip NTP which can take up to 10s on Linux)
+let os = detect_os_with_request(&OsRequest::summary())?;
 println!("OS: {} {}", os.name, os.version);
+
+// Expert composition: discover a git repo and sniff workspace structure only
+let git = GitRepo::discover(Path::new("."))?;
+let repo = detect_repo_structure(Path::new("."))?;
 ```
+
+See [../docs/sniff-library-architecture.md](../docs/sniff-library-architecture.md) for a full breakdown of per-subsection costs, shared-work strategies, and common caller profiles.
 
 ## Architecture
 
@@ -588,17 +601,21 @@ Detects installed programs across 8 categories with parallel execution and macOS
 | Headless Audio | afplay, pacat, aplay | PATH lookup |
 | AI CLI | claude, aider, goose | PATH lookup |
 
+**Performance notes:**
+
+`ProgramsInfo::detect()` builds a single shared `ExecutableIndex` by scanning every `PATH` directory and macOS app bundle location once, then runs all 8 categories in parallel using `rayon::join` pairs. Per-program lookups are O(1) HashMap hits rather than repeated filesystem traversals, so the total cost is dominated by the one-time index build.
+
 **Example:**
 
 ```rust
 use sniff::programs::ProgramsInfo;
 
-// Detect all installed programs (parallel)
+// Detect all installed programs (parallel, shared index)
 let programs = ProgramsInfo::detect();
 
 println!("Editors: {:?}", programs.editors);
 println!("Utilities: {:?}", programs.utilities);
-println!("AI CLI tools: {:?}", programs.ai_cli);
+println!("AI CLI tools: {:?}", programs.ai_clients);
 
 // Access metadata
 for editor in &programs.editors {

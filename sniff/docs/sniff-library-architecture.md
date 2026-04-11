@@ -1,6 +1,6 @@
 ## Overview
 
-The sniff library detects system information across five domains -- OS, hardware, network, filesystem, and programs -- each with its own cost profile. Some operations complete in under 10ms while others require seconds of I/O or network access. The library's architecture gives callers three distinct ways to interact with it, arranged from simplest to most flexible, so that every caller gets exactly the data they need without paying for operations they don't.
+The sniff library detects system information across four plan-driven domains (OS, hardware, network, filesystem) plus two standalone APIs (programs, services). Every subsection has its own cost profile -- some operations complete in under 10ms while others require seconds of I/O or network access. The library's architecture gives callers three distinct ways to interact with it, arranged from simplest to most flexible, so that every caller gets exactly the data they need without paying for operations they don't.
 
 ## Three API Tiers
 
@@ -15,7 +15,7 @@ let result = detect()?;
 // result.os, result.hardware, result.network, result.filesystem
 ```
 
-Under the hood, `detect()` constructs a `DetectionPlan::default()` and delegates to `detect_with_plan`.
+Under the hood, `detect()` builds a `SniffConfig::default()`, converts it into a `DetectionPlan`, and delegates to `detect_with_plan`. The net effect is the same as `DetectionPlan::default()`: all four domains at full detail.
 
 ### Tier 2: Plan-Based (`detect_with_plan(DetectionPlan)`)
 
@@ -67,23 +67,25 @@ Every subsection has a real-world cost. The table below captures approximate lat
 | **OS** | Core identity (type, name, version, kernel, hostname) | <10ms | Yes |
 | **OS** | Package managers | 50-500ms (Linux) | Yes |
 | **OS** | Locale | <5ms | Yes |
-| **OS** | NTP/Timezone | up to 10s (Linux timedatectl) | Yes |
+| **OS** | Timezone + DST + UTC offset | <5ms | Yes |
+| **OS** | NTP synchronization status | up to 10s (Linux `timedatectl`) | Yes |
 | **Hardware** | CPU + Memory | <50ms | Yes |
 | **Hardware** | Storage devices | ~50ms | Yes |
 | **Hardware** | GPU detection | ~50ms | Yes |
 | **Hardware** | Audio devices | ~1.5s (macOS CoreAudio) | Yes |
 | **Network** | Local interfaces | <10ms | Yes |
-| **Network** | WAN IP (HTTP call) | 500ms-2s | Yes |
+| **Network** | WAN IP (HTTP call, TTL-cached) | 500ms-2s cold, <1ms warm | Yes |
 | **Filesystem** | Git summary (branch, dirty counts) | <50ms | Yes |
-| **Filesystem** | Git file changes (per-file diffs) | 50-500ms | Yes |
-| **Filesystem** | Git deep (remote refresh) | 1-5s (network) | No |
-| **Filesystem** | Repo structure (workspace tools) | <100ms | Yes |
-| **Filesystem** | Repo full (per-package languages) | 200ms-5s | Yes |
-| **Filesystem** | File inventory | 50-500ms | Yes |
+| **Filesystem** | Git file changes (paths + line stats) | 50-500ms | Yes |
+| **Filesystem** | Git file diffs (full unified diffs) | 100ms-1s | No (deep only) |
+| **Filesystem** | Git remote refresh (branches, behind, containment) | 1-5s (network) | No |
+| **Filesystem** | Repo structure (workspace tools + package list) | <100ms | Yes |
+| **Filesystem** | Repo full (per-package languages, frameworks) | 200ms-5s | Yes |
+| **Filesystem** | File inventory (classification + languages) | 50-500ms | Yes |
 | **Filesystem** | EditorConfig | <10ms | Yes |
 | **Filesystem** | Markdown documents | 50-200ms | Yes |
-| **Programs** | All 8 categories (parallel) | 200-800ms | Separate API |
-| **Services** | Init system detection | 50-200ms | Separate API |
+| **Programs** | All 8 categories (parallel, shared executable index) | 200-800ms | Separate API |
+| **Services** | Init system detection + service list | 50-200ms | Separate API |
 
 Programs and Services are not part of `DetectionPlan` because they have no dependency on the filesystem base directory and their results are system-global rather than project-scoped. They are accessed through `ProgramsInfo::detect()` and `ServiceManager::detect()` respectively.
 
@@ -110,17 +112,19 @@ Each detection domain has a dedicated request type with named constructors for c
 | Constructor | What it includes |
 |------------|-----------------|
 | `interfaces_only()` | Local interfaces. No external HTTP call |
-| `full()` | Adds WAN IP lookup via external service |
+| `full()` | Adds WAN IP lookup via external service (TTL-cached) |
+
+WAN IP results are cached per run; call `.force_refresh(true)` to bypass the cache and issue a fresh HTTP lookup.
 
 ### GitRequest
 
 | Constructor | What it includes |
 |------------|-----------------|
-| `summary()` | Repo root, current branch, dirty status counts. No commits, no file details |
-| `full()` | 10 commits, per-file changes, worktrees. No network |
-| `deep()` | Refreshes remote tracking refs, populates behind status and commit containment |
+| `summary()` | Repo root, current branch, dirty status counts. No commits, no file details, no worktrees |
+| `full()` | 10 commits, per-file change stats (paths + line counts), worktrees. No unified diff payloads, no network |
+| `deep()` | Everything in `full()` plus full unified diffs for dirty and untracked files, remote tracking refresh, remote branch details, and per-commit remote containment |
 
-All constructors return a builder, so you can further adjust with methods like `.commit_count(5)` or `.include_worktrees(false)`.
+All constructors return a builder, so you can further adjust with methods like `.commit_count(5)`, `.include_worktrees(false)`, `.include_file_diffs(true)`, or `.refresh_remote_tracking(false)`.
 
 ### RepoRequest
 
@@ -143,30 +147,48 @@ let fs_request = FilesystemRequest::new()
 
 ## Shared-Work Architecture
 
-Several detection paths would naturally duplicate expensive I/O if implemented naively. The library uses four internal strategies to avoid this.
+Several detection paths would naturally duplicate expensive I/O if implemented naively. The library uses six internal strategies to avoid this.
+
+### Top-Level Domain Concurrency
+
+`detect_with_plan` runs the four top-level domains (OS, hardware, network, filesystem) concurrently using `std::thread::scope`. Each domain has its own scoped thread with a tracing span, and the results are joined before assembling the final `SniffResult`. Domains are independent and have no shared state, so there is no ordering constraint.
+
+### Staged Filesystem Detection
+
+Within the filesystem domain, `detect_filesystem_with_request` runs five stages sequentially so each can reuse work from the previous:
+
+1. **Git**: Discovers the repo root (used to retarget subsequent stages at the actual repo rather than the caller's cwd).
+2. **Repo**: Returns both the `RepoInfo` and its internal `FileInventory` via `detect_repo_with_inventory`, so Stage 3 can skip its own walk.
+3. **File inventory + languages**: Reuses the repo-level inventory when available, optionally filtered to a package scope with sibling-package exclusions.
+4. **Formatting (EditorConfig)**: Cheap local lookup.
+5. **Docs**: Markdown discovery, informed by the package list from Stage 2 so doc-to-package association is accurate.
+
+Each stage is strictly cheaper because the previous stage pre-computed its expensive inputs.
 
 ### Manifest Index
 
-When `detect_repo` runs full-detail detection, it builds a `ManifestIndex` from a single filesystem walk. This index records every `Cargo.toml`, `package.json`, `pyproject.toml`, and `go.mod` found in the tree. Package boundaries and their ecosystems are then derived entirely from this index rather than walking the tree again per workspace tool.
+When full repo detection runs, it builds a `ManifestIndex` from a single filesystem walk. This index records every `Cargo.toml`, `package.json`, `pyproject.toml`, and `go.mod` found in the tree. Package boundaries and their ecosystems are then derived entirely from this index rather than walking the tree again per workspace tool.
 
-The `detect_repo_structure` variant skips the manifest index entirely, since it only needs workspace-declared package lists.
+`detect_repo_structure` skips the manifest index entirely, since it only needs workspace-declared package lists. This is the 10-50x speedup path used by `RepoRequest::structure()`.
 
 ### File Inventory Projection
 
-The file inventory scan runs once at the repo level. When the caller's base directory falls within a specific package, the library looks up that package's boundary from the repo detection result and produces a package-scoped view by filtering the repo-level scan with path-prefix exclusions for sibling packages. This means a single walk serves both the overall language breakdown and any package-scoped view.
+The file inventory scan runs once at the repo level inside full repo detection and is threaded back out via `detect_repo_with_inventory`. When the caller's base directory falls within a specific package, Stage 3 produces a package-scoped view by filtering the repo-level scan with path-prefix exclusions for sibling packages. A single walk serves both the overall language breakdown and any package-scoped view.
 
 ### Git Status Layers
 
 Git status collection has two code paths selected by the request:
 
-- **Counts-only** (`include_file_changes: false`): Walks the libgit2 status list once, incrementing staged/unstaged/untracked counters. This is used for worktree summaries and the `summary()` preset.
-- **Full status** (`include_file_changes: true`): Collects per-file change details including delta kind and line-level diff stats. Only paid for when the caller actually needs file-level data.
+- **Counts-only** (`include_file_changes: false`): Walks the libgit2 status list once, incrementing staged/unstaged/untracked counters. Used for worktree summaries and the `summary()` preset.
+- **Full status** (`include_file_changes: true`): Collects per-file change details including delta kind and line-level diff stats. Only paid for when the caller actually needs file-level data. An additional `include_file_diffs` flag further opts into full unified diff payloads (used by `deep()`).
 
 Both paths share the same `libgit2` repository handle opened once by `GitRepo::discover`.
 
-### Parallel Program Detection
+### Parallel Program Detection with Shared Executable Index
 
-`ProgramsInfo::detect()` runs all 8 program categories in parallel using `rayon::join` pairs. Each category also parallelizes its internal lookups (e.g., checking 15 editor binaries concurrently). Rayon handles the nested parallelism correctly, distributing work across its thread pool without spawning excess threads.
+`ProgramsInfo::detect()` first builds a single `ExecutableIndex` by scanning every `PATH` directory and macOS app bundle location once. All 8 program categories then share this index via `Arc` and perform O(1) HashMap lookups instead of redundant filesystem traversals. The categories themselves run in parallel using `rayon::join` pairs (editors+utilities, language+OS package managers, TTS+terminals, headless audio+AI clients). Rayon handles the nested parallelism correctly, distributing work across its thread pool without spawning excess threads.
+
+The net effect: the PATH scan runs once instead of eight times, macOS bundle detection runs once instead of eight times, and per-program lookups are HashMap hits rather than `which` invocations.
 
 ## Common Caller Profiles
 
