@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(feature = "network")]
 use std::net::IpAddr;
+#[cfg(any(target_os = "windows", test))]
 use std::process::Command;
 #[cfg(feature = "network")]
 use std::sync::Mutex;
@@ -551,15 +552,13 @@ fn detect_default_route_interface(interfaces: &[NetworkInterface]) -> Option<Str
     ))]
     {
         let _ = interfaces;
-        command_output("route", &["-n", "get", "default"])
-            .and_then(|output| parse_bsd_default_route_interface(&output))
+        detect_bsd_default_route_interface_native()
     }
 
     #[cfg(target_os = "linux")]
     {
         let _ = interfaces;
-        command_output("ip", &["route", "show", "default"])
-            .and_then(|output| parse_linux_default_route_interface(&output))
+        detect_linux_default_route_interface_native()
     }
 
     #[cfg(target_os = "windows")]
@@ -584,6 +583,236 @@ fn detect_default_route_interface(interfaces: &[NetworkInterface]) -> Option<Str
     }
 }
 
+#[cfg(target_os = "linux")]
+fn detect_linux_default_route_interface_native() -> Option<String> {
+    std::fs::read_to_string("/proc/net/route")
+        .ok()
+        .and_then(|output| parse_linux_proc_default_route_interface(&output))
+}
+
+#[cfg(target_os = "linux")]
+fn parse_linux_proc_default_route_interface(output: &str) -> Option<String> {
+    let mut best: Option<(&str, u32)> = None;
+
+    for line in output.lines().skip(1) {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 8 || cols[1] != "00000000" {
+            continue;
+        }
+
+        let flags = match u16::from_str_radix(cols[3], 16) {
+            Ok(flags) => flags,
+            Err(_) => continue,
+        };
+        if flags & libc::RTF_UP as u16 == 0 {
+            continue;
+        }
+
+        let metric = match cols[6].parse::<u32>() {
+            Ok(metric) => metric,
+            Err(_) => continue,
+        };
+        match best {
+            None => best = Some((cols[0], metric)),
+            Some((_, best_metric)) if metric < best_metric => best = Some((cols[0], metric)),
+            _ => {}
+        }
+    }
+
+    best.map(|(interface, _)| interface.to_string())
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn detect_bsd_default_route_interface_native() -> Option<String> {
+    let mut mib = [
+        libc::CTL_NET,
+        libc::PF_ROUTE,
+        0,
+        libc::AF_INET,
+        libc::NET_RT_FLAGS,
+        libc::RTF_GATEWAY,
+    ];
+    let mut len: libc::size_t = 0;
+
+    unsafe {
+        if libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as _,
+            std::ptr::null_mut(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return None;
+        }
+    }
+
+    if len == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0_u8; len];
+    unsafe {
+        if libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as _,
+            buffer.as_mut_ptr().cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return None;
+        }
+    }
+
+    parse_bsd_route_dump(&buffer[..len])
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn parse_bsd_route_dump(buffer: &[u8]) -> Option<String> {
+    let mut offset = 0;
+
+    while offset + std::mem::size_of::<libc::rt_msghdr>() <= buffer.len() {
+        let header = unsafe { &*(buffer[offset..].as_ptr().cast::<libc::rt_msghdr>()) };
+        let message_len = header.rtm_msglen as usize;
+        if message_len == 0 || offset + message_len > buffer.len() {
+            break;
+        }
+
+        if is_default_bsd_route_message(header, &buffer[offset..offset + message_len]) {
+            return interface_name_from_index(header.rtm_index as u32);
+        }
+
+        offset += message_len;
+    }
+
+    None
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn is_default_bsd_route_message(header: &libc::rt_msghdr, message: &[u8]) -> bool {
+    let data = &message[std::mem::size_of::<libc::rt_msghdr>()..];
+    let destination =
+        sockaddr_from_route_message(data, header.rtm_addrs as i32, libc::RTAX_DST as usize);
+    let Some(destination) = destination else {
+        return false;
+    };
+
+    unsafe {
+        if (*destination).sa_family as i32 != libc::AF_INET {
+            return false;
+        }
+
+        let destination = destination.cast::<libc::sockaddr_in>();
+        (*destination).sin_addr.s_addr == 0
+    }
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn sockaddr_from_route_message(
+    data: &[u8],
+    addrs_mask: i32,
+    desired_index: usize,
+) -> Option<*const libc::sockaddr> {
+    let mut offset = 0;
+
+    for index in 0..(libc::RTAX_MAX as usize) {
+        if addrs_mask & (1 << index) == 0 {
+            continue;
+        }
+
+        if offset >= data.len() {
+            return None;
+        }
+
+        let sockaddr = unsafe { &*(data[offset..].as_ptr().cast::<libc::sockaddr>()) };
+        let sockaddr_len = sockaddr_len(sockaddr);
+
+        if index == desired_index {
+            return Some(sockaddr as *const libc::sockaddr);
+        }
+
+        offset += align_sockaddr_len(sockaddr_len);
+    }
+
+    None
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn sockaddr_len(sockaddr: &libc::sockaddr) -> usize {
+    let len = sockaddr.sa_len as usize;
+    if len == 0 {
+        std::mem::size_of::<libc::sockaddr>()
+    } else {
+        len
+    }
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn align_sockaddr_len(len: usize) -> usize {
+    let align = std::mem::size_of::<libc::c_long>();
+    (len + align - 1) & !(align - 1)
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn interface_name_from_index(index: u32) -> Option<String> {
+    let mut buffer = [0_u8; libc::IF_NAMESIZE];
+    let name = unsafe { libc::if_indextoname(index, buffer.as_mut_ptr().cast()) };
+    if name.is_null() {
+        return None;
+    }
+
+    unsafe { std::ffi::CStr::from_ptr(name) }
+        .to_str()
+        .ok()
+        .map(|name| name.to_string())
+}
+
+#[cfg(any(target_os = "windows", test))]
 fn command_output(program: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
     if !output.status.success() {
@@ -1339,6 +1568,19 @@ destination: default
         assert_eq!(
             parse_linux_default_route_interface(output),
             Some("wlp3s0".to_string())
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_parse_linux_proc_default_route_interface() {
+        let output = "\
+Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT
+wlp3s0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0
+eth0\t00000000\t0100A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0";
+        assert_eq!(
+            parse_linux_proc_default_route_interface(output),
+            Some("eth0".to_string())
         );
     }
 

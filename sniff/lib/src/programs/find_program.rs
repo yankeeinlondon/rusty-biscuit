@@ -72,6 +72,8 @@ use super::types::ExecutableSource;
 pub struct ExecutableIndex {
     /// Maps binary name to resolved path (first occurrence wins = PATH precedence)
     path_executables: HashMap<String, PathBuf>,
+    /// Number of PATH directories scanned while building the index.
+    path_dir_count: usize,
     /// Maps binary name to app bundle path (macOS only)
     #[cfg(target_os = "macos")]
     bundle_executables: HashMap<String, PathBuf>,
@@ -91,10 +93,21 @@ impl ExecutableIndex {
     /// A fully populated index ready for O(1) lookups.
     #[instrument(skip_all)]
     pub fn build() -> Self {
+        Self::build_with_bundles(true)
+    }
+
+    #[instrument(skip_all)]
+    pub fn build_path_only() -> Self {
+        Self::build_with_bundles(false)
+    }
+
+    fn build_with_bundles(include_bundles: bool) -> Self {
         let mut path_executables = HashMap::new();
+        let mut path_dir_count = 0;
 
         if let Some(path_var) = std::env::var_os("PATH") {
             for dir in std::env::split_paths(&path_var) {
+                path_dir_count += 1;
                 trace!(dir = %dir.display(), "scanning PATH directory");
                 if let Ok(entries) = std::fs::read_dir(&dir) {
                     for entry in entries.filter_map(|e| e.ok()) {
@@ -131,8 +144,13 @@ impl ExecutableIndex {
 
         Self {
             path_executables,
+            path_dir_count,
             #[cfg(target_os = "macos")]
-            bundle_executables: build_bundle_index(),
+            bundle_executables: if include_bundles {
+                build_bundle_index()
+            } else {
+                HashMap::new()
+            },
         }
     }
 
@@ -166,6 +184,10 @@ impl ExecutableIndex {
     /// - `None` - Program not found in PATH
     pub fn find(&self, program: &str) -> Option<PathBuf> {
         self.path_executables.get(program).cloned()
+    }
+
+    pub fn path_dir_count(&self) -> usize {
+        self.path_dir_count
     }
 }
 
