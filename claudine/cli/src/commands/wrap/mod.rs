@@ -1945,10 +1945,15 @@ fn build_harness_launch(
     state.next_prompt_override = None;
 
     let prompt = strip_prompt_tags_for_provider(provider, &materialized.prompt);
+    let prompt_source = profile::PromptSource::Inline(prompt.clone());
     let stdin_seed = profile
         .prompt_delivery(&args, &prompt, effective_non_interactive)?
         .apply_to(&mut args);
-    profile.validate_final_args(&args, effective_non_interactive, stdin_seed.is_some())?;
+    profile::require_prompt_present(
+        profile.binary(),
+        effective_non_interactive,
+        &prompt_source,
+    )?;
 
     let mut env = base_env.clone();
     for (key, value) in &materialized.env_overrides {
