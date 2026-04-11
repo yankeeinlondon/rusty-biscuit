@@ -2,6 +2,7 @@
 dir: ""
 spec: ""
 design: ""
+review: "review"
 iteration: 1
 success:
     say: "Feature review {{iteration}} has completed"
@@ -11,8 +12,12 @@ failure:
 
 We have just completed a feature defined in "{{dir}}":
 
-- the specification file is located at: "{{dir}}/{{spec}}"
-- the technical design is located at: "{{dir}}/{{design}}"
+::block when="spec"
+- specification: "{{dir}}/{{spec}}"
+::endblock
+::block when="design"
+- technical design: "{{dir}}/{{design}}"
+::endblock
 
 Read both the specification and design documents and then perform a review on the implementation:
 
@@ -21,14 +26,7 @@ Read both the specification and design documents and then perform a review on th
 - functionality which is light on test coverage (we expect strong unit and integration testing for everything)
 - are there any changes which would make the code more ergonomic, more performant, or both?
 
-::block when="iteration == 1"
-Save your review suggestions to "{{dir}}/review.md"
-::end-block
-
-::block when="iteration != 1"
-Save your review suggestions to "{{dir}}/review-{{iteration}}.md"
-::end-block
-
+Save your review suggestions to "{{dir}}/{{review}}-{{iteration}}.md"
 
 **IMPORTANT:**
 
