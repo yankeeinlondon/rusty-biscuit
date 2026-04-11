@@ -847,6 +847,64 @@ cargo test -p sniff --features network
 - Filesystem: Git parsing, monorepo detection, language analysis
 - Package: Manager detection, registry queries (network)
 
+## Benchmarking and Profiling
+
+The library ships with a Criterion benchmark harness under
+`sniff/lib/benches/` and lightweight example binaries under
+`sniff/lib/examples/` intended for flamegraph profiling.
+
+```bash
+# Run the full Criterion suite (HTML reports land in target/criterion)
+just bench
+
+# Run a single domain
+just bench-system
+just bench-hardware
+just bench-filesystem
+just bench-inventory
+
+# End-to-end CLI benchmarks (requires `hyperfine` on PATH)
+just bench-cli
+
+# Generate a flamegraph from a profiling example
+just profile profile_detect_full
+just profile profile_filesystem
+just profile profile_hardware
+
+# Profile the sniff CLI directly
+just profile-cli --json
+```
+
+Criterion output is written to `target/criterion/` with HTML reports at
+`target/criterion/report/index.html`. Flamegraphs use a dedicated
+`[profile.profiling]` Cargo profile (release + debuginfo, no stripping)
+so sampled stacks resolve symbols without changing normal release
+builds.
+
+The `--perf` flag on the CLI exposes structured per-stage timings from
+the library's `PerformanceCollector`; Criterion wall-clock numbers are
+the primary regression surface, while `--perf` stage breakdowns are
+useful for explaining *where* an observed regression lives.
+
+**Platform notes:**
+
+- Audio device and GPU/Metal benches are most meaningful on macOS.
+  They still compile and run on Linux/Windows but mostly exercise
+  stub paths.
+- The `services_detect` bench depends on which init system is present
+  (systemd, launchd, etc.) — variance between hosts is expected.
+
+**Which benches track regressions:**
+
+- `system::detect_summary` and `system::detect_full` are the headline
+  regression signals.
+- `filesystem_git::git_summary_monorepo`,
+  `filesystem_repo::repo_structure_monorepo`, and
+  `inventory::programs_detect` cover the highest-risk shared-walk and
+  fan-out paths.
+- Audio/GPU benches are informational and should not be used to gate
+  merges across platforms.
+
 ## Design Principles
 
 1. **Zero-Cost Abstractions**: Detection is opt-in via configuration
