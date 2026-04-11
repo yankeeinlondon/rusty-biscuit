@@ -1,8 +1,11 @@
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use tracing::Level;
 use tracing::instrument;
 
 use crate::Result;
+use crate::performance;
 use crate::request::HardwareRequest;
 
 mod audio;
@@ -15,7 +18,7 @@ pub use audio::{AudioDeviceInfo, AudioDeviceKind, AudioDirection, detect_audio_d
 pub use cpu::{CpuInfo, SimdCapabilities, detect_simd};
 pub use gpu::{GpuCapabilities, GpuDeviceType, GpuInfo, detect_gpus};
 pub use memory::MemoryInfo;
-pub use storage::{StorageInfo, StorageKind};
+pub use storage::{StorageInfo, StorageKind, detect_storage};
 
 // Re-export OS types from the dedicated os module for backward compatibility.
 // The canonical path is now `sniff::os::*`.
@@ -61,17 +64,7 @@ pub struct HardwareInfo {
     audio = request.include_audio,
 ))]
 pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<HardwareInfo> {
-    // Audio must be detected first. On macOS, linking against extra
-    // CoreAudio sub-frameworks (AudioUnit, OpenAL, CoreMIDI) caused
-    // a ~10s init delay. With only the `core_audio` feature enabled
-    // on `coreaudio-sys`, init is ~1.5s. Detecting audio before GPU
-    // avoids any potential Metal framework interference.
-    let audio_devices = if request.include_audio {
-        detect_audio_devices()
-    } else {
-        Vec::new()
-    };
-
+    let core_started = Instant::now();
     let sys = System::new_with_specifics(
         RefreshKind::nothing()
             .with_cpu(CpuRefreshKind::everything())
@@ -114,18 +107,102 @@ pub fn detect_hardware_with_request(request: &HardwareRequest) -> Result<Hardwar
         free_swap: sys.free_swap(),
         used_swap: sys.used_swap(),
     };
+    performance::record_logged_stage("hardware.core", core_started.elapsed(), Level::DEBUG);
 
-    let storage = if request.include_storage {
-        storage::detect_storage()
-    } else {
-        Vec::new()
-    };
+    let collector = performance::current_collector();
+    let (audio_devices, storage, gpu) = std::thread::scope(|scope| {
+        let audio_handle = request.include_audio.then(|| {
+            let collector = collector.clone();
+            scope.spawn(move || {
+                performance::with_current_collector(collector, || {
+                    // Audio initialization has historically interacted badly
+                    // with later Metal setup on macOS, so keep the audio-first
+                    // ordering there while still overlapping storage work.
+                    let audio_started = Instant::now();
+                    let devices = detect_audio_devices();
+                    performance::record_logged_stage(
+                        "hardware.audio",
+                        audio_started.elapsed(),
+                        Level::DEBUG,
+                    );
+                    devices
+                })
+            })
+        });
 
-    let gpu = if request.include_gpu {
-        detect_gpus()
-    } else {
-        Vec::new()
-    };
+        let storage_handle = request.include_storage.then(|| {
+            let collector = collector.clone();
+            scope.spawn(move || {
+                performance::with_current_collector(collector, || {
+                    let storage_started = Instant::now();
+                    let devices = storage::detect_storage();
+                    performance::record_logged_stage(
+                        "hardware.storage",
+                        storage_started.elapsed(),
+                        Level::DEBUG,
+                    );
+                    devices
+                })
+            })
+        });
+
+        #[cfg(target_os = "macos")]
+        let gpu = {
+            let audio_devices = audio_handle
+                .map(|handle| handle.join().unwrap())
+                .unwrap_or_default();
+            let collector = collector.clone();
+            let gpu = request.include_gpu.then(|| {
+                performance::with_current_collector(collector, || {
+                    let gpu_started = Instant::now();
+                    let devices = detect_gpus();
+                    performance::record_logged_stage(
+                        "hardware.gpu",
+                        gpu_started.elapsed(),
+                        Level::DEBUG,
+                    );
+                    devices
+                })
+            });
+            let storage = storage_handle
+                .map(|handle| handle.join().unwrap())
+                .unwrap_or_default();
+            (audio_devices, storage, gpu.unwrap_or_default())
+        };
+
+        #[cfg(not(target_os = "macos"))]
+        let gpu = {
+            let gpu_handle = request.include_gpu.then(|| {
+                let collector = collector.clone();
+                scope.spawn(move || {
+                    performance::with_current_collector(collector, || {
+                        let gpu_started = Instant::now();
+                        let devices = detect_gpus();
+                        performance::record_logged_stage(
+                            "hardware.gpu",
+                            gpu_started.elapsed(),
+                            Level::DEBUG,
+                        );
+                        devices
+                    })
+                })
+            });
+
+            (
+                audio_handle
+                    .map(|handle| handle.join().unwrap())
+                    .unwrap_or_default(),
+                storage_handle
+                    .map(|handle| handle.join().unwrap())
+                    .unwrap_or_default(),
+                gpu_handle
+                    .map(|handle| handle.join().unwrap())
+                    .unwrap_or_default(),
+            )
+        };
+
+        gpu
+    });
 
     Ok(HardwareInfo {
         cpu,

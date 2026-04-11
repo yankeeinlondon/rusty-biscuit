@@ -38,3 +38,8 @@ members = [
     "unchained-ai/lib", "agent-sandbox/cli", "messenger/cli", "messenger/lib", "biscuit-visualized/src", "worktree/lib", "worktree/cli",
 ]
 exclude = ["schematic/schema"]
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"

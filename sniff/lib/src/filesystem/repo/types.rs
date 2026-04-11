@@ -378,6 +378,7 @@ enum ManifestKind {
 ///
 /// Performs a single directory walk and caches manifest locations,
 /// avoiding redundant filesystem traversals during package discovery.
+#[derive(Debug, Clone)]
 pub(crate) struct ManifestIndex {
     /// Map from parent directory to set of manifest kinds found there
     manifests: HashMap<PathBuf, HashSet<ManifestKind>>,
@@ -427,6 +428,35 @@ impl ManifestIndex {
             }
 
             let Some(parent) = entry.path().parent() else {
+                continue;
+            };
+
+            manifests
+                .entry(parent.to_path_buf())
+                .or_default()
+                .insert(kind);
+        }
+
+        Self { manifests }
+    }
+
+    pub(crate) fn from_manifest_paths(paths: impl IntoIterator<Item = PathBuf>) -> Self {
+        let mut manifests: HashMap<PathBuf, HashSet<ManifestKind>> = HashMap::new();
+
+        for path in paths {
+            let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+
+            let kind = match file_name {
+                "Cargo.toml" => ManifestKind::Cargo,
+                "package.json" => ManifestKind::Node,
+                "pyproject.toml" => ManifestKind::Python,
+                "go.mod" => ManifestKind::Go,
+                _ => continue,
+            };
+
+            let Some(parent) = path.parent() else {
                 continue;
             };
 

@@ -1,5 +1,6 @@
 use sniff::filesystem::ProgrammingLanguage;
 use sniff::os::NtpStatus;
+use sniff::request::DetectionPlan;
 use sniff::{SniffConfig, detect, detect_with_config};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -67,6 +68,33 @@ fn test_serialization_roundtrip() {
     let orig_os = result.os.expect("os should be present");
     let parsed_os = parsed.os.expect("parsed os should be present");
     assert_eq!(orig_os.name, parsed_os.name);
+}
+
+#[test]
+fn test_performance_is_opt_in() {
+    let result = detect().unwrap();
+    assert!(result.performance.is_none());
+}
+
+#[test]
+fn test_performance_report_is_serialized_when_requested() {
+    let result = sniff::detect_with_plan(
+        DetectionPlan::new()
+            .without_network()
+            .without_filesystem()
+            .performance(true),
+    )
+    .unwrap();
+
+    let performance = result
+        .performance
+        .as_ref()
+        .expect("performance should be present");
+    assert!(performance.total_duration_ms >= 0.0);
+    assert!(performance.stages.contains_key("detect.total"));
+
+    let json = serde_json::to_value(&result).unwrap();
+    assert!(json.get("performance").is_some());
 }
 
 #[test]
