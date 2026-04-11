@@ -234,8 +234,14 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         opts
     };
 
-    let approval_options =
-        super::wrap::build_harness_shell_options(&source.resolved_path, None, shared.interactive);
+    let shared_approval_cache =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+
+    let approval_options = super::wrap::build_harness_shell_options_with_cache(
+        &source.resolved_path,
+        None,
+        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    );
 
     let preflight = composition::resolve_shell_approvals(
         Some(&source.markdown),
@@ -278,7 +284,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         quiet: shared.quiet,
         silent: shared.silent,
         env_overrides: std::collections::BTreeMap::new(),
-        shared_approval_cache: None,
+        shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
     };
 
@@ -341,8 +347,14 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         opts
     };
 
-    let approval_options =
-        super::wrap::build_harness_shell_options(&source.resolved_path, None, shared.interactive);
+    let shared_approval_cache =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+
+    let approval_options = super::wrap::build_harness_shell_options_with_cache(
+        &source.resolved_path,
+        None,
+        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    );
 
     let preflight = composition::resolve_shell_approvals(
         Some(&source.markdown),
@@ -385,7 +397,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         quiet: shared.quiet,
         silent: shared.silent,
         env_overrides: std::collections::BTreeMap::new(),
-        shared_approval_cache: None,
+        shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
     };
 

@@ -361,12 +361,19 @@ fn resolve_launch_workspace_context(
     launch_cwd: &Path,
     repo_root_hint: Option<&Path>,
 ) -> LaunchWorkspaceContext {
+    // `repo_root` is metadata — guardrails, MCP defaults, harness path
+    // resolution. When composing a document, the caller passes the
+    // document's enclosing git root as a hint so those subsystems key
+    // off the document's repo (e.g. `@`-references, per-repo guardrails).
     let repo_root = repo_root_hint
         .map(Path::to_path_buf)
         .or_else(|| detect_repo_root(launch_cwd));
-    let child_cwd = repo_root
-        .clone()
-        .unwrap_or_else(|| launch_cwd.to_path_buf());
+    // `child_cwd` is the directory the spawned provider process will
+    // run in. It must ALWAYS follow the user's launch directory, never
+    // the document hint — otherwise a sequence that composes a markdown
+    // file from an unrelated nested clone would jump OpenCode/Claude/etc.
+    // into that clone and flag the user's real worktree as external.
+    let child_cwd = detect_repo_root(launch_cwd).unwrap_or_else(|| launch_cwd.to_path_buf());
 
     match resolve_monorepo_package_context(launch_cwd) {
         Ok(repo_ctx) => LaunchWorkspaceContext {
@@ -890,7 +897,11 @@ mod tests {
     }
 
     #[test]
-    fn repo_root_hint_overrides_cwd_detection() {
+    fn repo_root_hint_sets_metadata_but_not_child_cwd() {
+        // The hint describes the composition source's enclosing repo
+        // (used for guardrails, MCP, harness path resolution). The
+        // child process must still spawn in the user's launch directory
+        // — never in whatever repo the document happens to live in.
         let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
         let cwd = tempfile::tempdir().unwrap();
         let hint_dir = tempfile::tempdir().unwrap();
@@ -910,9 +921,8 @@ mod tests {
         )
         .unwrap();
 
-        // repo_root should be the hint, not whatever CWD detection found.
         assert_eq!(plan.repo_root.as_deref(), Some(hint_dir.path()));
-        assert_eq!(plan.child_cwd.as_path(), hint_dir.path());
+        assert_eq!(plan.child_cwd.as_path(), cwd.path());
     }
 
     #[test]

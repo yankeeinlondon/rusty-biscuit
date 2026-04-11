@@ -38,8 +38,10 @@ pub use os::OsInfo;
 ///
 /// Contains OS, hardware, network, and filesystem information gathered
 /// by the sniff library. All fields are optional to allow partial
-/// detection when using flags.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// detection when using flags. The `Default` impl yields an all-`None`
+/// instance, which downstream callers can use as a graceful fallback when
+/// a detection plan fails (e.g. `detect_with_plan(plan).unwrap_or_default()`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SniffResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub os: Option<OsInfo>,

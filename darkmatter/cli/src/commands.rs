@@ -581,7 +581,7 @@ pub fn run_compose(
 
     let shell_opts = ShellExpansionOptions {
         timeout: timeout_secs
-            .map(|s| std::time::Duration::from_secs(s))
+            .map(std::time::Duration::from_secs)
             .unwrap_or(std::time::Duration::from_secs(10)),
         policy_root: resolved_input.as_ref().and_then(|p| {
             p.parent()

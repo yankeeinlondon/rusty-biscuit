@@ -1489,7 +1489,15 @@ impl WrapperProfile for OpencodeWrapper {
                     prompt.len() / 1024
                 );
             }
-            Ok(PromptDelivery::AppendArgs(vec![prompt.to_string()]))
+            // Separate the positional prompt with `--` so OpenCode's yargs
+            // parser stops looking for flags. Composed prompts commonly
+            // start with a bullet (`- ...`) or other `-`-prefixed token,
+            // which yargs would otherwise treat as an unrecognized option
+            // and respond to by printing `opencode run` help and exiting.
+            Ok(PromptDelivery::AppendArgs(vec![
+                "--".to_string(),
+                prompt.to_string(),
+            ]))
         } else {
             // Interactive TUI: use --prompt flag which auto-submits the
             // message (OpenCode PR #4510).  This keeps stdin inherited so
@@ -2026,7 +2034,35 @@ mod tests {
             .unwrap()
             .apply_to(&mut args);
         assert_eq!(stdin_seed, None);
-        assert_eq!(args, vec!["run", "summarize staged files"]);
+        assert_eq!(args, vec!["run", "--", "summarize staged files"]);
+    }
+
+    #[test]
+    fn opencode_non_interactive_prompt_starting_with_dash_is_separated_with_end_of_options() {
+        // Regression: OpenCode's yargs parser prints help and exits when a
+        // positional prompt begins with `-`. Claudine must emit `--` before
+        // the prompt so composed bullet-list prompts are delivered intact.
+        let p = profile(Provider::OpenCode);
+        let mut args = vec![
+            "run".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+        ];
+        p.prompt_delivery(&args, "- implement the plan\n- use the skill", true)
+            .unwrap()
+            .apply_to(&mut args);
+        let sep_index = args
+            .iter()
+            .position(|a| a == "--")
+            .expect("`--` separator must be present");
+        let prompt_index = args
+            .iter()
+            .position(|a| a == "- implement the plan\n- use the skill")
+            .expect("prompt must be present as a positional");
+        assert!(
+            sep_index < prompt_index,
+            "`--` must precede the prompt: {args:?}"
+        );
     }
 
     #[test]
