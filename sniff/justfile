@@ -187,23 +187,34 @@ outdated:
 # run the full Criterion bench suite for sniff-lib
 bench *args="":
     @echo -e "Running Criterion benches for {{BOLD}}sniff{{RESET}}"
-    @cargo bench -p sniff --bench perf -- {{args}}
+    @cargo bench -p sniff --features network --bench perf -- {{args}}
 
 # run only the system-level benches
 bench-system *args="":
-    @cargo bench -p sniff --bench perf -- ^system {{args}}
+    @cargo bench -p sniff --features network --bench perf -- ^system {{args}}
 
 # run only the hardware benches
 bench-hardware *args="":
-    @cargo bench -p sniff --bench perf -- ^hardware {{args}}
+    @cargo bench -p sniff --features network --bench perf -- ^hardware {{args}}
 
 # run only the filesystem benches
 bench-filesystem *args="":
-    @cargo bench -p sniff --bench perf -- ^filesystem {{args}}
+    @cargo bench -p sniff --features network --bench perf -- ^filesystem {{args}}
 
 # run only the programs + services inventory benches
 bench-inventory *args="":
-    @cargo bench -p sniff --bench perf -- ^inventory {{args}}
+    @cargo bench -p sniff --features network --bench perf -- ^inventory {{args}}
+
+# run only the network benches (wiremock-backed)
+bench-network *args="":
+    @cargo bench -p sniff --features network --bench perf -- ^network {{args}}
+
+# run the narrow CI subset of benches (matches sniff-performance.yml)
+bench-ci *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    filter="$(paste -sd'|' lib/benches/ci-bench-ids.txt | sed 's/\./\\./g')"
+    cargo bench -p sniff --features network --bench perf -- "^(${filter})$" {{args}}
 
 # end-to-end CLI benchmarks via hyperfine (requires hyperfine on PATH)
 bench-cli:
@@ -223,6 +234,12 @@ bench-cli:
         "${SNIFF_BIN} hardware --json"
 
 # generate a flamegraph for one of the sniff example entry points
+#
+# The `profile_filesystem` example materializes a deterministic
+# synthetic monorepo under $TMPDIR on its own, so running it without
+# arguments profiles the same workload as the Criterion benches. Pass
+# `--rebuild` as an extra arg to force a fresh fixture, or a path to
+# profile that path instead.
 profile target *args="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -231,7 +248,7 @@ profile target *args="":
         echo "Install it with 'cargo install flamegraph'."
         exit 1
     fi
-    cargo flamegraph --profile profiling -p sniff --example "{{target}}" -- {{args}}
+    cargo flamegraph --profile profiling -p sniff --features network --example "{{target}}" -- {{args}}
 
 # generate a flamegraph for the sniff CLI binary
 profile-cli *args="":
