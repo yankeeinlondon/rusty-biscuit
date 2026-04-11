@@ -283,6 +283,14 @@ pub(crate) fn run_child(
 
     let needs_stdin_pipe = io.stdin_seed.is_some();
 
+    // Whether we isolate the child into its own process group. Needed only
+    // when we pipe streams (so we can clean up orphaned descendants that
+    // keep the pipe fds open — see `kill_process_group`). For pure TTY
+    // inheritance (interactive TUIs like Claude/Codex), isolating into a
+    // background pgroup causes the child to receive SIGTTIN on stdin read
+    // and hang indefinitely.
+    let isolate_process_group = filter_stdout || filter_stderr || needs_stdin_pipe;
+
     let mut command = Command::new(binary);
     command
         .args(args)
@@ -306,7 +314,7 @@ pub(crate) fn run_child(
         });
 
     #[cfg(unix)]
-    {
+    if isolate_process_group {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
@@ -386,10 +394,12 @@ pub(crate) fn run_child(
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
-        wait_with_signal_handling(&mut child)?
+        wait_with_signal_handling(&mut child, isolate_process_group)?
     };
 
-    kill_process_group(&mut child);
+    if isolate_process_group {
+        kill_process_group(&mut child);
+    }
 
     let thread_join_timeout = Duration::from_secs(5);
     if let Some(handle) = stdout_handle {
@@ -474,10 +484,19 @@ fn join_with_timeout_or<T>(handle: thread::JoinHandle<T>, timeout: Duration, fal
 
 /// Wait for the child, forwarding SIGINT/SIGTERM on repeated Ctrl-C.
 ///
+/// When `child_in_own_pgroup` is true, the child was spawned with
+/// `process_group(0)` and the installed SIGINT handler manually forwards
+/// signals to `-child_pid` so descendants also receive them. When it is
+/// false, the child shares the parent's process group (required for
+/// interactive TUIs that read the controlling TTY); in that case the
+/// terminal already delivers SIGINT to the child naturally, so we only
+/// track the interrupt count locally.
+///
 /// Returns `(exit_code, termination_kind)`.
 #[cfg(unix)]
 fn wait_with_signal_handling(
     child: &mut Child,
+    child_in_own_pgroup: bool,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU8, Ordering};
@@ -485,26 +504,24 @@ fn wait_with_signal_handling(
     let interrupt_count = Arc::new(AtomicU8::new(0));
     let child_pid = child.id();
 
-    // Install a SIGINT handler that escalates on repeated presses.
-    // Signal the process group (negative pid) so descendants also receive it.
     let counter = Arc::clone(&interrupt_count);
     let _guard = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            if !child_in_own_pgroup {
+                // Child shares our process group; the terminal already
+                // delivered SIGINT to it. Just track the count so the
+                // termination kind is reported correctly.
+                return;
+            }
             match count {
                 1 => {
-                    // First Ctrl-C: forward SIGINT to the process group.
-                    // Registering this handler replaced the default behavior
-                    // (which would propagate to the process group), so we
-                    // must explicitly forward the signal.
                     libc::kill(-(child_pid as i32), libc::SIGINT);
                 }
                 2 => {
-                    // Second Ctrl-C: escalate to SIGTERM
                     libc::kill(-(child_pid as i32), libc::SIGTERM);
                 }
                 _ => {
-                    // Third+ Ctrl-C: force kill
                     libc::kill(-(child_pid as i32), libc::SIGKILL);
                 }
             }
@@ -525,6 +542,7 @@ fn wait_with_signal_handling(
 #[cfg(not(unix))]
 fn wait_with_signal_handling(
     child: &mut Child,
+    _child_in_own_pgroup: bool,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
     let status = child.wait()?;
     Ok((
@@ -755,7 +773,7 @@ pub(crate) fn run_child_capture(
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
-        wait_with_signal_handling(&mut child)?
+        wait_with_signal_handling(&mut child, true)?
     };
 
     kill_process_group(&mut child);
@@ -937,7 +955,7 @@ pub(crate) fn run_child_stream(
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
-        wait_with_signal_handling(&mut child)?
+        wait_with_signal_handling(&mut child, true)?
     };
 
     // The main child has exited, but descendant processes (e.g. subagents
@@ -1112,7 +1130,7 @@ pub(crate) fn run_child_stream_capture(
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
-        wait_with_signal_handling(&mut child)?
+        wait_with_signal_handling(&mut child, true)?
     };
 
     kill_process_group(&mut child);

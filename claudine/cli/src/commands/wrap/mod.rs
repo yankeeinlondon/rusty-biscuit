@@ -872,6 +872,17 @@ fn has_explicit_native_output_request(provider: Provider, args: &[String]) -> bo
 }
 
 /// Shared wrapper args for provider subcommands.
+///
+/// Boolean flags like `--yolo`, `--interactive`, `--quiet`, `--silent`,
+/// `--verbose`, and `--repo` are declared here for clap to parse AND also
+/// extracted from the passthrough bucket by `extract_wrapper_flags_from_passthrough`.
+/// The two sources are OR-merged so flags work whether placed before or after `--`.
+/// This avoids bug #2.2 (dual-source truth) by keeping clap as the primary
+/// parser while the passthrough extractor serves as a fallback for flags that
+/// land after the `--` separator.
+///
+/// Unknown flags (belonging to the underlying agent) flow into `passthrough`
+/// thanks to `ignore_errors(true)` on wrapper subcommands (see `parse_cli`).
 #[derive(Debug, Clone, Args)]
 pub struct WrapperArgs {
     /// Print help for this wrapper command.
@@ -957,6 +968,10 @@ pub struct WrapperArgs {
     pub strict: bool,
 
     /// Arguments forwarded to the wrapped provider CLI.
+    ///
+    /// Because wrapper subcommands use `ignore_errors(true)` (see `parse_cli`
+    /// in main.rs), unknown flags from the underlying agent CLI land here
+    /// instead of causing a clap error.
     #[arg(
         value_name = "ARGS",
         num_args = 0..,
@@ -973,18 +988,28 @@ pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs, verbose: u8) 
         return Ok(());
     }
 
-    let code = match run_provider_wrapper_inner(provider, args, verbose) {
-        Ok(code) => code,
+    let (code, stderr_capture) = match run_provider_wrapper_inner(provider, args, verbose) {
+        Ok((code, stderr)) => (code, stderr),
         Err(error) => {
             log::error(&error.to_string());
-            1
+            (1, None)
         }
     };
+
+    if code != 0 {
+        let term = wrap_terminal();
+        let report = crate::output::error_report::AgentErrorReport::from_exit_code(
+            provider,
+            code,
+            stderr_capture.as_deref(),
+        );
+        report.render(&term);
+    }
 
     std::process::exit(code);
 }
 
-fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8) -> Result<i32> {
+fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8) -> Result<(i32, Option<String>)> {
     let profile = profile::profile_for_provider(provider).ok_or_else(|| {
         eyre!(
             "'{}' cannot be wrapped (it is a VS Code extension)",
@@ -1386,7 +1411,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &term,
             sp_display_lines.as_deref(),
         );
-        return Ok(0);
+        return Ok((0, None));
     }
 
     switch_process_cwd(child_cwd)?;
@@ -1540,7 +1565,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     // Execute the provider. Composition and harness execution are handled by
     // `claudine compose` / `claudine inline-compose` through the wrapper-grade
     // composition executor; the wrapper path handles plain prompt passthrough.
-    let exit_code = if let Some((source_path, base_prompt, initial_materialized, shell_options)) =
+    let (exit_code, stderr_capture) = if let Some((source_path, base_prompt, initial_materialized, shell_options)) =
         wrapper_harness
     {
         let mut prompt_state = HarnessPromptState {
@@ -1575,7 +1600,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         };
         let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
 
-        run_harness_loop(
+        let harness_code = run_harness_loop(
             provider,
             profile,
             binary_path.as_path(),
@@ -1602,7 +1627,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &default_lifecycle,
             &default_lifecycle_ctx,
             &default_lifecycle_emitter,
-        )?
+        )?;
+        (harness_code, None)
     } else if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig {
@@ -1664,7 +1690,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &summary_details.lock().unwrap().clone(),
         );
 
-        summary.exit_code
+        let stderr_text = summary.stderr_text.clone();
+        (summary.exit_code, stderr_text)
     } else {
         // Legacy path: forward I/O to terminal
         let mut _spawned = false;
@@ -1681,7 +1708,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             },
             &mut _spawned,
         )?;
-        result.data
+        (result.data, None)
     };
 
     // MCP injector cleanup: remove temp files written during injection
@@ -1691,7 +1718,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         tracing::warn!("MCP injector cleanup failed: {e}");
     }
 
-    Ok(exit_code)
+    Ok((exit_code, stderr_capture))
 }
 
 fn merge_frontmatter_overlay(
