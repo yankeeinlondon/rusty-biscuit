@@ -20,45 +20,75 @@ The pre-flight runs as part of every wrapper command — `claudine compose`, `cl
 Prompt resolved → Pre-flight shell approval → Provider launches
 ```
 
-### Step 1: Collect All Shell Commands
+### Two-Phase Discovery
 
-Claudine gathers shell commands from all three sources:
+Claudine discovers shell commands in two phases because harness properties can only be read from the **effective (composed) frontmatter**, which is not available until after Darkmatter composition runs. But composition itself needs the pre-approved command set to execute `::shell` directives. This creates a dependency:
 
-- **Template directives**: Claudine asks Darkmatter to walk the full document graph and return every `::shell` directive it finds. Darkmatter runs interpolation first (using the same state that will be used during actual composition) so that template variables and dynamic transclusion paths resolve correctly. The result is a list of concrete commands with their source file and line number.
-- **Harness checks**: Claudine iterates the `pre_checks` and `post_checks` from the harness plan, extracting any `shell_command` validation rules.
-- **Harness handlers**: Claudine iterates handler definitions, extracting shell commands from `deviate` actions and programmatic `handle` declarations.
+```
+Phase 1: Discover template ::shell directives
+         → approve them
+         → pass approved set to Darkmatter composition
+         → composition produces effective frontmatter
 
-All commands are deduplicated by their normalized form. If the same command appears in multiple transclusion children or in both a pre-check and the template, it only needs one approval.
+Phase 2: Parse harness plan from effective frontmatter
+         → discover harness commands
+         → approve them (reusing the shared approval cache)
+```
 
-### Step 2: Check Against the Whitelist
+Both phases share a single **approval cache** — an `Arc<Mutex<HashMap>>` that maps normalized command strings to approval decisions. When a command approved in phase 1 also appears in phase 2 (e.g. the same `curl` call in both a template directive and a pre-check), the cache hit skips the duplicate prompt. From the user's perspective this appears as a single approval loop.
 
-Each collected command is checked against Claudine's shell policy:
+The `claudine claude` / `claudine codex` passthrough path uses only phase 2 because it has no template composition step — it parses the harness plan directly from the source file's frontmatter and preflights harness commands in a single pass.
+
+### Phase 1: Template Directives
+
+Claudine asks Darkmatter to walk the full document graph and return every `::shell` directive it finds. Darkmatter runs interpolation first (using the same state that will be used during actual composition) so that template variables and dynamic transclusion paths resolve correctly. The result is a list of concrete commands with their source file and line number.
+
+Each command is checked against shell policy (blacklist, whitelist, approval cache) and, if not already approved, the user is prompted. Once all template commands are approved, the approved set is passed to Darkmatter as `pre_approved_commands` on the `ComposeOptions` and composition proceeds.
+
+### Phase 2: Harness Commands
+
+After composition, Claudine parses the harness plan from the effective frontmatter and discovers harness shell commands:
+
+- **Harness checks**: `pre_checks` and `post_checks` of type `shell_command`.
+- **Harness handlers**: `deviate` actions and programmatic `handle` declarations.
+
+These commands flow through the same `resolve_shell_approvals` function and the same shared approval cache. Any command already approved in phase 1 is a cache hit. Only genuinely new commands trigger additional prompts.
+
+### Per-Attempt Audit (Passthrough Only)
+
+In the passthrough wrapper path (`claudine claude`, `claudine codex`), the harness loop re-audits shell commands on every attempt (retry, redirect). This is necessary because the source file may change between iterations — a redirect handler can point to a different file with different `::shell` directives. The per-attempt audit reads the raw source text and discovers source-page directives via line-level scanning.
+
+Composition flows (`claudine compose`, `claudine inline-compose`) do **not** re-audit on each attempt. Template directives were discovered through Darkmatter's graph walker (which respects `::block when="false"` guards), and harness commands were approved in phase 2. The approval handler is frozen after the first attempt so redirect/retry iterations cannot trigger new interactive prompts — only cached or whitelisted commands pass.
+
+### Approval Policy
+
+Each command is checked against Claudine's shell policy:
 
 - Built-in blacklist (dangerous commands like `rm`, `dd`, `chmod`)
 - User blacklist (`.darkmatter-shell-blacklist`)
 - User whitelist (`.darkmatter-shell-whitelist`)
 
-Commands that match the whitelist are marked as approved. Commands that match a blacklist are rejected immediately with a clear error. Everything else moves to step 3.
+Commands that match the whitelist are marked as approved. Commands that match a blacklist are rejected immediately with a clear error. Everything else is presented to the user.
 
-### Step 3: Prompt the User
+### User Prompt
 
-Any command not already covered by the whitelist is presented to the user one at a time. The user sees the command, its source file, and line number, and can choose:
+Any command not already covered by the whitelist or approval cache is presented to the user one at a time. The user sees the command, its source file, and line number, and can choose:
 
 - **Allow this exact command** (persisted to whitelist)
 - **Allow all commands from this executable** (persisted to whitelist)
-- **Allow once** (this session only)
+- **Allow once** (this session only — cached but not persisted)
 - **Deny** — the session aborts immediately
 - **Blacklist** (persisted to blacklist, session aborts)
 
 If the user denies any command, Claudine stops. No provider session is started. The error message states exactly which command was denied and confirms that nothing was executed.
 
-### Step 4: Pass Pre-Approved Set to Compose
+### Shared Approval Cache
 
-After the pre-flight completes, Claudine holds a set of all authorized commands (those from the whitelist plus those the user just approved). This set is passed to Darkmatter as `pre_approved_commands` on the `ComposeOptions`.
+The approval cache is an in-memory `HashMap<String, CachedApprovalDecision>` wrapped in `Arc<Mutex<...>>`. It serves three purposes:
 
-During composition, Darkmatter's shell expansion stage checks each `::shell` directive against this set. If the command is in the set, it executes. If not, it fails immediately with a clear error indicating the command was not pre-approved. Darkmatter does not run its own approval flow when a pre-approved set is provided.
-
-The same set is also used by the harness runtime when executing shell commands in pre-checks, post-checks, and handlers.
+1. **Cross-phase deduplication**: A command approved during template discovery (phase 1) is not re-prompted during harness discovery (phase 2).
+2. **Cross-step reuse for sequences**: The sequence orchestrator builds a fresh `ShellApprovalOptions` per step but clones the same `Arc` cache into each one. An "allow once" approval from step 1 carries forward to step 5 without re-prompting.
+3. **Freeze enforcement**: After pre-flight completes, composition modes remove the interactive approval handler from the `ShellApprovalOptions`. The cache remains, so previously approved commands still pass, but new uncached commands are denied without prompting. This enforces the contract that all shell approvals are resolved before the provider session starts.
 
 ## The Claudine/Darkmatter Boundary
 
@@ -130,3 +160,7 @@ Pre-flight is especially important for non-interactive sessions where there is n
 ### Harness Validations
 
 Shell-based validations (`shell_command` in pre-checks and post-checks) and shell-based handlers (`deviate`, programmatic `handle`) are included in the pre-flight scan. This means all shell commands across the entire session lifecycle are authorized upfront, not just those in the template.
+
+### Sequence Execution
+
+When running a sequence (`claudine compose` with a `sequence` frontmatter property), the pre-flight runs once per step during the discovery phase. Each step builds its own `ComposeOptions` (because `--set` overlays differ per step) but shares the same approval cache across all steps. Cumulatively approved commands are merged and passed to each step's composition run. A command approved on step 1 is not re-prompted on step 5.
