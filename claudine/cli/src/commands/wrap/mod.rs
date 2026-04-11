@@ -748,6 +748,75 @@ pub(crate) fn wrap_terminal() -> Terminal {
     crate::log::terminal()
 }
 
+/// Shared startup detection results for the direct wrap path.
+///
+/// Populated by a single `sniff::detect_with_plan` call and consumed by
+/// three independent downstream structures that would otherwise each
+/// trigger their own full repo walk.
+pub(crate) struct WrapStartupDetection {
+    pub(crate) env_context: EnvironmentContext,
+    pub(crate) launch_context: claudine::system_prompt::LaunchContext,
+    pub(crate) launch_workspace: env::LaunchWorkspaceContext,
+}
+
+/// Run one sniff-based filesystem scan and build every startup context
+/// the direct wrap path needs from the shared result.
+///
+/// On a cold filesystem cache in a large monorepo the previous pipeline
+/// walked the tree 3-5 times (once in `detect_environment_fast`, once in
+/// `LaunchContext::from_cwd`, and twice inside `build_child_env`). This
+/// helper collapses that into a single scan and then builds the three
+/// consumer contexts from borrowed data, falling back to empty contexts
+/// on detection errors so startup never blocks on an unrelated failure.
+pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
+    use sniff::request::*;
+
+    let plan = DetectionPlan::new()
+        .base_dir(cwd.to_path_buf())
+        .without_os()
+        .without_hardware()
+        .without_network()
+        .filesystem(
+            FilesystemRequest::new()
+                .git(GitRequest::summary())
+                .repo(RepoRequest::structure())
+                .without_file_inventory()
+                .without_docs()
+                .without_formatting(),
+        );
+
+    let result = sniff::detect_with_plan(plan).unwrap_or(sniff::SniffResult {
+        os: None,
+        hardware: None,
+        network: None,
+        filesystem: None,
+    });
+
+    let launch_context = claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
+
+    let (git_root, repo) = result
+        .filesystem
+        .as_ref()
+        .map(|f| {
+            (
+                f.git.as_ref().map(|g| g.repo_root.clone()),
+                f.repo.as_ref().cloned(),
+            )
+        })
+        .unwrap_or((None, None));
+
+    let launch_workspace =
+        env::launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref());
+
+    let env_context = claudine::events::environment_context_from_sniff_result(result);
+
+    WrapStartupDetection {
+        env_context,
+        launch_context,
+        launch_workspace,
+    }
+}
+
 pub(crate) fn switch_process_cwd(child_cwd: &Path) -> Result<()> {
     let current = std::env::current_dir()?;
     if current != child_cwd {
@@ -923,15 +992,24 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         )
     })?;
     let cwd = std::env::current_dir()?;
-    let env_context = claudine::events::detect_environment_fast(&cwd);
+
+    // One sniff-based scan produces the raw git + repo-structure data that
+    // the rest of startup needs. The result is consumed by three separate
+    // consumers (EnvironmentContext, LaunchContext, LaunchWorkspaceContext)
+    // without ever walking the filesystem again — this avoids the 3-5
+    // redundant tree walks the earlier pipeline performed.
+    let startup = detect_wrap_startup(&cwd);
+    let env_context = startup.env_context;
+    let launch_context = startup.launch_context;
+    let launch_workspace = startup.launch_workspace;
+
     let term = wrap_terminal();
 
-    let clients = InstalledAiClients::new();
     let binary_path = info_span!(
         "wrapper_binary_resolution",
         provider = %provider,
     )
-    .in_scope(|| resolve_binary_path(profile, &clients))?;
+    .in_scope(|| resolve_binary_path_direct(profile))?;
 
     let raw_agent_params: Vec<String> = std::env::args().skip(2).collect();
     let mut child_args = args.passthrough.clone();
@@ -1071,15 +1149,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         append_file: args.append_system_prompt.clone(),
         replace_file: args.replace_system_prompt.clone(),
     };
-    let launch_context =
-        claudine::system_prompt::LaunchContext::from_cwd(&cwd).unwrap_or_else(|_| {
-            claudine::system_prompt::LaunchContext {
-                cwd: cwd.clone(),
-                repo_root: None,
-                package_area_root: None,
-                package_root: None,
-            }
-        });
     let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
         &sp_args,
         &launch_context,
@@ -1126,18 +1195,17 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let needs_mcp_shadow_home = (args.mcp || !args.mcp_use.is_empty())
         && matches!(provider, Provider::Codex | Provider::Gemini);
 
-    let mut env_plan = env::build_child_env(
+    let mut env_plan = env::build_child_env_with_launch(
         profile,
         provider,
         &args.include,
         yolo_enabled,
         !non_interactive_requested,
         &raw_agent_params,
-        &cwd,
         &env_overrides,
         repo_requested,
         needs_mcp_shadow_home,
-        None,
+        launch_workspace,
     )?;
     if args.timeout.is_some() && !effective_non_interactive {
         return Err(eyre!(
@@ -3050,14 +3118,24 @@ pub(crate) fn resolve_binary_path(
     clients: &InstalledAiClients,
 ) -> Result<PathBuf> {
     let ai_cli = profile.provider().sniff_ai_cli();
-    clients.path(ai_cli).ok_or_else(|| {
-        eyre!(
-            "cannot run wrapped {} session because '{}' is not installed or not on PATH (docs: {})",
-            profile.provider(),
-            profile.binary(),
-            profile.provider().docs_url()
-        )
-    })
+    clients.path(ai_cli).ok_or_else(|| binary_missing_error(profile))
+}
+
+/// Resolve the child binary path directly via `which`, without scanning the
+/// entire set of known AI CLIs. Used on the hot path of the direct wrapper
+/// so we don't pay for a full PATH walk over ~9 binaries when only one is
+/// needed.
+pub(crate) fn resolve_binary_path_direct(profile: &dyn WrapperProfile) -> Result<PathBuf> {
+    which::which(profile.binary()).map_err(|_| binary_missing_error(profile))
+}
+
+fn binary_missing_error(profile: &dyn WrapperProfile) -> color_eyre::eyre::Error {
+    eyre!(
+        "cannot run wrapped {} session because '{}' is not installed or not on PATH (docs: {})",
+        profile.provider(),
+        profile.binary(),
+        profile.provider().docs_url()
+    )
 }
 
 fn model_value_from_args(args: &[String]) -> Option<String> {

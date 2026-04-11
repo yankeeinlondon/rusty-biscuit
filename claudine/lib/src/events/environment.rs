@@ -287,6 +287,20 @@ impl From<sniff::SniffResult> for EnvironmentContext {
     }
 }
 
+/// Build an `EnvironmentContext` from a pre-computed `SniffResult`.
+///
+/// Use this when a caller has already invoked `sniff::detect_with_plan`
+/// (e.g. to build a `LaunchContext` in the same startup pass) and wants
+/// to avoid triggering a second full filesystem walk.
+///
+/// The returned context still has `PACKAGE_AREA` / `PACKAGE` populated
+/// from the current process environment, matching `detect_environment_fast`.
+pub fn environment_context_from_sniff_result(result: sniff::SniffResult) -> EnvironmentContext {
+    let mut context = EnvironmentContext::from(result);
+    apply_wrapper_package_context(&mut context, &lookup_env_var);
+    context
+}
+
 /// Detect the environment context for the given working directory.
 ///
 /// Uses `sniff` with a plan-based configuration: no network calls,
