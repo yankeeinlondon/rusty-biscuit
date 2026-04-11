@@ -347,6 +347,7 @@ fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
     let opencode = cargo_bin_cmd!("claudine")
         .env("HOME", &home)
         .env("NO_COLOR", "1")
+        .env("OPENCODE_MODEL", "test-model")
         .env("PATH", &path_dir)
         .args([
             "opencode",

@@ -191,6 +191,60 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn sequence_opencode_requires_model_when_missing() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let args_path = workspace.path().join("opencode-args.txt");
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+sequence:
+  - only
+---
+Run step {{state}}
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .current_dir(workspace.path())
+        .args(["sequence", "--opencode", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("OpenCode cannot use its configured default model"),
+        "stderr should explain the missing non-interactive OpenCode model; stderr: {plain}"
+    );
+    assert!(
+        plain.contains("OPENCODE_MODEL"),
+        "stderr should tell the user how to provide the model; stderr: {plain}"
+    );
+    assert!(
+        !args_path.exists(),
+        "OpenCode should not launch when the model is missing"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn sequence_cli_fail_fast_flag_overrides_document_default() {
     // Document sets fail_fast: false, but CLI overrides to true.
     let workspace = tempdir().unwrap();
