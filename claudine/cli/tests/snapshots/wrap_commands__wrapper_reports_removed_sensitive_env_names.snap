@@ -21,7 +21,6 @@ Environment Variables:
 - Info: potentially dangerous ENV variables were removed; if you need one of
    these to be included use the --include <ENV> CLI switch
 System Prompt(appended):
-
   ▌ ## Context
   ▌ 
   ▌ - you are working in the **rusty-biscuit** monorepo

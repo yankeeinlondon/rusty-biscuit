@@ -298,7 +298,7 @@ fn wrapper_reports_removed_sensitive_env_names() {
     fs::create_dir_all(fake_home.join(".codex")).unwrap();
 
     write_executable(
-        &path_dir.join("opencode"),
+        &path_dir.join("codex"),
         r#"#!/bin/sh
 exit 0
 "#,
