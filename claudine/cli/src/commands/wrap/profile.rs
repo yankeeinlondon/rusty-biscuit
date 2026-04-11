@@ -244,15 +244,6 @@ pub(crate) trait WrapperProfile: Send + Sync {
         Ok(())
     }
 
-    /// **Deprecated** — shim retained during Phase 2-3 of the DRY
-    /// providers refactor so callers remain unchanged. Will be removed
-    /// in Phase 5 (Task 16). New providers should implement
-    /// `apply_entrypoint` and `apply_non_interactive_flags` instead.
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
-        self.apply_entrypoint(args, true);
-        self.apply_non_interactive_flags(args)
-    }
-
     /// Apply provider-specific defaults for non-interactive mode (e.g.
     /// OpenCode's default model injection). Default: no-op.
     fn apply_non_interactive_defaults(&self, _args: &mut Vec<String>) {}
@@ -395,25 +386,6 @@ pub(crate) trait WrapperProfile: Send + Sync {
         prompt: &str,
         non_interactive: bool,
     ) -> Result<PromptDelivery>;
-
-    // -- Final argument validation -------------------------------------------
-
-    /// Validate the final child args after all prompt sources have been
-    /// processed (passthrough, --prompt-file, --compose, --frontmatter-prompt).
-    ///
-    /// Providers that require a positional prompt (Codex, OpenCode, Goose)
-    /// should check for it here rather than in `apply_non_interactive()`,
-    /// because prompt delivery may happen after non-interactive setup.
-    ///
-    /// Default: no-op.
-    fn validate_final_args(
-        &self,
-        _args: &[String],
-        _non_interactive: bool,
-        _has_stdin: bool,
-    ) -> Result<()> {
-        Ok(())
-    }
 
     // -- Provider-required env vars ------------------------------------------
 
@@ -812,24 +784,6 @@ impl WrapperProfile for CodexWrapper {
         }
     }
 
-    fn validate_final_args(
-        &self,
-        args: &[String],
-        non_interactive: bool,
-        has_stdin: bool,
-    ) -> Result<()> {
-        require_prompt_or_stdin(
-            args,
-            non_interactive,
-            has_stdin,
-            &PromptRequirement {
-                flag_names: &[],
-                skip_entrypoint: true,
-                error_message: "--non-interactive for codex requires a prompt after the entrypoint",
-            },
-        )
-    }
-
     fn allowed_env_keys(&self) -> &'static [&'static str] {
         &["OPENAI_API_KEY", "CODEX_API_KEY"]
     }
@@ -987,25 +941,6 @@ impl WrapperProfile for GeminiWrapper {
             bail!("--non-interactive conflicts with interactive prompt mode for gemini");
         }
         Ok(())
-    }
-
-    fn validate_final_args(
-        &self,
-        args: &[String],
-        non_interactive: bool,
-        has_stdin: bool,
-    ) -> Result<()> {
-        require_prompt_or_stdin(
-            args,
-            non_interactive,
-            has_stdin,
-            &PromptRequirement {
-                flag_names: &["-p", "--prompt"],
-                skip_entrypoint: false,
-                error_message:
-                    "--non-interactive for gemini requires a prompt (positional or --prompt/-p)",
-            },
-        )
     }
 
     fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
@@ -1305,25 +1240,6 @@ impl WrapperProfile for QwenWrapper {
         Ok(())
     }
 
-    fn validate_final_args(
-        &self,
-        args: &[String],
-        non_interactive: bool,
-        has_stdin: bool,
-    ) -> Result<()> {
-        require_prompt_or_stdin(
-            args,
-            non_interactive,
-            has_stdin,
-            &PromptRequirement {
-                flag_names: &["-p", "--prompt"],
-                skip_entrypoint: false,
-                error_message:
-                    "--non-interactive for qwen requires a prompt (positional or --prompt/-p)",
-            },
-        )
-    }
-
     fn allowed_env_keys(&self) -> &'static [&'static str] {
         &["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
     }
@@ -1581,25 +1497,6 @@ impl WrapperProfile for OpencodeWrapper {
         }
     }
 
-    fn validate_final_args(
-        &self,
-        args: &[String],
-        non_interactive: bool,
-        has_stdin: bool,
-    ) -> Result<()> {
-        require_prompt_or_stdin(
-            args,
-            non_interactive,
-            has_stdin,
-            &PromptRequirement {
-                flag_names: &[],
-                skip_entrypoint: true,
-                error_message:
-                    "--non-interactive for opencode requires a prompt after the entrypoint",
-            },
-        )
-    }
-
     fn supports_structured_stream(&self) -> bool {
         true
     }
@@ -1720,24 +1617,6 @@ impl WrapperProfile for GooseWrapper {
         }
     }
 
-    fn validate_final_args(
-        &self,
-        args: &[String],
-        non_interactive: bool,
-        has_stdin: bool,
-    ) -> Result<()> {
-        require_prompt_or_stdin(
-            args,
-            non_interactive,
-            has_stdin,
-            &PromptRequirement {
-                flag_names: &["-t"],
-                skip_entrypoint: true,
-                error_message: "--non-interactive for goose requires a prompt after the entrypoint",
-            },
-        )
-    }
-
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
         PromptArgConventions {
             prompt_flags: &["-t", "--text"],
@@ -1755,114 +1634,11 @@ fn non_empty_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
 }
 
-pub(super) fn has_non_flag_positional(args: &[String]) -> bool {
-    find_first_positional(args).is_some()
-}
-
-/// Return the index of the first positional (non-flag) argument.
-fn find_first_positional(args: &[String]) -> Option<usize> {
-    let mut skip_next = false;
-    for (index, arg) in args.iter().enumerate() {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-
-        if arg == "--" {
-            return Some(index);
-        }
-
-        // Skip known value-taking flags so their values aren't mistaken for
-        // positional arguments.
-        if arg == "-m"
-            || arg == "--model"
-            || arg == "--output-format"
-            || arg == "-o"
-            || arg == "--output-last-message"
-            || arg == "--auth-type"
-            || arg == "--sandbox-image"
-            || arg == "--approval-mode"
-        {
-            skip_next = true;
-            continue;
-        }
-
-        if !arg.starts_with('-') {
-            return Some(index);
-        }
-    }
-
-    None
-}
-
 fn has_any_flag(args: &[String], primary: &str, aliases: &[&str]) -> bool {
     if has_flag(args, primary) {
         return true;
     }
     aliases.iter().any(|alias| has_flag(args, alias))
-}
-
-/// Configuration describing how a provider considers a prompt to be
-/// "delivered" when validating the final child argv.
-///
-/// Providers call [`require_prompt_or_stdin`] from their
-/// [`WrapperProfile::validate_final_args`] implementations with one of
-/// these, centralizing the "did a prompt reach the provider?" question
-/// that previously drifted across per-provider impls (and which caused
-/// composition pipelines to bail for Gemini and Qwen because their
-/// validation accidentally lived in `apply_non_interactive`).
-pub(super) struct PromptRequirement<'a> {
-    /// Flag names whose presence counts as a delivered prompt
-    /// (e.g. `["-p", "--prompt"]` for Gemini, `["-t"]` for Goose).
-    ///
-    /// Pass an empty slice for providers that accept only a positional
-    /// prompt (Codex, OpenCode).
-    pub flag_names: &'a [&'a str],
-    /// When true, skip `args[0]` (the entrypoint/subcommand) while
-    /// scanning for a positional prompt. Providers whose
-    /// `apply_non_interactive` injects an entrypoint (Codex `exec`,
-    /// OpenCode/Goose `run`) set this so the entrypoint itself is
-    /// never mistaken for a prompt.
-    pub skip_entrypoint: bool,
-    /// Error message used when no prompt can be found. Kept
-    /// per-provider so existing test substrings and wording remain
-    /// stable.
-    pub error_message: &'a str,
-}
-
-/// Shared "does a prompt reach the provider?" check for non-interactive
-/// launches.
-///
-/// Returns `Ok(())` when any of the following holds:
-/// - `non_interactive` is false (interactive launches do not require a
-///   preloaded prompt — the user types it)
-/// - `has_stdin` is true (the prompt is being piped on stdin)
-/// - Any flag listed in `req.flag_names` is present in `args`
-/// - A non-flag positional arg exists in `args` (after optionally
-///   skipping the entrypoint per `req.skip_entrypoint`)
-///
-/// Otherwise bails with `req.error_message`.
-pub(super) fn require_prompt_or_stdin(
-    args: &[String],
-    non_interactive: bool,
-    has_stdin: bool,
-    req: &PromptRequirement<'_>,
-) -> Result<()> {
-    if !non_interactive || has_stdin {
-        return Ok(());
-    }
-    if req.flag_names.iter().any(|flag| has_flag(args, flag)) {
-        return Ok(());
-    }
-    let scan: &[String] = if req.skip_entrypoint && !args.is_empty() {
-        &args[1..]
-    } else {
-        args
-    };
-    if has_non_flag_positional(scan) {
-        return Ok(());
-    }
-    bail!("{}", req.error_message);
 }
 
 fn has_flag(args: &[String], flag: &str) -> bool {
@@ -2098,119 +1874,6 @@ mod tests {
         assert!(PromptSource::InheritStdin.has_prompt_or_stdin());
     }
 
-    // -- require_prompt_or_stdin shared helper ------------------------------
-
-    fn req_positional_only() -> PromptRequirement<'static> {
-        PromptRequirement {
-            flag_names: &[],
-            skip_entrypoint: true,
-            error_message: "requires a prompt",
-        }
-    }
-
-    fn req_prompt_flag() -> PromptRequirement<'static> {
-        PromptRequirement {
-            flag_names: &["-p", "--prompt"],
-            skip_entrypoint: false,
-            error_message: "requires a prompt",
-        }
-    }
-
-    #[test]
-    fn require_prompt_or_stdin_passes_in_interactive_mode() {
-        let args: Vec<String> = Vec::new();
-        require_prompt_or_stdin(&args, false, false, &req_positional_only()).unwrap();
-    }
-
-    #[test]
-    fn require_prompt_or_stdin_passes_when_stdin_supplied() {
-        let args = vec!["exec".to_string()];
-        require_prompt_or_stdin(&args, true, true, &req_positional_only()).unwrap();
-    }
-
-    #[test]
-    fn require_prompt_or_stdin_accepts_positional_after_entrypoint() {
-        let args = vec!["exec".to_string(), "do the thing".to_string()];
-        require_prompt_or_stdin(&args, true, false, &req_positional_only()).unwrap();
-    }
-
-    #[test]
-    fn require_prompt_or_stdin_rejects_entrypoint_as_positional() {
-        // Only the entrypoint itself is present — skip_entrypoint must prevent
-        // it from being mistaken for a prompt.
-        let args = vec!["exec".to_string()];
-        let err =
-            require_prompt_or_stdin(&args, true, false, &req_positional_only()).unwrap_err();
-        assert!(err.to_string().contains("requires a prompt"));
-    }
-
-    #[test]
-    fn require_prompt_or_stdin_rejects_flags_only() {
-        let args = vec!["exec".to_string(), "--json".to_string()];
-        let err =
-            require_prompt_or_stdin(&args, true, false, &req_positional_only()).unwrap_err();
-        assert!(err.to_string().contains("requires a prompt"));
-    }
-
-    #[test]
-    fn require_prompt_or_stdin_accepts_flag_delivered_prompt() {
-        let args = vec!["--prompt".to_string(), "hello".to_string()];
-        require_prompt_or_stdin(&args, true, false, &req_prompt_flag()).unwrap();
-    }
-
-    #[test]
-    fn require_prompt_or_stdin_accepts_short_flag_delivered_prompt() {
-        let args = vec!["-p".to_string(), "hello".to_string()];
-        require_prompt_or_stdin(&args, true, false, &req_prompt_flag()).unwrap();
-    }
-
-    #[test]
-    fn require_prompt_or_stdin_empty_args_rejected() {
-        let args: Vec<String> = Vec::new();
-        let err = require_prompt_or_stdin(&args, true, false, &req_prompt_flag()).unwrap_err();
-        assert!(err.to_string().contains("requires a prompt"));
-    }
-
-    #[test]
-    fn require_prompt_or_stdin_skip_entrypoint_false_accepts_first_positional() {
-        // Providers like Gemini/Qwen don't inject an entrypoint, so the first
-        // positional IS the prompt (after apply_non_interactive has converted
-        // it to --prompt, but also in the rare direct-positional path).
-        let args = vec!["hello".to_string()];
-        require_prompt_or_stdin(&args, true, false, &req_prompt_flag()).unwrap();
-    }
-
-    #[test]
-    fn codex_non_interactive_ensures_exec_once() {
-        let p = profile(Provider::Codex);
-        let mut args = vec!["exec".to_string(), "--json".to_string(), "task".to_string()];
-
-        p.apply_non_interactive(&mut args).unwrap();
-        p.apply_non_interactive(&mut args).unwrap();
-
-        assert_eq!(args, vec!["exec", "--json", "task"]);
-    }
-
-    #[test]
-    fn codex_non_interactive_prepends_exec() {
-        let p = profile(Provider::Codex);
-        let mut args = vec!["--json".to_string(), "summarize".to_string()];
-
-        p.apply_non_interactive(&mut args).unwrap();
-
-        assert_eq!(args, vec!["exec", "--json", "summarize"]);
-    }
-
-    #[test]
-    fn codex_non_interactive_rejects_missing_prompt() {
-        let p = profile(Provider::Codex);
-        let mut args = vec!["--json".to_string()];
-
-        p.apply_non_interactive(&mut args).unwrap();
-        let err = p.validate_final_args(&args, true, false).unwrap_err();
-        assert!(err.to_string().contains("requires a prompt"));
-    }
-
     #[test]
     fn gemini_yolo_mapping_is_idempotent() {
         let p = profile(Provider::Gemini);
@@ -2327,16 +1990,6 @@ mod tests {
     }
 
     #[test]
-    fn opencode_non_interactive_rejects_missing_prompt() {
-        let p = profile(Provider::OpenCode);
-        let mut args = vec!["--json".to_string()];
-
-        p.apply_non_interactive(&mut args).unwrap();
-        let err = p.validate_final_args(&args, true, false).unwrap_err();
-        assert!(err.to_string().contains("requires a prompt"));
-    }
-
-    #[test]
     fn opencode_non_interactive_prompt_body_uses_positional_arg() {
         let p = profile(Provider::OpenCode);
         let mut args = vec!["run".to_string()];
@@ -2360,16 +2013,6 @@ mod tests {
         let unique: HashSet<_> = env_overrides.into_iter().collect();
         assert_eq!(unique.len(), 1);
         assert!(unique.contains(&("GOOSE_MODE".to_string(), "auto".to_string())));
-    }
-
-    #[test]
-    fn goose_non_interactive_rejects_missing_prompt() {
-        let p = profile(Provider::Goose);
-        let mut args = Vec::new();
-
-        p.apply_non_interactive(&mut args).unwrap();
-        let err = p.validate_final_args(&args, true, false).unwrap_err();
-        assert!(err.to_string().contains("requires a prompt"));
     }
 
     #[test]
