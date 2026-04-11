@@ -2,3 +2,4 @@ prefix echo
 prefix sniff
 prefix ll
 prefix ls
+prefix just
