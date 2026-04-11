@@ -1504,7 +1504,15 @@ fn run_provider_wrapper_inner(
     } else {
         &[]
     };
-    let stderr_noise = profile.stderr_noise_prefixes();
+    // Interactive TUIs (Codex, OpenCode, etc.) must inherit stderr directly.
+    // A non-empty stderr filter causes `exec::run_child` to pipe stderr,
+    // which flips `isolate_process_group` on and leaves the child in a
+    // background pgroup — it then hangs on SIGTTIN when reading the TTY.
+    let stderr_noise = if effective_non_interactive {
+        profile.stderr_noise_prefixes()
+    } else {
+        &[]
+    };
 
     // Decide whether to use internal structured stream parsing.
     // Conditions: provider supports it, non-interactive, no explicit output format.
@@ -2748,91 +2756,106 @@ pub(crate) fn run_harness_loop(
         }
 
         // Shell audit preflight.
-        // Composition flows (Compose/Inline) already preflight ::shell directives
-        // during composition — re-parsing raw source would reintroduce commands
-        // hidden by false ::block directives.  Only passthrough mode needs raw
-        // source-page audit.
-        let source_text = match prompt_state.mode {
-            HarnessPromptMode::Passthrough => {
-                std::fs::read_to_string(&prompt_state.source_path).ok()
-            }
-            _ => None,
-        };
-        let auditable =
-            claudine::harness::collect_auditable_commands(&plan, source_text.as_deref())?;
+        //
+        // Composition flows (Compose/Inline) preflight all shell commands
+        // before the provider starts — template directives during composition
+        // and harness commands in execute_composition_request.  The per-
+        // attempt audit below is redundant for those modes because:
+        //
+        //   1. source_text is None, so source-page ::shell directives are
+        //      excluded (they were discovered via Darkmatter's graph walker
+        //      during composition, which respects ::block when="false").
+        //   2. Harness commands were approved and cached during the
+        //      composition preflight pass.
+        //   3. The approval handler is frozen after attempt 1, so no new
+        //      interactive prompts are possible.
+        //
+        // Only Passthrough mode needs the per-attempt audit because it reads
+        // raw source text and the source file may change between
+        // redirect/retry iterations.
+        if matches!(prompt_state.mode, HarnessPromptMode::Passthrough) {
+            let source_text = std::fs::read_to_string(&prompt_state.source_path).ok();
 
-        let audit_report = info_span!(
-            "harness_shell_audit",
-            attempt,
-            command_count = auditable.len(),
-        )
-        .in_scope(|| {
-            claudine::harness::audit_shell_commands(&auditable, harness_context.shell_options())
-        });
+            let auditable =
+                claudine::harness::collect_auditable_commands(&plan, source_text.as_deref())?;
 
-        if show_checks {
-            claudine::harness::report::report_shell_audit_header(audit_report.outcomes.len(), term);
-            claudine::harness::report::report_shell_audit_outcomes(&audit_report, term);
-        }
+            let audit_report = info_span!(
+                "harness_shell_audit",
+                attempt,
+                command_count = auditable.len(),
+            )
+            .in_scope(|| {
+                claudine::harness::audit_shell_commands(&auditable, harness_context.shell_options())
+            });
 
-        if !audit_report.all_passed() {
-            let failed = audit_report.failures();
-            let (source_failures, harness_failures): (Vec<_>, Vec<_>) =
-                failed.into_iter().partition(|o| {
-                    matches!(
-                        o.command.source,
-                        claudine::harness::AuditedCommandSource::ComposeSourceLine { .. }
-                    )
-                });
-
-            // Source-page ::shell failures are terminal in v1 — no recovery.
-            if !source_failures.is_empty() {
-                if show_checks {
-                    claudine::harness::report::report_unhandled_failure(
-                        "shell audit failed for source-page directives — cannot proceed",
-                        term,
-                    );
-                }
-                guard.emit_blocked_or_failure();
-                return Err(eyre!(
-                    "shell audit failed: {} denied directive(s) in source page",
-                    source_failures.len()
-                ));
-            }
-
-            // Non-source failures flow through handler resolution.
-            if !harness_failures.is_empty() {
-                let contexts = claudine::harness::build_audit_failure_context(
-                    &harness_failures,
-                    provider.as_slug(),
-                    plan.source_path.as_path(),
-                    attempt,
-                );
-                if let Some(next_plan) = try_resolve_handler(
-                    &contexts,
-                    &plan,
-                    attempt,
-                    DEFAULT_MAX_RETRIES,
-                    profile,
-                    None,
-                    &prompt_state.source_path,
-                    repo_root,
-                    show_checks,
+            if show_checks {
+                claudine::harness::report::report_shell_audit_header(
+                    audit_report.outcomes.len(),
                     term,
-                )? {
-                    attempt = next_plan.next_attempt;
-                    apply_next_attempt_plan(prompt_state, &next_plan);
-                    continue;
-                }
-                let msg = format!(
-                    "shell audit failed: {} denied command(s)",
-                    harness_failures.len()
                 );
-                if show_checks {
-                    claudine::harness::report::report_unhandled_failure(&msg, term);
+                claudine::harness::report::report_shell_audit_outcomes(&audit_report, term);
+            }
+
+            if !audit_report.all_passed() {
+                let failed = audit_report.failures();
+                let (source_failures, harness_failures): (Vec<_>, Vec<_>) =
+                    failed.into_iter().partition(|o| {
+                        matches!(
+                            o.command.source,
+                            claudine::harness::AuditedCommandSource::ComposeSourceLine { .. }
+                        )
+                    });
+
+                // Source-page ::shell failures are terminal in v1 — no recovery.
+                if !source_failures.is_empty() {
+                    if show_checks {
+                        claudine::harness::report::report_unhandled_failure(
+                            "shell audit failed for source-page directives — cannot proceed",
+                            term,
+                        );
+                    }
+                    guard.emit_blocked_or_failure();
+                    return Err(eyre!(
+                        "shell audit failed: {} denied directive(s) in source page",
+                        source_failures.len()
+                    ));
                 }
-                guard.emit_blocked_or_failure();
-                return Err(eyre!("shell audit failed"));
+
+                // Non-source failures flow through handler resolution.
+                if !harness_failures.is_empty() {
+                    let contexts = claudine::harness::build_audit_failure_context(
+                        &harness_failures,
+                        provider.as_slug(),
+                        plan.source_path.as_path(),
+                        attempt,
+                    );
+                    if let Some(next_plan) = try_resolve_handler(
+                        &contexts,
+                        &plan,
+                        attempt,
+                        DEFAULT_MAX_RETRIES,
+                        profile,
+                        None,
+                        &prompt_state.source_path,
+                        repo_root,
+                        show_checks,
+                        term,
+                    )? {
+                        attempt = next_plan.next_attempt;
+                        continue;
+                    }
+
+                    let msg = format!(
+                        "shell audit failed: {} command(s) denied. \
+                         No handler available to resolve.",
+                        harness_failures.len()
+                    );
+                    if show_checks {
+                        claudine::harness::report::report_unhandled_failure(&msg, term);
+                    }
+                    guard.emit_blocked_or_failure();
+                    return Err(eyre!("shell audit failed"));
+                }
             }
         }
 

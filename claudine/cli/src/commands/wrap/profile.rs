@@ -2043,7 +2043,11 @@ mod tests {
         // positional prompt begins with `-`. Claudine must emit `--` before
         // the prompt so composed bullet-list prompts are delivered intact.
         let p = profile(Provider::OpenCode);
-        let mut args = vec!["run".to_string(), "--format".to_string(), "json".to_string()];
+        let mut args = vec![
+            "run".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+        ];
         p.prompt_delivery(&args, "- implement the plan\n- use the skill", true)
             .unwrap()
             .apply_to(&mut args);
@@ -2055,7 +2059,10 @@ mod tests {
             .iter()
             .position(|a| a == "- implement the plan\n- use the skill")
             .expect("prompt must be present as a positional");
-        assert!(sep_index < prompt_index, "`--` must precede the prompt: {args:?}");
+        assert!(
+            sep_index < prompt_index,
+            "`--` must precede the prompt: {args:?}"
+        );
     }
 
     #[test]
