@@ -248,6 +248,12 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// OpenCode's default model injection). Default: no-op.
     fn apply_non_interactive_defaults(&self, _args: &mut Vec<String>) {}
 
+    /// Validate any provider-specific non-interactive requirements after
+    /// defaults and explicit model flags have been applied.
+    fn validate_non_interactive_requirements(&self, _args: &[String]) -> Result<()> {
+        Ok(())
+    }
+
     // -- Universal --model flag ----------------------------------------------
 
     /// Map the universal `--model <value>` to provider-specific flags/env.
@@ -1415,11 +1421,23 @@ impl WrapperProfile for OpencodeWrapper {
         if has_flag(args, "--model") || has_flag(args, "-m") {
             return;
         }
-        let model = non_empty_env_var("OPENCODE_MODEL")
-            .or_else(|| non_empty_env_var("MODEL"))
-            .unwrap_or_else(|| "minimax/MiniMax-M2.5-highspeed".to_string());
+        let Some(model) = non_empty_env_var("OPENCODE_MODEL") else {
+            return;
+        };
         args.push("--model".to_string());
         args.push(model);
+    }
+
+    fn validate_non_interactive_requirements(&self, args: &[String]) -> Result<()> {
+        if has_flag(args, "--model") || has_flag(args, "-m") {
+            return Ok(());
+        }
+        bail!(
+            "OpenCode cannot use its configured default model in non-interactive mode.\n\
+             Pass `--model MODEL` to Claudine, or set `OPENCODE_MODEL` in the environment \
+             before launching.\n\
+             Interactive OpenCode sessions can continue using OpenCode's default model."
+        )
     }
 
     fn apply_model(
@@ -1758,10 +1776,7 @@ fn find_prompt_flag(
 
 /// Find the index of the first positional prompt candidate in `args`,
 /// honoring the entrypoint skip and the set of value-taking flags.
-fn find_positional_prompt_index(
-    args: &[String],
-    conv: &PromptArgConventions,
-) -> Option<usize> {
+fn find_positional_prompt_index(args: &[String], conv: &PromptArgConventions) -> Option<usize> {
     let mut skip_next = false;
     for (idx, arg) in args.iter().enumerate() {
         if skip_next {
@@ -1963,14 +1978,13 @@ mod tests {
     }
 
     #[test]
-    fn opencode_non_interactive_defaults_add_model_when_missing() {
+    fn opencode_non_interactive_defaults_do_not_inject_a_hard_coded_model() {
         let p = profile(Provider::OpenCode);
         let mut args = vec!["run".to_string(), "status".to_string()];
 
         p.apply_non_interactive_defaults(&mut args);
 
-        assert!(args.contains(&"--model".to_string()));
-        assert!(args.contains(&"minimax/MiniMax-M2.5-highspeed".to_string()));
+        assert_eq!(args, vec!["run", "status"]);
     }
 
     #[test]
@@ -1987,6 +2001,20 @@ mod tests {
         let model_flags = args.iter().filter(|a| a.as_str() == "--model").count();
         assert_eq!(model_flags, 1);
         assert!(args.contains(&"user-choice".to_string()));
+    }
+
+    #[test]
+    fn opencode_non_interactive_validation_requires_a_model() {
+        let p = profile(Provider::OpenCode);
+        let args = vec!["run".to_string(), "status".to_string()];
+
+        let error = p.validate_non_interactive_requirements(&args).unwrap_err();
+        assert!(
+            error.to_string().contains(
+                "OpenCode cannot use its configured default model in non-interactive mode"
+            )
+        );
+        assert!(error.to_string().contains("OPENCODE_MODEL"));
     }
 
     #[test]
@@ -2214,11 +2242,7 @@ mod tests {
 
     #[test]
     fn extract_claude_flag_before_positional_is_preserved() {
-        let (args, source) = extract(
-            Provider::Claude,
-            &["--model", "opus", "fix the bug"],
-            false,
-        );
+        let (args, source) = extract(Provider::Claude, &["--model", "opus", "fix the bug"], false);
         assert_eq!(args, vec!["--model", "opus"]);
         assert_eq!(source, PromptSource::Inline("fix the bug".to_string()));
     }
@@ -2239,8 +2263,7 @@ mod tests {
 
     #[test]
     fn extract_gemini_long_prompt_flag() {
-        let (args, source) =
-            extract(Provider::Gemini, &["--prompt", "hi"], false);
+        let (args, source) = extract(Provider::Gemini, &["--prompt", "hi"], false);
         assert!(args.is_empty());
         assert_eq!(source, PromptSource::Inline("hi".to_string()));
     }
@@ -2254,8 +2277,7 @@ mod tests {
 
     #[test]
     fn extract_gemini_inline_prompt_flag() {
-        let (args, source) =
-            extract(Provider::Gemini, &["--prompt=hi"], false);
+        let (args, source) = extract(Provider::Gemini, &["--prompt=hi"], false);
         assert!(args.is_empty());
         assert_eq!(source, PromptSource::Inline("hi".to_string()));
     }
@@ -2284,8 +2306,7 @@ mod tests {
 
     #[test]
     fn extract_goose_text_flag() {
-        let (args, source) =
-            extract(Provider::Goose, &["run", "-t", "hello"], false);
+        let (args, source) = extract(Provider::Goose, &["run", "-t", "hello"], false);
         assert_eq!(args, vec!["run"]);
         assert_eq!(source, PromptSource::Inline("hello".to_string()));
     }
@@ -2299,24 +2320,21 @@ mod tests {
 
     #[test]
     fn extract_opencode_skips_run_entrypoint() {
-        let (args, source) =
-            extract(Provider::OpenCode, &["run", "build it"], false);
+        let (args, source) = extract(Provider::OpenCode, &["run", "build it"], false);
         assert_eq!(args, vec!["run"]);
         assert_eq!(source, PromptSource::Inline("build it".to_string()));
     }
 
     #[test]
     fn extract_qwen_long_prompt_flag() {
-        let (args, source) =
-            extract(Provider::QwenCode, &["--prompt", "hi"], false);
+        let (args, source) = extract(Provider::QwenCode, &["--prompt", "hi"], false);
         assert!(args.is_empty());
         assert_eq!(source, PromptSource::Inline("hi".to_string()));
     }
 
     #[test]
     fn extract_flags_only_returns_none_when_no_piped_stdin() {
-        let (args, source) =
-            extract(Provider::Codex, &["exec", "--json"], false);
+        let (args, source) = extract(Provider::Codex, &["exec", "--json"], false);
         assert_eq!(args, vec!["exec", "--json"]);
         assert_eq!(source, PromptSource::None);
     }
@@ -2335,9 +2353,8 @@ mod tests {
         // positional / stdin / None branches. Silent fall-through is the
         // original DRY-providers bug this refactor exists to prevent.
         let args: Vec<String> = vec!["--prompt".to_string()];
-        let err =
-            extract_prompt_source_from_passthrough(profile(Provider::Gemini), &args, false)
-                .expect_err("dangling --prompt must return an error");
+        let err = extract_prompt_source_from_passthrough(profile(Provider::Gemini), &args, false)
+            .expect_err("dangling --prompt must return an error");
         let message = err.to_string();
         assert!(
             message.contains("--prompt"),
@@ -2357,13 +2374,9 @@ mod tests {
         // `KEY` is not in the known value-taking flag list, so `KEY=VALUE`
         // must be treated as the first positional prompt (not skipped), and
         // the second positional remains in args.
-        let (args, source) =
-            extract(Provider::Claude, &["KEY=VALUE", "the actual prompt"], false);
+        let (args, source) = extract(Provider::Claude, &["KEY=VALUE", "the actual prompt"], false);
         assert_eq!(args, vec!["the actual prompt".to_string()]);
-        assert_eq!(
-            source,
-            PromptSource::Inline("KEY=VALUE".to_string())
-        );
+        assert_eq!(source, PromptSource::Inline("KEY=VALUE".to_string()));
     }
 
     // -- require_prompt_present tests -----------------------------------------
@@ -2375,12 +2388,7 @@ mod tests {
 
     #[test]
     fn require_prompt_present_passes_with_inline_prompt() {
-        require_prompt_present(
-            "claude",
-            true,
-            &PromptSource::Inline("x".to_string()),
-        )
-        .unwrap();
+        require_prompt_present("claude", true, &PromptSource::Inline("x".to_string())).unwrap();
     }
 
     #[test]
@@ -2390,8 +2398,7 @@ mod tests {
 
     #[test]
     fn require_prompt_present_fails_non_interactive_with_no_source() {
-        let err =
-            require_prompt_present("codex", true, &PromptSource::None).unwrap_err();
+        let err = require_prompt_present("codex", true, &PromptSource::None).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("codex"));
         assert!(message.contains("requires a prompt"));

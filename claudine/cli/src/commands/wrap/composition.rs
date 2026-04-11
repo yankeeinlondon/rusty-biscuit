@@ -36,8 +36,7 @@ use super::{
     StructuredSummaryDetails, WrapperHarnessPermissionProbe,
     build_harness_shell_options_with_cache, emit_stream_summary_no_separator_with_context,
     emit_stream_summary_with_context, materialized_harness_prompt_from_prepared,
-    resolve_binary_path, run_harness_loop, structured_verbosity,
-    switch_process_cwd, wrap_terminal,
+    resolve_binary_path, run_harness_loop, structured_verbosity, switch_process_cwd, wrap_terminal,
 };
 use crate::log;
 
@@ -385,6 +384,18 @@ pub(crate) fn execute_composition_request_inner(
         if provider == Provider::OpenCode && effective_non_interactive {
             env_plan.env.insert("MODEL".into(), model.clone().into());
         }
+    }
+
+    if provider == Provider::OpenCode
+        && effective_non_interactive
+        && request.model.is_none()
+        && let Some(model) = super::model_value_from_args(&child_args)
+    {
+        env_plan.env.insert("MODEL".into(), model.into());
+    }
+
+    if effective_non_interactive {
+        profile.validate_non_interactive_requirements(&child_args)?;
     }
 
     // Universal --output flag

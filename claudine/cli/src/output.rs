@@ -441,13 +441,6 @@ pub(crate) fn package_name_display(env_plan: &EnvPlan) -> Option<String> {
     ))
 }
 
-pub(crate) fn opencode_non_interactive_model_hint() -> String {
-    "<bold><blue>Info:</blue></bold> Opencode requires a model be specified when run in \
-     non-interactive mode. You can specify with the --model switch or set either OPENCODE_MODEL \
-     or MODEL environment variables."
-        .to_string()
-}
-
 pub(crate) fn repo_flag_info_message(
     term: &Terminal,
     shadow_home: Option<&std::path::Path>,

@@ -305,6 +305,12 @@ pub(crate) fn run_child(
             Stdio::inherit()
         });
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
@@ -383,17 +389,87 @@ pub(crate) fn run_child(
         wait_with_signal_handling(&mut child)?
     };
 
+    kill_process_group(&mut child);
+
+    let thread_join_timeout = Duration::from_secs(5);
     if let Some(handle) = stdout_handle {
-        let _ = handle.join();
+        join_with_timeout(handle, thread_join_timeout);
     }
     if let Some(handle) = stderr_handle {
-        let _ = handle.join();
+        join_with_timeout(handle, thread_join_timeout);
     }
 
     Ok(ProcessResult {
         data: exit_code,
         termination,
     })
+}
+
+/// After the main child exits, kill any orphaned descendant processes so
+/// inherited pipe fds are closed and reader threads unblock. Without this,
+/// a subagent spawned by the child (e.g. OpenCode Task tool) that inherits
+/// stdout/stderr can keep the pipe open indefinitely, causing the reader
+/// threads to hang on `BufReader::lines()`.
+#[cfg(unix)]
+fn kill_process_group(child: &mut Child) {
+    let pid = child.id() as i32;
+    // Send SIGTERM to the process group first (graceful), then SIGKILL.
+    unsafe {
+        // kill(-pgid, ...) sends to the entire process group.
+        // With process_group(0), the pgid == child pid.
+        if libc::kill(-pid, libc::SIGTERM) == 0 {
+            // Give descendants a brief grace period to exit.
+            std::thread::sleep(Duration::from_millis(200));
+            // Ensure everything is dead.
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_process_group(_child: &mut Child) {}
+
+/// Join a thread with a timeout. Returns `true` if the thread joined
+/// successfully within the deadline, `false` if it timed out.
+///
+/// On timeout the thread is **leaked** (detached) rather than panicked,
+/// because the reader threads only terminate when their pipe closes and
+/// there is no safe way to interrupt a blocking `BufReader::lines()` call
+/// from outside.
+fn join_with_timeout(handle: thread::JoinHandle<()>, timeout: Duration) -> bool {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        // `is_finished()` is available on Rust 1.69+ and does not block.
+        if handle.is_finished() {
+            let _ = handle.join();
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    tracing::warn!(
+        "reader thread did not exit within {:?}; detaching (pipe may still be held open by a descendant process)",
+        timeout
+    );
+    std::mem::forget(handle);
+    false
+}
+
+/// Join a thread that returns a value, with a timeout. Returns the value
+/// on success or a fallback on timeout.
+fn join_with_timeout_or<T>(handle: thread::JoinHandle<T>, timeout: Duration, fallback: T) -> T {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if handle.is_finished() {
+            return handle.join().unwrap_or(fallback);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    tracing::warn!(
+        "reader thread did not exit within {:?}; using fallback result",
+        timeout
+    );
+    std::mem::forget(handle);
+    fallback
 }
 
 /// Wait for the child, forwarding SIGINT/SIGTERM on repeated Ctrl-C.
@@ -410,25 +486,26 @@ fn wait_with_signal_handling(
     let child_pid = child.id();
 
     // Install a SIGINT handler that escalates on repeated presses.
+    // Signal the process group (negative pid) so descendants also receive it.
     let counter = Arc::clone(&interrupt_count);
     let _guard = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
             match count {
                 1 => {
-                    // First Ctrl-C: forward SIGINT to the child process.
+                    // First Ctrl-C: forward SIGINT to the process group.
                     // Registering this handler replaced the default behavior
                     // (which would propagate to the process group), so we
                     // must explicitly forward the signal.
-                    libc::kill(child_pid as i32, libc::SIGINT);
+                    libc::kill(-(child_pid as i32), libc::SIGINT);
                 }
                 2 => {
                     // Second Ctrl-C: escalate to SIGTERM
-                    libc::kill(child_pid as i32, libc::SIGTERM);
+                    libc::kill(-(child_pid as i32), libc::SIGTERM);
                 }
                 _ => {
                     // Third+ Ctrl-C: force kill
-                    libc::kill(child_pid as i32, libc::SIGKILL);
+                    libc::kill(-(child_pid as i32), libc::SIGKILL);
                 }
             }
         })
@@ -610,6 +687,12 @@ pub(crate) fn run_child_capture(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
@@ -675,8 +758,11 @@ pub(crate) fn run_child_capture(
         wait_with_signal_handling(&mut child)?
     };
 
-    let stdout = stdout_handle.join().unwrap_or_default();
-    let stderr = stderr_handle.join().unwrap_or_default();
+    kill_process_group(&mut child);
+
+    let thread_join_timeout = Duration::from_secs(5);
+    let stdout = join_with_timeout_or(stdout_handle, thread_join_timeout, String::new());
+    let stderr = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
 
     Ok(ProcessResult {
         data: CapturedChildOutput {
@@ -734,6 +820,12 @@ pub(crate) fn run_child_stream(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
 
     let mut child = command.spawn()?;
     *child_spawned = true;
@@ -847,14 +939,22 @@ pub(crate) fn run_child_stream(
     } else {
         wait_with_signal_handling(&mut child)?
     };
+
+    // The main child has exited, but descendant processes (e.g. subagents
+    // spawned by OpenCode's Task tool) may still hold inherited pipe fds.
+    // Kill the entire process group so reader threads unblock.
+    kill_process_group(&mut child);
+
     stop_progress_heartbeat(heartbeat);
 
-    let parser = stdout_handle.join().unwrap_or_else(|_| {
-        // If the thread panicked, create a minimal error summary
-        Box::new(ErrorParser { exit_code })
-    });
+    let thread_join_timeout = Duration::from_secs(5);
+    let parser = join_with_timeout_or(
+        stdout_handle,
+        thread_join_timeout,
+        Box::new(ErrorParser { exit_code }),
+    );
 
-    let captured = stderr_handle.join().unwrap_or_default();
+    let captured = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
     if suppress_stderr_on_success && exit_code != 0 && !captured.is_empty() {
         eprintln!("{captured}");
     }
@@ -948,6 +1048,12 @@ pub(crate) fn run_child_stream_capture(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
     let mut child = command.spawn()?;
     Span::current().record("child_pid", tracing::field::display(child.id()));
 
@@ -1009,10 +1115,15 @@ pub(crate) fn run_child_stream_capture(
         wait_with_signal_handling(&mut child)?
     };
 
-    let parser = stdout_handle
-        .join()
-        .unwrap_or_else(|_| Box::new(ErrorParser { exit_code }));
-    let stderr_text = stderr_handle.join().unwrap_or_default();
+    kill_process_group(&mut child);
+
+    let thread_join_timeout = Duration::from_secs(5);
+    let parser = join_with_timeout_or(
+        stdout_handle,
+        thread_join_timeout,
+        Box::new(ErrorParser { exit_code }),
+    );
+    let stderr_text = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
 
     let mut summary = parser.finish(exit_code);
     if summary.duration_ms.is_none() {

@@ -1037,11 +1037,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     // methods see clean args; prompt_delivery is the only code path
     // that places the prompt back in.
     let (extracted_args, mut prompt_source) =
-        profile::extract_prompt_source_from_passthrough(
-            profile,
-            &child_args,
-            has_piped_stdin,
-        )?;
+        profile::extract_prompt_source_from_passthrough(profile, &child_args, has_piped_stdin)?;
     child_args = extracted_args;
 
     // Default: non-interactive when a prompt reaches the child, interactive
@@ -1090,11 +1086,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         None
     };
 
-    profile::require_prompt_present(
-        profile.binary(),
-        effective_non_interactive,
-        &prompt_source,
-    )?;
+    profile::require_prompt_present(profile.binary(), effective_non_interactive, &prompt_source)?;
 
     profile.reject_direct_yolo(&child_args)?;
     reject_retired_composition_flags(&child_args)?;
@@ -1133,8 +1125,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         env_overrides.push(("MODEL".to_string(), model));
     }
 
-    if provider == Provider::OpenCode && non_interactive_requested {
-        deferred_messages.push(crate::output::opencode_non_interactive_model_hint());
+    if non_interactive_requested {
+        profile.validate_non_interactive_requirements(&child_args)?;
     }
 
     // Universal --output flag
@@ -1497,7 +1489,9 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     };
 
     let wrapper_harness = {
-        let base_prompt = prompt_source.as_inline().map(|s| s.to_string())
+        let base_prompt = prompt_source
+            .as_inline()
+            .map(|s| s.to_string())
             .or_else(|| stdin_seed.clone());
         let harness_source = base_prompt.as_ref().and_then(|_| {
             find_wrapper_harness_source(provider, env_plan.repo_root.as_deref(), &cwd)
@@ -1971,11 +1965,7 @@ fn build_harness_launch(
     let stdin_seed = profile
         .prompt_delivery(&args, &prompt, effective_non_interactive)?
         .apply_to(&mut args);
-    profile::require_prompt_present(
-        profile.binary(),
-        effective_non_interactive,
-        &prompt_source,
-    )?;
+    profile::require_prompt_present(profile.binary(), effective_non_interactive, &prompt_source)?;
 
     let mut env = base_env.clone();
     for (key, value) in &materialized.env_overrides {
@@ -3120,7 +3110,9 @@ pub(crate) fn resolve_binary_path(
     clients: &InstalledAiClients,
 ) -> Result<PathBuf> {
     let ai_cli = profile.provider().sniff_ai_cli();
-    clients.path(ai_cli).ok_or_else(|| binary_missing_error(profile))
+    clients
+        .path(ai_cli)
+        .ok_or_else(|| binary_missing_error(profile))
 }
 
 /// Resolve the child binary path directly via `which`, without scanning the
