@@ -15,6 +15,7 @@
         "mermaidjs",
         "nextest",
         "oxker",
+        "pinentry",
         "proptest",
         "ptyprocess",
         "Qwen",
