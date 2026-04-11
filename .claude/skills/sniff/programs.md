@@ -1,6 +1,6 @@
 # Program Detection
 
-Parallel detection across 8 categories with macOS app bundle support.
+Parallel detection across 8 categories with macOS app bundle support. A single shared `ExecutableIndex` scans `PATH` and macOS bundle directories once, then all categories perform O(1) HashMap lookups against it in parallel via `rayon::join` pairs.
 
 ## Categories
 
