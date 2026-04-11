@@ -182,6 +182,69 @@ outdated:
 	@cargo outdated --root-deps-only
 
 
+# ---------- benchmarking + profiling ----------
+
+# run the full Criterion bench suite for sniff-lib
+bench *args="":
+    @echo -e "Running Criterion benches for {{BOLD}}sniff{{RESET}}"
+    @cargo bench -p sniff --bench perf -- {{args}}
+
+# run only the system-level benches
+bench-system *args="":
+    @cargo bench -p sniff --bench perf -- ^system {{args}}
+
+# run only the hardware benches
+bench-hardware *args="":
+    @cargo bench -p sniff --bench perf -- ^hardware {{args}}
+
+# run only the filesystem benches
+bench-filesystem *args="":
+    @cargo bench -p sniff --bench perf -- ^filesystem {{args}}
+
+# run only the programs + services inventory benches
+bench-inventory *args="":
+    @cargo bench -p sniff --bench perf -- ^inventory {{args}}
+
+# end-to-end CLI benchmarks via hyperfine (requires hyperfine on PATH)
+bench-cli:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v hyperfine &> /dev/null; then
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} hyperfine is not installed."
+        echo "Install it with 'brew install hyperfine' or 'cargo install hyperfine'."
+        exit 1
+    fi
+    cargo build --release -p sniff-cli
+    SNIFF_BIN="$(cargo metadata --format-version 1 --no-deps \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/release/sniff"
+    hyperfine --warmup 3 \
+        "${SNIFF_BIN} --version" \
+        "${SNIFF_BIN} --json" \
+        "${SNIFF_BIN} hardware --json"
+
+# generate a flamegraph for one of the sniff example entry points
+profile target *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v cargo-flamegraph &> /dev/null; then
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} cargo-flamegraph is not installed."
+        echo "Install it with 'cargo install flamegraph'."
+        exit 1
+    fi
+    cargo flamegraph --profile profiling -p sniff --example "{{target}}" -- {{args}}
+
+# generate a flamegraph for the sniff CLI binary
+profile-cli *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v cargo-flamegraph &> /dev/null; then
+        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} cargo-flamegraph is not installed."
+        echo "Install it with 'cargo install flamegraph'."
+        exit 1
+    fi
+    cargo flamegraph --profile profiling -p sniff-cli -- {{args}}
+
+
 # commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
 commit:
     @echo ""

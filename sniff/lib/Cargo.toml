@@ -52,7 +52,12 @@ windows = { version = "0.62", features = [
 ] }
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros"] }
 wiremock = "0.6"
+
+[[bench]]
+name = "perf"
+harness = false
