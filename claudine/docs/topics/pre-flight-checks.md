@@ -40,6 +40,8 @@ Both phases share a single **approval cache** — an `Arc<Mutex<HashMap>>` that 
 
 The `claudine claude` / `claudine codex` passthrough path uses only phase 2 because it has no template composition step — it parses the harness plan directly from the source file's frontmatter and preflights harness commands in a single pass.
 
+The `claudine sequence` orchestrator runs both phases **per step** during its upfront discovery loop, so every template and harness command across every step is approved before any provider session starts. See [Sequence Execution](#sequence-execution) below.
+
 ### Phase 1: Template Directives
 
 Claudine asks Darkmatter to walk the full document graph and return every `::shell` directive it finds. Darkmatter runs interpolation first (using the same state that will be used during actual composition) so that template variables and dynamic transclusion paths resolve correctly. The result is a list of concrete commands with their source file and line number.
