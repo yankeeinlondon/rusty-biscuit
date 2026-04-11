@@ -204,6 +204,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    /// Include structured performance timings and counters in the output
+    #[arg(long, global = true)]
+    pub perf: bool,
+
     /// Increase output verbosity
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,

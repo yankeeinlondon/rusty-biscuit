@@ -545,6 +545,8 @@ let config = SniffConfig::new()
 let result = sniff::detect_with_config(config)?;
 ```
 
+See [../docs/sniff-library-architecture.md](../docs/sniff-library-architecture.md) for the per-subsection cost table, shared-work strategies, and common caller profiles.
+
 ### Verbosity Levels
 
 Text output supports three verbosity levels:

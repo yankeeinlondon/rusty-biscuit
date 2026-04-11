@@ -42,6 +42,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         command = ?cli.command.as_ref().map(|c| format!("{c:?}")),
         json = cli.json,
         plain = cli.plain,
+        perf = cli.perf,
     )
     .entered();
 
@@ -543,7 +544,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         plan.base_dir(base.clone())
     } else {
         plan
-    };
+    }
+    .performance(cli.perf);
 
     let mut result = detect_with_plan(plan)?;
 
