@@ -13,13 +13,7 @@ mod telemetry;
 use args::{Cli, Commands};
 
 const WRAPPER_SUBCOMMANDS: &[&str] = &[
-    "claude",
-    "codex",
-    "gemini",
-    "kimi",
-    "qwen",
-    "opencode",
-    "goose",
+    "claude", "codex", "gemini", "kimi", "qwen", "opencode", "goose",
 ];
 
 fn wrapper_command(

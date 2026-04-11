@@ -12,9 +12,9 @@ use claudine::badges::{COMPOSE, INLINE_COMPOSE, INTERACTIVE, REPO_FLAG, SEQUENCE
 use claudine::events::Provider;
 use std::path::Path;
 
+use crate::commands::wrap::McpRuntimeInfo;
 use crate::commands::wrap::env::EnvPlan;
 use crate::commands::wrap::profile::WrapperProfile;
-use crate::commands::wrap::McpRuntimeInfo;
 use crate::log;
 
 /// Context for compose/inline-compose mode display in the header.
@@ -55,11 +55,13 @@ pub(crate) fn log_wrapper_header(
     env_plan: &EnvPlan,
     term: &Terminal,
 ) {
-    let mut header_parts: Vec<String> = vec![Prose::new(format!(
-        "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold>",
-        profile.provider()
-    ))
-    .render(term)];
+    let mut header_parts: Vec<String> = vec![
+        Prose::new(format!(
+            "<blue><bold>Claudine</bold></blue> <dim>\u{25b8}</dim> <bold>{}</bold>",
+            profile.provider()
+        ))
+        .render(term),
+    ];
 
     if yolo_requested {
         header_parts.push(YOLO.to_string());
@@ -143,8 +145,8 @@ pub(crate) fn log_wrapper_header(
 /// are rendered with a truncation notice.
 pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     use biscuit_terminal::utils::color::{Color, Tailwind};
-    use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
     use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     log::message(&Prose::new("<bold>Agent Prompt:</bold>").render(term));
 
@@ -211,8 +213,8 @@ pub(crate) fn log_system_prompt(
     term: &Terminal,
 ) {
     use biscuit_terminal::utils::color::{Color, Tailwind};
-    use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
     use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     if silent {
         return;
@@ -760,8 +762,8 @@ pub(crate) fn render_assistant_markdown_with_options(
     term: &Terminal,
     options: Option<&darkmatter::markdown::output::terminal::TerminalOptions>,
 ) -> String {
-    use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
     use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     let owned;
     let opts = match options {
@@ -909,12 +911,19 @@ fn try_format_structured_api_error(line: &str, term: &Terminal) -> Option<String
 }
 
 /// Format common CLI error patterns that are not API JSON errors.
+///
+/// Recognised line-start prefixes (`error: `, `Error: `, `fatal: `) are stripped
+/// from the rendered body so that the styled `Error:` label added by this
+/// function is not doubled with a plain-text `error:` already inside the line.
 fn try_format_cli_error(line: &str, term: &Terminal) -> Option<String> {
     let lower = line.to_lowercase();
 
-    let is_cli_error = line.strip_prefix("error: ").is_some()
-        || line.strip_prefix("Error: ").is_some()
-        || line.strip_prefix("fatal: ").is_some()
+    let stripped_prefix = line
+        .strip_prefix("error: ")
+        .or_else(|| line.strip_prefix("Error: "))
+        .or_else(|| line.strip_prefix("fatal: "));
+
+    let is_cli_error = stripped_prefix.is_some()
         || lower.contains("unrecognized argument")
         || lower.contains("unknown flag")
         || lower.contains("unknown option")
@@ -930,7 +939,8 @@ fn try_format_cli_error(line: &str, term: &Terminal) -> Option<String> {
         return None;
     }
 
-    Some(Prose::new(format!("<red><bold>Error:</bold></red> {line}")).render(term))
+    let body = stripped_prefix.unwrap_or(line);
+    Some(Prose::new(format!("<red><bold>Error:</bold></red> {body}")).render(term))
 }
 
 #[cfg(test)]
@@ -994,6 +1004,57 @@ mod tests {
             &term,
         );
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn try_format_cli_error_strips_lowercase_error_prefix() {
+        let term = test_terminal();
+        let rendered = try_format_api_error("error: unrecognized argument '--foo'", &term).unwrap();
+        let plain = strip_ansi_codes(&rendered);
+
+        assert!(
+            !plain.to_lowercase().contains("error: error:"),
+            "styled label must not duplicate the stripped prefix: {plain}"
+        );
+        assert!(
+            plain.contains("unrecognized argument '--foo'"),
+            "body should still include the underlying message: {plain}"
+        );
+    }
+
+    #[test]
+    fn try_format_cli_error_strips_capital_error_prefix() {
+        let term = test_terminal();
+        let rendered = try_format_api_error("Error: something went wrong", &term).unwrap();
+        let plain = strip_ansi_codes(&rendered);
+
+        assert!(
+            !plain.contains("Error: Error:"),
+            "styled label must not duplicate the stripped prefix: {plain}"
+        );
+        assert!(plain.contains("something went wrong"));
+    }
+
+    #[test]
+    fn try_format_cli_error_strips_fatal_prefix() {
+        let term = test_terminal();
+        let rendered = try_format_api_error("fatal: boom", &term).unwrap();
+        let plain = strip_ansi_codes(&rendered);
+
+        assert!(!plain.contains("Error: fatal:"));
+        assert!(!plain.contains("fatal: fatal:"));
+        assert!(plain.contains("boom"));
+    }
+
+    #[test]
+    fn try_format_cli_error_keeps_line_when_prefix_not_at_start() {
+        // Lines without a known start-of-line prefix are forwarded verbatim
+        // after the styled label (no stripping).
+        let term = test_terminal();
+        let rendered = try_format_api_error("unknown flag --bar", &term).unwrap();
+        let plain = strip_ansi_codes(&rendered);
+
+        assert!(plain.contains("unknown flag --bar"));
     }
 
     #[test]
