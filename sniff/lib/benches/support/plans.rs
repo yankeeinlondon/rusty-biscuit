@@ -10,6 +10,8 @@ use sniff::request::{
 };
 use std::path::PathBuf;
 
+use super::network_fixture;
+
 /// Bare-minimum plan: every domain skipped.
 ///
 /// Used to measure pure orchestration overhead inside
@@ -46,12 +48,19 @@ pub fn summary_plan(base_dir: PathBuf) -> DetectionPlan {
 
 /// Full detection plan, anchored at `base_dir`.
 ///
-/// Deliberately pins network to `interfaces_only()` so benchmarks are
-/// not dominated by the external HTTP latency of the WAN IP lookup. OS
-/// detection still runs at full detail (NTP, locale, package managers)
-/// because that is the realistic "full" cost callers pay.
+/// Exercises the real full-network path, including the WAN IP lookup.
+/// To keep bench wall-clock off public internet latency, the bench
+/// process installs a wiremock-backed endpoint via
+/// [`network_fixture::ensure_ready`] before this plan runs — callers
+/// must invoke that helper first (the top-level `register_all` in
+/// `perf.rs` does). OS detection runs at full detail (NTP, locale,
+/// package managers) because that is the realistic cost callers pay.
 pub fn full_plan(base_dir: PathBuf) -> DetectionPlan {
+    // Cheap idempotent guard: if a direct caller forgot to prime the
+    // fixture we still point WAN IP detection at wiremock rather than
+    // the public internet.
+    network_fixture::ensure_ready();
     DetectionPlan::new()
         .base_dir(base_dir)
-        .network(NetworkRequest::interfaces_only())
+        .network(NetworkRequest::full())
 }
