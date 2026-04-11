@@ -103,6 +103,8 @@ pub mod installer;
 pub mod inventory;
 pub mod macos_bundle;
 pub mod pkg_mngrs;
+#[cfg(target_os = "windows")]
+pub(crate) mod windows_apps;
 pub mod schema;
 pub mod terminal_apps;
 pub mod tts_clients;

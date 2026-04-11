@@ -21,13 +21,10 @@ use crate::programs::schema::{ProgramError, ProgramMetadata};
 
 /// Describes where a program executable was discovered.
 ///
-/// This enum distinguishes between traditional PATH-based executables and
-/// macOS application bundles, enabling appropriate invocation strategies.
-///
-/// ## Variants
-///
-/// - `Path` - Found in system PATH (traditional executable)
-/// - `MacOsAppBundle` - Found as a macOS `.app` bundle
+/// Distinguishes between traditional PATH-based executables, macOS `.app`
+/// bundles, and Windows-specific fallback sources (registry App Paths, shallow
+/// install-root walk). Non-PATH sources are "fallback" sources — they are
+/// consulted only when PATH lookup misses.
 ///
 /// ## Examples
 ///
@@ -36,9 +33,11 @@ use crate::programs::schema::{ProgramError, ProgramMetadata};
 ///
 /// let source = ExecutableSource::Path;
 /// assert!(!source.is_app_bundle());
+/// assert!(!source.is_fallback());
 ///
 /// let bundle = ExecutableSource::MacOsAppBundle;
 /// assert!(bundle.is_app_bundle());
+/// assert!(bundle.is_fallback());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -47,10 +46,16 @@ pub enum ExecutableSource {
     Path,
     /// Found as a macOS `.app` bundle.
     MacOsAppBundle,
+    /// Found via the Windows `App Paths` registry key
+    /// (`HKCU|HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths`).
+    WindowsAppPaths,
+    /// Found via a shallow walk of a Windows install root
+    /// (`%ProgramFiles%`, `%ProgramFiles(x86)%`, `%LocalAppData%\Programs`).
+    WindowsInstallRoot,
 }
 
 impl ExecutableSource {
-    /// Returns true if this source is a macOS app bundle.
+    /// Returns `true` if this source is a macOS app bundle.
     ///
     /// ## Examples
     ///
@@ -64,6 +69,23 @@ impl ExecutableSource {
     pub fn is_app_bundle(&self) -> bool {
         matches!(self, Self::MacOsAppBundle)
     }
+
+    /// Returns `true` if this source is a non-PATH fallback source.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use sniff::programs::ExecutableSource;
+    ///
+    /// assert!(!ExecutableSource::Path.is_fallback());
+    /// assert!(ExecutableSource::MacOsAppBundle.is_fallback());
+    /// assert!(ExecutableSource::WindowsAppPaths.is_fallback());
+    /// assert!(ExecutableSource::WindowsInstallRoot.is_fallback());
+    /// ```
+    #[must_use]
+    pub fn is_fallback(&self) -> bool {
+        !matches!(self, Self::Path)
+    }
 }
 
 impl std::fmt::Display for ExecutableSource {
@@ -71,6 +93,8 @@ impl std::fmt::Display for ExecutableSource {
         match self {
             ExecutableSource::Path => write!(f, "PATH"),
             ExecutableSource::MacOsAppBundle => write!(f, "macOS App Bundle"),
+            ExecutableSource::WindowsAppPaths => write!(f, "Windows App Paths"),
+            ExecutableSource::WindowsInstallRoot => write!(f, "Windows Install Root"),
         }
     }
 }
@@ -955,11 +979,15 @@ mod tests {
         let mut set = HashSet::new();
         set.insert(ExecutableSource::Path);
         set.insert(ExecutableSource::MacOsAppBundle);
+        set.insert(ExecutableSource::WindowsAppPaths);
+        set.insert(ExecutableSource::WindowsInstallRoot);
         set.insert(ExecutableSource::Path); // Duplicate
 
-        assert_eq!(set.len(), 2);
+        assert_eq!(set.len(), 4);
         assert!(set.contains(&ExecutableSource::Path));
         assert!(set.contains(&ExecutableSource::MacOsAppBundle));
+        assert!(set.contains(&ExecutableSource::WindowsAppPaths));
+        assert!(set.contains(&ExecutableSource::WindowsInstallRoot));
     }
 
     #[test]
@@ -985,11 +1013,66 @@ mod tests {
 
     #[test]
     fn test_executable_source_roundtrip() {
-        for source in [ExecutableSource::Path, ExecutableSource::MacOsAppBundle] {
+        for source in [
+            ExecutableSource::Path,
+            ExecutableSource::MacOsAppBundle,
+            ExecutableSource::WindowsAppPaths,
+            ExecutableSource::WindowsInstallRoot,
+        ] {
             let json = serde_json::to_string(&source).unwrap();
             let deserialized: ExecutableSource = serde_json::from_str(&json).unwrap();
             assert_eq!(source, deserialized);
         }
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_serialize() {
+        let app_paths = ExecutableSource::WindowsAppPaths;
+        let install_root = ExecutableSource::WindowsInstallRoot;
+
+        assert_eq!(
+            serde_json::to_string(&app_paths).unwrap(),
+            "\"windows_app_paths\""
+        );
+        assert_eq!(
+            serde_json::to_string(&install_root).unwrap(),
+            "\"windows_install_root\""
+        );
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_deserialize() {
+        let ap: ExecutableSource = serde_json::from_str("\"windows_app_paths\"").unwrap();
+        let ir: ExecutableSource = serde_json::from_str("\"windows_install_root\"").unwrap();
+
+        assert_eq!(ap, ExecutableSource::WindowsAppPaths);
+        assert_eq!(ir, ExecutableSource::WindowsInstallRoot);
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_display() {
+        assert_eq!(
+            ExecutableSource::WindowsAppPaths.to_string(),
+            "Windows App Paths"
+        );
+        assert_eq!(
+            ExecutableSource::WindowsInstallRoot.to_string(),
+            "Windows Install Root"
+        );
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_not_app_bundle() {
+        assert!(!ExecutableSource::WindowsAppPaths.is_app_bundle());
+        assert!(!ExecutableSource::WindowsInstallRoot.is_app_bundle());
+    }
+
+    #[test]
+    fn test_executable_source_is_fallback() {
+        assert!(!ExecutableSource::Path.is_fallback());
+        assert!(ExecutableSource::MacOsAppBundle.is_fallback());
+        assert!(ExecutableSource::WindowsAppPaths.is_fallback());
+        assert!(ExecutableSource::WindowsInstallRoot.is_fallback());
     }
 
     // ============================================
@@ -1185,16 +1268,25 @@ mod tests {
 
     #[test]
     fn test_executable_source_pattern_matching() {
-        // Test that match exhaustiveness is enforced by the compiler
         fn describe_source(source: ExecutableSource) -> &'static str {
             match source {
                 ExecutableSource::Path => "path",
                 ExecutableSource::MacOsAppBundle => "bundle",
+                ExecutableSource::WindowsAppPaths => "app_paths",
+                ExecutableSource::WindowsInstallRoot => "install_root",
             }
         }
 
         assert_eq!(describe_source(ExecutableSource::Path), "path");
         assert_eq!(describe_source(ExecutableSource::MacOsAppBundle), "bundle");
+        assert_eq!(
+            describe_source(ExecutableSource::WindowsAppPaths),
+            "app_paths"
+        );
+        assert_eq!(
+            describe_source(ExecutableSource::WindowsInstallRoot),
+            "install_root"
+        );
     }
 
     #[test]
