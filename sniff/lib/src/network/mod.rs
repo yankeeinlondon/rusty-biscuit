@@ -871,17 +871,6 @@ fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
     })
 }
 
-#[cfg(target_os = "linux")]
-fn parse_linux_default_route_interface(output: &str) -> Option<String> {
-    output.lines().find_map(|line| {
-        let tokens: Vec<_> = line.split_whitespace().collect();
-        tokens
-            .windows(2)
-            .find(|window| window[0] == "dev")
-            .map(|window| window[1].to_string())
-    })
-}
-
 #[cfg(any(target_os = "windows", test))]
 fn parse_windows_default_route_interface_ip(output: &str) -> Option<std::net::Ipv4Addr> {
     let mut best: Option<(std::net::Ipv4Addr, u32)> = None;
@@ -1631,16 +1620,6 @@ destination: default
         assert_eq!(
             parse_bsd_default_route_interface(output),
             Some("en7".to_string())
-        );
-    }
-
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn test_parse_linux_default_route_interface() {
-        let output = "default via 192.168.1.1 dev wlp3s0 proto dhcp src 192.168.1.42 metric 600";
-        assert_eq!(
-            parse_linux_default_route_interface(output),
-            Some("wlp3s0".to_string())
         );
     }
 

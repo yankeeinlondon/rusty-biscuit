@@ -102,6 +102,9 @@ impl ExecutableIndex {
     }
 
     fn build_with_bundles(include_bundles: bool) -> Self {
+        #[cfg(not(target_os = "macos"))]
+        let _ = include_bundles;
+
         let mut path_executables = HashMap::new();
         let mut path_dir_count = 0;
 
