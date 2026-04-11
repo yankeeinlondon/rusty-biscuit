@@ -3,8 +3,10 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use biscuit_terminal::terminal::Terminal;
 use claudine::stream::parser::{StreamChunk, StreamParseError, StreamParser};
@@ -702,6 +704,7 @@ pub(crate) fn run_child_stream(
     timeout: Option<u64>,
     stderr_noise_prefixes: &[&str],
     suppress_stderr_on_success: bool,
+    show_progress_heartbeat: bool,
     stdin_seed: Option<&str>,
     parser: Box<dyn StreamParser>,
     child_spawned: &mut bool,
@@ -735,6 +738,7 @@ pub(crate) fn run_child_stream(
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
+    let heartbeat = spawn_progress_heartbeat(show_progress_heartbeat, started_at);
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
@@ -843,6 +847,7 @@ pub(crate) fn run_child_stream(
     } else {
         wait_with_signal_handling(&mut child)?
     };
+    stop_progress_heartbeat(heartbeat);
 
     let parser = stdout_handle.join().unwrap_or_else(|_| {
         // If the thread panicked, create a minimal error summary
@@ -863,6 +868,49 @@ pub(crate) fn run_child_stream(
         data: summary,
         termination,
     })
+}
+
+fn spawn_progress_heartbeat(
+    enabled: bool,
+    started_at: Instant,
+) -> Option<(Arc<AtomicBool>, thread::JoinHandle<()>)> {
+    if !enabled {
+        return None;
+    }
+
+    let done = Arc::new(AtomicBool::new(false));
+    let done_flag = Arc::clone(&done);
+    let handle = thread::spawn(move || {
+        let interval = Duration::from_secs(30);
+        let mut next_tick = started_at + interval;
+
+        while !done_flag.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            if now >= next_tick {
+                let elapsed_ms = started_at.elapsed().as_millis() as u64;
+                eprintln!(
+                    "status: still running ({} elapsed)",
+                    claudine::stream::stderr::format_duration(elapsed_ms)
+                );
+                next_tick += interval;
+                continue;
+            }
+
+            let sleep_for = next_tick
+                .saturating_duration_since(now)
+                .min(Duration::from_secs(1));
+            thread::sleep(sleep_for);
+        }
+    });
+
+    Some((done, handle))
+}
+
+fn stop_progress_heartbeat(heartbeat: Option<(Arc<AtomicBool>, thread::JoinHandle<()>)>) {
+    if let Some((done, handle)) = heartbeat {
+        done.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+    }
 }
 
 /// Spawn a provider child process with structured stream parsing, capturing output.
@@ -1109,6 +1157,7 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
             Some(5),
             &[],
             false,
+            false,
             None,
             parser,
             &mut spawned,
@@ -1232,6 +1281,7 @@ cat >/dev/null
             &cwd,
             Some(2),
             &[],
+            false,
             false,
             None,
             parser,
