@@ -58,34 +58,27 @@ pub(crate) fn execute_sequence(
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
 
+    // ── Phase 1: run pre-flight shell discovery for every step ─────────
+    //
+    // Template `::shell` directives can reference per-step state
+    // (`{{state.name}}`, `{{previous_state.foo}}`, etc.) so each step's
+    // discovery pass needs its own compose context. Running the whole
+    // pass up-front means any required approval prompts fire BEFORE
+    // the first agent launches — the operator reviews all shell commands
+    // once and then walks away.
+    let mut step_contexts: Vec<(serde_json::Value, BTreeMap<String, String>)> =
+        Vec::with_capacity(total_steps);
     for step_index in 0..total_steps {
-        let step = &plan.steps[step_index];
         let overlay = build_step_overlay(&plan, step_index);
-
-        if !silent {
-            let status = Status::from_prose(format!(
-                "[<yellow>{}/{}</yellow>] <i>starting</i> <b>{}</b>",
-                step_index + 1,
-                total_steps,
-                step.name
-            ))
-            .state(StatusState::Info);
-            log::message(&status.render(&log::terminal()));
-        }
-
-        let start = std::time::Instant::now();
-
         let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
 
         let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
         env_overrides.insert("FAIL_FAST".to_string(), effective_fail_fast.to_string());
 
-        // Pre-flight shell approval for this step.
-        //
-        // The compose context used for ::shell discovery must see the same
-        // `FAIL_FAST` value the child process will see, otherwise the
-        // template interpolation used for pre-flight may diverge from
-        // runtime. Build a context explicitly and inject env overrides.
+        // The compose context used for ::shell discovery must see the
+        // same `FAIL_FAST` value the child process will see, otherwise
+        // the template interpolation used for pre-flight may diverge
+        // from runtime.
         let compose_options = {
             let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
             for (key, value) in &env_overrides {
@@ -100,7 +93,6 @@ pub(crate) fn execute_sequence(
         let approval_options = super::build_harness_shell_options_with_cache(
             &source.resolved_path,
             None,
-            shared.interactive,
             Some(Arc::clone(&shared_approval_cache)),
         );
 
@@ -113,9 +105,38 @@ pub(crate) fn execute_sequence(
         .map_err(|e| eyre!("{e}"))?;
 
         cumulative_approved.extend(preflight.approved_commands.iter().cloned());
+        step_contexts.push((step_set_overrides, env_overrides));
+    }
+
+    if !silent {
+        let status = Status::from_prose(format!(
+            "<b>Preflight:</b> shell commands approved for all \
+             <yellow>{}</yellow> step(s) in the sequence",
+            total_steps
+        ))
+        .state(StatusState::Info);
+        log::message(&status.render(&log::terminal()));
+    }
+
+    // ── Phase 2: execute each step ─────────────────────────────────────
+    for (step_index, (step_set_overrides, env_overrides)) in step_contexts.iter().enumerate() {
+        let step = &plan.steps[step_index];
+
+        if !silent {
+            let status = Status::from_prose(format!(
+                "[<yellow>{}/{}</yellow>] <i>starting</i> <b>{}</b>",
+                step_index + 1,
+                total_steps,
+                step.name
+            ))
+            .state(StatusState::Info);
+            log::message(&status.render(&log::terminal()));
+        }
+
+        let start = std::time::Instant::now();
 
         let prepare_options = PrepareOptions {
-            set_overrides: Some(step_set_overrides),
+            set_overrides: Some(step_set_overrides.clone()),
             pre_approved_commands: Some(cumulative_approved.clone()),
             env_overrides: env_overrides.clone(),
         };

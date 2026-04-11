@@ -182,30 +182,38 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
 pub(crate) fn build_harness_shell_options(
     source_path: &Path,
     repo_root: Option<&Path>,
-    interactive: bool,
 ) -> claudine::harness::ShellApprovalOptions {
-    build_harness_shell_options_with_cache(source_path, repo_root, interactive, None)
+    build_harness_shell_options_with_cache(source_path, repo_root, None)
 }
 
 /// Build shell approval options, optionally reusing a shared approval
 /// cache. Callers like the sequence orchestrator pass a shared cache so
 /// that "allow once" approvals from earlier steps carry over to later
 /// ones for the duration of the sequence run.
+///
+/// The interactive approval handler is installed whenever the process
+/// can actually prompt — i.e. stdin and stderr are both TTYs. This is
+/// independent of whether the spawned agent runs in interactive mode:
+/// shell approval happens during preflight, before any agent is launched,
+/// so there is no TTY contention. Non-TTY environments (CI, piped input)
+/// get no handler and unapproved commands hard-fail as before.
 pub(crate) fn build_harness_shell_options_with_cache(
     source_path: &Path,
     repo_root: Option<&Path>,
-    interactive: bool,
     shared_cache: Option<claudine::composition::SharedApprovalCache>,
 ) -> claudine::harness::ShellApprovalOptions {
+    let approval_handler: Option<
+        std::sync::Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>,
+    > = if darkmatter_cli::approval::can_prompt_interactively() {
+        Some(std::sync::Arc::new(
+            darkmatter_cli::approval::CliShellApprovalHandler,
+        ))
+    } else {
+        None
+    };
     let mut opts = claudine::harness::ShellApprovalOptions {
         policy_root: harness_policy_root(source_path, repo_root),
-        approval_handler: if interactive {
-            Some(std::sync::Arc::new(
-                darkmatter_cli::approval::CliShellApprovalHandler,
-            ))
-        } else {
-            None
-        },
+        approval_handler,
         ..Default::default()
     };
     if let Some(cache) = shared_cache {
@@ -1534,11 +1542,8 @@ fn run_provider_wrapper_inner(
                     source_path: &source_path,
                     repo_root: env_plan.repo_root.as_deref(),
                 };
-                let shell_options = build_harness_shell_options(
-                    &source_path,
-                    env_plan.repo_root.as_deref(),
-                    !effective_non_interactive,
-                );
+                let shell_options =
+                    build_harness_shell_options(&source_path, env_plan.repo_root.as_deref());
                 let plan = claudine::harness::parse_harness_plan(
                     &seed.frontmatter,
                     &source_path,

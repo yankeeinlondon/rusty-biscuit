@@ -234,8 +234,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         opts
     };
 
-    let approval_options =
-        super::wrap::build_harness_shell_options(&source.resolved_path, None, shared.interactive);
+    let approval_options = super::wrap::build_harness_shell_options(&source.resolved_path, None);
 
     let preflight = composition::resolve_shell_approvals(
         Some(&source.markdown),
@@ -341,8 +340,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         opts
     };
 
-    let approval_options =
-        super::wrap::build_harness_shell_options(&source.resolved_path, None, shared.interactive);
+    let approval_options = super::wrap::build_harness_shell_options(&source.resolved_path, None);
 
     let preflight = composition::resolve_shell_approvals(
         Some(&source.markdown),
