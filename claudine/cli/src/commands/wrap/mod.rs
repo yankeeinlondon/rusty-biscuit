@@ -958,7 +958,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     // child_args free of any prompt characters. Downstream apply_*
     // methods see clean args; prompt_delivery is the only code path
     // that places the prompt back in.
-    let (extracted_args, prompt_source) =
+    let (extracted_args, mut prompt_source) =
         profile::extract_prompt_source_from_passthrough(
             profile,
             &child_args,
@@ -1168,7 +1168,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         let catalog =
             McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
         let (cleaned_prompt, prompt_tags) =
-            extract_tags_from_child_args(provider, &mut child_args, lex_tags);
+            extract_tags_from_prompt(prompt_source.as_inline(), lex_tags);
+        if let Some(ref cleaned) = cleaned_prompt {
+            prompt_source = profile::PromptSource::Inline(cleaned.clone());
+        }
         let prompt_is_interactive =
             std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
         let mut session = compute_session_set(
@@ -1426,8 +1429,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     };
 
     let wrapper_harness = {
-        let base_prompt =
-            extract_prompt_from_child_args(provider, &child_args, stdin_seed.as_deref());
+        let base_prompt = prompt_source.as_inline().map(|s| s.to_string())
+            .or_else(|| stdin_seed.clone());
         let harness_source = base_prompt.as_ref().and_then(|_| {
             find_wrapper_harness_source(provider, env_plan.repo_root.as_deref(), &cwd)
         });
@@ -1490,7 +1493,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         };
 
         let mut harness_base_args = child_args.clone();
-        strip_prompt_from_args(provider, &mut harness_base_args);
         if !use_structured {
             profile.prepare_captured_output(&mut harness_base_args);
         }
@@ -1639,55 +1641,6 @@ fn merge_frontmatter_overlay(
         } else {
             overlay.insert(key.clone(), value.clone());
         }
-    }
-}
-
-pub(crate) fn strip_prompt_from_args(provider: Provider, args: &mut Vec<String>) {
-    match provider {
-        Provider::Gemini | Provider::QwenCode => {
-            let mut index = 0;
-            while index < args.len() {
-                if args[index] == "--prompt" || args[index] == "-p" {
-                    if index + 1 < args.len() {
-                        args.drain(index..=index + 1);
-                    } else {
-                        args.remove(index);
-                    }
-                    return;
-                }
-                if args[index].starts_with("--prompt=") || args[index].starts_with("-p=") {
-                    args.remove(index);
-                    return;
-                }
-                index += 1;
-            }
-        }
-        Provider::Goose => {
-            if let Some(index) = args.iter().position(|arg| arg == "-t" || arg == "--text") {
-                if index + 1 < args.len() {
-                    args.drain(index..=index + 1);
-                } else {
-                    args.remove(index);
-                }
-            }
-        }
-        Provider::Codex | Provider::OpenCode => {
-            if let Some(location) = find_prompt_location(provider, args) {
-                match location {
-                    PromptLocation::Value(index) => {
-                        if index < args.len() {
-                            args.remove(index);
-                        }
-                    }
-                    PromptLocation::Inline { index, .. } => {
-                        if index < args.len() {
-                            args.remove(index);
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
     }
 }
 
@@ -3378,42 +3331,19 @@ fn format_verbose_summary_details_prose(
     Some(format!("<dim>{}</dim>", parts.join(" \u{00b7} ")))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PromptLocation {
-    Value(usize),
-    Inline { index: usize, prefix: &'static str },
-}
-
-fn extract_tags_from_child_args(
-    provider: Provider,
-    args: &mut [String],
+fn extract_tags_from_prompt(
+    prompt: Option<&str>,
     extract_tags: fn(&str) -> (String, Vec<String>),
 ) -> (Option<String>, Vec<String>) {
-    let Some(location) = find_prompt_location(provider, args) else {
+    let Some(prompt) = prompt else {
         return (None, Vec::new());
     };
-
-    let prompt = match location {
-        PromptLocation::Value(index) => args[index].clone(),
-        PromptLocation::Inline { index, prefix } => args[index]
-            .strip_prefix(prefix)
-            .unwrap_or_default()
-            .to_string(),
-    };
-
-    let (cleaned_prompt, tags) = extract_tags(&prompt);
+    let (cleaned, tags) = extract_tags(prompt);
     if tags.is_empty() {
-        return (None, tags);
+        (None, Vec::new())
+    } else {
+        (Some(cleaned), tags)
     }
-
-    match location {
-        PromptLocation::Value(index) => args[index] = cleaned_prompt.clone(),
-        PromptLocation::Inline { index, prefix } => {
-            args[index] = format!("{prefix}{cleaned_prompt}");
-        }
-    }
-
-    (Some(cleaned_prompt), tags)
 }
 
 fn bootstrap_mcp_state(repo_root: Option<&std::path::Path>) -> Result<bool> {
@@ -3457,113 +3387,6 @@ fn bootstrap_mcp_state(repo_root: Option<&std::path::Path>) -> Result<bool> {
     Ok(true)
 }
 
-fn find_prompt_location(provider: Provider, args: &[String]) -> Option<PromptLocation> {
-    match provider {
-        Provider::Gemini => find_gemini_prompt_location(args),
-        Provider::Codex => find_positional_prompt_location(args, 0),
-        Provider::OpenCode => find_positional_prompt_location(args, 0),
-        _ => None,
-    }
-}
-
-fn find_gemini_prompt_location(args: &[String]) -> Option<PromptLocation> {
-    for (index, arg) in args.iter().enumerate() {
-        if arg == "--prompt" || arg == "-p" {
-            return (index + 1 < args.len()).then_some(PromptLocation::Value(index + 1));
-        }
-        if arg.starts_with("--prompt=") {
-            return Some(PromptLocation::Inline {
-                index,
-                prefix: "--prompt=",
-            });
-        }
-        if arg.starts_with("-p=") {
-            return Some(PromptLocation::Inline {
-                index,
-                prefix: "-p=",
-            });
-        }
-    }
-
-    find_positional_prompt_location(args, 0)
-}
-
-fn find_positional_prompt_location(args: &[String], start_index: usize) -> Option<PromptLocation> {
-    let mut skip_next = false;
-
-    for (index, arg) in args.iter().enumerate().skip(start_index) {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-
-        if index == 0 && (arg == "exec" || arg == "run" || arg == "e") {
-            continue;
-        }
-
-        if arg == "--" {
-            return (index + 1 < args.len()).then_some(PromptLocation::Value(index + 1));
-        }
-
-        if takes_value(arg) {
-            skip_next = !arg.contains('=');
-            continue;
-        }
-
-        if !arg.starts_with('-') {
-            return Some(PromptLocation::Value(index));
-        }
-    }
-
-    None
-}
-
-fn takes_value(arg: &str) -> bool {
-    matches!(
-        arg,
-        "-m" | "--model"
-            | "-o"
-            | "--output"
-            | "--output-format"
-            | "--output-last-message"
-            | "--approval-mode"
-            | "--config"
-            | "-c"
-            | "--profile"
-            | "--system-prompt"
-            | "--sandbox-image"
-    )
-}
-
-/// Extract the user's prompt string from the raw passthrough args.
-/// Returns the first non-switch argument, if any.
-fn extract_user_prompt(passthrough: &[String]) -> Option<String> {
-    passthrough
-        .iter()
-        .find(|arg| !arg.starts_with('-'))
-        .cloned()
-}
-
-fn extract_prompt_from_child_args(
-    provider: Provider,
-    child_args: &[String],
-    stdin_seed: Option<&str>,
-) -> Option<String> {
-    if let Some(seed) = stdin_seed {
-        return Some(seed.to_string());
-    }
-
-    find_prompt_location(provider, child_args)
-        .and_then(|location| match location {
-            PromptLocation::Value(index) => child_args.get(index).cloned(),
-            PromptLocation::Inline { index, prefix } => child_args
-                .get(index)
-                .and_then(|value| value.strip_prefix(prefix))
-                .map(ToOwned::to_owned),
-        })
-        .or_else(|| extract_user_prompt(child_args))
-}
-
 fn print_wrapper_help(provider: Provider) {
     let slug = provider.as_slug();
     println!(
@@ -3594,17 +3417,6 @@ fn print_wrapper_help(provider: Provider) {
          \x20     --strict              Treat unresolved or ambiguous MCP tags as hard errors\n\
          \x20 -h, --help               Print help"
     );
-}
-
-/// Returns true if a prompt string is present — either as a remaining
-/// non-switch arg in `child_args` or via stdin.
-#[allow(dead_code)] // only called from tests; production path removed in Task 13; delete in Task 17
-fn has_prompt_source(child_args: &[String], stdin_seed: Option<&str>) -> bool {
-    if stdin_seed.is_some() {
-        return true;
-    }
-    // Check for a non-switch positional arg in passthrough
-    child_args.iter().any(|arg| !arg.starts_with('-'))
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -3787,76 +3599,6 @@ mod tests {
         // Old flags should NOT be consumed by Claudine
         assert!(!extracted.interactive);
         assert_eq!(args, vec!["-n", "--non-interactive", "--ni", "task"]);
-    }
-
-    #[test]
-    fn has_prompt_source_detects_positional_arg() {
-        // No prompt → no prompt source
-        assert!(!has_prompt_source(&[], None));
-
-        // Non-switch arg in child_args → prompt source
-        assert!(has_prompt_source(&["fix the bug".to_string()], None));
-
-        // Switch-only args → no prompt source
-        assert!(!has_prompt_source(&["--json".to_string()], None));
-
-        // stdin_seed → prompt source
-        assert!(has_prompt_source(&[], Some("hello")));
-    }
-
-    #[test]
-    fn extract_user_prompt_finds_first_non_switch() {
-        assert_eq!(
-            extract_user_prompt(&["--json".to_string(), "fix bug".to_string()]),
-            Some("fix bug".to_string())
-        );
-        assert_eq!(
-            extract_user_prompt(&["--json".to_string(), "--verbose".to_string()]),
-            None
-        );
-        assert_eq!(
-            extract_user_prompt(&["hello world".to_string()]),
-            Some("hello world".to_string())
-        );
-    }
-
-    #[test]
-    fn codex_prompt_location_skips_output_last_message_value() {
-        let args = vec![
-            "exec".to_string(),
-            "--json".to_string(),
-            "--output-last-message".to_string(),
-            "/tmp/last-message.txt".to_string(),
-            "actual prompt".to_string(),
-        ];
-
-        assert_eq!(
-            find_prompt_location(Provider::Codex, &args),
-            Some(PromptLocation::Value(4))
-        );
-    }
-
-    #[test]
-    fn strip_prompt_from_args_preserves_output_last_message_pair_for_codex() {
-        let mut args = vec![
-            "exec".to_string(),
-            "--json".to_string(),
-            "--output-last-message".to_string(),
-            "/tmp/last-message.txt".to_string(),
-            "actual prompt".to_string(),
-        ];
-
-        strip_prompt_from_args(Provider::Codex, &mut args);
-
-        assert_eq!(
-            args,
-            vec![
-                "exec".to_string(),
-                "--json".to_string(),
-                "--output-last-message".to_string(),
-                "/tmp/last-message.txt".to_string(),
-            ]
-        );
     }
 
     #[test]
@@ -4117,29 +3859,23 @@ mod tests {
     #[test]
     fn extracts_tags_from_codex_prompt_position() {
         let _ = make_catalog_with_servers(&["calendar"]);
-        let mut args = vec![
-            "exec".to_string(),
-            "--json".to_string(),
-            "fix #calendar bugs".to_string(),
-        ];
+        let prompt = "fix #calendar bugs";
 
-        let (cleaned, tags) = extract_tags_from_child_args(Provider::Codex, &mut args, lex_tags);
+        let (cleaned, tags) = extract_tags_from_prompt(Some(prompt), lex_tags);
 
         assert_eq!(tags, vec!["calendar"]);
         assert_eq!(cleaned.as_deref(), Some("fix bugs"));
-        assert_eq!(args[2], "fix bugs");
     }
 
     #[test]
     fn extracts_tags_from_gemini_prompt_flag() {
         let _ = make_catalog_with_servers(&["slack"]);
-        let mut args = vec!["--prompt".to_string(), "debug #slack auth".to_string()];
+        let prompt = "debug #slack auth";
 
-        let (cleaned, tags) = extract_tags_from_child_args(Provider::Gemini, &mut args, lex_tags);
+        let (cleaned, tags) = extract_tags_from_prompt(Some(prompt), lex_tags);
 
         assert_eq!(tags, vec!["slack"]);
         assert_eq!(cleaned.as_deref(), Some("debug auth"));
-        assert_eq!(args[1], "debug auth");
     }
 
     #[cfg(test)]
