@@ -21,14 +21,13 @@ use sniff::programs::{
 };
 
 /// CLI adapter that renders install-interview events to the terminal.
-#[allow(dead_code)]
 pub struct CliInstallUi {
     pub terminal: Terminal,
     pub plain: bool,
+    #[cfg_attr(not(test), allow(dead_code))]
     pub buffer: Vec<u8>,
 }
 
-#[allow(dead_code)]
 impl CliInstallUi {
     /// Create a new `CliInstallUi` that writes to stdout.
     pub fn new(terminal: Terminal, plain: bool) -> Self {
@@ -199,7 +198,6 @@ impl InstallInterviewDelegate for CliInstallUi {
 }
 
 /// Ensure a rendered string ends with exactly two newlines (one trailing blank line).
-#[allow(dead_code)]
 fn ensure_trailing_blank_line(s: &str) -> String {
     let trimmed = s.trim_end_matches('\n');
     format!("{trimmed}\n\n")
