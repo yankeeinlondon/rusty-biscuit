@@ -184,11 +184,59 @@ pub fn resolve_program(name: &str) -> Result<ResolvedProgram, ResolveError> {
 }
 
 // ---------------------------------------------------------------------------
+// Shared interview runner
+// ---------------------------------------------------------------------------
+
+/// Build an install plan for each resolved program, then run the shared
+/// install interview via `CliInstallUi`. One `Terminal` is constructed and
+/// reused across all programs.
+pub fn install_selected_via_interview(
+    programs: &[ResolvedProgram],
+    dry_run: bool,
+    plain: bool,
+) -> Result<(), Box<dyn Error>> {
+    use biscuit_terminal::terminal::Terminal;
+    use sniff::programs::{
+        InstallInterviewInput, InstallInterviewOptions, build_install_plan,
+        run_install_interview, HostCapabilities,
+    };
+
+    let host = HostCapabilities::load_or_detect_with_verification(false);
+    let terminal = Terminal::new();
+    let mut ui = crate::install_ui::CliInstallUi::new(terminal, plain);
+
+    for resolved in programs {
+        let plan = match resolved {
+            ResolvedProgram::Editor(p) => build_install_plan(p, &host),
+            ResolvedProgram::Utility(p) => build_install_plan(p, &host),
+            ResolvedProgram::LanguagePackageManager(p) => build_install_plan(p, &host),
+            ResolvedProgram::OsPackageManager(p) => build_install_plan(p, &host),
+            ResolvedProgram::TtsClient(p) => build_install_plan(p, &host),
+            ResolvedProgram::TerminalApp(p) => build_install_plan(p, &host),
+            ResolvedProgram::HeadlessAudio(p) => build_install_plan(p, &host),
+            ResolvedProgram::AiCli(p) => build_install_plan(p, &host),
+        };
+
+        let input = InstallInterviewInput {
+            program: plan.program.clone(),
+            website: plan.website,
+            plan,
+        };
+        let mut opts = InstallInterviewOptions::default();
+        opts.install.dry_run = dry_run;
+        opts.install.timeout_secs = 120;
+
+        let _ = run_install_interview(&input, &opts, &mut ui)?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Interactive install (MultiSelect picker)
 // ---------------------------------------------------------------------------
 
 macro_rules! interactive_install_category {
-    ($fn_name:ident, $enum_type:ty, $detector_type:ty, $prompt:expr) => {
+    ($fn_name:ident, $enum_type:ty, $detector_type:ty, $prompt:expr, $variant:path) => {
         fn $fn_name() -> Result<(), Box<dyn Error>> {
             let detector = <$detector_type>::new();
             let all: Vec<$enum_type> = <$enum_type>::iter().collect();
@@ -236,6 +284,7 @@ macro_rules! interactive_install_category {
                 return Ok(());
             }
 
+            let mut resolved: Vec<$crate::install::ResolvedProgram> = Vec::new();
             for label in &selected {
                 let idx = options.iter().position(|o| o == label).unwrap();
                 let program = not_installed[idx];
@@ -246,13 +295,12 @@ macro_rules! interactive_install_category {
                     );
                     continue;
                 }
-                println!("Installing {}...", program.display_name());
-                match detector.install(*program) {
-                    Ok(()) => println!("  Successfully installed."),
-                    Err(e) => eprintln!("  Failed: {}", e),
-                }
+                resolved.push($variant(*program));
             }
-            Ok(())
+            if resolved.is_empty() {
+                return Ok(());
+            }
+            $crate::install::install_selected_via_interview(&resolved, false, false)
         }
     };
 }
@@ -261,49 +309,57 @@ interactive_install_category!(
     interactive_install_editors,
     sniff::programs::Editor,
     sniff::programs::InstalledEditors,
-    "Select editors to install:"
+    "Select editors to install:",
+    ResolvedProgram::Editor
 );
 interactive_install_category!(
     interactive_install_utilities,
     sniff::programs::Utility,
     sniff::programs::InstalledUtilities,
-    "Select utilities to install:"
+    "Select utilities to install:",
+    ResolvedProgram::Utility
 );
 interactive_install_category!(
     interactive_install_lang_pkg_mgrs,
     sniff::programs::LanguagePackageManager,
     sniff::programs::InstalledLanguagePackageManagers,
-    "Select language package managers to install:"
+    "Select language package managers to install:",
+    ResolvedProgram::LanguagePackageManager
 );
 interactive_install_category!(
     interactive_install_os_pkg_mgrs,
     sniff::programs::OsPackageManager,
     sniff::programs::InstalledOsPackageManagers,
-    "Select OS package managers to install:"
+    "Select OS package managers to install:",
+    ResolvedProgram::OsPackageManager
 );
 interactive_install_category!(
     interactive_install_tts_clients,
     sniff::programs::TtsClient,
     sniff::programs::InstalledTtsClients,
-    "Select TTS clients to install:"
+    "Select TTS clients to install:",
+    ResolvedProgram::TtsClient
 );
 interactive_install_category!(
     interactive_install_terminal_apps,
     sniff::programs::TerminalApp,
     sniff::programs::InstalledTerminalApps,
-    "Select terminal apps to install:"
+    "Select terminal apps to install:",
+    ResolvedProgram::TerminalApp
 );
 interactive_install_category!(
     interactive_install_audio,
     sniff::programs::HeadlessAudio,
     sniff::programs::InstalledHeadlessAudio,
-    "Select audio players to install:"
+    "Select audio players to install:",
+    ResolvedProgram::HeadlessAudio
 );
 interactive_install_category!(
     interactive_install_agents,
     sniff::programs::AiCli,
     sniff::programs::InstalledAiClients,
-    "Select AI agents to install:"
+    "Select AI agents to install:",
+    ResolvedProgram::AiCli
 );
 
 /// Dispatch interactive install to the correct category.
@@ -419,5 +475,23 @@ mod tests {
     fn resolve_program_unknown_name_errors() {
         let err = resolve_program("definitely-not-a-real-program-xyz").unwrap_err();
         assert!(err.to_string().contains("Unknown program"));
+    }
+
+    #[test]
+    fn install_selected_via_interview_fn_exists() {
+        // Compile-level check that the entry point has the expected signature.
+        let _: fn(&[ResolvedProgram], bool, bool) -> Result<(), Box<dyn std::error::Error>> =
+            install_selected_via_interview;
+    }
+
+    #[test]
+    fn install_selected_via_interview_accepts_empty_slice() {
+        // Should no-op and return Ok.
+        let result = install_selected_via_interview(&[], true, true);
+        assert!(
+            result.is_ok(),
+            "empty slice should succeed: {:?}",
+            result.err().map(|e| e.to_string())
+        );
     }
 }
