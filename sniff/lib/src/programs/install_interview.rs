@@ -129,6 +129,224 @@ pub enum InstallInterviewOutcome {
     NotInstallable,
 }
 
+use crate::programs::installer::{
+    build_install_announcement, build_install_failure_status, build_install_success_status,
+    execute_install_captured, get_install_command, InstallCapturedOutcome,
+};
+
+/// Runs the install interview for the given program.
+///
+/// Emits events through `delegate` and returns the session outcome.
+///
+/// ## Returns
+///
+/// `Ok(NotInstallable)` when the plan has no viable method, emitting an error
+/// status first. Otherwise delegates to the private `run_attempt` helper.
+///
+/// ## Errors
+///
+/// Propagates any `SniffInstallationError` returned by the delegate.
+pub fn run_install_interview<D: InstallInterviewDelegate>(
+    input: &InstallInterviewInput,
+    options: &InstallInterviewOptions,
+    delegate: &mut D,
+) -> Result<InstallInterviewOutcome, SniffInstallationError> {
+    if !input.plan.successful {
+        delegate.on_event(&InstallInterviewEvent::Status {
+            kind: InstallStatusKind::Error,
+            text: build_install_failure_status(&input.program, input.website),
+        })?;
+        return Ok(InstallInterviewOutcome::NotInstallable);
+    }
+
+    let chosen = input
+        .plan
+        .chosen()
+        .cloned()
+        .expect("successful plan has a chosen option");
+    run_attempt(input, options, delegate, chosen.kind, Vec::new())
+}
+
+fn run_attempt<D: InstallInterviewDelegate>(
+    input: &InstallInterviewInput,
+    options: &InstallInterviewOptions,
+    delegate: &mut D,
+    method: InstallationMethod,
+    mut attempted: Vec<InstallationMethod>,
+) -> Result<InstallInterviewOutcome, SniffInstallationError> {
+    let command = get_install_command(&method)?;
+
+    delegate.on_event(&InstallInterviewEvent::Announcement {
+        prose: build_install_announcement(&input.program, input.website, &method, &command),
+    })?;
+
+    // Consent gate added in Task 8.
+
+    let outcome = execute_install_captured(&method, &options.install);
+    attempted.push(method.clone());
+
+    match outcome {
+        InstallCapturedOutcome::SetupError(e) => {
+            let body = e.to_string();
+            if !body.trim().is_empty() {
+                delegate.on_event(&InstallInterviewEvent::CapturedOutput {
+                    stream: InstallOutputStream::Stderr,
+                    body,
+                })?;
+            }
+            delegate.on_event(&InstallInterviewEvent::Status {
+                kind: InstallStatusKind::Error,
+                text: build_install_failure_status(&input.program, input.website),
+            })?;
+            Ok(InstallInterviewOutcome::Failed { attempted })
+        }
+        InstallCapturedOutcome::Completed(r) if r.success && !r.executed => {
+            delegate.on_event(&InstallInterviewEvent::Status {
+                kind: InstallStatusKind::Success,
+                text: build_install_success_status(&input.program, input.website),
+            })?;
+            Ok(InstallInterviewOutcome::DryRun { method })
+        }
+        InstallCapturedOutcome::Completed(r) if r.success => {
+            if !r.stdout.trim().is_empty() {
+                delegate.on_event(&InstallInterviewEvent::CapturedOutput {
+                    stream: InstallOutputStream::Stdout,
+                    body: r.stdout,
+                })?;
+            }
+            delegate.on_event(&InstallInterviewEvent::Status {
+                kind: InstallStatusKind::Success,
+                text: build_install_success_status(&input.program, input.website),
+            })?;
+            Ok(InstallInterviewOutcome::Installed { method })
+        }
+        InstallCapturedOutcome::Completed(r) => {
+            let body = if !r.stderr.trim().is_empty() {
+                r.stderr
+            } else {
+                r.stdout
+            };
+            if !body.trim().is_empty() {
+                delegate.on_event(&InstallInterviewEvent::CapturedOutput {
+                    stream: InstallOutputStream::Stderr,
+                    body,
+                })?;
+            }
+            delegate.on_event(&InstallInterviewEvent::Status {
+                kind: InstallStatusKind::Error,
+                text: build_install_failure_status(&input.program, input.website),
+            })?;
+            Ok(InstallInterviewOutcome::Failed { attempted })
+        }
+    }
+}
+
+#[cfg(test)]
+mod runner_tests {
+    use super::*;
+    use crate::programs::install_plan::{InstallPlan, InstallPlanOption, InstallPlanReason};
+
+    struct RecordingDelegate {
+        events: Vec<InstallInterviewEvent>,
+        consent_answer: bool,
+        retry_answer: Option<RetryChoice>,
+    }
+
+    impl RecordingDelegate {
+        fn new() -> Self {
+            Self {
+                events: Vec::new(),
+                consent_answer: true,
+                retry_answer: None,
+            }
+        }
+    }
+
+    impl InstallInterviewDelegate for RecordingDelegate {
+        fn on_event(&mut self, e: &InstallInterviewEvent) -> Result<(), SniffInstallationError> {
+            self.events.push(e.clone());
+            Ok(())
+        }
+        fn confirm_remote_script(&mut self, _p: &str) -> Result<bool, SniffInstallationError> {
+            Ok(self.consent_answer)
+        }
+        fn choose_retry(
+            &mut self,
+            _p: &RetryPrompt,
+        ) -> Result<RetryChoice, SniffInstallationError> {
+            Ok(self.retry_answer.clone().unwrap_or(RetryChoice::Quit))
+        }
+    }
+
+    fn brew_plan() -> InstallInterviewInput {
+        InstallInterviewInput {
+            program: "Ripgrep".into(),
+            website: "https://github.com/BurntSushi/ripgrep",
+            plan: InstallPlan {
+                program: "Ripgrep".into(),
+                website: "https://github.com/BurntSushi/ripgrep",
+                successful: true,
+                options: vec![InstallPlanOption {
+                    kind: InstallationMethod::Brew("ripgrep"),
+                    requires_sudo: false,
+                    choose: true,
+                    reason_type: InstallPlanReason::Selected,
+                    reason: "chosen".into(),
+                }],
+            },
+        }
+    }
+
+    #[test]
+    fn dry_run_emits_announcement_and_success_status_without_execution() {
+        let input = brew_plan();
+        let mut opts = InstallInterviewOptions::default();
+        opts.install.dry_run = true;
+        let mut d = RecordingDelegate::new();
+        let outcome = run_install_interview(&input, &opts, &mut d).unwrap();
+        assert!(matches!(outcome, InstallInterviewOutcome::DryRun { .. }));
+        assert!(matches!(
+            d.events[0],
+            InstallInterviewEvent::Announcement { .. }
+        ));
+        assert!(d.events.iter().any(|e| matches!(
+            e,
+            InstallInterviewEvent::Status {
+                kind: InstallStatusKind::Success,
+                ..
+            }
+        )));
+        assert!(!d.events.iter().any(
+            |e| matches!(e, InstallInterviewEvent::CapturedOutput { .. })
+        ));
+    }
+
+    #[test]
+    fn not_installable_plan_returns_not_installable_outcome() {
+        let input = InstallInterviewInput {
+            program: "nope".into(),
+            website: "https://example.com",
+            plan: InstallPlan {
+                program: "nope".into(),
+                website: "https://example.com",
+                successful: false,
+                options: vec![],
+            },
+        };
+        let mut d = RecordingDelegate::new();
+        let outcome = run_install_interview(&input, &InstallInterviewOptions::default(), &mut d)
+            .unwrap();
+        assert!(matches!(outcome, InstallInterviewOutcome::NotInstallable));
+        assert!(d.events.iter().any(|e| matches!(
+            e,
+            InstallInterviewEvent::Status {
+                kind: InstallStatusKind::Error,
+                ..
+            }
+        )));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
