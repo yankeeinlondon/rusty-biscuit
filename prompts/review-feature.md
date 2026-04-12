@@ -1,5 +1,5 @@
 ---
-dir: ""
+dir: "$(pwd)"
 spec: ""
 design: ""
 review: "review"
@@ -19,7 +19,15 @@ We have just completed a feature defined in "{{dir}}":
 - technical design: "{{dir}}/{{design}}"
 ::endblock
 
+::block when="spec && design"
 Read both the specification and design documents and then perform a review on the implementation:
+::endblock
+::block when="spec"
+Read both the specification document and then perform a review on the implementation:
+::endblock
+::block when="design"
+Read both the specification document and then perform a review on the implementation:
+::endblock
 
 - look for gaps in functionality that were designed but not implemented
 - features who's implementation is broken or incomplete
