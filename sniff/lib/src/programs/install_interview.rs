@@ -180,9 +180,23 @@ fn run_attempt<D: InstallInterviewDelegate>(
         prose: build_install_announcement(&input.program, input.website, &method, &command),
     })?;
 
-    // Consent gate added in Task 8.
+    let needs_consent = matches!(
+        method,
+        InstallationMethod::RemoteBash(_) | InstallationMethod::UvWithInstall(_)
+    );
+    if needs_consent && !options.install.dry_run && !options.install.approve_remote_bash {
+        let warning = build_remote_script_warning(&input.program, &method);
+        delegate.on_event(&InstallInterviewEvent::ConsentWarning { prose: warning.clone() })?;
+        if !delegate.confirm_remote_script(&warning)? {
+            return Ok(InstallInterviewOutcome::AbortedByUser);
+        }
+    }
 
-    let outcome = execute_install_captured(&method, &options.install);
+    let mut exec_opts = options.install.clone();
+    if needs_consent {
+        exec_opts.approve_remote_bash = true;
+    }
+    let outcome = execute_install_captured(&method, &exec_opts);
     attempted.push(method.clone());
 
     match outcome {
@@ -238,6 +252,21 @@ fn run_attempt<D: InstallInterviewDelegate>(
             })?;
             Ok(InstallInterviewOutcome::Failed { attempted })
         }
+    }
+}
+
+fn build_remote_script_warning(program: &str, method: &InstallationMethod) -> String {
+    match method {
+        InstallationMethod::RemoteBash(url) => format!(
+            "<yellow>Warning:</yellow> installing <b>{program}</b> will download and execute a remote shell script from <a href=\"{url}\">{url}</a>."
+        ),
+        InstallationMethod::UvWithInstall(_) => {
+            let url = crate::programs::installer::astral_installer_url();
+            format!(
+                "<yellow>Warning:</yellow> installing <b>{program}</b> will bootstrap <b>uv</b> by downloading and executing a remote script from <a href=\"{url}\">{url}</a>."
+            )
+        }
+        _ => String::new(),
     }
 }
 
@@ -319,6 +348,67 @@ mod runner_tests {
         assert!(!d.events.iter().any(
             |e| matches!(e, InstallInterviewEvent::CapturedOutput { .. })
         ));
+    }
+
+    fn remote_bash_plan() -> InstallInterviewInput {
+        InstallInterviewInput {
+            program: "Rustup".into(),
+            website: "https://rustup.rs",
+            plan: InstallPlan {
+                program: "Rustup".into(),
+                website: "https://rustup.rs",
+                successful: true,
+                options: vec![InstallPlanOption {
+                    kind: InstallationMethod::RemoteBash("https://sh.rustup.rs"),
+                    requires_sudo: false,
+                    choose: true,
+                    reason_type: InstallPlanReason::Selected,
+                    reason: "chosen".into(),
+                }],
+            },
+        }
+    }
+
+    #[test]
+    fn denied_remote_consent_returns_aborted_by_user() {
+        let input = remote_bash_plan();
+        let mut opts = InstallInterviewOptions::default();
+        opts.install.dry_run = false;
+        opts.install.approve_remote_bash = false;
+        let mut d = RecordingDelegate::new();
+        d.consent_answer = false;
+        let outcome = run_install_interview(&input, &opts, &mut d).unwrap();
+        assert!(matches!(outcome, InstallInterviewOutcome::AbortedByUser));
+        assert!(d.events.iter().any(|e| matches!(e, InstallInterviewEvent::ConsentWarning { .. })));
+        // No status event was emitted because user aborted before execution.
+        assert!(!d.events.iter().any(|e| matches!(e, InstallInterviewEvent::Status { .. })));
+    }
+
+    #[test]
+    fn remote_bash_dry_run_skips_consent() {
+        let input = remote_bash_plan();
+        let mut opts = InstallInterviewOptions::default();
+        opts.install.dry_run = true;
+        let mut d = RecordingDelegate::new();
+        d.consent_answer = false; // would deny but must not be asked
+        let outcome = run_install_interview(&input, &opts, &mut d).unwrap();
+        assert!(matches!(outcome, InstallInterviewOutcome::DryRun { .. }));
+        assert!(!d.events.iter().any(|e| matches!(e, InstallInterviewEvent::ConsentWarning { .. })));
+    }
+
+    #[test]
+    fn remote_bash_preapproved_skips_consent() {
+        let input = remote_bash_plan();
+        let mut opts = InstallInterviewOptions::default();
+        opts.install.dry_run = false;
+        opts.install.approve_remote_bash = true;
+        let mut d = RecordingDelegate::new();
+        d.consent_answer = false;
+        // The method will actually execute; we don't assert on final outcome
+        // because whether the command succeeds depends on the host. We only
+        // assert that no ConsentWarning event was emitted.
+        let _ = run_install_interview(&input, &opts, &mut d);
+        assert!(!d.events.iter().any(|e| matches!(e, InstallInterviewEvent::ConsentWarning { .. })));
     }
 
     #[test]
