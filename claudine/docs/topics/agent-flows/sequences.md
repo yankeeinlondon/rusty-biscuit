@@ -60,4 +60,35 @@ and **append** all the information we have on him to "reports/dodgy-people.md".
 
 #### YAML Templates
 
-If you wanted to replicate the functionality in the last example by defining the sequence data externally in a 
+If you wanted to replicate the functionality in the last example but define sequence data externally in YAML you can do that:
+
+```yaml
+template:
+    description: "{{name}} ({{age}} years old)"
+sequence:
+    - name: Bob
+      age: 32
+    - name: Sally
+      age: 36
+    - name: John
+      age: 18
+```
+
+Externalizing the sequence data is useful for at least two reasons:
+
+1. the data you're wanting to iterate over in a sequence is often highly reusable
+1. when you choose the external representation, you can use the "template" section of the YAML to define a property which will be made available in every step's state. It can be static but typically it would reference and format information from the other structured data defined.
+
+This YAML file could now be referenced in the Markdown like so:
+
+```md
+---
+sequence: "path/to/data.yaml"
+---
+Find the customer {{state.name}}, who is {{state.age}} years old in our corporate database 
+and **append** all the information we have on him to "reports/dodgy-people.md", add the information under an H2 heading of `## {{state.description}}`.
+```
+
+## Advanced Techniques
+
+So far we've been showing you a very popular style of sequence which consists of 
