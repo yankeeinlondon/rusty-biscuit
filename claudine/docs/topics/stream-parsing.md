@@ -2,6 +2,8 @@
 
 When **Claudine** is running in non-interactive mode it will ask the Agent to respond in a streaming format. Each Agent has slightly different structure and semantics but we standardize the way we want to interact with this streaming information with the [`StreamParser`](claudine/lib/src/stream/parser.rs) trait.
 
+Each provider's wire format is modelled by a strongly typed, serde-derived event enum in [`stream/protocol/`](claudine/lib/src/stream/protocol/). The parser's `feed_line` walks a two-pass pipeline: parse the raw NDJSON line into a `serde_json::Value` first (which preserves the pre-existing malformed-line handling and keeps a raw copy available for `raw_summary` construction), then attempt typed deserialization into a provider-specific `*Event` enum. Unknown event types fall through to a silent skip that matches the legacy behavior, so provider format drift never turns into a hard failure. See the "Typed Protocol Models" section below for the module layout, the patterns each provider uses, and the edge cases that shaped them.
+
 
 ## Research
 
@@ -145,4 +147,82 @@ Based on this research we've been able to establish the following schemas for th
     - `insufficient_funds.data`: `provider_name`, `current_balance`, `required_minimum`
 - **Notes:** `-y` / `--yolo` / `--permission-mode acceptAll` is required for non-interactive runs to prevent the agent from hanging on approval prompts. In `--json` mode, ANSI styling is disabled; in `stream-json`, stdout is reserved for JSON and logging is redirected to stderr. `ask_followup_question` tool use is the detection point for HITL attempts; subagent HITL events nest within the subagent's event context.
 
+## Typed Protocol Models
 
+The 6 currently-supported providers (Claude, Codex, Gemini, OpenCode, Qwen, Kimi) have a matching typed event model at [`claudine/lib/src/stream/protocol/<provider>.rs`](claudine/lib/src/stream/protocol/). Each module exports a tagged enum `*Event` that covers every event type the corresponding parser dispatches on, plus one struct per variant payload. Shared design rules across all six modules:
+
+- **`#[serde(tag = "type")]`** — each top-level enum is internally tagged on the `type` field, so each variant's struct receives the remaining fields.
+- **Every field is optional.** Structs use `#[serde(default)]` on every field and are `#[derive(Debug, Default, Deserialize)]`. There is no `#[serde(deny_unknown_fields)]` anywhere in `protocol/`, so provider format evolution (new fields, new subtypes) never breaks deserialization.
+- **No unknown-variant fallback.** When a provider emits an event whose `type` string isn't listed in the enum, `serde_json::from_value::<*Event>` returns `Err(_)`. The parser's `feed_line` treats that `Err(_)` as a silent skip, matching the legacy `_ => Ok(None)` arm.
+- **Helper methods carry alias resolution.** Instead of exposing every field alias to handlers, each struct provides `resolved_*` / `take_*` helpers (e.g. `resolved_tool_name()`, `take_input()`) that walk all accepted aliases in a single place. Handlers call one method and are oblivious to the underlying aliasing.
+
+### Module layout
+
+```
+claudine/lib/src/stream/protocol/
+├── mod.rs       — module root + `ProtocolError` (documentation-only today)
+├── claude.rs    — ClaudeEvent + 14 structs
+├── codex.rs     — CodexEvent + 8 structs, dotted type names
+├── gemini.rs    — GeminiEvent + 9 structs
+├── opencode.rs  — OpenCodeEvent + 12 structs, `#[serde(flatten)]` for dual-location fields
+├── qwen.rs      — QwenEvent + 9 structs, subtype-dispatched system events
+└── kimi.rs      — KimiEvent + 10 structs, three-way content fallback
+```
+
+Every protocol module has its own `#[cfg(test)] mod tests` block covering each event variant, the major field aliases, and the `unknown_event_type_fails_typed` contract. Those tests deserialize raw JSON strings to guarantee the serde derives line up with the wire format — they are the safety net for provider format drift.
+
+### Two-pass `feed_line` dispatch
+
+Every parser now uses the same shape:
+
+```rust
+fn feed_line(&mut self, line: &str) -> Result<Option<StreamChunk>, StreamParseError> {
+    // 1. line trimming + empty-line shortcut (unchanged)
+
+    // 2. Parse as `Value` first — preserves malformed-line handling
+    let raw: Value = serde_json::from_str(line).map_err(...)?;
+
+    // 3. Extract event_type for tracing (the only residual `.get("type")`
+    //    call in the parsers)
+    let event_type = raw.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    super::trace_parser_event(Provider::<X>, event_type, self.line_num);
+
+    // 4. Typed dispatch
+    match serde_json::from_value::<<X>Event>(raw.clone()) {
+        Ok(<X>Event::<Variant>(payload)) => { self.handle_<variant>(payload); Ok(None) }
+        ...
+        Err(_) => Ok(None),  // unknown or schema-mismatched — silently skipped
+    }
+}
+```
+
+Handler methods take the typed struct by value (e.g. `fn handle_result(&mut self, result: ClaudeResult, raw: Value)`) so there is no lingering `fn handle_*(&mut self, obj: &Value)` in any parser. The only handlers that still accept a raw `Value` are the two that construct a `raw_summary` for the execution summary (Claude's `handle_result`, Codex's `handle_turn_completed`, Gemini's `handle_result`, Qwen's `handle_result`) — those take both the typed event and the `raw` clone so the compact "large-arrays stripped" summary can be built from the original JSON.
+
+### Per-provider idioms worth knowing
+
+**Claude** — `ClaudeEvent` has separate `Init` and `System` variants that both wrap `ClaudeInit`, so `init` and `system` events funnel into the same handler via `Ok(ClaudeEvent::Init(init) | ClaudeEvent::System(init))`. `ContentBlockStart` is its own variant and the parser checks `content_block.kind == "tool_use"` before forwarding via `ClaudeContentBlock::into_tool_use()`. `ClaudeResult::effective_cost_usd()` picks `total_cost_usd` over the legacy `cost_usd`.
+
+**Codex** — Dotted event names work cleanly with `#[serde(rename = "thread.created")]` on each variant. `turn.started` uses an empty `CodexTurnStarted {}` struct because internally-tagged unit variants in serde have quirky behavior around extra fields; empty structs silently accept any residual fields. `CodexItem` is a single flat struct covering every item subtype (agent_message, tool_use, tool_call, permission_request, etc.), with associated functions `is_tool_item_kind()` and `is_permission_item_kind()` that replace the old string-matching helpers. The `item.started` → `item.completed` merge is now a typed operation via `CodexItem::merge_started()` instead of a `Value` map-overlay. Codex keeps `StreamParseError::Fatal` (not `MalformedLine`) for malformed JSON.
+
+**Gemini** — `GeminiMessage.content` stays `Option<Value>` because Gemini emits content as either a plain string or an array of `{text: ...}` parts; the handler branches on `content_val.as_str()` vs `content_val.as_array()` after typed deserialization. The severity-based warning/error branching in `handle_error` stays in the handler, since it affects sink dispatch rather than field extraction.
+
+**OpenCode** — The most complex parser. Tool fields can appear at the top level of an event OR nested inside a `part` object, and `OpenCodeTool` captures both via `#[serde(flatten)] top: OpenCodeToolFields` plus a separate `part: Option<OpenCodeToolFields>`. A single `OpenCodeTool::resolve()` method collapses both locations into a `ResolvedOpenCodeTool` (top-level fields win; `part` fills gaps), replacing the 7 legacy `opencode_*` helper functions. `OpenCodeText::resolved_text()` walks `part.text` → top-level `text` → top-level `content` in one place. `OpenCodeStepStart` uses `#[serde(rename = "sessionID")]` for the camelCase session ID.
+
+**Qwen** — The `system` event is dispatched only when `subtype == "session_start"` via `QwenSystem::is_session_start()` + `into_init()`. `QwenEvent::Assistant` (where the event type is literally `"assistant"`) skips the `role == "assistant"` filter that `QwenEvent::Message` / `QwenEvent::AssistantMessage` require, matching the legacy parser's dual-check logic. `QwenTool::take_input()` accepts all five aliases: `input`, `parameters`, `arguments`, `args`, `params` — the legacy type audit caught `args`/`params` as missing from the design doc, and the protocol module fixes that.
+
+**Kimi** — `KimiContent::resolved_text()` implements the three-way fallback (`content` array → top-level `text` → `content` as string) in one method. `KimiStatusUpdate::resolved_context()` returns a `KimiContextUsage` struct whose `computed_percent()` method falls back to computing `used/total * 100.0` when the provider doesn't pre-supply `percent` — the 80% warning logic stays in the parser, not the type, because it's a sink-dispatch concern. Tool input aliases include `args`/`params` for parity with Qwen.
+
+### Why `raw.clone()` is acceptable
+
+The `feed_line` pattern parses the line twice: once into `Value`, once into the typed enum via `from_value`. That clone is unavoidable today because we need both the malformed-line error path and the raw `Value` for result summaries. The cost is negligible — result/summary events are rare, and the clone is a single `serde_json::Value` (not a full string reparse). Cleaning this up would require either collapsing the raw `Value` needs into the typed structs (via `#[serde(flatten)] extra: serde_json::Map<String, Value>`) or introducing a second code path that parses only the typed enum and loses the raw fallback.
+
+### What still uses `.get()`
+
+A `rg '\.get\('` across the parser files turns up only legitimate uses after the migration:
+
+1. **`raw.get("type")` in each `feed_line`** — event-type extraction for the tracing call, invoked before typed dispatch.
+2. **`part.get("text")` in Gemini, Qwen, Codex content walkers** — iterating a `Vec<Value>` whose entries are shape-diverse content parts (text, image, tool_use, etc.) that the typed layer intentionally leaves as `Value`.
+3. **`self.tool_uses.get(id)` / `.remove(id)`** — `HashMap<String, ...>` lookups, not `Value` extraction.
+4. **Test assertions like `raw.get("tools").is_none()`** — verifying the `raw_summary` compaction pass stripped the large arrays.
+
+No handler method accepts `&Value` for field extraction anymore.
