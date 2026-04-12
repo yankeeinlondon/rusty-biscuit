@@ -346,6 +346,7 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
             },
             rate_limit: None,
             context_usage: None,
+            badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
         }

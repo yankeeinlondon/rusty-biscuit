@@ -201,6 +201,7 @@ mod tests {
             tool_calls: Some(5),
             rate_limit: None,
             context_usage: None,
+            badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
         }

@@ -286,6 +286,7 @@ impl<S: StreamEventSink + Send> StreamParser for GeminiStreamParser<S> {
             },
             rate_limit: None,
             context_usage: None,
+            badges: Vec::new(),
             raw_summary: self.raw_summary,
             stderr_text: None,
         }

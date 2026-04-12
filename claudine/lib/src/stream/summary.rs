@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::badges::SessionBadge;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
 
@@ -65,6 +66,8 @@ pub struct StreamExecutionSummary {
     pub rate_limit: Option<RateLimitInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_usage: Option<ContextUsage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub badges: Vec<SessionBadge>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_summary: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -91,6 +94,7 @@ impl Default for StreamExecutionSummary {
             tool_calls: None,
             rate_limit: None,
             context_usage: None,
+            badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
         }
@@ -139,6 +143,7 @@ mod tests {
             tool_calls: Some(5),
             rate_limit: None,
             context_usage: None,
+            badges: Vec::new(),
             raw_summary: Some(serde_json::json!({"stop_reason": "end_turn"})),
             stderr_text: Some("stderr text".into()),
         };
@@ -206,5 +211,38 @@ mod tests {
         assert_eq!(summary.error_kind.as_deref(), Some("billing_error"));
         let json = serde_json::to_string(&summary).unwrap();
         assert!(json.contains("billing_error"));
+    }
+
+    #[test]
+    fn badges_default_is_empty_vec() {
+        let summary = StreamExecutionSummary::default();
+        assert!(summary.badges.is_empty());
+    }
+
+    #[test]
+    fn empty_badges_vec_is_skipped_in_serde_output() {
+        let summary = StreamExecutionSummary::default();
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(!json.contains("badges"));
+    }
+
+    #[test]
+    fn non_empty_badges_vec_round_trips() {
+        use crate::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
+        let summary = StreamExecutionSummary {
+            badges: vec![SessionBadge {
+                category: BadgeCategory::Billing,
+                severity: BadgeSeverity::Error,
+                label: "Billing".into(),
+                message: "Insufficient credits".into(),
+                remediation_url: Some("https://console.anthropic.com/settings/billing".into()),
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(json.contains("Insufficient credits"));
+        let restored: StreamExecutionSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.badges.len(), 1);
+        assert_eq!(restored.badges[0].category, BadgeCategory::Billing);
     }
 }

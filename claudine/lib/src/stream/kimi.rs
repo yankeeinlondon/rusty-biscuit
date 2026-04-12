@@ -289,6 +289,7 @@ impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
             },
             rate_limit: None,
             context_usage: self.context_usage,
+            badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
         }
