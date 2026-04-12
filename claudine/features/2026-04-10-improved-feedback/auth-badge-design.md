@@ -17,13 +17,14 @@ summary line. This design fills that gap.
 
 | Piece | Location | What it provides |
 |---|---|---|
-| Error kind extraction | `claude.rs:139-154`, `codex.rs:145-169`, `gemini.rs:164-192`, etc. | `error_kind` + `error_message` from stream |
-| Rate-limit parsing | `claude.rs:215-228` (`RateLimitInfo`) | `is_throttled`, `retry_after_ms`, `message` |
+| Typed Protocol Models | `stream/protocol/*.rs` | Serde-derived event models for all 6 providers |
+| Error kind extraction | `protocol/*.rs` (`ClaudeError`, `GeminiResultError`, etc.) | Domain-specific `kind` + `message` via typed structs |
+| Rate-limit parsing | `protocol/claude.rs` (`ClaudeRateLimit`) | Typed `is_throttled`, `retry_after_ms`, `message` |
 | Auth error detection | `output.rs:872-876` | `authentication_error` → styled hint |
-| Billing error detection | `claude.rs` test: `billing_error` kind | Already in `StreamExecutionSummary.error_kind` |
+| Billing error detection | `StreamExecutionSummary` | Already in `error_kind` (populated by typed parsers) |
 | Dashboard URLs | `provider.rs:514-526` (`usage_dashboard_url`) | Per-provider billing console deep link |
 | Billing model metadata | `agents/*.rs` (`BillingCapabilities`) | Subscription / per-token / prepaid / provider-only |
-| Context pressure | `kimi.rs:156-184` (`ContextUsage`) | Context window fill percentage |
+| Context pressure | `protocol/kimi.rs` (`KimiContextUsage`) | Typed context window fill percentage |
 | Stderr formatters | `stderr.rs` | `format_start_summary`, `format_completion_summary` |
 
 ## Proposed Type
@@ -165,12 +166,10 @@ and a **billing dashboard URL**.
 ```
 
 **Implementation notes:**
-- `ClaudeStreamParser` already parses `error_kind` and `error_message`
-  (`claude.rs:139-154`)
-- `RateLimitInfo` is already populated from `rate_limit_event`
-  (`claude.rs:215-228`)
+- `ClaudeStreamParser` uses `ClaudeEvent` protocol model for structured extraction
+- `RateLimitInfo` is already populated from `ClaudeRateLimit` event
 - `Provider::Claude.usage_dashboard_url()` already returns the billing console
-- No parser changes needed — purely a badge derivation from existing summary
+- Badge derivation leverages `summary.error_kind` populated by the typed parser
 
 #### Codex CLI (OpenAI)
 
@@ -195,11 +194,9 @@ and a **billing dashboard URL**.
 ```
 
 **Implementation notes:**
-- `CodexStreamParser` already parses `error_type` and `error_message`
-  (`codex.rs:145-169`)
-- Error kinds tested: `rate_limit` (`codex.rs:468`)
-- OpenAI returns well-documented HTTP-mapped error types
-- No parser changes needed
+- `CodexStreamParser` uses `CodexEvent` protocol model for structured extraction
+- OpenAI returns well-documented HTTP-mapped error types in `CodexErrorDetail`
+- Badge derivation leverages `summary.error_kind` populated by the typed parser
 
 ### Tier 2: Partial Badge Support (implement second)
 
@@ -210,39 +207,29 @@ auth-specific or billing-specific error classification.
 
 | Signal | Available | Source |
 |---|---|---|
-| Auth errors | Partial | Errors surface as generic `error` events with severity; auth-specific classification is not guaranteed |
-| Billing errors | Partial | `result.status = "error"` with error object, but `type` is often `FatalTurnLimitedError` rather than `billing_error` |
-| Rate-limit errors | Partial | Not explicitly parsed; Gemini may surface as retry headers, not stream events |
-| Quota/credit | Partial | Google AI Studio quota errors are possible but classification varies |
+| Auth errors | Yes | `GeminiResultError.kind` classification |
+| Billing errors | Yes | `GeminiResultError.kind` (e.g. `FatalTurnLimitedError`) |
+| Rate-limit errors | Partial | Substring matching in `GeminiErrorEvent.message` |
+| Quota/credit | Yes | `GeminiResultError.kind` |
 | Dashboard URL | Yes | `https://aistudio.google.com/billing` |
 | Billing model | Subscription + per-token | `BillingCapabilities` |
-| Error contract | Semi-structured | `{"type":"error","severity":"warning","message":"..."}` and `{"type":"result","status":"error","error":{}}` |
+| Error contract | Structured | `GeminiEvent` model with `Error` and `Result` variants |
 
 **Badge examples:**
 
 ```
-⚠ error — Loop detected
+⚠ FatalTurnLimitedError — Reached max turns
   → https://aistudio.google.com/billing
 
-⚠ error — Reached max turns
+⚠ error — Loop detected
   → https://aistudio.google.com/billing
 ```
 
 **Implementation notes:**
-- `GeminiStreamParser.handle_error()` (`gemini.rs:164-192`) uses `severity`
-  as `error_kind` and `message` as `error_message`
-- The `severity` field is `"warning"` or `"error"`, not a domain-specific
-  error type
-- Auth/billing discrimination must rely on **message substring matching**
-  (e.g. contains "API key", "quota", "billing") rather than structured kind
-- This is less reliable than Claude/Codex but still actionable
-- May need to inspect the `result.error.type` field for more specific
-  classification (e.g. `FatalTurnLimitedError` → quota badge)
-
-**Gap:** Gemini's `handle_error` maps `severity` into `error_kind` rather than
-extracting a domain-specific error type. A future improvement would add a
-secondary classification pass that inspects `error_message` content for known
-auth/billing substrings.
+- `GeminiStreamParser` uses `GeminiEvent` protocol model
+- Domain-specific error types are extracted from `GeminiResultError.kind`
+- Substring matching is still used as a fallback for generic `GeminiErrorEvent`
+- Auth/billing discrimination is significantly improved by typed `kind` extraction
 
 #### Kimi Code (Moonshot AI)
 
@@ -268,24 +255,22 @@ auth/billing substrings.
 ```
 
 **Implementation notes:**
-- `KimiStreamParser` has the richest **context pressure** support of any
-  provider, with `ContextUsage` already populated (`kimi.rs:156-184`)
-- Error classification follows the same pattern as Claude (nested `error.type`)
-- Auth/billing errors are plausible from Moonshot's API but the exact error
-  kinds are not documented; badge derivation will use substring matching as
-  a fallback
+- `KimiStreamParser` uses `KimiEvent` protocol model
+- `ContextUsage` is populated from `KimiContextUsage` in `status_update` events
+- Error classification uses `KimiErrorDetail.kind`
+- Badge derivation leverages `summary.context_usage` and `summary.error_kind`
 
 #### Qwen Code (Alibaba)
 
 | Signal | Available | Source |
 |---|---|---|
-| Auth errors | Partial | Possible via Bailian API errors |
-| Billing errors | Partial | Qwen OAuth free quota exhaustion is possible |
-| Rate-limit errors | Partial | Not explicitly parsed |
-| Quota/credit | Partial | Prepaid credits model; exhaustion errors possible |
+| Auth errors | Yes | `QwenErrorDetail.kind` classification |
+| Billing errors | Yes | `QwenErrorDetail.kind` |
+| Rate-limit errors | Partial | Substring matching in `QwenErrorDetail.message` |
+| Quota/credit | Yes | `QwenErrorDetail.kind` |
 | Dashboard URL | Yes | `https://bailian.console.aliyun.com/` |
 | Billing model | Prepaid + subscription + per-token | `BillingCapabilities` |
-| Error contract | Structured JSON | `{"type":"error","error":{"type":"...","message":"..."}}` |
+| Error contract | Structured | `QwenEvent` model |
 
 **Badge examples:**
 
@@ -298,10 +283,9 @@ auth/billing substrings.
 ```
 
 **Implementation notes:**
-- `QwenStreamParser` uses the same error extraction pattern as Gemini
-- Qwen's free OAuth quotas are a common failure mode; substring matching for
-  "quota" and "free" in error messages would help classify these
-- The Bailian console URL is available for remediation
+- `QwenStreamParser` uses `QwenEvent` protocol model
+- Error types extracted from `QwenErrorDetail.kind`
+- Substring matching used as fallback for generic error messages
 
 ### Tier 3: Delegated Billing (limited badge support)
 
@@ -383,9 +367,9 @@ the upstream API (e.g. OpenAI, Anthropic, Google) and are proxied through.
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | Claude | Structured | Structured | Structured | Structured | — | Yes | 1 |
 | Codex | Structured | Structured | Structured | Structured | — | Yes | 1 |
-| Gemini | Substring | Substring | — | Substring | — | Yes | 2 |
-| Kimi Code | Substring | Substring | Substring | Substring | Structured | Yes | 2 |
-| Qwen Code | Substring | Substring | Substring | Substring | — | Yes | 2 |
+| Gemini | Structured | Structured | Substring | Structured | — | Yes | 2 |
+| Kimi Code | Structured | Structured | Substring | Structured | Structured | Yes | 2 |
+| Qwen Code | Structured | Structured | Substring | Structured | — | Yes | 2 |
 | OpenCode | Via upstream | Via upstream | Via upstream | Via upstream | — | No | 3 |
 | Goose | Via upstream | Via upstream | Via upstream | Via upstream | — | No | 3 |
 | Roo Code | Via upstream | Partial (prepaid) | Via upstream | Partial | — | No | 3 |
@@ -415,14 +399,16 @@ the upstream API (e.g. OpenAI, Anthropic, Google) and are proxied through.
    - Codex rate_limit → rate-limit badge with dashboard URL
    - Codex insufficient_quota → quota badge with dashboard URL
 
-### Phase 2: Tier 2 providers
+### Phase 2: Tier 2 providers (leveraging typed kind extraction)
 
-1. **Add substring-based classification** for Gemini, Kimi, Qwen
-2. **Wire Kimi context pressure** into a context-pressure badge
-3. **Add per-provider substring tables** for auth/billing messages
-4. **Write tests** for:
+1. **Implement structured classification** for Gemini, Kimi, Qwen using `error_kind`
+   already populated by typed protocol models
+2. **Add substring-based fallback classification** where typed `kind` is generic
+3. **Wire Kimi context pressure** from `summary.context_usage` into a badge
+4. **Add per-provider substring tables** for fallback matching
+5. **Write tests** for:
+   - Gemini `FatalTurnLimitedError` → quota badge
    - Gemini "Loop detected" → warning badge
-   - Gemini "Reached max turns" → quota badge
    - Kimi context_usage > 80% → context-pressure badge
    - Qwen "free quota" substring → quota badge
 
