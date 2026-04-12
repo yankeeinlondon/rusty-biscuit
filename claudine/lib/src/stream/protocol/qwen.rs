@@ -73,7 +73,48 @@ pub struct QwenMessage {
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
-    pub content: Option<Value>,
+    pub content: Option<QwenMessageContent>,
+}
+
+impl QwenMessage {
+    /// Extract the text content with the parser's two-way fallback:
+    /// array of `{text: ...}` parts → plain string → `None`.
+    pub fn resolved_text(self) -> Option<String> {
+        let content = self.content?;
+        match content {
+            QwenMessageContent::Parts(parts) => {
+                let mut collected = String::new();
+                for part in parts {
+                    if let Some(text) = part.text {
+                        collected.push_str(&text);
+                    }
+                }
+                if collected.is_empty() {
+                    None
+                } else {
+                    Some(collected)
+                }
+            }
+            QwenMessageContent::Text(text) if !text.is_empty() => Some(text),
+            QwenMessageContent::Text(_) => None,
+        }
+    }
+}
+
+/// Qwen's `message.content` accepts either a Gemini-style array of
+/// [`QwenContentPart`] entries or a plain string. Order matters: the array
+/// variant must come first so a JSON array doesn't fall through to `Text`.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum QwenMessageContent {
+    Parts(Vec<QwenContentPart>),
+    Text(String),
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct QwenContentPart {
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -256,7 +297,7 @@ mod tests {
             panic!("expected Message");
         };
         assert_eq!(msg.role.as_deref(), Some("assistant"));
-        assert!(msg.content.is_some());
+        assert_eq!(msg.resolved_text(), Some("Hello from Qwen".into()));
     }
 
     #[test]
@@ -266,10 +307,7 @@ mod tests {
         let QwenEvent::Message(msg) = event else {
             panic!("expected Message");
         };
-        assert_eq!(
-            msg.content.as_ref().and_then(Value::as_str),
-            Some("Plain string content")
-        );
+        assert_eq!(msg.resolved_text(), Some("Plain string content".into()));
     }
 
     #[test]

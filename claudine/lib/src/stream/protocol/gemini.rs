@@ -34,14 +34,62 @@ pub struct GeminiInit {
 }
 
 /// Assistant/user message. The parser filters on `role == "assistant"` before
-/// extracting text. `content` can arrive as either a plain string or an array
-/// of `{text: ...}` parts.
+/// extracting text. `content` is typed as [`GeminiMessageContent`] which
+/// accepts both Gemini's real plain-string format and the defensive array
+/// fallback shape. `delta` is captured from streaming-mode messages even
+/// though arrival of the event itself is what drives streaming.
 #[derive(Debug, Default, Deserialize)]
 pub struct GeminiMessage {
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
-    pub content: Option<Value>,
+    pub content: Option<GeminiMessageContent>,
+    #[serde(default)]
+    pub delta: Option<bool>,
+}
+
+impl GeminiMessage {
+    /// Extract the text content with the parser's three-way fallback:
+    /// plain string → array of `{text: ...}` parts → `None`.
+    pub fn resolved_text(self) -> Option<String> {
+        let content = self.content?;
+        match content {
+            GeminiMessageContent::Text(text) if !text.is_empty() => Some(text),
+            GeminiMessageContent::Text(_) => None,
+            GeminiMessageContent::Parts(parts) => {
+                let mut collected = String::new();
+                for part in parts {
+                    if let Some(text) = part.text {
+                        collected.push_str(&text);
+                    }
+                }
+                if collected.is_empty() {
+                    None
+                } else {
+                    Some(collected)
+                }
+            }
+        }
+    }
+}
+
+/// Gemini's `message.content` arrives as a plain string in the canonical
+/// format, but historical and defensive paths emit an array of
+/// [`GeminiContentPart`] entries. This untagged enum accepts both shapes so
+/// the parser doesn't have to walk a `serde_json::Value`.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum GeminiMessageContent {
+    Text(String),
+    Parts(Vec<GeminiContentPart>),
+}
+
+/// Single entry in a `message.content` array. Only `text` is consumed today;
+/// other fields are tolerated but ignored.
+#[derive(Debug, Default, Deserialize)]
+pub struct GeminiContentPart {
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 /// `error` event. Gemini's error events carry a `severity` that determines
@@ -117,8 +165,12 @@ impl GeminiToolUse {
         self.tool_name.as_deref().or(self.name.as_deref())
     }
 
-    pub fn resolved_input(self) -> Option<Value> {
-        self.parameters.or(self.input)
+    pub fn resolved_tool_id(&self) -> Option<&str> {
+        self.tool_id.as_deref()
+    }
+
+    pub fn take_input(&mut self) -> Option<Value> {
+        self.parameters.take().or_else(|| self.input.take())
     }
 }
 
@@ -169,7 +221,7 @@ mod tests {
             panic!("expected Message");
         };
         assert_eq!(msg.role.as_deref(), Some("assistant"));
-        assert_eq!(msg.content.as_ref().and_then(Value::as_str), Some("Hello"));
+        assert_eq!(msg.resolved_text(), Some("Hello".into()));
     }
 
     #[test]
@@ -180,8 +232,18 @@ mod tests {
         let GeminiEvent::Message(msg) = event else {
             panic!("expected Message");
         };
-        let arr = msg.content.as_ref().and_then(Value::as_array).unwrap();
-        assert_eq!(arr.len(), 2);
+        assert_eq!(msg.resolved_text(), Some("Hi there".into()));
+    }
+
+    #[test]
+    fn gemini_message_delta_field_captured() {
+        let event =
+            parse(r#"{"type":"message","role":"assistant","content":"chunk","delta":true}"#);
+        let GeminiEvent::Message(msg) = event else {
+            panic!("expected Message");
+        };
+        assert_eq!(msg.delta, Some(true));
+        assert_eq!(msg.resolved_text(), Some("chunk".into()));
     }
 
     #[test]
@@ -238,23 +300,23 @@ mod tests {
         let event = parse(
             r#"{"type":"tool_use","tool_name":"search","tool_id":"t1","parameters":{"query":"rust"}}"#,
         );
-        let GeminiEvent::ToolUse(tu) = event else {
+        let GeminiEvent::ToolUse(mut tu) = event else {
             panic!("expected ToolUse");
         };
         assert_eq!(tu.resolved_tool_name(), Some("search"));
-        assert_eq!(tu.tool_id.as_deref(), Some("t1"));
-        let input = tu.resolved_input().expect("input");
+        assert_eq!(tu.resolved_tool_id(), Some("t1"));
+        let input = tu.take_input().expect("input");
         assert_eq!(input.get("query").and_then(Value::as_str), Some("rust"));
     }
 
     #[test]
     fn gemini_tool_use_input_alias() {
         let event = parse(r#"{"type":"tool_use","name":"search","input":{"query":"fallback"}}"#);
-        let GeminiEvent::ToolUse(tu) = event else {
+        let GeminiEvent::ToolUse(mut tu) = event else {
             panic!("expected ToolUse");
         };
         assert_eq!(tu.resolved_tool_name(), Some("search"));
-        let input = tu.resolved_input().expect("input");
+        let input = tu.take_input().expect("input");
         assert_eq!(input.get("query").and_then(Value::as_str), Some("fallback"));
     }
 

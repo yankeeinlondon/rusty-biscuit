@@ -11,6 +11,11 @@ use serde_json::Value;
 /// Tagged enum over all Codex CLI stream event variants dispatched by the
 /// parser. Unknown event types fail typed deserialization and are handled by
 /// the parser's fallback arm.
+///
+/// Top-level shorthand events (`item.tool_use`, `tool_use`, `item.tool_result`,
+/// `tool_result`) carry tool fields directly, without a nested item type tag,
+/// so they use [`CodexToolItemFields`] rather than the tagged [`CodexItem`]
+/// enum.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
 pub enum CodexEvent {
@@ -35,13 +40,13 @@ pub enum CodexEvent {
     #[serde(rename = "item.completed")]
     ItemCompleted(CodexItemEnvelope),
     #[serde(rename = "item.tool_use")]
-    ItemToolUse(CodexItem),
+    ItemToolUse(CodexToolItemFields),
     #[serde(rename = "tool_use")]
-    ToolUse(CodexItem),
+    ToolUse(CodexToolItemFields),
     #[serde(rename = "item.tool_result")]
-    ItemToolResult(CodexItem),
+    ItemToolResult(CodexToolItemFields),
     #[serde(rename = "tool_result")]
-    ToolResult(CodexItem),
+    ToolResult(CodexToolItemFields),
 }
 
 /// `thread.created` / `thread.started` payload. Some Codex builds emit
@@ -153,23 +158,229 @@ pub struct CodexItemEnvelope {
     pub item: Option<CodexItem>,
 }
 
-/// Flattened representation of a Codex item (agent_message, tool_use,
-/// tool_result, permission_request, etc.). The parser branches on `kind` for
-/// dispatch and accepts multiple aliases for tool fields.
+/// Tagged enum over the `item.type` discriminator that appears inside
+/// `item.started` / `item.completed` envelopes. Tool variants share
+/// [`CodexToolItemFields`]; permission variants share [`CodexPermissionItem`];
+/// the `Reasoning` variant is a separate shape because Codex emits an
+/// optional `summary` block for it. Unknown item types fall into [`Unknown`]
+/// so a single bad variant can't fail the whole envelope.
+///
+/// [`Unknown`]: CodexItem::Unknown
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CodexItem {
+    AgentMessage(CodexAgentMessage),
+    ToolUse(CodexToolItemFields),
+    ToolCall(CodexToolItemFields),
+    McpToolCall(CodexToolItemFields),
+    WebSearch(CodexToolItemFields),
+    CommandExec(CodexToolItemFields),
+    PatchApply(CodexToolItemFields),
+    ImageGeneration(CodexToolItemFields),
+    ViewImage(CodexToolItemFields),
+    PermissionRequest(CodexPermissionItem),
+    ApprovalRequest(CodexPermissionItem),
+    UserInputRequest(CodexPermissionItem),
+    Reasoning(CodexReasoning),
+    #[serde(other)]
+    Unknown,
+}
+
+impl CodexItem {
+    /// Whether this variant carries a tool item payload (any of the
+    /// `tool_use`, `tool_call`, `mcp_tool_call`, etc. shapes).
+    pub fn is_tool_item(&self) -> bool {
+        matches!(
+            self,
+            CodexItem::ToolUse(_)
+                | CodexItem::ToolCall(_)
+                | CodexItem::McpToolCall(_)
+                | CodexItem::WebSearch(_)
+                | CodexItem::CommandExec(_)
+                | CodexItem::PatchApply(_)
+                | CodexItem::ImageGeneration(_)
+                | CodexItem::ViewImage(_)
+        )
+    }
+
+    /// Whether this variant carries a permission/approval/user-input
+    /// payload that should fan out to the permission sink hook.
+    pub fn is_permission_item(&self) -> bool {
+        matches!(
+            self,
+            CodexItem::PermissionRequest(_)
+                | CodexItem::ApprovalRequest(_)
+                | CodexItem::UserInputRequest(_)
+        )
+    }
+
+    /// Borrow the tool fields if this variant is a tool item.
+    pub fn as_tool_fields(&self) -> Option<&CodexToolItemFields> {
+        match self {
+            CodexItem::ToolUse(f)
+            | CodexItem::ToolCall(f)
+            | CodexItem::McpToolCall(f)
+            | CodexItem::WebSearch(f)
+            | CodexItem::CommandExec(f)
+            | CodexItem::PatchApply(f)
+            | CodexItem::ImageGeneration(f)
+            | CodexItem::ViewImage(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// Mutable borrow of the tool fields, used by the parser to merge
+    /// `item.started` into `item.completed`.
+    pub fn as_tool_fields_mut(&mut self) -> Option<&mut CodexToolItemFields> {
+        match self {
+            CodexItem::ToolUse(f)
+            | CodexItem::ToolCall(f)
+            | CodexItem::McpToolCall(f)
+            | CodexItem::WebSearch(f)
+            | CodexItem::CommandExec(f)
+            | CodexItem::PatchApply(f)
+            | CodexItem::ImageGeneration(f)
+            | CodexItem::ViewImage(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// Borrow the permission item if applicable.
+    pub fn as_permission(&self) -> Option<&CodexPermissionItem> {
+        match self {
+            CodexItem::PermissionRequest(p)
+            | CodexItem::ApprovalRequest(p)
+            | CodexItem::UserInputRequest(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Borrow the agent message if applicable.
+    pub fn as_agent_message(&self) -> Option<&CodexAgentMessage> {
+        match self {
+            CodexItem::AgentMessage(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Resolve the item id from whichever sub-payload carries it.
+    pub fn resolved_id(&self) -> Option<&str> {
+        match self {
+            CodexItem::AgentMessage(m) => m.id.as_deref(),
+            CodexItem::PermissionRequest(p)
+            | CodexItem::ApprovalRequest(p)
+            | CodexItem::UserInputRequest(p) => p.id.as_deref(),
+            CodexItem::Reasoning(_) | CodexItem::Unknown => None,
+            _ => self.as_tool_fields().and_then(|f| f.id.as_deref()),
+        }
+    }
+
+    /// Fold the started snapshot into the completed snapshot. The parser
+    /// stores the started form keyed by id and merges when the matching
+    /// `item.completed` arrives. Only tool variants carry merge-eligible
+    /// data today; for other variants the completed snapshot is returned
+    /// unchanged.
+    pub fn merge_started(mut self, started: CodexItem) -> CodexItem {
+        if let (Some(completed_fields), Some(started_fields)) =
+            (self.as_tool_fields_mut(), started.into_tool_fields())
+        {
+            completed_fields.merge_started(started_fields);
+        }
+        self
+    }
+
+    /// Consume the item and return its tool fields, if it carries any.
+    /// Used by [`merge_started`] when folding a stored started snapshot
+    /// into the corresponding completed snapshot.
+    ///
+    /// [`merge_started`]: CodexItem::merge_started
+    pub fn into_tool_fields(self) -> Option<CodexToolItemFields> {
+        match self {
+            CodexItem::ToolUse(f)
+            | CodexItem::ToolCall(f)
+            | CodexItem::McpToolCall(f)
+            | CodexItem::WebSearch(f)
+            | CodexItem::CommandExec(f)
+            | CodexItem::PatchApply(f)
+            | CodexItem::ImageGeneration(f)
+            | CodexItem::ViewImage(f) => Some(f),
+            _ => None,
+        }
+    }
+}
+
+/// Single text part inside an `agent_message.content` array. Codex emits
+/// `{type: "text", text: "..."}` entries; the `type` field is preserved as
+/// `kind` for diagnostics but is not required.
 #[derive(Debug, Default, Deserialize)]
-pub struct CodexItem {
+pub struct CodexContentPart {
     #[serde(rename = "type", default)]
     pub kind: Option<String>,
     #[serde(default)]
+    pub text: Option<String>,
+}
+
+/// Typed `agent_message` body. Either `text` (legacy / synthesized form)
+/// or `content` (the canonical array of [`CodexContentPart`]) carries the
+/// assistant text. The parser concatenates whichever is populated.
+#[derive(Debug, Default, Deserialize)]
+pub struct CodexAgentMessage {
+    #[serde(default)]
     pub id: Option<String>,
-    /// Direct text used by `agent_message` items.
     #[serde(default)]
     pub text: Option<String>,
-    /// Either an array of `{text: ...}` parts (agent_message) or a tool
-    /// response payload (tool_result). The parser branches on `kind` to
-    /// decide how to interpret it.
     #[serde(default)]
-    pub content: Option<Value>,
+    pub content: Option<Vec<CodexContentPart>>,
+}
+
+impl CodexAgentMessage {
+    /// Concatenate all text fragments. Falls back to the top-level `text`
+    /// field if no `content` parts carry text.
+    pub fn collected_text(&self) -> Option<String> {
+        if let Some(parts) = &self.content {
+            let mut collected = String::new();
+            for part in parts {
+                if let Some(text) = &part.text {
+                    collected.push_str(text);
+                }
+            }
+            if !collected.is_empty() {
+                return Some(collected);
+            }
+        }
+        self.text.clone().filter(|s| !s.is_empty())
+    }
+}
+
+/// Permission/approval/user-input item shape. Codex carries `id` and
+/// `name` for these and the parser uses `name` as the tool name placeholder
+/// when fanning out to the permission sink hook.
+#[derive(Debug, Default, Deserialize)]
+pub struct CodexPermissionItem {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// Reasoning item shape. Codex emits a `text` field plus an optional
+/// `summary` payload that is opaque today. The parser does not currently
+/// surface reasoning traces beyond logging.
+#[derive(Debug, Default, Deserialize)]
+pub struct CodexReasoning {
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub summary: Option<Value>,
+}
+
+/// Shared tool item payload reused by every tool-bearing variant of
+/// [`CodexItem`] and by the top-level `item.tool_use` / `tool_use` /
+/// `item.tool_result` / `tool_result` event variants on [`CodexEvent`].
+#[derive(Debug, Default, Deserialize)]
+pub struct CodexToolItemFields {
+    #[serde(default)]
+    pub id: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
@@ -184,32 +395,17 @@ pub struct CodexItem {
     pub output: Option<Value>,
     #[serde(default)]
     pub result: Option<Value>,
+    #[serde(default)]
+    pub content: Option<Value>,
 }
 
-impl CodexItem {
-    pub fn is_tool_item_kind(kind: &str) -> bool {
-        matches!(
-            kind,
-            "tool_use"
-                | "tool_call"
-                | "mcp_tool_call"
-                | "web_search"
-                | "command_exec"
-                | "patch_apply"
-                | "image_generation"
-                | "view_image"
-        )
-    }
-
-    pub fn is_permission_item_kind(kind: &str) -> bool {
-        matches!(
-            kind,
-            "permission_request" | "approval_request" | "user_input_request"
-        )
-    }
-
+impl CodexToolItemFields {
     pub fn resolved_tool_name(&self) -> Option<&str> {
         self.tool_name.as_deref().or(self.name.as_deref())
+    }
+
+    pub fn resolved_tool_id(&self) -> Option<&str> {
+        self.id.as_deref()
     }
 
     pub fn resolved_input(&self) -> Option<&Value> {
@@ -226,21 +422,12 @@ impl CodexItem {
             .or(self.content.as_ref())
     }
 
-    /// Fold a previously-seen `item.started` record into a
-    /// corresponding `item.completed` record. Any field missing on
-    /// `self` (the completed event) is inherited from `started`.
-    pub fn merge_started(mut self, started: CodexItem) -> CodexItem {
-        if self.kind.is_none() {
-            self.kind = started.kind;
-        }
+    /// Fold a previously-seen `item.started` snapshot into this completed
+    /// snapshot. Any field missing on `self` (completed) is inherited from
+    /// `started`.
+    pub fn merge_started(&mut self, started: CodexToolItemFields) {
         if self.id.is_none() {
             self.id = started.id;
-        }
-        if self.text.is_none() {
-            self.text = started.text;
-        }
-        if self.content.is_none() {
-            self.content = started.content;
         }
         if self.name.is_none() {
             self.name = started.name;
@@ -263,7 +450,9 @@ impl CodexItem {
         if self.result.is_none() {
             self.result = started.result;
         }
-        self
+        if self.content.is_none() {
+            self.content = started.content;
+        }
     }
 }
 
@@ -348,8 +537,10 @@ mod tests {
             panic!("expected ItemStarted");
         };
         let item = env.item.expect("item");
-        assert_eq!(item.kind.as_deref(), Some("agent_message"));
-        assert_eq!(item.text.as_deref(), Some("hi"));
+        let msg = item.as_agent_message().expect("agent_message");
+        assert_eq!(msg.id.as_deref(), Some("item_0"));
+        assert_eq!(msg.text.as_deref(), Some("hi"));
+        assert_eq!(msg.collected_text(), Some("hi".into()));
     }
 
     #[test]
@@ -361,24 +552,69 @@ mod tests {
             panic!("expected ItemCompleted");
         };
         let item = env.item.expect("item");
-        assert!(CodexItem::is_tool_item_kind(item.kind.as_deref().unwrap()));
-        assert_eq!(item.resolved_tool_name(), Some("bash"));
+        assert!(item.is_tool_item());
+        let fields = item.as_tool_fields().expect("tool fields");
+        assert_eq!(fields.resolved_tool_name(), Some("bash"));
         assert_eq!(
-            item.resolved_input()
+            fields
+                .resolved_input()
                 .and_then(|v| v.get("command"))
                 .and_then(Value::as_str),
             Some("ls")
         );
-        assert_eq!(item.resolved_output().and_then(Value::as_str), Some("ok"));
+        assert_eq!(fields.resolved_output().and_then(Value::as_str), Some("ok"));
+    }
+
+    #[test]
+    fn codex_item_completed_typed_agent_message_content() {
+        let event = parse(
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","content":[{"type":"text","text":"Hi "},{"type":"text","text":"there"}]}}"#,
+        );
+        let CodexEvent::ItemCompleted(env) = event else {
+            panic!("expected ItemCompleted");
+        };
+        let item = env.item.expect("item");
+        let msg = item.as_agent_message().expect("agent_message");
+        let parts = msg.content.as_ref().expect("content");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].kind.as_deref(), Some("text"));
+        assert_eq!(parts[0].text.as_deref(), Some("Hi "));
+        assert_eq!(msg.collected_text(), Some("Hi there".into()));
+    }
+
+    #[test]
+    fn codex_item_permission_request_typed() {
+        let event = parse(
+            r#"{"type":"item.started","item":{"id":"perm-1","type":"permission_request","name":"bash"}}"#,
+        );
+        let CodexEvent::ItemStarted(env) = event else {
+            panic!("expected ItemStarted");
+        };
+        let item = env.item.expect("item");
+        assert!(item.is_permission_item());
+        let perm = item.as_permission().expect("permission");
+        assert_eq!(perm.id.as_deref(), Some("perm-1"));
+        assert_eq!(perm.name.as_deref(), Some("bash"));
+    }
+
+    #[test]
+    fn codex_item_unknown_kind_falls_back() {
+        let event =
+            parse(r#"{"type":"item.started","item":{"id":"x","type":"some_brand_new_kind"}}"#);
+        let CodexEvent::ItemStarted(env) = event else {
+            panic!("expected ItemStarted");
+        };
+        let item = env.item.expect("item");
+        assert!(matches!(item, CodexItem::Unknown));
     }
 
     #[test]
     fn codex_top_level_tool_use_deserializes() {
         let event = parse(r#"{"type":"item.tool_use","name":"bash"}"#);
-        let CodexEvent::ItemToolUse(item) = event else {
+        let CodexEvent::ItemToolUse(fields) = event else {
             panic!("expected ItemToolUse");
         };
-        assert_eq!(item.name.as_deref(), Some("bash"));
+        assert_eq!(fields.resolved_tool_name(), Some("bash"));
     }
 
     #[test]
@@ -389,30 +625,29 @@ mod tests {
 
     #[test]
     fn codex_merge_started_populates_missing_fields() {
-        let started = CodexItem {
-            kind: Some("tool_use".into()),
+        let started = CodexItem::ToolUse(CodexToolItemFields {
             id: Some("tu-1".into()),
             name: Some("bash".into()),
             input: Some(serde_json::json!({"command": "ls"})),
             ..Default::default()
-        };
-        let completed = CodexItem {
-            kind: Some("tool_use".into()),
+        });
+        let completed = CodexItem::ToolUse(CodexToolItemFields {
             id: Some("tu-1".into()),
             output: Some(Value::String("clean".into())),
             ..Default::default()
-        };
+        });
         let merged = completed.merge_started(started);
-        assert_eq!(merged.name.as_deref(), Some("bash"));
+        let fields = merged.as_tool_fields().expect("tool fields");
+        assert_eq!(fields.name.as_deref(), Some("bash"));
         assert_eq!(
-            merged
+            fields
                 .resolved_input()
                 .and_then(|v| v.get("command"))
                 .and_then(Value::as_str),
             Some("ls")
         );
         assert_eq!(
-            merged.resolved_output().and_then(Value::as_str),
+            fields.resolved_output().and_then(Value::as_str),
             Some("clean")
         );
     }

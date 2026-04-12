@@ -238,7 +238,7 @@ pub struct OpenCodeToolFields {
 }
 
 impl OpenCodeToolFields {
-    pub fn tool_name(&self) -> Option<&str> {
+    pub fn resolved_tool_name(&self) -> Option<&str> {
         self.name
             .as_deref()
             .or(self.tool_name.as_deref())
@@ -246,7 +246,7 @@ impl OpenCodeToolFields {
             .or(self.tool.as_deref())
     }
 
-    pub fn tool_id(&self) -> Option<&str> {
+    pub fn resolved_tool_id(&self) -> Option<&str> {
         self.id
             .as_deref()
             .or(self.tool_id.as_deref())
@@ -298,8 +298,8 @@ impl OpenCodeTool {
     pub fn resolve(self) -> ResolvedOpenCodeTool {
         let OpenCodeTool { mut top, part } = self;
         let mut resolved = ResolvedOpenCodeTool {
-            id: top.tool_id().map(ToOwned::to_owned),
-            name: top.tool_name().map(ToOwned::to_owned),
+            id: top.resolved_tool_id().map(ToOwned::to_owned),
+            name: top.resolved_tool_name().map(ToOwned::to_owned),
             input: top.take_input(),
             output: top.take_output(),
             status: top.status.take(),
@@ -307,10 +307,10 @@ impl OpenCodeTool {
         };
         if let Some(mut part) = part {
             if resolved.id.is_none() {
-                resolved.id = part.tool_id().map(ToOwned::to_owned);
+                resolved.id = part.resolved_tool_id().map(ToOwned::to_owned);
             }
             if resolved.name.is_none() {
-                resolved.name = part.tool_name().map(ToOwned::to_owned);
+                resolved.name = part.resolved_tool_name().map(ToOwned::to_owned);
             }
             if resolved.input.is_none() {
                 resolved.input = part.take_input();

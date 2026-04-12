@@ -87,34 +87,9 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
         if !from_assistant_type && msg.role.as_deref() != Some("assistant") {
             return None;
         }
-
-        let content = msg.content?;
-
-        // Try content array (Gemini-style)
-        if let Some(parts) = content.as_array() {
-            let mut text_parts = String::new();
-            for part in parts {
-                if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                    text_parts.push_str(text);
-                }
-            }
-            if !text_parts.is_empty() {
-                self.assistant_text.push_str(&text_parts);
-                return Some(StreamChunk::Text(super::ensure_message_newline(text_parts)));
-            }
-        }
-
-        // Try content as string (Qwen-specific)
-        if let Some(text) = content.as_str()
-            && !text.is_empty()
-        {
-            self.assistant_text.push_str(text);
-            return Some(StreamChunk::Text(super::ensure_message_newline(
-                text.to_string(),
-            )));
-        }
-
-        None
+        let text = msg.resolved_text()?;
+        self.assistant_text.push_str(&text);
+        Some(StreamChunk::Text(super::ensure_message_newline(text)))
     }
 
     fn handle_result(&mut self, result: QwenResult, raw: Value) {

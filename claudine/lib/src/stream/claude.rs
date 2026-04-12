@@ -192,9 +192,11 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         self.rate_limit = Some(info);
     }
 
-    fn handle_tool_use(&mut self, tu: ClaudeToolUse) {
+    fn handle_tool_use(&mut self, mut tu: ClaudeToolUse) {
         self.tool_calls += 1;
-        let (tool_id, tool_name, tool_input) = tu.resolved_id();
+        let tool_id = tu.resolved_tool_id().map(ToOwned::to_owned);
+        let tool_name = tu.resolved_tool_name().map(ToOwned::to_owned);
+        let tool_input = tu.take_input();
         super::trace_tool_event(Provider::Claude, self.tool_calls, tool_name.as_deref());
 
         let mut meta = EventMeta::default();
@@ -216,7 +218,7 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
     }
 
     fn handle_tool_result(&mut self, tr: ClaudeToolResult) {
-        let tool_id = tr.tool_id().map(ToOwned::to_owned);
+        let tool_id = tr.resolved_tool_id().map(ToOwned::to_owned);
         let (tool_name, tool_input) = tool_id
             .as_ref()
             .and_then(|id| self.tool_uses.remove(id))

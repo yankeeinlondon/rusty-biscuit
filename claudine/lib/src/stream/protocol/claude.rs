@@ -230,10 +230,16 @@ pub struct ClaudeToolUse {
 }
 
 impl ClaudeToolUse {
-    pub fn resolved_id(self) -> (Option<String>, Option<String>, Option<Value>) {
-        let id = self.id.or(self.tool_use_id);
-        let name = self.name.or(self.tool_name);
-        (id, name, self.input)
+    pub fn resolved_tool_id(&self) -> Option<&str> {
+        self.id.as_deref().or(self.tool_use_id.as_deref())
+    }
+
+    pub fn resolved_tool_name(&self) -> Option<&str> {
+        self.name.as_deref().or(self.tool_name.as_deref())
+    }
+
+    pub fn take_input(&mut self) -> Option<Value> {
+        self.input.take()
     }
 }
 
@@ -256,7 +262,7 @@ pub struct ClaudeToolResult {
 impl ClaudeToolResult {
     /// Resolve the tool id, preferring `tool_use_id` over the legacy `id`
     /// field, matching the existing parser behavior.
-    pub fn tool_id(&self) -> Option<&str> {
+    pub fn resolved_tool_id(&self) -> Option<&str> {
         self.tool_use_id.as_deref().or(self.id.as_deref())
     }
 
@@ -439,7 +445,7 @@ mod tests {
         let ClaudeEvent::ToolResult(tr) = event else {
             panic!("expected ToolResult");
         };
-        assert_eq!(tr.tool_id(), Some("tu-1"));
+        assert_eq!(tr.resolved_tool_id(), Some("tu-1"));
         assert_eq!(
             tr.response().and_then(|v| v.as_str().map(String::from)),
             Some("file contents".into())

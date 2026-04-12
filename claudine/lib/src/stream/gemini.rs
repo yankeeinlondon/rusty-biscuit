@@ -82,27 +82,7 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
         if msg.role.as_deref() != Some("assistant") {
             return None;
         }
-
-        let content_val = msg.content?;
-        // Gemini emits content as a plain string (confirmed from types.d.ts),
-        // but handle array format defensively in case future versions change.
-        let text = if let Some(s) = content_val.as_str() {
-            s.to_string()
-        } else if let Some(arr) = content_val.as_array() {
-            let mut parts = String::new();
-            for part in arr {
-                if let Some(t) = part.get("text").and_then(|t| t.as_str()) {
-                    parts.push_str(t);
-                }
-            }
-            parts
-        } else {
-            return None;
-        };
-
-        if text.is_empty() {
-            return None;
-        }
+        let text = msg.resolved_text()?;
         self.assistant_text.push_str(&text);
         Some(StreamChunk::Text(super::ensure_message_newline(text)))
     }
@@ -177,13 +157,13 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
         self.sink.on_turn_error(&meta);
     }
 
-    fn handle_tool_use(&mut self, tu: GeminiToolUse) {
+    fn handle_tool_use(&mut self, mut tu: GeminiToolUse) {
         self.tool_calls += 1;
         super::trace_tool_event(Provider::Gemini, self.tool_calls, tu.resolved_tool_name());
 
-        let tool_id = tu.tool_id.clone();
+        let tool_id = tu.resolved_tool_id().map(ToOwned::to_owned);
         let tool_name = tu.resolved_tool_name().map(ToOwned::to_owned);
-        let parameters = tu.resolved_input();
+        let parameters = tu.take_input();
 
         if let Some(tool_id) = &tool_id {
             self.tool_uses

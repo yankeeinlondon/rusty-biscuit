@@ -4,8 +4,8 @@ use serde_json::Value;
 
 use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
 use super::protocol::codex::{
-    CodexErrorEnvelope, CodexEvent, CodexItem, CodexItemEnvelope, CodexThreadMeta,
-    CodexTurnCompleted,
+    CodexAgentMessage, CodexErrorEnvelope, CodexEvent, CodexItem, CodexItemEnvelope,
+    CodexPermissionItem, CodexThreadMeta, CodexToolItemFields, CodexTurnCompleted,
 };
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
@@ -35,7 +35,7 @@ pub struct CodexStreamParser<S: StreamEventSink> {
     error_message: Option<String>,
     raw_summary: Option<Value>,
     assistant_text: String,
-    tool_items: HashMap<String, CodexItem>,
+    tool_items: HashMap<String, CodexToolItemFields>,
 }
 
 impl<S: StreamEventSink> CodexStreamParser<S> {
@@ -158,38 +158,40 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
     /// temp file, not from the stream. We accumulate stream text as a fallback
     /// but do NOT return it from `feed_line` to avoid emitting it to stdout
     /// (which would prevent the file-based text from being used).
-    fn handle_agent_message_item(&mut self, item: &CodexItem) {
-        if let Some(text) = item.text.as_deref() {
-            self.assistant_text.push_str(text);
-            return;
-        }
-
-        if let Some(parts) = item.content.as_ref().and_then(|v| v.as_array()) {
-            let text = parts
-                .iter()
-                .filter_map(|part| part.get("text").and_then(|v| v.as_str()))
-                .collect::<String>();
-            if !text.is_empty() {
-                self.assistant_text.push_str(&text);
-            }
+    fn handle_agent_message_item(&mut self, msg: &CodexAgentMessage) {
+        if let Some(text) = msg.collected_text() {
+            self.assistant_text.push_str(&text);
         }
     }
 
-    fn tool_meta_from_item(&self, item: &CodexItem) -> EventMeta {
+    fn tool_meta_from_fields(&self, fields: &CodexToolItemFields) -> EventMeta {
         let mut meta = self.session_meta();
-        if let Some(tool_name) = item.resolved_tool_name() {
+        if let Some(tool_name) = fields.resolved_tool_name() {
             meta.extra
                 .insert("tool_name".into(), Value::String(tool_name.to_string()));
         }
-        if let Some(tool_id) = item.id.as_deref() {
+        if let Some(tool_id) = fields.resolved_tool_id() {
             meta.extra
                 .insert("tool_id".into(), Value::String(tool_id.to_string()));
         }
-        if let Some(input) = item.resolved_input() {
+        if let Some(input) = fields.resolved_input() {
             meta.extra.insert("tool_input".into(), input.clone());
         }
-        if let Some(output) = item.resolved_output() {
+        if let Some(output) = fields.resolved_output() {
             meta.extra.insert("tool_response".into(), output.clone());
+        }
+        meta
+    }
+
+    fn permission_meta(&self, perm: &CodexPermissionItem) -> EventMeta {
+        let mut meta = self.session_meta();
+        if let Some(name) = perm.name.as_deref() {
+            meta.extra
+                .insert("tool_name".into(), Value::String(name.to_string()));
+        }
+        if let Some(id) = perm.id.as_deref() {
+            meta.extra
+                .insert("tool_id".into(), Value::String(id.to_string()));
         }
         meta
     }
@@ -198,20 +200,28 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         let Some(item) = env.item else {
             return;
         };
-        let kind = item.kind.as_deref().unwrap_or("");
 
-        if CodexItem::is_permission_item_kind(kind) {
-            let meta = self.tool_meta_from_item(&item);
+        if let Some(perm) = item.as_permission() {
+            let meta = self.permission_meta(perm);
             self.sink.on_permission_request(&meta);
             return;
         }
 
-        if CodexItem::is_tool_item_kind(kind) {
+        if item.is_tool_item() {
+            let fields = item
+                .as_tool_fields()
+                .expect("is_tool_item implies tool fields");
             self.tool_calls += 1;
-            super::trace_tool_event(Provider::Codex, self.tool_calls, item.resolved_tool_name());
-            let meta = self.tool_meta_from_item(&item);
-            if let Some(id) = item.id.clone() {
-                self.tool_items.insert(id, item);
+            super::trace_tool_event(
+                Provider::Codex,
+                self.tool_calls,
+                fields.resolved_tool_name(),
+            );
+            let meta = self.tool_meta_from_fields(fields);
+            if let Some(id) = fields.id.clone()
+                && let Some(owned_fields) = item.into_tool_fields()
+            {
+                self.tool_items.insert(id, owned_fields);
             }
             self.sink.on_before_tool(&meta);
         }
@@ -219,37 +229,28 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
 
     fn handle_item_completed(&mut self, env: CodexItemEnvelope) -> Option<StreamChunk> {
         let item = env.item?;
-        let kind = item.kind.as_deref().unwrap_or("");
 
-        if kind == "agent_message" {
-            self.handle_agent_message_item(&item);
+        if let Some(msg) = item.as_agent_message() {
+            self.handle_agent_message_item(msg);
             return None;
         }
 
-        if CodexItem::is_tool_item_kind(kind) {
-            let merged_item = item
-                .id
-                .as_ref()
-                .and_then(|id| self.tool_items.remove(id))
-                .map(|started| {
-                    // Re-run the merge: completed values win, started fills gaps.
-                    let completed_copy = CodexItem {
-                        kind: item.kind.clone(),
-                        id: item.id.clone(),
-                        text: item.text.clone(),
-                        content: item.content.clone(),
-                        name: item.name.clone(),
-                        tool_name: item.tool_name.clone(),
-                        input: item.input.clone(),
-                        arguments: item.arguments.clone(),
-                        parameters: item.parameters.clone(),
-                        output: item.output.clone(),
-                        result: item.result.clone(),
-                    };
-                    completed_copy.merge_started(started)
-                })
-                .unwrap_or(item);
-            let meta = self.tool_meta_from_item(&merged_item);
+        if item.is_tool_item() {
+            let id = item.as_tool_fields().and_then(|f| f.id.clone());
+            let merged_item = if let Some(id) = &id
+                && let Some(started) = self.tool_items.remove(id)
+            {
+                // Wrap started back into the same variant so merge_started runs
+                // through CodexItem and we can keep using the enum API.
+                let started_item = CodexItem::ToolUse(started);
+                item.merge_started(started_item)
+            } else {
+                item
+            };
+            let fields = merged_item
+                .as_tool_fields()
+                .expect("is_tool_item implies tool fields");
+            let meta = self.tool_meta_from_fields(fields);
             self.sink.on_after_tool(&meta);
         }
 
@@ -305,19 +306,19 @@ impl<S: StreamEventSink + Send> StreamParser for CodexStreamParser<S> {
                 Ok(None)
             }
             Ok(CodexEvent::ItemCompleted(env)) => Ok(self.handle_item_completed(env)),
-            Ok(CodexEvent::ItemToolUse(item) | CodexEvent::ToolUse(item)) => {
+            Ok(CodexEvent::ItemToolUse(fields) | CodexEvent::ToolUse(fields)) => {
                 self.tool_calls += 1;
                 super::trace_tool_event(
                     Provider::Codex,
                     self.tool_calls,
-                    item.resolved_tool_name(),
+                    fields.resolved_tool_name(),
                 );
-                let meta = self.tool_meta_from_item(&item);
+                let meta = self.tool_meta_from_fields(&fields);
                 self.sink.on_before_tool(&meta);
                 Ok(None)
             }
-            Ok(CodexEvent::ItemToolResult(item) | CodexEvent::ToolResult(item)) => {
-                let meta = self.tool_meta_from_item(&item);
+            Ok(CodexEvent::ItemToolResult(fields) | CodexEvent::ToolResult(fields)) => {
+                let meta = self.tool_meta_from_fields(&fields);
                 self.sink.on_after_tool(&meta);
                 Ok(None)
             }
