@@ -137,9 +137,7 @@ pub fn build_large_monorepo(root: &Path) -> Repository {
         let pkg = root.join(format!("crates/pkg{i:02}"));
         write_file(
             &pkg.join("Cargo.toml"),
-            &format!(
-                "[package]\nname = \"pkg{i:02}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
-            ),
+            &format!("[package]\nname = \"pkg{i:02}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
         );
         write_file(
             &pkg.join("src/lib.rs"),
@@ -153,7 +151,9 @@ pub fn build_large_monorepo(root: &Path) -> Repository {
         write_file(&pkg.join("README.md"), &format!("# pkg{i:02}\n"));
     }
 
-    let js_members: Vec<String> = (0..js_pkgs).map(|i| format!("  - 'apps/app{i:02}'")).collect();
+    let js_members: Vec<String> = (0..js_pkgs)
+        .map(|i| format!("  - 'apps/app{i:02}'"))
+        .collect();
     write_file(
         &root.join("pnpm-workspace.yaml"),
         &format!("packages:\n{}\n", js_members.join("\n")),
@@ -204,8 +204,14 @@ pub fn build_large_monorepo(root: &Path) -> Repository {
 /// benchmarks that should not pay git discovery costs.
 pub fn build_language_mix_tree(root: &Path) {
     for i in 0..20u32 {
-        write_file(&root.join(format!("shallow/file_{i:02}.rs")), "fn noop() {}\n");
-        write_file(&root.join(format!("shallow/file_{i:02}.ts")), "export {};\n");
+        write_file(
+            &root.join(format!("shallow/file_{i:02}.rs")),
+            "fn noop() {}\n",
+        );
+        write_file(
+            &root.join(format!("shallow/file_{i:02}.ts")),
+            "export {};\n",
+        );
         write_file(&root.join(format!("shallow/file_{i:02}.py")), "pass\n");
         write_file(&root.join(format!("shallow/file_{i:02}.md")), "# note\n");
     }

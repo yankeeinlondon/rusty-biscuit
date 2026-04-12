@@ -59,8 +59,8 @@ fn main() {
     );
 
     for _ in 0..iterations {
-        let info = detect_filesystem_with_request(&root, &request)
-            .expect("filesystem detect failed");
+        let info =
+            detect_filesystem_with_request(&root, &request).expect("filesystem detect failed");
         std::hint::black_box(info);
     }
 }
@@ -98,7 +98,10 @@ fn prepare_fixture(force_rebuild: bool) -> PathBuf {
 }
 
 fn assert_fixture_shape(root: &Path) {
-    assert!(root.join("Cargo.toml").is_file(), "workspace manifest missing");
+    assert!(
+        root.join("Cargo.toml").is_file(),
+        "workspace manifest missing"
+    );
     assert!(
         root.join("crates/pkg00/Cargo.toml").is_file(),
         "expected rust package pkg00 manifest"

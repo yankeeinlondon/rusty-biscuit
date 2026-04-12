@@ -7,8 +7,8 @@
 #![cfg(target_os = "windows")]
 
 use sniff::programs::ExecutableIndex;
-use winreg::enums::HKEY_CURRENT_USER;
 use winreg::RegKey;
+use winreg::enums::HKEY_CURRENT_USER;
 
 const TEST_KEY: &str =
     r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\sniff_integration_orphan.exe";

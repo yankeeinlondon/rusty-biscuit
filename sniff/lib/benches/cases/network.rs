@@ -39,8 +39,7 @@ pub fn register(c: &mut Criterion) {
     group.bench_function("wan_ip_forced_refresh", |b| {
         let req = NetworkRequest::full().force_refresh(true);
         b.iter(|| {
-            let info = detect_network_with_request(black_box(&req))
-                .expect("wan_ip_forced_refresh");
+            let info = detect_network_with_request(black_box(&req)).expect("wan_ip_forced_refresh");
             black_box(info);
         });
     });
@@ -52,8 +51,7 @@ pub fn register(c: &mut Criterion) {
     group.bench_function("wan_ip_cached", |b| {
         let req = NetworkRequest::full();
         b.iter(|| {
-            let info =
-                detect_network_with_request(black_box(&req)).expect("wan_ip_cached");
+            let info = detect_network_with_request(black_box(&req)).expect("wan_ip_cached");
             black_box(info);
         });
     });
