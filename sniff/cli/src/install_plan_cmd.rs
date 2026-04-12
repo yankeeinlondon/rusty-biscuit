@@ -8,9 +8,7 @@ use std::error::Error;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
-use sniff::programs::{
-    InstallPlan, InstallPlanOption, InstallPlanReason, InstallationMethod,
-};
+use sniff::programs::{InstallPlan, InstallPlanOption, InstallPlanReason, InstallationMethod};
 
 /// Render the plan to a `String` ready for printing to stdout.
 ///
@@ -130,8 +128,8 @@ pub fn execute_install_flow(
     plain: bool,
 ) -> Result<(), Box<dyn Error>> {
     use sniff::programs::{
-        run_install_interview, InstallInterviewInput, InstallInterviewOptions,
-        InstallInterviewOutcome,
+        InstallInterviewInput, InstallInterviewOptions, InstallInterviewOutcome,
+        run_install_interview,
     };
 
     let input = InstallInterviewInput {
@@ -520,7 +518,13 @@ mod tests {
         // from execute_install_flow directly (it writes to stdout), but we can
         // observe that the function returns Ok.
         let plan = fake_success_plan(false); // uses Brew, no sudo
-        let result = execute_install_flow(&plan, /*dry_run*/ true, /*skip_confirm*/ true, /*plain*/ true);
-        assert!(result.is_ok(), "dry-run should succeed, got: {:?}", result.err().map(|e| e.to_string()));
+        let result = execute_install_flow(
+            &plan, /*dry_run*/ true, /*skip_confirm*/ true, /*plain*/ true,
+        );
+        assert!(
+            result.is_ok(),
+            "dry-run should succeed, got: {:?}",
+            result.err().map(|e| e.to_string())
+        );
     }
 }

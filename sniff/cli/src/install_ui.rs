@@ -157,7 +157,10 @@ impl InstallInterviewDelegate for CliInstallUi {
         }
     }
 
-    fn choose_retry(&mut self, prompt: &RetryPrompt) -> Result<RetryChoice, SniffInstallationError> {
+    fn choose_retry(
+        &mut self,
+        prompt: &RetryPrompt,
+    ) -> Result<RetryChoice, SniffInstallationError> {
         // Render each choice's prose as a line.
         for choice in &prompt.choices {
             let rendered = Prose::new(choice.prose.clone()).render(&self.terminal);

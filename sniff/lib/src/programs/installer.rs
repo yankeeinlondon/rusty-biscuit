@@ -274,7 +274,6 @@ pub struct InstallResult {
     pub stderr: String,
 }
 
-
 /// Captured outcome of an install attempt, preserving stdout/stderr on both
 /// success and non-zero-exit failures so the interview layer can render
 /// structured output. See
@@ -722,13 +721,11 @@ pub fn execute_install(
             stdout: r.stdout,
             stderr: r.stderr,
         }),
-        InstallCapturedOutcome::Completed(r) => {
-            Err(SniffInstallationError::PackageManagerFailed {
-                pkg: method.package_name().to_string(),
-                manager: method.manager_name().to_string(),
-                msg: r.stderr,
-            })
-        }
+        InstallCapturedOutcome::Completed(r) => Err(SniffInstallationError::PackageManagerFailed {
+            pkg: method.package_name().to_string(),
+            manager: method.manager_name().to_string(),
+            msg: r.stderr,
+        }),
     }
 }
 
@@ -757,13 +754,11 @@ pub fn execute_versioned_install(
             stdout: r.stdout,
             stderr: r.stderr,
         }),
-        InstallCapturedOutcome::Completed(r) => {
-            Err(SniffInstallationError::PackageManagerFailed {
-                pkg: method.package_name().to_string(),
-                manager: method.manager_name().to_string(),
-                msg: r.stderr,
-            })
-        }
+        InstallCapturedOutcome::Completed(r) => Err(SniffInstallationError::PackageManagerFailed {
+            pkg: method.package_name().to_string(),
+            manager: method.manager_name().to_string(),
+            msg: r.stderr,
+        }),
     }
 }
 
@@ -1406,7 +1401,8 @@ mod tests {
     #[test]
     fn execute_versioned_install_captured_dry_run() {
         let method = InstallationMethod::Cargo("bat");
-        let outcome = execute_versioned_install_captured(&method, "0.24.0", &InstallOptions::dry_run());
+        let outcome =
+            execute_versioned_install_captured(&method, "0.24.0", &InstallOptions::dry_run());
         match outcome {
             InstallCapturedOutcome::Completed(r) => {
                 assert!(!r.executed);
@@ -1421,11 +1417,8 @@ mod tests {
     #[test]
     fn execute_versioned_install_captured_uv_with_install_includes_versioned_target() {
         let method = InstallationMethod::UvWithInstall("aider-chat");
-        let outcome = execute_versioned_install_captured(
-            &method,
-            "0.50.0",
-            &InstallOptions::dry_run(),
-        );
+        let outcome =
+            execute_versioned_install_captured(&method, "0.50.0", &InstallOptions::dry_run());
         match outcome {
             InstallCapturedOutcome::Completed(r) => {
                 assert!(r.command.contains("tool install 'aider-chat@0.50.0'"));

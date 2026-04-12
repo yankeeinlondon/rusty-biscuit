@@ -131,10 +131,9 @@ pub use host_capability::{
     load_host_capabilities_from, save_host_capabilities_to,
 };
 pub use install_interview::{
-    run_install_interview,
     InstallInterviewDelegate, InstallInterviewEvent, InstallInterviewInput,
-    InstallInterviewOptions, InstallInterviewOutcome, InstallOutputStream,
-    InstallStatusKind, RetryChoice, RetryPrompt, RetryPromptChoice,
+    InstallInterviewOptions, InstallInterviewOutcome, InstallOutputStream, InstallStatusKind,
+    RetryChoice, RetryPrompt, RetryPromptChoice, run_install_interview,
 };
 pub use install_plan::{InstallPlan, InstallPlanOption, InstallPlanReason, build_install_plan};
 pub use installer::{

@@ -197,8 +197,8 @@ pub fn install_selected_via_interview(
 ) -> Result<(), Box<dyn Error>> {
     use biscuit_terminal::terminal::Terminal;
     use sniff::programs::{
-        InstallInterviewInput, InstallInterviewOptions, build_install_plan,
-        run_install_interview, HostCapabilities,
+        HostCapabilities, InstallInterviewInput, InstallInterviewOptions, build_install_plan,
+        run_install_interview,
     };
 
     let host = HostCapabilities::load_or_detect_with_verification(false);

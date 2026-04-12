@@ -103,20 +103,12 @@ pub enum RetryChoice {
 
 /// Caller-provided adapter for rendering events and handling prompts.
 pub trait InstallInterviewDelegate {
-    fn on_event(
-        &mut self,
-        event: &InstallInterviewEvent,
-    ) -> Result<(), SniffInstallationError>;
+    fn on_event(&mut self, event: &InstallInterviewEvent) -> Result<(), SniffInstallationError>;
 
-    fn confirm_remote_script(
-        &mut self,
-        prose: &str,
-    ) -> Result<bool, SniffInstallationError>;
+    fn confirm_remote_script(&mut self, prose: &str) -> Result<bool, SniffInstallationError>;
 
-    fn choose_retry(
-        &mut self,
-        prompt: &RetryPrompt,
-    ) -> Result<RetryChoice, SniffInstallationError>;
+    fn choose_retry(&mut self, prompt: &RetryPrompt)
+    -> Result<RetryChoice, SniffInstallationError>;
 }
 
 /// Final outcome of an interview session.
@@ -130,9 +122,9 @@ pub enum InstallInterviewOutcome {
 }
 
 use crate::programs::installer::{
-    build_install_announcement, build_install_failure_status, build_install_success_status,
-    build_retry_choice_prose, build_retry_quit_prose, execute_install_captured, get_install_command,
-    InstallCapturedOutcome,
+    InstallCapturedOutcome, build_install_announcement, build_install_failure_status,
+    build_install_success_status, build_retry_choice_prose, build_retry_quit_prose,
+    execute_install_captured, get_install_command,
 };
 
 /// Runs the install interview for the given program.
@@ -199,7 +191,9 @@ fn run_attempt<D: InstallInterviewDelegate>(
     );
     if needs_consent && !options.install.dry_run && !options.install.approve_remote_bash {
         let warning = build_remote_script_warning(&input.program, &method);
-        delegate.on_event(&InstallInterviewEvent::ConsentWarning { prose: warning.clone() })?;
+        delegate.on_event(&InstallInterviewEvent::ConsentWarning {
+            prose: warning.clone(),
+        })?;
         if !delegate.confirm_remote_script(&warning)? {
             return Ok(InstallInterviewOutcome::AbortedByUser);
         }
@@ -241,7 +235,11 @@ fn run_attempt<D: InstallInterviewDelegate>(
             Ok(InstallInterviewOutcome::Installed { method })
         }
         InstallCapturedOutcome::Completed(r) => {
-            let body = if !r.stderr.trim().is_empty() { r.stderr } else { r.stdout };
+            let body = if !r.stderr.trim().is_empty() {
+                r.stderr
+            } else {
+                r.stdout
+            };
             handle_failure(
                 input,
                 options,
@@ -383,9 +381,11 @@ mod runner_tests {
                 ..
             }
         )));
-        assert!(!d.events.iter().any(
-            |e| matches!(e, InstallInterviewEvent::CapturedOutput { .. })
-        ));
+        assert!(
+            !d.events
+                .iter()
+                .any(|e| matches!(e, InstallInterviewEvent::CapturedOutput { .. }))
+        );
     }
 
     fn remote_bash_plan() -> InstallInterviewInput {
@@ -417,9 +417,17 @@ mod runner_tests {
         d.consent_answer = false;
         let outcome = run_install_interview(&input, &opts, &mut d).unwrap();
         assert!(matches!(outcome, InstallInterviewOutcome::AbortedByUser));
-        assert!(d.events.iter().any(|e| matches!(e, InstallInterviewEvent::ConsentWarning { .. })));
+        assert!(
+            d.events
+                .iter()
+                .any(|e| matches!(e, InstallInterviewEvent::ConsentWarning { .. }))
+        );
         // No status event was emitted because user aborted before execution.
-        assert!(!d.events.iter().any(|e| matches!(e, InstallInterviewEvent::Status { .. })));
+        assert!(
+            !d.events
+                .iter()
+                .any(|e| matches!(e, InstallInterviewEvent::Status { .. }))
+        );
     }
 
     #[test]
@@ -431,7 +439,11 @@ mod runner_tests {
         d.consent_answer = false; // would deny but must not be asked
         let outcome = run_install_interview(&input, &opts, &mut d).unwrap();
         assert!(matches!(outcome, InstallInterviewOutcome::DryRun { .. }));
-        assert!(!d.events.iter().any(|e| matches!(e, InstallInterviewEvent::ConsentWarning { .. })));
+        assert!(
+            !d.events
+                .iter()
+                .any(|e| matches!(e, InstallInterviewEvent::ConsentWarning { .. }))
+        );
     }
 
     #[test]
@@ -446,7 +458,11 @@ mod runner_tests {
         // because whether the command succeeds depends on the host. We only
         // assert that no ConsentWarning event was emitted.
         let _ = run_install_interview(&input, &opts, &mut d);
-        assert!(!d.events.iter().any(|e| matches!(e, InstallInterviewEvent::ConsentWarning { .. })));
+        assert!(
+            !d.events
+                .iter()
+                .any(|e| matches!(e, InstallInterviewEvent::ConsentWarning { .. }))
+        );
     }
 
     fn fake_setup_error_plan() -> InstallInterviewInput {
@@ -492,8 +508,32 @@ mod runner_tests {
         // because build_install_command validates before honoring dry_run. That
         // drives us into handle_failure → retry → second attempt (Cargo dry-run) → success.
         assert!(matches!(outcome, InstallInterviewOutcome::DryRun { .. }));
-        let error_count = d.events.iter().filter(|e| matches!(e, InstallInterviewEvent::Status { kind: InstallStatusKind::Error, .. })).count();
-        let success_count = d.events.iter().filter(|e| matches!(e, InstallInterviewEvent::Status { kind: InstallStatusKind::Success, .. })).count();
+        let error_count = d
+            .events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    InstallInterviewEvent::Status {
+                        kind: InstallStatusKind::Error,
+                        ..
+                    }
+                )
+            })
+            .count();
+        let success_count = d
+            .events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    InstallInterviewEvent::Status {
+                        kind: InstallStatusKind::Success,
+                        ..
+                    }
+                )
+            })
+            .count();
         assert_eq!(error_count, 1);
         assert_eq!(success_count, 1);
     }
@@ -517,7 +557,8 @@ mod runner_tests {
             },
         };
         let mut d = RecordingDelegate::new();
-        let outcome = run_install_interview(&input, &InstallInterviewOptions::default(), &mut d).unwrap();
+        let outcome =
+            run_install_interview(&input, &InstallInterviewOptions::default(), &mut d).unwrap();
         assert!(matches!(outcome, InstallInterviewOutcome::Failed { .. }));
     }
 
@@ -551,8 +592,8 @@ mod runner_tests {
             },
         };
         let mut d = RecordingDelegate::new();
-        let outcome = run_install_interview(&input, &InstallInterviewOptions::default(), &mut d)
-            .unwrap();
+        let outcome =
+            run_install_interview(&input, &InstallInterviewOptions::default(), &mut d).unwrap();
         assert!(matches!(outcome, InstallInterviewOutcome::NotInstallable));
         assert!(d.events.iter().any(|e| matches!(
             e,
@@ -572,7 +613,9 @@ mod tests {
     fn event_variants_carry_expected_fields() {
         let events = [
             InstallInterviewEvent::Announcement { prose: "hi".into() },
-            InstallInterviewEvent::ConsentWarning { prose: "warn".into() },
+            InstallInterviewEvent::ConsentWarning {
+                prose: "warn".into(),
+            },
             InstallInterviewEvent::CapturedOutput {
                 stream: InstallOutputStream::Stdout,
                 body: "out".into(),

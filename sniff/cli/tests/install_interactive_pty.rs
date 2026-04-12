@@ -15,8 +15,8 @@ use std::time::Duration;
 use expectrl::{Expect, Regex, spawn};
 
 #[test]
-fn install_dry_run_emits_announcement_and_success_under_pty(
-) -> Result<(), Box<dyn std::error::Error>> {
+fn install_dry_run_emits_announcement_and_success_under_pty()
+-> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("SNIFF_INTERACTIVE_PTY").is_none() {
         eprintln!("skipping: set SNIFF_INTERACTIVE_PTY=1 to enable");
         return Ok(());
