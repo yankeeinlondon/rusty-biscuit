@@ -25,15 +25,102 @@
 //! execute_install(&method, &opts)?;
 //! ```
 
+use std::path::PathBuf;
 use std::process::{Command, Output};
 
 use strum::IntoEnumIterator;
 
 use crate::error::SniffInstallationError;
+use crate::os::{OsType, detect_os_type};
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::host_capability::HostCapabilities;
 use crate::programs::schema::ProgramMetadata;
 use crate::programs::types::InstallationMethod;
+
+/// The astral.sh installer URL for the current platform.
+///
+/// Unix platforms use the POSIX `sh` install script. Native Windows uses
+/// the PowerShell install script. WSL is detected as Linux and falls
+/// through to the Unix branch.
+pub(crate) fn astral_installer_url() -> &'static str {
+    match detect_os_type() {
+        OsType::Windows => "https://astral.sh/uv/install.ps1",
+        _ => "https://astral.sh/uv/install.sh",
+    }
+}
+
+/// Returns the POSIX shell one-liner that bootstraps uv on Unix-like hosts.
+fn unix_uv_bootstrap_command() -> String {
+    format!("curl -LsSf '{}' | sh", "https://astral.sh/uv/install.sh")
+}
+
+/// Returns the PowerShell one-liner that bootstraps uv on native Windows.
+fn windows_uv_bootstrap_command() -> String {
+    "powershell -ExecutionPolicy ByPass -c \"irm https://astral.sh/uv/install.ps1 | iex\""
+        .to_string()
+}
+
+/// Resolves the `uv` binary after (possible) bootstrap.
+///
+/// Resolution order:
+/// 1. Bare `uv` on `PATH` (covers pre-existing installs and users who
+///    added `~/.local/bin` to PATH).
+/// 2. `~/.local/bin/uv` (Unix) or `%USERPROFILE%\.local\bin\uv.exe`
+///    (Windows) — the astral installer's documented default location.
+///
+/// Returns `None` if neither path resolves.
+fn resolve_uv_binary() -> Option<PathBuf> {
+    if let Ok(path) = which::which("uv") {
+        return Some(path);
+    }
+    let home = dirs::home_dir()?;
+    let candidate = if cfg!(target_os = "windows") {
+        home.join(".local").join("bin").join("uv.exe")
+    } else {
+        home.join(".local").join("bin").join("uv")
+    };
+    if candidate.exists() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// Renders the two-step (or one-step) command string for `UvWithInstall`.
+///
+/// When `uv` is already on PATH, only the `uv tool install` line is
+/// rendered. When absent, the astral bootstrap line is rendered first.
+/// The `uv` path used in the install line is whichever path `resolve_uv_binary`
+/// would pick (or `~/.local/bin/uv` as the post-bootstrap default).
+fn render_uv_with_install_command(pkg: &str, version: Option<&str>) -> String {
+    let uv_present = which::which("uv").is_ok();
+    let uv_path_str = if uv_present {
+        resolve_uv_binary()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "uv".to_string())
+    } else if cfg!(target_os = "windows") {
+        "%USERPROFILE%\\.local\\bin\\uv.exe".to_string()
+    } else {
+        "~/.local/bin/uv".to_string()
+    };
+
+    let target = match version {
+        Some(v) => format!("'{}@{}'", pkg, v),
+        None => format!("'{}'", pkg),
+    };
+    let install_line = format!("{} tool install {}", uv_path_str, target);
+
+    if uv_present {
+        install_line
+    } else {
+        let bootstrap = if cfg!(target_os = "windows") {
+            windows_uv_bootstrap_command()
+        } else {
+            unix_uv_bootstrap_command()
+        };
+        format!("{}\n{}", bootstrap, install_line)
+    }
+}
 
 /// Default timeout for installation commands (30 seconds).
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -146,6 +233,13 @@ impl InstallResult {
 pub(crate) fn method_available(method: &InstallationMethod, host: &HostCapabilities) -> bool {
     if method.is_remote_bash() {
         return host.has_bash;
+    }
+
+    // `UvWithInstall` is runnable when bash is available on Unix or the
+    // host is native Windows (PowerShell always present). It does NOT
+    // require `uv` to be on the host — the whole point is to bootstrap it.
+    if matches!(method, InstallationMethod::UvWithInstall(_)) {
+        return host.os_type == OsType::Windows || host.has_bash;
     }
 
     let binary = method.manager_binary();
@@ -352,6 +446,12 @@ fn build_install_command(
 
         // Remote Bash is handled before this match statement.
         InstallationMethod::RemoteBash(_) => unreachable!("handled above"),
+
+        // UvWithInstall is handled by `execute_uv_with_install`; this function
+        // is only reached if called directly (e.g. from `get_install_command`).
+        InstallationMethod::UvWithInstall(_) => {
+            unreachable!("UvWithInstall is handled via execute_uv_with_install")
+        }
     };
 
     Ok(cmd)
@@ -503,6 +603,12 @@ fn build_versioned_install_command(
                 cmd: "Remote bash installation does not support versioning".to_string(),
             });
         }
+
+        // UvWithInstall is handled by `execute_uv_with_install`; this function
+        // is only reached if called directly (e.g. from `get_versioned_install_command`).
+        InstallationMethod::UvWithInstall(_) => {
+            unreachable!("UvWithInstall is handled via execute_uv_with_install")
+        }
     };
 
     Ok(cmd)
@@ -537,6 +643,10 @@ pub fn execute_install(
     method: &InstallationMethod,
     opts: &InstallOptions,
 ) -> Result<InstallResult, SniffInstallationError> {
+    if let InstallationMethod::UvWithInstall(pkg) = method {
+        return execute_uv_with_install(pkg, None, opts);
+    }
+
     let cmd_parts = build_install_command(method)?;
     let cmd_str = cmd_parts.join(" ");
 
@@ -585,6 +695,10 @@ pub fn execute_versioned_install(
     version: &str,
     opts: &InstallOptions,
 ) -> Result<InstallResult, SniffInstallationError> {
+    if let InstallationMethod::UvWithInstall(pkg) = method {
+        return execute_uv_with_install(pkg, Some(version), opts);
+    }
+
     let cmd_parts = build_versioned_install_command(method, version)?;
     let cmd_str = cmd_parts.join(" ");
 
@@ -616,10 +730,117 @@ pub fn execute_versioned_install(
     Ok(result)
 }
 
+/// Executes an `UvWithInstall` method: conditionally bootstraps uv via
+/// astral.sh, then runs `uv tool install <pkg>` (optionally `@version`).
+///
+/// The decision to run the bootstrap step is made at *call time* via a
+/// fresh `which uv` probe — not from cached host capabilities — so a user
+/// who installed uv between plan-build and execute does not trigger a
+/// redundant bootstrap.
+fn execute_uv_with_install(
+    pkg: &str,
+    version: Option<&str>,
+    opts: &InstallOptions,
+) -> Result<InstallResult, SniffInstallationError> {
+    validate_package_name(pkg)?;
+    if let Some(v) = version {
+        validate_package_name(v)?;
+    }
+
+    let command_str = render_uv_with_install_command(pkg, version);
+
+    if opts.dry_run {
+        return Ok(InstallResult::dry_run(command_str));
+    }
+
+    // Step 1: bootstrap uv if absent.
+    let mut combined_stdout = String::new();
+    let mut combined_stderr = String::new();
+
+    if which::which("uv").is_err() {
+        let bootstrap_output =
+            run_uv_bootstrap().map_err(|e| SniffInstallationError::PackageManagerFailed {
+                pkg: pkg.to_string(),
+                manager: "uv".to_string(),
+                msg: e.to_string(),
+            })?;
+        combined_stdout.push_str(&String::from_utf8_lossy(&bootstrap_output.stdout));
+        combined_stderr.push_str(&String::from_utf8_lossy(&bootstrap_output.stderr));
+        if !bootstrap_output.status.success() {
+            return Err(SniffInstallationError::PackageManagerFailed {
+                pkg: pkg.to_string(),
+                manager: "uv".to_string(),
+                msg: format!("astral.sh uv bootstrap failed: {}", combined_stderr),
+            });
+        }
+    }
+
+    // Step 2: resolve the uv binary and run `uv tool install`.
+    let uv_path = resolve_uv_binary().ok_or_else(|| SniffInstallationError::InstallationError {
+        pkg: pkg.to_string(),
+        cmd: "uv could not be located on PATH or at ~/.local/bin/uv after bootstrap".to_string(),
+    })?;
+
+    let target = match version {
+        Some(v) => format!("{}@{}", pkg, v),
+        None => pkg.to_string(),
+    };
+
+    let output = Command::new(&uv_path)
+        .arg("tool")
+        .arg("install")
+        .arg(&target)
+        .output()
+        .map_err(|e| SniffInstallationError::PackageManagerFailed {
+            pkg: pkg.to_string(),
+            manager: "uv".to_string(),
+            msg: e.to_string(),
+        })?;
+
+    combined_stdout.push_str(&String::from_utf8_lossy(&output.stdout));
+    combined_stderr.push_str(&String::from_utf8_lossy(&output.stderr));
+
+    if !output.status.success() {
+        return Err(SniffInstallationError::PackageManagerFailed {
+            pkg: pkg.to_string(),
+            manager: "uv".to_string(),
+            msg: combined_stderr,
+        });
+    }
+
+    Ok(InstallResult {
+        command: command_str,
+        executed: true,
+        exit_code: output.status.code(),
+        stdout: combined_stdout,
+        stderr: combined_stderr,
+    })
+}
+
+/// Runs the astral.sh uv bootstrap script for the current platform.
+fn run_uv_bootstrap() -> std::io::Result<Output> {
+    if cfg!(target_os = "windows") {
+        Command::new("powershell")
+            .arg("-ExecutionPolicy")
+            .arg("ByPass")
+            .arg("-c")
+            .arg("irm https://astral.sh/uv/install.ps1 | iex")
+            .output()
+    } else {
+        Command::new("sh")
+            .arg("-c")
+            .arg("curl -LsSf 'https://astral.sh/uv/install.sh' | sh")
+            .output()
+    }
+}
+
 /// Returns the command that would be executed for installing a package.
 ///
 /// This is useful for displaying to users before confirmation.
 pub fn get_install_command(method: &InstallationMethod) -> Result<String, SniffInstallationError> {
+    if let InstallationMethod::UvWithInstall(pkg) = method {
+        return Ok(render_uv_with_install_command(pkg, None));
+    }
     let cmd_parts = build_install_command(method)?;
     Ok(cmd_parts.join(" "))
 }
@@ -629,6 +850,9 @@ pub fn get_versioned_install_command(
     method: &InstallationMethod,
     version: &str,
 ) -> Result<String, SniffInstallationError> {
+    if let InstallationMethod::UvWithInstall(pkg) = method {
+        return Ok(render_uv_with_install_command(pkg, Some(version)));
+    }
     let cmd_parts = build_versioned_install_command(method, version)?;
     Ok(cmd_parts.join(" "))
 }
@@ -872,5 +1096,67 @@ mod tests {
     fn test_install_options_with_approve_remote_bash_sets_flag() {
         let opts = InstallOptions::default().with_approve_remote_bash(true);
         assert!(opts.approve_remote_bash);
+    }
+
+    // =======================================================================
+    // UvWithInstall execution tests
+    // =======================================================================
+
+    #[test]
+    fn uv_with_install_dry_run_renders_install_line() {
+        let method = InstallationMethod::UvWithInstall("aider-chat");
+        let result = execute_install(&method, &InstallOptions::dry_run()).unwrap();
+        assert!(!result.executed);
+        // Must always include the uv tool install line.
+        assert!(result.command.contains("tool install 'aider-chat'"));
+    }
+
+    #[test]
+    fn uv_with_install_without_consent_returns_consent_error_via_plan() {
+        use crate::programs::install_plan::{InstallPlan, InstallPlanOption, InstallPlanReason};
+        let plan = InstallPlan {
+            program: "aider".into(),
+            website: "https://aider.chat",
+            successful: true,
+            options: vec![InstallPlanOption {
+                kind: InstallationMethod::UvWithInstall("aider-chat"),
+                requires_sudo: false,
+                choose: true,
+                reason_type: InstallPlanReason::Selected,
+                reason: "chosen".into(),
+            }],
+        };
+        let err = plan.execute(&InstallOptions::default()).unwrap_err();
+        match err {
+            SniffInstallationError::RemoteBashConsentRequired { url, .. } => {
+                // url must be the astral installer URL, NOT the package name.
+                assert!(
+                    url.starts_with("https://astral.sh/uv/install."),
+                    "expected astral installer URL, got {}",
+                    url
+                );
+            }
+            other => panic!("expected RemoteBashConsentRequired, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn uv_with_install_versioned_renders_at_version() {
+        let method = InstallationMethod::UvWithInstall("aider-chat");
+        let result =
+            execute_versioned_install(&method, "0.50.0", &InstallOptions::dry_run()).unwrap();
+        assert!(!result.executed);
+        assert!(
+            result.command.contains("tool install 'aider-chat@0.50.0'"),
+            "rendered command: {}",
+            result.command
+        );
+    }
+
+    #[test]
+    fn uv_with_install_get_install_command_contains_install_line() {
+        let method = InstallationMethod::UvWithInstall("conan");
+        let cmd = get_install_command(&method).unwrap();
+        assert!(cmd.contains("tool install 'conan'"));
     }
 }

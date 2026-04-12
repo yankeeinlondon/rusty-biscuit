@@ -169,6 +169,17 @@ pub enum InstallationMethod {
     /// Install by downloading a bash script from a URL and then
     /// piping it to the host's `bash` command for installation.
     RemoteBash(&'static str),
+
+    /// Install `pkg` via `uv tool install`, bootstrapping uv from
+    /// `astral.sh/uv/install.sh` (or `install.ps1` on Windows) first if
+    /// `uv` is not already on `PATH`. Runnable whenever bash (Unix) or
+    /// PowerShell (Windows) is available — no Python on the host is
+    /// required because the astral installer is self-contained and
+    /// `uv tool install` manages Python on its own. Uses the
+    /// `RemoteBash` consent flow via the existing `approve_remote_bash`
+    /// option; consent is demanded even when the bootstrap step will
+    /// be skipped at execute time.
+    UvWithInstall(&'static str),
 }
 
 impl InstallationMethod {
@@ -206,6 +217,8 @@ impl InstallationMethod {
             InstallationMethod::Nix(pkg) => pkg,
             // Remote bash
             InstallationMethod::RemoteBash(url) => url,
+            // Uv with optional bootstrap
+            InstallationMethod::UvWithInstall(pkg) => pkg,
         }
     }
 
@@ -240,6 +253,7 @@ impl InstallationMethod {
             InstallationMethod::Scoop(_) => "scoop",
             InstallationMethod::Nix(_) => "nix",
             InstallationMethod::RemoteBash(_) => "bash",
+            InstallationMethod::UvWithInstall(_) => "uv",
         }
     }
 
@@ -298,6 +312,7 @@ impl InstallationMethod {
             InstallationMethod::Scoop(_) => "scoop",
             InstallationMethod::Nix(_) => "nix",
             InstallationMethod::RemoteBash(_) => "bash",
+            InstallationMethod::UvWithInstall(_) => "uv",
         }
     }
 }
@@ -600,10 +615,20 @@ impl<E: CategoryEnum> ProgramDetector for CategoryDetector<E> {
                 ),
             })?;
 
-        if matches!(chosen.kind, InstallationMethod::RemoteBash(_)) {
+        if matches!(
+            chosen.kind,
+            InstallationMethod::RemoteBash(_) | InstallationMethod::UvWithInstall(_)
+        ) {
+            let url = match &chosen.kind {
+                InstallationMethod::RemoteBash(u) => (*u).to_string(),
+                InstallationMethod::UvWithInstall(_) => {
+                    crate::programs::installer::astral_installer_url().to_string()
+                }
+                _ => unreachable!(),
+            };
             return Err(SniffInstallationError::RemoteBashConsentRequired {
                 pkg: program.display_name().to_string(),
-                url: chosen.kind.package_name().to_string(),
+                url,
             });
         }
 
@@ -1243,6 +1268,7 @@ mod tests {
             InstallationMethod::Scoop("x"),
             InstallationMethod::Nix("x"),
             InstallationMethod::RemoteBash("x"),
+            InstallationMethod::UvWithInstall("x"),
         ];
 
         for method in &all_methods {
@@ -1253,6 +1279,16 @@ mod tests {
                 method
             );
         }
+    }
+
+    #[test]
+    fn test_uv_with_install_package_name_and_manager() {
+        let method = InstallationMethod::UvWithInstall("aider-chat");
+        assert_eq!(method.package_name(), "aider-chat");
+        assert_eq!(method.manager_name(), "uv");
+        assert_eq!(method.manager_binary(), "uv");
+        assert!(!method.is_os_package_manager());
+        assert!(!method.is_remote_bash());
     }
 
     // ============================================

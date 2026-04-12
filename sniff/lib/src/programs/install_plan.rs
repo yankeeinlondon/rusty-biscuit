@@ -10,7 +10,7 @@ use crate::os::OsType;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::host_capability::HostCapabilities;
 use crate::programs::installer::{
-    InstallOptions, InstallResult, execute_install, method_available,
+    InstallOptions, InstallResult, astral_installer_url, execute_install, method_available,
 };
 use crate::programs::schema::ProgramMetadata;
 use crate::programs::types::InstallationMethod;
@@ -31,6 +31,12 @@ pub enum InstallPlanReason {
     RequiresSudoNotAvailable,
     /// A language PM is installed but not verified.
     RequiresUnverifiedLangManager,
+    /// `Pip(_)` is blocked because `uv` is also installed and is preferred
+    /// over pip for Python tool installs.
+    UvPreferredOverPip,
+    /// `UvWithInstall(_)` cannot run on a Unix host without bash (the astral
+    /// installer requires it).
+    BashNotAvailable,
     /// Catch-all for unexpected skip reasons.
     Unknown,
 }
@@ -88,11 +94,16 @@ impl InstallPlan {
                 ),
             })?;
 
-        if matches!(chosen.kind, InstallationMethod::RemoteBash(_))
-            && !opts.approve_remote_bash
-            && !opts.dry_run
-        {
-            let url = chosen.kind.package_name().to_string();
+        let needs_remote_consent = matches!(
+            chosen.kind,
+            InstallationMethod::RemoteBash(_) | InstallationMethod::UvWithInstall(_)
+        );
+        if needs_remote_consent && !opts.approve_remote_bash && !opts.dry_run {
+            let url = match &chosen.kind {
+                InstallationMethod::RemoteBash(u) => (*u).to_string(),
+                InstallationMethod::UvWithInstall(_) => astral_installer_url().to_string(),
+                _ => unreachable!(),
+            };
             return Err(SniffInstallationError::RemoteBashConsentRequired {
                 pkg: self.program.clone(),
                 url,
@@ -135,6 +146,50 @@ pub(crate) fn derive_method_fact(
 
     let mut blocking_reason = None;
     let mut eligible = true;
+
+    // `UvWithInstall` has its own eligibility rule that differs from the
+    // usual manager-installed check: it is runnable whenever bash is
+    // available on Unix or the host is native Windows (PowerShell always
+    // present). Whether `uv` itself is on PATH is deferred to execute time.
+    if matches!(method, InstallationMethod::UvWithInstall(_)) {
+        if !os_supported {
+            eligible = false;
+            blocking_reason = Some(InstallPlanReason::NoOsSupport);
+        } else if host.os_type == OsType::Windows {
+            // Native Windows (includes both `Windows` and WSL as detected).
+            // WSL is `OsType::Linux` with `is_wsl = true`, so this matches
+            // only real native Windows; PowerShell is always present.
+        } else if !host.has_bash {
+            eligible = false;
+            blocking_reason = Some(InstallPlanReason::BashNotAvailable);
+        }
+        return MethodFact {
+            kind: method.clone(),
+            os_supported,
+            manager_installed,
+            requires_sudo,
+            lang_manager_verified,
+            eligible_without_priority: eligible,
+            blocking_reason,
+        };
+    }
+
+    // `Pip(_)` is eligible only when pip is installed AND uv is NOT
+    // installed. When both are present, we prefer uv.
+    if matches!(method, InstallationMethod::Pip(_))
+        && manager_installed
+        && host.lang_pkg_mgrs.is_installed(LanguagePackageManager::Uv)
+    {
+        return MethodFact {
+            kind: method.clone(),
+            os_supported,
+            manager_installed,
+            requires_sudo,
+            lang_manager_verified,
+            eligible_without_priority: false,
+            blocking_reason: Some(InstallPlanReason::UvPreferredOverPip),
+        };
+    }
 
     if !os_supported {
         eligible = false;
@@ -213,6 +268,10 @@ enum Bucket {
     RemoteBash,
     Cargo,
     SudoNpm,
+    /// Plain `Pip(_)` or `Uv(_)` — the manager is already on the host.
+    PipUvDirect,
+    /// `UvWithInstall(_)` — bootstraps uv from astral.sh if absent.
+    UvBootstrap,
     Other,
 }
 
@@ -257,11 +316,13 @@ fn bucket_for(fact: &MethodFact, host: &HostCapabilities) -> Bucket {
         _ if fact.kind.is_os_package_manager() => Bucket::AltOsPm,
         InstallationMethod::RemoteBash(_) => Bucket::RemoteBash,
         InstallationMethod::Cargo(_) => Bucket::Cargo,
+        InstallationMethod::Pip(_) | InstallationMethod::Uv(_) => Bucket::PipUvDirect,
+        InstallationMethod::UvWithInstall(_) => Bucket::UvBootstrap,
         _ => Bucket::Other,
     }
 }
 
-fn bucket_order() -> [Bucket; 7] {
+fn bucket_order() -> [Bucket; 9] {
     [
         Bucket::DefaultOsPm,
         Bucket::VerifiedPnpm,
@@ -270,14 +331,51 @@ fn bucket_order() -> [Bucket; 7] {
         Bucket::RemoteBash,
         Bucket::Cargo,
         Bucket::SudoNpm,
+        Bucket::PipUvDirect,
+        Bucket::UvBootstrap,
     ]
+}
+
+/// Synthesize a tail `UvWithInstall(pkg)` method for a program that declares
+/// `Pip(_)` or `Uv(_)` but no explicit `UvWithInstall(_)`. The package name
+/// is taken from the first `Uv(_)` if present, else from the first `Pip(_)`.
+fn synthesize_uv_bootstrap(declared: &[InstallationMethod]) -> Option<InstallationMethod> {
+    if declared
+        .iter()
+        .any(|m| matches!(m, InstallationMethod::UvWithInstall(_)))
+    {
+        return None;
+    }
+    let pkg = declared
+        .iter()
+        .find_map(|m| match m {
+            InstallationMethod::Uv(p) => Some(*p),
+            _ => None,
+        })
+        .or_else(|| {
+            declared.iter().find_map(|m| match m {
+                InstallationMethod::Pip(p) => Some(*p),
+                _ => None,
+            })
+        })?;
+    Some(InstallationMethod::UvWithInstall(pkg))
 }
 
 /// Build an install plan for a program against the given host capabilities.
 pub fn build_install_plan<P: ProgramMetadata>(program: &P, host: &HostCapabilities) -> InstallPlan {
     let info = program.info();
-    let facts: Vec<MethodFact> = info
-        .installation_methods
+
+    // Auto-append a synthesized UvWithInstall(pkg) when the program declares
+    // Pip(_) or Uv(_) and does not already declare an explicit
+    // UvWithInstall(_). Keeps program metadata untouched while closing the
+    // install gap for Python-installable tools on all supported hosts.
+    let declared: Vec<InstallationMethod> = info.installation_methods.to_vec();
+    let mut effective_methods = declared.clone();
+    if let Some(synth) = synthesize_uv_bootstrap(&declared) {
+        effective_methods.push(synth);
+    }
+
+    let facts: Vec<MethodFact> = effective_methods
         .iter()
         .map(|m| derive_method_fact(m, info.os_availability, host))
         .collect();
@@ -299,9 +397,14 @@ pub fn build_install_plan<P: ProgramMetadata>(program: &P, host: &HostCapabiliti
         .map(|(i, fact)| {
             let choose = chosen_index == Some(i);
             let (reason_type, reason) = if choose {
-                (
-                    InstallPlanReason::Selected,
-                    format!(
+                let text = match &fact.kind {
+                    InstallationMethod::Uv(_) => {
+                        "chosen — uv tool install (uv already on host)".to_string()
+                    }
+                    InstallationMethod::Pip(_) => {
+                        "chosen — pip install (pip already on host; uv absent)".to_string()
+                    }
+                    _ => format!(
                         "chosen — {}{}",
                         bucket_description(bucket_for(fact, host)),
                         if fact.requires_sudo {
@@ -310,7 +413,8 @@ pub fn build_install_plan<P: ProgramMetadata>(program: &P, host: &HostCapabiliti
                             ""
                         }
                     ),
-                )
+                };
+                (InstallPlanReason::Selected, text)
             } else if fact.eligible_without_priority && bucket_for(fact, host) != Bucket::Other {
                 // Eligible and in a real bucket, just outranked by a higher one.
                 (
@@ -352,6 +456,10 @@ fn bucket_description(bucket: Bucket) -> &'static str {
         Bucket::RemoteBash => "remote bash installer",
         Bucket::Cargo => "cargo install",
         Bucket::SudoNpm => "sudo-gated npm global",
+        Bucket::PipUvDirect => "pip/uv already on host",
+        Bucket::UvBootstrap => {
+            "uv tool install (bootstraps uv via astral.sh if absent; requires remote-script consent)"
+        }
         Bucket::Other => "other",
     }
 }
@@ -390,6 +498,12 @@ fn explain_blocking_reason(fact: &MethodFact, reason: InstallPlanReason) -> Stri
             "{} is installed but has no globally-installed packages — not choosing it blindly",
             fact.kind.manager_name()
         ),
+        InstallPlanReason::UvPreferredOverPip => {
+            "uv is installed; uv is preferred over pip for Python tools".to_string()
+        }
+        InstallPlanReason::BashNotAvailable => {
+            "bash is not available; cannot run the astral uv installer".to_string()
+        }
         InstallPlanReason::Unknown => "no other bucket accepted this method".to_string(),
         InstallPlanReason::Selected | InstallPlanReason::LowerPriorityAlternative => {
             unreachable!()
@@ -831,5 +945,364 @@ mod selection_tests {
             pnpm_opt.reason_type,
             InstallPlanReason::RequiresUnverifiedLangManager
         );
+    }
+
+    // =======================================================================
+    // UvWithInstall — auto-append, selection rule, eligibility edges
+    // =======================================================================
+
+    static PIP_ONLY: ProgramInfo = ProgramInfo {
+        binary_name: "conan",
+        display_name: "conan",
+        description: "C/C++ pkg mgr",
+        website: "https://conan.io",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: &[],
+        repo: None,
+        installation_methods: &[InstallationMethod::Pip("conan")],
+    };
+
+    static UV_ONLY: ProgramInfo = ProgramInfo {
+        binary_name: "kimi-cli",
+        display_name: "kimi-cli",
+        description: "Kimi CLI",
+        website: "https://example.com",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: &[],
+        repo: None,
+        installation_methods: &[InstallationMethod::Uv("kimi-cli")],
+    };
+
+    static PIP_AND_UV: ProgramInfo = ProgramInfo {
+        binary_name: "aider",
+        display_name: "aider",
+        description: "AI pair",
+        website: "https://aider.chat",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: &[],
+        repo: None,
+        installation_methods: &[
+            InstallationMethod::Pip("aider"),
+            InstallationMethod::Uv("aider-chat"),
+        ],
+    };
+
+    static BREW_AND_PIP: ProgramInfo = ProgramInfo {
+        binary_name: "poetry",
+        display_name: "poetry",
+        description: "poetry",
+        website: "https://python-poetry.org",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: &[],
+        repo: None,
+        installation_methods: &[
+            InstallationMethod::Brew("poetry"),
+            InstallationMethod::Pip("poetry"),
+        ],
+    };
+
+    static BREW_VIM_ONLY: ProgramInfo = ProgramInfo {
+        binary_name: "vim",
+        display_name: "vim",
+        description: "vim",
+        website: "https://vim.org",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: &[],
+        repo: None,
+        installation_methods: &[InstallationMethod::Brew("vim")],
+    };
+
+    static PIP_AND_EXPLICIT_UVI: ProgramInfo = ProgramInfo {
+        binary_name: "foo",
+        display_name: "foo",
+        description: "foo",
+        website: "https://example.com",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: &[],
+        repo: None,
+        installation_methods: &[
+            InstallationMethod::Pip("foo"),
+            InstallationMethod::UvWithInstall("foo"),
+        ],
+    };
+
+    static CARGO_AND_PIP: ProgramInfo = ProgramInfo {
+        binary_name: "foo",
+        display_name: "foo",
+        description: "foo",
+        website: "https://example.com",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: &[],
+        repo: None,
+        installation_methods: &[
+            InstallationMethod::Cargo("foo"),
+            InstallationMethod::Pip("foo"),
+        ],
+    };
+
+    fn host_linux_with(
+        pip: bool,
+        uv: bool,
+        has_bash: bool,
+        cargo: bool,
+        brew: bool,
+    ) -> HostCapabilities {
+        let lang_json = format!(r#"{{"pip": {}, "uv": {}, "cargo": {}}}"#, pip, uv, cargo);
+        let os_json = format!(r#"{{"brew": {}}}"#, brew);
+        HostCapabilities {
+            os_type: OsType::Linux,
+            lang_pkg_mgrs: serde_json::from_str(&lang_json).unwrap(),
+            os_pkg_mgrs: serde_json::from_str(&os_json).unwrap(),
+            default_os_package_manager: if brew {
+                Some(OsPackageManager::Brew)
+            } else {
+                None
+            },
+            has_bash,
+            ..HostCapabilities::default()
+        }
+    }
+
+    #[test]
+    fn auto_append_synthesizes_uv_with_install_from_pip_only() {
+        let host = host_linux_with(true, false, true, false, false);
+        let plan = build_install_plan(&FakeProgram { info: &PIP_ONLY }, &host);
+        assert!(
+            plan.options.iter().any(
+                |o| matches!(o.kind, InstallationMethod::UvWithInstall(pkg) if pkg == "conan")
+            )
+        );
+    }
+
+    #[test]
+    fn auto_append_synthesizes_uv_with_install_from_uv_only() {
+        let host = host_linux_with(false, true, true, false, false);
+        let plan = build_install_plan(&FakeProgram { info: &UV_ONLY }, &host);
+        assert!(plan.options.iter().any(
+            |o| matches!(o.kind, InstallationMethod::UvWithInstall(pkg) if pkg == "kimi-cli")
+        ));
+    }
+
+    #[test]
+    fn auto_append_prefers_uv_package_name_over_pip() {
+        let host = host_linux_with(false, false, true, false, false);
+        let plan = build_install_plan(&FakeProgram { info: &PIP_AND_UV }, &host);
+        let synth = plan
+            .options
+            .iter()
+            .find(|o| matches!(o.kind, InstallationMethod::UvWithInstall(_)))
+            .expect("synthesized UvWithInstall");
+        assert!(
+            matches!(synth.kind, InstallationMethod::UvWithInstall(pkg) if pkg == "aider-chat")
+        );
+    }
+
+    #[test]
+    fn auto_append_skipped_when_no_python_method() {
+        let host = host_linux_with(false, false, true, false, true);
+        let plan = build_install_plan(
+            &FakeProgram {
+                info: &BREW_VIM_ONLY,
+            },
+            &host,
+        );
+        assert!(
+            !plan
+                .options
+                .iter()
+                .any(|o| matches!(o.kind, InstallationMethod::UvWithInstall(_)))
+        );
+    }
+
+    #[test]
+    fn auto_append_skipped_when_explicit_uv_with_install_present() {
+        let host = host_linux_with(false, false, true, false, false);
+        let plan = build_install_plan(
+            &FakeProgram {
+                info: &PIP_AND_EXPLICIT_UVI,
+            },
+            &host,
+        );
+        let uvi_count = plan
+            .options
+            .iter()
+            .filter(|o| matches!(o.kind, InstallationMethod::UvWithInstall(_)))
+            .count();
+        assert_eq!(
+            uvi_count, 1,
+            "no synthesis should occur when explicit UvWithInstall present"
+        );
+    }
+
+    #[test]
+    fn uv_wins_when_uv_installed_and_uv_declared() {
+        // host has uv installed → Uv(_) in PipUvDirect wins.
+        let host = host_linux_with(true, true, true, false, false);
+        let plan = build_install_plan(&FakeProgram { info: &PIP_AND_UV }, &host);
+        let chosen = plan.chosen().expect("chosen");
+        assert!(matches!(chosen.kind, InstallationMethod::Uv(pkg) if pkg == "aider-chat"));
+    }
+
+    #[test]
+    fn uv_wins_when_uv_installed_and_only_pip_declared() {
+        // Only Pip declared; host has uv → Pip blocked by UvPreferredOverPip,
+        // synthesized UvWithInstall runs in UvBootstrap.
+        let host = host_linux_with(true, true, true, false, false);
+        let plan = build_install_plan(&FakeProgram { info: &PIP_ONLY }, &host);
+        let chosen = plan.chosen().expect("chosen");
+        assert!(matches!(chosen.kind, InstallationMethod::UvWithInstall(pkg) if pkg == "conan"));
+        let pip_opt = plan
+            .options
+            .iter()
+            .find(|o| matches!(o.kind, InstallationMethod::Pip(_)))
+            .unwrap();
+        assert_eq!(pip_opt.reason_type, InstallPlanReason::UvPreferredOverPip);
+    }
+
+    #[test]
+    fn pip_wins_when_pip_installed_uv_absent() {
+        let host = host_linux_with(true, false, true, false, false);
+        let plan = build_install_plan(&FakeProgram { info: &PIP_ONLY }, &host);
+        let chosen = plan.chosen().expect("chosen");
+        assert!(matches!(chosen.kind, InstallationMethod::Pip(pkg) if pkg == "conan"));
+        let uvi_opt = plan
+            .options
+            .iter()
+            .find(|o| matches!(o.kind, InstallationMethod::UvWithInstall(_)))
+            .unwrap();
+        assert_eq!(
+            uvi_opt.reason_type,
+            InstallPlanReason::LowerPriorityAlternative
+        );
+    }
+
+    #[test]
+    fn pip_wins_when_both_declared_and_pip_installed_uv_absent() {
+        let host = host_linux_with(true, false, true, false, false);
+        let plan = build_install_plan(&FakeProgram { info: &PIP_AND_UV }, &host);
+        let chosen = plan.chosen().expect("chosen");
+        assert!(matches!(chosen.kind, InstallationMethod::Pip(pkg) if pkg == "aider"));
+        let uv_opt = plan
+            .options
+            .iter()
+            .find(|o| matches!(o.kind, InstallationMethod::Uv(_)))
+            .unwrap();
+        assert_eq!(uv_opt.reason_type, InstallPlanReason::ManagerNotInstalled);
+    }
+
+    #[test]
+    fn bootstrap_wins_when_neither_installed() {
+        let host = host_linux_with(false, false, true, false, false);
+        let plan = build_install_plan(&FakeProgram { info: &PIP_ONLY }, &host);
+        let chosen = plan.chosen().expect("chosen");
+        assert!(matches!(chosen.kind, InstallationMethod::UvWithInstall(pkg) if pkg == "conan"));
+    }
+
+    #[test]
+    fn bootstrap_wins_when_only_uv_declared_and_only_pip_installed() {
+        let host = host_linux_with(true, false, true, false, false);
+        let plan = build_install_plan(&FakeProgram { info: &UV_ONLY }, &host);
+        let chosen = plan.chosen().expect("chosen");
+        assert!(matches!(chosen.kind, InstallationMethod::UvWithInstall(pkg) if pkg == "kimi-cli"));
+    }
+
+    #[test]
+    fn brew_wins_over_pip_uv_direct_on_macos() {
+        let os_pkg_mgrs = serde_json::from_str(r#"{"brew": true}"#).unwrap();
+        let lang_pkg_mgrs = serde_json::from_str(r#"{"pip": true}"#).unwrap();
+        let host = HostCapabilities {
+            os_type: OsType::MacOS,
+            default_os_package_manager: Some(OsPackageManager::Brew),
+            os_pkg_mgrs,
+            lang_pkg_mgrs,
+            has_bash: true,
+            ..HostCapabilities::default()
+        };
+        let plan = build_install_plan(
+            &FakeProgram {
+                info: &BREW_AND_PIP,
+            },
+            &host,
+        );
+        let chosen = plan.chosen().expect("chosen");
+        assert!(matches!(chosen.kind, InstallationMethod::Brew(_)));
+    }
+
+    #[test]
+    fn cargo_wins_over_uv_bootstrap() {
+        // host has cargo, no pip, no uv — cargo should win; UvBootstrap is
+        // strictly later in bucket_order.
+        let lang_pkg_mgrs = serde_json::from_str(r#"{"cargo": true}"#).unwrap();
+        let host = HostCapabilities {
+            os_type: OsType::Linux,
+            lang_pkg_mgrs,
+            has_bash: true,
+            ..HostCapabilities::default()
+        };
+        let plan = build_install_plan(
+            &FakeProgram {
+                info: &CARGO_AND_PIP,
+            },
+            &host,
+        );
+        let chosen = plan.chosen().expect("chosen");
+        assert!(matches!(chosen.kind, InstallationMethod::Cargo(_)));
+    }
+
+    #[test]
+    fn uv_with_install_blocked_on_unix_without_bash() {
+        let host = HostCapabilities {
+            os_type: OsType::Linux,
+            has_bash: false,
+            ..HostCapabilities::default()
+        };
+        let plan = build_install_plan(&FakeProgram { info: &PIP_ONLY }, &host);
+        let uvi = plan
+            .options
+            .iter()
+            .find(|o| matches!(o.kind, InstallationMethod::UvWithInstall(_)))
+            .unwrap();
+        assert!(!uvi.choose);
+        assert_eq!(uvi.reason_type, InstallPlanReason::BashNotAvailable);
+    }
+
+    #[test]
+    fn uv_with_install_eligible_on_native_windows() {
+        let host = HostCapabilities {
+            os_type: OsType::Windows,
+            has_bash: false,
+            ..HostCapabilities::default()
+        };
+        let plan = build_install_plan(&FakeProgram { info: &PIP_ONLY }, &host);
+        let chosen = plan.chosen().expect("chosen");
+        assert!(matches!(chosen.kind, InstallationMethod::UvWithInstall(_)));
     }
 }

@@ -56,8 +56,8 @@ pub(super) struct WindowsIndex {
 /// both succeed. Orphaned entries whose target file does not exist are
 /// filtered out.
 fn scan_app_paths() -> HashMap<String, PathBuf> {
-    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
     use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 
     const APP_PATHS: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths";
 
@@ -198,8 +198,8 @@ fn scan_install_roots() -> HashMap<String, PathBuf> {
 /// are present. Unknown variables are left untouched (the Win32 API preserves
 /// them verbatim), which lets downstream `is_file()` checks drop stale paths.
 fn expand_env_vars(input: &str) -> String {
-    use windows::core::HSTRING;
     use windows::Win32::System::Environment::ExpandEnvironmentStringsW;
+    use windows::core::HSTRING;
 
     let wide = HSTRING::from(input);
 
@@ -269,8 +269,8 @@ mod tests {
         use crate::test_helpers::ENV_MUTEX;
         use std::fs;
         use tempfile::NamedTempFile;
-        use winreg::enums::{HKEY_CURRENT_USER, KEY_ALL_ACCESS};
         use winreg::RegKey;
+        use winreg::enums::{HKEY_CURRENT_USER, KEY_ALL_ACCESS};
 
         let _lock = ENV_MUTEX.lock().unwrap();
 
@@ -307,8 +307,8 @@ mod tests {
     #[test]
     fn scan_app_paths_filters_orphaned_entries() {
         use crate::test_helpers::ENV_MUTEX;
-        use winreg::enums::HKEY_CURRENT_USER;
         use winreg::RegKey;
+        use winreg::enums::HKEY_CURRENT_USER;
 
         let _lock = ENV_MUTEX.lock().unwrap();
 
@@ -387,8 +387,7 @@ mod tests {
         fs::write(&high_exe, b"H").unwrap();
         fs::write(&low_exe, b"L").unwrap();
 
-        let result =
-            walk_install_roots(&[high.path().to_path_buf(), low.path().to_path_buf()]);
+        let result = walk_install_roots(&[high.path().to_path_buf(), low.path().to_path_buf()]);
 
         assert_eq!(
             result.get("dup").cloned(),

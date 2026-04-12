@@ -103,13 +103,13 @@ pub mod installer;
 pub mod inventory;
 pub mod macos_bundle;
 pub mod pkg_mngrs;
-#[cfg(target_os = "windows")]
-pub(crate) mod windows_apps;
 pub mod schema;
 pub mod terminal_apps;
 pub mod tts_clients;
 pub mod types;
 pub mod utilities;
+#[cfg(target_os = "windows")]
+pub(crate) mod windows_apps;
 
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
