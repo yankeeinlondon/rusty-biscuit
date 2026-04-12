@@ -712,8 +712,7 @@ fn parse_bsd_route_dump(buffer: &[u8]) -> Option<String> {
 ))]
 fn is_default_bsd_route_message(header: &libc::rt_msghdr, message: &[u8]) -> bool {
     let data = &message[std::mem::size_of::<libc::rt_msghdr>()..];
-    let destination =
-        sockaddr_from_route_message(data, header.rtm_addrs, libc::RTAX_DST as usize);
+    let destination = sockaddr_from_route_message(data, header.rtm_addrs, libc::RTAX_DST as usize);
     let Some(destination) = destination else {
         return false;
     };

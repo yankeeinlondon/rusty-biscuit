@@ -86,6 +86,7 @@ pub enum RepoAction {
     },
     SourceCodeChanges {
         period: Option<String>,
+        actions: Vec<RecentCommitActionArg>,
         package: Option<String>,
         package_area: Option<String>,
         no_error: bool,
@@ -93,6 +94,7 @@ pub enum RepoAction {
     },
     DocumentationChanges {
         period: Option<String>,
+        actions: Vec<RecentCommitActionArg>,
         package: Option<String>,
         package_area: Option<String>,
         no_error: bool,
@@ -736,6 +738,9 @@ pub enum RepoSubcommand {
     SourceCodeChanges {
         /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
         period: Option<String>,
+        /// Filter to conventional commit actions; repeat to OR multiple actions together
+        #[arg(long = "action", value_enum, value_name = "ACTION")]
+        actions: Vec<RecentCommitActionArg>,
         /// Scope to a specific package
         #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
@@ -754,6 +759,9 @@ pub enum RepoSubcommand {
     DocumentationChanges {
         /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
         period: Option<String>,
+        /// Filter to conventional commit actions; repeat to OR multiple actions together
+        #[arg(long = "action", value_enum, value_name = "ACTION")]
+        actions: Vec<RecentCommitActionArg>,
         /// Scope to a specific package
         #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
@@ -1145,12 +1153,14 @@ impl Commands {
                 },
                 Some(RepoSubcommand::SourceCodeChanges {
                     period,
+                    actions,
                     package,
                     package_area,
                     no_error,
                     on_error,
                 }) => RepoAction::SourceCodeChanges {
                     period: period.clone(),
+                    actions: actions.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                     no_error: *no_error,
@@ -1158,12 +1168,14 @@ impl Commands {
                 },
                 Some(RepoSubcommand::DocumentationChanges {
                     period,
+                    actions,
                     package,
                     package_area,
                     no_error,
                     on_error,
                 }) => RepoAction::DocumentationChanges {
                     period: period.clone(),
+                    actions: actions.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                     no_error: *no_error,
@@ -1620,6 +1632,42 @@ mod tests {
                     repo_subcommand: Some(RepoSubcommand::RecentCommits { actions, .. }),
                     ..
                 }) if actions == vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix]
+            ));
+        }
+
+        #[test]
+        fn repo_source_code_changes_actions_parse() {
+            let cli = parse_args(&[
+                "repo",
+                "source-code-changes",
+                "--action",
+                "feat",
+                "--action",
+                "fix",
+            ])
+            .unwrap();
+
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand:
+                        Some(RepoSubcommand::SourceCodeChanges { actions, .. }),
+                    ..
+                }) if actions == vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix]
+            ));
+        }
+
+        #[test]
+        fn repo_documentation_changes_actions_parse() {
+            let cli = parse_args(&["repo", "documentation-changes", "--action", "chore"]).unwrap();
+
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand:
+                        Some(RepoSubcommand::DocumentationChanges { actions, .. }),
+                    ..
+                }) if actions == vec![RecentCommitActionArg::Chore]
             ));
         }
 

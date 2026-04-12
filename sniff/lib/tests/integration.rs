@@ -1183,7 +1183,12 @@ fn test_get_recent_commits_includes_files() {
     let set = result.unwrap();
     assert!(!set.commits.is_empty());
     assert!(!set.commits[0].files.is_empty(), "Commit should have files");
-    assert!(set.commits[0].files.iter().any(|f| f.contains("main.rs")));
+    assert!(
+        set.commits[0]
+            .files
+            .iter()
+            .any(|f| f.path.contains("main.rs"))
+    );
 }
 
 #[test]
@@ -1216,10 +1221,17 @@ fn test_get_recent_commits_describe_produces_markdown() {
     assert!(result.is_ok());
     let set = result.unwrap();
     let md = set.describe(true);
-    assert!(md.contains("## "), "Should have section headers");
-    assert!(md.contains("**Commit:**"), "Should have commit hash");
-    assert!(md.contains("**Files:**"), "Should have files section");
-    assert!(md.contains("**Description:**"), "Should have description");
+    // Commit-centric format: "- [shorthash] ... at <time>: <message>"
+    assert!(
+        md.contains("- ["),
+        "Should start each commit block with bracketed short hash, got:\n{}",
+        md
+    );
+    assert!(
+        md.contains("    **Files Impacted:**"),
+        "Should have Files Impacted sub-block, got:\n{}",
+        md
+    );
 }
 
 #[test]
@@ -1614,9 +1626,9 @@ fn test_monorepo_filter_by_package_narrows_commits() {
     for commit in &result.commits {
         for file in &commit.files {
             assert!(
-                file.starts_with("pkg-a/"),
+                file.path.starts_with("pkg-a/"),
                 "Expected file under pkg-a/, got: {}",
-                file
+                file.path
             );
         }
     }
