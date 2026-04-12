@@ -3430,6 +3430,20 @@ fn format_summary_prose(
         None => parts.push("<i>no tool calls</i>".to_string()),
     }
 
+    if let Some(pp) = summary.permission_prompts {
+        parts.push(format!(
+            "{pp} <i>permission prompt{}</i>",
+            if pp == 1 { "" } else { "s" }
+        ));
+    }
+
+    if let Some(uip) = summary.user_input_prompts {
+        parts.push(format!(
+            "{uip} <i>user input prompt{}</i>",
+            if uip == 1 { "" } else { "s" }
+        ));
+    }
+
     if parts.is_empty() {
         return None;
     }
@@ -4334,5 +4348,68 @@ mod tests {
         let rendered = super::format_summary_prose(&summary).unwrap();
         assert!(!rendered.contains("Billing"));
         assert!(!rendered.contains("\u{26a0}"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_permission_prompts_singular() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            tool_calls: Some(4),
+            permission_prompts: Some(1),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("1 <i>permission prompt</i>"));
+        assert!(!rendered.contains("permission prompts"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_permission_prompts_plural() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            tool_calls: Some(4),
+            permission_prompts: Some(3),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("3 <i>permission prompts</i>"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_user_input_prompts_singular() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            user_input_prompts: Some(1),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("1 <i>user input prompt</i>"));
+        assert!(!rendered.contains("user input prompts"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_both_counters() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(41_000),
+            tool_calls: Some(12),
+            permission_prompts: Some(2),
+            user_input_prompts: Some(1),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("2 <i>permission prompts</i>"));
+        assert!(rendered.contains("1 <i>user input prompt</i>"));
+    }
+
+    #[test]
+    fn format_summary_prose_omits_permission_clauses_when_unset() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            tool_calls: Some(4),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(!rendered.contains("permission"));
+        assert!(!rendered.contains("user input"));
     }
 }
