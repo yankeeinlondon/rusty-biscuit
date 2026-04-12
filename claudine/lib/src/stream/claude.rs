@@ -312,7 +312,7 @@ impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
-        StreamExecutionSummary {
+        let mut summary = StreamExecutionSummary {
             provider: Provider::Claude,
             session_id: self.session_id,
             model: self.model,
@@ -337,7 +337,9 @@ impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
             badges: Vec::new(),
             raw_summary: self.raw_summary,
             stderr_text: None,
-        }
+        };
+        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::Claude);
+        summary
     }
 }
 
@@ -777,5 +779,60 @@ mod tests {
             summary.assistant_text,
             "The sky is blue because of Rayleigh scattering."
         );
+    }
+
+    #[test]
+    fn billing_error_populates_billing_badge_on_summary() {
+        let mut parser = make_parser();
+        let init =
+            r#"{"type":"init","session_id":"sess-err","model":"claude-sonnet-4-20250514"}"#;
+        parser.feed_line(init).unwrap();
+        let error = r#"{"type":"error","error":{"type":"billing_error","message":"Insufficient credits"}}"#;
+        parser.feed_line(error).unwrap();
+        let summary = parser.finish(1);
+        assert_eq!(summary.badges.len(), 1);
+        assert_eq!(
+            summary.badges[0].category,
+            crate::stream::badges::BadgeCategory::Billing
+        );
+        assert_eq!(summary.badges[0].message, "Insufficient credits");
+        assert_eq!(
+            summary.badges[0].remediation_url.as_deref(),
+            Some("https://console.anthropic.com/settings/billing")
+        );
+    }
+
+    #[test]
+    fn auth_error_populates_auth_badge_on_summary() {
+        let mut parser = make_parser();
+        let init =
+            r#"{"type":"init","session_id":"sess-auth","model":"claude-sonnet-4-20250514"}"#;
+        parser.feed_line(init).unwrap();
+        let error = r#"{"type":"error","error":{"type":"authentication_error","message":"Invalid API key"}}"#;
+        parser.feed_line(error).unwrap();
+        let summary = parser.finish(1);
+        assert_eq!(summary.badges.len(), 1);
+        assert_eq!(
+            summary.badges[0].category,
+            crate::stream::badges::BadgeCategory::Auth
+        );
+    }
+
+    #[test]
+    fn rate_limit_event_populates_rate_limit_badge_on_summary() {
+        let mut parser = make_recording_parser();
+        let init = r#"{"type":"init","session_id":"sess-rl","model":"claude-sonnet-4-20250514"}"#;
+        parser.feed_line(init).unwrap();
+        let rl = r#"{"type":"rate_limit_event","is_throttled":true,"retry_after_ms":5000,"message":"Rate limit exceeded"}"#;
+        parser.feed_line(rl).unwrap();
+        let result = r#"{"type":"result","duration_ms":5000,"usage":{"input_tokens":100,"output_tokens":50}}"#;
+        parser.feed_line(result).unwrap();
+        let summary = parser.finish(0);
+        assert_eq!(summary.badges.len(), 1);
+        assert_eq!(
+            summary.badges[0].category,
+            crate::stream::badges::BadgeCategory::RateLimit
+        );
+        assert!(summary.badges[0].message.contains("5.0s"));
     }
 }

@@ -264,7 +264,7 @@ impl<S: StreamEventSink + Send> StreamParser for GeminiStreamParser<S> {
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
-        StreamExecutionSummary {
+        let mut summary = StreamExecutionSummary {
             provider: Provider::Gemini,
             session_id: self.session_id,
             model: self.model,
@@ -289,7 +289,9 @@ impl<S: StreamEventSink + Send> StreamParser for GeminiStreamParser<S> {
             badges: Vec::new(),
             raw_summary: self.raw_summary,
             stderr_text: None,
-        }
+        };
+        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::Gemini);
+        summary
     }
 }
 

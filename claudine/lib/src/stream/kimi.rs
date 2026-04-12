@@ -267,7 +267,7 @@ impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
-        StreamExecutionSummary {
+        let mut summary = StreamExecutionSummary {
             provider: Provider::KimiCode,
             session_id: self.session_id,
             model: self.model,
@@ -292,7 +292,9 @@ impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
             badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
-        }
+        };
+        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::KimiCode);
+        summary
     }
 }
 

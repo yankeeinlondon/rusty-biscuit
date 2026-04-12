@@ -312,7 +312,7 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
             self.provider_status.as_deref(),
         );
         let has_usage = self.token_usage.input.is_some() || self.token_usage.output.is_some();
-        StreamExecutionSummary {
+        let mut summary = StreamExecutionSummary {
             provider: Provider::OpenCode,
             session_id: self.session_id,
             model: self.model,
@@ -349,7 +349,9 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
             badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
-        }
+        };
+        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::OpenCode);
+        summary
     }
 }
 
