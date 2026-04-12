@@ -9,7 +9,7 @@ blast_radius:
 
 # The `sniff repo documentation-changes` Subcommand
 
-Lists documentation files changed within a time period, grouped by file. Each file entry shows which commits touched it and why. This is the documentation-focused complement to `source-code-changes`.
+Lists documentation changes within a time period in a **commit-centric** layout: one block per commit, with only the commit's documentation files surfaced under **Files Impacted**. Commits that did not touch any documentation files are skipped entirely. This shares the same rendering template as `recent-commits` and `source-code-changes`, so the three commands differ only in which files they include.
 
 ## What Counts as Documentation
 
@@ -22,20 +22,36 @@ Source code, configuration, and other non-documentation files are excluded.
 
 ## Default Behavior
 
-When no period is specified, defaults to `3d` (last 3 days). Output is rendered as Markdown with a heading that includes the period label:
+When no period is specified, defaults to `3d` (last 3 days). Output is rendered as Markdown with a heading that includes the period label, followed by one block per commit:
 
 ```
-### Documentation Changes (last 3d)
+### Documentation Changes (today)
 
-- sniff/docs/cli/repo_recent-commits.md
-    - 2026-04-09 at 16:00 - docs(sniff): add CLI docs for recent-commits subcommand as part of commit 5e8f2a1b
-        - Documented period argument formats
-        - Added JSON output examples
-- CHANGELOG.md
-    - 2026-04-08 at 11:30 - docs: update changelog for v0.5.0 as part of commit 7c3d9e4f
+- [e0a1034] docs(sniff) at 10:12am Today: document commit-centric changes layout
+
+    **Description:**
+
+    - Add examples matching the new per-commit block
+    - Note the change-kind prefix in Files Impacted
+
+    **Files Impacted:**
+
+    - modified: sniff/docs/cli/repo_source-code-changes.md
+    - modified: sniff/docs/cli/repo_documentation-changes.md
+
+- [a1b5d77] docs(sniff) at 12:32pm Today: add program-installation documentation placeholder
+
+    **Files Impacted:**
+
+    - added: sniff/docs/topics/program-installation.md
 ```
 
-File paths are rendered as clickable OSC8 hyperlinks (pointing to `file://` URIs) in terminals that support them.
+Notes:
+
+- **Files Impacted** lists only documentation files; any non-doc files touched by the same commit are hidden from this view.
+- Each file is prefixed by its change kind (`added`, `modified`, `deleted`, `renamed`, `copied`).
+- File paths are rendered as clickable OSC8 hyperlinks (pointing to `file://` URIs) in terminals that support them.
+- Commit timestamps are displayed in the viewer's local timezone with `Today`/`Yesterday` labels.
 
 ## Period Argument
 
@@ -68,10 +84,17 @@ The optional `PERIOD` argument accepts several formats:
 | Argument | Description |
 |----------|-------------|
 | `[PERIOD]` | Time period (default: `3d`) |
+| `--action <feat\|chore\|refactor\|test\|style\|fix>` | Filter to one or more conventional commit actions |
 | `--package <PKG>` | Scope to commits touching a specific package |
 | `--package-area <AREA>` | Scope to commits touching a specific package area |
 | `--no-error` | Exit 0 with no output when no results found |
 | `--on-error <MESSAGE>` | Message to display when no results found |
+
+## Conventional Commit Action Filtering
+
+Use `--action` to keep only commits whose summary matches one of these conventional commit actions: `feat`, `chore`, `refactor`, `test`, `style`, `fix`.
+
+The flag may be repeated; multiple `--action` values are OR'd together. Non-conventional commits are excluded when `--action` filtering is active.
 
 ## Package Scoping
 
@@ -91,6 +114,8 @@ sniff repo documentation-changes today              # Since midnight
 sniff repo documentation-changes yesterday          # Yesterday only
 sniff repo documentation-changes 2026-04-01         # Specific date
 sniff repo documentation-changes a1b2c3d            # From hash to HEAD
+sniff repo documentation-changes --action feat      # Only conventional feat commits
+sniff repo documentation-changes --action chore --action refactor
 sniff repo documentation-changes 2w --package sniff # Last 2 weeks, sniff package only
 ```
 
@@ -100,7 +125,7 @@ sniff repo documentation-changes 2w --package sniff # Last 2 weeks, sniff packag
 sniff --json repo documentation-changes 1w
 ```
 
-Returns the same `CommitDescSet` object as `recent-commits`. The file-grouped rendering is a text-only view — JSON always returns the full commit list:
+Returns the same `CommitDescSet` object as `recent-commits` — JSON is not filtered down to documentation files, it always carries every changed file for the commit. The text-only rendering is the only view that prunes non-documentation files:
 
 ```json
 {
@@ -111,8 +136,8 @@ Returns the same `CommitDescSet` object as `recent-commits`. The file-grouped re
       "packages": ["sniff"],
       "package_areas": ["sniff"],
       "files": [
-        "sniff/docs/cli/repo_recent-commits.md",
-        "sniff/lib/src/filesystem/git/recent_commits.rs"
+        { "path": "sniff/docs/cli/repo_recent-commits.md",        "kind": "modified" },
+        { "path": "sniff/lib/src/filesystem/git/recent_commits.rs", "kind": "modified" }
       ],
       "description": "docs(sniff): add CLI docs for recent-commits subcommand",
       "bullet_points": [
@@ -125,6 +150,8 @@ Returns the same `CommitDescSet` object as `recent-commits`. The file-grouped re
   "repo_root": "/absolute/path/to/repo"
 }
 ```
+
+Each `files` item is a record of `{ path, kind }` where `kind` is one of `added`, `modified`, `deleted`, `renamed`, `copied`.
 
 ## Plain Output (`--plain`)
 
