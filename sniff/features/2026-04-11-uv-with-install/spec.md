@@ -1,30 +1,35 @@
-# UvWithInstall — Last-Resort Bootstrap for Python-Installable Tools
+# UvWithInstall — Make Python-Installable Tools Actually Install
 
 ## Summary
 
-Add a new `InstallationMethod::UvWithInstall(pkg)` variant to Sniff's program
-installer. On a host where Python is on `PATH` but `uv` is not, this variant
-is a last-resort fallback that bootstraps `uv` via the official
-[astral.sh/uv/install.sh] script (or its PowerShell equivalent on Windows),
-then runs `uv tool install <pkg>` to install the target program. It reuses
-the existing `RemoteBashConsentRequired` consent gate so users who have not
-approved remote install scripts are never surprised.
+Add `InstallationMethod::UvWithInstall(pkg)` to Sniff's program installer
+*and* make plain `Pip(_)` and `Uv(_)` methods selectable by adding them to
+the install-plan bucket order. The combined change closes the install gap
+for programs whose only methods are `Pip(_)` or `Uv(_)` (aider, goose,
+kimi-cli, conan, poetry, and the TTS cluster) on every host where Sniff
+runs.
 
-The variant is **auto-appended** by the plan builder: any program whose
-metadata declares a `Pip(_)` or `Uv(_)` installation method automatically
-gains a synthesized `UvWithInstall(_)` option at the tail of its install plan.
-No program-metadata edits are required.
+The selection rule encoded in the new buckets is:
+
+| Host state | Action |
+|---|---|
+| `uv` is installed | Use `uv` (declared `Uv(_)` if present, else synthesized `UvWithInstall(_)` which skips its bootstrap step at execute time) |
+| `pip` is installed, `uv` is not | Use `pip` (declared `Pip(_)`) — don't install new software when existing software works |
+| neither is installed | Bootstrap `uv` via `astral.sh/uv/install.sh` (or `install.ps1` on Windows), then `uv tool install <pkg>` |
+
+`UvWithInstall(_)` is auto-appended at plan-build time whenever a program
+declares `Pip(_)` or `Uv(_)` and does not already declare an explicit
+`UvWithInstall(_)`. Program metadata in `metadata.rs` is **not** edited.
 
 ## Motivation
 
 Today, a program whose only install methods are `Pip(_)` or `Uv(_)` cannot
 be installed by `sniff <category> install <name>` at all — *regardless* of
-whether pip or uv is present on the host. This is because the plan
-builder's `bucket_for` helper routes both `Pip(_)` and `Uv(_)` to
-`Bucket::Other`, which is deliberately excluded from `bucket_order`. The
-deliberate exclusion (inherited from the install-improvements feature)
-reflects a reluctance to pick unverified language package managers blindly,
-and this spec does not relitigate that decision.
+whether pip or uv is present on the host. The plan builder's `bucket_for`
+helper routes both `Pip(_)` and `Uv(_)` to `Bucket::Other`, which is
+deliberately excluded from `bucket_order` (the install-improvements
+feature left them out, presumably to avoid blindly picking unverified
+language package managers).
 
 The gap affects real tools, including:
 
@@ -33,66 +38,72 @@ The gap affects real tools, including:
 - TTS cluster: `gtts`, `coqui-tts`, `sherpa-onnx`, `kokoro-tts`, `mimic`,
   `mimic3`, `piper`
 
-On a fresh Linux container with Python available but no language package
-managers, every one of these currently resolves to `ManagerNotInstalled`.
-On a host with pip *and* uv installed, they still fail with no chosen
-method because of the `Bucket::Other` routing. `UvWithInstall` closes both
-gaps with a single variant that is eligible whenever Python is present and
-bash (or PowerShell) is available, and that bootstraps `uv` only if it is
-not already installed.
+`uv` itself is a single static Rust binary that does *not* require a
+pre-existing Python interpreter. The astral installer fetches a
+self-contained binary, and `uv tool install` will use a uv-managed Python
+runtime if none is on the host. This means we do not need to gate the
+fallback on Python being on `PATH`; bash (Unix) or PowerShell (Windows)
+is the only environmental precondition.
 
 ## Goals
 
 1. Every program with a `Pip(_)` or `Uv(_)` install method gains a
-   runnable install path whenever Python is on the host, regardless of
-   whether `uv` is already installed.
-2. The fallback runs only when no higher-priority method is runnable — it
-   must never preempt a working brew / apt / cargo / etc.
-3. The fallback reuses the existing remote-bash consent flow; no new CLI
+   runnable install path on every supported host.
+2. When `uv` is already installed, prefer `uv` over `pip` — this is the
+   user's stated preference and aligns with the modern Python tooling
+   direction.
+3. When `pip` is installed and `uv` is not, prefer the already-installed
+   `pip` over bootstrapping a new copy of `uv` — don't install new
+   software when existing software works.
+4. When neither is installed, bootstrap `uv` from astral and proceed.
+5. The fallback runs only when no higher-priority method is runnable —
+   it never preempts a working brew / apt / cargo / etc.
+6. The fallback reuses the existing remote-bash consent flow; no new CLI
    flags, no new error variants the user has to learn.
-4. The fallback works end-to-end on macOS and Linux (including WSL) in the
-   first delivery; Windows support ships in the same change via PowerShell.
-5. Program metadata (`installation_methods` slices in `metadata.rs`) does
+7. The fallback works end-to-end on macOS, Linux (including WSL), and
+   native Windows in the first delivery.
+8. Program metadata (`installation_methods` slices in `metadata.rs`) does
    **not** need to be touched for existing programs to benefit.
-6. When `uv` is already on the host, execution skips the bootstrap step
-   and runs `uv tool install` directly; the bootstrap only fires when
-   `uv` is absent.
 
 ## Non-Goals
 
-- Detecting or managing the Python interpreter itself. Sniff will only check
-  whether `python3`, `python`, or `py` is present on `PATH`; it will not
-  install Python, probe version, or care about virtualenvs.
-- Introducing a `PipWithInstall` variant. `uv` supersedes `pip` for tool
-  installs (`uv tool install` targets the same PyPI packages and installs
-  to `~/.local/bin` without requiring a venv), so a second variant adds
-  complexity without covering any case `UvWithInstall` does not.
-- Bootstrapping uv through any mechanism other than the astral installer.
-  Alternatives (`pip install uv`, `brew install uv`, `cargo install uv`)
-  are all covered by uv's existing `UV_INSTALL` metadata entry and would
-  be selected through the normal plan if their prerequisites were present.
+- Detecting or managing the Python interpreter itself. `uv` handles its
+  own Python; Sniff does not need to know whether `python3` is on `PATH`.
+- Introducing a `PipWithInstall` variant. `uv tool install` subsumes
+  `pip install --user` for CLI tools.
+- Bootstrapping `uv` through any mechanism other than the astral
+  installer. Alternatives (`pip install uv`, `brew install uv`,
+  `cargo install uv`) are already covered by uv's own `UV_INSTALL`
+  metadata entry and would be selected through the normal plan if
+  their prerequisites were present.
 - Modifying the user's shell profile, `PATH`, or environment. The astral
   script writes `uv` to `~/.local/bin/`; Sniff calls that absolute path
   for the follow-up install and leaves environment configuration to the
   user.
-- Version probing or version floors for Python. Q2 answer: PATH lookup
-  only. False positives on the Windows Store Python stub are accepted as
-  an execution-time failure rather than a selection-time concern.
+- Fixing `Bucket::Other` for the *other* language package managers
+  (`Pnpm` unverified case, `Bun`, `Yarn`, `Poetry`, `Cpan`, `Cpanm`,
+  `LuaRocks`, `VcPkg`, `Conan`, `Nuget`, `Hex`, `GoModules`, `Composer`,
+  `SwiftPm`). They stay in `Bucket::Other`. This spec narrowly addresses
+  the Python-installable tool gap.
+- Auto-synthesizing a `Pip(pkg)` from a `Uv(pkg)` declaration. We do not
+  assume that the PyPI package name for a uv-declared tool is identical
+  to what `pip install` would resolve, so a program declaring only
+  `Uv("kimi-cli")` on a pip-only host will fall through to the
+  bootstrap path rather than guess.
 
 ## Design Decisions
-
-The following decisions were reached during brainstorming and are binding
-for the implementation:
 
 | # | Decision | Notes |
 |---|---|---|
 | 1 | Only `UvWithInstall` — no `PipWithInstall`. | `uv tool install` subsumes `pip install --user` for CLI tools. |
-| 2 | Python gate is PATH-only. | `which::which("python3").is_ok() \|\| which::which("python").is_ok() \|\| which::which("py").is_ok()`. No version probe, no interpreter spawn. |
+| 2 | No Python detection. | `uv` doesn't require a pre-existing Python interpreter. The astral installer is self-contained, and `uv tool install` manages Python automatically. No `HostCapabilities` change, no cache schema bump. |
 | 3 | Bootstrap is hard-coded to the astral installer. | Unix: `sh -c "curl -LsSf https://astral.sh/uv/install.sh \| sh"`. Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"`. |
-| 4 | Consent reuses `RemoteBashConsentRequired` + `approve_remote_bash`. | No new error variant, no new CLI flag. The `url` field reports the astral installer URL (not the PyPI package name). Consent is demanded even if the bootstrap step turns out to be skipped at execution time — the *plan* is built against a snapshot of host state and asks for worst-case consent. |
-| 5 | Bucket placement is dead-last. | `UvBootstrap` is the final bucket in `bucket_order`, after `SudoNpm`. Only fires when nothing else is runnable. |
-| 6 | Auto-append at plan-build time. | `build_install_plan` synthesizes a tail `UvWithInstall(pkg)` whenever declared methods include `Pip(_)` or `Uv(_)` and no explicit `UvWithInstall(_)` is already present. |
-| 7 | `UvWithInstall` is a **superset of `Uv`**, not a sibling. | Eligibility does NOT require uv to be absent. When uv is already on the host, execution skips the bootstrap step and runs `uv tool install` directly. This is the minimal fix for the `Bucket::Other` gap noted in *Motivation*, without expanding scope to re-bucket plain `Pip(_)` / `Uv(_)` methods. |
+| 4 | Consent reuses `RemoteBashConsentRequired` + `approve_remote_bash`. | No new error variant, no new CLI flag. The `url` field reports the astral installer URL. Consent is demanded at plan level even if the bootstrap step turns out to be skipped at execute time — the plan asks for worst-case approval. |
+| 5 | New bucket `PipUvDirect` placed after `SudoNpm` and before `UvBootstrap`. | Holds plain `Pip(_)` and `Uv(_)` facts so they can finally be selected. |
+| 6 | `Pip(_)` eligibility is conditional on `uv` being absent. | This is what enforces "uv wins over pip when both installed." Within the same `PipUvDirect` bucket, at most one of `Pip` and `Uv` is ever eligible, so within-bucket ordering is moot. |
+| 7 | `UvWithInstall(_)` lives in its own dead-last `UvBootstrap` bucket. | Eligibility = `has_bash` (Unix) or `is_windows`. Always available as a final fallback. |
+| 8 | Auto-append at plan-build time. | `build_install_plan` synthesizes a tail `UvWithInstall(pkg)` whenever declared methods include `Pip(_)` or `Uv(_)` and no explicit `UvWithInstall(_)` is already present. The package name is taken from the first `Uv(_)` if present, else from the first `Pip(_)`. |
+| 9 | `UvWithInstall` execution skips its bootstrap step when `uv` is already on `PATH`. | Decided at execute time via a fresh `which uv` probe — not from cached host capabilities — so a user who installed uv between plan-build and execute does not trigger a redundant bootstrap. |
 
 ## Architecture
 
@@ -106,280 +117,338 @@ pub enum InstallationMethod {
 
     /// Install `pkg` via `uv tool install`, bootstrapping uv from
     /// astral.sh/uv/install.sh (or install.ps1 on Windows) first if
-    /// uv is not already on PATH. Runnable whenever Python is on
-    /// PATH and bash (Unix) or PowerShell (Windows) is available.
-    /// Uses the RemoteBash consent flow via the existing
-    /// `approve_remote_bash` option — consent is demanded even when
-    /// the bootstrap step will be skipped at execution time.
+    /// uv is not already on PATH. Runnable whenever bash (Unix) or
+    /// PowerShell (Windows) is available — no Python on the host is
+    /// required because the astral installer is self-contained and
+    /// `uv tool install` manages Python on its own. Uses the
+    /// RemoteBash consent flow via the existing `approve_remote_bash`
+    /// option; consent is demanded even when the bootstrap step will
+    /// be skipped at execute time.
     UvWithInstall(&'static str),
 }
 ```
 
-The variant carries the PyPI package name (same shape as `Pip(_)` and
+The variant carries the PyPI package name (same shape as `Pip(_)` /
 `Uv(_)`). The astral installer URL is hard-coded inside the installer
-module — not stored on the variant — so there is one authoritative source
-per platform.
+module — not stored on the variant — so there is one authoritative
+source per platform.
 
-### HostCapabilities delta
+`InstallationMethod::package_name`, `manager_name`, `manager_binary`,
+`is_os_package_manager`, and the existing tests that exhaustively
+enumerate variants all need a one-line addition for `UvWithInstall`.
 
-One new field in `sniff/lib/src/programs/host_capability.rs`:
+### HostCapabilities
 
-```rust
-pub struct HostCapabilities {
-    // ...existing fields...
-    pub python_on_path: bool,
-}
-```
-
-Detection in `HostCapabilities::detect()`:
-
-```rust
-fn detect_python_on_path() -> bool {
-    which::which("python3").is_ok()
-        || which::which("python").is_ok()
-        || which::which("py").is_ok()
-}
-```
-
-`Default::default()` sets the field to `false`.
-
-### Cache schema version bump
-
-`CACHE_SCHEMA_VERSION` goes from `1` to `2`. Existing
-`~/.sniff-programs.json` files will fail the version check inside
-`load_host_capabilities_from` and be silently replaced on next detection.
-No migration is needed.
+**No changes.** No new field, no new detection, no cache schema bump.
+The `python_on_path` idea from an earlier draft of this spec was
+removed because `uv` does not require Python on the host.
 
 ### Plan-builder changes
 
 In `sniff/lib/src/programs/install_plan.rs`:
 
-1. **New bucket.** `Bucket::UvBootstrap` added to the `Bucket` enum and
-   placed last in `bucket_order`:
+#### 1. New buckets
 
-   ```
-   DefaultOsPm → VerifiedPnpm → NpmNoSudo → AltOsPm
-     → RemoteBash → Cargo → SudoNpm → UvBootstrap
-   ```
+```rust
+enum Bucket {
+    DefaultOsPm,
+    VerifiedPnpm,
+    NpmNoSudo,
+    AltOsPm,
+    RemoteBash,
+    Cargo,
+    SudoNpm,
+    PipUvDirect,   // new — holds plain Pip(_) and Uv(_)
+    UvBootstrap,   // new — holds UvWithInstall(_)
+    Other,         // pre-existing catch-all
+}
+```
 
-2. **Auto-append.** Before deriving facts, post-process the declared
-   methods:
+#### 2. Updated `bucket_order`
 
-   ```rust
-   fn synthesize_uv_bootstrap(
-       declared: &[InstallationMethod],
-   ) -> Option<InstallationMethod> {
-       if declared.iter().any(|m| matches!(m, InstallationMethod::UvWithInstall(_))) {
-           return None;
-       }
-       let pkg = declared
-           .iter()
-           .find_map(|m| match m {
-               InstallationMethod::Uv(p) => Some(*p),
-               _ => None,
-           })
-           .or_else(|| declared.iter().find_map(|m| match m {
-               InstallationMethod::Pip(p) => Some(*p),
-               _ => None,
-           }))?;
-       Some(InstallationMethod::UvWithInstall(pkg))
-   }
-   ```
+```rust
+fn bucket_order() -> [Bucket; 9] {
+    [
+        Bucket::DefaultOsPm,
+        Bucket::VerifiedPnpm,
+        Bucket::NpmNoSudo,
+        Bucket::AltOsPm,
+        Bucket::RemoteBash,
+        Bucket::Cargo,
+        Bucket::SudoNpm,
+        Bucket::PipUvDirect,
+        Bucket::UvBootstrap,
+    ]
+}
+```
 
-   The synthesized variant is chained onto the declared slice before
-   fact derivation, so it flows through every downstream reason path
-   identically to a declared method.
+`Bucket::Other` continues to be excluded from `bucket_order`. Only
+`Pip` and `Uv` are pulled out of it; the other language PMs stay in
+`Other` (out of scope, see Non-Goals).
 
-3. **Routing.** `bucket_for(fact, host)` routes
-   `InstallationMethod::UvWithInstall(_)` to `Bucket::UvBootstrap`.
+#### 3. Routing in `bucket_for`
 
-4. **Eligibility.** `derive_method_fact` for `UvWithInstall` computes:
+```rust
+match &fact.kind {
+    // ...existing arms...
 
-   ```
-   eligible_without_priority =
-        host.python_on_path
-     && platform_bootstrap_available(host)
-   ```
+    InstallationMethod::Pip(_) | InstallationMethod::Uv(_) => Bucket::PipUvDirect,
+    InstallationMethod::UvWithInstall(_) => Bucket::UvBootstrap,
 
-   where `platform_bootstrap_available` is:
+    _ => Bucket::Other,
+}
+```
 
-   - **Unix** (`host.os_type != OsType::Windows`, which includes macOS,
-     Linux, and WSL — sniff already detects WSL as Linux): requires
-     `host.has_bash == true`. Bash is only needed on the bootstrap
-     path; when uv is already installed, the bootstrap step is
-     skipped and bash is not actually required. We still gate on
-     bash at plan-build time because the plan is built against a
-     pessimistic view of the host: if the user approves and runs
-     the plan, and uv has been uninstalled in the interim, we want
-     the plan to fail cleanly at selection rather than mid-execute.
-   - **Native Windows** (`host.os_type == OsType::Windows`): always
-     `true`. PowerShell is present on every supported Windows version,
-     so no capability flag is needed.
+The OS-package-manager and Pnpm/Npm arms stay above this so default
+OS PMs continue to win when applicable.
 
-   Notably, the eligibility rule does **not** depend on whether `uv`
-   is currently installed. That's the core of the superset-of-`Uv`
-   decision: the variant is runnable in both states, and the
-   execution path decides at the last minute whether the bootstrap
-   step fires.
+#### 4. Auto-append synthesis
 
-5. **New blocking reason.** One new variant of `InstallPlanReason`:
+Before deriving facts, `build_install_plan` post-processes the declared
+methods:
 
-   - `PythonNotOnPath` — Python interpreter missing from PATH.
+```rust
+fn synthesize_uv_bootstrap(
+    declared: &[InstallationMethod],
+) -> Option<InstallationMethod> {
+    if declared.iter().any(|m| matches!(m, InstallationMethod::UvWithInstall(_))) {
+        return None;
+    }
+    let pkg = declared
+        .iter()
+        .find_map(|m| match m {
+            InstallationMethod::Uv(p) => Some(*p),
+            _ => None,
+        })
+        .or_else(|| declared.iter().find_map(|m| match m {
+            InstallationMethod::Pip(p) => Some(*p),
+            _ => None,
+        }))?;
+    Some(InstallationMethod::UvWithInstall(pkg))
+}
+```
 
-   Surfaced through `blocking_reason_for` / `explain_blocking_reason`.
-   Reason text examples:
+The synthesized variant is chained onto the declared slice before
+fact derivation, so it flows through every downstream reason path
+identically to a declared method.
 
-   - Selected (uv absent):
-     `"chosen — uv tool install (bootstraps uv via astral.sh; requires remote-script consent)"`
-   - Selected (uv already present):
-     `"chosen — uv tool install (uv already installed; bootstrap skipped at execute time; requires remote-script consent)"`
-   - Python missing:
-     `"python interpreter not on PATH — cannot use uv to install"`
+#### 5. Eligibility in `derive_method_fact`
 
-   The "requires remote-script consent" suffix appears on the selected
-   reason regardless of host state. This is intentional: the plan is a
-   snapshot, and the user must approve the worst-case side effect even
-   if the actual execution ends up skipping the bootstrap. An earlier
-   iteration of this spec added an `UvAlreadyInstalledPreferred` reason;
-   it was removed because `UvWithInstall` is now itself the direct path.
+| Method | `eligible_without_priority` |
+|---|---|
+| `Uv(_)` | `host.lang_pkg_mgrs.is_installed(LanguagePackageManager::Uv)` |
+| `Pip(_)` | `host.lang_pkg_mgrs.is_installed(LanguagePackageManager::Pip) && !host.lang_pkg_mgrs.is_installed(LanguagePackageManager::Uv)` |
+| `UvWithInstall(_)` | Unix: `host.has_bash`. Native Windows (`os_type == Windows`): `true` (PowerShell is always present on supported Windows). |
+
+The `&& !uv_installed` clause on `Pip` is the critical enforcement of
+"uv wins over pip when both are installed." Because `Pip` and `Uv`
+share the `PipUvDirect` bucket, at most one is ever eligible at a
+time, so within-bucket order does not matter and the bucket selection
+is unambiguous.
+
+`UvWithInstall` deliberately does *not* gate on whether `uv` is
+already installed. It is runnable in both states, and execution
+decides at the last minute whether the bootstrap step fires.
+
+#### 6. New blocking reasons
+
+Two new variants of `InstallPlanReason`:
+
+- `UvPreferredOverPip` — `Pip(_)` is blocked because `uv` is also
+  installed and is the preferred Python tool installer. Reason text:
+  `"uv is installed; uv is preferred over pip for Python tools"`.
+- `BashNotAvailable` — `UvWithInstall(_)` cannot run on a Unix host
+  without bash (the astral installer requires it). Reason text:
+  `"bash is not available; cannot run the astral uv installer"`.
+
+`PipUvDirect` selected reasons:
+
+- `Uv(_)` selected: `"chosen — uv tool install (uv already on host)"`
+- `Pip(_)` selected: `"chosen — pip install (pip already on host; uv absent)"`
+
+`UvBootstrap` selected reason:
+
+- `"chosen — uv tool install (bootstraps uv via astral.sh if absent; requires remote-script consent)"`
 
 ### Execution
 
 In `sniff/lib/src/programs/installer.rs`:
 
-1. `execute_install` and `execute_versioned_install` gain a branch for
-   `UvWithInstall(pkg)`.
+#### 1. New branch in `execute_install` and `execute_versioned_install`
 
-2. Consent check happens inside `InstallPlan::execute`, which already
-   branches on `RemoteBash`. Extend the branch:
+`UvWithInstall(pkg)` gets a dedicated branch. The existing `Pip(_)`
+and `Uv(_)` branches are unchanged — they continue to run
+`pip install <pkg>` and `uv tool install <pkg>` as today.
 
-   ```rust
-   let needs_remote_consent = matches!(
-       chosen.kind,
-       InstallationMethod::RemoteBash(_) | InstallationMethod::UvWithInstall(_)
-   );
-   if needs_remote_consent && !opts.approve_remote_bash && !opts.dry_run {
-       let url = match &chosen.kind {
-           InstallationMethod::RemoteBash(u) => u.to_string(),
-           InstallationMethod::UvWithInstall(_) => astral_installer_url().to_string(),
-           _ => unreachable!(),
-       };
-       return Err(SniffInstallationError::RemoteBashConsentRequired {
-           pkg: self.program.clone(),
-           url,
-       });
-   }
-   ```
+#### 2. Conditional two-step execution
 
-3. Execution sequence. Step 1 is conditional on host state **at
-   execution time** (not plan-build time — re-check `which uv` just
-   before running):
+```
+Step 1 — bootstrap uv (only if `which uv` fails right now)
+  Unix:    sh -c "curl -LsSf https://astral.sh/uv/install.sh | sh"
+  Windows: powershell -ExecutionPolicy ByPass -c \
+           "irm https://astral.sh/uv/install.ps1 | iex"
 
-   ```
-   Step 1 — bootstrap uv (only if uv is not already on PATH)
-     Unix:    sh -c "curl -LsSf https://astral.sh/uv/install.sh | sh"
-     Windows: powershell -ExecutionPolicy ByPass -c \
-              "irm https://astral.sh/uv/install.ps1 | iex"
+Step 2 — install the target program (always runs)
+  Unversioned: <uv_path> tool install <pkg>
+  Versioned:   <uv_path> tool install <pkg>@<version>
+```
 
-   Step 2 — install the target program with uv (always runs)
-     Unversioned: <uv_path> tool install <pkg>
-     Versioned:   <uv_path> tool install <pkg>@<version>
-   ```
+The step-1 skip is driven by a fresh `which::which("uv")` lookup
+inside `execute_install`, not by the cached `HostCapabilities`. A
+user who installed uv between plan-build and execute-time does not
+trigger a redundant bootstrap.
 
-   The step-1 skip is driven by a fresh PATH lookup inside
-   `execute_install`, not by the cached `HostCapabilities`, so a
-   user who installed uv between plan-build and execute-time does
-   not trigger a redundant bootstrap.
+#### 3. uv binary resolution
 
-4. `uv` binary resolution after bootstrap:
+After bootstrap (or at the start of execution if bootstrap was
+skipped), resolve the uv binary in this order:
 
-   - Unix: `~/.local/bin/uv`
-   - Windows: `%USERPROFILE%\.local\bin\uv.exe`
+1. Bare `uv` on `PATH` (handles "user already had uv" and "user
+   added `~/.local/bin` to PATH").
+2. `~/.local/bin/uv` (Unix) or `%USERPROFILE%\.local\bin\uv.exe`
+   (Windows) — the astral installer's documented default location.
+3. If both miss, return `SniffInstallationError::InstallationError`
+   with a clear message that uv could not be located after bootstrap.
 
-   These paths match the astral installer defaults as of April 2026.
-   If the default path does not exist after a successful bootstrap
-   execution, fall back to bare `uv` on `PATH`; if that also fails,
-   return `SniffInstallationError::InstallationError` with a clear
-   message that uv could not be located. This fallback covers future
-   astral-default changes without requiring a Sniff release.
+This ordering covers the case where uv was installed system-wide via
+some other route (brew/apt) and lives at `/usr/local/bin/uv` or
+similar.
 
-5. `InstallResult.command` rendering. For dry-run and verbose CLI
-   output, the `command` string contains whichever steps will
-   actually run:
+#### 4. Consent check inside `InstallPlan::execute`
 
-   - When uv is absent (bootstrap required):
-     ```
-     curl -LsSf 'https://astral.sh/uv/install.sh' | sh
-     ~/.local/bin/uv tool install 'aider-chat'
-     ```
-   - When uv is already on PATH (bootstrap skipped):
-     ```
-     uv tool install 'aider-chat'
-     ```
+Extend the existing `RemoteBash` branch:
 
-   The dry-run renderer inspects the same runtime `which uv` probe
-   as the execute path, so the rendered command is honest about
-   what *would* run right now. No new fields on `InstallResult` —
-   keeps the API surface unchanged.
+```rust
+let needs_remote_consent = matches!(
+    chosen.kind,
+    InstallationMethod::RemoteBash(_) | InstallationMethod::UvWithInstall(_)
+);
+if needs_remote_consent && !opts.approve_remote_bash && !opts.dry_run {
+    let url = match &chosen.kind {
+        InstallationMethod::RemoteBash(u) => u.to_string(),
+        InstallationMethod::UvWithInstall(_) => astral_installer_url().to_string(),
+        _ => unreachable!(),
+    };
+    return Err(SniffInstallationError::RemoteBashConsentRequired {
+        pkg: self.program.clone(),
+        url,
+    });
+}
+```
 
-6. Versioned installs *are* supported via `uv tool install pkg@version`.
-   Unlike plain `RemoteBash` (which must error on versioned installs),
-   `UvWithInstall` gracefully supports `install_version` end-to-end. This
-   is a win for the affected programs: on hosts without pip/uv today,
-   `install_version("aider-chat", "0.50.0")` returns an error; after this
-   change, it works via the bootstrap path.
+`astral_installer_url()` is a small platform-dispatched helper that
+returns the Unix or Windows URL.
+
+#### 5. `InstallResult.command` rendering
+
+For dry-run and verbose CLI output, the `command` string contains
+whichever steps will actually run, decided by the same runtime
+`which uv` probe used by execution:
+
+- When `uv` is absent (bootstrap will run):
+  ```
+  curl -LsSf 'https://astral.sh/uv/install.sh' | sh
+  ~/.local/bin/uv tool install 'aider-chat'
+  ```
+- When `uv` is already on `PATH` (bootstrap will be skipped):
+  ```
+  uv tool install 'aider-chat'
+  ```
+
+No new fields on `InstallResult` — keeps the API surface unchanged.
+
+#### 6. Versioned installs
+
+Versioned installs work via `uv tool install pkg@version`. The
+pre-existing `Pip(_)` versioned install (`pip install pkg==version`,
+already in `installer.rs:438`) continues to work for the
+"pip-installed-uv-absent" case via the new `PipUvDirect` selection.
 
 ### What stays untouched
 
 - Program metadata in `sniff/lib/src/programs/enums/metadata.rs`. No
-  `installation_methods` slice is edited. Auto-append handles all
-  existing and future Python-installable tools.
+  `installation_methods` slice is edited. Auto-append handles
+  existing and future Python-installable tools uniformly.
 - CLI subcommands (`sniff <category> install …`). The consent gate
-  already surfaces `RemoteBashConsentRequired`; users will see the
+  already surfaces `RemoteBashConsentRequired`; users see the
   astral installer URL in the prompt and approve (or not) using the
   same flow they would for any other remote-bash install.
 - `ProgramDetector` trait methods. All reachable via the existing
   `install_plan` / `install` / `install_version` entry points.
+- Other language package managers (`Pnpm`, `Bun`, `Yarn`, `Poetry`,
+  `Cpan`, `Cpanm`, `LuaRocks`, `VcPkg`, `Conan` lib, `Nuget`, `Hex`,
+  `GoModules`, `Composer`, `SwiftPm`) and their `Bucket::Other`
+  routing. Out of scope.
 
 ## Testing
 
 ### Unit tests — selection (`install_plan.rs`)
 
-- `uv_with_install_synthesized_when_pip_declared`: program declares
-  only `Pip("aider-chat")`; Python on PATH; `has_bash == true` → plan
-  options include a synthetic `UvWithInstall("aider-chat")` and it
-  is chosen.
-- `uv_with_install_synthesized_when_uv_declared`: program declares
-  only `Uv("kimi-cli")` → same, package name taken from the `Uv`
-  variant.
-- `uv_with_install_prefers_uv_package_name_over_pip`: program
-  declares both `Pip("aider")` and `Uv("aider-chat")` → synthesized
-  variant uses `"aider-chat"` (the `Uv` name wins).
-- `uv_with_install_blocked_when_python_not_on_path`: Python absent →
-  reason is `PythonNotOnPath` and the option is not chosen.
-- `uv_with_install_chosen_even_when_uv_already_installed`: uv present
-  in `host.lang_pkg_mgrs`, program declares only `Pip("conan")` →
-  `UvWithInstall("conan")` is synthesized and chosen. This verifies
-  the superset-of-`Uv` behavior and guards against regressing into
-  the `UvAlreadyInstalledPreferred` trap.
-- `uv_with_install_not_chosen_when_higher_bucket_runnable`: program
-  has `Brew("poetry")` and `Pip("poetry")`; host is macOS with brew →
-  chosen is `Brew`; the synthesized `UvWithInstall` is present with
-  reason `LowerPriorityAlternative`.
-- `uv_with_install_is_last_bucket`: program has only `Pip("foo")`
-  plus the synthesized `UvWithInstall`; host also has a runnable
-  `Cargo` path for a sibling program — verify `UvWithInstall` does
-  not preempt `Cargo` and lands in the final bucket.
-- `uv_with_install_not_synthesized_when_no_python_method`: program
-  with only `Brew("vim")` → no synthesized variant.
-- `uv_with_install_not_double_synthesized`: program whose metadata
-  already declares an explicit `UvWithInstall("foo")` → synthesis is
-  a no-op.
-- `uv_with_install_blocked_on_unix_without_bash`: Python on PATH,
-  `has_bash == false` on Unix → option not chosen with a blocking
-  reason describing the missing bash. (Even though bash is only
-  strictly needed on the bootstrap path, we gate at plan-build time
-  for worst-case planning as documented in the Eligibility section.)
+**Auto-append behavior:**
+
+- `auto_append_synthesizes_uv_with_install_from_pip_only`: program
+  declares `[Pip("conan")]` → plan options include
+  `UvWithInstall("conan")` at the tail.
+- `auto_append_synthesizes_uv_with_install_from_uv_only`: program
+  declares `[Uv("kimi-cli")]` → synthesized
+  `UvWithInstall("kimi-cli")`.
+- `auto_append_prefers_uv_package_name_over_pip`: program declares
+  both `[Pip("aider"), Uv("aider-chat")]` → synthesized
+  `UvWithInstall("aider-chat")`.
+- `auto_append_skipped_when_no_python_method`: program with only
+  `[Brew("vim")]` → no synthesized variant.
+- `auto_append_skipped_when_explicit_uv_with_install_present`: program
+  declaring `[Pip("foo"), UvWithInstall("foo")]` → synthesis is a
+  no-op.
+
+**Selection rule (`uv > pip > bootstrap`):**
+
+- `uv_wins_when_uv_installed_and_uv_declared`: program declares
+  `[Pip("aider"), Uv("aider-chat")]`; host has uv installed → chosen
+  is `Uv("aider-chat")` (in `PipUvDirect` bucket).
+- `uv_wins_when_uv_installed_and_only_pip_declared`: program declares
+  `[Pip("conan")]`; host has uv installed → chosen is synthesized
+  `UvWithInstall("conan")` (`PipUvDirect` is empty of eligible facts;
+  `UvBootstrap` wins). The `Pip` fact is blocked with reason
+  `UvPreferredOverPip`.
+- `pip_wins_when_pip_installed_uv_absent`: program declares
+  `[Pip("conan")]`; host has pip installed but not uv → chosen is
+  `Pip("conan")` (in `PipUvDirect` bucket). The synthesized
+  `UvWithInstall` is present with reason `LowerPriorityAlternative`.
+- `pip_wins_when_both_declared_and_pip_installed_uv_absent`: program
+  declares `[Pip("aider"), Uv("aider-chat")]`; host has pip but not
+  uv → chosen is `Pip("aider")`. The `Uv("aider-chat")` fact is
+  blocked with reason `ManagerNotInstalled`.
+- `bootstrap_wins_when_neither_installed`: program declares
+  `[Pip("conan")]`; host has neither pip nor uv → chosen is
+  synthesized `UvWithInstall("conan")` in `UvBootstrap`.
+- `bootstrap_wins_when_only_uv_declared_and_only_pip_installed`:
+  program declares `[Uv("kimi-cli")]`; host has pip but not uv →
+  chosen is synthesized `UvWithInstall("kimi-cli")`. (Documents the
+  edge case in row 5 of the scenarios table — we do not assume
+  `pip install kimi-cli` would work without an explicit declaration.)
+
+**Higher-priority methods still win:**
+
+- `brew_wins_over_pip_uv_direct_on_macos`: program declares
+  `[Brew("poetry"), Pip("poetry")]`; macOS host with brew → chosen
+  is `Brew`; the `PipUvDirect` and `UvBootstrap` candidates are
+  marked `LowerPriorityAlternative`.
+- `cargo_wins_over_uv_bootstrap`: program declares
+  `[Cargo("foo"), Pip("foo")]`; host has cargo but not pip/uv →
+  chosen is `Cargo`. (Verifies `UvBootstrap` is strictly after
+  `Cargo` in `bucket_order`.)
+- `uv_bootstrap_is_truly_last`: program declares only `[Pip("foo")]`;
+  host has runnable methods in every earlier bucket via siblings —
+  `UvWithInstall` does not preempt anything in earlier buckets.
+
+**Eligibility edges:**
+
+- `uv_with_install_blocked_on_unix_without_bash`: `host.has_bash ==
+  false` on Unix → `UvWithInstall` is ineligible with reason
+  `BashNotAvailable`.
+- `uv_with_install_eligible_on_native_windows`: fabricated Windows
+  host → `UvWithInstall` is eligible regardless of `has_bash`.
 
 ### Unit tests — execution (`installer.rs`)
 
@@ -403,22 +472,19 @@ In `sniff/lib/src/programs/installer.rs`:
   fabricated Windows host where `which uv` fails, dry-run command
   contains
   `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`.
-
-### Unit tests — host capability (`host_capability.rs`)
-
-- `default_python_on_path_is_false`: `HostCapabilities::default()
-  .python_on_path == false`.
-- `cache_schema_version_bump_invalidates_old`: write a cache envelope
-  with `schema_version: 1`; `load_host_capabilities_from` returns
-  `None`.
+- `uv_with_install_resolves_uv_path_via_path_first`: when `which uv`
+  succeeds at a non-default location (e.g. `/opt/homebrew/bin/uv`),
+  the install command uses that path, not `~/.local/bin/uv`.
 
 ### Integration test (`sniff/lib/tests/uv_with_install_plan.rs`)
 
-A new test file that uses the fake `ProgramInfo` pattern established by
-`install_plan.rs`'s existing `selection_tests` module. It fabricates a
-`HostCapabilities` with Python on PATH, `has_bash = true`, no installed
-language package managers, and verifies end-to-end plan shape for a
-program declaring only `Pip("aider-chat")`.
+A new test file using the fake `ProgramInfo` pattern from
+`install_plan.rs::selection_tests`. It fabricates several
+`HostCapabilities` permutations (uv installed; pip installed
+without uv; neither installed; uv installed on Windows; bash
+missing on Linux) and verifies end-to-end plan shape for a program
+declaring only `[Pip("aider-chat")]`. This is the cross-cutting
+guard that protects the full table of scenarios from regressing.
 
 ### Not tested
 
@@ -427,62 +493,72 @@ program declaring only `Pip("aider-chat")`.
   that is sufficient for automated coverage.
 - Live Windows PowerShell execution. The command-shape test covers
   rendering; live Windows behavior is validated manually.
+- Live `uv tool install` against PyPI. Same reason — the command
+  shape is verified, the network call is not.
 
 ## Open Questions
 
-None. All design decisions were settled during the brainstorming pass
-that produced this spec.
+None. All design decisions were settled during the brainstorming
+pass that produced this spec.
 
 ## Risks
 
-1. **Astral default install path changes.** If astral moves `uv` out
-   of `~/.local/bin/`, the post-bootstrap path resolution breaks.
-   *Mitigation:* fallback to bare `uv` on `PATH` after a failed
-   absolute-path lookup; a clear error if both fail. Worst case is a
-   one-line constant update in `installer.rs`.
-2. **Windows Store Python stub.** On Windows, `python` on `PATH` may
-   be the Microsoft Store redirect that exits with a prompt rather
-   than running code. Our PATH-only gate reports `python_on_path =
-   true`, the plan picks `UvWithInstall`, and the user may hit the
-   stub at execution time. Because the astral Windows installer does
-   not actually require an existing Python interpreter to install uv
-   itself (the installer bundles a Python runtime), this may turn
-   out to be a non-issue in practice. If users hit it, we upgrade
-   the gate to a version probe in a follow-up.
-3. **Consent reuse conflation.** A user who previously approved a
+1. **Astral default install path changes.** If astral moves `uv`
+   out of `~/.local/bin/`, the post-bootstrap absolute-path
+   resolution misses. *Mitigation:* the resolution order tries
+   bare `uv` on `PATH` first, then the documented default location;
+   a clear error fires only if both miss. Worst case is a one-line
+   constant update in `installer.rs`.
+2. **Consent reuse conflation.** A user who previously approved a
    remote-bash install for (say) `rustup` gets auto-opted into
-   approving the astral uv bootstrap too. This trade-off was
-   accepted for API simplicity. If users complain, we split the
-   consent flag in a follow-up — the call sites are all inside
+   approving the astral uv bootstrap too. This was accepted for
+   API simplicity. If users complain, we split the consent flag in
+   a follow-up — the call sites are all inside
    `InstallPlan::execute`.
-4. **Consent is demanded even when the bootstrap would be skipped.**
-   Because `UvWithInstall` is a superset of `Uv` and the bootstrap
-   decision is made at execution time, the plan-level consent gate
-   asks for worst-case approval even if `uv` is already installed.
-   On a host with uv present, users will see "approve remote
-   script?" for an install that turns out to skip the remote
-   script entirely. This is mildly annoying but truthful — the
-   *plan* really does declare a conditional remote-script side
-   effect. A more refined UX would probe uv at plan-build time and
-   skip the consent prompt accordingly, but that conflates plan
-   semantics with host liveness checks and was deferred.
+3. **Consent demanded even when bootstrap will be skipped.** Because
+   the bootstrap decision is made at execute time but consent is
+   plan-level, users on a host with uv already installed will see
+   "approve remote script?" for an install that turns out to skip
+   the remote script entirely. A more refined UX would do a
+   plan-build-time `which uv` probe and skip the consent prompt
+   accordingly, but that conflates plan semantics with host
+   liveness checks and was deferred.
+4. **Pulling `Pip` and `Uv` out of `Bucket::Other` may surprise the
+   author of the install-improvements feature**, who deliberately
+   left them out. This spec's narrow argument is that Python
+   tooling is the largest concrete gap and that the new
+   `PipUvDirect` bucket plus the `uv > pip` eligibility rule
+   delivers the right semantics for this slice without committing
+   to any particular policy for the other language PMs.
+5. **Edge case: program declares only `Uv("kimi-cli")` and host has
+   only pip.** We do not auto-synthesize a `Pip("kimi-cli")` from
+   the `Uv` declaration; instead, `UvWithInstall` bootstraps uv.
+   This is documented in row 5 of the scenarios table and tested
+   by `bootstrap_wins_when_only_uv_declared_and_only_pip_installed`.
+   If users hit this case in practice and want pip to win, the
+   fix is a metadata edit on the affected program (add an explicit
+   `Pip(_)` declaration) — not a behavior change in this spec.
 
 ## Delivery Order (informal)
 
 This is a spec, not a plan, but the natural sequence is:
 
-1. `HostCapabilities::python_on_path` + cache schema bump + its tests.
-2. `InstallationMethod::UvWithInstall` variant + its `package_name` /
-   `manager_name` / `manager_binary` extensions + compile-time
-   exhaustiveness tests.
-3. `Bucket::UvBootstrap` + auto-append in `build_install_plan` +
-   eligibility rule + selection tests.
-4. Two-step execution in `installer.rs` + dry-run rendering +
-   execution tests.
-5. Consent-flow extension in `InstallPlan::execute` + consent test.
-6. Integration test.
-7. Manual smoke test on macOS and a Linux container with only Python
-   present.
+1. `InstallationMethod::UvWithInstall` variant + extensions to
+   `package_name` / `manager_name` / `manager_binary` /
+   exhaustive enum tests. No behavior change yet.
+2. `Bucket::PipUvDirect` and `Bucket::UvBootstrap` additions to
+   the `Bucket` enum + `bucket_order` update + routing in
+   `bucket_for`. Existing tests should still pass.
+3. Eligibility rules for `Pip(_)`, `Uv(_)`, and `UvWithInstall(_)`
+   in `derive_method_fact`. Auto-append synthesis in
+   `build_install_plan`. New blocking reasons. Selection tests.
+4. Two-step execution in `installer.rs` with the runtime `which
+   uv` probe and the binary resolution fallback. Dry-run rendering
+   tests. Execution-shape tests.
+5. Consent-flow extension in `InstallPlan::execute`. Consent test.
+6. Integration test (`sniff/lib/tests/uv_with_install_plan.rs`).
+7. Manual smoke test on macOS (with and without uv installed) and
+   on a Linux container with only pip installed.
 
 The detailed task breakdown belongs in a follow-up plan doc (see
 `plan.md` sibling files in other feature folders for the convention).
