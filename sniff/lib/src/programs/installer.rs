@@ -230,6 +230,31 @@ impl InstallResult {
     }
 }
 
+/// Captured outcome of an install attempt, preserving stdout/stderr on both
+/// success and non-zero-exit failures so the interview layer can render
+/// structured output. See
+/// `sniff/features/2026-04-12-better-interview-for-install/tech-design.md`.
+#[derive(Debug, Clone)]
+pub struct InstallCapturedResult {
+    pub command: String,
+    pub executed: bool,
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub success: bool,
+}
+
+/// Two-arm outcome from a captured install run.
+///
+/// `Completed` covers dry-run, success, and non-zero exit (including spawn
+/// failures folded into `stderr`). `SetupError` is reserved for invalid
+/// inputs where no command could meaningfully run.
+#[derive(Debug)]
+pub enum InstallCapturedOutcome {
+    Completed(InstallCapturedResult),
+    SetupError(SniffInstallationError),
+}
+
 pub(crate) fn method_available(method: &InstallationMethod, host: &HostCapabilities) -> bool {
     if method.is_remote_bash() {
         return host.has_bash;
@@ -1158,5 +1183,25 @@ mod tests {
         let method = InstallationMethod::UvWithInstall("conan");
         let cmd = get_install_command(&method).unwrap();
         assert!(cmd.contains("tool install 'conan'"));
+    }
+
+    #[test]
+    fn install_captured_outcome_completed_has_command_and_streams() {
+        let ok = InstallCapturedResult {
+            command: "brew install rg".into(),
+            executed: true,
+            exit_code: Some(0),
+            stdout: "ok\n".into(),
+            stderr: String::new(),
+            success: true,
+        };
+        let outcome = InstallCapturedOutcome::Completed(ok);
+        match outcome {
+            InstallCapturedOutcome::Completed(r) => {
+                assert_eq!(r.command, "brew install rg");
+                assert!(r.success);
+            }
+            _ => panic!("expected Completed"),
+        }
     }
 }
