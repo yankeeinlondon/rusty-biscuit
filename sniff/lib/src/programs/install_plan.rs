@@ -76,6 +76,20 @@ impl InstallPlan {
         self.options.iter().find(|o| o.choose)
     }
 
+    /// Returns alternative options flagged as `LowerPriorityAlternative` whose
+    /// method kind is not present in `attempted`. These are the runnable-but-
+    /// not-chosen candidates the interview engine should offer on retry.
+    pub fn retryable_alternatives(
+        &self,
+        attempted: &[InstallationMethod],
+    ) -> Vec<&InstallPlanOption> {
+        self.options
+            .iter()
+            .filter(|o| o.reason_type == InstallPlanReason::LowerPriorityAlternative)
+            .filter(|o| !attempted.iter().any(|m| m == &o.kind))
+            .collect()
+    }
+
     /// Execute the chosen installation option.
     ///
     /// Returns `NoViableMethod` if no option was marked as chosen. For a
@@ -604,6 +618,90 @@ mod tests {
         assert!(plan.chosen().is_none());
         assert!(plan.failed_with_reason().is_empty());
         assert!(plan.known_installations().is_empty());
+    }
+
+    #[test]
+    fn retryable_alternatives_excludes_blocked_and_attempted() {
+        let plan = InstallPlan {
+            program: "bat".into(),
+            website: "https://github.com/sharkdp/bat",
+            successful: true,
+            options: vec![
+                InstallPlanOption {
+                    kind: InstallationMethod::Brew("bat"),
+                    requires_sudo: false,
+                    choose: true,
+                    reason_type: InstallPlanReason::Selected,
+                    reason: "chosen".into(),
+                },
+                InstallPlanOption {
+                    kind: InstallationMethod::Cargo("bat"),
+                    requires_sudo: false,
+                    choose: false,
+                    reason_type: InstallPlanReason::LowerPriorityAlternative,
+                    reason: "brew chosen".into(),
+                },
+                InstallPlanOption {
+                    kind: InstallationMethod::Apt("bat"),
+                    requires_sudo: true,
+                    choose: false,
+                    reason_type: InstallPlanReason::ManagerNotInstalled,
+                    reason: "apt missing".into(),
+                },
+            ],
+        };
+        let attempted = [InstallationMethod::Brew("bat")];
+        let alts = plan.retryable_alternatives(&attempted);
+        assert_eq!(alts.len(), 1);
+        assert!(matches!(alts[0].kind, InstallationMethod::Cargo(_)));
+    }
+
+    #[test]
+    fn retryable_alternatives_empty_when_nothing_remains() {
+        let plan = InstallPlan {
+            program: "bat".into(),
+            website: "https://github.com/sharkdp/bat",
+            successful: true,
+            options: vec![InstallPlanOption {
+                kind: InstallationMethod::Brew("bat"),
+                requires_sudo: false,
+                choose: true,
+                reason_type: InstallPlanReason::Selected,
+                reason: "chosen".into(),
+            }],
+        };
+        let attempted = [InstallationMethod::Brew("bat")];
+        assert!(plan.retryable_alternatives(&attempted).is_empty());
+    }
+
+    #[test]
+    fn retryable_alternatives_excludes_already_attempted_cargo() {
+        let plan = InstallPlan {
+            program: "bat".into(),
+            website: "https://github.com/sharkdp/bat",
+            successful: true,
+            options: vec![
+                InstallPlanOption {
+                    kind: InstallationMethod::Brew("bat"),
+                    requires_sudo: false,
+                    choose: true,
+                    reason_type: InstallPlanReason::Selected,
+                    reason: "chosen".into(),
+                },
+                InstallPlanOption {
+                    kind: InstallationMethod::Cargo("bat"),
+                    requires_sudo: false,
+                    choose: false,
+                    reason_type: InstallPlanReason::LowerPriorityAlternative,
+                    reason: "".into(),
+                },
+            ],
+        };
+        let attempted = [
+            InstallationMethod::Brew("bat"),
+            InstallationMethod::Cargo("bat"),
+        ];
+        assert!(plan.retryable_alternatives(&attempted).is_empty());
     }
 
     #[test]
