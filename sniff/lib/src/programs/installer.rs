@@ -208,27 +208,6 @@ pub struct InstallResult {
     pub stderr: String,
 }
 
-impl InstallResult {
-    fn dry_run(command: String) -> Self {
-        Self {
-            command,
-            executed: false,
-            exit_code: None,
-            stdout: String::new(),
-            stderr: String::new(),
-        }
-    }
-
-    fn from_output(command: String, output: Output) -> Self {
-        Self {
-            command,
-            executed: true,
-            exit_code: output.status.code(),
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        }
-    }
-}
 
 /// Captured outcome of an install attempt, preserving stdout/stderr on both
 /// success and non-zero-exit failures so the interview layer can render
@@ -668,40 +647,23 @@ pub fn execute_install(
     method: &InstallationMethod,
     opts: &InstallOptions,
 ) -> Result<InstallResult, SniffInstallationError> {
-    if let InstallationMethod::UvWithInstall(pkg) = method {
-        return execute_uv_with_install(pkg, None, opts);
-    }
-
-    let cmd_parts = build_install_command(method)?;
-    let cmd_str = cmd_parts.join(" ");
-
-    if opts.dry_run {
-        return Ok(InstallResult::dry_run(cmd_str));
-    }
-
-    // Execute the command
-    let program = &cmd_parts[0];
-    let args = &cmd_parts[1..];
-
-    let output = Command::new(program).args(args).output().map_err(|e| {
-        SniffInstallationError::PackageManagerFailed {
-            pkg: method.package_name().to_string(),
-            manager: method.manager_name().to_string(),
-            msg: e.to_string(),
+    match execute_install_captured(method, opts) {
+        InstallCapturedOutcome::SetupError(e) => Err(e),
+        InstallCapturedOutcome::Completed(r) if r.success => Ok(InstallResult {
+            command: r.command,
+            executed: r.executed,
+            exit_code: r.exit_code,
+            stdout: r.stdout,
+            stderr: r.stderr,
+        }),
+        InstallCapturedOutcome::Completed(r) => {
+            Err(SniffInstallationError::PackageManagerFailed {
+                pkg: method.package_name().to_string(),
+                manager: method.manager_name().to_string(),
+                msg: r.stderr,
+            })
         }
-    })?;
-
-    let result = InstallResult::from_output(cmd_str, output);
-
-    if result.exit_code != Some(0) {
-        return Err(SniffInstallationError::PackageManagerFailed {
-            pkg: method.package_name().to_string(),
-            manager: method.manager_name().to_string(),
-            msg: result.stderr.clone(),
-        });
     }
-
-    Ok(result)
 }
 
 /// Executes a versioned installation command.
@@ -720,126 +682,23 @@ pub fn execute_versioned_install(
     version: &str,
     opts: &InstallOptions,
 ) -> Result<InstallResult, SniffInstallationError> {
-    if let InstallationMethod::UvWithInstall(pkg) = method {
-        return execute_uv_with_install(pkg, Some(version), opts);
-    }
-
-    let cmd_parts = build_versioned_install_command(method, version)?;
-    let cmd_str = cmd_parts.join(" ");
-
-    if opts.dry_run {
-        return Ok(InstallResult::dry_run(cmd_str));
-    }
-
-    let program = &cmd_parts[0];
-    let args = &cmd_parts[1..];
-
-    let output = Command::new(program).args(args).output().map_err(|e| {
-        SniffInstallationError::PackageManagerFailed {
-            pkg: method.package_name().to_string(),
-            manager: method.manager_name().to_string(),
-            msg: e.to_string(),
-        }
-    })?;
-
-    let result = InstallResult::from_output(cmd_str, output);
-
-    if result.exit_code != Some(0) {
-        return Err(SniffInstallationError::PackageManagerFailed {
-            pkg: method.package_name().to_string(),
-            manager: method.manager_name().to_string(),
-            msg: result.stderr.clone(),
-        });
-    }
-
-    Ok(result)
-}
-
-/// Executes an `UvWithInstall` method: conditionally bootstraps uv via
-/// astral.sh, then runs `uv tool install <pkg>` (optionally `@version`).
-///
-/// The decision to run the bootstrap step is made at *call time* via a
-/// fresh `which uv` probe — not from cached host capabilities — so a user
-/// who installed uv between plan-build and execute does not trigger a
-/// redundant bootstrap.
-fn execute_uv_with_install(
-    pkg: &str,
-    version: Option<&str>,
-    opts: &InstallOptions,
-) -> Result<InstallResult, SniffInstallationError> {
-    validate_package_name(pkg)?;
-    if let Some(v) = version {
-        validate_package_name(v)?;
-    }
-
-    let command_str = render_uv_with_install_command(pkg, version);
-
-    if opts.dry_run {
-        return Ok(InstallResult::dry_run(command_str));
-    }
-
-    // Step 1: bootstrap uv if absent.
-    let mut combined_stdout = String::new();
-    let mut combined_stderr = String::new();
-
-    if which::which("uv").is_err() {
-        let bootstrap_output =
-            run_uv_bootstrap().map_err(|e| SniffInstallationError::PackageManagerFailed {
-                pkg: pkg.to_string(),
-                manager: "uv".to_string(),
-                msg: e.to_string(),
-            })?;
-        combined_stdout.push_str(&String::from_utf8_lossy(&bootstrap_output.stdout));
-        combined_stderr.push_str(&String::from_utf8_lossy(&bootstrap_output.stderr));
-        if !bootstrap_output.status.success() {
-            return Err(SniffInstallationError::PackageManagerFailed {
-                pkg: pkg.to_string(),
-                manager: "uv".to_string(),
-                msg: format!("astral.sh uv bootstrap failed: {}", combined_stderr),
-            });
+    match execute_versioned_install_captured(method, version, opts) {
+        InstallCapturedOutcome::SetupError(e) => Err(e),
+        InstallCapturedOutcome::Completed(r) if r.success => Ok(InstallResult {
+            command: r.command,
+            executed: r.executed,
+            exit_code: r.exit_code,
+            stdout: r.stdout,
+            stderr: r.stderr,
+        }),
+        InstallCapturedOutcome::Completed(r) => {
+            Err(SniffInstallationError::PackageManagerFailed {
+                pkg: method.package_name().to_string(),
+                manager: method.manager_name().to_string(),
+                msg: r.stderr,
+            })
         }
     }
-
-    // Step 2: resolve the uv binary and run `uv tool install`.
-    let uv_path = resolve_uv_binary().ok_or_else(|| SniffInstallationError::InstallationError {
-        pkg: pkg.to_string(),
-        cmd: "uv could not be located on PATH or at ~/.local/bin/uv after bootstrap".to_string(),
-    })?;
-
-    let target = match version {
-        Some(v) => format!("{}@{}", pkg, v),
-        None => pkg.to_string(),
-    };
-
-    let output = Command::new(&uv_path)
-        .arg("tool")
-        .arg("install")
-        .arg(&target)
-        .output()
-        .map_err(|e| SniffInstallationError::PackageManagerFailed {
-            pkg: pkg.to_string(),
-            manager: "uv".to_string(),
-            msg: e.to_string(),
-        })?;
-
-    combined_stdout.push_str(&String::from_utf8_lossy(&output.stdout));
-    combined_stderr.push_str(&String::from_utf8_lossy(&output.stderr));
-
-    if !output.status.success() {
-        return Err(SniffInstallationError::PackageManagerFailed {
-            pkg: pkg.to_string(),
-            manager: "uv".to_string(),
-            msg: combined_stderr,
-        });
-    }
-
-    Ok(InstallResult {
-        command: command_str,
-        executed: true,
-        exit_code: output.status.code(),
-        stdout: combined_stdout,
-        stderr: combined_stderr,
-    })
 }
 
 /// Runs the astral.sh uv bootstrap script for the current platform.
@@ -917,11 +776,70 @@ pub fn execute_install_captured(
     }
 }
 
+/// Executes a versioned installation command and captures stdout/stderr without
+/// ever returning an error — spawn failures are folded into `stderr` and
+/// returned as `Completed { success: false }`.
+///
+/// ## Returns
+///
+/// - `InstallCapturedOutcome::Completed` for dry-run, success, non-zero exit,
+///   and spawn failures.
+/// - `InstallCapturedOutcome::SetupError` only when the input is invalid (e.g.
+///   package name contains shell metacharacters) so no command could be built.
+pub fn execute_versioned_install_captured(
+    method: &InstallationMethod,
+    version: &str,
+    opts: &InstallOptions,
+) -> InstallCapturedOutcome {
+    if let InstallationMethod::UvWithInstall(pkg) = method {
+        return execute_uv_with_install_captured(pkg, Some(version), opts);
+    }
+
+    let cmd_parts = match build_versioned_install_command(method, version) {
+        Ok(parts) => parts,
+        Err(e) => return InstallCapturedOutcome::SetupError(e),
+    };
+    let command = cmd_parts.join(" ");
+
+    if opts.dry_run {
+        return InstallCapturedOutcome::Completed(InstallCapturedResult {
+            command,
+            executed: false,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            success: true,
+        });
+    }
+
+    let program = &cmd_parts[0];
+    let args = &cmd_parts[1..];
+
+    match Command::new(program).args(args).output() {
+        Ok(output) => InstallCapturedOutcome::Completed(InstallCapturedResult {
+            command,
+            executed: true,
+            exit_code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            success: output.status.success(),
+        }),
+        Err(e) => InstallCapturedOutcome::Completed(InstallCapturedResult {
+            command,
+            executed: false,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: e.to_string(),
+            success: false,
+        }),
+    }
+}
+
 /// Executes a `UvWithInstall` method and captures all output.
 ///
-/// Mirrors the logic of [`execute_uv_with_install`] but always returns
-/// [`InstallCapturedOutcome`] — spawn/bootstrap failures are folded into
-/// `stderr` rather than propagated as errors.
+/// Mirrors the logic of the captured install path but for `UvWithInstall`,
+/// conditionally bootstrapping uv via astral.sh then running `uv tool install`.
+/// Spawn/bootstrap failures are folded into `stderr` rather than propagated as errors.
 fn execute_uv_with_install_captured(
     pkg: &str,
     version: Option<&str>,
@@ -930,10 +848,10 @@ fn execute_uv_with_install_captured(
     if let Err(e) = validate_package_name(pkg) {
         return InstallCapturedOutcome::SetupError(e);
     }
-    if let Some(v) = version {
-        if let Err(e) = validate_package_name(v) {
-            return InstallCapturedOutcome::SetupError(e);
-        }
+    if let Some(v) = version
+        && let Err(e) = validate_package_name(v)
+    {
+        return InstallCapturedOutcome::SetupError(e);
     }
 
     let command_str = render_uv_with_install_command(pkg, version);
@@ -1417,5 +1335,45 @@ mod tests {
             }
             other => panic!("expected Completed, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn execute_versioned_install_captured_dry_run() {
+        let method = InstallationMethod::Cargo("bat");
+        let outcome = execute_versioned_install_captured(&method, "0.24.0", &InstallOptions::dry_run());
+        match outcome {
+            InstallCapturedOutcome::Completed(r) => {
+                assert!(!r.executed);
+                assert!(r.success);
+                assert!(r.command.contains("bat"));
+                assert!(r.command.contains("0.24.0"));
+            }
+            other => panic!("expected Completed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn execute_versioned_install_captured_uv_with_install_includes_versioned_target() {
+        let method = InstallationMethod::UvWithInstall("aider-chat");
+        let outcome = execute_versioned_install_captured(
+            &method,
+            "0.50.0",
+            &InstallOptions::dry_run(),
+        );
+        match outcome {
+            InstallCapturedOutcome::Completed(r) => {
+                assert!(r.command.contains("tool install 'aider-chat@0.50.0'"));
+            }
+            other => panic!("expected Completed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn legacy_execute_install_dry_run_still_returns_install_result() {
+        // Ensures the refactored wrapper preserves existing behavior.
+        let method = InstallationMethod::Brew("ripgrep");
+        let result = execute_install(&method, &InstallOptions::dry_run()).unwrap();
+        assert!(!result.executed);
+        assert_eq!(result.command, "brew install ripgrep");
     }
 }
