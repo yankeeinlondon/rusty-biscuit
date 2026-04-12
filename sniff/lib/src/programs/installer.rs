@@ -859,6 +859,184 @@ fn run_uv_bootstrap() -> std::io::Result<Output> {
     }
 }
 
+/// Executes an installation command and captures stdout/stderr without
+/// ever returning an error — spawn failures are folded into `stderr` and
+/// returned as `Completed { success: false }`.
+///
+/// ## Returns
+///
+/// - `InstallCapturedOutcome::Completed` for dry-run, success, non-zero exit,
+///   and spawn failures.
+/// - `InstallCapturedOutcome::SetupError` only when the input is invalid (e.g.
+///   package name contains shell metacharacters) so no command could be built.
+pub fn execute_install_captured(
+    method: &InstallationMethod,
+    opts: &InstallOptions,
+) -> InstallCapturedOutcome {
+    if let InstallationMethod::UvWithInstall(pkg) = method {
+        return execute_uv_with_install_captured(pkg, None, opts);
+    }
+
+    let cmd_parts = match build_install_command(method) {
+        Ok(parts) => parts,
+        Err(e) => return InstallCapturedOutcome::SetupError(e),
+    };
+    let command = cmd_parts.join(" ");
+
+    if opts.dry_run {
+        return InstallCapturedOutcome::Completed(InstallCapturedResult {
+            command,
+            executed: false,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            success: true,
+        });
+    }
+
+    let program = &cmd_parts[0];
+    let args = &cmd_parts[1..];
+
+    match Command::new(program).args(args).output() {
+        Ok(output) => InstallCapturedOutcome::Completed(InstallCapturedResult {
+            command,
+            executed: true,
+            exit_code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            success: output.status.success(),
+        }),
+        Err(e) => InstallCapturedOutcome::Completed(InstallCapturedResult {
+            command,
+            executed: false,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: e.to_string(),
+            success: false,
+        }),
+    }
+}
+
+/// Executes a `UvWithInstall` method and captures all output.
+///
+/// Mirrors the logic of [`execute_uv_with_install`] but always returns
+/// [`InstallCapturedOutcome`] — spawn/bootstrap failures are folded into
+/// `stderr` rather than propagated as errors.
+fn execute_uv_with_install_captured(
+    pkg: &str,
+    version: Option<&str>,
+    opts: &InstallOptions,
+) -> InstallCapturedOutcome {
+    if let Err(e) = validate_package_name(pkg) {
+        return InstallCapturedOutcome::SetupError(e);
+    }
+    if let Some(v) = version {
+        if let Err(e) = validate_package_name(v) {
+            return InstallCapturedOutcome::SetupError(e);
+        }
+    }
+
+    let command_str = render_uv_with_install_command(pkg, version);
+
+    if opts.dry_run {
+        return InstallCapturedOutcome::Completed(InstallCapturedResult {
+            command: command_str,
+            executed: false,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            success: true,
+        });
+    }
+
+    let mut combined_stdout = String::new();
+    let mut combined_stderr = String::new();
+
+    // Step 1: bootstrap uv if absent.
+    if which::which("uv").is_err() {
+        let bootstrap_output = match run_uv_bootstrap() {
+            Ok(out) => out,
+            Err(e) => {
+                return InstallCapturedOutcome::Completed(InstallCapturedResult {
+                    command: command_str,
+                    executed: false,
+                    exit_code: None,
+                    stdout: String::new(),
+                    stderr: e.to_string(),
+                    success: false,
+                });
+            }
+        };
+
+        combined_stdout.push_str(&String::from_utf8_lossy(&bootstrap_output.stdout));
+        combined_stderr.push_str(&String::from_utf8_lossy(&bootstrap_output.stderr));
+
+        if !bootstrap_output.status.success() {
+            return InstallCapturedOutcome::Completed(InstallCapturedResult {
+                command: command_str,
+                executed: true,
+                exit_code: bootstrap_output.status.code(),
+                stdout: combined_stdout,
+                stderr: combined_stderr,
+                success: false,
+            });
+        }
+    }
+
+    // Step 2: resolve the uv binary.
+    let uv_path = match resolve_uv_binary() {
+        Some(p) => p,
+        None => {
+            return InstallCapturedOutcome::Completed(InstallCapturedResult {
+                command: command_str,
+                executed: false,
+                exit_code: None,
+                stdout: combined_stdout,
+                stderr: "uv could not be located on PATH or at ~/.local/bin/uv after bootstrap"
+                    .into(),
+                success: false,
+            });
+        }
+    };
+
+    // Step 3: run `uv tool install <target>`.
+    let target = match version {
+        Some(v) => format!("{}@{}", pkg, v),
+        None => pkg.to_string(),
+    };
+
+    match Command::new(&uv_path)
+        .arg("tool")
+        .arg("install")
+        .arg(&target)
+        .output()
+    {
+        Ok(output) => {
+            combined_stdout.push_str(&String::from_utf8_lossy(&output.stdout));
+            combined_stderr.push_str(&String::from_utf8_lossy(&output.stderr));
+            InstallCapturedOutcome::Completed(InstallCapturedResult {
+                command: command_str,
+                executed: true,
+                exit_code: output.status.code(),
+                stdout: combined_stdout,
+                stderr: combined_stderr,
+                success: output.status.success(),
+            })
+        }
+        Err(e) => {
+            combined_stderr.push_str(&e.to_string());
+            InstallCapturedOutcome::Completed(InstallCapturedResult {
+                command: command_str,
+                executed: false,
+                exit_code: None,
+                stdout: combined_stdout,
+                stderr: combined_stderr,
+                success: false,
+            })
+        }
+    }
+}
+
 /// Returns the command that would be executed for installing a package.
 ///
 /// This is useful for displaying to users before confirmation.
@@ -1202,6 +1380,42 @@ mod tests {
                 assert!(r.success);
             }
             _ => panic!("expected Completed"),
+        }
+    }
+
+    #[test]
+    fn execute_install_captured_dry_run_returns_completed_with_command() {
+        let method = InstallationMethod::Brew("ripgrep");
+        let outcome = execute_install_captured(&method, &InstallOptions::dry_run());
+        match outcome {
+            InstallCapturedOutcome::Completed(r) => {
+                assert!(!r.executed);
+                assert!(r.success);
+                assert_eq!(r.command, "brew install ripgrep");
+                assert_eq!(r.exit_code, None);
+            }
+            other => panic!("dry run must be Completed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn execute_install_captured_setup_error_on_invalid_package() {
+        let method = InstallationMethod::Brew("bad;pkg");
+        let outcome = execute_install_captured(&method, &InstallOptions::default());
+        assert!(matches!(outcome, InstallCapturedOutcome::SetupError(_)));
+    }
+
+    #[test]
+    fn execute_install_captured_uv_with_install_dry_run_includes_install_line() {
+        let method = InstallationMethod::UvWithInstall("aider-chat");
+        let outcome = execute_install_captured(&method, &InstallOptions::dry_run());
+        match outcome {
+            InstallCapturedOutcome::Completed(r) => {
+                assert!(!r.executed);
+                assert!(r.success);
+                assert!(r.command.contains("tool install 'aider-chat'"));
+            }
+            other => panic!("expected Completed, got {:?}", other),
         }
     }
 }
