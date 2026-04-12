@@ -89,6 +89,14 @@ pub fn format_completion_summary(summary: &StreamExecutionSummary) -> Option<Str
         parts.push(format!("{tc} tool{}", if tc == 1 { "" } else { "s" }));
     }
 
+    // Permission prompts (Codex today; other providers leave None)
+    if let Some(pp) = summary.permission_prompts {
+        parts.push(format!(
+            "{pp} permission prompt{}",
+            if pp == 1 { "" } else { "s" }
+        ));
+    }
+
     // Error info
     if summary.is_error
         && let Some(msg) = &summary.error_message
@@ -449,5 +457,53 @@ mod tests {
         let rendered = format_compact_completion(&summary).unwrap();
         assert!(!rendered.contains('|'));
         assert_eq!(rendered.lines().count(), 1);
+    }
+
+    #[test]
+    fn completion_summary_includes_permission_prompts() {
+        let summary = StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            tool_calls: Some(4),
+            permission_prompts: Some(3),
+            ..Default::default()
+        };
+        let rendered = format_completion_summary(&summary).unwrap();
+        assert!(rendered.contains("3 permission prompts"));
+    }
+
+    #[test]
+    fn completion_summary_singular_permission_prompt() {
+        let summary = StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            permission_prompts: Some(1),
+            ..Default::default()
+        };
+        let rendered = format_completion_summary(&summary).unwrap();
+        assert!(rendered.contains("1 permission prompt"));
+        assert!(!rendered.contains("permission prompts"));
+    }
+
+    #[test]
+    fn completion_summary_omits_permission_when_none() {
+        let summary = StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            tool_calls: Some(4),
+            ..Default::default()
+        };
+        let rendered = format_completion_summary(&summary).unwrap();
+        assert!(!rendered.contains("permission"));
+    }
+
+    #[test]
+    fn compact_completion_ignores_permission_prompts() {
+        let summary = StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            permission_prompts: Some(3),
+            user_input_prompts: Some(1),
+            ..Default::default()
+        };
+        let rendered = format_compact_completion(&summary).unwrap();
+        assert!(!rendered.contains("permission"));
+        assert!(!rendered.contains("user input"));
     }
 }
