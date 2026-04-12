@@ -29,6 +29,8 @@ pub struct CodexStreamParser<S: StreamEventSink> {
     duration_ms: Option<u64>,
     num_turns: u32,
     tool_calls: u32,
+    permission_prompts: u32,
+    user_input_prompts: u32,
     provider_status: Option<String>,
     is_error: bool,
     error_kind: Option<String>,
@@ -50,6 +52,8 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
             duration_ms: None,
             num_turns: 0,
             tool_calls: 0,
+            permission_prompts: 0,
+            user_input_prompts: 0,
             provider_status: None,
             is_error: false,
             error_kind: None,
@@ -183,7 +187,7 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         meta
     }
 
-    fn permission_meta(&self, perm: &CodexPermissionItem) -> EventMeta {
+    fn permission_meta(&self, perm: &CodexPermissionItem, kind: &str) -> EventMeta {
         let mut meta = self.session_meta();
         if let Some(name) = perm.name.as_deref() {
             meta.extra
@@ -193,6 +197,8 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
             meta.extra
                 .insert("tool_id".into(), Value::String(id.to_string()));
         }
+        meta.extra
+            .insert("permission_kind".into(), Value::String(kind.to_string()));
         meta
     }
 
@@ -201,10 +207,20 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
             return;
         };
 
-        if let Some(perm) = item.as_permission() {
-            let meta = self.permission_meta(perm);
-            self.sink.on_permission_request(&meta);
-            return;
+        match &item {
+            CodexItem::PermissionRequest(perm) | CodexItem::ApprovalRequest(perm) => {
+                self.permission_prompts += 1;
+                let meta = self.permission_meta(perm, "permission_prompt");
+                self.sink.on_permission_request(&meta);
+                return;
+            }
+            CodexItem::UserInputRequest(perm) => {
+                self.user_input_prompts += 1;
+                let meta = self.permission_meta(perm, "user_input_prompt");
+                self.sink.on_permission_request(&meta);
+                return;
+            }
+            _ => {}
         }
 
         if item.is_tool_item() {
@@ -355,8 +371,16 @@ impl<S: StreamEventSink + Send> StreamParser for CodexStreamParser<S> {
             } else {
                 None
             },
-            permission_prompts: None,
-            user_input_prompts: None,
+            permission_prompts: if self.permission_prompts > 0 {
+                Some(self.permission_prompts)
+            } else {
+                None
+            },
+            user_input_prompts: if self.user_input_prompts > 0 {
+                Some(self.user_input_prompts)
+            } else {
+                None
+            },
             rate_limit: None,
             context_usage: None,
             badges: Vec::new(),
@@ -498,5 +522,81 @@ mod tests {
             summary.badges[0].category,
             crate::stream::badges::BadgeCategory::Quota
         );
+    }
+
+    #[test]
+    fn permission_request_increments_permission_prompts() {
+        let mut parser = make_parser();
+        parser
+            .feed_line(
+                r#"{"type":"item.started","item":{"id":"perm-1","type":"permission_request","name":"bash"}}"#,
+            )
+            .unwrap();
+        let summary = parser.finish(0);
+        assert_eq!(summary.permission_prompts, Some(1));
+        assert_eq!(summary.user_input_prompts, None);
+    }
+
+    #[test]
+    fn approval_request_increments_permission_prompts() {
+        let mut parser = make_parser();
+        parser
+            .feed_line(
+                r#"{"type":"item.started","item":{"id":"appr-1","type":"approval_request","name":"write"}}"#,
+            )
+            .unwrap();
+        let summary = parser.finish(0);
+        assert_eq!(summary.permission_prompts, Some(1));
+        assert_eq!(summary.user_input_prompts, None);
+    }
+
+    #[test]
+    fn user_input_request_increments_user_input_prompts() {
+        let mut parser = make_parser();
+        parser
+            .feed_line(
+                r#"{"type":"item.started","item":{"id":"input-1","type":"user_input_request","name":"clarify"}}"#,
+            )
+            .unwrap();
+        let summary = parser.finish(0);
+        assert_eq!(summary.user_input_prompts, Some(1));
+        assert_eq!(summary.permission_prompts, None);
+    }
+
+    #[test]
+    fn mixed_permission_variants_roll_up_independently() {
+        let mut parser = make_parser();
+        parser
+            .feed_line(
+                r#"{"type":"item.started","item":{"id":"perm-1","type":"permission_request","name":"bash"}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"item.started","item":{"id":"appr-1","type":"approval_request","name":"write"}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"item.started","item":{"id":"input-1","type":"user_input_request","name":"clarify"}}"#,
+            )
+            .unwrap();
+        let summary = parser.finish(0);
+        assert_eq!(summary.permission_prompts, Some(2));
+        assert_eq!(summary.user_input_prompts, Some(1));
+    }
+
+    #[test]
+    fn no_permission_activity_leaves_counters_none() {
+        let mut parser = make_parser();
+        parser.feed_line(r#"{"type":"turn.started"}"#).unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5},"status":"completed"}"#,
+            )
+            .unwrap();
+        let summary = parser.finish(0);
+        assert_eq!(summary.permission_prompts, None);
+        assert_eq!(summary.user_input_prompts, None);
     }
 }
