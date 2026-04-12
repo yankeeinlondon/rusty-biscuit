@@ -999,7 +999,9 @@ pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs, verbose: u8) 
     let (code, stderr_capture) = match run_provider_wrapper_inner(provider, args, verbose) {
         Ok((code, stderr)) => (code, stderr),
         Err(error) => {
-            log::error(&error.to_string());
+            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
+                log::error(&error.to_string());
+            }
             (1, None)
         }
     };
@@ -1830,9 +1832,10 @@ fn materialize_passthrough_harness_seed(
     let options =
         darkmatter::markdown::compose::ComposeOptions::new().with_source_file(source_path);
     let (composed, _report) = source_markdown.compose_with(options).map_err(|e| {
-        eyre!(
-            "Darkmatter compose failed for '{}': {e}",
-            source_path.display()
+        crate::output::shell_expansion_error::pretty_markdown_report(
+            source_path,
+            &format!("Darkmatter compose failed for '{}'", source_path.display()),
+            e,
         )
     })?;
 
@@ -1897,9 +1900,13 @@ fn materialize_harness_prompt(
             let options = darkmatter::markdown::compose::ComposeOptions::new()
                 .with_source_file(&state.source_path);
             let (composed, _report) = effective_markdown.compose_with(options).map_err(|e| {
-                eyre!(
-                    "Darkmatter compose failed for '{}': {e}",
-                    state.source_path.display()
+                crate::output::shell_expansion_error::pretty_markdown_report(
+                    &state.source_path,
+                    &format!(
+                        "Darkmatter compose failed for '{}'",
+                        state.source_path.display()
+                    ),
+                    e,
                 )
             })?;
             let prompt = state.base_prompt.clone().ok_or_else(|| {
@@ -1919,9 +1926,13 @@ fn materialize_harness_prompt(
             let options = darkmatter::markdown::compose::ComposeOptions::new()
                 .with_source_file(&state.source_path);
             let (composed, _report) = effective_markdown.compose_with(options).map_err(|e| {
-                eyre!(
-                    "Darkmatter compose failed for '{}': {e}",
-                    state.source_path.display()
+                crate::output::shell_expansion_error::pretty_markdown_report(
+                    &state.source_path,
+                    &format!(
+                        "Darkmatter compose failed for '{}'",
+                        state.source_path.display()
+                    ),
+                    e,
                 )
             })?;
             let body = composed.content().to_string();
@@ -1948,7 +1959,12 @@ fn materialize_harness_prompt(
                 &source,
                 claudine::composition::PrepareOptions::default(),
             )
-            .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+            .map_err(|e| match e {
+                claudine::composition::CompositionError::ShellExpansionFailed { .. } => {
+                    crate::output::shell_expansion_error::pretty_or_report(e)
+                }
+                other => eyre!("frontmatter-prompt: {other}"),
+            })?;
             (
                 prepared.prompt,
                 prepared.effective_frontmatter,

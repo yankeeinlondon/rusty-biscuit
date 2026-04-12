@@ -124,8 +124,8 @@ pub(crate) fn execute_sequence(
             env_overrides: env_overrides.clone(),
         };
 
-        let prepared =
-            composition::prepare_direct(source, prepare_options).map_err(|e| eyre!("{e}"))?;
+        let prepared = composition::prepare_direct(source, prepare_options)
+            .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
 
         // ── Harness pre-flight ────────────────────────────────────────
         if has_harness_properties(&prepared.effective_frontmatter) {
