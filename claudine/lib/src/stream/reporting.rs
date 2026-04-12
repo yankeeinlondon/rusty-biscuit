@@ -126,6 +126,12 @@ pub fn summary_to_event_meta_with_context(
         extra.insert("provider_summary".into(), Value::Object(provider_summary));
     }
 
+    if !summary.badges.is_empty()
+        && let Ok(value) = serde_json::to_value(&summary.badges)
+    {
+        extra.insert("badges".into(), value);
+    }
+
     EventMeta {
         provider: summary.provider,
         event: AgenticEvent::SessionEnd,
@@ -382,5 +388,40 @@ mod tests {
 
         assert_eq!(meta_plain.extra.len(), meta_none.extra.len());
         assert!(!meta_none.extra.contains_key("composition_file_ref"));
+    }
+
+    #[test]
+    fn summary_to_event_meta_serializes_badges_when_present() {
+        use crate::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
+        let mut summary = make_test_summary();
+        summary.badges = vec![SessionBadge {
+            category: BadgeCategory::Billing,
+            severity: BadgeSeverity::Error,
+            label: "Billing".into(),
+            message: "Insufficient credits".into(),
+            remediation_url: Some("https://console.anthropic.com/settings/billing".into()),
+        }];
+        let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &make_test_env());
+        let badges = meta.extra.get("badges").unwrap();
+        let arr = badges.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["category"], Value::String("billing".into()));
+        assert_eq!(arr[0]["severity"], Value::String("error".into()));
+        assert_eq!(arr[0]["label"], Value::String("Billing".into()));
+        assert_eq!(
+            arr[0]["message"],
+            Value::String("Insufficient credits".into())
+        );
+        assert_eq!(
+            arr[0]["remediation_url"],
+            Value::String("https://console.anthropic.com/settings/billing".into())
+        );
+    }
+
+    #[test]
+    fn summary_to_event_meta_omits_badges_when_empty() {
+        let summary = make_test_summary();
+        let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &make_test_env());
+        assert!(!meta.extra.contains_key("badges"));
     }
 }
