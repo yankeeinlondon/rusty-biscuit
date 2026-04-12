@@ -456,4 +456,36 @@ mod tests {
             },
         );
     }
+
+    #[test]
+    fn status_update_above_threshold_yields_context_pressure_badge() {
+        let mut parser = make_parser();
+        parser
+            .feed_line(
+                r#"{"type":"StatusUpdate","context_usage":{"used":110000,"total":128000}}"#,
+            )
+            .unwrap();
+        let summary = parser.finish(0);
+        assert_eq!(summary.badges.len(), 1);
+        assert_eq!(
+            summary.badges[0].category,
+            crate::stream::badges::BadgeCategory::ContextPressure
+        );
+        assert_eq!(
+            summary.badges[0].remediation_url.as_deref(),
+            Some("https://platform.moonshot.cn/console/account")
+        );
+    }
+
+    #[test]
+    fn status_update_below_threshold_yields_no_badge() {
+        let mut parser = make_parser();
+        parser
+            .feed_line(
+                r#"{"type":"StatusUpdate","context_usage":{"used":50000,"total":128000}}"#,
+            )
+            .unwrap();
+        let summary = parser.finish(0);
+        assert!(summary.badges.is_empty());
+    }
 }

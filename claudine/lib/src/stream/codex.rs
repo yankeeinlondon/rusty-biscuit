@@ -461,4 +461,40 @@ mod tests {
         let summary = parser.finish(0);
         assert_eq!(summary.tool_calls, Some(2));
     }
+
+    #[test]
+    fn rate_limit_error_yields_rate_limit_badge() {
+        let mut parser = make_parser();
+        parser
+            .feed_line(
+                r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
+            )
+            .unwrap();
+        let summary = parser.finish(1);
+        assert_eq!(summary.badges.len(), 1);
+        assert_eq!(
+            summary.badges[0].category,
+            crate::stream::badges::BadgeCategory::RateLimit
+        );
+        assert_eq!(
+            summary.badges[0].remediation_url.as_deref(),
+            Some("https://platform.openai.com/usage")
+        );
+    }
+
+    #[test]
+    fn insufficient_quota_yields_quota_badge() {
+        let mut parser = make_parser();
+        parser
+            .feed_line(
+                r#"{"type":"error","error_type":"insufficient_quota","error_message":"You exceeded your current quota"}"#,
+            )
+            .unwrap();
+        let summary = parser.finish(1);
+        assert_eq!(summary.badges.len(), 1);
+        assert_eq!(
+            summary.badges[0].category,
+            crate::stream::badges::BadgeCategory::Quota
+        );
+    }
 }
