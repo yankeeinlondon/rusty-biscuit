@@ -131,7 +131,8 @@ pub enum InstallInterviewOutcome {
 
 use crate::programs::installer::{
     build_install_announcement, build_install_failure_status, build_install_success_status,
-    execute_install_captured, get_install_command, InstallCapturedOutcome,
+    build_retry_choice_prose, build_retry_quit_prose, execute_install_captured, get_install_command,
+    InstallCapturedOutcome,
 };
 
 /// Runs the install interview for the given program.
@@ -174,7 +175,19 @@ fn run_attempt<D: InstallInterviewDelegate>(
     method: InstallationMethod,
     mut attempted: Vec<InstallationMethod>,
 ) -> Result<InstallInterviewOutcome, SniffInstallationError> {
-    let command = get_install_command(&method)?;
+    let command = match get_install_command(&method) {
+        Ok(cmd) => cmd,
+        Err(e) => {
+            attempted.push(method);
+            return handle_failure(
+                input,
+                options,
+                delegate,
+                Some((InstallOutputStream::Stderr, e.to_string())),
+                attempted,
+            );
+        }
+    };
 
     delegate.on_event(&InstallInterviewEvent::Announcement {
         prose: build_install_announcement(&input.program, input.website, &method, &command),
@@ -200,20 +213,13 @@ fn run_attempt<D: InstallInterviewDelegate>(
     attempted.push(method.clone());
 
     match outcome {
-        InstallCapturedOutcome::SetupError(e) => {
-            let body = e.to_string();
-            if !body.trim().is_empty() {
-                delegate.on_event(&InstallInterviewEvent::CapturedOutput {
-                    stream: InstallOutputStream::Stderr,
-                    body,
-                })?;
-            }
-            delegate.on_event(&InstallInterviewEvent::Status {
-                kind: InstallStatusKind::Error,
-                text: build_install_failure_status(&input.program, input.website),
-            })?;
-            Ok(InstallInterviewOutcome::Failed { attempted })
-        }
+        InstallCapturedOutcome::SetupError(e) => handle_failure(
+            input,
+            options,
+            delegate,
+            Some((InstallOutputStream::Stderr, e.to_string())),
+            attempted,
+        ),
         InstallCapturedOutcome::Completed(r) if r.success && !r.executed => {
             delegate.on_event(&InstallInterviewEvent::Status {
                 kind: InstallStatusKind::Success,
@@ -235,23 +241,55 @@ fn run_attempt<D: InstallInterviewDelegate>(
             Ok(InstallInterviewOutcome::Installed { method })
         }
         InstallCapturedOutcome::Completed(r) => {
-            let body = if !r.stderr.trim().is_empty() {
-                r.stderr
-            } else {
-                r.stdout
-            };
-            if !body.trim().is_empty() {
-                delegate.on_event(&InstallInterviewEvent::CapturedOutput {
-                    stream: InstallOutputStream::Stderr,
-                    body,
-                })?;
-            }
-            delegate.on_event(&InstallInterviewEvent::Status {
-                kind: InstallStatusKind::Error,
-                text: build_install_failure_status(&input.program, input.website),
-            })?;
-            Ok(InstallInterviewOutcome::Failed { attempted })
+            let body = if !r.stderr.trim().is_empty() { r.stderr } else { r.stdout };
+            handle_failure(
+                input,
+                options,
+                delegate,
+                Some((InstallOutputStream::Stderr, body)),
+                attempted,
+            )
         }
+    }
+}
+
+fn handle_failure<D: InstallInterviewDelegate>(
+    input: &InstallInterviewInput,
+    options: &InstallInterviewOptions,
+    delegate: &mut D,
+    captured_body: Option<(InstallOutputStream, String)>,
+    attempted: Vec<InstallationMethod>,
+) -> Result<InstallInterviewOutcome, SniffInstallationError> {
+    if let Some((stream, body)) = captured_body
+        && !body.trim().is_empty()
+    {
+        delegate.on_event(&InstallInterviewEvent::CapturedOutput { stream, body })?;
+    }
+    delegate.on_event(&InstallInterviewEvent::Status {
+        kind: InstallStatusKind::Error,
+        text: build_install_failure_status(&input.program, input.website),
+    })?;
+
+    let alts = input.plan.retryable_alternatives(&attempted);
+    if alts.is_empty() || !options.prompt_on_failure {
+        return Ok(InstallInterviewOutcome::Failed { attempted });
+    }
+
+    let prompt = RetryPrompt {
+        heading_prose: build_retry_quit_prose(),
+        choices: alts
+            .iter()
+            .map(|o| RetryPromptChoice {
+                label: format!("Retry with {}", o.kind.manager_name()),
+                prose: build_retry_choice_prose(&o.kind),
+                method: o.kind.clone(),
+            })
+            .collect(),
+    };
+
+    match delegate.choose_retry(&prompt)? {
+        RetryChoice::Quit => Ok(InstallInterviewOutcome::AbortedByUser),
+        RetryChoice::RetryWith(next) => run_attempt(input, options, delegate, next, attempted),
     }
 }
 
@@ -409,6 +447,95 @@ mod runner_tests {
         // assert that no ConsentWarning event was emitted.
         let _ = run_install_interview(&input, &opts, &mut d);
         assert!(!d.events.iter().any(|e| matches!(e, InstallInterviewEvent::ConsentWarning { .. })));
+    }
+
+    fn fake_setup_error_plan() -> InstallInterviewInput {
+        InstallInterviewInput {
+            program: "bad".into(),
+            website: "https://example.com",
+            plan: InstallPlan {
+                program: "bad".into(),
+                website: "https://example.com",
+                successful: true,
+                options: vec![
+                    InstallPlanOption {
+                        kind: InstallationMethod::Brew("bad;pkg"),
+                        requires_sudo: false,
+                        choose: true,
+                        reason_type: InstallPlanReason::Selected,
+                        reason: "chosen".into(),
+                    },
+                    InstallPlanOption {
+                        kind: InstallationMethod::Cargo("goodpkg"),
+                        requires_sudo: false,
+                        choose: false,
+                        reason_type: InstallPlanReason::LowerPriorityAlternative,
+                        reason: "alternative".into(),
+                    },
+                ],
+            },
+        }
+    }
+
+    #[test]
+    fn failure_with_alternatives_prompts_retry_and_loops() {
+        let input = fake_setup_error_plan();
+        let mut d = RecordingDelegate::new();
+        d.retry_answer = Some(RetryChoice::RetryWith(InstallationMethod::Cargo("goodpkg")));
+
+        let mut opts = InstallInterviewOptions::default();
+        opts.install.dry_run = true; // second attempt succeeds as dry-run
+        opts.prompt_on_failure = true;
+
+        let outcome = run_install_interview(&input, &opts, &mut d).unwrap();
+        // NOTE: first attempt hits SetupError (shell metachars) even with dry_run,
+        // because build_install_command validates before honoring dry_run. That
+        // drives us into handle_failure → retry → second attempt (Cargo dry-run) → success.
+        assert!(matches!(outcome, InstallInterviewOutcome::DryRun { .. }));
+        let error_count = d.events.iter().filter(|e| matches!(e, InstallInterviewEvent::Status { kind: InstallStatusKind::Error, .. })).count();
+        let success_count = d.events.iter().filter(|e| matches!(e, InstallInterviewEvent::Status { kind: InstallStatusKind::Success, .. })).count();
+        assert_eq!(error_count, 1);
+        assert_eq!(success_count, 1);
+    }
+
+    #[test]
+    fn failure_without_alternatives_returns_failed_and_does_not_prompt() {
+        let input = InstallInterviewInput {
+            program: "bad".into(),
+            website: "https://example.com",
+            plan: InstallPlan {
+                program: "bad".into(),
+                website: "https://example.com",
+                successful: true,
+                options: vec![InstallPlanOption {
+                    kind: InstallationMethod::Brew("bad;pkg"),
+                    requires_sudo: false,
+                    choose: true,
+                    reason_type: InstallPlanReason::Selected,
+                    reason: "chosen".into(),
+                }],
+            },
+        };
+        let mut d = RecordingDelegate::new();
+        let outcome = run_install_interview(&input, &InstallInterviewOptions::default(), &mut d).unwrap();
+        assert!(matches!(outcome, InstallInterviewOutcome::Failed { .. }));
+    }
+
+    #[test]
+    fn failure_with_prompt_disabled_does_not_call_delegate_choose_retry() {
+        // If prompt_on_failure is false, we must return Failed without calling choose_retry.
+        let input = fake_setup_error_plan();
+        let mut d = RecordingDelegate::new();
+        // If choose_retry gets called, the default returns Quit (AbortedByUser) — but
+        // we want to verify we short-circuit to Failed without prompting at all.
+        d.retry_answer = Some(RetryChoice::RetryWith(InstallationMethod::Cargo("goodpkg")));
+
+        let mut opts = InstallInterviewOptions::default();
+        opts.install.dry_run = true;
+        opts.prompt_on_failure = false;
+
+        let outcome = run_install_interview(&input, &opts, &mut d).unwrap();
+        assert!(matches!(outcome, InstallInterviewOutcome::Failed { .. }));
     }
 
     #[test]
