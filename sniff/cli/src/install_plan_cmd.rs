@@ -24,8 +24,20 @@ use sniff::programs::{
 ///
 /// When `verbose` is set, each failed option is rendered above the success
 /// line so users can see what was skipped and why.
+///
+/// Uses a `Terminal::default()` for rendering. To supply a real detected
+/// terminal, use [`render_install_plan_with`].
+#[allow(dead_code)]
 pub fn render_install_plan(plan: &InstallPlan, verbose: bool) -> String {
     let terminal = Terminal::default();
+    render_install_plan_with(plan, verbose, &terminal)
+}
+
+/// Render the plan to a `String` using the supplied `terminal` for width and
+/// capability detection.
+///
+/// See [`render_install_plan`] for a description of the rendering branches.
+pub fn render_install_plan_with(plan: &InstallPlan, verbose: bool, terminal: &Terminal) -> String {
     let mut out = String::new();
 
     if plan.successful {
@@ -36,7 +48,7 @@ pub fn render_install_plan(plan: &InstallPlan, verbose: bool) -> String {
                     opt.kind.manager_name(),
                     opt.reason
                 );
-                out.push_str(&Prose::new(line).render(&terminal));
+                out.push_str(&Prose::new(line).render(terminal));
                 out.push('\n');
             }
             if !plan.failed_with_reason().is_empty() {
@@ -45,10 +57,10 @@ pub fn render_install_plan(plan: &InstallPlan, verbose: bool) -> String {
         }
         let chosen = plan.chosen().expect("successful plan has a chosen option");
         let success_line = render_success_line(&plan.program, chosen);
-        out.push_str(&Prose::new(success_line).render(&terminal));
+        out.push_str(&Prose::new(success_line).render(terminal));
         out.push('\n');
     } else {
-        out.push_str(&render_failure_block(plan, &terminal));
+        out.push_str(&render_failure_block(plan, terminal));
     }
 
     out
@@ -269,7 +281,8 @@ pub fn dispatch(
 
     match kind {
         InstallCommandKind::InstallPlan => {
-            let rendered = render_install_plan(&plan, /* verbose */ true);
+            let terminal = Terminal::new();
+            let rendered = render_install_plan_with(&plan, /* verbose */ true, &terminal);
             crate::output::emit_text(&rendered, plain);
             Ok(())
         }
@@ -483,6 +496,22 @@ mod tests {
         };
         let err = apply_via(&mut plan, "apt").unwrap_err();
         assert!(err.contains("cannot override an unavailable method"));
+    }
+
+    #[test]
+    fn render_install_plan_with_real_terminal_contains_program_and_manager() {
+        let plan = fake_success_plan(false);
+        let terminal = Terminal::default();
+        let rendered = render_install_plan_with(&plan, false, &terminal);
+        assert!(rendered.contains("Vim"));
+        assert!(rendered.to_lowercase().contains("brew"));
+    }
+
+    #[test]
+    fn render_install_plan_default_wrapper_still_works() {
+        let plan = fake_success_plan(false);
+        let rendered = render_install_plan(&plan, false);
+        assert!(rendered.contains("Vim"));
     }
 
     #[test]
