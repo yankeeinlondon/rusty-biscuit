@@ -63,6 +63,10 @@ pub struct StreamExecutionSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_prompts: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_input_prompts: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<RateLimitInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_usage: Option<ContextUsage>,
@@ -92,6 +96,8 @@ impl Default for StreamExecutionSummary {
             token_usage: None,
             cost_usd: None,
             tool_calls: None,
+            permission_prompts: None,
+            user_input_prompts: None,
             rate_limit: None,
             context_usage: None,
             badges: Vec::new(),
@@ -141,6 +147,8 @@ mod tests {
             }),
             cost_usd: Some(0.0042),
             tool_calls: Some(5),
+            permission_prompts: None,
+            user_input_prompts: None,
             rate_limit: None,
             context_usage: None,
             badges: Vec::new(),
@@ -244,5 +252,28 @@ mod tests {
         let restored: StreamExecutionSummary = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.badges.len(), 1);
         assert_eq!(restored.badges[0].category, BadgeCategory::Billing);
+    }
+
+    #[test]
+    fn permission_counters_round_trip() {
+        let summary = StreamExecutionSummary {
+            permission_prompts: Some(3),
+            user_input_prompts: Some(1),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(json.contains("\"permission_prompts\":3"));
+        assert!(json.contains("\"user_input_prompts\":1"));
+        let restored: StreamExecutionSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.permission_prompts, Some(3));
+        assert_eq!(restored.user_input_prompts, Some(1));
+    }
+
+    #[test]
+    fn permission_counters_skip_none() {
+        let summary = StreamExecutionSummary::default();
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(!json.contains("permission_prompts"));
+        assert!(!json.contains("user_input_prompts"));
     }
 }

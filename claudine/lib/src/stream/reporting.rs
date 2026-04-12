@@ -205,6 +205,8 @@ mod tests {
             }),
             cost_usd: Some(0.0042),
             tool_calls: Some(5),
+            permission_prompts: None,
+            user_input_prompts: None,
             rate_limit: None,
             context_usage: None,
             badges: Vec::new(),

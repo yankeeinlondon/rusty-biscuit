@@ -276,6 +276,8 @@ impl<S: StreamEventSink + Send> StreamParser for QwenStreamParser<S> {
             } else {
                 None
             },
+            permission_prompts: None,
+            user_input_prompts: None,
             rate_limit: None,
             context_usage: None,
             badges: Vec::new(),
