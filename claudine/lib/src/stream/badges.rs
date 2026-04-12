@@ -157,6 +157,52 @@ pub fn derive_badges(summary: &StreamExecutionSummary, provider: Provider) -> Ve
         }
     }
 
+    let already_has_rate_limit = badges.iter().any(|b| b.category == BadgeCategory::RateLimit);
+
+    if !already_has_rate_limit
+        && let Some(rate_limit) = summary.rate_limit.as_ref()
+        && rate_limit.is_throttled.unwrap_or(false)
+    {
+        let retry_hint = rate_limit
+            .retry_after_ms
+            .map(|ms| format!(" (retry in {:.1}s)", ms as f64 / 1000.0))
+            .unwrap_or_default();
+        let base_message = rate_limit
+            .message
+            .clone()
+            .unwrap_or_else(|| "Rate limit hit".to_string());
+        badges.push(SessionBadge {
+            category: BadgeCategory::RateLimit,
+            severity: BadgeSeverity::Warning,
+            label: "Rate Limit".into(),
+            message: format!("{base_message}{retry_hint}"),
+            remediation_url: dashboard_url.clone(),
+        });
+    }
+
+    const CONTEXT_PRESSURE_THRESHOLD: f64 = 80.0;
+
+    if let Some(context) = summary.context_usage.as_ref()
+        && let Some(percent) = context.percent
+        && percent >= CONTEXT_PRESSURE_THRESHOLD
+    {
+        let used = context
+            .used
+            .map(|u| u.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        let total = context
+            .total
+            .map(|t| t.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        badges.push(SessionBadge {
+            category: BadgeCategory::ContextPressure,
+            severity: BadgeSeverity::Warning,
+            label: "Context".into(),
+            message: format!("Context window pressure: {percent:.0}% used ({used}/{total} tokens)"),
+            remediation_url: dashboard_url.clone(),
+        });
+    }
+
     badges
 }
 
@@ -324,5 +370,116 @@ mod tests {
         let badges = derive_badges(&summary, Provider::Codex);
         assert_eq!(badges.len(), 1);
         assert_eq!(badges[0].category, BadgeCategory::Quota);
+    }
+
+    #[test]
+    fn throttled_rate_limit_info_yields_badge_even_without_error_kind() {
+        use crate::stream::summary::RateLimitInfo;
+        let summary = StreamExecutionSummary {
+            rate_limit: Some(RateLimitInfo {
+                is_throttled: Some(true),
+                retry_after_ms: Some(5000),
+                message: Some("Rate limit exceeded".into()),
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::Claude);
+        assert_eq!(badges.len(), 1);
+        assert_eq!(badges[0].category, BadgeCategory::RateLimit);
+        assert!(badges[0].message.contains("Rate limit exceeded"));
+        assert!(badges[0].message.contains("5.0s"));
+    }
+
+    #[test]
+    fn non_throttled_rate_limit_info_does_not_yield_badge() {
+        use crate::stream::summary::RateLimitInfo;
+        let summary = StreamExecutionSummary {
+            rate_limit: Some(RateLimitInfo {
+                is_throttled: Some(false),
+                retry_after_ms: None,
+                message: None,
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::Claude);
+        assert!(badges.is_empty());
+    }
+
+    #[test]
+    fn rate_limit_from_error_kind_does_not_duplicate_with_rate_limit_info() {
+        use crate::stream::summary::RateLimitInfo;
+        let summary = StreamExecutionSummary {
+            is_error: true,
+            error_kind: Some("rate_limit".into()),
+            error_message: Some("Too many requests".into()),
+            rate_limit: Some(RateLimitInfo {
+                is_throttled: Some(true),
+                retry_after_ms: Some(1000),
+                message: Some("Slow down".into()),
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::Codex);
+        let rate_limit_count = badges
+            .iter()
+            .filter(|b| b.category == BadgeCategory::RateLimit)
+            .count();
+        assert_eq!(rate_limit_count, 1);
+    }
+
+    #[test]
+    fn context_usage_at_or_above_threshold_yields_context_pressure_badge() {
+        use crate::stream::summary::ContextUsage;
+        let summary = StreamExecutionSummary {
+            context_usage: Some(ContextUsage {
+                used: Some(110_000),
+                total: Some(128_000),
+                percent: Some(85.9),
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::KimiCode);
+        assert_eq!(badges.len(), 1);
+        assert_eq!(badges[0].category, BadgeCategory::ContextPressure);
+        assert_eq!(badges[0].label, "Context");
+        assert_eq!(badges[0].severity, BadgeSeverity::Warning);
+        assert!(badges[0].message.contains("86%"));
+        assert!(badges[0].message.contains("110000"));
+        assert!(badges[0].message.contains("128000"));
+        assert_eq!(
+            badges[0].remediation_url.as_deref(),
+            Some("https://platform.moonshot.cn/console/account")
+        );
+    }
+
+    #[test]
+    fn context_usage_below_threshold_does_not_yield_badge() {
+        use crate::stream::summary::ContextUsage;
+        let summary = StreamExecutionSummary {
+            context_usage: Some(ContextUsage {
+                used: Some(50_000),
+                total: Some(128_000),
+                percent: Some(39.0),
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::KimiCode);
+        assert!(badges.is_empty());
+    }
+
+    #[test]
+    fn context_usage_at_exact_threshold_yields_badge() {
+        use crate::stream::summary::ContextUsage;
+        let summary = StreamExecutionSummary {
+            context_usage: Some(ContextUsage {
+                used: Some(102_400),
+                total: Some(128_000),
+                percent: Some(80.0),
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::KimiCode);
+        assert_eq!(badges.len(), 1);
+        assert_eq!(badges[0].category, BadgeCategory::ContextPressure);
     }
 }
