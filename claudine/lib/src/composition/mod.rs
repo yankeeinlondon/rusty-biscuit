@@ -17,10 +17,8 @@ mod select;
 pub mod sequence;
 mod types;
 
+pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::CompositionError;
-pub use darkmatter::markdown::compose::shell_expansion::{
-    ShellCommandOrigin, ShellExpansionError,
-};
 #[allow(deprecated)]
 pub use lifecycle::{
     DefaultLifecycleEmitter, LifecycleConfig, LifecycleEmitter, LifecycleNotification,

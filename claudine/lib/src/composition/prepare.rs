@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use darkmatter::markdown::{Markdown, MarkdownError};
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+use darkmatter::markdown::{Markdown, MarkdownError};
 
 /// Convert a `MarkdownError` into a `CompositionError`, preserving the
 /// structured `ShellExpansion` variant so the CLI can render rich errors.
