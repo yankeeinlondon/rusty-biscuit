@@ -100,7 +100,19 @@ pub fn format_completion_summary(summary: &StreamExecutionSummary) -> Option<Str
         return None;
     }
 
-    Some(format!("{prefix} {}", parts.join(" \u{00b7} ")))
+    let mut out = format!("{prefix} {}", parts.join(" \u{00b7} "));
+    for badge in &summary.badges {
+        out.push('\n');
+        out.push_str(&format!(
+            "\u{26a0} {} \u{2014} {}",
+            badge.label, badge.message
+        ));
+        if let Some(url) = &badge.remediation_url {
+            out.push('\n');
+            out.push_str(&format!("  \u{2192} {url}"));
+        }
+    }
+    Some(out)
 }
 
 /// Format a single compact completion line for `--quiet` mode.
@@ -140,7 +152,12 @@ pub fn format_compact_completion(summary: &StreamExecutionSummary) -> Option<Str
         return None;
     }
 
-    Some(format!("{prefix} {}", parts.join(" \u{00b7} ")))
+    let mut out = format!("{prefix} {}", parts.join(" \u{00b7} "));
+    if !summary.badges.is_empty() {
+        let labels: Vec<&str> = summary.badges.iter().map(|b| b.label.as_str()).collect();
+        out.push_str(&format!(" | \u{26a0} {}", labels.join(", ")));
+    }
+    Some(out)
 }
 
 /// Formats a duration in milliseconds as a human-readable string.
@@ -306,5 +323,129 @@ mod tests {
         let completion = format_completion_summary(&summary).unwrap();
         assert!(completion.contains("1 tool"));
         assert!(!completion.contains("1 tools"));
+    }
+
+    #[test]
+    fn completion_summary_renders_single_badge_with_url() {
+        use crate::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
+        let mut summary = full_summary();
+        summary.badges = vec![SessionBadge {
+            category: BadgeCategory::Billing,
+            severity: BadgeSeverity::Error,
+            label: "Billing".into(),
+            message: "Insufficient credits".into(),
+            remediation_url: Some("https://console.anthropic.com/settings/billing".into()),
+        }];
+        let rendered = format_completion_summary(&summary).unwrap();
+        assert!(rendered.contains("\u{2713}"));
+        assert!(rendered.contains("\u{26a0}"));
+        assert!(rendered.contains("Billing"));
+        assert!(rendered.contains("Insufficient credits"));
+        assert!(rendered.contains("https://console.anthropic.com/settings/billing"));
+        assert!(rendered.lines().count() >= 3);
+    }
+
+    #[test]
+    fn completion_summary_renders_badge_without_url() {
+        use crate::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
+        let mut summary = full_summary();
+        summary.badges = vec![SessionBadge {
+            category: BadgeCategory::Permission,
+            severity: BadgeSeverity::Error,
+            label: "Permission".into(),
+            message: "Access denied".into(),
+            remediation_url: None,
+        }];
+        let rendered = format_completion_summary(&summary).unwrap();
+        assert!(rendered.contains("Permission"));
+        assert!(rendered.contains("Access denied"));
+        assert!(!rendered.contains("\u{2192}"));
+    }
+
+    #[test]
+    fn completion_summary_renders_multiple_badges() {
+        use crate::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
+        let mut summary = full_summary();
+        summary.badges = vec![
+            SessionBadge {
+                category: BadgeCategory::RateLimit,
+                severity: BadgeSeverity::Warning,
+                label: "Rate Limit".into(),
+                message: "Slow down".into(),
+                remediation_url: None,
+            },
+            SessionBadge {
+                category: BadgeCategory::ContextPressure,
+                severity: BadgeSeverity::Warning,
+                label: "Context".into(),
+                message: "Context window pressure: 86% used".into(),
+                remediation_url: None,
+            },
+        ];
+        let rendered = format_completion_summary(&summary).unwrap();
+        assert!(rendered.contains("Rate Limit"));
+        assert!(rendered.contains("Slow down"));
+        assert!(rendered.contains("Context"));
+        assert!(rendered.contains("86%"));
+    }
+
+    #[test]
+    fn completion_summary_without_badges_is_single_line() {
+        let summary = full_summary();
+        let rendered = format_completion_summary(&summary).unwrap();
+        assert!(!rendered.contains("\u{26a0}"));
+        assert_eq!(rendered.lines().count(), 1);
+    }
+
+    #[test]
+    fn compact_completion_shows_badge_indicator_with_label() {
+        use crate::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
+        let mut summary = full_summary();
+        summary.badges = vec![SessionBadge {
+            category: BadgeCategory::Billing,
+            severity: BadgeSeverity::Error,
+            label: "Billing".into(),
+            message: "Insufficient credits".into(),
+            remediation_url: None,
+        }];
+        let rendered = format_compact_completion(&summary).unwrap();
+        assert!(rendered.contains("|"));
+        assert!(rendered.contains("\u{26a0}"));
+        assert!(rendered.contains("Billing"));
+        assert!(!rendered.contains("Insufficient credits"));
+    }
+
+    #[test]
+    fn compact_completion_shows_multiple_badge_labels_comma_separated() {
+        use crate::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
+        let mut summary = full_summary();
+        summary.badges = vec![
+            SessionBadge {
+                category: BadgeCategory::RateLimit,
+                severity: BadgeSeverity::Warning,
+                label: "Rate Limit".into(),
+                message: "Slow down".into(),
+                remediation_url: None,
+            },
+            SessionBadge {
+                category: BadgeCategory::ContextPressure,
+                severity: BadgeSeverity::Warning,
+                label: "Context".into(),
+                message: "86%".into(),
+                remediation_url: None,
+            },
+        ];
+        let rendered = format_compact_completion(&summary).unwrap();
+        assert!(rendered.contains("Rate Limit"));
+        assert!(rendered.contains("Context"));
+        assert!(rendered.contains(", "));
+    }
+
+    #[test]
+    fn compact_completion_without_badges_is_single_line() {
+        let summary = full_summary();
+        let rendered = format_compact_completion(&summary).unwrap();
+        assert!(!rendered.contains('|'));
+        assert_eq!(rendered.lines().count(), 1);
     }
 }
