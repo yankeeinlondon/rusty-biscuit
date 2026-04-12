@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
+use super::protocol::qwen::{
+    QwenErrorEvent, QwenEvent, QwenInit, QwenMessage, QwenResult, QwenTool,
+};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -52,12 +55,9 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
         }
     }
 
-    fn handle_init(&mut self, obj: &Value) {
-        self.session_id = obj
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
+    fn handle_init(&mut self, init: QwenInit) {
+        self.session_id = init.session_id;
+        self.model = init.model;
         super::trace_session_metadata(
             Provider::QwenCode,
             self.session_id.as_deref(),
@@ -76,17 +76,24 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
         self.sink.on_session_start(&meta);
     }
 
-    fn handle_message(&mut self, obj: &Value) -> Option<StreamChunk> {
-        let role = obj.get("role").and_then(|r| r.as_str()).unwrap_or("");
-        let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if role != "assistant" && event_type != "assistant" {
+    /// `from_assistant_type` is true when the event type was `assistant` —
+    /// in that case we skip the `role == "assistant"` filter so messages
+    /// dispatched via the type alias are still accepted.
+    fn handle_message(
+        &mut self,
+        msg: QwenMessage,
+        from_assistant_type: bool,
+    ) -> Option<StreamChunk> {
+        if !from_assistant_type && msg.role.as_deref() != Some("assistant") {
             return None;
         }
 
+        let content = msg.content?;
+
         // Try content array (Gemini-style)
-        if let Some(content) = obj.get("content").and_then(|c| c.as_array()) {
+        if let Some(parts) = content.as_array() {
             let mut text_parts = String::new();
-            for part in content {
+            for part in parts {
                 if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                     text_parts.push_str(text);
                 }
@@ -98,7 +105,7 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
         }
 
         // Try content as string (Qwen-specific)
-        if let Some(text) = obj.get("content").and_then(|c| c.as_str())
+        if let Some(text) = content.as_str()
             && !text.is_empty()
         {
             self.assistant_text.push_str(text);
@@ -110,31 +117,20 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
         None
     }
 
-    fn handle_result(&mut self, obj: &Value) {
-        self.duration_ms = obj.get("duration_ms").and_then(|v| v.as_u64());
-        self.num_turns = obj
-            .get("num_turns")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
-        self.provider_status = obj
-            .get("stop_reason")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        self.cost_usd = obj.get("cost_usd").and_then(|v| v.as_f64());
+    fn handle_result(&mut self, result: QwenResult, raw: Value) {
+        let (usage, meta) = result.resolved_usage();
+        self.duration_ms = meta.duration_ms;
+        self.num_turns = meta.num_turns.map(|v| v as u32);
+        self.provider_status = meta.stop_reason;
+        self.cost_usd = meta.cost_usd;
 
-        let stats = obj
-            .get("stats")
-            .or_else(|| obj.get("usage"))
-            .or_else(|| obj.get("token_usage"));
-        if let Some(stats) = stats {
-            let input = stats.get("input_tokens").and_then(|v| v.as_u64());
-            let output = stats.get("output_tokens").and_then(|v| v.as_u64());
-            let cache_read = stats
-                .get("cache_read_input_tokens")
-                .and_then(|v| v.as_u64());
+        if let Some(usage) = usage {
+            let input = usage.input_tokens;
+            let output = usage.output_tokens;
+            let cache_read = usage.cache_read_input_tokens;
             let total = match (input, output) {
                 (Some(i), Some(o)) => Some(i + o),
-                _ => stats.get("total_tokens").and_then(|v| v.as_u64()),
+                _ => usage.total_tokens,
             };
             self.token_usage = Some(NormalizedTokenUsage {
                 input,
@@ -144,7 +140,7 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
             });
         }
 
-        self.raw_summary = Some(obj.clone());
+        self.raw_summary = Some(raw);
         super::trace_summary_update(
             Provider::QwenCode,
             self.provider_status.as_deref(),
@@ -153,18 +149,11 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
         );
     }
 
-    fn handle_error(&mut self, obj: &Value) {
+    fn handle_error(&mut self, event: QwenErrorEvent) {
         self.is_error = true;
-        self.error_kind = obj
-            .get("error")
-            .and_then(|e| e.get("type"))
-            .and_then(|t| t.as_str())
-            .map(String::from);
-        self.error_message = obj
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(|m| m.as_str())
-            .map(String::from);
+        let detail = event.error;
+        self.error_kind = detail.as_ref().and_then(|d| d.kind.clone());
+        self.error_message = detail.and_then(|d| d.message);
         let mut meta = EventMeta::default();
         if let Some(message) = &self.error_message {
             meta.extra
@@ -177,28 +166,61 @@ impl<S: StreamEventSink> QwenStreamParser<S> {
         self.sink.on_turn_error(&meta);
     }
 
-    fn tool_id(obj: &Value) -> Option<String> {
-        obj.get("id")
-            .or_else(|| obj.get("tool_id"))
-            .or_else(|| obj.get("tool_use_id"))
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
+    fn handle_tool_use(&mut self, mut tool: QwenTool) {
+        self.tool_calls += 1;
+        let tool_id = tool.resolved_tool_id().map(ToOwned::to_owned);
+        let tool_name = tool.resolved_tool_name().map(ToOwned::to_owned);
+        let tool_input = tool.take_input();
+        super::trace_tool_event(Provider::QwenCode, self.tool_calls, tool_name.as_deref());
+        let mut meta = EventMeta::default();
+        if let Some(tool_id) = &tool_id {
+            meta.extra
+                .insert("tool_id".into(), Value::String(tool_id.clone()));
+        }
+        if let Some(tool_name) = &tool_name {
+            meta.extra
+                .insert("tool_name".into(), Value::String(tool_name.clone()));
+        }
+        if let Some(tool_input) = &tool_input {
+            meta.extra.insert("tool_input".into(), tool_input.clone());
+        }
+        if let Some(tool_id) = tool_id {
+            self.tool_uses.insert(tool_id, (tool_name, tool_input));
+        }
+        self.sink.on_before_tool(&meta);
     }
 
-    fn tool_input(obj: &Value) -> Option<Value> {
-        obj.get("input")
-            .or_else(|| obj.get("parameters"))
-            .or_else(|| obj.get("arguments"))
-            .or_else(|| obj.get("args"))
-            .or_else(|| obj.get("params"))
-            .cloned()
-    }
+    fn handle_tool_result(&mut self, mut tool: QwenTool) {
+        let tool_id = tool.resolved_tool_id().map(ToOwned::to_owned);
+        let (tool_name, tool_input) = tool_id
+            .as_ref()
+            .and_then(|id| self.tool_uses.remove(id))
+            .unwrap_or((None, None));
+        let tool_output = tool.take_output();
+        let status = tool.status.take();
+        let error = tool.error.take();
 
-    fn tool_output(obj: &Value) -> Option<Value> {
-        obj.get("output")
-            .or_else(|| obj.get("result"))
-            .or_else(|| obj.get("content"))
-            .cloned()
+        let mut meta = EventMeta::default();
+        if let Some(tool_id) = tool_id {
+            meta.extra.insert("tool_id".into(), Value::String(tool_id));
+        }
+        if let Some(tool_name) = tool_name {
+            meta.extra
+                .insert("tool_name".into(), Value::String(tool_name));
+        }
+        if let Some(tool_input) = tool_input {
+            meta.extra.insert("tool_input".into(), tool_input);
+        }
+        if let Some(tool_output) = tool_output {
+            meta.extra.insert("tool_response".into(), tool_output);
+        }
+        if let Some(status) = status {
+            meta.extra.insert("status".into(), Value::String(status));
+        }
+        if let Some(error) = error {
+            meta.extra.insert("error".into(), error);
+        }
+        self.sink.on_after_tool(&meta);
     }
 }
 
@@ -210,7 +232,7 @@ impl<S: StreamEventSink + Send> StreamParser for QwenStreamParser<S> {
             return Ok(None);
         }
 
-        let obj: Value = serde_json::from_str(line).map_err(|e| {
+        let raw: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
             super::trace_malformed_line(Provider::QwenCode, self.line_num, &e.to_string());
@@ -220,87 +242,41 @@ impl<S: StreamEventSink + Send> StreamParser for QwenStreamParser<S> {
             }
         })?;
 
-        let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        let subtype = obj.get("subtype").and_then(|t| t.as_str()).unwrap_or("");
+        let event_type = raw.get("type").and_then(|t| t.as_str()).unwrap_or("");
         super::trace_parser_event(Provider::QwenCode, event_type, self.line_num);
 
-        match event_type {
-            "init" => {
-                self.handle_init(&obj);
+        match serde_json::from_value::<QwenEvent>(raw.clone()) {
+            Ok(QwenEvent::Init(init)) => {
+                self.handle_init(init);
                 Ok(None)
             }
-            "system" if subtype == "session_start" => {
-                self.handle_init(&obj);
+            Ok(QwenEvent::System(sys)) => {
+                if sys.is_session_start() {
+                    self.handle_init(sys.into_init());
+                }
                 Ok(None)
             }
-            "message" | "assistant_message" | "assistant" => Ok(self.handle_message(&obj)),
-            "error" => {
-                self.handle_error(&obj);
+            Ok(QwenEvent::Message(msg) | QwenEvent::AssistantMessage(msg)) => {
+                Ok(self.handle_message(msg, false))
+            }
+            Ok(QwenEvent::Assistant(msg)) => Ok(self.handle_message(msg, true)),
+            Ok(QwenEvent::Error(err)) => {
+                self.handle_error(err);
                 Ok(None)
             }
-            "result" | "summary" => {
-                self.handle_result(&obj);
+            Ok(QwenEvent::Result(result) | QwenEvent::Summary(result)) => {
+                self.handle_result(result, raw);
                 Ok(None)
             }
-            "tool_use" | "tool_call" => {
-                self.tool_calls += 1;
-                let tool_name = obj
-                    .get("name")
-                    .or_else(|| obj.get("tool_name"))
-                    .and_then(|value| value.as_str())
-                    .map(ToOwned::to_owned);
-                let tool_id = Self::tool_id(&obj);
-                let tool_input = Self::tool_input(&obj);
-                super::trace_tool_event(Provider::QwenCode, self.tool_calls, tool_name.as_deref());
-                let mut meta = EventMeta::default();
-                if let Some(tool_id) = &tool_id {
-                    meta.extra
-                        .insert("tool_id".into(), Value::String(tool_id.clone()));
-                }
-                if let Some(tool_name) = &tool_name {
-                    meta.extra
-                        .insert("tool_name".into(), Value::String(tool_name.clone()));
-                }
-                if let Some(tool_input) = &tool_input {
-                    meta.extra.insert("tool_input".into(), tool_input.clone());
-                }
-                if let Some(tool_id) = tool_id {
-                    self.tool_uses.insert(tool_id, (tool_name, tool_input));
-                }
-                self.sink.on_before_tool(&meta);
+            Ok(QwenEvent::ToolUse(tool) | QwenEvent::ToolCall(tool)) => {
+                self.handle_tool_use(tool);
                 Ok(None)
             }
-            "tool_result" | "tool_response" => {
-                let tool_id = Self::tool_id(&obj);
-                let (tool_name, tool_input) = tool_id
-                    .as_ref()
-                    .and_then(|id| self.tool_uses.remove(id))
-                    .unwrap_or((None, None));
-                let mut meta = EventMeta::default();
-                if let Some(tool_id) = tool_id {
-                    meta.extra.insert("tool_id".into(), Value::String(tool_id));
-                }
-                if let Some(tool_name) = tool_name {
-                    meta.extra
-                        .insert("tool_name".into(), Value::String(tool_name));
-                }
-                if let Some(tool_input) = tool_input {
-                    meta.extra.insert("tool_input".into(), tool_input);
-                }
-                if let Some(tool_output) = Self::tool_output(&obj) {
-                    meta.extra.insert("tool_response".into(), tool_output);
-                }
-                if let Some(status) = obj.get("status").and_then(Value::as_str) {
-                    meta.extra
-                        .insert("status".into(), Value::String(status.to_string()));
-                }
-                if let Some(error) = obj.get("error") {
-                    meta.extra.insert("error".into(), error.clone());
-                }
-                self.sink.on_after_tool(&meta);
+            Ok(QwenEvent::ToolResult(tool) | QwenEvent::ToolResponse(tool)) => {
+                self.handle_tool_result(tool);
                 Ok(None)
             }
-            _ => Ok(None),
+            Err(_) => Ok(None),
         }
     }
 

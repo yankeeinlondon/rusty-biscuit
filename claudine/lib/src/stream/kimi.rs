@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
+use super::protocol::kimi::{
+    KimiContent, KimiErrorEvent, KimiEvent, KimiInit, KimiStatusUpdate, KimiTool,
+};
 use super::summary::{ContextUsage, StreamExecutionSummary};
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -56,12 +59,9 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
         }
     }
 
-    fn handle_init(&mut self, obj: &Value) {
-        self.session_id = obj
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
+    fn handle_init(&mut self, init: KimiInit) {
+        self.session_id = init.session_id;
+        self.model = init.model;
         super::trace_session_metadata(
             Provider::KimiCode,
             self.session_id.as_deref(),
@@ -80,56 +80,25 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
         self.sink.on_session_start(&meta);
     }
 
-    fn handle_content(&mut self, obj: &Value) -> Option<StreamChunk> {
-        // Try content array with text parts
-        if let Some(content) = obj.get("content").and_then(|c| c.as_array()) {
-            let mut text_parts = String::new();
-            for part in content {
-                if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                    text_parts.push_str(text);
-                }
-            }
-            if !text_parts.is_empty() {
-                self.assistant_text.push_str(&text_parts);
-                return Some(StreamChunk::Text(super::ensure_message_newline(text_parts)));
-            }
+    fn handle_content(&mut self, event: KimiContent) -> Option<StreamChunk> {
+        let text = event.resolved_text()?;
+        if text.is_empty() {
+            return None;
         }
-
-        // Try direct text field
-        if let Some(text) = obj.get("text").and_then(|t| t.as_str())
-            && !text.is_empty()
-        {
-            self.assistant_text.push_str(text);
-            return Some(StreamChunk::Text(super::ensure_message_newline(
-                text.to_string(),
-            )));
-        }
-
-        // Try content as string
-        if let Some(text) = obj.get("content").and_then(|c| c.as_str())
-            && !text.is_empty()
-        {
-            self.assistant_text.push_str(text);
-            return Some(StreamChunk::Text(super::ensure_message_newline(
-                text.to_string(),
-            )));
-        }
-
-        None
+        self.assistant_text.push_str(&text);
+        Some(StreamChunk::Text(super::ensure_message_newline(text)))
     }
 
-    fn handle_status_update(&mut self, obj: &Value) {
+    fn handle_status_update(&mut self, mut event: KimiStatusUpdate) {
         // Token usage from latest status update (last snapshot wins)
-        if let Some(usage) = obj.get("usage").or_else(|| obj.get("token_usage")) {
-            let input = usage.get("input_tokens").and_then(|v| v.as_u64());
-            let output = usage.get("output_tokens").and_then(|v| v.as_u64());
+        if let Some(usage) = event.resolved_usage() {
+            let input = usage.input_tokens;
+            let output = usage.output_tokens;
             let total = match (input, output) {
                 (Some(i), Some(o)) => Some(i + o),
-                _ => usage.get("total_tokens").and_then(|v| v.as_u64()),
+                _ => usage.total_tokens,
             };
-            let cache_read = usage
-                .get("cache_read_input_tokens")
-                .and_then(|v| v.as_u64());
+            let cache_read = usage.cache_read_input_tokens;
             self.token_usage = Some(NormalizedTokenUsage {
                 input,
                 output,
@@ -138,31 +107,15 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
             });
         }
 
-        self.cost_usd = obj
-            .get("cost_usd")
-            .and_then(|v| v.as_f64())
-            .or(self.cost_usd);
-        self.duration_ms = obj
-            .get("duration_ms")
-            .and_then(|v| v.as_u64())
-            .or(self.duration_ms);
-        self.num_turns = obj
-            .get("num_turns")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32)
-            .or(self.num_turns);
+        self.cost_usd = event.cost_usd.or(self.cost_usd);
+        self.duration_ms = event.duration_ms.or(self.duration_ms);
+        self.num_turns = event.num_turns.map(|v| v as u32).or(self.num_turns);
 
         // Context window pressure
-        if let Some(ctx) = obj.get("context_usage").or_else(|| obj.get("context")) {
-            let used = ctx.get("used").and_then(|v| v.as_u64());
-            let total = ctx.get("total").and_then(|v| v.as_u64());
-            let percent =
-                ctx.get("percent")
-                    .and_then(|v| v.as_f64())
-                    .or_else(|| match (used, total) {
-                        (Some(u), Some(t)) if t > 0 => Some((u as f64 / t as f64) * 100.0),
-                        _ => None,
-                    });
+        if let Some(ctx) = event.resolved_context() {
+            let used = ctx.used;
+            let total = ctx.total;
+            let percent = ctx.computed_percent();
 
             let context = ContextUsage {
                 used,
@@ -190,46 +143,70 @@ impl<S: StreamEventSink> KimiStreamParser<S> {
         );
     }
 
-    fn handle_error(&mut self, obj: &Value) {
+    fn handle_error(&mut self, event: KimiErrorEvent) {
         self.is_error = true;
-        self.error_kind = obj
-            .get("error")
-            .and_then(|e| e.get("type"))
-            .and_then(|t| t.as_str())
-            .map(String::from);
-        self.error_message = obj
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(|m| m.as_str())
-            .or_else(|| obj.get("message").and_then(|m| m.as_str()))
-            .map(String::from);
+        self.error_kind = event.resolved_kind();
+        self.error_message = event.resolved_message();
 
         let meta = EventMeta::default();
         self.sink.on_turn_error(&meta);
     }
 
-    fn tool_id(obj: &Value) -> Option<String> {
-        obj.get("id")
-            .or_else(|| obj.get("tool_id"))
-            .or_else(|| obj.get("tool_use_id"))
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
+    fn handle_tool_use(&mut self, mut tool: KimiTool) {
+        self.tool_calls += 1;
+        let tool_id = tool.resolved_tool_id().map(ToOwned::to_owned);
+        let tool_name = tool.resolved_tool_name().map(ToOwned::to_owned);
+        let tool_input = tool.take_input();
+        super::trace_tool_event(Provider::KimiCode, self.tool_calls, tool_name.as_deref());
+        let mut meta = EventMeta::default();
+        if let Some(tool_id) = &tool_id {
+            meta.extra
+                .insert("tool_id".into(), Value::String(tool_id.clone()));
+        }
+        if let Some(tool_name) = &tool_name {
+            meta.extra
+                .insert("tool_name".into(), Value::String(tool_name.clone()));
+        }
+        if let Some(tool_input) = &tool_input {
+            meta.extra.insert("tool_input".into(), tool_input.clone());
+        }
+        if let Some(tool_id) = tool_id {
+            self.tool_uses.insert(tool_id, (tool_name, tool_input));
+        }
+        self.sink.on_before_tool(&meta);
     }
 
-    fn tool_input(obj: &Value) -> Option<Value> {
-        obj.get("input")
-            .or_else(|| obj.get("parameters"))
-            .or_else(|| obj.get("arguments"))
-            .or_else(|| obj.get("args"))
-            .or_else(|| obj.get("params"))
-            .cloned()
-    }
+    fn handle_tool_result(&mut self, mut tool: KimiTool) {
+        let tool_id = tool.resolved_tool_id().map(ToOwned::to_owned);
+        let (tool_name, tool_input) = tool_id
+            .as_ref()
+            .and_then(|id| self.tool_uses.remove(id))
+            .unwrap_or((None, None));
+        let tool_output = tool.take_output();
+        let status = tool.status.take();
+        let error = tool.error.take();
 
-    fn tool_output(obj: &Value) -> Option<Value> {
-        obj.get("output")
-            .or_else(|| obj.get("result"))
-            .or_else(|| obj.get("content"))
-            .cloned()
+        let mut meta = EventMeta::default();
+        if let Some(tool_id) = tool_id {
+            meta.extra.insert("tool_id".into(), Value::String(tool_id));
+        }
+        if let Some(tool_name) = tool_name {
+            meta.extra
+                .insert("tool_name".into(), Value::String(tool_name));
+        }
+        if let Some(tool_input) = tool_input {
+            meta.extra.insert("tool_input".into(), tool_input);
+        }
+        if let Some(tool_output) = tool_output {
+            meta.extra.insert("tool_response".into(), tool_output);
+        }
+        if let Some(status) = status {
+            meta.extra.insert("status".into(), Value::String(status));
+        }
+        if let Some(error) = error {
+            meta.extra.insert("error".into(), error);
+        }
+        self.sink.on_after_tool(&meta);
     }
 }
 
@@ -241,7 +218,7 @@ impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
             return Ok(None);
         }
 
-        let obj: Value = serde_json::from_str(line).map_err(|e| {
+        let raw: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
             super::trace_malformed_line(Provider::KimiCode, self.line_num, &e.to_string());
@@ -251,82 +228,41 @@ impl<S: StreamEventSink + Send> StreamParser for KimiStreamParser<S> {
             }
         })?;
 
-        let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let event_type = raw.get("type").and_then(|t| t.as_str()).unwrap_or("");
         super::trace_parser_event(Provider::KimiCode, event_type, self.line_num);
 
-        match event_type {
-            "init" | "system" => {
-                self.handle_init(&obj);
+        match serde_json::from_value::<KimiEvent>(raw) {
+            Ok(KimiEvent::Init(init) | KimiEvent::System(init)) => {
+                self.handle_init(init);
                 Ok(None)
             }
-            "assistant" | "message" | "content" | "ContentPart" => Ok(self.handle_content(&obj)),
-            "StatusUpdate" | "status_update" | "status" => {
-                self.handle_status_update(&obj);
+            Ok(
+                KimiEvent::Assistant(content)
+                | KimiEvent::Message(content)
+                | KimiEvent::Content(content)
+                | KimiEvent::ContentPart(content),
+            ) => Ok(self.handle_content(content)),
+            Ok(
+                KimiEvent::StatusUpdatePascal(status)
+                | KimiEvent::StatusUpdate(status)
+                | KimiEvent::Status(status),
+            ) => {
+                self.handle_status_update(status);
                 Ok(None)
             }
-            "error" => {
-                self.handle_error(&obj);
+            Ok(KimiEvent::Error(err)) => {
+                self.handle_error(err);
                 Ok(None)
             }
-            "tool_use" => {
-                self.tool_calls += 1;
-                let tool_name = obj
-                    .get("name")
-                    .or_else(|| obj.get("tool_name"))
-                    .and_then(|value| value.as_str())
-                    .map(ToOwned::to_owned);
-                let tool_id = Self::tool_id(&obj);
-                let tool_input = Self::tool_input(&obj);
-                super::trace_tool_event(Provider::KimiCode, self.tool_calls, tool_name.as_deref());
-                let mut meta = EventMeta::default();
-                if let Some(tool_id) = &tool_id {
-                    meta.extra
-                        .insert("tool_id".into(), Value::String(tool_id.clone()));
-                }
-                if let Some(tool_name) = &tool_name {
-                    meta.extra
-                        .insert("tool_name".into(), Value::String(tool_name.clone()));
-                }
-                if let Some(tool_input) = &tool_input {
-                    meta.extra.insert("tool_input".into(), tool_input.clone());
-                }
-                if let Some(tool_id) = tool_id {
-                    self.tool_uses.insert(tool_id, (tool_name, tool_input));
-                }
-                self.sink.on_before_tool(&meta);
+            Ok(KimiEvent::ToolUse(tool)) => {
+                self.handle_tool_use(tool);
                 Ok(None)
             }
-            "tool_result" => {
-                let tool_id = Self::tool_id(&obj);
-                let (tool_name, tool_input) = tool_id
-                    .as_ref()
-                    .and_then(|id| self.tool_uses.remove(id))
-                    .unwrap_or((None, None));
-                let mut meta = EventMeta::default();
-                if let Some(tool_id) = tool_id {
-                    meta.extra.insert("tool_id".into(), Value::String(tool_id));
-                }
-                if let Some(tool_name) = tool_name {
-                    meta.extra
-                        .insert("tool_name".into(), Value::String(tool_name));
-                }
-                if let Some(tool_input) = tool_input {
-                    meta.extra.insert("tool_input".into(), tool_input);
-                }
-                if let Some(tool_output) = Self::tool_output(&obj) {
-                    meta.extra.insert("tool_response".into(), tool_output);
-                }
-                if let Some(status) = obj.get("status").and_then(Value::as_str) {
-                    meta.extra
-                        .insert("status".into(), Value::String(status.to_string()));
-                }
-                if let Some(error) = obj.get("error") {
-                    meta.extra.insert("error".into(), error.clone());
-                }
-                self.sink.on_after_tool(&meta);
+            Ok(KimiEvent::ToolResult(tool)) => {
+                self.handle_tool_result(tool);
                 Ok(None)
             }
-            _ => Ok(None),
+            Err(_) => Ok(None),
         }
     }
 

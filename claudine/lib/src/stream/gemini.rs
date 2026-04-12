@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
+use super::protocol::gemini::{
+    GeminiErrorEvent, GeminiEvent, GeminiInit, GeminiMessage, GeminiResult, GeminiToolResult,
+    GeminiToolUse,
+};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -53,12 +57,9 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
         }
     }
 
-    fn handle_init(&mut self, obj: &Value) {
-        self.session_id = obj
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
+    fn handle_init(&mut self, init: GeminiInit) {
+        self.session_id = init.session_id;
+        self.model = init.model;
         super::trace_session_metadata(
             Provider::Gemini,
             self.session_id.as_deref(),
@@ -77,14 +78,12 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
         self.sink.on_session_start(&meta);
     }
 
-    fn handle_message(&mut self, obj: &Value) -> Option<StreamChunk> {
-        let role = obj.get("role").and_then(|r| r.as_str()).unwrap_or("");
-        if role != "assistant" {
+    fn handle_message(&mut self, msg: GeminiMessage) -> Option<StreamChunk> {
+        if msg.role.as_deref() != Some("assistant") {
             return None;
         }
 
-        let content_val = obj.get("content")?;
-
+        let content_val = msg.content?;
         // Gemini emits content as a plain string (confirmed from types.d.ts),
         // but handle array format defensively in case future versions change.
         let text = if let Some(s) = content_val.as_str() {
@@ -108,41 +107,33 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
         Some(StreamChunk::Text(super::ensure_message_newline(text)))
     }
 
-    fn handle_result(&mut self, obj: &Value) {
-        // Result status: "success" or "error"
-        self.provider_status = obj.get("status").and_then(|v| v.as_str()).map(String::from);
+    fn handle_result(&mut self, result: GeminiResult, raw: Value) {
+        self.provider_status = result.status.clone();
 
-        // Handle result-level errors
-        if obj.get("status").and_then(|v| v.as_str()) == Some("error") {
+        if result.status.as_deref() == Some("error") {
             self.is_error = true;
-            if let Some(err) = obj.get("error") {
-                self.error_kind = err.get("type").and_then(|v| v.as_str()).map(String::from);
-                self.error_message = err
-                    .get("message")
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
+            if let Some(err) = result.error {
+                self.error_kind = err.kind;
+                self.error_message = err.message;
             }
         }
 
-        self.cost_usd = obj.get("cost_usd").and_then(|v| v.as_f64());
+        self.cost_usd = result.cost_usd;
 
-        // Gemini stats: {total_tokens, input_tokens, output_tokens, cached, input, duration_ms, tool_calls}
-        let stats = obj.get("stats");
-        if let Some(stats) = stats {
-            self.duration_ms = stats.get("duration_ms").and_then(|v| v.as_u64());
+        if let Some(stats) = result.stats {
+            self.duration_ms = stats.duration_ms;
 
-            // Tool calls from stats
-            if let Some(tc) = stats.get("tool_calls").and_then(|v| v.as_u64()) {
+            if let Some(tc) = stats.tool_calls {
                 self.tool_calls = tc as u32;
             }
 
-            let input = stats.get("input_tokens").and_then(|v| v.as_u64());
-            let output = stats.get("output_tokens").and_then(|v| v.as_u64());
+            let input = stats.input_tokens;
+            let output = stats.output_tokens;
             // "cached" = cached prompt tokens (maps to cache_read)
-            let cache_read = stats.get("cached").and_then(|v| v.as_u64());
+            let cache_read = stats.cached;
             let total = match (input, output) {
                 (Some(i), Some(o)) => Some(i + o),
-                _ => stats.get("total_tokens").and_then(|v| v.as_u64()),
+                _ => stats.total_tokens,
             };
             self.token_usage = Some(NormalizedTokenUsage {
                 input,
@@ -152,7 +143,7 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
             });
         }
 
-        self.raw_summary = Some(obj.clone());
+        self.raw_summary = Some(raw);
         super::trace_summary_update(
             Provider::Gemini,
             self.provider_status.as_deref(),
@@ -161,16 +152,11 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
         );
     }
 
-    fn handle_error(&mut self, obj: &Value) {
+    fn handle_error(&mut self, event: GeminiErrorEvent) {
         // Real format: {"type":"error","severity":"warning","message":"Loop detected"}
-        self.error_kind = obj
-            .get("severity")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        self.error_message = obj
-            .get("message")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        self.error_kind = event.severity;
+        self.error_message = event.message;
+
         let mut meta = EventMeta::default();
         if let Some(message) = &self.error_message {
             meta.extra
@@ -191,26 +177,13 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
         self.sink.on_turn_error(&meta);
     }
 
-    fn handle_tool_use(&mut self, obj: &Value) {
+    fn handle_tool_use(&mut self, tu: GeminiToolUse) {
         self.tool_calls += 1;
-        super::trace_tool_event(
-            Provider::Gemini,
-            self.tool_calls,
-            obj.get("tool_name")
-                .or_else(|| obj.get("name"))
-                .and_then(|value| value.as_str()),
-        );
+        super::trace_tool_event(Provider::Gemini, self.tool_calls, tu.resolved_tool_name());
 
-        let tool_id = obj
-            .get("tool_id")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let tool_name = obj
-            .get("tool_name")
-            .or_else(|| obj.get("name"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let parameters = obj.get("parameters").or_else(|| obj.get("input")).cloned();
+        let tool_id = tu.tool_id.clone();
+        let tool_name = tu.resolved_tool_name().map(ToOwned::to_owned);
+        let parameters = tu.resolved_input();
 
         if let Some(tool_id) = &tool_id {
             self.tool_uses
@@ -231,15 +204,13 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
         self.sink.on_before_tool(&meta);
     }
 
-    fn handle_tool_result(&mut self, obj: &Value) {
-        let tool_id = obj
-            .get("tool_id")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+    fn handle_tool_result(&mut self, tr: GeminiToolResult) {
+        let tool_id = tr.tool_id.clone();
         let (tool_name, tool_input) = tool_id
             .as_ref()
             .and_then(|id| self.tool_uses.get(id).cloned())
             .unwrap_or((None, None));
+        let (output, error, status) = tr.response();
 
         let mut meta = EventMeta::default();
         if let Some(tool_id) = tool_id {
@@ -252,15 +223,14 @@ impl<S: StreamEventSink> GeminiStreamParser<S> {
         if let Some(tool_input) = tool_input {
             meta.extra.insert("tool_input".into(), tool_input);
         }
-        if let Some(output) = obj.get("output").or_else(|| obj.get("result")) {
-            meta.extra.insert("tool_response".into(), output.clone());
+        if let Some(output) = output {
+            meta.extra.insert("tool_response".into(), output);
         }
-        if let Some(error) = obj.get("error") {
-            meta.extra.insert("error".into(), error.clone());
+        if let Some(error) = error {
+            meta.extra.insert("error".into(), error);
         }
-        if let Some(status) = obj.get("status").and_then(|v| v.as_str()) {
-            meta.extra
-                .insert("status".into(), Value::String(status.to_string()));
+        if let Some(status) = status {
+            meta.extra.insert("status".into(), Value::String(status));
         }
         self.sink.on_after_tool(&meta);
     }
@@ -274,7 +244,7 @@ impl<S: StreamEventSink + Send> StreamParser for GeminiStreamParser<S> {
             return Ok(None);
         }
 
-        let obj: Value = serde_json::from_str(line).map_err(|e| {
+        let raw: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
             super::trace_malformed_line(Provider::Gemini, self.line_num, &e.to_string());
@@ -284,32 +254,32 @@ impl<S: StreamEventSink + Send> StreamParser for GeminiStreamParser<S> {
             }
         })?;
 
-        let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let event_type = raw.get("type").and_then(|t| t.as_str()).unwrap_or("");
         super::trace_parser_event(Provider::Gemini, event_type, self.line_num);
 
-        match event_type {
-            "init" | "system" => {
-                self.handle_init(&obj);
+        match serde_json::from_value::<GeminiEvent>(raw.clone()) {
+            Ok(GeminiEvent::Init(init) | GeminiEvent::System(init)) => {
+                self.handle_init(init);
                 Ok(None)
             }
-            "message" => Ok(self.handle_message(&obj)),
-            "error" => {
-                self.handle_error(&obj);
+            Ok(GeminiEvent::Message(msg)) => Ok(self.handle_message(msg)),
+            Ok(GeminiEvent::Error(err)) => {
+                self.handle_error(err);
                 Ok(None)
             }
-            "result" => {
-                self.handle_result(&obj);
+            Ok(GeminiEvent::Result(result)) => {
+                self.handle_result(result, raw);
                 Ok(None)
             }
-            "tool_use" => {
-                self.handle_tool_use(&obj);
+            Ok(GeminiEvent::ToolUse(tu)) => {
+                self.handle_tool_use(tu);
                 Ok(None)
             }
-            "tool_result" => {
-                self.handle_tool_result(&obj);
+            Ok(GeminiEvent::ToolResult(tr)) => {
+                self.handle_tool_result(tr);
                 Ok(None)
             }
-            _ => Ok(None),
+            Err(_) => Ok(None),
         }
     }
 

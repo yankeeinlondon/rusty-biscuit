@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
+use super::protocol::codex::{
+    CodexErrorEnvelope, CodexEvent, CodexItem, CodexItemEnvelope, CodexThreadMeta,
+    CodexTurnCompleted,
+};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -31,7 +35,7 @@ pub struct CodexStreamParser<S: StreamEventSink> {
     error_message: Option<String>,
     raw_summary: Option<Value>,
     assistant_text: String,
-    tool_items: HashMap<String, Value>,
+    tool_items: HashMap<String, CodexItem>,
 }
 
 impl<S: StreamEventSink> CodexStreamParser<S> {
@@ -69,20 +73,16 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         meta
     }
 
-    fn handle_thread_started(&mut self, obj: &Value) {
-        self.session_id = obj
-            .get("thread_id")
-            .or_else(|| obj.get("id"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
+    fn handle_thread_started(&mut self, meta: CodexThreadMeta) {
+        self.session_id = meta.resolved_id();
         super::trace_session_metadata(
             Provider::Codex,
             self.session_id.as_deref(),
             self.model.as_deref(),
         );
 
-        let meta = self.session_meta();
-        self.sink.on_session_start(&meta);
+        let session_meta = self.session_meta();
+        self.sink.on_session_start(&session_meta);
     }
 
     fn handle_turn_started(&mut self) {
@@ -91,18 +91,16 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         self.sink.on_turn_start(&meta);
     }
 
-    fn handle_turn_completed(&mut self, obj: &Value) {
-        // Extract usage from turn.completed
-        if let Some(usage) = obj.get("usage") {
-            let input = usage.get("input_tokens").and_then(|v| v.as_u64());
-            let output = usage.get("output_tokens").and_then(|v| v.as_u64());
-            let cache_read = usage
-                .get("cached_input_tokens")
-                .or_else(|| usage.get("cache_read_input_tokens"))
-                .and_then(|v| v.as_u64());
+    fn handle_turn_completed(&mut self, tc: CodexTurnCompleted, raw: Value) {
+        let provider_status = tc.provider_status().map(String::from);
+
+        if let Some(usage) = &tc.usage {
+            let input = usage.input_tokens;
+            let output = usage.output_tokens;
+            let cache_read = usage.cache_read();
             let total = match (input, output) {
                 (Some(i), Some(o)) => Some(i + o),
-                _ => usage.get("total_tokens").and_then(|v| v.as_u64()),
+                _ => usage.total_tokens,
             };
             let step_usage = NormalizedTokenUsage {
                 input,
@@ -117,16 +115,11 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
             }
         }
 
-        self.duration_ms = obj.get("duration_ms").and_then(|v| v.as_u64());
-        self.cost_usd = obj.get("cost_usd").and_then(|v| v.as_f64());
+        self.duration_ms = tc.duration_ms;
+        self.cost_usd = tc.cost_usd;
+        self.provider_status = provider_status;
 
-        self.provider_status = obj
-            .get("status")
-            .or_else(|| obj.get("stop_reason"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-
-        self.raw_summary = Some(obj.clone());
+        self.raw_summary = Some(raw);
         super::trace_summary_update(
             Provider::Codex,
             self.provider_status.as_deref(),
@@ -142,19 +135,10 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         self.sink.on_turn_complete(&meta);
     }
 
-    fn handle_error(&mut self, obj: &Value) {
+    fn handle_error(&mut self, env: CodexErrorEnvelope) {
         self.is_error = true;
-        self.error_kind = obj
-            .get("error_type")
-            .or_else(|| obj.get("error").and_then(|e| e.get("type")))
-            .and_then(|t| t.as_str())
-            .map(String::from);
-        self.error_message = obj
-            .get("error_message")
-            .or_else(|| obj.get("error").and_then(|e| e.get("message")))
-            .or_else(|| obj.get("message"))
-            .and_then(|m| m.as_str())
-            .map(String::from);
+        self.error_kind = env.resolved_kind();
+        self.error_message = env.resolved_message();
 
         let mut meta = self.session_meta();
         if let Some(kind) = &self.error_kind {
@@ -174,13 +158,13 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
     /// temp file, not from the stream. We accumulate stream text as a fallback
     /// but do NOT return it from `feed_line` to avoid emitting it to stdout
     /// (which would prevent the file-based text from being used).
-    fn handle_agent_message_item(&mut self, item: &Value) {
-        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+    fn handle_agent_message_item(&mut self, item: &CodexItem) {
+        if let Some(text) = item.text.as_deref() {
             self.assistant_text.push_str(text);
             return;
         }
 
-        if let Some(parts) = item.get("content").and_then(|v| v.as_array()) {
+        if let Some(parts) = item.content.as_ref().and_then(|v| v.as_array()) {
             let text = parts
                 .iter()
                 .filter_map(|part| part.get("text").and_then(|v| v.as_str()))
@@ -191,109 +175,82 @@ impl<S: StreamEventSink> CodexStreamParser<S> {
         }
     }
 
-    fn tool_meta_from_item(&self, item: &Value) -> EventMeta {
+    fn tool_meta_from_item(&self, item: &CodexItem) -> EventMeta {
         let mut meta = self.session_meta();
-        if let Some(tool_name) = item
-            .get("tool_name")
-            .or_else(|| item.get("name"))
-            .and_then(|v| v.as_str())
-        {
+        if let Some(tool_name) = item.resolved_tool_name() {
             meta.extra
                 .insert("tool_name".into(), Value::String(tool_name.to_string()));
         }
-        if let Some(tool_id) = item.get("id").and_then(|v| v.as_str()) {
+        if let Some(tool_id) = item.id.as_deref() {
             meta.extra
                 .insert("tool_id".into(), Value::String(tool_id.to_string()));
         }
-        if let Some(input) = item
-            .get("input")
-            .or_else(|| item.get("arguments"))
-            .or_else(|| item.get("parameters"))
-        {
+        if let Some(input) = item.resolved_input() {
             meta.extra.insert("tool_input".into(), input.clone());
         }
-        if let Some(output) = item
-            .get("output")
-            .or_else(|| item.get("result"))
-            .or_else(|| item.get("content"))
-        {
+        if let Some(output) = item.resolved_output() {
             meta.extra.insert("tool_response".into(), output.clone());
         }
         meta
     }
 
-    fn is_tool_item_type(item_type: &str) -> bool {
-        matches!(
-            item_type,
-            "tool_use"
-                | "tool_call"
-                | "mcp_tool_call"
-                | "web_search"
-                | "command_exec"
-                | "patch_apply"
-                | "image_generation"
-                | "view_image"
-        )
-    }
-
-    fn handle_item_started(&mut self, obj: &Value) {
-        let Some(item) = obj.get("item") else {
+    fn handle_item_started(&mut self, env: CodexItemEnvelope) {
+        let Some(item) = env.item else {
             return;
         };
-        let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let kind = item.kind.as_deref().unwrap_or("");
 
-        if matches!(
-            item_type,
-            "permission_request" | "approval_request" | "user_input_request"
-        ) {
-            self.sink
-                .on_permission_request(&self.tool_meta_from_item(item));
+        if CodexItem::is_permission_item_kind(kind) {
+            let meta = self.tool_meta_from_item(&item);
+            self.sink.on_permission_request(&meta);
             return;
         }
 
-        if Self::is_tool_item_type(item_type) {
+        if CodexItem::is_tool_item_kind(kind) {
             self.tool_calls += 1;
-            super::trace_tool_event(
-                Provider::Codex,
-                self.tool_calls,
-                item.get("tool_name")
-                    .or_else(|| item.get("name"))
-                    .and_then(|value| value.as_str()),
-            );
-            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
-                self.tool_items.insert(id.to_string(), item.clone());
+            super::trace_tool_event(Provider::Codex, self.tool_calls, item.resolved_tool_name());
+            let meta = self.tool_meta_from_item(&item);
+            if let Some(id) = item.id.clone() {
+                self.tool_items.insert(id, item);
             }
-            self.sink.on_before_tool(&self.tool_meta_from_item(item));
+            self.sink.on_before_tool(&meta);
         }
     }
 
-    fn handle_item_completed(&mut self, obj: &Value) -> Option<StreamChunk> {
-        let item = obj.get("item")?;
-        let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    fn handle_item_completed(&mut self, env: CodexItemEnvelope) -> Option<StreamChunk> {
+        let item = env.item?;
+        let kind = item.kind.as_deref().unwrap_or("");
 
-        if item_type == "agent_message" {
-            self.handle_agent_message_item(item);
+        if kind == "agent_message" {
+            self.handle_agent_message_item(&item);
             return None;
         }
 
-        if Self::is_tool_item_type(item_type) {
+        if CodexItem::is_tool_item_kind(kind) {
             let merged_item = item
-                .get("id")
-                .and_then(|v| v.as_str())
+                .id
+                .as_ref()
                 .and_then(|id| self.tool_items.remove(id))
-                .map(|mut started| {
-                    if let (Some(started_map), Some(completed_map)) =
-                        (started.as_object_mut(), item.as_object())
-                    {
-                        for (key, value) in completed_map {
-                            started_map.insert(key.clone(), value.clone());
-                        }
-                    }
-                    started
+                .map(|started| {
+                    // Re-run the merge: completed values win, started fills gaps.
+                    let completed_copy = CodexItem {
+                        kind: item.kind.clone(),
+                        id: item.id.clone(),
+                        text: item.text.clone(),
+                        content: item.content.clone(),
+                        name: item.name.clone(),
+                        tool_name: item.tool_name.clone(),
+                        input: item.input.clone(),
+                        arguments: item.arguments.clone(),
+                        parameters: item.parameters.clone(),
+                        output: item.output.clone(),
+                        result: item.result.clone(),
+                    };
+                    completed_copy.merge_started(started)
                 })
-                .unwrap_or_else(|| item.clone());
-            self.sink
-                .on_after_tool(&self.tool_meta_from_item(&merged_item));
+                .unwrap_or(item);
+            let meta = self.tool_meta_from_item(&merged_item);
+            self.sink.on_after_tool(&meta);
         }
 
         None
@@ -308,59 +265,65 @@ impl<S: StreamEventSink + Send> StreamParser for CodexStreamParser<S> {
             return Ok(None);
         }
 
-        let obj: Value = serde_json::from_str(line).map_err(|e| {
+        // Parse as Value first so we preserve the existing Fatal error path
+        // for malformed JSON and keep the raw value for `turn.completed` raw
+        // summaries.
+        let raw: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
             super::trace_malformed_line(Provider::Codex, self.line_num, &e.to_string());
             StreamParseError::Fatal(format!("Malformed JSON on line {}: {e}", self.line_num))
         })?;
 
-        let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let event_type = raw.get("type").and_then(|t| t.as_str()).unwrap_or("");
         super::trace_parser_event(Provider::Codex, event_type, self.line_num);
 
-        match event_type {
-            "thread.created" | "thread.started" => {
-                self.handle_thread_started(&obj);
+        match serde_json::from_value::<CodexEvent>(raw.clone()) {
+            Ok(CodexEvent::ThreadCreated(meta) | CodexEvent::ThreadStarted(meta)) => {
+                self.handle_thread_started(meta);
                 Ok(None)
             }
-            "turn.started" => {
+            Ok(CodexEvent::TurnStarted(_)) => {
                 self.handle_turn_started();
                 Ok(None)
             }
-            "turn.completed" => {
-                self.handle_turn_completed(&obj);
+            Ok(CodexEvent::TurnCompleted(tc)) => {
+                self.handle_turn_completed(tc, raw);
                 Ok(None)
             }
-            "error" | "turn.error" | "turn.failed" | "stream.error" => {
-                self.handle_error(&obj);
+            Ok(
+                CodexEvent::Error(err)
+                | CodexEvent::TurnError(err)
+                | CodexEvent::TurnFailed(err)
+                | CodexEvent::StreamError(err),
+            ) => {
+                self.handle_error(err);
                 Ok(None)
             }
-            "item.started" => {
-                self.handle_item_started(&obj);
+            Ok(CodexEvent::ItemStarted(env)) => {
+                self.handle_item_started(env);
                 Ok(None)
             }
-            "item.completed" => Ok(self.handle_item_completed(&obj)),
-            "item.tool_use" | "tool_use" => {
+            Ok(CodexEvent::ItemCompleted(env)) => Ok(self.handle_item_completed(env)),
+            Ok(CodexEvent::ItemToolUse(item) | CodexEvent::ToolUse(item)) => {
                 self.tool_calls += 1;
                 super::trace_tool_event(
                     Provider::Codex,
                     self.tool_calls,
-                    obj.get("tool_name")
-                        .or_else(|| obj.get("name"))
-                        .and_then(|value| value.as_str()),
+                    item.resolved_tool_name(),
                 );
-                let meta = self.tool_meta_from_item(&obj);
+                let meta = self.tool_meta_from_item(&item);
                 self.sink.on_before_tool(&meta);
                 Ok(None)
             }
-            "item.tool_result" | "tool_result" => {
-                let meta = self.tool_meta_from_item(&obj);
+            Ok(CodexEvent::ItemToolResult(item) | CodexEvent::ToolResult(item)) => {
+                let meta = self.tool_meta_from_item(&item);
                 self.sink.on_after_tool(&meta);
                 Ok(None)
             }
-            _ => {
-                // Codex stream is control-plane oriented; assistant text is
-                // accumulated for fallback use but never emitted live.
+            Err(_) => {
+                // Codex stream is control-plane oriented; unknown events are
+                // silently skipped, matching the prior behavior.
                 Ok(None)
             }
         }
