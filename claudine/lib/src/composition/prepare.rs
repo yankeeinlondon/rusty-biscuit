@@ -3,8 +3,20 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use darkmatter::markdown::Markdown;
+use darkmatter::markdown::{Markdown, MarkdownError};
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+
+/// Convert a `MarkdownError` into a `CompositionError`, preserving the
+/// structured `ShellExpansion` variant so the CLI can render rich errors.
+fn map_compose_error(source_path: &std::path::Path, err: MarkdownError) -> CompositionError {
+    match err {
+        MarkdownError::ShellExpansion(shell_err) => CompositionError::ShellExpansionFailed {
+            source_path: source_path.to_path_buf(),
+            error: Box::new(shell_err),
+        },
+        other => CompositionError::ComposeFailed(other.to_string()),
+    }
+}
 
 /// Options for composition preparation.
 #[derive(Debug, Default)]
@@ -61,7 +73,7 @@ pub fn prepare_direct(
     let (composed, _report) = source
         .markdown
         .compose_with(compose_opts)
-        .map_err(|e| CompositionError::ComposeFailed(e.to_string()))?;
+        .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let effective_agent_hint = composed.frontmatter().as_map().get("agent").cloned();
@@ -122,7 +134,7 @@ pub fn prepare_inline(
     }
     let (composed, _report) = temp_md
         .compose_with(compose_opts)
-        .map_err(|e| CompositionError::ComposeFailed(e.to_string()))?;
+        .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let effective_agent_hint = composed.frontmatter().as_map().get("agent").cloned();
