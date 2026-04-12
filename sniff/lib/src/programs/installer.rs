@@ -131,6 +131,72 @@ const SHELL_METACHARACTERS: &[char] = &[
     '\t', '*', '?', '!', '#', '~', '^',
 ];
 
+/// Builds the user-facing announcement prose for an installation about to begin.
+pub fn build_install_announcement(
+    program: &str,
+    website: &str,
+    method: &InstallationMethod,
+    command: &str,
+) -> String {
+    let program_link = format!(
+        r#"<b><blue><a href="{website}">{program}</a></blue></b>"#,
+        website = website,
+        program = program,
+    );
+    let command_span = format!("<dim><green>{command}</green></dim>", command = command);
+
+    match method {
+        InstallationMethod::RemoteBash(url) => format!(
+            "The {program_link} will be installed using the remote installer script at \
+             <a href=\"{url}\">{url}</a> using the command: {command_span}",
+            url = url,
+        ),
+        InstallationMethod::UvWithInstall(_) => {
+            let astral_url = astral_installer_url();
+            format!(
+                "The {program_link} will be installed by bootstrapping <b>uv</b> from \
+                 <a href=\"{astral_url}\">{astral_url}</a> if needed, then running: {command_span}",
+            )
+        }
+        _ => {
+            let manager = method.manager_name();
+            format!(
+                "The {program_link} will be installed through the <b>{manager}</b> package \
+                 manager using the command: {command_span}",
+            )
+        }
+    }
+}
+
+/// Builds the user-facing success status prose after a successful installation.
+pub fn build_install_success_status(program: &str, website: &str) -> String {
+    format!(
+        r#"<b><blue><a href="{website}">{program}</a></blue></b> has been installed successfully"#,
+        website = website,
+        program = program,
+    )
+}
+
+/// Builds the user-facing failure status prose after a failed installation.
+pub fn build_install_failure_status(program: &str, website: &str) -> String {
+    format!(
+        r#"failed to install <b><blue><a href="{website}">{program}</a></blue></b>."#,
+        website = website,
+        program = program,
+    )
+}
+
+/// Builds the prose for a retry-with-alternative-manager choice in the interview.
+pub fn build_retry_choice_prose(method: &InstallationMethod) -> String {
+    let manager = method.manager_name();
+    format!("Try installing using <b>{manager}</b> instead")
+}
+
+/// Builds the prose for the quit/manual option in a retry dialog.
+pub fn build_retry_quit_prose() -> String {
+    "Quit (<i>and try manually if desired</i>)".to_string()
+}
+
 /// Options for program installation.
 #[derive(Debug, Clone)]
 pub struct InstallOptions {
@@ -1375,5 +1441,75 @@ mod tests {
         let result = execute_install(&method, &InstallOptions::dry_run()).unwrap();
         assert!(!result.executed);
         assert_eq!(result.command, "brew install ripgrep");
+    }
+
+    #[test]
+    fn announcement_package_manager_template() {
+        let out = build_install_announcement(
+            "Ripgrep",
+            "https://github.com/BurntSushi/ripgrep",
+            &InstallationMethod::Brew("ripgrep"),
+            "brew install ripgrep",
+        );
+        assert!(out.contains("Ripgrep"));
+        assert!(out.contains("https://github.com/BurntSushi/ripgrep"));
+        assert!(out.contains("brew"));
+        assert!(out.contains("brew install ripgrep"));
+        assert!(out.contains("package manager"));
+    }
+
+    #[test]
+    fn announcement_remote_bash_template() {
+        let url = "https://sh.rustup.rs";
+        let out = build_install_announcement(
+            "Rustup",
+            "https://rustup.rs",
+            &InstallationMethod::RemoteBash(url),
+            "curl -sSfL 'https://sh.rustup.rs' | bash",
+        );
+        assert!(out.contains("remote installer script"));
+        assert!(out.contains(url));
+        assert!(out.contains("curl -sSfL"));
+    }
+
+    #[test]
+    fn announcement_uv_with_install_template() {
+        let out = build_install_announcement(
+            "Aider",
+            "https://aider.chat",
+            &InstallationMethod::UvWithInstall("aider-chat"),
+            "uv tool install 'aider-chat'",
+        );
+        assert!(out.contains("bootstrapping"));
+        assert!(out.contains("uv"));
+        assert!(out.contains("astral.sh"));
+    }
+
+    #[test]
+    fn success_status_mentions_installed_successfully() {
+        let out = build_install_success_status("Ripgrep", "https://github.com/BurntSushi/ripgrep");
+        assert!(out.contains("Ripgrep"));
+        assert!(out.contains("installed successfully"));
+    }
+
+    #[test]
+    fn failure_status_mentions_failed_to_install() {
+        let out = build_install_failure_status("Ripgrep", "https://github.com/BurntSushi/ripgrep");
+        assert!(out.to_lowercase().contains("failed to install"));
+        assert!(out.contains("Ripgrep"));
+    }
+
+    #[test]
+    fn retry_choice_prose_names_alternative() {
+        let out = build_retry_choice_prose(&InstallationMethod::Cargo("bat"));
+        assert!(out.contains("cargo"));
+        assert!(out.contains("Try installing"));
+    }
+
+    #[test]
+    fn retry_quit_prose_mentions_quit() {
+        let out = build_retry_quit_prose();
+        assert!(out.to_lowercase().contains("quit"));
+        assert!(out.contains("manually"));
     }
 }
