@@ -500,7 +500,7 @@ pub enum Commands {
     },
 
     /// Show only headless audio players
-    Audio {
+    AudioPlayers {
         #[command(subcommand)]
         action: Option<AudioAction>,
     },
@@ -802,7 +802,7 @@ impl Commands {
             Commands::OsPackageManagers { .. } => OutputFilter::OsPackageManagers,
             Commands::TtsClients { .. } => OutputFilter::TtsClients,
             Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
-            Commands::Audio { .. } => OutputFilter::HeadlessAudio,
+            Commands::AudioPlayers { .. } => OutputFilter::HeadlessAudio,
             Commands::Agents { .. } => OutputFilter::AiClients,
             Commands::Services { .. } => OutputFilter::Services,
             Commands::BlastRadius { .. } => OutputFilter::BlastRadius,
@@ -821,7 +821,7 @@ impl Commands {
                 | Commands::OsPackageManagers { .. }
                 | Commands::TtsClients { .. }
                 | Commands::TerminalApps { .. }
-                | Commands::Audio { .. }
+                | Commands::AudioPlayers { .. }
                 | Commands::Agents { .. }
         )
     }
@@ -896,10 +896,10 @@ impl Commands {
             TerminalApps {
                 action: Some(TerminalAppAction::InstallPlan(args)),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            Audio {
+            AudioPlayers {
                 action: Some(AudioAction::Install(args)),
             } => Some((InstallCommandKind::Install, args)),
-            Audio {
+            AudioPlayers {
                 action: Some(AudioAction::InstallPlan(args)),
             } => Some((InstallCommandKind::InstallPlan, args)),
             Agents {

@@ -15,8 +15,15 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 use inquire::{Confirm, Select};
 use owo_colors::OwoColorize;
-use sniff::programs::{InstalledTtsClients, ProgramDetector, TtsClient};
+use sniff::programs::{
+    HostCapabilities, InstallInterviewInput, InstallInterviewOptions, InstallInterviewOutcome,
+    InstallOptions, InstalledTtsClients, ProgramDetector, TtsClient, build_install_plan,
+    run_install_interview,
+};
 use strum::IntoEnumIterator;
+
+mod install_ui;
+use install_ui::SoYouSayInstallUi;
 
 const CLI_BINARY_NAME: &str = "so-you-say";
 
@@ -138,6 +145,9 @@ enum Command {
     Install {
         /// Provider to install (interactive selection if omitted)
         pkg: Option<String>,
+        /// Show the install command without executing it
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -849,6 +859,20 @@ fn tts_client_to_host_provider(client: TtsClient) -> Option<HostTtsProvider> {
     }
 }
 
+/// Collapse TTS clients that share an underlying binary.
+///
+/// On Linux the `espeak-ng` package ships both `espeak` and `espeak-ng`
+/// binaries that run the same code, so sniff reports two detections for one
+/// installation. This helper prefers `EspeakNg` and drops `Espeak` when both
+/// are present.
+fn dedupe_tts_client_aliases(mut clients: Vec<TtsClient>) -> Vec<TtsClient> {
+    let has_espeak_ng = clients.contains(&TtsClient::EspeakNg);
+    if has_espeak_ng {
+        clients.retain(|c| *c != TtsClient::Espeak);
+    }
+    clients
+}
+
 /// Display name for a TtsClient (for install UI).
 fn tts_client_display_name(client: TtsClient) -> &'static str {
     match client {
@@ -932,15 +956,7 @@ fn run_init() {
             {
                 Ok(true) => {
                     println!();
-                    println!("Installing kokoro...");
-                    match installed.install(TtsClient::KokoroTts) {
-                        Ok(()) => {
-                            println!("  {} kokoro installed successfully!", "✓".green().bold());
-                        }
-                        Err(e) => {
-                            eprintln!("  {} Failed to install kokoro: {}", "✗".red().bold(), e);
-                        }
-                    }
+                    install_client_via_interview(TtsClient::KokoroTts, false);
                 }
                 Ok(false) => {
                     println!(
@@ -965,11 +981,10 @@ fn run_init() {
 // install subcommand
 // ============================================================================
 
-fn run_install(pkg: Option<&str>) {
+fn run_install(pkg: Option<&str>, dry_run: bool) {
     let installed = InstalledTtsClients::new();
 
     if let Some(pkg_name) = pkg {
-        // Install a specific provider by name
         let client = match parse_tts_client_name(pkg_name) {
             Some(c) => c,
             None => {
@@ -982,7 +997,7 @@ fn run_install(pkg: Option<&str>) {
             }
         };
 
-        if installed.is_installed(client) {
+        if installed.is_installed(client) && !dry_run {
             println!(
                 "  {} {} is already installed.",
                 "✓".green().bold(),
@@ -991,37 +1006,10 @@ fn run_install(pkg: Option<&str>) {
             return;
         }
 
-        if !installed.installable(client) {
-            eprintln!(
-                "  {} {} cannot be automatically installed on this OS.",
-                "✗".red().bold(),
-                tts_client_display_name(client)
-            );
-            std::process::exit(1);
-        }
-
-        println!("Installing {}...", tts_client_display_name(client));
-        match installed.install(client) {
-            Ok(()) => {
-                println!(
-                    "  {} {} installed successfully!",
-                    "✓".green().bold(),
-                    tts_client_display_name(client)
-                );
-            }
-            Err(e) => {
-                eprintln!(
-                    "  {} Failed to install {}: {}",
-                    "✗".red().bold(),
-                    tts_client_display_name(client),
-                    e
-                );
-                std::process::exit(1);
-            }
-        }
+        install_client_via_interview(client, dry_run);
     } else {
         // Interactive mode: show installed, prompt to install from remaining
-        let installed_clients = installed.installed();
+        let installed_clients = dedupe_tts_client_aliases(installed.installed());
 
         if !installed_clients.is_empty() {
             println!("{}", "Installed TTS providers:".bold());
@@ -1036,10 +1024,11 @@ fn run_install(pkg: Option<&str>) {
             println!();
         }
 
-        // Build list of installable but not-yet-installed clients
-        let installable: Vec<TtsClient> = TtsClient::iter()
-            .filter(|c| !installed.is_installed(*c) && installed.installable(*c))
-            .collect();
+        let installable: Vec<TtsClient> = dedupe_tts_client_aliases(
+            TtsClient::iter()
+                .filter(|c| !installed.is_installed(*c) && installed.installable(*c))
+                .collect(),
+        );
 
         if installable.is_empty() {
             if installed_clients.is_empty() {
@@ -1072,28 +1061,66 @@ fn run_install(pkg: Option<&str>) {
 
         if let Ok(selection) = Select::new("Select a TTS provider to install", options).prompt() {
             println!();
-            println!(
-                "Installing {}...",
-                tts_client_display_name(selection.client)
+            install_client_via_interview(selection.client, dry_run);
+        }
+    }
+}
+
+/// Drive sniff's install-plan + interview flow for the given `TtsClient`.
+///
+/// Exits with status 1 on failure. Honors `dry_run` by asking sniff to render
+/// the command without executing it.
+fn install_client_via_interview(client: TtsClient, dry_run: bool) {
+    let host = HostCapabilities::detect();
+    let plan = build_install_plan(&client, &host);
+
+    if !plan.successful {
+        eprintln!(
+            "  {} {} cannot be automatically installed on this host.",
+            "✗".red().bold(),
+            tts_client_display_name(client)
+        );
+        for option in plan.failed_with_reason() {
+            eprintln!(
+                "    - {}: {}",
+                option.kind.manager_name().dimmed(),
+                option.reason
             );
-            match installed.install(selection.client) {
-                Ok(()) => {
-                    println!(
-                        "  {} {} installed successfully!",
-                        "✓".green().bold(),
-                        tts_client_display_name(selection.client)
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "  {} Failed to install {}: {}",
-                        "✗".red().bold(),
-                        tts_client_display_name(selection.client),
-                        e
-                    );
-                    std::process::exit(1);
-                }
-            }
+        }
+        if !plan.website.is_empty() {
+            eprintln!("  See: {}", plan.website.dimmed());
+        }
+        std::process::exit(1);
+    }
+
+    let input = InstallInterviewInput {
+        program: tts_client_display_name(client).to_string(),
+        website: plan.website,
+        plan,
+    };
+    let options = InstallInterviewOptions {
+        install: if dry_run {
+            InstallOptions::dry_run()
+        } else {
+            InstallOptions::default()
+        },
+        prompt_on_failure: true,
+    };
+
+    let mut ui = SoYouSayInstallUi::new();
+    match run_install_interview(&input, &options, &mut ui) {
+        Ok(InstallInterviewOutcome::Installed { .. } | InstallInterviewOutcome::DryRun { .. }) => {}
+        Ok(InstallInterviewOutcome::AbortedByUser) => {
+            eprintln!("  {} Installation aborted.", "!".yellow().bold());
+            std::process::exit(1);
+        }
+        Ok(InstallInterviewOutcome::Failed { .. })
+        | Ok(InstallInterviewOutcome::NotInstallable) => {
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("  {} Install interview error: {}", "✗".red().bold(), e);
+            std::process::exit(1);
         }
     }
 }
@@ -1181,8 +1208,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 run_init();
                 return Ok(());
             }
-            Command::Install { pkg } => {
-                run_install(pkg.as_deref());
+            Command::Install { pkg, dry_run } => {
+                run_install(pkg.as_deref(), *dry_run);
                 return Ok(());
             }
         }

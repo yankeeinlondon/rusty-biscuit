@@ -17,6 +17,8 @@ use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 use tracing::{Span, info_span};
 
+use super::stream_io::StreamOutput;
+
 pub(crate) struct ChildIoOptions<'a> {
     pub(crate) stdout_noise_prefixes: &'a [&'a str],
     pub(crate) stderr_noise_prefixes: &'a [&'a str],
@@ -41,9 +43,11 @@ struct StreamTextRenderer {
     line_buffer: String,
     /// Whether we are inside a fenced code block (``` or ~~~).
     in_code_fence: bool,
-    /// True when the partial line in `line_buffer` has already been written to
-    /// stdout raw. When the newline eventually arrives we only emit `\n`
-    /// instead of re-rendering through darkmatter, avoiding duplicate output.
+    /// True when the partial line in `line_buffer` has already been written
+    /// to stdout raw. When the newline eventually arrives we only emit `\n`
+    /// instead of re-rendering through darkmatter, avoiding duplicate
+    /// output. Safe to enable now that all stderr status lines route through
+    /// `StreamOutput`, which guarantees a newline-boundary before writing.
     partial_line_committed: bool,
     /// Terminal reference for rendering.
     term: Option<Terminal>,
@@ -96,8 +100,11 @@ impl StreamTextRenderer {
 
         // Stream the remaining partial line immediately so the user sees
         // progress even when the provider stalls before sending a newline.
-        // Skip when we're inside a fenced block or actively accumulating a
-        // markdown block — those paths need the full block before rendering.
+        // Safe across the stdout/stderr boundary because status emissions go
+        // through `StreamOutput`, which inserts a newline before writing
+        // stderr when stdout is mid-line. Skip when we're inside a fenced
+        // block or actively accumulating a markdown block — those paths need
+        // the full block before rendering.
         if !self.line_buffer.is_empty() && !self.in_code_fence && self.block_buffer.is_empty() {
             let partial = std::mem::take(&mut self.line_buffer);
             let _ = out.write_all(partial.as_bytes());
@@ -847,6 +854,7 @@ pub(crate) fn run_child_stream(
     parser: Box<dyn StreamParser>,
     child_spawned: &mut bool,
     live_metrics: Option<LiveMetrics>,
+    stream_output: Option<Arc<StreamOutput>>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
@@ -885,8 +893,15 @@ pub(crate) fn run_child_stream(
     Span::current().record("child_pid", tracing::field::display(child.id()));
     let heartbeat_metrics = live_metrics.clone();
     let stdout_metrics = live_metrics.clone();
-    let heartbeat =
-        spawn_progress_heartbeat(show_progress_heartbeat, started_at, heartbeat_metrics);
+    let coordinator = stream_output.unwrap_or_else(StreamOutput::new);
+    let heartbeat_output = coordinator.clone();
+    let stdout_output = coordinator.clone();
+    let heartbeat = spawn_progress_heartbeat(
+        show_progress_heartbeat,
+        started_at,
+        heartbeat_metrics,
+        heartbeat_output,
+    );
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
@@ -897,7 +912,9 @@ pub(crate) fn run_child_stream(
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
         let reader = BufReader::new(stdout_pipe);
-        let mut out = std::io::stdout().lock();
+        // Route stdout through the coordinator so the shared cursor-state
+        // flag stays in sync with stderr status emissions.
+        let mut out = stdout_output.stdout_writer();
         let mut parser = parser;
         let mut fallback_mode = false;
         let mut renderer = StreamTextRenderer::new();
@@ -1035,6 +1052,7 @@ fn spawn_progress_heartbeat(
     enabled: bool,
     started_at: Instant,
     live_metrics: Option<LiveMetrics>,
+    stream_output: Arc<StreamOutput>,
 ) -> Option<(Arc<AtomicBool>, thread::JoinHandle<()>)> {
     if !enabled {
         return None;
@@ -1050,7 +1068,13 @@ fn spawn_progress_heartbeat(
         while !done_flag.load(Ordering::Relaxed) {
             let now = Instant::now();
             if now >= next_tick {
-                emit_progress_heartbeat(started_at, live_metrics.as_ref(), interval, &term);
+                emit_progress_heartbeat(
+                    started_at,
+                    live_metrics.as_ref(),
+                    interval,
+                    &term,
+                    &stream_output,
+                );
                 next_tick += interval;
                 continue;
             }
@@ -1070,6 +1094,7 @@ fn emit_progress_heartbeat(
     live_metrics: Option<&LiveMetrics>,
     quiet_window: Duration,
     term: &Terminal,
+    stream_output: &StreamOutput,
 ) {
     let elapsed = started_at.elapsed();
     let now = Instant::now();
@@ -1100,7 +1125,7 @@ fn emit_progress_heartbeat(
 
     if let Some(desc) = description {
         let rendered = Status::new(desc).state(StatusState::Info).render(term);
-        eprintln!("{rendered}");
+        stream_output.emit_stderr_line(&rendered);
     }
 }
 
@@ -1126,8 +1151,10 @@ pub(crate) fn run_child_stream_capture(
     stdin_seed: Option<&str>,
     parser: Box<dyn StreamParser>,
     live_metrics: Option<LiveMetrics>,
+    stream_output: Option<Arc<StreamOutput>>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     let _ = live_metrics; // capture variant does not currently emit heartbeat
+    let _ = stream_output; // capture variant does not emit stderr status lines
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
 
@@ -1324,6 +1351,7 @@ printf '%s\n' '{"type":"result","duration_ms":25}'
             None,
             parser,
             None,
+            None,
         )
         .unwrap();
         let summary = result.data;
@@ -1374,6 +1402,7 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
             parser,
             &mut spawned,
             None,
+            None,
         )
         .unwrap();
         let summary = result.data;
@@ -1405,8 +1434,8 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
         let flushed = String::from_utf8(out).unwrap();
 
         assert!(flushed.contains("First paragraph."));
-        // Partial "Second" is streamed raw immediately so the user never
-        // waits for a newline that may never arrive.
+        // Trailing partial "Second" now streams raw immediately because
+        // StreamOutput coordination guarantees stderr lines won't interleave.
         assert!(flushed.contains("Second"));
         assert!(renderer.line_buffer.is_empty());
         assert!(renderer.partial_line_committed);
@@ -1432,9 +1461,6 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
 
     #[test]
     fn stream_text_renderer_streams_partial_line_immediately() {
-        // Regression guard: trailing text without a newline must reach stdout
-        // right away so the user sees progress even if the provider stalls
-        // before emitting the terminating newline.
         let mut renderer = test_renderer();
         let mut out = Vec::new();
 
@@ -1447,9 +1473,9 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
 
     #[test]
     fn stream_text_renderer_newline_after_partial_emits_only_newline() {
-        // When a partial line was already streamed raw, the arriving newline
-        // must not cause the line to be re-rendered through darkmatter —
-        // otherwise the user sees the same line twice.
+        // When the partial line was already streamed raw, the arriving
+        // newline must not cause the line to be re-rendered — otherwise the
+        // user sees the same content twice (once raw, once markdown).
         let mut renderer = test_renderer();
         let mut out = Vec::new();
 
@@ -1517,6 +1543,7 @@ cat >/dev/null
             None,
             parser,
             &mut spawned,
+            None,
             None,
         )
         .unwrap();
