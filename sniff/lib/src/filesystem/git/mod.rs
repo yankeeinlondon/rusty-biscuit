@@ -7,7 +7,7 @@ pub use detection::{
     get_commit_files, get_commits_for_path,
 };
 pub use recent_commits::{
-    CommitDesc, CommitDescSet, PeriodSpecifier, get_recent_commits_by_date,
+    CommitDesc, CommitDescSet, CommitFileChange, PeriodSpecifier, get_recent_commits_by_date,
     get_recent_commits_by_duration, get_recent_commits_by_hash, get_recent_commits_in_range,
     parse_period,
 };

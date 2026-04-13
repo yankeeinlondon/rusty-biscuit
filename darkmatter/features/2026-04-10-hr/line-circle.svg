@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" height="40" style="width: var(--hr-width, 100%);">
+  <line x1="0" y1="50%" x2="100%" y2="50%" stroke="currentColor" style="stroke-width: var(--hr-line-weight, 6px);" />
+
+  <circle cx="50%" cy="50%" fill="currentColor" style="r: var(--hr-circle-radius, 16px);" />
+</svg>

@@ -6,11 +6,11 @@
 //! deterministic regardless of host state.
 
 use criterion::{Criterion, black_box};
+use sniff::filesystem::repo::detect_repo_with_inventory;
 use sniff::filesystem::{
     detect_filesystem_with_request, detect_git_with_request, detect_languages,
     detect_repo_structure,
 };
-use sniff::filesystem::repo::detect_repo_with_inventory;
 use sniff::request::{FilesystemRequest, GitRequest, RepoRequest};
 
 use crate::support::{fixtures, util};
@@ -26,8 +26,7 @@ pub fn register(c: &mut Criterion) {
     git_group.bench_function("git_summary_small", |b| {
         let req = GitRequest::summary();
         b.iter(|| {
-            let info =
-                detect_git_with_request(black_box(small.path()), black_box(&req)).unwrap();
+            let info = detect_git_with_request(black_box(small.path()), black_box(&req)).unwrap();
             black_box(info);
         });
     });
@@ -35,8 +34,7 @@ pub fn register(c: &mut Criterion) {
     git_group.bench_function("git_full_small", |b| {
         let req = GitRequest::full();
         b.iter(|| {
-            let info =
-                detect_git_with_request(black_box(small.path()), black_box(&req)).unwrap();
+            let info = detect_git_with_request(black_box(small.path()), black_box(&req)).unwrap();
             black_box(info);
         });
     });
@@ -44,8 +42,7 @@ pub fn register(c: &mut Criterion) {
     git_group.bench_function("git_summary_monorepo", |b| {
         let req = GitRequest::summary();
         b.iter(|| {
-            let info =
-                detect_git_with_request(black_box(large.path()), black_box(&req)).unwrap();
+            let info = detect_git_with_request(black_box(large.path()), black_box(&req)).unwrap();
             black_box(info);
         });
     });
@@ -53,8 +50,7 @@ pub fn register(c: &mut Criterion) {
     git_group.bench_function("git_full_monorepo", |b| {
         let req = GitRequest::full();
         b.iter(|| {
-            let info =
-                detect_git_with_request(black_box(large.path()), black_box(&req)).unwrap();
+            let info = detect_git_with_request(black_box(large.path()), black_box(&req)).unwrap();
             black_box(info);
         });
     });

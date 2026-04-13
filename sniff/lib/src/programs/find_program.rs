@@ -74,9 +74,12 @@ pub struct ExecutableIndex {
     path_executables: HashMap<String, PathBuf>,
     /// Number of PATH directories scanned while building the index.
     path_dir_count: usize,
-    /// Maps binary name to app bundle path (macOS only)
+    /// Maps binary name to app bundle path (macOS only).
     #[cfg(target_os = "macos")]
     bundle_executables: HashMap<String, PathBuf>,
+    /// Windows-specific fallback index (App Paths + install-root walk).
+    #[cfg(target_os = "windows")]
+    windows_index: super::windows_apps::WindowsIndex,
 }
 
 impl ExecutableIndex {
@@ -102,6 +105,9 @@ impl ExecutableIndex {
     }
 
     fn build_with_bundles(include_bundles: bool) -> Self {
+        #[cfg(not(target_os = "macos"))]
+        let _ = include_bundles;
+
         let mut path_executables = HashMap::new();
         let mut path_dir_count = 0;
 
@@ -151,6 +157,12 @@ impl ExecutableIndex {
             } else {
                 HashMap::new()
             },
+            #[cfg(target_os = "windows")]
+            windows_index: if include_bundles {
+                super::windows_apps::build_windows_index()
+            } else {
+                super::windows_apps::WindowsIndex::default()
+            },
         }
     }
 
@@ -164,13 +176,27 @@ impl ExecutableIndex {
     /// - `Some((PathBuf, ExecutableSource))` - Path and how it was found
     /// - `None` - Program not found anywhere
     pub fn find_with_source(&self, program: &str) -> Option<(PathBuf, ExecutableSource)> {
+        // Layer 1: PATH (authoritative — matches `CreateProcess`).
         if let Some(path) = self.path_executables.get(program) {
             return Some((path.clone(), ExecutableSource::Path));
         }
 
+        // Layer 2: macOS bundles.
         #[cfg(target_os = "macos")]
         if let Some(path) = self.bundle_executables.get(program) {
             return Some((path.clone(), ExecutableSource::MacOsAppBundle));
+        }
+
+        // Layers 3 + 4: Windows App Paths registry, then shallow install-root walk.
+        #[cfg(target_os = "windows")]
+        {
+            let key = program.to_ascii_lowercase();
+            if let Some(path) = self.windows_index.app_paths.get(&key) {
+                return Some((path.clone(), ExecutableSource::WindowsAppPaths));
+            }
+            if let Some(path) = self.windows_index.install_roots.get(&key) {
+                return Some((path.clone(), ExecutableSource::WindowsInstallRoot));
+            }
         }
 
         None
@@ -419,14 +445,27 @@ pub fn find_program_with_source<P: AsRef<OsStr>>(
 ) -> Option<(PathBuf, ExecutableSource)> {
     let program_str = program.as_ref().to_string_lossy();
 
-    // Priority 1: Check PATH first
+    // Priority 1: PATH (authoritative).
     if let Ok(path) = which(&program) {
         return Some((path, ExecutableSource::Path));
     }
 
-    // Priority 2: Check macOS app bundles (macOS only)
+    // Priority 2: macOS app bundles.
     if let Some(path) = find_macos_app_bundle(&program_str) {
         return Some((path, ExecutableSource::MacOsAppBundle));
+    }
+
+    // Priority 3 + 4: Windows fallback layers.
+    #[cfg(target_os = "windows")]
+    {
+        let key = program_str.to_ascii_lowercase();
+        let idx = super::windows_apps::build_windows_index();
+        if let Some(path) = idx.app_paths.get(&key) {
+            return Some((path.clone(), ExecutableSource::WindowsAppPaths));
+        }
+        if let Some(path) = idx.install_roots.get(&key) {
+            return Some((path.clone(), ExecutableSource::WindowsInstallRoot));
+        }
     }
 
     None

@@ -35,7 +35,7 @@ lazy_static = "1.5"
 regex = "1.11"
 tempfile = "3.8"
 globset = "0.4"
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "now"] }
 which = "7"
 dirs = "6"
 

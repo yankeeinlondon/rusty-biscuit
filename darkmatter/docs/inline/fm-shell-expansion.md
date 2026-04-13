@@ -114,8 +114,8 @@ When multiple top-level frontmatter properties contain shell expressions, they e
 - Override globally: `--timeout <seconds>` (CLI) or `ComposeOptions::with_shell_timeout()` (library)
 - Override per-command: `$(cmd)::timeout:<seconds>`
 - Timeout outcome:
-  - Default: compose error
-  - With `--allow-shell-timeout`: empty string replacement + warning
+    - Default: compose error
+    - With `--allow-shell-timeout`: empty string replacement + warning
 
 ## Compose Reporting
 

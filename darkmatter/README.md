@@ -6,17 +6,17 @@
 - Render to [multiple output formats](./docs/topics/output-formats.md)
 - Compose supports both body `::shell` expansion and top-level frontmatter `$(...)` shell expansion with shared approval and timeout controls
 - Report on [differences/changes](./docs/topics/delta.md), TOC, graph dependencies, and more
-- Provides auto-completions via [shell completions](./docs/cli/completions.md) in the terminal and the [LSP](./lsp/README.md) in an editor.
+- Provides shell auto-completions in the terminal (bash, elvish, fish, powershell, zsh) and the [LSP](./lsp/README.md) in an editor.
 
 ## Packages
 
 For details, choose one or more of the packages in this package area.
 
-| Type | Package  &nbsp;&nbsp;&nbsp; | Description |
-|---------|-------|-------------      |
-| [**Library**](./lib/README.md) | `darkmatter` | Core library; follow the link for a much deeper functional and technical overview of what Darkmatter provides |
-| [**CLI**](./cli/README.md) | `darkmatter-cli` | The Darkmatter CLI (binary: `md`); follow the link for a full description on how to use the CLI, what sub-commands exist, what CLI switches exist, example usage and how to get shell completions working |
-| [**LSP**](./lsp/README.md) | `darkmatter-lsp` | **FUTURE:** A language server for Darkmatter (aka, Markdown + DSL) |
+| Type                           | Package &nbsp;&nbsp;&nbsp; | Description                                                                                                                                                                                               |
+| ------------------------------ | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**Library**](./lib/README.md) | `darkmatter`               | Core library; follow the link for a much deeper functional and technical overview of what Darkmatter provides                                                                                             |
+| [**CLI**](./cli/README.md)     | `darkmatter-cli`           | The Darkmatter CLI (binary: `md`); follow the link for a full description on how to use the CLI, what sub-commands exist, what CLI switches exist, example usage and how to get shell completions working |
+| [**LSP**](./lsp/README.md)     | `darkmatter-lsp`           | **FUTURE:** A language server for Darkmatter (aka, Markdown + DSL)                                                                                                                                        |
 
 ## Documentation
 
@@ -30,7 +30,6 @@ For details, choose one or more of the packages in this package area.
     - [Rendering Output Formats](./docs/topics/output-formats.md)
     - [Delta Processing](./docs/topics/delta.md)
     - [Context Variables provided to Composition](./docs/topics/context-variables.md)
-
 
 ## License
 

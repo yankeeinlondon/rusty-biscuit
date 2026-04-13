@@ -4,6 +4,7 @@
 //! Each major section (OS, Hardware, Network, Filesystem, Programs, Services)
 //! has its own submodule.
 
+mod commit_blocks;
 mod filesystem;
 mod hardware;
 mod just;

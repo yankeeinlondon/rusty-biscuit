@@ -550,21 +550,11 @@ fn build_llama_server_args(config: &ServerLaunchConfig) -> Vec<String> {
 }
 
 fn format_command_for_display(binary: &Path, args: &[String]) -> String {
+    use biscuit_terminal::utils::text::shell_escape_for_display;
     let mut parts = Vec::with_capacity(args.len() + 1);
-    parts.push(shell_escape(&binary.to_string_lossy()));
-    parts.extend(args.iter().map(|arg| shell_escape(arg)));
+    parts.push(shell_escape_for_display(&binary.to_string_lossy()));
+    parts.extend(args.iter().map(|arg| shell_escape_for_display(arg)));
     parts.join(" ")
-}
-
-fn shell_escape(value: &str) -> String {
-    if value
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '/' | '.' | ':' | '='))
-    {
-        return value.to_string();
-    }
-
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn ensure_port_available(host: &str, port: u16) -> Result<()> {

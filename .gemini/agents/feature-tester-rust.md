@@ -1,1 +1,0 @@
-../../.claude/agents/feature-tester-rust.md

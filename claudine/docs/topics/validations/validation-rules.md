@@ -63,9 +63,9 @@ The typed file checks matter because "the file exists" is often too weak. A JSON
 
 These checks look at dirty source state:
 
-- `no_dirty_source_code`
-- `has_dirty_source_code`
-- `no_merge_conflicts`
+- `no_dirty_source_code()`
+- `has_dirty_source_code()`
+- `no_merge_conflicts()`
 
 These are useful when a prompt is intended to work from a clean baseline, or when a prompt is only meaningful if the user has already made local edits that the agent is supposed to inspect.
 

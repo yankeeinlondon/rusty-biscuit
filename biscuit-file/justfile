@@ -1,11 +1,12 @@
 set dotenv-load
 set positional-arguments
 
+import "../just/features.just"
+
 BOLD := '\033[1m'
 ITALIC := '\033[3m'
 DIM := '\033[2m'
 RESET := '\033[0m'
-YELLOW2 := '\033[38;5;3m'
 BLACK := '\033[30m'
 RED := '\033[31m'
 GREEN := '\033[32m'
@@ -207,3 +208,8 @@ drift *args="":
     @echo
     @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- biscuit-file {{DOCS}} {{args}}
     @_speak "the drift recipe for the biscuit-file package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true

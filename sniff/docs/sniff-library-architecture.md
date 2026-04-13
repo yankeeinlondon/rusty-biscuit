@@ -190,6 +190,8 @@ Both paths share the same `libgit2` repository handle opened once by `GitRepo::d
 
 The net effect: the PATH scan runs once instead of eight times, macOS bundle detection runs once instead of eight times, and per-program lookups are HashMap hits rather than `which` invocations.
 
+On Windows, `ExecutableIndex::build()` also populates a `WindowsIndex` holding two HashMaps: `app_paths` (from a HKLM+HKCU registry walk) and `install_roots` (from a one-level directory walk of `Program Files`, `Program Files (x86)`, and `LocalAppData\Programs`). Warm-cache cost: 40–80 ms serial, inside the existing build-once budget. Non-Windows builds do not compile this code.
+
 ## Common Caller Profiles
 
 ### CI Tool (Fast Context)

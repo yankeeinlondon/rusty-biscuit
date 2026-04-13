@@ -750,8 +750,7 @@ fn parse_bsd_route_dump(buffer: &[u8]) -> Option<String> {
 ))]
 fn is_default_bsd_route_message(header: &libc::rt_msghdr, message: &[u8]) -> bool {
     let data = &message[std::mem::size_of::<libc::rt_msghdr>()..];
-    let destination =
-        sockaddr_from_route_message(data, header.rtm_addrs, libc::RTAX_DST as usize);
+    let destination = sockaddr_from_route_message(data, header.rtm_addrs, libc::RTAX_DST as usize);
     let Some(destination) = destination else {
         return false;
     };
@@ -868,17 +867,6 @@ fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .map(ToOwned::to_owned)
-    })
-}
-
-#[cfg(target_os = "linux")]
-fn parse_linux_default_route_interface(output: &str) -> Option<String> {
-    output.lines().find_map(|line| {
-        let tokens: Vec<_> = line.split_whitespace().collect();
-        tokens
-            .windows(2)
-            .find(|window| window[0] == "dev")
-            .map(|window| window[1].to_string())
     })
 }
 
@@ -1631,16 +1619,6 @@ destination: default
         assert_eq!(
             parse_bsd_default_route_interface(output),
             Some("en7".to_string())
-        );
-    }
-
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn test_parse_linux_default_route_interface() {
-        let output = "default via 192.168.1.1 dev wlp3s0 proto dhcp src 192.168.1.42 metric 600";
-        assert_eq!(
-            parse_linux_default_route_interface(output),
-            Some("wlp3s0".to_string())
         );
     }
 
