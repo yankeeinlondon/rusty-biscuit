@@ -1813,6 +1813,55 @@ fn test_repo_recent_commits_with_period() {
 }
 
 #[test]
+fn test_repo_recent_commits_with_count_period() {
+    let (_dir, path) = create_test_repo();
+    for i in 0..5 {
+        test_commit_file(&path, &format!("src/file{i}.rs"), "fn main() {}");
+    }
+
+    let assert = cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "recent-commits",
+            "2",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+    let commits = json["commits"].as_array().expect("commits array");
+    assert_eq!(commits.len(), 2, "expected exactly 2 commits");
+    assert_eq!(
+        json["period_label"].as_str().unwrap(),
+        "last 2 commits",
+        "period label should describe the count"
+    );
+}
+
+#[test]
+fn test_repo_source_code_changes_with_count_period() {
+    let (_dir, path) = create_test_repo();
+    for i in 0..3 {
+        test_commit_file(&path, &format!("src/file{i}.rs"), "fn main() {}");
+    }
+
+    cargo_bin_cmd!("sniff")
+        .args([
+            "--base",
+            path.to_str().unwrap(),
+            "repo",
+            "source-code-changes",
+            "2",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
 fn test_repo_recent_commits_with_json() {
     let (_dir, path) = create_test_repo();
     test_commit_file(&path, "src/main.rs", "fn main() {}");

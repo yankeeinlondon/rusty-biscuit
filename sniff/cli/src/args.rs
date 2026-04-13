@@ -715,7 +715,7 @@ pub enum RepoSubcommand {
     /// Show recent commits for a period
     #[command(name = "recent-commits")]
     RecentCommits {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
         /// Filter to conventional commit actions; repeat to OR multiple actions together
         #[arg(long = "action", value_enum, value_name = "ACTION")]
@@ -736,7 +736,7 @@ pub enum RepoSubcommand {
     /// Show source code changes for a period
     #[command(name = "source-code-changes")]
     SourceCodeChanges {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
         /// Filter to conventional commit actions; repeat to OR multiple actions together
         #[arg(long = "action", value_enum, value_name = "ACTION")]
@@ -757,7 +757,7 @@ pub enum RepoSubcommand {
     /// Show documentation changes for a period
     #[command(name = "documentation-changes")]
     DocumentationChanges {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
         /// Filter to conventional commit actions; repeat to OR multiple actions together
         #[arg(long = "action", value_enum, value_name = "ACTION")]
@@ -1356,6 +1356,7 @@ Git:
 Recent Commits:
   sniff repo recent-commits           Show commits from last 3 days
   sniff repo recent-commits 1w        Show commits from last week
+  sniff repo recent-commits 10        Show the last 10 commits
   sniff repo source-code-changes 1w   Source code changes in last week
   sniff repo documentation-changes 1w Documentation changes in last week
 
