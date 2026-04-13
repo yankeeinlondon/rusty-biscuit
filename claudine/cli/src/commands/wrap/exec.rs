@@ -41,6 +41,10 @@ struct StreamTextRenderer {
     line_buffer: String,
     /// Whether we are inside a fenced code block (``` or ~~~).
     in_code_fence: bool,
+    /// True when the partial line in `line_buffer` has already been written to
+    /// stdout raw. When the newline eventually arrives we only emit `\n`
+    /// instead of re-rendering through darkmatter, avoiding duplicate output.
+    partial_line_committed: bool,
     /// Terminal reference for rendering.
     term: Option<Terminal>,
     /// Cached darkmatter options (created once to avoid repeated theme detection).
@@ -60,6 +64,7 @@ impl StreamTextRenderer {
             block_buffer: String::new(),
             line_buffer: String::new(),
             in_code_fence: false,
+            partial_line_committed: false,
             term,
             terminal_options,
         }
@@ -76,7 +81,28 @@ impl StreamTextRenderer {
         while let Some(newline_pos) = self.line_buffer.find('\n') {
             let line = self.line_buffer[..=newline_pos].to_string();
             self.line_buffer.drain(..=newline_pos);
+
+            if self.partial_line_committed {
+                // Partial line was already streamed raw; emit only the newline
+                // and skip markdown rendering to avoid duplicate output.
+                let _ = out.write_all(b"\n");
+                let _ = out.flush();
+                self.partial_line_committed = false;
+                continue;
+            }
+
             self.process_line(out, &line);
+        }
+
+        // Stream the remaining partial line immediately so the user sees
+        // progress even when the provider stalls before sending a newline.
+        // Skip when we're inside a fenced block or actively accumulating a
+        // markdown block — those paths need the full block before rendering.
+        if !self.line_buffer.is_empty() && !self.in_code_fence && self.block_buffer.is_empty() {
+            let partial = std::mem::take(&mut self.line_buffer);
+            let _ = out.write_all(partial.as_bytes());
+            let _ = out.flush();
+            self.partial_line_committed = true;
         }
     }
 
@@ -139,7 +165,12 @@ impl StreamTextRenderer {
     fn flush_remaining<W: Write>(&mut self, out: &mut W) {
         if !self.line_buffer.is_empty() {
             let leftover = std::mem::take(&mut self.line_buffer);
-            self.block_buffer.push_str(&leftover);
+            if self.partial_line_committed {
+                // Already streamed raw — do not re-render through darkmatter.
+                self.partial_line_committed = false;
+            } else {
+                self.block_buffer.push_str(&leftover);
+            }
         }
         self.flush_block(out);
     }
@@ -852,7 +883,10 @@ pub(crate) fn run_child_stream(
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
-    let heartbeat = spawn_progress_heartbeat(show_progress_heartbeat, started_at, live_metrics);
+    let heartbeat_metrics = live_metrics.clone();
+    let stdout_metrics = live_metrics.clone();
+    let heartbeat =
+        spawn_progress_heartbeat(show_progress_heartbeat, started_at, heartbeat_metrics);
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
@@ -880,6 +914,11 @@ pub(crate) fn run_child_stream(
 
             match parser.feed_line(&line) {
                 Ok(Some(StreamChunk::Text(text))) => {
+                    if let Some(metrics) = stdout_metrics.as_ref()
+                        && let Ok(mut state) = metrics.lock()
+                    {
+                        state.record_activity(Instant::now());
+                    }
                     thinking_renderer.flush_if_active();
                     renderer.push(&mut out, &text);
                 }
@@ -1034,19 +1073,28 @@ fn emit_progress_heartbeat(
 ) {
     let elapsed = started_at.elapsed();
     let now = Instant::now();
+    // After this much time since the last heartbeat, surface a tick regardless
+    // of ongoing tool/text activity. Keeps long-running busy streams visible.
+    let force_window = Duration::from_secs(120);
 
     let description = match live_metrics {
         Some(metrics) => {
-            let Ok(state) = metrics.lock() else {
+            let Ok(mut state) = metrics.lock() else {
                 return;
             };
-            progress::describe_heartbeat(&state, elapsed, now, quiet_window)
+            let desc =
+                progress::describe_heartbeat(&state, elapsed, now, quiet_window, force_window);
+            if desc.is_some() {
+                state.last_heartbeat_at = Some(now);
+            }
+            desc
         }
         None => progress::describe_heartbeat(
             &claudine::stream::progress::LiveMetricsState::default(),
             elapsed,
             now,
             quiet_window,
+            force_window,
         ),
     };
 
@@ -1337,35 +1385,37 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
         assert!(summary.duration_ms.unwrap() < 5_000);
     }
 
-    #[test]
-    fn stream_text_renderer_flushes_on_blank_line() {
-        let mut renderer = StreamTextRenderer {
+    fn test_renderer() -> StreamTextRenderer {
+        StreamTextRenderer {
             block_buffer: String::new(),
             line_buffer: String::new(),
             in_code_fence: false,
+            partial_line_committed: false,
             term: None,
             terminal_options: None,
-        };
+        }
+    }
+
+    #[test]
+    fn stream_text_renderer_flushes_on_blank_line() {
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         renderer.push(&mut out, "First paragraph.\n\nSecond");
         let flushed = String::from_utf8(out).unwrap();
 
         assert!(flushed.contains("First paragraph."));
-        // "Second" has no newline yet — sits in line_buffer
-        assert_eq!(renderer.line_buffer, "Second");
+        // Partial "Second" is streamed raw immediately so the user never
+        // waits for a newline that may never arrive.
+        assert!(flushed.contains("Second"));
+        assert!(renderer.line_buffer.is_empty());
+        assert!(renderer.partial_line_committed);
         assert!(renderer.block_buffer.is_empty());
     }
 
     #[test]
     fn stream_text_renderer_buffers_code_fence() {
-        let mut renderer = StreamTextRenderer {
-            block_buffer: String::new(),
-            line_buffer: String::new(),
-            in_code_fence: false,
-            term: None,
-            terminal_options: None,
-        };
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         // Opening fence + code — should NOT flush yet
@@ -1381,33 +1431,49 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
     }
 
     #[test]
-    fn stream_text_renderer_flush_remaining_drains_everything() {
-        let mut renderer = StreamTextRenderer {
-            block_buffer: String::new(),
-            line_buffer: String::new(),
-            in_code_fence: false,
-            term: None,
-            terminal_options: None,
-        };
+    fn stream_text_renderer_streams_partial_line_immediately() {
+        // Regression guard: trailing text without a newline must reach stdout
+        // right away so the user sees progress even if the provider stalls
+        // before emitting the terminating newline.
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         renderer.push(&mut out, "trailing text without newline");
-        assert!(out.is_empty());
-
-        renderer.flush_remaining(&mut out);
         let flushed = String::from_utf8(out).unwrap();
         assert_eq!(flushed, "trailing text without newline");
+        assert!(renderer.line_buffer.is_empty());
+        assert!(renderer.partial_line_committed);
+    }
+
+    #[test]
+    fn stream_text_renderer_newline_after_partial_emits_only_newline() {
+        // When a partial line was already streamed raw, the arriving newline
+        // must not cause the line to be re-rendered through darkmatter —
+        // otherwise the user sees the same line twice.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "Group A: progress.rs");
+        renderer.push(&mut out, "\n");
+        let flushed = String::from_utf8(out).unwrap();
+        assert_eq!(flushed, "Group A: progress.rs\n");
+        assert!(!renderer.partial_line_committed);
+    }
+
+    #[test]
+    fn stream_text_renderer_flush_remaining_does_not_duplicate_streamed_text() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "already streamed");
+        renderer.flush_remaining(&mut out);
+        let flushed = String::from_utf8(out).unwrap();
+        assert_eq!(flushed, "already streamed");
     }
 
     #[test]
     fn stream_text_renderer_flushes_list_items_immediately() {
-        let mut renderer = StreamTextRenderer {
-            block_buffer: String::new(),
-            line_buffer: String::new(),
-            in_code_fence: false,
-            term: None,
-            terminal_options: None,
-        };
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         renderer.push(&mut out, "1. first item\n2. second item\n");

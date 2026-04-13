@@ -46,8 +46,16 @@ pub struct LiveMetricsState {
     pub token_usage: Option<NormalizedTokenUsage>,
     /// Latest known cost-in-USD for the session.
     pub cost_usd: Option<f64>,
-    /// Wall-clock time of the last tool start/end observed.
-    pub last_tool_event_at: Option<Instant>,
+    /// Wall-clock time of the most recent observed event of any kind (tool
+    /// start, tool end, or assistant text delta). The heartbeat suppresses
+    /// ticks when this is recent so busy streams stay quiet; a stale value
+    /// means the provider is silent and the user deserves a status update.
+    pub last_event_at: Option<Instant>,
+    /// Wall-clock time of the most recent heartbeat emission. Ensures the
+    /// heartbeat surfaces at a hard cadence even during sustained activity —
+    /// otherwise a flood of tool events can hide a long-running subagent
+    /// indefinitely.
+    pub last_heartbeat_at: Option<Instant>,
 }
 
 impl LiveMetricsState {
@@ -59,14 +67,20 @@ impl LiveMetricsState {
                 started_at: now,
             },
         );
-        self.last_tool_event_at = Some(now);
+        self.last_event_at = Some(now);
     }
 
     pub fn record_tool_end(&mut self, id: Option<&str>, now: Instant) -> Option<InFlightTool> {
         let removed = id.and_then(|id| self.in_flight.remove(id));
         self.done_count += 1;
-        self.last_tool_event_at = Some(now);
+        self.last_event_at = Some(now);
         removed
+    }
+
+    /// Record assistant-text or other non-tool activity so the heartbeat
+    /// suppresses while the provider is actively producing output.
+    pub fn record_activity(&mut self, now: Instant) {
+        self.last_event_at = Some(now);
     }
 
     pub fn update_token_usage(&mut self, usage: NormalizedTokenUsage) {
@@ -127,16 +141,27 @@ pub fn describe_tool_end(meta: &EventMeta, duration: Option<Duration>) -> Option
 
 /// Build the `Status::Info` description for a heartbeat tick.
 ///
-/// Returns `None` when the caller should suppress the tick (most recent tool
-/// event happened within `quiet_window`). `elapsed` is the session duration
-/// since the provider launched.
+/// Returns `None` when the caller should suppress the tick because the stream
+/// has been actively producing output within `quiet_window`. The suppression
+/// is overridden by `force_window`: once that much time has passed since the
+/// last heartbeat, a tick is emitted regardless of ongoing activity so busy
+/// streams still surface progress to the user.
+///
+/// `elapsed` is the session duration since the provider launched.
 pub fn describe_heartbeat(
     state: &LiveMetricsState,
     elapsed: Duration,
     now: Instant,
     quiet_window: Duration,
+    force_window: Duration,
 ) -> Option<String> {
-    if let Some(last) = state.last_tool_event_at
+    let should_force = state
+        .last_heartbeat_at
+        .map(|last| now.saturating_duration_since(last) >= force_window)
+        .unwrap_or(false);
+
+    if !should_force
+        && let Some(last) = state.last_event_at
         && now.saturating_duration_since(last) < quiet_window
     {
         return None;
@@ -331,10 +356,16 @@ mod tests {
     fn heartbeat_suppresses_when_activity_is_recent() {
         let mut state = LiveMetricsState::default();
         let now = Instant::now();
-        state.last_tool_event_at = Some(now);
+        state.last_event_at = Some(now);
         assert!(
-            describe_heartbeat(&state, Duration::from_secs(90), now, Duration::from_secs(30))
-                .is_none()
+            describe_heartbeat(
+                &state,
+                Duration::from_secs(90),
+                now,
+                Duration::from_secs(30),
+                Duration::from_secs(120),
+            )
+            .is_none()
         );
     }
 
@@ -342,11 +373,16 @@ mod tests {
     fn heartbeat_emits_when_activity_is_stale() {
         let mut state = LiveMetricsState::default();
         let now = Instant::now();
-        state.last_tool_event_at = Some(now - Duration::from_secs(60));
+        state.last_event_at = Some(now - Duration::from_secs(60));
         state.done_count = 3;
-        let desc =
-            describe_heartbeat(&state, Duration::from_secs(90), now, Duration::from_secs(30))
-                .unwrap();
+        let desc = describe_heartbeat(
+            &state,
+            Duration::from_secs(90),
+            now,
+            Duration::from_secs(30),
+            Duration::from_secs(120),
+        )
+        .unwrap();
         assert!(desc.contains("90s"));
         assert!(desc.contains("3 done"));
     }
@@ -358,9 +394,14 @@ mod tests {
         state.record_tool_start("a".into(), Some("Bash".into()), now);
         state.record_tool_start("b".into(), Some("Read".into()), now);
         let later = Instant::now();
-        let desc =
-            describe_heartbeat(&state, Duration::from_secs(120), later, Duration::from_secs(30))
-                .unwrap();
+        let desc = describe_heartbeat(
+            &state,
+            Duration::from_secs(120),
+            later,
+            Duration::from_secs(30),
+            Duration::from_secs(120),
+        )
+        .unwrap();
         assert!(desc.contains("2 running"));
         assert!(desc.contains("Bash"));
         assert!(desc.contains("Read"));
@@ -370,7 +411,7 @@ mod tests {
     fn heartbeat_includes_tokens_and_cost() {
         let mut state = LiveMetricsState::default();
         let now = Instant::now() - Duration::from_secs(60);
-        state.last_tool_event_at = Some(now);
+        state.last_event_at = Some(now);
         state.update_token_usage(NormalizedTokenUsage {
             input: Some(12_000),
             output: Some(3_000),
@@ -379,9 +420,14 @@ mod tests {
         });
         state.update_cost(0.0215);
         let later = Instant::now();
-        let desc =
-            describe_heartbeat(&state, Duration::from_secs(90), later, Duration::from_secs(30))
-                .unwrap();
+        let desc = describe_heartbeat(
+            &state,
+            Duration::from_secs(90),
+            later,
+            Duration::from_secs(30),
+            Duration::from_secs(120),
+        )
+        .unwrap();
         assert!(desc.contains("12K\u{2192}3K tok"));
         assert!(desc.contains("$0.02"));
     }
@@ -390,9 +436,42 @@ mod tests {
     fn heartbeat_always_emits_when_no_events_observed() {
         let state = LiveMetricsState::default();
         let now = Instant::now();
-        let desc =
-            describe_heartbeat(&state, Duration::from_secs(30), now, Duration::from_secs(30))
-                .unwrap();
+        let desc = describe_heartbeat(
+            &state,
+            Duration::from_secs(30),
+            now,
+            Duration::from_secs(30),
+            Duration::from_secs(120),
+        )
+        .unwrap();
         assert!(desc.starts_with("30s"));
+    }
+
+    #[test]
+    fn heartbeat_forces_emission_when_last_heartbeat_is_stale() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        // Busy stream: an event happened just now, so the quiet window would
+        // normally suppress. But the last heartbeat was 3 minutes ago and the
+        // force window is 2 minutes — the tick must fire anyway.
+        state.last_event_at = Some(now);
+        state.last_heartbeat_at = Some(now - Duration::from_secs(180));
+        let desc = describe_heartbeat(
+            &state,
+            Duration::from_secs(200),
+            now,
+            Duration::from_secs(30),
+            Duration::from_secs(120),
+        )
+        .unwrap();
+        assert!(desc.contains("200s"));
+    }
+
+    #[test]
+    fn record_activity_updates_last_event_at() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        state.record_activity(now);
+        assert_eq!(state.last_event_at, Some(now));
     }
 }
