@@ -1,70 +1,109 @@
 ## File Reference Resolution
 
- resolves compact descriptors (`@`, `!`, `vault:`, `%`, `{{ENV}}`) to absolute paths lazily
+Resolves compact descriptors to absolute paths lazily, with configurable search
+roots and vault roots. For the full treatment, see
+[the topic doc](../docs/topics/file-references.md).
 
- with configurable search roots and and vault roots.
+### Reference Kinds
 
- The topic doc at `biscuit-file/docs/topics/file-references.md` has the authoritative reference.
+| Prefix                | Kind                  | Resolves against                                         |
+|-----------------------|-----------------------|----------------------------------------------------------|
+| `./` or `../`         | **Relative**          | Current working directory (no fallback)                  |
+| _(none)_              | **Implicit Relative** | CWD, then git repository root                            |
+| `/`                   | **Absolute**          | Used verbatim                                            |
+| `@`                   | **Magic**             | Prepended paths → git root → HOME → appended paths       |
+| `!`                   | **Package**           | Cargo workspace package area (git root fallback)         |
+| `vault:` or `vault::` | **Vault**             | Configured vault roots + `$VAULT` env var                |
 
- For a deeper treatment, see [the detailed topic doc](../docs/topics/file-references.md).
+Any kind can be prefixed with `%` for recursive directory search, and any
+segment can contain `{{VAR_NAME}}` environment variable interpolation.
 
-.
+### Syntax Examples
 
-### Syntax
-
+```text
+README.md                   # Relative: <CWD>/README.md
+./src/main.rs               # Relative: <CWD>/src/main.rs
+/etc/config.toml            # Absolute: used as-is
+@docs/spec.md               # Magic: search git root, HOME, custom paths
+@.bashrc                    # Magic: finds in HOME if not in repo
+!README.md                  # Package: <package_area>/README.md
+!docs/spec.md               # Package: <package_area>/docs/spec.md
+vault:notes/today.md        # Vault: search configured vault roots
+%@README.md                 # Recursive: walk git root + HOME for "README.md"
+%./config.toml              # Recursive: walk CWD tree for "config.toml"
+{{PROJECT}}/docs/spec.md    # Env var interpolation
 ```
-@path/to/file.md            # Magic: search repo root, HOME, custom paths
-!path/to/file.md            # Package: Cargo workspace area or git root
-vault:notes/today.md           # Vault: configured vault roots
-%path/to/file.md              # Recursive: walk directories
-{{ENV_VAR}}/rest/of/file.md   # Interpolate environment variable
-/path/to/file.md              # Absolute: used verbatim
-./foo.md                 # Relative to CWD
-```
 
-The `%` prefix makes a search **recursive** — walks directories instead of checking exact paths.
+### Magic Search Order (`@`)
 
- Each `%` prefix can be used with any reference kind.
+1. Prepended paths (`.add_magic_path(path, PathPosition::Start)`)
+2. Git repository root (via `git2`)
+3. `$HOME` directory
+4. Appended paths (`.add_magic_path(path, PathPosition::End)`)
 
- Supports environment variable interpolation via `{{VAR_NAME}}` in any path segment.
+Use `.with_package_area_magic_path()` in monorepos to prepend the current Cargo
+package area before git root. No-op outside a workspace.
 
- Variable names must match `[A-Z0-9_]+`.
- Multiple interpolations are expanded left-to right at right.
+### Package Area Detection (`!`)
 
- Adjacent `Literal` and `EnvVar` segments.
+Finds the first path component of the Cargo workspace member containing CWD.
+Example: CWD `/repo/biscuit-file/lib/src/` → package area `/repo/biscuit-file/`.
+Falls back to git root if no workspace member matches. Returns `Ok(None)` if no
+git repo found.
 
- Empty strings and invalid variable names are rejected.
+### Recursive Search (`%`)
 
- The `@`, `!`, `vault:`, `%` all support interpolation.
-
- Interpolation happens during resolution, not parsing.
-
- `{{}}` (empty) or `{{invalid-name}}` (invalid chars) are rejected.
-
- Parses `%` from `./docs/spec.md` → `!@docs/spec.md`:
- `%vault:notes.md` → `vault:notes.md`
- etc See `biscuit-file/docs/topics/file-references.md` for the full topic document.
+Walks directory trees from each search root. Matches on filename; if subdirs
+present in reference (e.g., `%docs/spec.md`), parent path must end with them.
+Matches sorted lexicographically, first returned. Does not follow symlinks.
 
 ### API
+
 ```rust
 use biscuit_file::{FileReference, PathPosition};
 
-let file_ref = FileReference::new("@docs/spec.md")?;          // parse only
-let path = file_ref.resolve()?;                   // resolve (absolute path)
-let path = file_ref.resolve_relative(None)?;    // relative to CWD
+// Relative
+let f = FileReference::new("README.md")?;
 
-let file_ref = FileReference::new("vault:notes/today.md")?
-    .add_vault("/path/to/vault")
-    .add_magic_path("/extra", PathPosition::Start);
+// Absolute
+let f = FileReference::new("/etc/config.toml")?;
+
+// Magic with custom paths
+let f = FileReference::new("@docs/spec.md")?
+    .add_magic_path("/opt/configs", PathPosition::Start)
+    .add_magic_path("/etc/defaults", PathPosition::End);
+
+// Package-area-aware magic (monorepo)
+let f = FileReference::new("@prompts/commit.md")?
+    .with_package_area_magic_path();
+
+// Vault
+let f = FileReference::new("vault:notes/today.md")?
+    .add_vault("/personal/vault")
+    .add_vault("/shared/vault");
+
+// Resolution
+let path = f.resolve()?;                           // absolute, uses ambient CWD
+let path = f.resolve_from(Path::new("/repo/docs"))?;  // override CWD (document-relative)
+let path = f.resolve_relative(None)?;              // relative to CWD
 ```
+
+### `resolve_from()` -- Document-Relative Resolution
+
+Overrides ambient CWD for relative, `@`, and `!` lookups. Use when a reference
+appears inside a document and should resolve relative to that document's
+location. HOME and env vars still read from live process state.
+
 ### Error Handling
+
 ```rust
 // FileReferenceError variants:
-// - InvalidSyntax -- malformed reference string
-// - MissingEnvironmentVariable -- unset env var
-// - CurrentDirectory -- cannot determine CWD
-// - Git -- git2 error during repo discovery
-// - Workspace -- cargo_metadata error
-// - VaultNotConfigured -- vault: ref with no roots
-// - RelativePath -- cannot compute relative path
-// - Io -- filesystem error
+// - InvalidSyntax          -- malformed reference string
+// - MissingEnvironmentVariable -- unset {{VAR}}
+// - CurrentDirectory       -- cannot determine CWD
+// - Git                    -- git2 error during repo discovery
+// - Workspace              -- cargo_metadata error
+// - VaultNotConfigured     -- vault: ref with no roots
+// - RelativePath           -- cannot compute relative path
+// - Io                     -- filesystem error
+```

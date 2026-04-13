@@ -3,11 +3,16 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
 use claudine::stream::parser::{StreamChunk, StreamParseError, StreamParser};
+use claudine::stream::progress::{self, LiveMetrics};
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 use tracing::{Span, info_span};
@@ -36,6 +41,10 @@ struct StreamTextRenderer {
     line_buffer: String,
     /// Whether we are inside a fenced code block (``` or ~~~).
     in_code_fence: bool,
+    /// True when the partial line in `line_buffer` has already been written to
+    /// stdout raw. When the newline eventually arrives we only emit `\n`
+    /// instead of re-rendering through darkmatter, avoiding duplicate output.
+    partial_line_committed: bool,
     /// Terminal reference for rendering.
     term: Option<Terminal>,
     /// Cached darkmatter options (created once to avoid repeated theme detection).
@@ -55,6 +64,7 @@ impl StreamTextRenderer {
             block_buffer: String::new(),
             line_buffer: String::new(),
             in_code_fence: false,
+            partial_line_committed: false,
             term,
             terminal_options,
         }
@@ -71,7 +81,28 @@ impl StreamTextRenderer {
         while let Some(newline_pos) = self.line_buffer.find('\n') {
             let line = self.line_buffer[..=newline_pos].to_string();
             self.line_buffer.drain(..=newline_pos);
+
+            if self.partial_line_committed {
+                // Partial line was already streamed raw; emit only the newline
+                // and skip markdown rendering to avoid duplicate output.
+                let _ = out.write_all(b"\n");
+                let _ = out.flush();
+                self.partial_line_committed = false;
+                continue;
+            }
+
             self.process_line(out, &line);
+        }
+
+        // Stream the remaining partial line immediately so the user sees
+        // progress even when the provider stalls before sending a newline.
+        // Skip when we're inside a fenced block or actively accumulating a
+        // markdown block — those paths need the full block before rendering.
+        if !self.line_buffer.is_empty() && !self.in_code_fence && self.block_buffer.is_empty() {
+            let partial = std::mem::take(&mut self.line_buffer);
+            let _ = out.write_all(partial.as_bytes());
+            let _ = out.flush();
+            self.partial_line_committed = true;
         }
     }
 
@@ -134,7 +165,12 @@ impl StreamTextRenderer {
     fn flush_remaining<W: Write>(&mut self, out: &mut W) {
         if !self.line_buffer.is_empty() {
             let leftover = std::mem::take(&mut self.line_buffer);
-            self.block_buffer.push_str(&leftover);
+            if self.partial_line_committed {
+                // Already streamed raw — do not re-render through darkmatter.
+                self.partial_line_committed = false;
+            } else {
+                self.block_buffer.push_str(&leftover);
+            }
         }
         self.flush_block(out);
     }
@@ -281,6 +317,14 @@ pub(crate) fn run_child(
 
     let needs_stdin_pipe = io.stdin_seed.is_some();
 
+    // Whether we isolate the child into its own process group. Needed only
+    // when we pipe streams (so we can clean up orphaned descendants that
+    // keep the pipe fds open — see `kill_process_group`). For pure TTY
+    // inheritance (interactive TUIs like Claude/Codex), isolating into a
+    // background pgroup causes the child to receive SIGTTIN on stdin read
+    // and hang indefinitely.
+    let isolate_process_group = filter_stdout || filter_stderr || needs_stdin_pipe;
+
     let mut command = Command::new(binary);
     command
         .args(args)
@@ -302,6 +346,12 @@ pub(crate) fn run_child(
         } else {
             Stdio::inherit()
         });
+
+    #[cfg(unix)]
+    if isolate_process_group {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
 
     let mut child = command.spawn()?;
     *child_spawned = true;
@@ -378,14 +428,19 @@ pub(crate) fn run_child(
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
-        wait_with_signal_handling(&mut child)?
+        wait_with_signal_handling(&mut child, isolate_process_group)?
     };
 
+    if isolate_process_group {
+        kill_process_group(&mut child);
+    }
+
+    let thread_join_timeout = Duration::from_secs(5);
     if let Some(handle) = stdout_handle {
-        let _ = handle.join();
+        join_with_timeout(handle, thread_join_timeout);
     }
     if let Some(handle) = stderr_handle {
-        let _ = handle.join();
+        join_with_timeout(handle, thread_join_timeout);
     }
 
     Ok(ProcessResult {
@@ -394,12 +449,88 @@ pub(crate) fn run_child(
     })
 }
 
+/// After the main child exits, kill any orphaned descendant processes so
+/// inherited pipe fds are closed and reader threads unblock. Without this,
+/// a subagent spawned by the child (e.g. OpenCode Task tool) that inherits
+/// stdout/stderr can keep the pipe open indefinitely, causing the reader
+/// threads to hang on `BufReader::lines()`.
+#[cfg(unix)]
+fn kill_process_group(child: &mut Child) {
+    let pid = child.id() as i32;
+    // Send SIGTERM to the process group first (graceful), then SIGKILL.
+    unsafe {
+        // kill(-pgid, ...) sends to the entire process group.
+        // With process_group(0), the pgid == child pid.
+        if libc::kill(-pid, libc::SIGTERM) == 0 {
+            // Give descendants a brief grace period to exit.
+            std::thread::sleep(Duration::from_millis(200));
+            // Ensure everything is dead.
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_process_group(_child: &mut Child) {}
+
+/// Join a thread with a timeout. Returns `true` if the thread joined
+/// successfully within the deadline, `false` if it timed out.
+///
+/// On timeout the thread is **leaked** (detached) rather than panicked,
+/// because the reader threads only terminate when their pipe closes and
+/// there is no safe way to interrupt a blocking `BufReader::lines()` call
+/// from outside.
+fn join_with_timeout(handle: thread::JoinHandle<()>, timeout: Duration) -> bool {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        // `is_finished()` is available on Rust 1.69+ and does not block.
+        if handle.is_finished() {
+            let _ = handle.join();
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    tracing::warn!(
+        "reader thread did not exit within {:?}; detaching (pipe may still be held open by a descendant process)",
+        timeout
+    );
+    std::mem::forget(handle);
+    false
+}
+
+/// Join a thread that returns a value, with a timeout. Returns the value
+/// on success or a fallback on timeout.
+fn join_with_timeout_or<T>(handle: thread::JoinHandle<T>, timeout: Duration, fallback: T) -> T {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if handle.is_finished() {
+            return handle.join().unwrap_or(fallback);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    tracing::warn!(
+        "reader thread did not exit within {:?}; using fallback result",
+        timeout
+    );
+    std::mem::forget(handle);
+    fallback
+}
+
 /// Wait for the child, forwarding SIGINT/SIGTERM on repeated Ctrl-C.
+///
+/// When `child_in_own_pgroup` is true, the child was spawned with
+/// `process_group(0)` and the installed SIGINT handler manually forwards
+/// signals to `-child_pid` so descendants also receive them. When it is
+/// false, the child shares the parent's process group (required for
+/// interactive TUIs that read the controlling TTY); in that case the
+/// terminal already delivers SIGINT to the child naturally, so we only
+/// track the interrupt count locally.
 ///
 /// Returns `(exit_code, termination_kind)`.
 #[cfg(unix)]
 fn wait_with_signal_handling(
     child: &mut Child,
+    child_in_own_pgroup: bool,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU8, Ordering};
@@ -407,26 +538,25 @@ fn wait_with_signal_handling(
     let interrupt_count = Arc::new(AtomicU8::new(0));
     let child_pid = child.id();
 
-    // Install a SIGINT handler that escalates on repeated presses.
     let counter = Arc::clone(&interrupt_count);
     let _guard = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            if !child_in_own_pgroup {
+                // Child shares our process group; the terminal already
+                // delivered SIGINT to it. Just track the count so the
+                // termination kind is reported correctly.
+                return;
+            }
             match count {
                 1 => {
-                    // First Ctrl-C: forward SIGINT to the child process.
-                    // Registering this handler replaced the default behavior
-                    // (which would propagate to the process group), so we
-                    // must explicitly forward the signal.
-                    libc::kill(child_pid as i32, libc::SIGINT);
+                    libc::kill(-(child_pid as i32), libc::SIGINT);
                 }
                 2 => {
-                    // Second Ctrl-C: escalate to SIGTERM
-                    libc::kill(child_pid as i32, libc::SIGTERM);
+                    libc::kill(-(child_pid as i32), libc::SIGTERM);
                 }
                 _ => {
-                    // Third+ Ctrl-C: force kill
-                    libc::kill(child_pid as i32, libc::SIGKILL);
+                    libc::kill(-(child_pid as i32), libc::SIGKILL);
                 }
             }
         })
@@ -446,6 +576,7 @@ fn wait_with_signal_handling(
 #[cfg(not(unix))]
 fn wait_with_signal_handling(
     child: &mut Child,
+    _child_in_own_pgroup: bool,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
     let status = child.wait()?;
     Ok((
@@ -608,6 +739,12 @@ pub(crate) fn run_child_capture(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
@@ -670,11 +807,14 @@ pub(crate) fn run_child_capture(
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
-        wait_with_signal_handling(&mut child)?
+        wait_with_signal_handling(&mut child, true)?
     };
 
-    let stdout = stdout_handle.join().unwrap_or_default();
-    let stderr = stderr_handle.join().unwrap_or_default();
+    kill_process_group(&mut child);
+
+    let thread_join_timeout = Duration::from_secs(5);
+    let stdout = join_with_timeout_or(stdout_handle, thread_join_timeout, String::new());
+    let stderr = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
 
     Ok(ProcessResult {
         data: CapturedChildOutput {
@@ -702,9 +842,11 @@ pub(crate) fn run_child_stream(
     timeout: Option<u64>,
     stderr_noise_prefixes: &[&str],
     suppress_stderr_on_success: bool,
+    show_progress_heartbeat: bool,
     stdin_seed: Option<&str>,
     parser: Box<dyn StreamParser>,
     child_spawned: &mut bool,
+    live_metrics: Option<LiveMetrics>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
@@ -732,9 +874,19 @@ pub(crate) fn run_child_stream(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
+    let heartbeat_metrics = live_metrics.clone();
+    let stdout_metrics = live_metrics.clone();
+    let heartbeat =
+        spawn_progress_heartbeat(show_progress_heartbeat, started_at, heartbeat_metrics);
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
@@ -762,6 +914,11 @@ pub(crate) fn run_child_stream(
 
             match parser.feed_line(&line) {
                 Ok(Some(StreamChunk::Text(text))) => {
+                    if let Some(metrics) = stdout_metrics.as_ref()
+                        && let Ok(mut state) = metrics.lock()
+                    {
+                        state.record_activity(Instant::now());
+                    }
                     thinking_renderer.flush_if_active();
                     renderer.push(&mut out, &text);
                 }
@@ -841,15 +998,24 @@ pub(crate) fn run_child_stream(
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
-        wait_with_signal_handling(&mut child)?
+        wait_with_signal_handling(&mut child, true)?
     };
 
-    let parser = stdout_handle.join().unwrap_or_else(|_| {
-        // If the thread panicked, create a minimal error summary
-        Box::new(ErrorParser { exit_code })
-    });
+    // The main child has exited, but descendant processes (e.g. subagents
+    // spawned by OpenCode's Task tool) may still hold inherited pipe fds.
+    // Kill the entire process group so reader threads unblock.
+    kill_process_group(&mut child);
 
-    let captured = stderr_handle.join().unwrap_or_default();
+    stop_progress_heartbeat(heartbeat);
+
+    let thread_join_timeout = Duration::from_secs(5);
+    let parser = join_with_timeout_or(
+        stdout_handle,
+        thread_join_timeout,
+        Box::new(ErrorParser { exit_code }),
+    );
+
+    let captured = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
     if suppress_stderr_on_success && exit_code != 0 && !captured.is_empty() {
         eprintln!("{captured}");
     }
@@ -863,6 +1029,86 @@ pub(crate) fn run_child_stream(
         data: summary,
         termination,
     })
+}
+
+fn spawn_progress_heartbeat(
+    enabled: bool,
+    started_at: Instant,
+    live_metrics: Option<LiveMetrics>,
+) -> Option<(Arc<AtomicBool>, thread::JoinHandle<()>)> {
+    if !enabled {
+        return None;
+    }
+
+    let done = Arc::new(AtomicBool::new(false));
+    let done_flag = Arc::clone(&done);
+    let handle = thread::spawn(move || {
+        let interval = Duration::from_secs(30);
+        let mut next_tick = started_at + interval;
+        let term = crate::log::terminal();
+
+        while !done_flag.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            if now >= next_tick {
+                emit_progress_heartbeat(started_at, live_metrics.as_ref(), interval, &term);
+                next_tick += interval;
+                continue;
+            }
+
+            let sleep_for = next_tick
+                .saturating_duration_since(now)
+                .min(Duration::from_secs(1));
+            thread::sleep(sleep_for);
+        }
+    });
+
+    Some((done, handle))
+}
+
+fn emit_progress_heartbeat(
+    started_at: Instant,
+    live_metrics: Option<&LiveMetrics>,
+    quiet_window: Duration,
+    term: &Terminal,
+) {
+    let elapsed = started_at.elapsed();
+    let now = Instant::now();
+    // After this much time since the last heartbeat, surface a tick regardless
+    // of ongoing tool/text activity. Keeps long-running busy streams visible.
+    let force_window = Duration::from_secs(120);
+
+    let description = match live_metrics {
+        Some(metrics) => {
+            let Ok(mut state) = metrics.lock() else {
+                return;
+            };
+            let desc =
+                progress::describe_heartbeat(&state, elapsed, now, quiet_window, force_window);
+            if desc.is_some() {
+                state.last_heartbeat_at = Some(now);
+            }
+            desc
+        }
+        None => progress::describe_heartbeat(
+            &claudine::stream::progress::LiveMetricsState::default(),
+            elapsed,
+            now,
+            quiet_window,
+            force_window,
+        ),
+    };
+
+    if let Some(desc) = description {
+        let rendered = Status::new(desc).state(StatusState::Info).render(term);
+        eprintln!("{rendered}");
+    }
+}
+
+fn stop_progress_heartbeat(heartbeat: Option<(Arc<AtomicBool>, thread::JoinHandle<()>)>) {
+    if let Some((done, handle)) = heartbeat {
+        done.store(true, Ordering::Relaxed);
+        let _ = handle.join();
+    }
 }
 
 /// Spawn a provider child process with structured stream parsing, capturing output.
@@ -879,7 +1125,9 @@ pub(crate) fn run_child_stream_capture(
     stderr_noise_prefixes: &[&str],
     stdin_seed: Option<&str>,
     parser: Box<dyn StreamParser>,
+    live_metrics: Option<LiveMetrics>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
+    let _ = live_metrics; // capture variant does not currently emit heartbeat
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
 
@@ -899,6 +1147,12 @@ pub(crate) fn run_child_stream_capture(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
 
     let mut child = command.spawn()?;
     Span::current().record("child_pid", tracing::field::display(child.id()));
@@ -958,13 +1212,18 @@ pub(crate) fn run_child_stream_capture(
     let (exit_code, termination) = if let Some(seconds) = timeout {
         wait_with_timeout(&mut child, seconds)?
     } else {
-        wait_with_signal_handling(&mut child)?
+        wait_with_signal_handling(&mut child, true)?
     };
 
-    let parser = stdout_handle
-        .join()
-        .unwrap_or_else(|_| Box::new(ErrorParser { exit_code }));
-    let stderr_text = stderr_handle.join().unwrap_or_default();
+    kill_process_group(&mut child);
+
+    let thread_join_timeout = Duration::from_secs(5);
+    let parser = join_with_timeout_or(
+        stdout_handle,
+        thread_join_timeout,
+        Box::new(ErrorParser { exit_code }),
+    );
+    let stderr_text = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
 
     let mut summary = parser.finish(exit_code);
     if summary.duration_ms.is_none() {
@@ -1064,6 +1323,7 @@ printf '%s\n' '{"type":"result","duration_ms":25}'
             &[],
             None,
             parser,
+            None,
         )
         .unwrap();
         let summary = result.data;
@@ -1109,9 +1369,11 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
             Some(5),
             &[],
             false,
+            false,
             None,
             parser,
             &mut spawned,
+            None,
         )
         .unwrap();
         let summary = result.data;
@@ -1123,35 +1385,37 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
         assert!(summary.duration_ms.unwrap() < 5_000);
     }
 
-    #[test]
-    fn stream_text_renderer_flushes_on_blank_line() {
-        let mut renderer = StreamTextRenderer {
+    fn test_renderer() -> StreamTextRenderer {
+        StreamTextRenderer {
             block_buffer: String::new(),
             line_buffer: String::new(),
             in_code_fence: false,
+            partial_line_committed: false,
             term: None,
             terminal_options: None,
-        };
+        }
+    }
+
+    #[test]
+    fn stream_text_renderer_flushes_on_blank_line() {
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         renderer.push(&mut out, "First paragraph.\n\nSecond");
         let flushed = String::from_utf8(out).unwrap();
 
         assert!(flushed.contains("First paragraph."));
-        // "Second" has no newline yet — sits in line_buffer
-        assert_eq!(renderer.line_buffer, "Second");
+        // Partial "Second" is streamed raw immediately so the user never
+        // waits for a newline that may never arrive.
+        assert!(flushed.contains("Second"));
+        assert!(renderer.line_buffer.is_empty());
+        assert!(renderer.partial_line_committed);
         assert!(renderer.block_buffer.is_empty());
     }
 
     #[test]
     fn stream_text_renderer_buffers_code_fence() {
-        let mut renderer = StreamTextRenderer {
-            block_buffer: String::new(),
-            line_buffer: String::new(),
-            in_code_fence: false,
-            term: None,
-            terminal_options: None,
-        };
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         // Opening fence + code — should NOT flush yet
@@ -1167,33 +1431,49 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
     }
 
     #[test]
-    fn stream_text_renderer_flush_remaining_drains_everything() {
-        let mut renderer = StreamTextRenderer {
-            block_buffer: String::new(),
-            line_buffer: String::new(),
-            in_code_fence: false,
-            term: None,
-            terminal_options: None,
-        };
+    fn stream_text_renderer_streams_partial_line_immediately() {
+        // Regression guard: trailing text without a newline must reach stdout
+        // right away so the user sees progress even if the provider stalls
+        // before emitting the terminating newline.
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         renderer.push(&mut out, "trailing text without newline");
-        assert!(out.is_empty());
-
-        renderer.flush_remaining(&mut out);
         let flushed = String::from_utf8(out).unwrap();
         assert_eq!(flushed, "trailing text without newline");
+        assert!(renderer.line_buffer.is_empty());
+        assert!(renderer.partial_line_committed);
+    }
+
+    #[test]
+    fn stream_text_renderer_newline_after_partial_emits_only_newline() {
+        // When a partial line was already streamed raw, the arriving newline
+        // must not cause the line to be re-rendered through darkmatter —
+        // otherwise the user sees the same line twice.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "Group A: progress.rs");
+        renderer.push(&mut out, "\n");
+        let flushed = String::from_utf8(out).unwrap();
+        assert_eq!(flushed, "Group A: progress.rs\n");
+        assert!(!renderer.partial_line_committed);
+    }
+
+    #[test]
+    fn stream_text_renderer_flush_remaining_does_not_duplicate_streamed_text() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "already streamed");
+        renderer.flush_remaining(&mut out);
+        let flushed = String::from_utf8(out).unwrap();
+        assert_eq!(flushed, "already streamed");
     }
 
     #[test]
     fn stream_text_renderer_flushes_list_items_immediately() {
-        let mut renderer = StreamTextRenderer {
-            block_buffer: String::new(),
-            line_buffer: String::new(),
-            in_code_fence: false,
-            term: None,
-            terminal_options: None,
-        };
+        let mut renderer = test_renderer();
         let mut out = Vec::new();
 
         renderer.push(&mut out, "1. first item\n2. second item\n");
@@ -1233,9 +1513,11 @@ cat >/dev/null
             Some(2),
             &[],
             false,
+            false,
             None,
             parser,
             &mut spawned,
+            None,
         )
         .unwrap();
 

@@ -130,6 +130,15 @@ fn collect_roots(
 ) -> Result<Vec<PathBuf>, FileReferenceError> {
     match kind {
         ReferenceKind::Relative(_) => Ok(vec![ctx.cwd.clone()]),
+        ReferenceKind::ImplicitRelative(_) => {
+            let mut roots = vec![ctx.cwd.clone()];
+            if let Some(git_root) = find_git_root(&ctx.cwd)?
+                && git_root != ctx.cwd
+            {
+                roots.push(git_root);
+            }
+            Ok(roots)
+        }
         ReferenceKind::Absolute(_) => Ok(vec![PathBuf::from("/")]),
         ReferenceKind::Magic(_) => {
             let mut roots = Vec::new();
@@ -374,5 +383,29 @@ mod tests {
     fn normalize_absolute_already_absolute() {
         let result = normalize_absolute(Path::new("/etc/config.toml"), Path::new("/home/user"));
         assert_eq!(result, PathBuf::from("/etc/config.toml"));
+    }
+
+    #[test]
+    fn implicit_relative_uses_cwd_then_git_root() {
+        use crate::file_reference::{MagicPathList, ParsedReference, ReferenceKind};
+
+        // We can't call collect_roots for ImplicitRelative without a real git
+        // context, so exercise the *direct* path by constructing a
+        // ParsedReference with no git root. In that case the only root
+        // should be CWD, matching the "git lookup returned None" branch.
+        let parsed = ParsedReference {
+            recursive: false,
+            kind: ReferenceKind::ImplicitRelative(PathTemplate {
+                segments: vec![TemplateSegment::Literal("nope.md".to_string())],
+            }),
+        };
+        let ctx = ResolutionContext {
+            cwd: PathBuf::from("/tmp"),
+            home_dir: None,
+            env: std::collections::HashMap::new(),
+        };
+        let roots = collect_roots(&parsed.kind, &MagicPathList::default(), &[], &ctx).unwrap();
+        // /tmp has no git repo, so only CWD is returned.
+        assert_eq!(roots, vec![PathBuf::from("/tmp")]);
     }
 }

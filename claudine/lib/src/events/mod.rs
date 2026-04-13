@@ -9,12 +9,11 @@ mod resolved_hook;
 
 pub use agentic_event::AgenticEvent;
 pub use config::{
-    CanonicalProviderSettings, EventBinding, GlobalSettings, HookerConfig, LinkingSettings,
-    ProviderConfig, TtsSettings,
+    CanonicalProviderSettings, EventBinding, GlobalSettings, LinkingSettings, TtsSettings,
 };
 pub use environment::{
     EnvironmentContext, GitContext, HardwareContext, OsContext, RepoContext, detect_environment,
-    detect_environment_fast,
+    detect_environment_fast, environment_context_from_sniff_result,
 };
 pub use event_meta::{EventMeta, ToolName};
 pub use init_defaults::{

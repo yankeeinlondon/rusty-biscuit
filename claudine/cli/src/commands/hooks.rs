@@ -7,16 +7,15 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::utils::layout::{Alignment, Margin, WordWrap};
-use claudine::actions::{HookAction, LogTarget, ReportFormat};
+use claudine::actions::{HookAction, ReportFormat};
+use claudine::config::claudine_config::ClaudineConfig;
 use claudine::config::{AgentConfigurator, detect_agents};
-use claudine::dispatch::loader::load_config;
+use claudine::dispatch::loader::load_claudine_config;
 use claudine::dispatch::template::{TemplateVariable, VariableCategory};
 use claudine::events::{
-    AgenticEvent, EventBinding, EventMeta, EventSupportLevel, HookerConfig, NativeEventName,
-    PROVIDERS_DISPLAY_ORDER, Provider, detect_environment, event_native_mapping_matrix,
-    event_support_matrix,
+    AgenticEvent, EventMeta, EventSupportLevel, NativeEventName, PROVIDERS_DISPLAY_ORDER, Provider,
+    detect_environment, event_native_mapping_matrix, event_support_matrix,
 };
-use claudine::services::{GateCapability, ProtectPosture, ProviderProtectProfiles};
 use playa::SoundEffect;
 use sniff::programs::InstalledAiClients;
 
@@ -66,16 +65,16 @@ fn provider_column() -> TableColumn {
         .with_word_wrap(WordWrap::None)
 }
 
-/// Get the expected events for a provider from the claudine config.
+/// Get the expected events for a provider from the ClaudineConfig.
 ///
-/// Returns events that are enabled for this specific provider AND can be
+/// Returns events that are in the config's actions map AND can be
 /// registered via the provider's config file.
 ///
 /// Takes an optional configurator to check for provider-specific registerable events.
 fn expected_events_for_provider(
-    config: &HookerConfig,
+    config: &ClaudineConfig,
     provider: Provider,
-    configurator: Option<&dyn claudine::config::AgentConfigurator>,
+    configurator: Option<&dyn AgentConfigurator>,
 ) -> HashSet<String> {
     // If configurator exists and doesn't support config registration, return empty
     if let Some(cfg) = configurator
@@ -85,48 +84,33 @@ fn expected_events_for_provider(
     }
 
     config
-        .providers
-        .get(&provider)
-        .map(|p| {
-            p.events
-                .iter()
-                .filter(|(event, binding)| {
-                    if !binding.enabled {
-                        return false;
-                    }
+        .actions
+        .keys()
+        .filter(|event| {
+            // Check if configurator has specific registerable events
+            if let Some(cfg) = configurator
+                && let Some(registerable) = cfg.registerable_events()
+            {
+                return registerable.contains(event);
+            }
 
-                    // Check if configurator has specific registerable events
-                    if let Some(cfg) = configurator
-                        && let Some(registerable) = cfg.registerable_events()
-                    {
-                        return registerable.contains(event);
-                    }
-
-                    // Default: filter by provider's hook-based event support only
-                    provider.supports_event_via_hook(event)
-                })
-                .map(|(event, _)| event.as_slug().to_string())
-                .collect()
+            // Default: filter by provider's hook-based event support only
+            provider.supports_event_via_hook(event)
         })
-        .unwrap_or_default()
+        .map(|event| event.as_slug().to_string())
+        .collect()
 }
 
-/// Get ALL enabled events for a provider from the claudine config.
+/// Get ALL events from the ClaudineConfig's actions map.
 ///
-/// Returns events that are enabled, regardless of whether the provider supports them.
-/// Use this to detect configuration errors (events configured for unsupporting providers).
-fn all_enabled_events_for_provider(config: &HookerConfig, provider: Provider) -> HashSet<String> {
+/// Since ClaudineConfig events are provider-agnostic, all configured events
+/// are considered "enabled" for every provider.
+fn all_enabled_events(config: &ClaudineConfig) -> HashSet<String> {
     config
-        .providers
-        .get(&provider)
-        .map(|p| {
-            p.events
-                .iter()
-                .filter(|(_, binding)| binding.enabled)
-                .map(|(event, _)| event.as_slug().to_string())
-                .collect()
-        })
-        .unwrap_or_default()
+        .actions
+        .keys()
+        .map(|event| event.as_slug().to_string())
+        .collect()
 }
 
 /// Check if an event is supported by a provider (via hook).
@@ -186,23 +170,21 @@ struct InvalidEffect {
 /// Find all invalid sound effect names in the config.
 ///
 /// Returns a list of invalid effect names with their suggested replacements.
-fn find_invalid_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
+fn find_invalid_sound_effects(config: &ClaudineConfig) -> Vec<InvalidEffect> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut invalid_effects: Vec<InvalidEffect> = Vec::new();
 
-    for provider_config in config.providers.values() {
-        for binding in provider_config.events.values() {
-            for action in &binding.actions {
-                if let HookAction::SoundEffect { name, .. } = action
-                    && SoundEffect::from_name(name).is_none()
-                    && !seen.contains(name)
-                {
-                    seen.insert(name.clone());
-                    invalid_effects.push(InvalidEffect {
-                        invalid_name: name.clone(),
-                        suggestion: find_similar_effect(name),
-                    });
-                }
+    for actions in config.actions.values() {
+        for action in actions {
+            if let HookAction::SoundEffect { effect, .. } = action
+                && SoundEffect::from_name(effect).is_none()
+                && !seen.contains(effect)
+            {
+                seen.insert(effect.clone());
+                invalid_effects.push(InvalidEffect {
+                    invalid_name: effect.clone(),
+                    suggestion: find_similar_effect(effect),
+                });
             }
         }
     }
@@ -213,7 +195,7 @@ fn find_invalid_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
 /// Validate sound effect names in the config and display warnings.
 ///
 /// Returns the list of invalid effects for potential fixing.
-fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
+fn validate_sound_effects(config: &ClaudineConfig) -> Vec<InvalidEffect> {
     let invalid_effects = find_invalid_sound_effects(config);
 
     if invalid_effects.is_empty() {
@@ -345,14 +327,14 @@ const DI_R: &str = "{{normal-font-weight}}{{not-italic}}";
 /// Format an action for display in the detailed provider view.
 fn format_action(action: &HookAction) -> String {
     match action {
-        HookAction::Speak { message } => {
+        HookAction::Speak { message, .. } => {
             format!(
                 "<cyan>Speak</cyan>({DI}\"{}\"{DI_R})",
                 truncate_string(message, 40)
             )
         }
         HookAction::SoundEffect {
-            name,
+            effect,
             volume,
             speed,
         } => {
@@ -370,40 +352,9 @@ fn format_action(action: &HookAction) -> String {
             };
             format!(
                 "<magenta>SoundEffect</magenta>({DI}{}{}{DI_R})",
-                name, params_str
+                effect, params_str
             )
         }
-        HookAction::Log { target } => match target {
-            LogTarget::File { path, rotate_daily } => {
-                let has_params = path.is_some() || !*rotate_daily;
-                if has_params {
-                    let mut params = Vec::new();
-                    if let Some(p) = path {
-                        params.push(format!("path={}", p.display()));
-                    }
-                    if !*rotate_daily {
-                        params.push("rotate_daily=false".to_string());
-                    }
-                    format!("<blue>Log</blue>({DI}{}{DI_R})", params.join(", "))
-                } else {
-                    "<blue>Log</blue>()".to_string()
-                }
-            }
-            LogTarget::Server {
-                url, timeout_ms, ..
-            } => {
-                let has_params = *timeout_ms != 10_000;
-                if has_params {
-                    format!(
-                        "<blue>Log</blue>({DI}url={}, timeout_ms={}{DI_R})",
-                        url, timeout_ms
-                    )
-                } else {
-                    format!("<blue>Log</blue>({DI}url={}{DI_R})", url)
-                }
-            }
-            _ => "<blue>Log</blue>()".to_string(),
-        },
         HookAction::Report { handler } => {
             let format_str = handler
                 .as_ref()
@@ -430,17 +381,15 @@ fn format_action(action: &HookAction) -> String {
                 format!("<yellow>Report</yellow>({DI}format={}{DI_R})", format_str)
             }
         }
-        HookAction::FireAndForget { command, args } => {
-            let has_args = args.as_ref().map(|a| !a.is_empty()).unwrap_or(false);
-            if has_args {
-                let args_str = args.as_ref().map(|a| a.join(" ")).unwrap_or_default();
-                format!(
-                    "<green>FireAndForget</green>({DI}\"{} {}\"{DI_R})",
-                    command,
-                    truncate_string(&args_str, 30)
-                )
+        HookAction::Bash { command, params } => {
+            if params.is_empty() {
+                format!("<green>Bash</green>({DI}\"{}\"{DI_R})", command)
             } else {
-                format!("<green>FireAndForget</green>({DI}\"{}\"{DI_R})", command)
+                format!(
+                    "<green>Bash</green>({DI}\"{} {}\"{DI_R})",
+                    command,
+                    truncate_string(params, 30)
+                )
             }
         }
         HookAction::Call {
@@ -483,7 +432,7 @@ fn truncate_string(s: &str, max_len: usize) -> String {
 }
 
 /// Show detailed event/action configuration for a specific provider.
-fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Result<()> {
+fn run_provider_detail(provider: Provider, config: Option<&ClaudineConfig>) -> Result<()> {
     let term = crate::log::terminal();
     let clients = InstalledAiClients::new();
     let installed = clients.is_installed(provider.sniff_ai_cli());
@@ -503,14 +452,11 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
     log::data(&format!(" {}", docs.render(&term)));
     log::data("");
 
-    // Get provider config if available
-    let provider_config = config.and_then(|c| c.providers.get(&provider));
-
     // Build a sorted list of all events with their status
-    let mut event_rows: Vec<(AgenticEvent, Option<&EventBinding>)> = Vec::new();
+    let mut event_rows: Vec<(AgenticEvent, Option<&Vec<HookAction>>)> = Vec::new();
     for event in AgenticEvent::ALL {
-        let binding = provider_config.and_then(|pc| pc.events.get(&event));
-        event_rows.push((event, binding));
+        let actions = config.and_then(|c| c.actions.get(&event));
+        event_rows.push((event, actions));
     }
 
     // Build table
@@ -525,7 +471,7 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
         .alternate_background_color();
     table.layout_mut().left_margin = Margin::Chars(1);
 
-    for (event, binding) in &event_rows {
+    for (event, actions) in &event_rows {
         let support_level = provider.event_support_level(event);
         let support_cell: TableCellContent = match support_level {
             EventSupportLevel::Hook => "hook".into(),
@@ -535,23 +481,14 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
             EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}").render(&term).into(),
         };
 
-        let actions_cell: TableCellContent = match binding {
+        let actions_cell: TableCellContent = match actions {
             None => "-".into(),
-            Some(b) if !b.enabled => "-".into(),
-            Some(b) => {
-                if b.actions.is_empty() {
-                    Prose::new("{{dim}}(no actions){{reset}}")
-                        .render(&term)
-                        .into()
-                } else {
-                    let text = b
-                        .actions
-                        .iter()
-                        .map(format_action)
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    Prose::new(text).render(&term).into()
-                }
+            Some(a) if a.is_empty() => Prose::new("{{dim}}(no actions){{reset}}")
+                .render(&term)
+                .into(),
+            Some(a) => {
+                let text = a.iter().map(format_action).collect::<Vec<_>>().join("\n");
+                Prose::new(text).render(&term).into()
             }
         };
 
@@ -569,7 +506,7 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
     let total_unified_events = AgenticEvent::ALL.len();
     let configured_count = event_rows
         .iter()
-        .filter(|row| row.1.is_some_and(|eb| eb.enabled))
+        .filter(|row| row.1.is_some_and(|a| !a.is_empty()))
         .count();
 
     log::data("");
@@ -582,7 +519,7 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
     // Show enabled events table with descriptions
     let enabled_events: Vec<&AgenticEvent> = event_rows
         .iter()
-        .filter(|(_, binding)| binding.is_some_and(|b| b.enabled))
+        .filter(|(_, actions)| actions.is_some_and(|a| !a.is_empty()))
         .map(|(event, _)| event)
         .collect();
 
@@ -660,14 +597,14 @@ pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
     }
 
     // Try to load claudine config for sync checking
-    let config = load_config(None, None).ok();
+    let config = load_claudine_config(None, None).ok();
     render_protect_visibility(config.as_ref());
 
     // If a provider is specified, show detailed view for that provider
     if let Some(provider) = args.provider {
         let result = run_provider_detail(provider, config.as_ref());
 
-        // Validate sound effects for this provider only
+        // Validate sound effects
         if let Some(cfg) = config.as_ref() {
             validate_sound_effects(cfg);
         }
@@ -692,67 +629,13 @@ pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
     result
 }
 
-fn render_protect_visibility(config: Option<&HookerConfig>) {
-    let Some(config) = config else {
-        return;
-    };
-    let Some(protect) = config.settings.protect.as_ref() else {
-        return;
-    };
-
-    let mode = runtime_mode_assumption();
-    let posture = match protect.posture {
-        ProtectPosture::Advisory => "advisory",
-        ProtectPosture::Balanced => "balanced",
-        ProtectPosture::Strict => "strict",
-    };
-
-    let profiles = ProviderProtectProfiles::defaults();
-    let degraded = ALL_PROVIDERS
-        .iter()
-        .filter_map(|provider| {
-            let resolved = protect
-                .providers
-                .get(provider)
-                .map(|override_cfg| protect.merge_provider_override(override_cfg))
-                .unwrap_or_else(|| protect.clone());
-
-            let caps = profiles.capabilities(*provider);
-            if resolved.posture != ProtectPosture::Advisory
-                && (caps.pre_tool_gate == GateCapability::None
-                    || caps.completion_gate == GateCapability::None)
-            {
-                Some(provider.to_string())
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-
+fn render_protect_visibility(config: Option<&ClaudineConfig>) {
+    let Some(config) = config else { return };
     log::data("");
-    log::data(&format!(
-        "Protect: enabled (posture={posture}, runtime_assumption={mode})"
-    ));
-    if degraded.is_empty() {
-        log::data("Protect capability downgrades: none");
+    if config.protect.enabled {
+        log::data("Protect: enabled");
     } else {
-        log::data(&format!(
-            "Protect capability downgrades: {}",
-            degraded.join(", ")
-        ));
-    }
-}
-
-fn runtime_mode_assumption() -> &'static str {
-    let value = std::env::var("CLAUDINE_PROTECT_MODE")
-        .or_else(|_| std::env::var("CLAUDINE_YOLO"))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    if value.contains("yolo") || value == "1" || value == "true" || value == "on" {
-        "yolo"
-    } else {
-        "normal"
+        log::data("Protect: disabled");
     }
 }
 
@@ -760,7 +643,7 @@ fn runtime_mode_assumption() -> &'static str {
 fn run_simple(
     agents: &[(Provider, Box<dyn AgentConfigurator>)],
     clients: &InstalledAiClients,
-    config: Option<&HookerConfig>,
+    config: Option<&ClaudineConfig>,
 ) -> Result<()> {
     let mut table = Table::new().with_columns(vec![
         provider_column(),
@@ -791,10 +674,8 @@ fn run_simple(
                 .map(|c| expected_events_for_provider(c, provider, configurator))
                 .unwrap_or_default();
 
-            // Get ALL enabled events (including unsupported) to detect config errors
-            let all_enabled: HashSet<String> = config
-                .map(|c| all_enabled_events_for_provider(c, provider))
-                .unwrap_or_default();
+            // Get ALL enabled events to detect config errors
+            let all_enabled: HashSet<String> = config.map(all_enabled_events).unwrap_or_default();
 
             // Find unsupported events (enabled but not in expected because provider doesn't support them)
             let unsupported: HashSet<&String> = all_enabled
@@ -899,7 +780,7 @@ const NOT_ALLOWED: &str = "⚠️";
 fn run_verbose(
     agents: &[(Provider, Box<dyn AgentConfigurator>)],
     clients: &InstalledAiClients,
-    config: Option<&HookerConfig>,
+    config: Option<&ClaudineConfig>,
 ) -> Result<()> {
     // Build columns: Provider, ∃ (exists/installed), then one per event
     let mut columns = vec![provider_column(), TableColumn::new(bold("∃"))]; // existence symbol for installed
@@ -940,11 +821,11 @@ fn run_verbose(
                 NOT_ALLOWED.into()
             } else {
                 // Check if event is configured and get action count
-                let binding = config.and_then(|c| c.get_binding(provider, &event));
-                match binding {
+                let actions = config.and_then(|c| c.actions.get(&event));
+                match actions {
                     None => NOT_INSTALLED.into(),
-                    Some(b) if !b.enabled => NOT_INSTALLED.into(),
-                    Some(b) => action_count_indicator(b.actions.len()).into(),
+                    Some(a) if a.is_empty() => NOT_INSTALLED.into(),
+                    Some(a) => action_count_indicator(a.len()).into(),
                 }
             };
             row.push(cell);

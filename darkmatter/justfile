@@ -242,7 +242,7 @@ commit:
     @echo ""
     @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}"
+    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
@@ -300,6 +300,25 @@ implement topic phase plan="":
     @echo -e "{{BOLD}}Phase {{phase}}:{{RESET}} {{DIM}}{{topic}}{{RESET}}"
     @echo
     @claudine compose @prompts/implement.md --set '{ topic: "{{topic}}", phase: "{{phase}}", plan: "{{plan}}" }' || ( just _play error2 && exit 1 )
+
+_implement-spec spec:
+    @DIR="$(dirname "{{spec}}")" claudine compose @prompts/design.md --set '{ spec: "{{spec}}", dir: "${DIR}" }' --codex -y -v
+    @claudine compose @prompts/clarify.md --set '{  dir: "${DIR}" }' -y -i --codex
+
+
+spec:
+    #!/usr/bin/env bash
+    just _implement-spec "$(fd spec.md | rg "features/2" | fzf --border --border-label "Specification File" --header "choose the specification file" --height=15)" || ( echo "bye" && exit 1 )
+
+# Create a technical design document from a specification file
+design feat="":
+    #!/usr/bin/env bash
+    echo -e "We will create a tech-design.md document in the same directory as your specification file"
+    if [[ -z "${feat}" ]]; then
+        fd spec.md | rg "features|fixes" | rg "{{feat}}"
+    else
+        fd spec.md | rg "features|fixes"
+    fi
 
 # review this package using the Codex CLI
 review *args="":

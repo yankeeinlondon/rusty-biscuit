@@ -10,7 +10,6 @@ use super::types::{
     ReferenceInsertionContext, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceSet,
     ReferenceSyntax, classify_target, make_reference_id,
 };
-use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::Markdown;
 use crate::markdown::compose::cache::RunLocalCache;
 use crate::markdown::compose::conditions;
@@ -19,6 +18,7 @@ use crate::markdown::compose::transclusion::{
     DirectiveKind, TransclusionRuntime, parse_directives, parse_frontmatter_refs,
 };
 use crate::markdown::compose::{ComposeOperation, ComposeSource, EffectiveStateBuilder};
+use crate::markdown::normalize::HeadingLevel;
 use crate::markdown::types::MarkdownResult;
 
 /// Runtime state for reference graph analysis.
@@ -142,7 +142,8 @@ fn flatten_node(node: &ReferenceGraphNode, graph: &ReferenceGraph, out: &mut Vec
             for (&line, insertions) in insertion_map.range(last_line..record.origin.line) {
                 if emitted_insertion_lines.insert(line) {
                     for insertion in insertions {
-                        if let Some(child_node) = graph.node_by_id(insertion.child_node_id.as_ref()) {
+                        if let Some(child_node) = graph.node_by_id(insertion.child_node_id.as_ref())
+                        {
                             flatten_node(child_node, graph, out);
                         }
                     }
@@ -901,7 +902,10 @@ mod tests {
 
     #[test]
     fn source_to_id_unknown() {
-        assert_eq!(source_to_id(&ComposeSource::Unknown), NodeId::from("unknown"));
+        assert_eq!(
+            source_to_id(&ComposeSource::Unknown),
+            NodeId::from("unknown")
+        );
     }
 
     #[test]

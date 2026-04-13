@@ -877,10 +877,9 @@ fn extract_file_ref(value: &Value, field: &str) -> Result<String, HarnessError> 
     if let Some(s) = extract_string_field(value, field) {
         return Ok(s);
     }
-    // For simple scalars, the value itself might be a string stored in the field
     Err(HarnessError::PathResolutionFailed {
         raw: value.to_string(),
-        detail: "expected a file path string or an object with a `file` field".to_string(),
+        detail: format!("expected a file path string or an object with a `{field}` field"),
     })
 }
 
@@ -1258,5 +1257,29 @@ mod tests {
         });
         let err = parse_harness_plan(&fm, source(), &test_ctx()).unwrap_err();
         assert!(matches!(err, HarnessError::InvalidShape { .. }));
+    }
+
+    #[test]
+    fn reject_file_validation_object_without_file_field() {
+        let fm = json!({
+            "post_checks": {
+                "file_exists": {
+                    "name": "goose.md",
+                    "say": "missing"
+                }
+            }
+        });
+
+        let err = parse_harness_plan(&fm, source(), &test_ctx()).unwrap_err();
+        let message = err.to_string();
+
+        assert!(
+            message.contains("`file` field"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("\"name\":\"goose.md\""),
+            "unexpected error: {message}"
+        );
     }
 }

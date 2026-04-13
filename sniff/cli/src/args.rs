@@ -40,8 +40,14 @@ pub enum RepoAction {
     Packages {
         filter: Vec<String>,
     },
-    Package,
-    PackageArea,
+    Package {
+        no_error: bool,
+        on_error: Option<String>,
+    },
+    PackageArea {
+        no_error: bool,
+        on_error: Option<String>,
+    },
     DirtyPackages {
         filter: Vec<String>,
     },
@@ -69,6 +75,31 @@ pub enum RepoAction {
     StagedSourceCode(FileListArgs),
     UnstagedSourceCode(FileListArgs),
     DirtyFiles(FileListArgs),
+    HasMergeConflict,
+    RecentCommits {
+        period: Option<String>,
+        actions: Vec<RecentCommitActionArg>,
+        package: Option<String>,
+        package_area: Option<String>,
+        no_error: bool,
+        on_error: Option<String>,
+    },
+    SourceCodeChanges {
+        period: Option<String>,
+        actions: Vec<RecentCommitActionArg>,
+        package: Option<String>,
+        package_area: Option<String>,
+        no_error: bool,
+        on_error: Option<String>,
+    },
+    DocumentationChanges {
+        period: Option<String>,
+        actions: Vec<RecentCommitActionArg>,
+        package: Option<String>,
+        package_area: Option<String>,
+        no_error: bool,
+        on_error: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +206,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    /// Include structured performance timings and counters in the output
+    #[arg(long, global = true)]
+    pub perf: bool,
+
     /// Increase output verbosity
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     pub verbose: u8,
@@ -193,11 +228,52 @@ pub struct Cli {
 }
 
 // ---------------------------------------------------------------------------
+// Shared install flag group
+// ---------------------------------------------------------------------------
+
+/// Shared flag group for `install` and `install-plan` subcommands across every
+/// program category.
+#[derive(clap::Args, Debug, Clone, Default)]
+pub struct InstallCommandArgs {
+    /// Program name to install (binary name or identifier)
+    pub program: Option<String>,
+
+    /// Build the plan and print what would happen; do not execute
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Skip the interactive confirmation prompt
+    #[arg(short = 'y', long)]
+    pub yes: bool,
+
+    /// Force a specific package manager (e.g. `brew`, `cargo`, `pnpm`)
+    #[arg(long, value_name = "MANAGER")]
+    pub via: Option<String>,
+
+    /// Force the plan builder to treat sudo as unavailable
+    #[arg(long)]
+    pub no_sudo: bool,
+
+    /// Bypass the host capability cache and rebuild it
+    #[arg(short = 'f', long)]
+    pub force: bool,
+}
+
+/// Discriminator returned by `Commands::install_command_args()` so dispatch
+/// can tell `install` and `install-plan` apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallCommandKind {
+    Install,
+    InstallPlan,
+}
+
+// ---------------------------------------------------------------------------
 // Per-category action enums with shell completion candidates
 // ---------------------------------------------------------------------------
 
 macro_rules! define_program_action {
     ($action_name:ident, $candidates_fn:ident, $program_enum:ty) => {
+        #[allow(dead_code)]
         fn $candidates_fn() -> Vec<clap_complete::engine::CompletionCandidate> {
             use clap_complete::engine::CompletionCandidate;
             use sniff::programs::ProgramMetadata;
@@ -223,11 +299,11 @@ macro_rules! define_program_action {
         #[derive(Subcommand, Debug, Clone)]
         pub enum $action_name {
             /// Install a program (interactive picker if no name given)
-            Install {
-                /// Program name to install (binary name or identifier)
-                #[arg(add = clap_complete::engine::ArgValueCandidates::new($candidates_fn))]
-                program: Option<String>,
-            },
+            Install(InstallCommandArgs),
+
+            /// Show the install plan without executing anything
+            #[command(name = "install-plan")]
+            InstallPlan(InstallCommandArgs),
         }
     };
 }
@@ -262,6 +338,7 @@ define_program_action!(
 define_program_action!(AgentAction, agent_candidates, sniff::programs::AiCli);
 
 /// Generates merged completion candidates across all program categories.
+#[allow(dead_code)]
 fn all_program_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
     let mut all = editor_candidates();
     all.extend(utility_candidates());
@@ -277,11 +354,11 @@ fn all_program_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
 #[derive(Subcommand, Debug, Clone)]
 pub enum AllProgramAction {
     /// Install a program (interactive picker if no name given)
-    Install {
-        /// Program name to install (binary name or identifier)
-        #[arg(add = clap_complete::engine::ArgValueCandidates::new(all_program_candidates))]
-        program: Option<String>,
-    },
+    Install(InstallCommandArgs),
+
+    /// Show the install plan without executing anything
+    #[command(name = "install-plan")]
+    InstallPlan(InstallCommandArgs),
 }
 
 // ---------------------------------------------------------------------------
@@ -569,9 +646,25 @@ pub enum RepoSubcommand {
         filter: Vec<String>,
     },
     /// Output the package name for the current directory
-    Package,
+    Package {
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
     /// Output the package area for the current directory
-    PackageArea,
+    PackageArea {
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
     /// Output only package names that have uncommitted changes
     DirtyPackages {
         /// Filter packages by name (or @area); prefix with ! to exclude
@@ -616,6 +709,72 @@ pub enum RepoSubcommand {
     IsCurrentPackageAreaDirty,
     /// Exit 0 if the current package area has source code changes, exit 1 otherwise
     PackageAreaHasSourceCodeChanges,
+    /// Exit 0 if merge conflicts are detected, exit 1 otherwise
+    #[command(name = "has-merge-conflict")]
+    HasMergeConflict,
+    /// Show recent commits for a period
+    #[command(name = "recent-commits")]
+    RecentCommits {
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        period: Option<String>,
+        /// Filter to conventional commit actions; repeat to OR multiple actions together
+        #[arg(long = "action", value_enum, value_name = "ACTION")]
+        actions: Vec<RecentCommitActionArg>,
+        /// Scope to a specific package
+        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
+    /// Show source code changes for a period
+    #[command(name = "source-code-changes")]
+    SourceCodeChanges {
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        period: Option<String>,
+        /// Filter to conventional commit actions; repeat to OR multiple actions together
+        #[arg(long = "action", value_enum, value_name = "ACTION")]
+        actions: Vec<RecentCommitActionArg>,
+        /// Scope to a specific package
+        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
+    /// Show documentation changes for a period
+    #[command(name = "documentation-changes")]
+    DocumentationChanges {
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        period: Option<String>,
+        /// Filter to conventional commit actions; repeat to OR multiple actions together
+        #[arg(long = "action", value_enum, value_name = "ACTION")]
+        actions: Vec<RecentCommitActionArg>,
+        /// Scope to a specific package
+        #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
+        package: Option<String>,
+        /// Scope to a specific package area
+        #[arg(long, value_name = "AREA", add = clap_complete::engine::ArgValueCandidates::new(repo_package_area_candidates))]
+        package_area: Option<String>,
+        /// Exit 0 with no output when no results found (default is exit 1)
+        #[arg(long)]
+        no_error: bool,
+        /// Message to display when no results found
+        #[arg(long, value_name = "MESSAGE")]
+        on_error: Option<String>,
+    },
 }
 
 impl Commands {
@@ -667,62 +826,88 @@ impl Commands {
         )
     }
 
-    /// Returns true if this command has an install action.
+    /// Returns true if this command has a plain `install` action (not `install-plan`).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_install_action(&self) -> bool {
-        matches!(
-            self,
-            Commands::Programs {
-                action: Some(AllProgramAction::Install { .. }),
-            } | Commands::Editors {
-                action: Some(EditorAction::Install { .. }),
-            } | Commands::Utilities {
-                action: Some(UtilityAction::Install { .. }),
-            } | Commands::LanguagePackageManagers {
-                action: Some(LangPkgMgrAction::Install { .. }),
-            } | Commands::OsPackageManagers {
-                action: Some(OsPkgMgrAction::Install { .. }),
-            } | Commands::TtsClients {
-                action: Some(TtsClientAction::Install { .. }),
-            } | Commands::TerminalApps {
-                action: Some(TerminalAppAction::Install { .. }),
-            } | Commands::Audio {
-                action: Some(AudioAction::Install { .. }),
-            } | Commands::Agents {
-                action: Some(AgentAction::Install { .. }),
-            }
-        )
+        self.install_command_args()
+            .map(|(k, _)| k == InstallCommandKind::Install)
+            .unwrap_or(false)
     }
 
-    /// Returns the program name from an install action, if present.
+    /// Returns true if this command is an `install-plan` action.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn is_install_plan_action(&self) -> bool {
+        self.install_command_args()
+            .map(|(k, _)| k == InstallCommandKind::InstallPlan)
+            .unwrap_or(false)
+    }
+
+    /// Returns the program name from an install-like action, if present.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn install_program_name(&self) -> Option<&str> {
+        self.install_command_args()
+            .and_then(|(_, args)| args.program.as_deref())
+    }
+
+    /// Returns the kind (install vs install-plan) and the shared args for
+    /// install-like commands. Returns `None` for non-install commands.
+    pub fn install_command_args(&self) -> Option<(InstallCommandKind, &InstallCommandArgs)> {
+        use Commands::*;
         match self {
-            Commands::Programs {
-                action: Some(AllProgramAction::Install { program }),
-            }
-            | Commands::Editors {
-                action: Some(EditorAction::Install { program }),
-            }
-            | Commands::Utilities {
-                action: Some(UtilityAction::Install { program }),
-            }
-            | Commands::LanguagePackageManagers {
-                action: Some(LangPkgMgrAction::Install { program }),
-            }
-            | Commands::OsPackageManagers {
-                action: Some(OsPkgMgrAction::Install { program }),
-            }
-            | Commands::TtsClients {
-                action: Some(TtsClientAction::Install { program }),
-            }
-            | Commands::TerminalApps {
-                action: Some(TerminalAppAction::Install { program }),
-            }
-            | Commands::Audio {
-                action: Some(AudioAction::Install { program }),
-            }
-            | Commands::Agents {
-                action: Some(AgentAction::Install { program }),
-            } => program.as_deref(),
+            Programs {
+                action: Some(AllProgramAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            Programs {
+                action: Some(AllProgramAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            Editors {
+                action: Some(EditorAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            Editors {
+                action: Some(EditorAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            Utilities {
+                action: Some(UtilityAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            Utilities {
+                action: Some(UtilityAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            LanguagePackageManagers {
+                action: Some(LangPkgMgrAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            LanguagePackageManagers {
+                action: Some(LangPkgMgrAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            OsPackageManagers {
+                action: Some(OsPkgMgrAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            OsPackageManagers {
+                action: Some(OsPkgMgrAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            TtsClients {
+                action: Some(TtsClientAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            TtsClients {
+                action: Some(TtsClientAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            TerminalApps {
+                action: Some(TerminalAppAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            TerminalApps {
+                action: Some(TerminalAppAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            Audio {
+                action: Some(AudioAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            Audio {
+                action: Some(AudioAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
+            Agents {
+                action: Some(AgentAction::Install(args)),
+            } => Some((InstallCommandKind::Install, args)),
+            Agents {
+                action: Some(AgentAction::InstallPlan(args)),
+            } => Some((InstallCommandKind::InstallPlan, args)),
             _ => None,
         }
     }
@@ -867,8 +1052,16 @@ impl Commands {
                         sub_filter.clone()
                     },
                 },
-                Some(RepoSubcommand::Package) => RepoAction::Package,
-                Some(RepoSubcommand::PackageArea) => RepoAction::PackageArea,
+                Some(RepoSubcommand::Package { no_error, on_error }) => RepoAction::Package {
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
+                Some(RepoSubcommand::PackageArea { no_error, on_error }) => {
+                    RepoAction::PackageArea {
+                        no_error: *no_error,
+                        on_error: on_error.clone(),
+                    }
+                }
                 Some(RepoSubcommand::DirtyPackages { filter: sub_filter }) => {
                     RepoAction::DirtyPackages {
                         filter: if sub_filter.is_empty() {
@@ -932,6 +1125,7 @@ impl Commands {
                 Some(RepoSubcommand::PackageAreaHasSourceCodeChanges) => {
                     RepoAction::PackageAreaHasSourceCodeChanges
                 }
+                Some(RepoSubcommand::HasMergeConflict) => RepoAction::HasMergeConflict,
                 Some(RepoSubcommand::DirtySourceCode(args)) => {
                     RepoAction::DirtySourceCode(args.clone())
                 }
@@ -942,6 +1136,51 @@ impl Commands {
                     RepoAction::UnstagedSourceCode(args.clone())
                 }
                 Some(RepoSubcommand::DirtyFiles(args)) => RepoAction::DirtyFiles(args.clone()),
+                Some(RepoSubcommand::RecentCommits {
+                    period,
+                    actions,
+                    package,
+                    package_area,
+                    no_error,
+                    on_error,
+                }) => RepoAction::RecentCommits {
+                    period: period.clone(),
+                    actions: actions.clone(),
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
+                Some(RepoSubcommand::SourceCodeChanges {
+                    period,
+                    actions,
+                    package,
+                    package_area,
+                    no_error,
+                    on_error,
+                }) => RepoAction::SourceCodeChanges {
+                    period: period.clone(),
+                    actions: actions.clone(),
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
+                Some(RepoSubcommand::DocumentationChanges {
+                    period,
+                    actions,
+                    package,
+                    package_area,
+                    no_error,
+                    on_error,
+                }) => RepoAction::DocumentationChanges {
+                    period: period.clone(),
+                    actions: actions.clone(),
+                    package: package.clone(),
+                    package_area: package_area.clone(),
+                    no_error: *no_error,
+                    on_error: on_error.clone(),
+                },
             }),
             _ => None,
         }
@@ -1019,6 +1258,30 @@ pub enum ServiceStateArg {
     Stopped,
 }
 
+/// Conventional commit action filter for `repo recent-commits`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum RecentCommitActionArg {
+    Feat,
+    Chore,
+    Refactor,
+    Test,
+    Style,
+    Fix,
+}
+
+impl RecentCommitActionArg {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Feat => "feat",
+            Self::Chore => "chore",
+            Self::Refactor => "refactor",
+            Self::Test => "test",
+            Self::Style => "style",
+            Self::Fix => "fix",
+        }
+    }
+}
+
 pub const HELP_TEMPLATE: &str = "\
 {name} {version}
 {about}
@@ -1049,10 +1312,11 @@ Commands:
     sniff blast-radius    Find docs affected by changed source files
 
   Programs:
-    sniff programs        Show all installed programs
-    sniff editors         Show editors (supports 'install' subcommand)
-    sniff utilities       Show utilities
-    sniff agents          Show AI agent CLI tools
+    sniff programs                        Show all installed programs
+    sniff programs install-plan <name>    Explain how a program would be installed
+    sniff editors                         Show editors (supports 'install' and 'install-plan')
+    sniff utilities                       Show utilities
+    sniff agents                          Show AI agent CLI tools
 
   Services:
     sniff services        Show running services
@@ -1088,6 +1352,12 @@ Git:
   sniff repo staged-source-code       List staged source code files
   sniff repo dirty-files              List all dirty files
   sniff repo remote origin            Inspect the 'origin' remote
+
+Recent Commits:
+  sniff repo recent-commits           Show commits from last 3 days
+  sniff repo recent-commits 1w        Show commits from last week
+  sniff repo source-code-changes 1w   Source code changes in last week
+  sniff repo documentation-changes 1w Documentation changes in last week
 
 Packages:
   sniff repo packages                 List all package names
@@ -1275,7 +1545,7 @@ mod tests {
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::Package),
+                    repo_subcommand: Some(RepoSubcommand::Package { .. }),
                     ..
                 })
             ));
@@ -1284,7 +1554,7 @@ mod tests {
             assert!(matches!(
                 cli.command,
                 Some(Commands::Repo {
-                    repo_subcommand: Some(RepoSubcommand::PackageArea),
+                    repo_subcommand: Some(RepoSubcommand::PackageArea { .. }),
                     ..
                 })
             ));
@@ -1345,13 +1615,70 @@ mod tests {
         }
 
         #[test]
+        fn repo_recent_commits_actions_parse() {
+            let cli = parse_args(&[
+                "repo",
+                "recent-commits",
+                "--action",
+                "feat",
+                "--action",
+                "fix",
+            ])
+            .unwrap();
+
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand: Some(RepoSubcommand::RecentCommits { actions, .. }),
+                    ..
+                }) if actions == vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix]
+            ));
+        }
+
+        #[test]
+        fn repo_source_code_changes_actions_parse() {
+            let cli = parse_args(&[
+                "repo",
+                "source-code-changes",
+                "--action",
+                "feat",
+                "--action",
+                "fix",
+            ])
+            .unwrap();
+
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand:
+                        Some(RepoSubcommand::SourceCodeChanges { actions, .. }),
+                    ..
+                }) if actions == vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix]
+            ));
+        }
+
+        #[test]
+        fn repo_documentation_changes_actions_parse() {
+            let cli = parse_args(&["repo", "documentation-changes", "--action", "chore"]).unwrap();
+
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand:
+                        Some(RepoSubcommand::DocumentationChanges { actions, .. }),
+                    ..
+                }) if actions == vec![RecentCommitActionArg::Chore]
+            ));
+        }
+
+        #[test]
         fn editors_install_no_name_parses() {
             let cli = parse_args(&["editors", "install"]).unwrap();
             if let Some(Commands::Editors {
-                action: Some(EditorAction::Install { program }),
+                action: Some(EditorAction::Install(args)),
             }) = cli.command
             {
-                assert!(program.is_none());
+                assert!(args.program.is_none());
             } else {
                 panic!("Expected Editors install with no program");
             }
@@ -1361,10 +1688,10 @@ mod tests {
         fn editors_install_with_name_parses() {
             let cli = parse_args(&["editors", "install", "vim"]).unwrap();
             if let Some(Commands::Editors {
-                action: Some(EditorAction::Install { program }),
+                action: Some(EditorAction::Install(args)),
             }) = cli.command
             {
-                assert_eq!(program.as_deref(), Some("vim"));
+                assert_eq!(args.program.as_deref(), Some("vim"));
             } else {
                 panic!("Expected Editors install with program name");
             }
@@ -1383,22 +1710,24 @@ mod tests {
         #[test]
         fn programs_install_no_name_parses() {
             let cli = parse_args(&["programs", "install"]).unwrap();
-            assert!(matches!(
-                cli.command,
-                Some(Commands::Programs {
-                    action: Some(AllProgramAction::Install { program: None }),
-                })
-            ));
+            if let Some(Commands::Programs {
+                action: Some(AllProgramAction::Install(args)),
+            }) = cli.command
+            {
+                assert!(args.program.is_none());
+            } else {
+                panic!("Expected Programs install with no program");
+            }
         }
 
         #[test]
         fn programs_install_with_name_parses() {
             let cli = parse_args(&["programs", "install", "nvim"]).unwrap();
             if let Some(Commands::Programs {
-                action: Some(AllProgramAction::Install { program }),
+                action: Some(AllProgramAction::Install(args)),
             }) = cli.command
             {
-                assert_eq!(program.as_deref(), Some("nvim"));
+                assert_eq!(args.program.as_deref(), Some("nvim"));
             } else {
                 panic!("Expected Programs install with program name");
             }
@@ -1454,14 +1783,18 @@ mod tests {
         #[test]
         fn is_install_action_returns_true() {
             let cmd = Commands::Editors {
-                action: Some(EditorAction::Install { program: None }),
+                action: Some(EditorAction::Install(InstallCommandArgs {
+                    program: None,
+                    ..Default::default()
+                })),
             };
             assert!(cmd.is_install_action());
 
             let cmd = Commands::Programs {
-                action: Some(AllProgramAction::Install {
+                action: Some(AllProgramAction::Install(InstallCommandArgs {
                     program: Some("vim".to_string()),
-                }),
+                    ..Default::default()
+                })),
             };
             assert!(cmd.is_install_action());
         }
@@ -1478,14 +1811,18 @@ mod tests {
         #[test]
         fn install_program_name_extracts_name() {
             let cmd = Commands::Editors {
-                action: Some(EditorAction::Install {
+                action: Some(EditorAction::Install(InstallCommandArgs {
                     program: Some("vim".to_string()),
-                }),
+                    ..Default::default()
+                })),
             };
             assert_eq!(cmd.install_program_name(), Some("vim"));
 
             let cmd = Commands::Editors {
-                action: Some(EditorAction::Install { program: None }),
+                action: Some(EditorAction::Install(InstallCommandArgs {
+                    program: None,
+                    ..Default::default()
+                })),
             };
             assert_eq!(cmd.install_program_name(), None);
 
@@ -1543,6 +1880,31 @@ mod tests {
                 assert_eq!(filter, vec!["top-level".to_string()]);
             } else {
                 panic!("Expected Deps action");
+            }
+
+            let cmd = Commands::Repo {
+                latest_versions: false,
+                filter: vec![],
+                repo_subcommand: Some(RepoSubcommand::RecentCommits {
+                    period: Some("1w".to_string()),
+                    actions: vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix],
+                    package: None,
+                    package_area: None,
+                    no_error: false,
+                    on_error: None,
+                }),
+            };
+            if let Some(RepoAction::RecentCommits {
+                period, actions, ..
+            }) = cmd.to_repo_action()
+            {
+                assert_eq!(period.as_deref(), Some("1w"));
+                assert_eq!(
+                    actions,
+                    vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix]
+                );
+            } else {
+                panic!("Expected RecentCommits action");
             }
         }
 
@@ -1980,6 +2342,62 @@ mod tests {
                 assert_eq!(args.on_error.as_deref(), Some("No changes found"));
             } else {
                 panic!("Expected DirtySourceCode with no_error + on_error");
+            }
+        }
+    }
+
+    mod install_command_args {
+        use super::*;
+
+        #[test]
+        fn editors_install_parses_with_dry_run_and_yes() {
+            let cli = parse_args(&["editors", "install", "vim", "--dry-run", "-y"]).unwrap();
+            if let Some(Commands::Editors {
+                action: Some(EditorAction::Install(args)),
+            }) = cli.command
+            {
+                assert_eq!(args.program.as_deref(), Some("vim"));
+                assert!(args.dry_run);
+                assert!(args.yes);
+                assert!(!args.no_sudo);
+                assert!(!args.force);
+                assert!(args.via.is_none());
+            } else {
+                panic!("Expected Editors install with InstallCommandArgs");
+            }
+        }
+
+        #[test]
+        fn editors_install_plan_parses() {
+            let cli = parse_args(&["editors", "install-plan", "vim"]).unwrap();
+            assert!(cli.command.as_ref().unwrap().is_install_plan_action());
+            assert_eq!(
+                cli.command.as_ref().unwrap().install_program_name(),
+                Some("vim")
+            );
+        }
+
+        #[test]
+        fn editors_install_via_and_no_sudo_parse() {
+            let cli = parse_args(&[
+                "editors",
+                "install",
+                "vim",
+                "--via",
+                "brew",
+                "--no-sudo",
+                "--force",
+            ])
+            .unwrap();
+            if let Some(Commands::Editors {
+                action: Some(EditorAction::Install(args)),
+            }) = cli.command
+            {
+                assert_eq!(args.via.as_deref(), Some("brew"));
+                assert!(args.no_sudo);
+                assert!(args.force);
+            } else {
+                panic!("Expected editors install with via+no_sudo+force");
             }
         }
     }

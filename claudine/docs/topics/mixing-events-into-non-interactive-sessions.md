@@ -1,3 +1,5 @@
+
+
 1. Can we propagate context to subagents?
 
    Yes, via the experimental.chat.system.transform hook in the bridge plugin. This hook fires for every LLM call (including subagent sessions) and can inject text into the system prompt. Adding something like "You are in a non-interactive session. Never ask questions." would propagate to all subagents automatically.

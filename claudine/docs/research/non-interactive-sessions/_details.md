@@ -1,5 +1,20 @@
 ---
-sequence: "@claudine/providers.yaml"
+sequence: "@claudine/docs/providers.yaml"
+success: 
+    say: "Completed research for {{state.name}}"
+error:
+    say: "Error during research of {{state.name}}"
+operation: "research"
+skip_when:
+    file_exists:
+        file: "{{state.file}}"
+        say: "The research on non-interactive sessions for {{state.name}} is already in place. Skipping."
+        stderr: "The research on non-interactive sessions for <b>{{state.name}}</b> is already in place. Skipping."
+post_checks:
+    file_exists:
+        file: "{{state.file}}"
+        say: "The research on {{state.name}} was completed but the file is missing!"
+        stderr: "The research on {{state.name}} was completed but the file is missing! Expected results to be saved to <b>{{state.file}}</b>."
 ---
 
 # Non-Interactive Sessions with Agents in Claudine
@@ -124,3 +139,4 @@ You will create/update the Markdown file "{{state.file}}" with the **research** 
         - if you came into an existing document which you updated then leave the `created` property 'as is'
 
 > **IMPORTANT:** keep the caller/user informed by providing updates to your progress whenever possible
+> **IMPORTANT:** the final output to "{{state.file}}" should be idiomatic CommonMark + GFM Markdown. Tables are Markdown Tables. Links are Markdown Links. If you want to provide a data visualization then use Mermaid code blocks.

@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
+use super::protocol::opencode::{
+    OpenCodeError, OpenCodeEvent, OpenCodeInit, OpenCodeStepComplete, OpenCodeStepFinish,
+    OpenCodeStepStart, OpenCodeText,
+};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -55,14 +59,11 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
         }
     }
 
-    fn handle_init(&mut self, obj: &Value) {
-        self.session_id = obj
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+    fn handle_init(&mut self, init: OpenCodeInit) {
+        self.session_id = init.session_id;
         // Override model if stream provides it
-        if let Some(model) = obj.get("model").and_then(|v| v.as_str()) {
-            self.model = Some(model.to_string());
+        if let Some(model) = init.model {
+            self.model = Some(model);
         }
         super::trace_session_metadata(
             Provider::OpenCode,
@@ -82,32 +83,22 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
         self.sink.on_session_start(&meta);
     }
 
-    fn handle_text(&mut self, obj: &Value) -> Option<StreamChunk> {
-        // Real format: {"type":"text","part":{"text":"hello",...}}
-        // Legacy format: {"type":"text","text":"hello"}
-        let text = obj
-            .get("part")
-            .and_then(|p| p.get("text"))
-            .or_else(|| obj.get("text"))
-            .or_else(|| obj.get("content"))
-            .and_then(|t| t.as_str())?;
+    fn handle_text(&mut self, event: OpenCodeText) -> Option<StreamChunk> {
+        let text = event.resolved_text()?;
         if text.is_empty() {
             return None;
         }
-        self.assistant_text.push_str(text);
-        Some(StreamChunk::Text(text.to_string()))
+        self.assistant_text.push_str(&text);
+        Some(StreamChunk::Text(text))
     }
 
-    fn handle_step_start(&mut self, obj: &Value) {
+    fn handle_step_start(&mut self, step: OpenCodeStepStart) {
         // Capture session ID from first step_start and emit session_start.
         // OpenCode doesn't send a dedicated init/session_start event; the
         // session ID arrives in the first step_start payload instead.
         let first_step = self.session_id.is_none();
         if first_step {
-            self.session_id = obj
-                .get("sessionID")
-                .and_then(|v| v.as_str())
-                .map(String::from);
+            self.session_id = step.resolved_session_id();
 
             let mut meta = EventMeta::default();
             if let Some(session_id) = &self.session_id {
@@ -126,33 +117,27 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
         self.sink.on_step_start(&meta);
     }
 
-    fn handle_step_finish(&mut self, obj: &Value) {
-        // Real format: {"type":"step_finish","part":{"cost":0.02,"tokens":{...}}}
-        let part = obj.get("part");
+    fn handle_step_finish(&mut self, event: OpenCodeStepFinish) {
+        if let Some(part) = event.part {
+            if let Some(tokens) = part.tokens {
+                let step = NormalizedTokenUsage {
+                    input: tokens.input,
+                    output: tokens.output,
+                    total: tokens.total,
+                    cache_read: tokens.cache.and_then(|c| c.read),
+                };
+                self.token_usage.accumulate(&step);
+            }
 
-        // Accumulate per-step usage from part.tokens
-        if let Some(tokens) = part.and_then(|p| p.get("tokens")) {
-            let step = NormalizedTokenUsage {
-                input: tokens.get("input").and_then(|v| v.as_u64()),
-                output: tokens.get("output").and_then(|v| v.as_u64()),
-                total: tokens.get("total").and_then(|v| v.as_u64()),
-                cache_read: tokens
-                    .get("cache")
-                    .and_then(|c| c.get("read"))
-                    .and_then(|v| v.as_u64()),
-            };
-            self.token_usage.accumulate(&step);
+            if let Some(cost) = part.cost {
+                self.cost_usd += cost;
+            }
+
+            if let Some(reason) = part.reason {
+                self.provider_status = Some(reason);
+            }
         }
 
-        // Accumulate cost from part.cost
-        if let Some(cost) = part.and_then(|p| p.get("cost")).and_then(|v| v.as_f64()) {
-            self.cost_usd += cost;
-        }
-
-        // Stop reason
-        if let Some(reason) = part.and_then(|p| p.get("reason")).and_then(|v| v.as_str()) {
-            self.provider_status = Some(reason.to_string());
-        }
         super::trace_summary_update(
             Provider::OpenCode,
             self.provider_status.as_deref(),
@@ -164,28 +149,28 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
         self.sink.on_step_finish(&meta);
     }
 
-    fn handle_step_complete(&mut self, obj: &Value) {
+    fn handle_step_complete(&mut self, event: OpenCodeStepComplete) {
         self.num_turns += 1;
 
         // Legacy format: {"type":"step_complete","usage":{...},"cost_usd":...}
-        if let Some(usage) = obj.get("usage") {
+        if let Some(usage) = event.usage {
             let step = NormalizedTokenUsage {
-                input: usage.get("input_tokens").and_then(|v| v.as_u64()),
-                output: usage.get("output_tokens").and_then(|v| v.as_u64()),
-                total: usage.get("total_tokens").and_then(|v| v.as_u64()),
+                input: usage.input_tokens,
+                output: usage.output_tokens,
+                total: usage.total_tokens,
                 cache_read: None,
             };
             self.token_usage.accumulate(&step);
         }
 
-        if let Some(cost) = obj.get("cost_usd").and_then(|v| v.as_f64()) {
+        if let Some(cost) = event.cost_usd {
             self.cost_usd += cost;
         }
 
-        self.duration_ms = obj
-            .get("duration_ms")
-            .and_then(|v| v.as_u64())
-            .or(self.duration_ms);
+        if let Some(duration) = event.duration_ms {
+            self.duration_ms = Some(duration);
+        }
+
         super::trace_summary_update(
             Provider::OpenCode,
             self.provider_status.as_deref(),
@@ -197,19 +182,10 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
         self.sink.on_turn_complete(&meta);
     }
 
-    fn handle_error(&mut self, obj: &Value) {
+    fn handle_error(&mut self, event: OpenCodeError) {
         self.is_error = true;
-        self.error_kind = obj
-            .get("error_type")
-            .or_else(|| obj.get("error").and_then(|e| e.get("type")))
-            .and_then(|t| t.as_str())
-            .map(String::from);
-        self.error_message = obj
-            .get("error_message")
-            .or_else(|| obj.get("error").and_then(|e| e.get("message")))
-            .or_else(|| obj.get("message"))
-            .and_then(|m| m.as_str())
-            .map(String::from);
+        self.error_kind = event.resolved_kind();
+        self.error_message = event.resolved_message();
 
         self.sink
             .on_warning(self.error_message.as_deref().unwrap_or("Step failure"));
@@ -217,54 +193,6 @@ impl<S: StreamEventSink> OpenCodeStreamParser<S> {
         let meta = EventMeta::default();
         self.sink.on_turn_error(&meta);
     }
-}
-
-fn opencode_tool_name(obj: &Value) -> Option<&str> {
-    obj.get("name")
-        .or_else(|| obj.get("tool_name"))
-        .or_else(|| obj.get("toolName"))
-        .or_else(|| obj.get("tool"))
-        .and_then(Value::as_str)
-        .or_else(|| {
-            obj.get("part").and_then(|part| {
-                part.get("name")
-                    .or_else(|| part.get("tool_name"))
-                    .or_else(|| part.get("toolName"))
-                    .or_else(|| part.get("tool"))
-                    .and_then(Value::as_str)
-            })
-        })
-}
-
-fn opencode_value<'a>(obj: &'a Value, keys: &[&str]) -> Option<&'a Value> {
-    keys.iter().find_map(|key| obj.get(*key)).or_else(|| {
-        obj.get("part")
-            .and_then(|part| keys.iter().find_map(|key| part.get(*key)))
-    })
-}
-
-fn opencode_tool_id(obj: &Value) -> Option<String> {
-    opencode_value(obj, &["id", "tool_id", "toolUseId", "tool_use_id"])
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-}
-
-fn opencode_tool_input(obj: &Value) -> Option<Value> {
-    opencode_value(obj, &["input", "parameters", "arguments", "args", "params"]).cloned()
-}
-
-fn opencode_tool_output(obj: &Value) -> Option<Value> {
-    opencode_value(obj, &["output", "result", "content"]).cloned()
-}
-
-fn opencode_tool_status(obj: &Value) -> Option<String> {
-    opencode_value(obj, &["status"])
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-}
-
-fn opencode_tool_error(obj: &Value) -> Option<Value> {
-    opencode_value(obj, &["error"]).cloned()
 }
 
 impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
@@ -275,7 +203,7 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
             return Ok(None);
         }
 
-        let obj: Value = serde_json::from_str(line).map_err(|e| {
+        let raw: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
             super::trace_malformed_line(Provider::OpenCode, self.line_num, &e.to_string());
@@ -285,65 +213,71 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
             }
         })?;
 
-        let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let event_type = raw.get("type").and_then(|t| t.as_str()).unwrap_or("");
         super::trace_parser_event(Provider::OpenCode, event_type, self.line_num);
 
-        match event_type {
-            "init" | "session_start" => {
-                self.handle_init(&obj);
+        match serde_json::from_value::<OpenCodeEvent>(raw) {
+            Ok(OpenCodeEvent::Init(init) | OpenCodeEvent::SessionStart(init)) => {
+                self.handle_init(init);
                 Ok(None)
             }
-            "step_start" => {
-                self.handle_step_start(&obj);
+            Ok(OpenCodeEvent::StepStart(step)) => {
+                self.handle_step_start(step);
                 Ok(None)
             }
-            "text" | "text_delta" | "assistant_text" => Ok(self.handle_text(&obj)),
-            "step_finish" => {
-                self.handle_step_finish(&obj);
+            Ok(
+                OpenCodeEvent::Text(text)
+                | OpenCodeEvent::TextDelta(text)
+                | OpenCodeEvent::AssistantText(text),
+            ) => Ok(self.handle_text(text)),
+            Ok(OpenCodeEvent::StepFinish(sf)) => {
+                self.handle_step_finish(sf);
                 Ok(None)
             }
-            "step_complete" | "turn_complete" => {
-                self.handle_step_complete(&obj);
+            Ok(OpenCodeEvent::StepComplete(sc) | OpenCodeEvent::TurnComplete(sc)) => {
+                self.handle_step_complete(sc);
                 Ok(None)
             }
-            "error" | "step_error" => {
-                self.handle_error(&obj);
+            Ok(OpenCodeEvent::Error(err) | OpenCodeEvent::StepError(err)) => {
+                self.handle_error(err);
                 Ok(None)
             }
-            "tool_use" | "tool_start" => {
+            Ok(OpenCodeEvent::ToolUse(tool) | OpenCodeEvent::ToolStart(tool)) => {
                 self.tool_calls += 1;
-                let tool_name = opencode_tool_name(&obj);
-                super::trace_tool_event(Provider::OpenCode, self.tool_calls, tool_name);
+                let resolved = tool.resolve();
+                super::trace_tool_event(
+                    Provider::OpenCode,
+                    self.tool_calls,
+                    resolved.name.as_deref(),
+                );
                 let mut meta = EventMeta::default();
-                let tool_id = opencode_tool_id(&obj);
-                let tool_input = opencode_tool_input(&obj);
-
-                if let Some(tool_id) = &tool_id {
+                if let Some(tool_id) = &resolved.id {
                     meta.extra
                         .insert("tool_id".into(), Value::String(tool_id.clone()));
                 }
-                if let Some(tool_name) = tool_name {
+                if let Some(tool_name) = &resolved.name {
                     meta.extra
-                        .insert("tool_name".into(), Value::String(tool_name.to_string()));
+                        .insert("tool_name".into(), Value::String(tool_name.clone()));
                 }
-                if let Some(tool_input) = &tool_input {
+                if let Some(tool_input) = &resolved.input {
                     meta.extra.insert("tool_input".into(), tool_input.clone());
                 }
-                if let Some(tool_id) = tool_id {
+                if let Some(tool_id) = resolved.id {
                     self.tool_uses
-                        .insert(tool_id, (tool_name.map(ToOwned::to_owned), tool_input));
+                        .insert(tool_id, (resolved.name, resolved.input));
                 }
                 self.sink.on_before_tool(&meta);
                 Ok(None)
             }
-            "tool_result" | "tool_end" => {
-                let tool_id = opencode_tool_id(&obj);
-                let (tool_name, tool_input) = tool_id
+            Ok(OpenCodeEvent::ToolResult(tool) | OpenCodeEvent::ToolEnd(tool)) => {
+                let resolved = tool.resolve();
+                let (tool_name, tool_input) = resolved
+                    .id
                     .as_ref()
                     .and_then(|id| self.tool_uses.remove(id))
-                    .unwrap_or((opencode_tool_name(&obj).map(ToOwned::to_owned), None));
+                    .unwrap_or((resolved.name.clone(), None));
                 let mut meta = EventMeta::default();
-                if let Some(tool_id) = tool_id {
+                if let Some(tool_id) = resolved.id {
                     meta.extra.insert("tool_id".into(), Value::String(tool_id));
                 }
                 if let Some(tool_name) = tool_name {
@@ -353,19 +287,19 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
                 if let Some(tool_input) = tool_input {
                     meta.extra.insert("tool_input".into(), tool_input);
                 }
-                if let Some(tool_output) = opencode_tool_output(&obj) {
+                if let Some(tool_output) = resolved.output {
                     meta.extra.insert("tool_response".into(), tool_output);
                 }
-                if let Some(status) = opencode_tool_status(&obj) {
+                if let Some(status) = resolved.status {
                     meta.extra.insert("status".into(), Value::String(status));
                 }
-                if let Some(error) = opencode_tool_error(&obj) {
+                if let Some(error) = resolved.error {
                     meta.extra.insert("error".into(), error);
                 }
                 self.sink.on_after_tool(&meta);
                 Ok(None)
             }
-            _ => Ok(None),
+            Err(_) => Ok(None),
         }
     }
 
@@ -378,7 +312,7 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
             self.provider_status.as_deref(),
         );
         let has_usage = self.token_usage.input.is_some() || self.token_usage.output.is_some();
-        StreamExecutionSummary {
+        let mut summary = StreamExecutionSummary {
             provider: Provider::OpenCode,
             session_id: self.session_id,
             model: self.model,
@@ -410,11 +344,16 @@ impl<S: StreamEventSink + Send> StreamParser for OpenCodeStreamParser<S> {
             } else {
                 None
             },
+            permission_prompts: None,
+            user_input_prompts: None,
             rate_limit: None,
             context_usage: None,
+            badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
-        }
+        };
+        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::OpenCode);
+        summary
     }
 }
 

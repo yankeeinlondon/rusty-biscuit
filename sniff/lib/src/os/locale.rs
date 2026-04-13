@@ -93,8 +93,16 @@ pub fn detect_locale() -> LocaleInfo {
         .or_else(|| lc_messages.as_deref().filter(|s| is_extractable_locale(s)))
         .or_else(|| lang.as_deref().filter(|s| is_extractable_locale(s)));
 
-    let preferred_language = effective_locale.and_then(extract_language_code);
-    let encoding = effective_locale.and_then(extract_encoding);
+    let (preferred_language, encoding) = if let Some(locale) = effective_locale {
+        (extract_language_code(locale), extract_encoding(locale))
+    } else if let Some(windows_locale) = detect_windows_locale() {
+        (
+            extract_language_code(&windows_locale),
+            extract_encoding(&windows_locale).or_else(|| Some("UTF-8".to_string())),
+        )
+    } else {
+        (None, None)
+    };
 
     LocaleInfo {
         lang,
@@ -105,6 +113,27 @@ pub fn detect_locale() -> LocaleInfo {
         preferred_language,
         encoding,
     }
+}
+
+#[cfg(target_os = "windows")]
+fn detect_windows_locale() -> Option<String> {
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", "(Get-Culture).Name"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let name = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.replace('-', "_"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn detect_windows_locale() -> Option<String> {
+    None
 }
 
 /// Checks if a locale string can yield meaningful language/encoding info.
@@ -198,7 +227,7 @@ pub fn extract_encoding(locale: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
 
     // ========== Locale Tests ==========
 
@@ -322,52 +351,7 @@ mod tests {
 
     mod detect_locale_tests {
         use super::*;
-
-        // Mutex to ensure env var tests don't interfere with each other
-        static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-        /// RAII guard for temporarily setting environment variables in tests.
-        struct ScopedEnv {
-            vars: Vec<(String, Option<String>)>,
-        }
-
-        impl ScopedEnv {
-            fn new() -> Self {
-                Self { vars: Vec::new() }
-            }
-
-            fn set(&mut self, key: &str, value: &str) -> &mut Self {
-                // Store original value for restoration
-                let original = std::env::var(key).ok();
-                self.vars.push((key.to_string(), original));
-                // SAFETY: Tests are run single-threaded with ENV_MUTEX protection,
-                // and we restore the original values in Drop.
-                unsafe { std::env::set_var(key, value) };
-                self
-            }
-
-            fn remove(&mut self, key: &str) -> &mut Self {
-                let original = std::env::var(key).ok();
-                self.vars.push((key.to_string(), original));
-                // SAFETY: Tests are run single-threaded with ENV_MUTEX protection,
-                // and we restore the original values in Drop.
-                unsafe { std::env::remove_var(key) };
-                self
-            }
-        }
-
-        impl Drop for ScopedEnv {
-            fn drop(&mut self) {
-                // Restore original values in reverse order
-                for (key, original) in self.vars.iter().rev() {
-                    // SAFETY: Restoring original values; tests are single-threaded.
-                    match original {
-                        Some(value) => unsafe { std::env::set_var(key, value) },
-                        None => unsafe { std::env::remove_var(key) },
-                    }
-                }
-            }
-        }
+        use crate::test_helpers::ENV_MUTEX;
 
         #[test]
         fn test_detect_locale_reads_lang() {

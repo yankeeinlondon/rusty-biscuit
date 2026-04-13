@@ -1328,7 +1328,8 @@ impl SoundEffect {
     /// Play this sound effect synchronously.
     ///
     /// This method blocks until playback completes. For non-blocking playback,
-    /// use `play_async` (requires the `async` feature).
+    /// use `play_async` (requires the `async` feature). Async callers that
+    /// need synchronous playback should use `tokio::task::spawn_blocking`.
     ///
     /// When the `sfx-native` feature is enabled, plays directly through the OS
     /// audio subsystem via rodio. On macOS with `sfx-native-macos`, routes to
@@ -1361,7 +1362,14 @@ impl SoundEffect {
     ///
     /// When the `sfx-native` feature is enabled, options are applied directly
     /// via rodio's Player. Otherwise, control depends on the host player's
-    /// capabilities.
+    /// capabilities. If a native device-open operation times out, playa
+    /// disables further native playback attempts for the rest of the process
+    /// and this method falls back directly to host playback on later calls.
+    ///
+    /// This method blocks until playback completes or times out. On Linux with
+    /// `sfx-native-linux`, PulseAudio wait loops are bounded by deadlines.
+    /// Async callers should use `tokio::task::spawn_blocking` to avoid
+    /// blocking the async runtime.
     pub fn play_with_options(
         self,
         options: &crate::PlaybackOptions,
@@ -1725,6 +1733,22 @@ impl SoundEffect {
         use std::sync::Arc;
         let bytes = Arc::new(self.as_bytes().to_vec());
         crate::playback::playa_async(crate::AudioData::Bytes(bytes)).await
+    }
+
+    /// Return the kebab-case names of all compiled-in sound effects, sorted alphabetically.
+    ///
+    /// The list reflects only the feature flags enabled at compile time.
+    /// With all features (`sound-effects`) this returns 88 names.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// for name in playa::SoundEffect::all_names() {
+    ///     println!("{name}");
+    /// }
+    /// ```
+    pub fn all_names() -> &'static [&'static str] {
+        effect_durations::EFFECT_NAMES
     }
 }
 

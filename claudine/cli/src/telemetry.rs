@@ -124,7 +124,7 @@ fn command_name(command: &Commands) -> &'static str {
     match command {
         Commands::Handle(_) => "handle",
         Commands::Completions(_) => "completions",
-        Commands::Init(_) => "init",
+        Commands::Config(_) => "config",
         Commands::Sync(_) => "sync",
         Commands::Hooks(_) => "hooks",
         Commands::Actions(_) => "actions",
@@ -510,7 +510,8 @@ mod tests {
             interactive: false,
             model: None,
             output: None,
-            system_prompt: None,
+            append_system_prompt: None,
+            replace_system_prompt: None,
             timeout: None,
             dry_run: false,
             quiet: false,

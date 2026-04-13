@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::error::Result;
-use crate::events::{HookerConfig, Provider};
+use crate::events::Provider;
 
 use super::atomic::atomic_write;
 use super::backup::create_backup;
 use super::claudine_handle_command;
-use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
+use super::trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
 
 pub(crate) struct ClaudeConfigurator;
 
@@ -41,7 +41,7 @@ impl AgentConfigurator for ClaudeConfigurator {
 
     fn register(
         &self,
-        config: &HookerConfig,
+        plan: &ProviderHookPlan,
         config_dir: Option<&Path>,
     ) -> Result<RegistrationResult> {
         let settings_path = config_path(config_dir);
@@ -55,9 +55,14 @@ impl AgentConfigurator for ClaudeConfigurator {
             }
         }
 
-        // Check if already in sync (same events registered as in config)
-        if self.is_in_sync(config, config_dir)? {
+        // Check if already in sync (same events registered as in plan)
+        if self.is_in_sync(plan, config_dir)? {
             return Ok(RegistrationResult::Skipped(SkipReason::AlreadyRegistered));
+        }
+
+        if plan.events.is_empty() {
+            self.deregister(config_dir)?;
+            return Ok(RegistrationResult::Registered { event_count: 0 });
         }
 
         create_backup(&settings_path, Provider::Claude)?;
@@ -72,49 +77,33 @@ impl AgentConfigurator for ClaudeConfigurator {
             .as_object_mut()
             .unwrap();
 
-        // Get events configured for this provider
-        let provider_config = match config.providers.get(&Provider::Claude) {
-            Some(pc) => pc,
-            None => {
-                // No config for Claude - remove all claudine hooks
-                self.deregister(config_dir)?;
-                return Ok(RegistrationResult::Registered { event_count: 0 });
-            }
-        };
-
         // Build set of native event names we want to keep
-        let expected_natives: std::collections::HashSet<String> = provider_config
+        let expected_natives: std::collections::HashSet<String> = plan
             .events
             .iter()
-            .filter(|(_, binding)| binding.enabled)
-            .filter_map(|(event, _)| {
+            .filter_map(|event| {
                 Provider::Claude
                     .registration_native_event_name(event)
                     .map(str::to_string)
             })
             .collect();
 
-        // First pass: remove claudine hooks for events NOT in config
+        // First pass: remove claudine hooks for events NOT in plan
         let hook_keys: Vec<String> = hooks.keys().cloned().collect();
         for native_name in hook_keys {
-            if !expected_natives.contains(&native_name) {
-                // Remove claudine hooks from this event
-                if let Some(arr) = hooks.get_mut(&native_name).and_then(|v| v.as_array_mut()) {
-                    arr.retain(|entry| !is_claudine_hook_group(entry));
-                }
+            if !expected_natives.contains(&native_name)
+                && let Some(arr) = hooks.get_mut(&native_name).and_then(|v| v.as_array_mut())
+            {
+                arr.retain(|entry| !is_claudine_hook_group(entry));
             }
         }
         // Clean up empty hook arrays
         hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
 
-        // Second pass: add/update hooks for events in config
+        // Second pass: add/update hooks for events in plan
         let handle_command = claudine_handle_command(Provider::Claude);
         let mut event_count = 0;
-        for (event, binding) in &provider_config.events {
-            // Skip disabled events
-            if !binding.enabled {
-                continue;
-            }
+        for event in &plan.events {
             // Skip events that Claude Code doesn't support
             let Some(native_name) = Provider::Claude.registration_native_event_name(event) else {
                 continue;
@@ -134,9 +123,7 @@ impl AgentConfigurator for ClaudeConfigurator {
                 .entry(native_name.to_string())
                 .or_insert_with(|| json!([]));
             if let Some(arr) = existing.as_array_mut() {
-                // Remove any existing Claudine entries first
                 arr.retain(|entry| !is_claudine_hook_group(entry));
-                // Add new Claudine entry
                 if let Some(new_arr) = hook_entry.as_array() {
                     arr.extend(new_arr.iter().cloned());
                 }
@@ -229,32 +216,24 @@ impl AgentConfigurator for ClaudeConfigurator {
 }
 
 impl ClaudeConfigurator {
-    /// Check if the registered hooks match the expected events from config.
+    /// Check if the registered hooks match the expected events from the plan.
     ///
     /// Returns true only if both sets contain exactly the same events.
-    fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
+    fn is_in_sync(&self, plan: &ProviderHookPlan, config_dir: Option<&Path>) -> Result<bool> {
         use std::collections::HashSet;
 
         let registered: HashSet<String> = self.registered_events(config_dir)?.into_iter().collect();
 
-        // Get expected events from config for this provider
-        let expected: HashSet<String> = config
-            .providers
-            .get(&Provider::Claude)
-            .map(|p| {
-                p.events
-                    .iter()
-                    .filter(|(event, binding)| {
-                        // Only count enabled events that Claude supports
-                        binding.enabled
-                            && Provider::Claude
-                                .registration_native_event_name(event)
-                                .is_some()
-                    })
-                    .map(|(event, _)| event.to_string())
-                    .collect()
+        let expected: HashSet<String> = plan
+            .events
+            .iter()
+            .filter(|event| {
+                Provider::Claude
+                    .registration_native_event_name(event)
+                    .is_some()
             })
-            .unwrap_or_default();
+            .map(|event| event.to_string())
+            .collect();
 
         Ok(registered == expected)
     }
@@ -330,32 +309,16 @@ fn config_path(config_dir: Option<&Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use tempfile::TempDir;
 
-    use crate::events::{AgenticEvent, EventBinding, GlobalSettings, ProviderConfig};
+    use crate::events::AgenticEvent;
 
     use super::*;
 
-    fn test_config(events: Vec<AgenticEvent>) -> HookerConfig {
-        let mut event_map = HashMap::new();
-        for event in events {
-            event_map.insert(
-                event,
-                EventBinding {
-                    enabled: true,
-                    actions: vec![],
-                    matcher: None,
-                },
-            );
-        }
-        let mut providers = HashMap::new();
-        providers.insert(Provider::Claude, ProviderConfig { events: event_map });
-        HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings::default(),
-            providers,
+    fn test_plan(events: Vec<AgenticEvent>) -> ProviderHookPlan {
+        ProviderHookPlan {
+            events,
+            canonical_for: None,
         }
     }
 
@@ -366,7 +329,7 @@ mod tests {
         fs::write(&settings, r#"{"hooks": {}}"#).unwrap();
 
         let configurator = ClaudeConfigurator;
-        let config = test_config(vec![AgenticEvent::BeforeTool, AgenticEvent::TurnComplete]);
+        let config = test_plan(vec![AgenticEvent::BeforeTool, AgenticEvent::TurnComplete]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
         match result {
@@ -397,7 +360,7 @@ mod tests {
         // - If CLI is not installed → returns NotDetected
         let tmp = TempDir::new().unwrap();
         let configurator = ClaudeConfigurator;
-        let config = test_config(vec![AgenticEvent::BeforeTool]);
+        let config = test_plan(vec![AgenticEvent::BeforeTool]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
 
@@ -465,7 +428,7 @@ mod tests {
         .unwrap();
 
         let configurator = ClaudeConfigurator;
-        let config = test_config(vec![AgenticEvent::BeforeTool]);
+        let config = test_plan(vec![AgenticEvent::BeforeTool]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
         assert!(matches!(
@@ -561,7 +524,7 @@ mod tests {
         .unwrap();
 
         let configurator = ClaudeConfigurator;
-        let config = test_config(vec![AgenticEvent::TurnComplete]);
+        let config = test_plan(vec![AgenticEvent::TurnComplete]);
         configurator.register(&config, Some(tmp.path())).unwrap();
 
         let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
@@ -642,7 +605,7 @@ mod tests {
         let configurator = ClaudeConfigurator;
 
         // First register with one event
-        let config1 = test_config(vec![AgenticEvent::BeforeTool]);
+        let config1 = test_plan(vec![AgenticEvent::BeforeTool]);
         configurator.register(&config1, Some(tmp.path())).unwrap();
 
         // Verify initial state
@@ -650,7 +613,7 @@ mod tests {
         assert_eq!(events, vec!["before_tool"]);
 
         // Re-register with two events
-        let config2 = test_config(vec![AgenticEvent::BeforeTool, AgenticEvent::TurnComplete]);
+        let config2 = test_plan(vec![AgenticEvent::BeforeTool, AgenticEvent::TurnComplete]);
         let result = configurator.register(&config2, Some(tmp.path())).unwrap();
 
         // Should register (not skip)
@@ -677,7 +640,7 @@ mod tests {
         let configurator = ClaudeConfigurator;
 
         // First register with two events
-        let config1 = test_config(vec![AgenticEvent::BeforeTool, AgenticEvent::TurnComplete]);
+        let config1 = test_plan(vec![AgenticEvent::BeforeTool, AgenticEvent::TurnComplete]);
         configurator.register(&config1, Some(tmp.path())).unwrap();
 
         // Verify initial state
@@ -685,7 +648,7 @@ mod tests {
         assert_eq!(events.len(), 2);
 
         // Re-register with only one event
-        let config2 = test_config(vec![AgenticEvent::BeforeTool]);
+        let config2 = test_plan(vec![AgenticEvent::BeforeTool]);
         let result = configurator.register(&config2, Some(tmp.path())).unwrap();
 
         // Should register (not skip)
@@ -716,7 +679,7 @@ mod tests {
         let configurator = ClaudeConfigurator;
 
         // First register
-        let config = test_config(vec![AgenticEvent::BeforeTool]);
+        let config = test_plan(vec![AgenticEvent::BeforeTool]);
         configurator.register(&config, Some(tmp.path())).unwrap();
 
         // Re-register with identical config

@@ -2,10 +2,13 @@ pub mod actions;
 pub mod agents;
 pub mod completions;
 pub mod compose;
+pub mod config_tui;
 pub mod handle;
 pub mod help;
 pub mod hooks;
+#[cfg(test)]
 pub mod init;
+pub mod init_wizard;
 pub mod link_display;
 pub mod logs;
 pub mod mcp;

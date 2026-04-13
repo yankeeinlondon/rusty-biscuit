@@ -20,7 +20,7 @@ System service detection across multiple init systems.
 ## Key Types
 
 ```rust
-use sniff_lib::services::{detect_services, ServicesInfo, Service, ServiceState};
+use sniff::services::{detect_services, ServicesInfo, Service, ServiceState};
 
 // Detect everything
 let info: ServicesInfo = detect_services();
@@ -62,7 +62,7 @@ sniff services --json                # JSON output
 Detection uses multiple fallback methods with evidence tracking:
 
 ```rust
-use sniff_lib::services::ServiceManager;
+use sniff::services::ServiceManager;
 
 let mgr = ServiceManager::detect();
 println!("Init: {:?}", mgr.init_system);

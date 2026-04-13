@@ -8,8 +8,11 @@ use crate::ducking::{DuckingBackend, NoopBackend};
 #[cfg(all(target_os = "macos", feature = "audio-ducking-macos"))]
 use crate::ducking::{MacOsBackend, MediaKeysBackend};
 
+#[cfg(all(target_os = "windows", feature = "audio-ducking-windows"))]
+use crate::ducking::WindowsBackend;
+
 #[cfg(all(target_os = "linux", feature = "audio-ducking-linux"))]
-use crate::ducking::{AlsaBackend, LinuxBackend};
+use crate::ducking::LinuxBackend;
 
 /// Creates the appropriate ducking backend for the current platform.
 ///
@@ -17,7 +20,7 @@ use crate::ducking::{AlsaBackend, LinuxBackend};
 ///
 /// - **macOS**: Returns `MacOsBackend` (CoreAudio virtual master volume)
 /// - **Windows**: Returns `WindowsBackend` (WASAPI per-session volume)
-/// - **Linux**: Returns `LinuxBackend` (PulseAudio/PipeWire with ALSA fallback)
+/// - **Linux**: Returns `LinuxBackend` (PulseAudio/PipeWire) or `NoopBackend`
 /// - **Other**: Returns `NoopBackend` (no-op, graceful degradation)
 ///
 /// ## Returns
@@ -58,29 +61,48 @@ pub fn create_backend() -> Box<dyn DuckingBackend> {
         return Box::new(NoopBackend::new());
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", feature = "audio-ducking-windows"))]
     {
-        // Phase 4 will implement this
+        let backend = WindowsBackend::new();
+        if backend.is_available() {
+            return Box::new(backend);
+        }
+        return Box::new(NoopBackend::new());
+    }
+
+    #[cfg(all(target_os = "windows", not(feature = "audio-ducking-windows")))]
+    {
+        use std::sync::Once;
+        static WARN_ONCE: Once = Once::new();
+        WARN_ONCE.call_once(|| {
+            eprintln!(
+                "playa: audio ducking on Windows requires the `audio-ducking-windows` feature; \
+                 falling back to noop"
+            );
+        });
         return Box::new(NoopBackend::new());
     }
 
     #[cfg(all(target_os = "linux", feature = "audio-ducking-linux"))]
     {
-        // Try PulseAudio/PipeWire first
+        // Try PulseAudio/PipeWire only
         let linux_backend = LinuxBackend::new();
         if linux_backend.is_available() {
             return Box::new(linux_backend);
         }
 
-        // Fall back to ALSA master mixer
-        let alsa_backend = AlsaBackend::new();
-        if alsa_backend.is_available() {
-            eprintln!("Warning: PulseAudio not available, using ALSA fallback (affects all audio)");
-            return Box::new(alsa_backend);
-        }
+        // PulseAudio unavailable: skip ALSA fallback (it would also duck
+        // Playa's own output) and degrade to noop.
+        use std::sync::Once;
+        static WARN_ONCE: Once = Once::new();
+        WARN_ONCE.call_once(|| {
+            eprintln!(
+                "playa: PulseAudio/PipeWire unavailable; skipping Linux ducking because \
+                 ALSA fallback would also duck Playa's own output"
+            );
+        });
 
-        // Last resort: no-op
-        return Box::new(NoopBackend::new());
+        Box::new(NoopBackend::new())
     }
 
     #[cfg(all(target_os = "linux", not(feature = "audio-ducking-linux")))]
@@ -122,25 +144,28 @@ pub fn backend_name() -> &'static str {
         return "noop";
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", feature = "audio-ducking-windows"))]
     {
-        return "noop"; // Will be "windows-wasapi" after Phase 4
+        let backend = WindowsBackend::new();
+        if backend.is_available() {
+            return "windows-wasapi";
+        }
+        return "noop";
+    }
+
+    #[cfg(all(target_os = "windows", not(feature = "audio-ducking-windows")))]
+    {
+        return "noop";
     }
 
     #[cfg(all(target_os = "linux", feature = "audio-ducking-linux"))]
     {
-        // Check which backend would actually be used
         let linux_backend = LinuxBackend::new();
         if linux_backend.is_available() {
             return "linux-pulse";
         }
 
-        let alsa_backend = AlsaBackend::new();
-        if alsa_backend.is_available() {
-            return "linux-alsa";
-        }
-
-        return "noop";
+        "noop"
     }
 
     #[cfg(all(target_os = "linux", not(feature = "audio-ducking-linux")))]
@@ -203,12 +228,10 @@ mod tests {
     #[test]
     fn linux_factory_creates_real_backend() {
         let backend = create_backend();
-        // Backend will be either linux-pulse (if PulseAudio available) or
-        // linux-alsa (fallback for non-PA systems)
         let name = backend.name();
         assert!(
-            name == "linux-pulse" || name == "linux-alsa" || name == "noop",
-            "expected linux-pulse, linux-alsa, or noop, got {}",
+            name == "linux-pulse" || name == "noop",
+            "expected linux-pulse or noop, got {}",
             name
         );
     }
@@ -220,11 +243,22 @@ mod tests {
         assert_eq!(backend.name(), "noop");
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", feature = "audio-ducking-windows"))]
     #[test]
-    fn windows_factory_creates_backend() {
+    fn windows_factory_creates_real_backend() {
         let backend = create_backend();
-        // Currently returns noop, will be windows-wasapi after Phase 4
+        let name = backend.name();
+        assert!(
+            name == "windows-wasapi" || name == "noop",
+            "expected windows-wasapi or noop, got {}",
+            name
+        );
+    }
+
+    #[cfg(all(target_os = "windows", not(feature = "audio-ducking-windows")))]
+    #[test]
+    fn windows_factory_creates_noop_without_feature() {
+        let backend = create_backend();
         assert_eq!(backend.name(), "noop");
     }
 }

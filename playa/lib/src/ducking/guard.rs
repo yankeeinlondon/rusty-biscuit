@@ -77,8 +77,7 @@ impl DuckGuard {
         // Fade to floor
         backend.fade_to_floor(&snapshot, &config).await?;
 
-        // Create restoration channel
-        let (tx, rx) = mpsc::channel(1);
+        let (tx, rx) = mpsc::channel(8);
         let restored = Arc::new(AtomicBool::new(false));
 
         // Spawn background restoration task
@@ -151,13 +150,23 @@ async fn restoration_task(
     config: DuckConfig,
     restored: Arc<AtomicBool>,
 ) {
-    // Wait for restoration request (only one message type for now)
-    if let Some(RestoreMessage::Restore) = rx.recv().await {
-        // Perform the actual restoration
-        if let Err(e) = backend.fade_restore(&snapshot, &config).await {
-            eprintln!("Warning: failed to restore audio volumes: {}", e);
+    match rx.recv().await {
+        Some(RestoreMessage::Restore) => {
+            if let Err(e) = backend.fade_restore(&snapshot, &config).await {
+                eprintln!("Warning: failed to restore audio volumes: {}", e);
+            }
+            restored.store(true, Ordering::SeqCst);
         }
-        restored.store(true, Ordering::SeqCst);
+        None => {
+            eprintln!(
+                "Warning: DuckGuard dropped before restoration task was ready; \
+                 attempting immediate restore"
+            );
+            restored.store(true, Ordering::SeqCst);
+            if let Err(e) = backend.fade_restore(&snapshot, &config).await {
+                eprintln!("Warning: fallback restore also failed: {}", e);
+            }
+        }
     }
 }
 

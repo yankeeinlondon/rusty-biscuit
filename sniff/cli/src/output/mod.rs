@@ -4,19 +4,21 @@
 //! Each major section (OS, Hardware, Network, Filesystem, Programs, Services)
 //! has its own submodule.
 
+mod commit_blocks;
 mod filesystem;
 mod hardware;
 mod just;
 mod network;
 mod os;
 mod programs;
+pub(crate) mod recent_commits;
 mod remote;
 mod services;
 mod topics;
 
 use std::path::Path;
 
-use sniff::SniffResult;
+use sniff::{PerformanceReport, SniffResult};
 
 use crate::args::{DocsFilter, FilesFilter, RepoAction};
 
@@ -201,6 +203,44 @@ pub(crate) fn format_uptime(seconds: u64) -> String {
     } else {
         parts.join(", ")
     }
+}
+
+fn render_performance_section(report: &PerformanceReport) -> String {
+    let mut out = String::new();
+    out.push_str("\n## Performance\n\n");
+    out.push_str(&format!("Total: {:.2} ms\n", report.total_duration_ms));
+
+    if !report.stages.is_empty() {
+        out.push_str("\nStages:\n");
+        let mut stages: Vec<_> = report.stages.iter().collect();
+        stages.sort_by(|a, b| {
+            b.1.total_duration_ms
+                .total_cmp(&a.1.total_duration_ms)
+                .then_with(|| a.0.cmp(b.0))
+        });
+        for (name, stage) in stages {
+            out.push_str(&format!(
+                "- {}: {:.2} ms total ({} call{}, max {:.2} ms, last {:.2} ms)\n",
+                name,
+                stage.total_duration_ms,
+                stage.calls,
+                if stage.calls == 1 { "" } else { "s" },
+                stage.max_duration_ms,
+                stage.last_duration_ms
+            ));
+        }
+    }
+
+    if !report.counters.is_empty() {
+        out.push_str("\nCounters:\n");
+        let mut counters: Vec<_> = report.counters.iter().collect();
+        counters.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+        for (name, value) in counters {
+            out.push_str(&format!("- {}: {}\n", name, value));
+        }
+    }
+
+    out
 }
 
 // ============================================================================
@@ -388,21 +428,11 @@ pub fn render_text(
         }
         OutputFilter::Repo => {
             match repo_action {
-                Some(RepoAction::Package) => {
-                    let rendered = render_repo_package(result, base_dir, verbose);
-                    if rendered.is_empty() {
-                        std::process::exit(1);
-                    }
-                    out.push_str(&rendered);
-                    out.push('\n');
+                Some(RepoAction::Package { .. }) => {
+                    unreachable!("Package is handled as an early return in commands.rs")
                 }
-                Some(RepoAction::PackageArea) => {
-                    let rendered = render_repo_package_area(result, base_dir);
-                    if rendered.is_empty() {
-                        std::process::exit(1);
-                    }
-                    out.push_str(&rendered);
-                    out.push('\n');
+                Some(RepoAction::PackageArea { .. }) => {
+                    unreachable!("PackageArea is handled as an early return in commands.rs")
                 }
                 Some(RepoAction::Packages { filter }) => {
                     let rendered = render_repo_packages(result, filter);
@@ -540,11 +570,7 @@ pub fn render_text(
             }
         }
         OutputFilter::Language => {
-            if let Some(ref filesystem) = result.filesystem
-                && let Some(ref langs) = filesystem.languages
-            {
-                out.push_str(&render_language_section(langs, verbose));
-            }
+            out.push_str(&render_language_section(result, verbose, base_dir));
         }
         OutputFilter::Files => {
             if let Some(ref filesystem) = result.filesystem
@@ -581,6 +607,10 @@ pub fn render_text(
                 "Programs, Services, Just, BlastRadius, and Remote filters should be handled separately"
             )
         }
+    }
+
+    if let Some(ref performance) = result.performance {
+        out.push_str(&render_performance_section(performance));
     }
 
     out
@@ -735,13 +765,37 @@ fn apply_filter_to_json(
     }
 }
 
+fn attach_performance(
+    mut filtered_json: serde_json::Value,
+    result: &SniffResult,
+) -> serde_json::Value {
+    let Some(performance) = result.performance.as_ref() else {
+        return filtered_json;
+    };
+
+    let performance_json = serde_json::to_value(performance).unwrap_or(serde_json::Value::Null);
+    match &mut filtered_json {
+        serde_json::Value::Object(map) => {
+            map.insert("performance".to_string(), performance_json);
+            filtered_json
+        }
+        _ => serde_json::json!({
+            "data": filtered_json,
+            "performance": performance_json,
+        }),
+    }
+}
+
 pub fn print_json(
     result: &SniffResult,
     filter: OutputFilter,
     docs_filter: &DocsFilter,
     files_filter: &FilesFilter,
 ) -> serde_json::Result<()> {
-    let filtered_json = apply_filter_to_json(result, filter, docs_filter, files_filter);
+    let filtered_json = attach_performance(
+        apply_filter_to_json(result, filter, docs_filter, files_filter),
+        result,
+    );
     println!("{}", serde_json::to_string_pretty(&filtered_json)?);
     Ok(())
 }
@@ -749,6 +803,7 @@ pub fn print_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sniff::{PerformanceReport, performance::PerformanceStage};
 
     mod docs_filter {
         use super::*;
@@ -1027,5 +1082,51 @@ mod tests {
             format_uptime(16 * 86400 + 13 * 3600 + 26 * 60),
             "16 days, 13 hours, 26 minutes"
         );
+    }
+
+    #[test]
+    fn attach_performance_to_object_filter_output() {
+        let result = SniffResult {
+            os: None,
+            hardware: None,
+            network: None,
+            filesystem: None,
+            performance: Some(PerformanceReport {
+                total_duration_ms: 12.5,
+                stages: std::collections::BTreeMap::from([(
+                    "detect.total".to_string(),
+                    PerformanceStage {
+                        calls: 1,
+                        total_duration_ms: 12.5,
+                        max_duration_ms: 12.5,
+                        last_duration_ms: 12.5,
+                    },
+                )]),
+                counters: std::collections::BTreeMap::from([("files".to_string(), 3)]),
+            }),
+        };
+
+        let filtered = attach_performance(serde_json::json!({"name": "sniff"}), &result);
+        assert_eq!(filtered["name"], "sniff");
+        assert_eq!(filtered["performance"]["total_duration_ms"], 12.5);
+    }
+
+    #[test]
+    fn attach_performance_wraps_non_object_output() {
+        let result = SniffResult {
+            os: None,
+            hardware: None,
+            network: None,
+            filesystem: None,
+            performance: Some(PerformanceReport {
+                total_duration_ms: 8.0,
+                stages: std::collections::BTreeMap::new(),
+                counters: std::collections::BTreeMap::from([("files".to_string(), 2)]),
+            }),
+        };
+
+        let filtered = attach_performance(serde_json::json!(["a", "b"]), &result);
+        assert_eq!(filtered["data"], serde_json::json!(["a", "b"]));
+        assert_eq!(filtered["performance"]["counters"]["files"], 2);
     }
 }

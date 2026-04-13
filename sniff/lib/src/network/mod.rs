@@ -1,12 +1,16 @@
 use crate::Result;
+use crate::performance;
 use crate::request::NetworkRequest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(feature = "network")]
 use std::net::IpAddr;
+#[cfg(any(target_os = "windows", test))]
 use std::process::Command;
 #[cfg(feature = "network")]
 use std::sync::Mutex;
+use std::time::Instant;
+use tracing::Level;
 #[cfg(feature = "network")]
 use tracing::{debug, info};
 use tracing::{instrument, warn};
@@ -16,6 +20,18 @@ pub use interface::{InterfaceFlags, IpAddresses, Ipv4Address, Ipv6Address, Netwo
 
 #[cfg(feature = "network")]
 const DEFAULT_WAN_IP_ENDPOINTS: &[&str] = &["https://api64.ipify.org"];
+
+/// Environment variable that overrides the WAN IP echo endpoints.
+///
+/// Expected format is a comma-separated list of URLs. When set and
+/// non-empty, the first successful response drives the WAN IP result
+/// exactly like the default production endpoints.
+///
+/// This exists primarily to let benches, integration tests, and
+/// air-gapped corporate deployments point WAN IP detection at a known
+/// address (e.g. a `wiremock` server) instead of the public internet.
+#[cfg(feature = "network")]
+const WAN_IP_ENDPOINTS_ENV: &str = "SNIFF_WAN_IP_ENDPOINTS";
 
 /// Default TTL for cached WAN IP results (5 minutes).
 #[cfg(feature = "network")]
@@ -140,13 +156,31 @@ pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkIn
     // Run WAN IP lookup concurrently with local interface enumeration
     // so neither blocks the other.
     std::thread::scope(|s| {
+        let collector = performance::current_collector();
         let wan_handle = if request.include_wan_ip {
-            Some(s.spawn(move || detect_wan_ip(request.force_refresh)))
+            Some(s.spawn(move || {
+                performance::with_current_collector(collector, || {
+                    let started = Instant::now();
+                    let result = detect_wan_ip(request.force_refresh);
+                    performance::record_logged_stage(
+                        "network.wan_ip",
+                        started.elapsed(),
+                        Level::DEBUG,
+                    );
+                    result
+                })
+            }))
         } else {
             None
         };
 
+        let local_started = Instant::now();
         let local_result = detect_local_interfaces();
+        performance::record_logged_stage(
+            "network.local_interfaces",
+            local_started.elapsed(),
+            Level::DEBUG,
+        );
 
         let wan_ip_address = wan_handle.map(|h| h.join().unwrap()).unwrap_or(None);
 
@@ -236,6 +270,35 @@ fn detect_local_interfaces()
     Ok((interfaces, primary, ip_addresses))
 }
 
+/// Resolve the WAN IP echo endpoint list, preferring the
+/// `SNIFF_WAN_IP_ENDPOINTS` environment variable over the compiled-in
+/// defaults when it is set to a non-empty value.
+///
+/// Expected env var format: comma-separated URLs. Empty entries are
+/// skipped; if every entry is empty, the defaults are returned.
+#[cfg(feature = "network")]
+fn resolve_wan_ip_endpoints() -> Vec<String> {
+    if let Ok(raw) = std::env::var(WAN_IP_ENDPOINTS_ENV) {
+        let parsed: Vec<String> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+        if !parsed.is_empty() {
+            debug!(
+                count = parsed.len(),
+                "using WAN IP endpoints from SNIFF_WAN_IP_ENDPOINTS"
+            );
+            return parsed;
+        }
+    }
+    DEFAULT_WAN_IP_ENDPOINTS
+        .iter()
+        .map(|endpoint| (*endpoint).to_string())
+        .collect()
+}
+
 #[cfg(feature = "network")]
 #[derive(Debug, Clone)]
 struct WanIpDetector {
@@ -252,10 +315,7 @@ impl WanIpDetector {
                 .timeout(std::time::Duration::from_secs(1))
                 .build()
                 .ok(),
-            endpoints: DEFAULT_WAN_IP_ENDPOINTS
-                .iter()
-                .map(|endpoint| endpoint.to_string())
-                .collect(),
+            endpoints: resolve_wan_ip_endpoints(),
         }
     }
 
@@ -304,16 +364,23 @@ impl WanIpDetector {
 #[cfg(feature = "network")]
 fn detect_wan_ip(force_refresh: bool) -> Option<String> {
     // Check cache first (unless refresh is forced)
+    if force_refresh {
+        performance::increment_counter("network.wan_ip.cache_forced_refreshes", 1);
+    }
     if !force_refresh
         && let Ok(guard) = WAN_IP_CACHE.lock()
         && let Some(entry) = guard.as_ref()
     {
         if entry.fetched_at.elapsed() < WAN_IP_TTL {
+            performance::increment_counter("network.wan_ip.cache_hits", 1);
             debug!("WAN IP served from cache");
             return entry.value.clone();
         }
+        performance::increment_counter("network.wan_ip.cache_expired", 1);
         debug!("WAN IP cache expired");
     }
+
+    performance::increment_counter("network.wan_ip.cache_misses", 1);
 
     // Fetch fresh value
     let value = WanIpDetector::new().detect();
@@ -359,9 +426,14 @@ fn format_mac_address(mac: &[u8; 6]) -> String {
 /// This first prefers the interface backing the system's default route.
 /// If that cannot be detected, or does not map to an eligible interface,
 /// it falls back to a local heuristic:
-/// 1. Physical interfaces (en*, eth*, wlan*) over virtual ones (bridge*, utun*, docker*, veth*, etc.)
-/// 2. Interfaces with RUNNING flag (actively transmitting)
-/// 3. First interface alphabetically within the same priority tier
+/// 1. Physical adapters over virtual ones
+///    - Unix: `en*`, `eth*`, `wlan*`, `wlp*`, `enp*`
+///    - Windows: `Ethernet`, `Wi-Fi`, `Local Area Connection`
+/// 2. Adapters with RUNNING flag (actively transmitting) over idle ones
+/// 3. Alphabetically first interface name within the same priority tier
+///
+/// Virtual adapters (`bridge*`, `utun*`, `docker*`, `vEthernet*`,
+/// `Hyper-V*`, `Bluetooth*`, `Loopback*`, `Npcap*`, etc.) are deprioritized.
 ///
 /// All candidates must be non-loopback, up, and have at least one IPv4 address.
 ///
@@ -369,7 +441,10 @@ fn format_mac_address(mac: &[u8; 6]) -> String {
 ///
 /// Returns the name of the primary interface, or None if no suitable interface exists.
 fn find_primary_interface(interfaces: &[NetworkInterface]) -> Option<String> {
-    select_primary_interface(interfaces, detect_default_route_interface().as_deref())
+    select_primary_interface(
+        interfaces,
+        detect_default_route_interface(interfaces).as_deref(),
+    )
 }
 
 fn select_primary_interface(
@@ -388,45 +463,7 @@ fn select_primary_interface(
 }
 
 fn find_primary_interface_fallback(interfaces: &[NetworkInterface]) -> Option<String> {
-    /// Checks if an interface name looks like a physical interface
-    fn is_physical_interface(name: &str) -> bool {
-        // Physical interface patterns:
-        // - en* (macOS/BSD Ethernet/WiFi)
-        // - eth* (Linux Ethernet)
-        // - wlan* (Linux WiFi)
-        // - wlp* (Linux WiFi with PCI naming)
-        // - enp* (Linux with predictable naming)
-        name.starts_with("en") && !name.starts_with("enx") // enx* are USB adapters, less preferred
-            || name.starts_with("eth")
-            || name.starts_with("wlan")
-            || name.starts_with("wlp")
-            || name.starts_with("enp")
-    }
-
-    /// Checks if an interface name looks like a virtual/bridge interface
-    fn is_virtual_interface(name: &str) -> bool {
-        // Common virtual interface patterns:
-        // - bridge* (network bridges)
-        // - utun* (macOS VPN tunnels)
-        // - tun*, tap* (VPN/virtual network devices)
-        // - veth* (Linux virtual Ethernet)
-        // - docker*, br-* (Docker)
-        // - vmnet* (VM networking)
-        // - awdl0 (Apple Wireless Direct Link)
-        // - llw* (Low Latency WLAN)
-        name.starts_with("bridge")
-            || name.starts_with("utun")
-            || name.starts_with("tun")
-            || name.starts_with("tap")
-            || name.starts_with("veth")
-            || name.starts_with("docker")
-            || name.starts_with("br-")
-            || name.starts_with("vmnet")
-            || name.starts_with("awdl")
-            || name.starts_with("llw")
-    }
-
-    let candidates: Vec<_> = interfaces
+    let mut candidates: Vec<_> = interfaces
         .iter()
         .filter(|i| is_primary_candidate(i))
         .collect();
@@ -435,41 +472,115 @@ fn find_primary_interface_fallback(interfaces: &[NetworkInterface]) -> Option<St
         return None;
     }
 
-    // Priority 1: Physical + Running
-    if let Some(iface) = candidates
-        .iter()
-        .find(|i| is_physical_interface(&i.name) && i.flags.is_running)
-    {
-        return Some(iface.name.clone());
-    }
+    candidates.sort_by(|a, b| {
+        interface_priority(b)
+            .cmp(&interface_priority(a))
+            .then_with(|| a.name.cmp(&b.name))
+    });
 
-    // Priority 2: Physical (even if not running)
-    if let Some(iface) = candidates.iter().find(|i| is_physical_interface(&i.name)) {
-        return Some(iface.name.clone());
-    }
-
-    // Priority 3: Non-virtual + Running
-    if let Some(iface) = candidates
-        .iter()
-        .find(|i| !is_virtual_interface(&i.name) && i.flags.is_running)
-    {
-        return Some(iface.name.clone());
-    }
-
-    // Priority 4: Any non-virtual
-    if let Some(iface) = candidates.iter().find(|i| !is_virtual_interface(&i.name)) {
-        return Some(iface.name.clone());
-    }
-
-    // Fallback: First candidate (even if virtual)
     candidates.first().map(|i| i.name.clone())
+}
+
+/// Computes a priority score for an interface used in primary-interface selection.
+///
+/// Higher values are preferred.  Ties are broken alphabetically by name in
+/// [`find_primary_interface_fallback`].
+///
+/// | Score | Meaning                                  |
+/// |-------|------------------------------------------|
+/// | 4     | Physical adapter, actively running       |
+/// | 3     | Physical adapter, not running            |
+/// | 2     | Non-virtual adapter, actively running    |
+/// | 1     | Non-virtual adapter, not running         |
+/// | 0     | Virtual / unrecognized (lowest priority) |
+fn interface_priority(iface: &NetworkInterface) -> u8 {
+    if is_physical_interface(&iface.name) {
+        if iface.flags.is_running { 4 } else { 3 }
+    } else if !is_virtual_interface(&iface.name) {
+        if iface.flags.is_running { 2 } else { 1 }
+    } else {
+        0
+    }
+}
+
+/// Checks if an interface name looks like a physical network adapter.
+///
+/// Recognises both Unix-style names (`en*`, `eth*`, `wlan*`, etc.) and common
+/// Windows adapter names (`Ethernet`, `Wi-Fi`, `Local Area Connection`).
+fn is_physical_interface(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+
+    // Unix patterns
+    // - en* (macOS/BSD Ethernet/WiFi), except enx* (USB adapters)
+    // - eth* (Linux Ethernet)
+    // - wlan* (Linux WiFi)
+    // - wlp* (Linux WiFi with PCI naming)
+    // - enp* (Linux with predictable naming)
+    if (lower.starts_with("en") && !lower.starts_with("enx"))
+        || lower.starts_with("eth")
+        || lower.starts_with("wlan")
+        || lower.starts_with("wlp")
+        || lower.starts_with("enp")
+    {
+        return true;
+    }
+
+    // Windows patterns — common adapter names produced by Windows NDIS / Hyper-V
+    matches!(
+        lower.as_str(),
+        "ethernet"
+            | "ethernet 2"
+            | "ethernet 3"
+            | "wi-fi"
+            | "wi-fi 2"
+            | "wi-fi 3"
+            | "local area connection"
+            | "local area connection 2"
+            | "local area connection 3"
+            | "network bridge"
+    )
+}
+
+/// Checks if an interface name looks like a virtual or software adapter.
+///
+/// Covers Unix virtual patterns (`bridge*`, `utun*`, `docker*`, etc.) and
+/// common Windows virtual adapters (`vEthernet*`, Hyper-V, VPN, Bluetooth,
+/// loopback/capture adapters).
+fn is_virtual_interface(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+
+    // Unix virtual patterns
+    if lower.starts_with("bridge")
+        || lower.starts_with("utun")
+        || lower.starts_with("tun")
+        || lower.starts_with("tap")
+        || lower.starts_with("veth")
+        || lower.starts_with("docker")
+        || lower.starts_with("br-")
+        || lower.starts_with("vmnet")
+        || lower.starts_with("awdl")
+        || lower.starts_with("llw")
+    {
+        return true;
+    }
+
+    // Windows virtual patterns
+    // - vEthernet* (Hyper-V virtual switch)
+    // - Hyper-V* adapters
+    // - Bluetooth*, Loopback*, Npcap*, WinCap* (capture adapters)
+    lower.starts_with("vethernet")
+        || lower.starts_with("hyper-v")
+        || lower.starts_with("bluetooth")
+        || lower.starts_with("loopback")
+        || lower.starts_with("npcap")
+        || lower.starts_with("wincap")
 }
 
 fn is_primary_candidate(interface: &NetworkInterface) -> bool {
     !interface.flags.is_loopback && !interface.ipv4_addresses.is_empty() && interface.flags.is_up
 }
 
-fn detect_default_route_interface() -> Option<String> {
+fn detect_default_route_interface(interfaces: &[NetworkInterface]) -> Option<String> {
     #[cfg(any(
         target_os = "macos",
         target_os = "freebsd",
@@ -478,14 +589,21 @@ fn detect_default_route_interface() -> Option<String> {
         target_os = "dragonfly"
     ))]
     {
-        command_output("route", &["-n", "get", "default"])
-            .and_then(|output| parse_bsd_default_route_interface(&output))
+        let _ = interfaces;
+        detect_bsd_default_route_interface_native()
     }
 
     #[cfg(target_os = "linux")]
     {
-        command_output("ip", &["route", "show", "default"])
-            .and_then(|output| parse_linux_default_route_interface(&output))
+        let _ = interfaces;
+        detect_linux_default_route_interface_native()
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        command_output("route", &["print", "0.0.0.0"])
+            .and_then(|output| parse_windows_default_route_interface_ip(&output))
+            .and_then(|ip| interface_name_for_ipv4(interfaces, ip))
     }
 
     #[cfg(not(any(
@@ -494,13 +612,244 @@ fn detect_default_route_interface() -> Option<String> {
         target_os = "openbsd",
         target_os = "netbsd",
         target_os = "dragonfly",
-        target_os = "linux"
+        target_os = "linux",
+        target_os = "windows"
     )))]
     {
+        let _ = interfaces;
         None
     }
 }
 
+#[cfg(target_os = "linux")]
+fn detect_linux_default_route_interface_native() -> Option<String> {
+    std::fs::read_to_string("/proc/net/route")
+        .ok()
+        .and_then(|output| parse_linux_proc_default_route_interface(&output))
+}
+
+#[cfg(target_os = "linux")]
+fn parse_linux_proc_default_route_interface(output: &str) -> Option<String> {
+    let mut best: Option<(&str, u32)> = None;
+
+    for line in output.lines().skip(1) {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 8 || cols[1] != "00000000" {
+            continue;
+        }
+
+        let flags = match u16::from_str_radix(cols[3], 16) {
+            Ok(flags) => flags,
+            Err(_) => continue,
+        };
+        if flags & libc::RTF_UP as u16 == 0 {
+            continue;
+        }
+
+        let metric = match cols[6].parse::<u32>() {
+            Ok(metric) => metric,
+            Err(_) => continue,
+        };
+        match best {
+            None => best = Some((cols[0], metric)),
+            Some((_, best_metric)) if metric < best_metric => best = Some((cols[0], metric)),
+            _ => {}
+        }
+    }
+
+    best.map(|(interface, _)| interface.to_string())
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn detect_bsd_default_route_interface_native() -> Option<String> {
+    let mut mib = [
+        libc::CTL_NET,
+        libc::PF_ROUTE,
+        0,
+        libc::AF_INET,
+        libc::NET_RT_FLAGS,
+        libc::RTF_GATEWAY,
+    ];
+    let mut len: libc::size_t = 0;
+
+    unsafe {
+        if libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as _,
+            std::ptr::null_mut(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return None;
+        }
+    }
+
+    if len == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0_u8; len];
+    unsafe {
+        if libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as _,
+            buffer.as_mut_ptr().cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return None;
+        }
+    }
+
+    parse_bsd_route_dump(&buffer[..len])
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn parse_bsd_route_dump(buffer: &[u8]) -> Option<String> {
+    let mut offset = 0;
+
+    while offset + std::mem::size_of::<libc::rt_msghdr>() <= buffer.len() {
+        let header = unsafe { &*(buffer[offset..].as_ptr().cast::<libc::rt_msghdr>()) };
+        let message_len = header.rtm_msglen as usize;
+        if message_len == 0 || offset + message_len > buffer.len() {
+            break;
+        }
+
+        if is_default_bsd_route_message(header, &buffer[offset..offset + message_len]) {
+            return interface_name_from_index(header.rtm_index as u32);
+        }
+
+        offset += message_len;
+    }
+
+    None
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn is_default_bsd_route_message(header: &libc::rt_msghdr, message: &[u8]) -> bool {
+    let data = &message[std::mem::size_of::<libc::rt_msghdr>()..];
+    let destination = sockaddr_from_route_message(data, header.rtm_addrs, libc::RTAX_DST as usize);
+    let Some(destination) = destination else {
+        return false;
+    };
+
+    unsafe {
+        if (*destination).sa_family as i32 != libc::AF_INET {
+            return false;
+        }
+
+        let destination = destination.cast::<libc::sockaddr_in>();
+        (*destination).sin_addr.s_addr == 0
+    }
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn sockaddr_from_route_message(
+    data: &[u8],
+    addrs_mask: i32,
+    desired_index: usize,
+) -> Option<*const libc::sockaddr> {
+    let mut offset = 0;
+
+    for index in 0..(libc::RTAX_MAX as usize) {
+        if addrs_mask & (1 << index) == 0 {
+            continue;
+        }
+
+        if offset >= data.len() {
+            return None;
+        }
+
+        let sockaddr = unsafe { &*(data[offset..].as_ptr().cast::<libc::sockaddr>()) };
+        let sockaddr_len = sockaddr_len(sockaddr);
+
+        if index == desired_index {
+            return Some(sockaddr as *const libc::sockaddr);
+        }
+
+        offset += align_sockaddr_len(sockaddr_len);
+    }
+
+    None
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn sockaddr_len(sockaddr: &libc::sockaddr) -> usize {
+    let len = sockaddr.sa_len as usize;
+    if len == 0 {
+        std::mem::size_of::<libc::sockaddr>()
+    } else {
+        len
+    }
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn align_sockaddr_len(len: usize) -> usize {
+    let align = std::mem::size_of::<libc::c_long>();
+    (len + align - 1) & !(align - 1)
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn interface_name_from_index(index: u32) -> Option<String> {
+    let mut buffer = [0_u8; libc::IF_NAMESIZE];
+    let name = unsafe { libc::if_indextoname(index, buffer.as_mut_ptr().cast()) };
+    if name.is_null() {
+        return None;
+    }
+
+    unsafe { std::ffi::CStr::from_ptr(name) }
+        .to_str()
+        .ok()
+        .map(|name| name.to_string())
+}
+
+#[cfg(any(target_os = "windows", test))]
 fn command_output(program: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
     if !output.status.success() {
@@ -510,14 +859,7 @@ fn command_output(program: &str, args: &[&str]) -> Option<String> {
     String::from_utf8(output.stdout).ok()
 }
 
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "dragonfly",
-    test
-))]
+#[cfg(test)]
 fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
     output.lines().find_map(|line| {
         line.trim()
@@ -528,15 +870,46 @@ fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
     })
 }
 
-#[cfg(target_os = "linux")]
-fn parse_linux_default_route_interface(output: &str) -> Option<String> {
-    output.lines().find_map(|line| {
-        let tokens: Vec<_> = line.split_whitespace().collect();
-        tokens
-            .windows(2)
-            .find(|window| window[0] == "dev")
-            .map(|window| window[1].to_string())
-    })
+#[cfg(any(target_os = "windows", test))]
+fn parse_windows_default_route_interface_ip(output: &str) -> Option<std::net::Ipv4Addr> {
+    let mut best: Option<(std::net::Ipv4Addr, u32)> = None;
+
+    for line in output.lines() {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 5 {
+            continue;
+        }
+        if cols[0] != "0.0.0.0" || cols[1] != "0.0.0.0" {
+            continue;
+        }
+        // Column layout: Network Netmask Gateway Interface Metric [...]
+        let ip: std::net::Ipv4Addr = match cols[3].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let metric: u32 = match cols[4].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        match best {
+            None => best = Some((ip, metric)),
+            Some((_, best_m)) if metric < best_m => best = Some((ip, metric)),
+            _ => {}
+        }
+    }
+
+    best.map(|(ip, _)| ip)
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn interface_name_for_ipv4(
+    interfaces: &[NetworkInterface],
+    address: std::net::Ipv4Addr,
+) -> Option<String> {
+    interfaces
+        .iter()
+        .find(|iface| iface.ipv4_addresses.contains(&address))
+        .map(|iface| iface.name.clone())
 }
 
 /// Detects network interfaces, excluding loopback and down interfaces.
@@ -798,6 +1171,48 @@ mod tests {
         assert_eq!(detector.detect(), Some("2001:db8::7".to_string()));
     }
 
+    #[cfg(feature = "network")]
+    #[test]
+    fn test_resolve_wan_ip_endpoints_prefers_env_override() {
+        // This test mutates process-wide environment state. It must not
+        // run in parallel with other tests that also read the env var,
+        // and it restores the original value on exit.
+        let key = WAN_IP_ENDPOINTS_ENV;
+        let original = std::env::var(key).ok();
+        // SAFETY: single-threaded test body; `std::env::set_var` is
+        // `unsafe` since Rust 1.85 but this block does no concurrent
+        // env access.
+        unsafe {
+            std::env::set_var(
+                key,
+                "https://first.example.test, https://second.example.test ,",
+            );
+        }
+
+        let endpoints = resolve_wan_ip_endpoints();
+        assert_eq!(
+            endpoints,
+            vec![
+                "https://first.example.test".to_string(),
+                "https://second.example.test".to_string(),
+            ]
+        );
+
+        // Empty value should fall back to the defaults.
+        unsafe {
+            std::env::set_var(key, "   ,  ,  ");
+        }
+        let endpoints = resolve_wan_ip_endpoints();
+        assert_eq!(endpoints.len(), DEFAULT_WAN_IP_ENDPOINTS.len());
+
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
     #[test]
     fn test_ip_addresses_are_valid_ip_strings() {
         use std::net::{Ipv4Addr, Ipv6Addr};
@@ -1048,7 +1463,6 @@ mod tests {
 
     #[test]
     fn test_primary_interface_excludes_common_virtual_patterns() {
-        // Test that common virtual interface patterns are correctly identified
         let virtual_patterns = vec![
             "bridge100",
             "utun0",
@@ -1060,6 +1474,11 @@ mod tests {
             "vmnet1",
             "awdl0",
             "llw0",
+            "vEthernet (WSL)",
+            "Hyper-V Virtual Ethernet Adapter",
+            "Bluetooth Network Connection",
+            "Loopback",
+            "Npcap Loopback Adapter",
         ];
 
         for virtual_name in virtual_patterns {
@@ -1080,15 +1499,17 @@ mod tests {
 
     #[test]
     fn test_primary_interface_recognizes_physical_patterns() {
-        // Test that common physical interface patterns are correctly identified
         let physical_patterns = vec![
-            "en0",     // macOS/BSD
-            "en1",     // macOS/BSD
-            "eth0",    // Linux Ethernet
-            "eth1",    // Linux Ethernet
-            "wlan0",   // Linux WiFi
-            "wlp3s0",  // Linux WiFi with PCI naming
-            "enp0s31", // Linux with predictable naming
+            "en0",                   // macOS/BSD
+            "en1",                   // macOS/BSD
+            "eth0",                  // Linux Ethernet
+            "eth1",                  // Linux Ethernet
+            "wlan0",                 // Linux WiFi
+            "wlp3s0",                // Linux WiFi with PCI naming
+            "enp0s31",               // Linux with predictable naming
+            "Ethernet",              // Windows
+            "Wi-Fi",                 // Windows
+            "Local Area Connection", // Windows
         ];
 
         for physical_name in physical_patterns {
@@ -1203,11 +1624,239 @@ destination: default
 
     #[test]
     #[cfg(target_os = "linux")]
-    fn test_parse_linux_default_route_interface() {
-        let output = "default via 192.168.1.1 dev wlp3s0 proto dhcp src 192.168.1.42 metric 600";
+    fn test_parse_linux_proc_default_route_interface() {
+        let output = "\
+Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT
+wlp3s0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0
+eth0\t00000000\t0100A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0";
         assert_eq!(
-            parse_linux_default_route_interface(output),
-            Some("wlp3s0".to_string())
+            parse_linux_proc_default_route_interface(output),
+            Some("eth0".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_windows_default_route_single_route() {
+        let output = "\
+===========================================================================
+Interface List
+ 15...00 1a 2b 3c 4d 5e ......Intel Ethernet Adapter
+===========================================================================
+IPv4 Route Table
+===========================================================================
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0      192.168.1.1    192.168.1.100     25
+===========================================================================";
+        assert_eq!(
+            parse_windows_default_route_interface_ip(output),
+            Some("192.168.1.100".parse::<std::net::Ipv4Addr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_parse_windows_default_route_lowest_metric_wins() {
+        let output = "\
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0      192.168.1.1    192.168.1.100     50
+          0.0.0.0          0.0.0.0      10.0.0.1       10.0.0.50         10
+          0.0.0.0          0.0.0.0      172.16.0.1     172.16.0.5       200";
+        assert_eq!(
+            parse_windows_default_route_interface_ip(output),
+            Some("10.0.0.50".parse::<std::net::Ipv4Addr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_parse_windows_default_route_malformed_rows_ignored() {
+        let output = "\
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0      192.168.1.1    not-an-ip         25
+          0.0.0.0          0.0.0.0      10.0.0.1       10.0.0.50         10
+          1.2.3.0          255.255.255.0 1.2.3.1       1.2.3.4           5
+garbage line";
+        assert_eq!(
+            parse_windows_default_route_interface_ip(output),
+            Some("10.0.0.50".parse::<std::net::Ipv4Addr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_parse_windows_default_route_no_routes() {
+        let output = "Active Routes:\nNetwork Destination Netmask Gateway Interface Metric";
+        assert_eq!(parse_windows_default_route_interface_ip(output), None);
+    }
+
+    #[test]
+    fn test_interface_name_for_ipv4_found() {
+        let mut iface = create_test_interface("Ethernet", true, true);
+        iface.ipv4_addresses.clear();
+        iface.ipv4_addresses.push("10.0.0.50".parse().unwrap());
+
+        let result = interface_name_for_ipv4(&[iface], "10.0.0.50".parse().unwrap());
+        assert_eq!(result, Some("Ethernet".to_string()));
+    }
+
+    #[test]
+    fn test_interface_name_for_ipv4_not_found() {
+        let iface = create_test_interface("Ethernet", true, true);
+        let result = interface_name_for_ipv4(&[iface], "10.0.0.99".parse().unwrap());
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_primary_interface_alphabetical_tiebreak_physical_running() {
+        let interfaces = vec![
+            create_test_interface("en2", true, true),
+            create_test_interface("en0", true, true),
+            create_test_interface("en1", true, true),
+        ];
+
+        let primary = find_primary_interface_fallback(&interfaces);
+        assert_eq!(
+            primary,
+            Some("en0".to_string()),
+            "Ties among physical+running should be broken alphabetically"
+        );
+    }
+
+    #[test]
+    fn test_primary_interface_alphabetical_tiebreak_physical_not_running() {
+        let interfaces = vec![
+            create_test_interface("eth2", true, false),
+            create_test_interface("eth0", true, false),
+        ];
+
+        let primary = find_primary_interface_fallback(&interfaces);
+        assert_eq!(
+            primary,
+            Some("eth0".to_string()),
+            "Ties among physical+not-running should be broken alphabetically"
+        );
+    }
+
+    #[test]
+    fn test_primary_interface_alphabetical_tiebreak_virtual() {
+        let interfaces = vec![
+            create_test_interface("utun3", true, true),
+            create_test_interface("utun1", true, true),
+        ];
+
+        let primary = find_primary_interface_fallback(&interfaces);
+        assert_eq!(
+            primary,
+            Some("utun1".to_string()),
+            "Ties among virtual interfaces should be broken alphabetically"
+        );
+    }
+
+    #[test]
+    fn test_primary_interface_prefers_windows_physical_over_virtual() {
+        let interfaces = vec![
+            create_test_interface("vEthernet (WSL)", true, true),
+            create_test_interface("Ethernet", true, true),
+            create_test_interface("Loopback", true, true),
+        ];
+
+        let primary = find_primary_interface_fallback(&interfaces);
+        assert_eq!(
+            primary,
+            Some("Ethernet".to_string()),
+            "Should prefer Windows physical adapter over virtual"
+        );
+    }
+
+    #[test]
+    fn test_primary_interface_recognizes_windows_physical_patterns() {
+        let windows_physical = vec![
+            "Ethernet",
+            "Wi-Fi",
+            "Local Area Connection",
+            "Ethernet 2",
+            "Wi-Fi 2",
+        ];
+
+        for name in windows_physical {
+            let interfaces = vec![
+                create_test_interface("vEthernet (Hyper-V)", true, true),
+                create_test_interface(name, true, true),
+            ];
+
+            let primary = find_primary_interface_fallback(&interfaces);
+            assert_eq!(
+                primary,
+                Some(name.to_string()),
+                "Should recognize '{}' as a Windows physical adapter",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_primary_interface_excludes_windows_virtual_patterns() {
+        let windows_virtual = vec![
+            "vEthernet (WSL)",
+            "vEthernet (Default Switch)",
+            "Hyper-V Virtual Ethernet Adapter",
+            "Bluetooth Network Connection",
+            "Loopback",
+            "Npcap Loopback Adapter",
+        ];
+
+        for name in windows_virtual {
+            let interfaces = vec![
+                create_test_interface(name, true, true),
+                create_test_interface("Ethernet", true, true),
+            ];
+
+            let primary = find_primary_interface_fallback(&interfaces);
+            assert_eq!(
+                primary,
+                Some("Ethernet".to_string()),
+                "Should prefer Ethernet over virtual adapter '{}'",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_interface_priority_scoring() {
+        assert_eq!(
+            interface_priority(&create_test_interface("en0", true, true)),
+            4,
+            "Physical + running = 4"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("Ethernet", true, true)),
+            4,
+            "Windows physical + running = 4"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("en0", true, false)),
+            3,
+            "Physical + not running = 3"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("someother0", true, true)),
+            2,
+            "Non-virtual + running = 2"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("someother0", true, false)),
+            1,
+            "Non-virtual + not running = 1"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("docker0", true, true)),
+            0,
+            "Virtual = 0"
+        );
+        assert_eq!(
+            interface_priority(&create_test_interface("vEthernet (WSL)", true, true)),
+            0,
+            "Windows virtual = 0"
         );
     }
 }

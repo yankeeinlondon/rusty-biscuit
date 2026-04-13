@@ -11,43 +11,265 @@ blast_radius:
 # File References in `biscuit-file`
 
 File references are compact string descriptors that resolve lazily to filesystem
-paths. They allow callers to express _where_ a file lives relative to
-project structure, environment, or vault configuration without committing to an
-absolute path at authoring time.
+paths. They let callers express _where_ a file lives relative to project
+structure, environment, or vault configuration without committing to an absolute
+path at authoring time.
 
-## Syntax
+Construction (`FileReference::new()`) is purely syntactic -- no filesystem
+access occurs until `resolve()` is called.
 
-A file reference has the general form:
+## Quick Reference
+
+| Prefix                | Kind                  | Resolves against                                         | Example                      |
+|-----------------------|-----------------------|----------------------------------------------------------|------------------------------|
+| `./` or `../`         | **Relative**          | Current working directory                                | `./src/main.rs`, `../a.md`   |
+| _(none)_              | **Implicit Relative** | CWD, then git repository root                            | `README.md`, `docs/spec.md`  |
+| `/`                   | **Absolute**          | Used verbatim                                            | `/etc/config.toml`           |
+| `@`                   | **Magic**             | Configurable search roots (git root, HOME, custom paths) | `@docs/spec.md`              |
+| `!`                   | **Package**           | Cargo workspace package area (or git root fallback)      | `!README.md`                 |
+| `vault:` or `vault::` | **Vault**             | Configured vault root directories                        | `vault:notes/today.md`       |
+
+Any reference can be prefixed with `%` to enable recursive directory search,
+and any path segment can contain `{{VAR}}` environment variable interpolation.
+
+## Relative References
+
+There are two kinds of relative reference, distinguished by whether the path
+*explicitly* starts with `./` or `../`:
+
+### Explicit Relative (`./`, `../`)
+
+A leading `./` or `../` pins the lookup to the current working directory.
+No fallback search is performed.
 
 ```text
-[%]<prefix><path-with-optional-interpolation>
+./README.md         → <CWD>/README.md
+../sibling/foo.md   → <CWD>/../sibling/foo.md   (normalized)
 ```
 
-### Recursive Flag (`%`)
+### Implicit Relative (bare path, no prefix)
 
-An optional leading `%` marks the reference as **recursive**. Instead of
-checking exact file paths, a recursive search walks directory trees from each
-search root, looking for a file whose name matches the final path component.
-Subdirectory components in the reference act as a suffix filter on the
-ancestor path.
+A bare path with no recognized prefix is treated as *implicitly* relative.
+It is first checked against the CWD and, if not found there, against the
+root of the enclosing git repository (when one is present).
 
 ```text
-%@README.md       → search every directory under each root for "README.md"
-%./config.toml    → search under CWD for "config.toml"
-%vault:notes.md   → search all vault roots for "notes.md"
+foo.md              → <CWD>/foo.md, then <git_root>/foo.md
+docs/spec.md        → <CWD>/docs/spec.md, then <git_root>/docs/spec.md
 ```
 
-### Reference Kinds
+If the reference is not found in either location, `resolve()` returns
+`Ok(None)`. If no git repository is discoverable, only the CWD is searched.
 
-| Prefix                | Kind         | Description                                                         |
-|-----------------------|--------------|---------------------------------------------------------------------|
-| _(none)_              | **Relative** | Resolved relative to the current working directory                  |
-| `/`                   | **Absolute** | Used verbatim as an absolute path                                   |
-| `@`                   | **Magic**    | Searches a configurable set of roots (git root, HOME, custom paths) |
-| `!`                   | **Package**  | Resolved relative to the current Cargo package area or git root     |
-| `vault:` or `vault::` | **Vault**    | Resolved against configured vault root directories                  |
+```rust,no_run
+use biscuit_file::FileReference;
 
-### Environment Variable Interpolation
+// From <repo>/biscuit-file/lib/src, resolves to <repo>/README.md
+let file_ref = FileReference::new("README.md")?;
+let path = file_ref.resolve()?;
+# Ok::<(), biscuit_file::FileReferenceError>(())
+```
+
+## Absolute References (`/`)
+
+The path is used exactly as written with no search logic:
+
+```text
+/etc/config.toml    → /etc/config.toml
+/tmp/output.json    → /tmp/output.json
+```
+
+```rust,no_run
+use biscuit_file::FileReference;
+
+let file_ref = FileReference::new("/etc/hosts")?;
+let path = file_ref.resolve()?;        // checks /etc/hosts directly
+# Ok::<(), biscuit_file::FileReferenceError>(())
+```
+
+## Magic References (`@`)
+
+Magic references search a prioritized list of root directories. This is the
+most flexible kind -- useful for finding files that could live at the project
+root, in your home directory, or in custom search paths.
+
+### Default Search Order
+
+1. **Prepended paths** -- added via `.add_magic_path(path, PathPosition::Start)`
+2. **Git repository root** -- discovered via `git2::Repository::discover()`
+3. **Home directory** -- from `$HOME` environment variable
+4. **Appended paths** -- added via `.add_magic_path(path, PathPosition::End)`
+
+The first path that exists as a file wins.
+
+### Examples
+
+```text
+@docs/spec.md       → searches <git_root>/docs/spec.md, then ~/docs/spec.md
+@.bashrc            → searches <git_root>/.bashrc, then ~/.bashrc
+@config.toml        → searches <git_root>/config.toml, then ~/config.toml
+```
+
+```rust,no_run
+use biscuit_file::{FileReference, PathPosition};
+
+// Basic magic lookup: git root → HOME
+let file_ref = FileReference::new("@docs/spec.md")?;
+let path = file_ref.resolve()?;
+
+// Custom search paths
+let file_ref = FileReference::new("@config.toml")?
+    .add_magic_path("/opt/configs", PathPosition::Start)   // searched first
+    .add_magic_path("/etc/defaults", PathPosition::End);   // searched last
+let path = file_ref.resolve()?;
+# Ok::<(), biscuit_file::FileReferenceError>(())
+```
+
+### Monorepo-Aware Magic with `with_package_area_magic_path()`
+
+In a monorepo, you often want `@` to search your current package area _before_
+the workspace root. The `with_package_area_magic_path()` builder method
+automatically detects the Cargo workspace package area and prepends it to the
+search order:
+
+```rust,no_run
+use biscuit_file::FileReference;
+
+// If CWD is /repo/biscuit-file/lib/src/, this prepends /repo/biscuit-file/
+let file_ref = FileReference::new("@prompts/commit.md")?
+    .with_package_area_magic_path();
+// Search order: <package_area> → <git_root> → HOME
+let path = file_ref.resolve()?;
+# Ok::<(), biscuit_file::FileReferenceError>(())
+```
+
+This is a no-op if the current directory is not inside a Cargo workspace.
+
+## Package References (`!`)
+
+Package references resolve relative to the current Cargo workspace "package
+area" -- the first path component of the workspace member containing the
+working directory.
+
+### Package Area Detection
+
+1. Find the git repository root from CWD
+2. Load `Cargo.toml` workspace metadata from that root
+3. For each workspace member, extract its first path component (the "area")
+4. Find which area contains the CWD
+5. Resolve the reference relative to that area directory
+
+For example, in the `rusty-biscuit` monorepo with CWD at
+`/repo/biscuit-file/lib/src/`, the package area is `/repo/biscuit-file/`.
+
+### Fallback Behavior
+
+- If no workspace member matches (e.g., a single-crate repo), the **git root**
+    is used instead.
+
+- If no git repository is found, no candidates are generated and resolution
+    returns `Ok(None)`.
+
+### Examples
+
+```text
+!README.md          → <package_area>/README.md
+!docs/spec.md       → <package_area>/docs/spec.md
+!Cargo.toml         → <package_area>/Cargo.toml
+```
+
+```rust,no_run
+use biscuit_file::FileReference;
+
+// From within /repo/biscuit-file/lib/src:
+let file_ref = FileReference::new("!README.md")?;
+let path = file_ref.resolve()?;        // checks /repo/biscuit-file/README.md
+# Ok::<(), biscuit_file::FileReferenceError>(())
+```
+
+This is particularly useful in monorepos where you want to reference files
+belonging to the current package regardless of where you are within it.
+
+## Vault References (`vault:` / `vault::`)
+
+Vault references search configured vault root directories. This is designed for
+personal knowledge bases, notes systems, or any collection of files stored in
+well-known locations outside the project.
+
+### Vault Root Sources
+
+Vault roots are checked in this order:
+
+1. **Explicitly configured** via `.add_vault()` (in order added)
+2. **`$VAULT` environment variable** -- split using the platform path separator
+
+Both `vault:` (single colon) and `vault::` (double colon) are accepted and
+behave identically. The double-colon form exists for compatibility with systems
+that use `scheme::path` syntax.
+
+### Examples
+
+```text
+vault:notes/today.md     → <vault_root_1>/notes/today.md, then <vault_root_2>/...
+vault::projects/plan.md  → same behavior as single-colon
+```
+
+```rust,no_run
+use biscuit_file::FileReference;
+
+let file_ref = FileReference::new("vault:notes/today.md")?
+    .add_vault("/personal/vault")
+    .add_vault("/shared/vault");
+let path = file_ref.resolve()?;
+# Ok::<(), biscuit_file::FileReferenceError>(())
+```
+
+### Error: `VaultNotConfigured`
+
+If neither `.add_vault()` nor `$VAULT` provides any roots, resolution fails
+with `FileReferenceError::VaultNotConfigured`.
+
+## Recursive Search (`%` prefix)
+
+An optional leading `%` on any reference kind switches from exact-path checking
+to recursive directory traversal. Instead of testing whether a specific path
+exists, it walks directory trees from each search root looking for matching
+files.
+
+### How It Works
+
+1. The same search roots as the underlying kind are used as traversal starting
+   points (not join targets)
+
+2. Every file under each root is checked against the **filename** (last path
+   component)
+
+3. If the reference includes subdirectory components (e.g., `%docs/spec.md`),
+   the match is further filtered: the entry's parent path must end with those
+   components
+
+4. All matches are sorted lexicographically; the first is returned
+
+### Examples
+
+```text
+%@README.md         → recursively search git root, HOME for any "README.md"
+%./config.toml      → recursively search under CWD for "config.toml"
+%vault:notes.md     → recursively search all vault roots for "notes.md"
+%@docs/spec.md      → find "spec.md" where the parent path ends with "docs"
+```
+
+```rust,no_run
+use biscuit_file::FileReference;
+
+let file_ref = FileReference::new("%@README.md")?;
+let path = file_ref.resolve()?;
+# Ok::<(), biscuit_file::FileReferenceError>(())
+```
+
+Recursive search does not follow symlinks.
+
+## Environment Variable Interpolation
 
 Any path segment can include `{{VAR_NAME}}` placeholders. Variable names must
 match `[A-Z0-9_]+`. At resolution time the value is read from the process
@@ -55,17 +277,24 @@ environment; if the variable is unset, resolution fails with
 `MissingEnvironmentVariable`.
 
 ```text
-{{PROJECT_ROOT}}/docs/spec.md
-vault:{{VAULT_NAME}}/notes.md
-@configs/{{APP}}/settings.toml
+{{PROJECT_ROOT}}/docs/spec.md         → relative ref with interpolation
+vault:{{VAULT_NAME}}/notes.md         → vault ref with interpolation
+@configs/{{APP}}/settings.toml        → magic ref with interpolation
+%vault:{{VAULT_NAME}}/notes.md        → recursive + vault + interpolation
 ```
+
+Multiple interpolations in a single reference are supported and expanded
+left-to-right. Empty variable names (`{{}}`) and invalid names
+(`{{invalid-name}}`) are rejected at parse time with `InvalidSyntax`.
+
+Interpolation happens during resolution, not parsing.
 
 ## API
 
 ### `FileReference`
 
 The primary public type. Construction parses the reference string
-syntactically—no filesystem access occurs until `resolve()` is called.
+syntactically -- no filesystem access occurs until `resolve()` is called.
 
 ```rust,no_run
 use biscuit_file::{FileReference, PathPosition};
@@ -80,17 +309,38 @@ if let Some(path) = resolved {
 
 #### Methods
 
-| Method                           | Returns                                       | Description                                                     |
-|----------------------------------|-----------------------------------------------|-----------------------------------------------------------------|
-| `new(raw: &str)`                 | `Result<FileReference, FileReferenceError>`   | Parse a reference string                                        |
-| `raw()`                          | `&str`                                        | The original reference string                                   |
-| `add_magic_path(path, position)` | `Self`                                        | Add a search root for `@` references (builder pattern)          |
-| `add_vault(path)`                | `Self`                                        | Add a vault root for `vault:` references (builder pattern)      |
-| `resolve()`                      | `Result<Option<PathBuf>, FileReferenceError>` | Resolve to an absolute path                                     |
-| `resolve_relative(base)`         | `Result<Option<PathBuf>, FileReferenceError>` | Resolve and return a path relative to `base` (or CWD if `None`) |
+| Method                           | Returns                                       | Description                                                          |
+|----------------------------------|-----------------------------------------------|----------------------------------------------------------------------|
+| `new(raw: &str)`                 | `Result<FileReference, FileReferenceError>`   | Parse a reference string                                             |
+| `raw()`                          | `&str`                                        | The original reference string                                        |
+| `add_magic_path(path, position)` | `Self`                                        | Add a search root for `@` references (builder pattern)               |
+| `with_package_area_magic_path()` | `Self`                                        | Prepend Cargo package area to `@` search roots (builder pattern)     |
+| `add_vault(path)`                | `Self`                                        | Add a vault root for `vault:` references (builder pattern)           |
+| `resolve()`                      | `Result<Option<PathBuf>, FileReferenceError>` | Resolve to an absolute path using ambient CWD                        |
+| `resolve_from(base)`             | `Result<Option<PathBuf>, FileReferenceError>` | Resolve using `base` as the working directory instead of ambient CWD |
+| `resolve_relative(base)`         | `Result<Option<PathBuf>, FileReferenceError>` | Resolve and return a path relative to `base` (or CWD if `None`)      |
 
-Both `add_magic_path` and `add_vault` consume and return `self`, enabling
-chained builder usage.
+All builder methods consume and return `self`, enabling chained usage.
+
+### `resolve_from()` -- Document-Relative Resolution
+
+When a file reference appears inside a document, it should usually resolve
+relative to _that document's location_, not wherever the process happens to be
+running. `resolve_from()` overrides the ambient CWD for relative, `@`, and `!`
+lookups:
+
+```rust,no_run
+use std::path::Path;
+use biscuit_file::FileReference;
+
+// Reference found inside /repo/docs/guide.md
+let file_ref = FileReference::new("./images/diagram.png")?;
+let path = file_ref.resolve_from(Path::new("/repo/docs"))?;
+// Checks /repo/docs/images/diagram.png (not <CWD>/images/diagram.png)
+# Ok::<(), biscuit_file::FileReferenceError>(())
+```
+
+HOME and environment variables are still read from the live process state.
 
 ### `PathPosition`
 
@@ -123,9 +373,11 @@ All errors produced by the file reference subsystem.
 
 Purely syntactic. The raw string is decomposed into:
 
-1. **Recursive flag** — stripped if leading `%`
-2. **Kind prefix** — determines the reference kind
-3. **Path template** — a sequence of `Literal` and `EnvVar` segments
+1. **Recursive flag** -- stripped if leading `%`
+2. **Kind prefix** -- determines the reference kind
+3. **Path template** -- a sequence of `Literal` and `EnvVar` segments
+
+Detection order: `vault::` > `vault:` > `@` > `!` > `/` > relative (default).
 
 No filesystem or environment access occurs during parsing.
 
@@ -134,9 +386,9 @@ No filesystem or environment access occurs during parsing.
 When `resolve()` is called, a `ResolutionContext` is built from live process
 state:
 
-- **CWD** — `std::env::current_dir()`
-- **Home directory** — `$HOME` environment variable
-- **Environment** — all process environment variables (for interpolation)
+- **CWD** -- `std::env::current_dir()` (or `base` if using `resolve_from()`)
+- **Home directory** -- `$HOME` environment variable
+- **Environment** -- all process environment variables (for interpolation)
 
 ### Phase 3: Interpolation
 
@@ -149,13 +401,14 @@ variable. If any variable is missing, resolution fails immediately.
 For **non-recursive** references, a list of candidate absolute paths is
 constructed by joining each search root with the interpolated path:
 
-| Kind     | Search Roots                                                       |
-|----------|--------------------------------------------------------------------|
-| Relative | `[CWD]`                                                            |
-| Absolute | `[interpolated path directly]`                                     |
-| Magic    | `magic_paths.prepend` → `git_root` → `HOME` → `magic_paths.append` |
-| Package  | `[package_area or git_root]`                                       |
-| Vault    | `vault_roots` → `$VAULT` env var split paths                       |
+| Kind              | Search Roots                                                       |
+|-------------------|--------------------------------------------------------------------|
+| Relative          | `[CWD]`                                                            |
+| Implicit Relative | `[CWD, git_root]` (git_root omitted when equal to CWD or absent)   |
+| Absolute          | `[interpolated path directly]`                                     |
+| Magic             | `magic_paths.prepend` → `git_root` → `HOME` → `magic_paths.append` |
+| Package           | `[package_area or git_root]`                                       |
+| Vault             | `vault_roots` → `$VAULT` env var split paths                       |
 
 For **recursive** references, the same search roots are used as traversal
 starting points rather than join targets.
@@ -177,45 +430,6 @@ Resolved paths are normalized by resolving `.` and `..` components
 lexicographically (without touching the filesystem). Relative paths are joined
 with CWD before normalization.
 
-## Feature Flag
-
-File reference support is gated behind the `file-reference` feature, which is
-enabled by default. It adds dependencies on `git2`, `cargo_metadata`, and
-`walkdir`.
-
-```toml
-[dependencies]
-biscuit-file = { version = "0.1", default-features = false, features = ["file-reference"] }
-```
-
-## Package Area Detection
-
-The `!` (package) reference kind uses Cargo workspace metadata to find the
-nearest workspace member containing the current working directory. The "package
-area" is the first path component of that member relative to the workspace root.
-
-For example, in the rusty-biscuit monorepo, if CWD is
-`/repo/biscuit-file/lib/src/`, the package area resolves to
-`/repo/biscuit-file/`.
-
-If no workspace member matches (e.g., a single-crate repo), the git repository
-root is used as a fallback. If no git repository is found, no candidates are
-generated and resolution returns `Ok(None)`.
-
-## Vault Resolution
-
-Vault roots come from two sources:
-
-1. **Explicitly configured** via `FileReference::add_vault()`
-2. **Environment variable** `$VAULT` — split using the platform path separator
-
-If neither source provides any roots and a `vault:` reference is used,
-resolution fails with `VaultNotConfigured`.
-
-Both `vault:` (single colon) and `vault::` (double colon) are accepted and
-behave identically. The double-colon form exists for compatibility with other
-systems that use `scheme::path` syntax.
-
 ## Relative Path Computation
 
 `resolve_relative()` first performs a full resolution, then computes a relative
@@ -228,3 +442,14 @@ pure-lexical algorithm that:
 4. Appends remaining target components
 
 If the paths share no common ancestor, an error is returned.
+
+## Feature Flag
+
+File reference support is gated behind the `file-reference` feature, which is
+enabled by default. It adds dependencies on `git2`, `cargo_metadata`, and
+`walkdir`.
+
+```toml
+[dependencies]
+biscuit-file = { version = "0.1", default-features = false, features = ["file-reference"] }
+```

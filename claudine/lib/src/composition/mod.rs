@@ -17,6 +17,7 @@ mod select;
 pub mod sequence;
 mod types;
 
+pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::CompositionError;
 #[allow(deprecated)]
 pub use lifecycle::{
@@ -33,5 +34,5 @@ pub use types::{
     CompositionClosurePlan, CompositionExecutionRequest, CompositionMode, InlineClosurePlan,
     OutputFormat, PreparedComposition, ResolvedCompositionSource, SelectedProvider,
     SelectionReason, SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceSource,
-    SequenceStep, SequenceStepOverlay, SequenceStepResult, SharedApprovalCache, SystemPromptInput,
+    SequenceStep, SequenceStepOverlay, SequenceStepResult, SharedApprovalCache,
 };

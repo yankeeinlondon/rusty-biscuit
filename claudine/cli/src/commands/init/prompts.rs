@@ -9,7 +9,6 @@ use claudine::events::{
     default_speak_template, recommended_sound,
 };
 use claudine::linking::preference_prompt_count;
-use claudine::services::ProtectPosture;
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
 
@@ -118,36 +117,12 @@ pub fn prompt_action_profile_with_defaults(
     })
 }
 
-/// Prompt whether Protect should be enabled and which posture to use, reusing a prior answer when
-/// available.
-pub fn prompt_protect_posture_with_default(
-    default: Option<Option<ProtectPosture>>,
-) -> Result<Option<ProtectPosture>> {
-    let enabled = Confirm::new("Enable Protect policy engine?")
-        .with_default(default.unwrap_or(Some(ProtectPosture::Balanced)).is_some())
+/// Prompt to enable or disable protect.
+pub fn prompt_protect_enabled(default: Option<bool>) -> Result<bool> {
+    let enabled = inquire::Confirm::new("Enable Protect? (blocks dangerous commands)")
+        .with_default(default.unwrap_or(true))
         .prompt()?;
-
-    if !enabled {
-        return Ok(None);
-    }
-
-    let options = vec![
-        "Balanced (recommended)",
-        "Advisory (monitor-only)",
-        "Strict (aggressive blocking)",
-    ];
-
-    let selected = Select::new("Select Protect posture:", options)
-        .with_starting_cursor(protect_posture_starting_cursor(default.flatten()))
-        .prompt()?;
-
-    let posture = match selected {
-        "Advisory (monitor-only)" => ProtectPosture::Advisory,
-        "Strict (aggressive blocking)" => ProtectPosture::Strict,
-        _ => ProtectPosture::Balanced,
-    };
-
-    Ok(Some(posture))
+    Ok(enabled)
 }
 
 fn prompt_logging_profile(default: Option<&LoggingProfile>) -> Result<LoggingProfile> {
@@ -317,7 +292,11 @@ fn prompt_input_speak_action() -> Result<HookAction> {
         .with_default(default_message)
         .with_help_message("Supports {{placeholder}} interpolation")
         .prompt()?;
-    Ok(HookAction::Speak { message })
+    Ok(HookAction::Speak {
+        message,
+        voice: None,
+        gender: None,
+    })
 }
 
 fn prompt_input_sound_effect() -> Result<HookAction> {
@@ -343,7 +322,7 @@ fn prompt_input_sound_effect() -> Result<HookAction> {
         .prompt()?;
 
     Ok(HookAction::SoundEffect {
-        name: selected.replace(" (recommended)", ""),
+        effect: selected.replace(" (recommended)", ""),
         volume: 1.0,
         speed: 1.0,
     })
@@ -353,19 +332,19 @@ fn prompt_input_run_action() -> Result<HookAction> {
     let command = Text::new("Command to run when input is needed:")
         .with_placeholder("notify-send")
         .prompt()?;
-    let args_str = Text::new("Arguments (space-separated, or leave empty):")
+    let params_str = Text::new("Parameters (template-interpolated, or leave empty):")
         .with_default("")
         .prompt()?;
-    let args = if args_str.is_empty() {
-        None
-    } else {
-        Some(args_str.split_whitespace().map(String::from).collect())
-    };
     let blocking = Confirm::new("Wait for command to complete?")
         .with_default(false)
         .prompt()?;
 
     if blocking {
+        let args = if params_str.is_empty() {
+            None
+        } else {
+            Some(params_str.split_whitespace().map(String::from).collect())
+        };
         Ok(HookAction::Call {
             command,
             args,
@@ -373,7 +352,10 @@ fn prompt_input_run_action() -> Result<HookAction> {
             mapper: None,
         })
     } else {
-        Ok(HookAction::FireAndForget { command, args })
+        Ok(HookAction::Bash {
+            command,
+            params: params_str,
+        })
     }
 }
 
@@ -440,14 +422,6 @@ fn log_target_starting_cursor(default: Option<&LogTarget>) -> usize {
     }
 }
 
-fn protect_posture_starting_cursor(default: Option<ProtectPosture>) -> usize {
-    match default.unwrap_or(ProtectPosture::Balanced) {
-        ProtectPosture::Balanced => 0,
-        ProtectPosture::Advisory => 1,
-        ProtectPosture::Strict => 2,
-    }
-}
-
 fn input_action_default_indices(defaults: Option<&[HookAction]>) -> Option<Vec<usize>> {
     let defaults = defaults?;
     let mut indices = Vec::new();
@@ -455,7 +429,7 @@ fn input_action_default_indices(defaults: Option<&[HookAction]>) -> Option<Vec<u
         let index = match action {
             HookAction::Speak { .. } => 0,
             HookAction::SoundEffect { .. } => 1,
-            HookAction::FireAndForget { .. } | HookAction::Call { .. } => 2,
+            HookAction::Bash { .. } | HookAction::Call { .. } => 2,
             _ => continue,
         };
         if !indices.contains(&index) {
@@ -497,15 +471,17 @@ mod tests {
         let defaults = vec![
             HookAction::Speak {
                 message: "hello".to_string(),
+                voice: None,
+                gender: None,
             },
             HookAction::SoundEffect {
-                name: "ding".to_string(),
+                effect: "ding".to_string(),
                 volume: 1.0,
                 speed: 1.0,
             },
-            HookAction::FireAndForget {
+            HookAction::Bash {
                 command: "notify-send".to_string(),
-                args: None,
+                params: String::new(),
             },
         ];
 

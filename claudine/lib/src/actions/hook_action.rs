@@ -3,7 +3,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// Logging destination for `HookAction::Log`.
+use crate::config::claudine_config::Gender;
+
+/// Logging destination for event log output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
@@ -107,7 +109,7 @@ pub enum HookAction {
     /// Play an embedded sound effect from playa.
     SoundEffect {
         /// Effect name.
-        name: String,
+        effect: String,
 
         /// Playback volume (0.0 to 1.0).
         #[serde(default = "default_volume")]
@@ -122,23 +124,24 @@ pub enum HookAction {
     Speak {
         /// Handlebars-style template message.
         message: String,
+
+        /// Optional voice override for this action.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        voice: Option<String>,
+
+        /// Optional gender preference for voice selection.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gender: Option<Gender>,
     },
 
-    /// Write the event to a configured log target.
-    Log {
-        /// Destination target.
-        #[serde(default = "default_log_target")]
-        target: LogTarget,
-    },
-
-    /// Execute a command asynchronously without waiting for a result.
-    FireAndForget {
-        /// Command name or path to executable.
+    /// Execute a shell command asynchronously without waiting for a result.
+    Bash {
+        /// Shell command string.
         command: String,
 
-        /// Optional arguments.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        args: Option<Vec<String>>,
+        /// Template-interpolated parameters appended to the command.
+        #[serde(default)]
+        params: String,
     },
 
     /// Execute a command synchronously and map its output to a hook response.
@@ -180,8 +183,7 @@ impl HookAction {
         match self {
             HookAction::SoundEffect { .. } => "sound_effect",
             HookAction::Speak { .. } => "speak",
-            HookAction::Log { .. } => "log",
-            HookAction::FireAndForget { .. } => "fire_and_forget",
+            HookAction::Bash { .. } => "bash",
             HookAction::Call { .. } => "call",
             HookAction::Report { .. } => "report",
             HookAction::Message { .. } => "message",
@@ -193,8 +195,7 @@ impl HookAction {
         match self {
             HookAction::SoundEffect { .. } => "SoundEffect",
             HookAction::Speak { .. } => "Speak",
-            HookAction::Log { .. } => "Log",
-            HookAction::FireAndForget { .. } => "FireAndForget",
+            HookAction::Bash { .. } => "Bash",
             HookAction::Call { .. } => "Call",
             HookAction::Report { .. } => "Report",
             HookAction::Message { .. } => "Message",
@@ -218,13 +219,6 @@ fn default_log_timeout_ms() -> u64 {
     10_000
 }
 
-fn default_log_target() -> LogTarget {
-    LogTarget::File {
-        path: None,
-        rotate_daily: true,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,12 +227,12 @@ mod tests {
     fn sound_effect_deserializes_defaults() {
         let json = serde_json::json!({
             "type": "sound_effect",
-            "name": "success"
+            "effect": "success"
         });
 
         let action: HookAction = serde_json::from_value(json).unwrap();
         let HookAction::SoundEffect {
-            name,
+            effect,
             volume,
             speed,
         } = action
@@ -246,9 +240,136 @@ mod tests {
             panic!("expected sound_effect");
         };
 
-        assert_eq!(name, "success");
+        assert_eq!(effect, "success");
         assert_eq!(volume, 1.0);
         assert_eq!(speed, 1.0);
+    }
+
+    #[test]
+    fn sound_effect_with_effect_field() {
+        let json = serde_json::json!({
+            "type": "sound_effect",
+            "effect": "ding",
+            "volume": 0.5,
+            "speed": 1.5
+        });
+
+        let action: HookAction = serde_json::from_value(json).unwrap();
+        let HookAction::SoundEffect {
+            effect,
+            volume,
+            speed,
+        } = action
+        else {
+            panic!("expected sound_effect");
+        };
+
+        assert_eq!(effect, "ding");
+        assert_eq!(volume, 0.5);
+        assert_eq!(speed, 1.5);
+    }
+
+    #[test]
+    fn speak_with_voice_and_gender() {
+        let json = serde_json::json!({
+            "type": "speak",
+            "message": "Hello world",
+            "voice": "Samantha",
+            "gender": "female"
+        });
+
+        let action: HookAction = serde_json::from_value(json).unwrap();
+        let HookAction::Speak {
+            message,
+            voice,
+            gender,
+        } = action
+        else {
+            panic!("expected speak");
+        };
+
+        assert_eq!(message, "Hello world");
+        assert_eq!(voice.as_deref(), Some("Samantha"));
+        assert_eq!(gender, Some(Gender::Female));
+    }
+
+    #[test]
+    fn speak_minimal() {
+        let json = serde_json::json!({
+            "type": "speak",
+            "message": "Hello"
+        });
+
+        let action: HookAction = serde_json::from_value(json).unwrap();
+        let HookAction::Speak {
+            message,
+            voice,
+            gender,
+        } = action
+        else {
+            panic!("expected speak");
+        };
+
+        assert_eq!(message, "Hello");
+        assert!(voice.is_none());
+        assert!(gender.is_none());
+    }
+
+    #[test]
+    fn speak_skips_serializing_none_fields() {
+        let action = HookAction::Speak {
+            message: "test".to_string(),
+            voice: None,
+            gender: None,
+        };
+
+        let json = serde_json::to_value(&action).unwrap();
+        assert!(json.get("voice").is_none());
+        assert!(json.get("gender").is_none());
+    }
+
+    #[test]
+    fn bash_deserializes() {
+        let json = serde_json::json!({
+            "type": "bash",
+            "command": "notify-send",
+            "params": "{{tool_name}}"
+        });
+
+        let action: HookAction = serde_json::from_value(json).unwrap();
+        let HookAction::Bash { command, params } = action else {
+            panic!("expected bash");
+        };
+
+        assert_eq!(command, "notify-send");
+        assert_eq!(params, "{{tool_name}}");
+    }
+
+    #[test]
+    fn bash_default_params() {
+        let json = serde_json::json!({
+            "type": "bash",
+            "command": "echo hello"
+        });
+
+        let action: HookAction = serde_json::from_value(json).unwrap();
+        let HookAction::Bash { command, params } = action else {
+            panic!("expected bash");
+        };
+
+        assert_eq!(command, "echo hello");
+        assert_eq!(params, "");
+    }
+
+    #[test]
+    fn bash_type_labels() {
+        let action = HookAction::Bash {
+            command: "echo".to_string(),
+            params: String::new(),
+        };
+
+        assert_eq!(action.type_slug(), "bash");
+        assert_eq!(action.type_pascal_case(), "Bash");
     }
 
     #[test]
@@ -267,37 +388,6 @@ mod tests {
 
         let back: HookAction = serde_json::from_value(json).unwrap();
         assert_eq!(back, action);
-    }
-
-    #[test]
-    fn log_defaults_to_file_target() {
-        let json = serde_json::json!({
-            "type": "log"
-        });
-
-        let action: HookAction = serde_json::from_value(json).unwrap();
-        let HookAction::Log { target } = action else {
-            panic!("expected log");
-        };
-
-        assert_eq!(
-            target,
-            LogTarget::File {
-                path: None,
-                rotate_daily: true
-            }
-        );
-    }
-
-    #[test]
-    fn action_type_labels() {
-        let action = HookAction::FireAndForget {
-            command: "echo".to_string(),
-            args: None,
-        };
-
-        assert_eq!(action.type_slug(), "fire_and_forget");
-        assert_eq!(action.type_pascal_case(), "FireAndForget");
     }
 
     #[test]

@@ -235,6 +235,7 @@ pub(crate) struct ParsedReference {
 #[derive(Debug, Clone)]
 pub(crate) enum ReferenceKind {
     Relative(PathTemplate),
+    ImplicitRelative(PathTemplate),
     Absolute(PathTemplate),
     Magic(PathTemplate),
     Package(PathTemplate),
@@ -245,6 +246,7 @@ impl ReferenceKind {
     pub(crate) fn template(&self) -> &PathTemplate {
         match self {
             Self::Relative(t)
+            | Self::ImplicitRelative(t)
             | Self::Absolute(t)
             | Self::Magic(t)
             | Self::Package(t)

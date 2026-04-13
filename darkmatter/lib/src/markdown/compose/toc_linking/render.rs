@@ -44,7 +44,13 @@ mod tests {
     use crate::markdown::toc::MarkdownTocNode;
 
     fn make_heading(level: u8, title: &str, slug: &str) -> MarkdownTocNode {
-        MarkdownTocNode::new(HeadingLevel::new(level).unwrap(), title.to_string(), slug.to_string(), (0, 0), (0, 0))
+        MarkdownTocNode::new(
+            HeadingLevel::new(level).unwrap(),
+            title.to_string(),
+            slug.to_string(),
+            (0, 0),
+            (0, 0),
+        )
     }
 
     fn default_filter() -> HeadingFilter {

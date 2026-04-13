@@ -43,6 +43,14 @@ Run with:
 cargo bench
 ```
 
+For CLI and mixed lib/CLI workspaces, start with a few high-signal, non-gating benchmarks:
+
+- policy or matcher evaluation hot paths
+- stream parsing throughput
+- config loading or dispatch setup on repeated calls
+
+Add them first as local or scheduled CI checks before enforcing regression budgets on every PR.
+
 ## Key Concepts
 
 ### `black_box`

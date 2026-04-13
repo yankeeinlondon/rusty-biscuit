@@ -42,7 +42,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         command = ?cli.command.as_ref().map(|c| format!("{c:?}")),
         json = cli.json,
         plain = cli.plain,
-    ).entered();
+        perf = cli.perf,
+    )
+    .entered();
 
     // Handle --completions first (prints setup instructions)
     if let Some(shell) = cli.completions {
@@ -70,13 +72,20 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Handle programs mode separately (doesn't use SniffResult)
     if let Some(ref cmd) = cli.command {
         if cmd.is_programs_mode() {
-            // Check for install action FIRST
-            if cmd.is_install_action() {
+            // Plan-aware install or install-plan
+            if let Some((kind, args)) = cmd.install_command_args() {
+                if args.program.is_some() {
+                    let filter = cmd.to_output_filter();
+                    return crate::install_plan_cmd::dispatch(
+                        kind, args, filter, cli.json, cli.plain,
+                    );
+                }
+                // No name: fall through to interactive (Install) or error (InstallPlan)
+                if kind == crate::args::InstallCommandKind::InstallPlan {
+                    return Err("install-plan requires a program name".into());
+                }
                 let filter = cmd.to_output_filter();
-                return match cmd.install_program_name() {
-                    Some(name) => crate::install::direct_install(filter, name),
-                    None => crate::install::interactive_install(filter),
-                };
+                return crate::install::interactive_install(filter);
             }
 
             let programs = detect_programs_for_filter(output_filter);
@@ -375,6 +384,34 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     base_dir.as_deref(),
                 );
             }
+            crate::args::RepoAction::HasMergeConflict => {
+                let dir = base_dir
+                    .as_deref()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let repo = git2::Repository::discover(dir)
+                    .map_err(|e| format!("Not a git repository: {}", e))?;
+                let conflicted = sniff::filesystem::git::detect_merge_conflicts(&repo);
+                if cli.verbose > 0 {
+                    for path in &conflicted {
+                        eprintln!("{}", path.display());
+                    }
+                }
+                if conflicted.is_empty() {
+                    std::process::exit(1);
+                }
+                std::process::exit(0);
+            }
+            crate::args::RepoAction::RecentCommits { .. }
+            | crate::args::RepoAction::SourceCodeChanges { .. }
+            | crate::args::RepoAction::DocumentationChanges { .. } => {
+                return crate::output::recent_commits::handle_recent_commits_command(
+                    action,
+                    base_dir.as_deref(),
+                    cli.json,
+                    cli.plain,
+                    cli.verbose,
+                );
+            }
             _ => {
                 // Other RepoAction variants (Structure, GitStatus, Deps, etc.)
                 // are handled after full detection below
@@ -507,7 +544,8 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         plan.base_dir(base.clone())
     } else {
         plan
-    };
+    }
+    .performance(cli.perf);
 
     let mut result = detect_with_plan(plan)?;
 
@@ -572,6 +610,30 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         || git.status.untracked_count > 0;
                 }
             }
+        }
+    }
+
+    // Handle Package/PackageArea early returns (need detection result but not enrichment)
+    if let Some(ref action) = repo_action {
+        match action {
+            crate::args::RepoAction::Package { no_error, on_error } => {
+                let rendered =
+                    output::render_repo_package(&result, base_dir.as_deref(), cli.verbose);
+                if rendered.is_empty() {
+                    return handle_no_results(*no_error, on_error, cli.plain);
+                }
+                println!("{rendered}");
+                return Ok(());
+            }
+            crate::args::RepoAction::PackageArea { no_error, on_error } => {
+                let rendered = output::render_repo_package_area(&result, base_dir.as_deref());
+                if rendered.is_empty() {
+                    return handle_no_results(*no_error, on_error, cli.plain);
+                }
+                println!("{rendered}");
+                return Ok(());
+            }
+            _ => {}
         }
     }
 
@@ -953,7 +1015,7 @@ fn path_list_format(args: &FileListArgs) -> PathListFormat {
 /// - `--no-error`: exit 0 with no output.
 /// - `--on-error <msg>`: render message to stderr.
 /// - `--on-error` + `--no-error`: render message to stdout, exit 0.
-fn handle_no_results(
+pub(crate) fn handle_no_results(
     no_error: bool,
     on_error: &Option<String>,
     plain: bool,
@@ -971,9 +1033,9 @@ fn handle_no_results(
             rendered
         };
         if no_error {
-            print!("{text}");
+            println!("{text}");
         } else {
-            eprint!("{text}");
+            eprintln!("{text}");
         }
     }
 

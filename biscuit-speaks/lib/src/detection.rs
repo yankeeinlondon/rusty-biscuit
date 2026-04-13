@@ -10,7 +10,9 @@ use std::sync::OnceLock;
 
 use sniff::programs::InstalledTtsClients;
 
-use crate::types::{CloudTtsProvider, HostTtsProvider, TtsFailoverStrategy, TtsProvider};
+use crate::types::{
+    CloudTtsProvider, Gender, HostTtsProvider, TtsFailoverStrategy, TtsProvider, VoiceQuality,
+};
 
 #[cfg(target_os = "linux")]
 use crate::types::LINUX_TTS_STACK;
@@ -158,6 +160,79 @@ pub fn parse_provider_name(name: &str) -> Option<TtsProvider> {
         }
 
         _ => None,
+    }
+}
+
+/// Returns the default voice name for a provider and gender.
+///
+/// This is a sync, zero-cost lookup that mirrors the hardcoded defaults
+/// from each provider's `TtsVoiceInventory::default_voice()` implementation.
+/// Providers that resolve defaults dynamically (say, sapi) return their
+/// best-known static default instead.
+pub fn default_voice_name(provider: &TtsProvider, gender: Gender) -> &'static str {
+    match provider {
+        TtsProvider::Host(h) => match h {
+            HostTtsProvider::Say => match gender {
+                Gender::Male => "Alex",
+                _ => "Samantha",
+            },
+            HostTtsProvider::KokoroTts => match gender {
+                Gender::Male => "am_adam",
+                _ => "af_heart",
+            },
+            HostTtsProvider::ESpeak => match gender {
+                Gender::Male => "en+m3",
+                _ => "en+f3",
+            },
+            HostTtsProvider::EchoGarden => match gender {
+                Gender::Male => "Michael",
+                _ => "Heart",
+            },
+            HostTtsProvider::Gtts => "English",
+            HostTtsProvider::Piper => "en_US-amy-medium",
+            HostTtsProvider::Sapi => match gender {
+                Gender::Male => "David",
+                _ => "Zira",
+            },
+            HostTtsProvider::Sherpa => "default",
+            HostTtsProvider::Mimic3 => "default",
+            HostTtsProvider::Festival => "default",
+            HostTtsProvider::Pico2Wave => "default",
+            HostTtsProvider::SpdSay => "default",
+        },
+        TtsProvider::Cloud(c) => match c {
+            CloudTtsProvider::ElevenLabs => match gender {
+                Gender::Male => "Adam",
+                _ => "Rachel",
+            },
+        },
+    }
+}
+
+/// Returns the baseline voice quality for a provider.
+///
+/// For providers where quality varies per voice (e.g. macOS `say`),
+/// this returns the most common tier. Use this when per-voice quality
+/// is unavailable.
+pub fn provider_base_quality(provider: &TtsProvider) -> VoiceQuality {
+    match provider {
+        TtsProvider::Host(h) => match h {
+            HostTtsProvider::KokoroTts => VoiceQuality::Excellent,
+            HostTtsProvider::EchoGarden => VoiceQuality::Excellent,
+            HostTtsProvider::Say => VoiceQuality::Good,
+            HostTtsProvider::Sapi => VoiceQuality::Good,
+            HostTtsProvider::Piper => VoiceQuality::Good,
+            HostTtsProvider::Gtts => VoiceQuality::Good,
+            HostTtsProvider::Sherpa => VoiceQuality::Good,
+            HostTtsProvider::ESpeak => VoiceQuality::Low,
+            HostTtsProvider::Mimic3 => VoiceQuality::Moderate,
+            HostTtsProvider::Festival => VoiceQuality::Moderate,
+            HostTtsProvider::Pico2Wave => VoiceQuality::Moderate,
+            HostTtsProvider::SpdSay => VoiceQuality::Moderate,
+        },
+        TtsProvider::Cloud(c) => match c {
+            CloudTtsProvider::ElevenLabs => VoiceQuality::Excellent,
+        },
     }
 }
 

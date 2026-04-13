@@ -1,6 +1,10 @@
+use std::io::Write;
+use std::path::Path;
+
 use claudine::events::Provider;
 use claudine::stream::StreamProtocol;
-use color_eyre::eyre::{Result, bail};
+use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
+use color_eyre::eyre::{Result, bail, eyre};
 
 // ---------------------------------------------------------------------------
 // Output format enum (universal --output flag)
@@ -35,6 +39,113 @@ impl PromptDelivery {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// PromptSource — typed prompt input to the wrap pipeline
+// ---------------------------------------------------------------------------
+
+/// A prompt supplied to the wrap pipeline, already extracted from any
+/// CLI passthrough or composition source.
+///
+/// The wrap pipeline holds the prompt as this typed value between
+/// extraction (at the entrypoint) and delivery (via `prompt_delivery`).
+/// Provider flag-injection methods (`apply_entrypoint`,
+/// `apply_non_interactive_flags`) never see or mutate the prompt text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PromptSource {
+    /// No prompt provided. Valid only for interactive sessions or
+    /// when stdin will be inherited from the parent (the child reads
+    /// the TTY directly).
+    None,
+    /// A text prompt to be placed by `prompt_delivery`.
+    Inline(String),
+    /// The caller is forwarding piped stdin from its own stdin.
+    /// The pipeline should not seed stdin; the child inherits it.
+    InheritStdin,
+}
+
+impl PromptSource {
+    /// Returns the inline prompt text if this source is `Inline`.
+    pub(crate) fn as_inline(&self) -> Option<&str> {
+        match self {
+            Self::Inline(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Returns true when the source carries no prompt at all.
+    #[allow(dead_code)] // used in Task 14 (composition path) and Task 17 cleanup
+    pub(crate) fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    /// Returns true when a prompt reaches the child by any means
+    /// (inline delivery OR inherited stdin).
+    pub(crate) fn has_prompt_or_stdin(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PromptArgConventions — per-provider prompt-argv parsing knowledge
+// ---------------------------------------------------------------------------
+
+/// Describes how a provider's native CLI represents a prompt on argv.
+///
+/// Used by `extract_prompt_source_from_passthrough` to find a prompt in
+/// raw passthrough arguments without embedding per-provider logic in a
+/// central match.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PromptArgConventions {
+    /// Value-taking flags that carry the prompt string when present,
+    /// e.g. `&["-p", "--prompt"]` for Gemini, `&["-t", "--text"]` for
+    /// Goose. Empty for providers that accept only a positional prompt.
+    pub prompt_flags: &'static [&'static str],
+    /// An optional entrypoint subcommand that must be skipped when
+    /// scanning for a positional prompt, e.g. `Some("exec")` for Codex
+    /// or `Some("run")` for OpenCode / Goose. `None` for providers that
+    /// have no subcommand entrypoint.
+    pub entrypoint: Option<&'static str>,
+    /// Additional value-taking flags whose values must not be mistaken
+    /// for a positional prompt, e.g. `&["-m", "--model", "--output-format"]`.
+    pub value_taking_flags: &'static [&'static str],
+}
+
+impl PromptArgConventions {
+    /// Conventions for a provider that accepts only a positional prompt
+    /// after an entrypoint subcommand (e.g. Codex `exec`, OpenCode `run`).
+    pub(crate) const fn positional_after(entrypoint: &'static str) -> Self {
+        Self {
+            prompt_flags: &[],
+            entrypoint: Some(entrypoint),
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+        }
+    }
+}
+
+/// Value-taking flags recognized by the prompt extractor across every
+/// wrapped provider. This is intentionally the UNION of every provider's
+/// value-taking flags, not a per-provider list — the extractor's job is
+/// to avoid mistaking a flag's value for a positional prompt, and
+/// over-skipping an unknown flag's value is harmless. Per-provider
+/// `prompt_arg_conventions` implementations can swap in a narrower list
+/// if a future provider needs it.
+const COMMON_VALUE_TAKING_FLAGS: &[&str] = &[
+    "-m",
+    "--model",
+    "-o",
+    "--output",
+    "--output-format",
+    "--output-last-message",
+    "--approval-mode",
+    "--config",
+    "-c",
+    "--profile",
+    "--system-prompt",
+    "--sandbox-image",
+    "--auth-type",
+    "--format",
+];
 
 impl std::fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -108,14 +219,40 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// Error messages may contain `<blue>` Prose tags for styled rendering.
     fn reject_direct_yolo(&self, args: &[String]) -> Result<()>;
 
-    // -- Non-interactive mode ------------------------------------------------
+    // -- Non-interactive mode -----------------------------------------------
 
-    /// Apply non-interactive mode to `args`.
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()>;
+    /// Inject the provider's entrypoint subcommand (if any) and any
+    /// mode-agnostic launch flags. Called in BOTH interactive and
+    /// non-interactive pipelines because some entrypoints (e.g. Codex
+    /// `exec`, OpenCode `run`) are needed in both.
+    ///
+    /// `non_interactive` is true when the wrap is running in
+    /// non-interactive mode, so providers whose entrypoint is
+    /// conditional on the mode (Claude: `--print`; Kimi: `--print`) can
+    /// decide here.
+    ///
+    /// Default: no-op.
+    fn apply_entrypoint(&self, _args: &mut Vec<String>, _non_interactive: bool) {}
+
+    /// Reject mode-conflict flags (e.g. `-i` / `--prompt-interactive`)
+    /// when the pipeline is running in non-interactive mode. Runs only
+    /// in non-interactive pipelines. Providers that do NOT have such
+    /// conflicting flags use the default no-op.
+    ///
+    /// Default: no-op.
+    fn apply_non_interactive_flags(&self, _args: &mut [String]) -> Result<()> {
+        Ok(())
+    }
 
     /// Apply provider-specific defaults for non-interactive mode (e.g.
     /// OpenCode's default model injection). Default: no-op.
     fn apply_non_interactive_defaults(&self, _args: &mut Vec<String>) {}
+
+    /// Validate any provider-specific non-interactive requirements after
+    /// defaults and explicit model flags have been applied.
+    fn validate_non_interactive_requirements(&self, _args: &[String]) -> Result<()> {
+        Ok(())
+    }
 
     // -- Universal --model flag ----------------------------------------------
 
@@ -148,14 +285,30 @@ pub(crate) trait WrapperProfile: Send + Sync {
 
     // -- Universal --system-prompt flag --------------------------------------
 
-    /// Map the universal `--system-prompt <value>` to provider-specific flags.
+    /// Map a resolved system prompt to provider-specific flags, env, and
+    /// temp artifacts.
     ///
-    /// Default: returns a warning that the provider doesn't support it.
-    fn apply_system_prompt(&self, _args: &mut Vec<String>, _prompt: &str) -> Option<String> {
-        Some(format!(
-            "{} does not support --system-prompt; this flag was skipped",
-            self.provider()
-        ))
+    /// Default: returns a warning that the provider doesn't support the
+    /// given mode.
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        Ok(super::system_prompt::SystemPromptApplication {
+            args: vec![],
+            env: vec![],
+            artifacts: vec![],
+            warnings: vec![format!(
+                "{} does not support {} system prompt; this flag was skipped",
+                self.provider(),
+                match prompt.mode {
+                    SystemPromptMode::Append => "append",
+                    SystemPromptMode::Replace => "replace",
+                },
+            )],
+        })
     }
 
     // -- Universal --sandbox flag --------------------------------------------
@@ -240,25 +393,6 @@ pub(crate) trait WrapperProfile: Send + Sync {
         non_interactive: bool,
     ) -> Result<PromptDelivery>;
 
-    // -- Final argument validation -------------------------------------------
-
-    /// Validate the final child args after all prompt sources have been
-    /// processed (passthrough, --prompt-file, --compose, --frontmatter-prompt).
-    ///
-    /// Providers that require a positional prompt (Codex, OpenCode, Goose)
-    /// should check for it here rather than in `apply_non_interactive()`,
-    /// because prompt delivery may happen after non-interactive setup.
-    ///
-    /// Default: no-op.
-    fn validate_final_args(
-        &self,
-        _args: &[String],
-        _non_interactive: bool,
-        _has_stdin: bool,
-    ) -> Result<()> {
-        Ok(())
-    }
-
     // -- Provider-required env vars ------------------------------------------
 
     /// Env var names that this provider requires and should bypass the
@@ -311,6 +445,23 @@ pub(crate) trait WrapperProfile: Send + Sync {
     /// interactive session ends for inline composition closure.
     fn supports_interactive_inline_closure(&self) -> bool {
         false
+    }
+
+    // -- Prompt argv conventions --------------------------------------------
+
+    /// Describe how this provider represents a prompt on argv.
+    ///
+    /// Used by `extract_prompt_source_from_passthrough` to locate and
+    /// remove a prompt from raw passthrough args. Every provider that
+    /// supports non-interactive mode must implement this; the default
+    /// returns "positional-only, no entrypoint" which works for Claude
+    /// (prompt as bare positional, no subcommand).
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions {
+            prompt_flags: &[],
+            entrypoint: None,
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+        }
     }
 }
 
@@ -396,11 +547,10 @@ impl WrapperProfile for ClaudeWrapper {
         Ok(())
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
-        if !has_flag(args, "--print") {
+    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
+        if non_interactive && !has_flag(args, "--print") {
             args.push("--print".to_string());
         }
-        Ok(())
     }
 
     fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
@@ -416,10 +566,43 @@ impl WrapperProfile for ClaudeWrapper {
         None
     }
 
-    fn apply_system_prompt(&self, args: &mut Vec<String>, prompt: &str) -> Option<String> {
-        args.push("--system-prompt".to_string());
-        args.push(prompt.to_string());
-        None
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+        use std::io::Write as _;
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                if interactive {
+                    app.args.push("--append-system-prompt".to_string());
+                    app.args.push(prompt.composed_markdown.clone());
+                } else {
+                    let mut tmp = tempfile::NamedTempFile::new()?;
+                    tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                    app.args.push("--append-system-prompt-file".to_string());
+                    app.args.push(tmp.path().display().to_string());
+                    app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+                }
+            }
+            SystemPromptMode::Replace => {
+                if interactive {
+                    app.args.push("--system-prompt".to_string());
+                    app.args.push(prompt.composed_markdown.clone());
+                } else {
+                    let mut tmp = tempfile::NamedTempFile::new()?;
+                    tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                    app.args.push("--system-prompt-file".to_string());
+                    app.args.push(tmp.path().display().to_string());
+                    app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+                }
+            }
+        }
+        Ok(app)
     }
 
     fn prompt_delivery(
@@ -509,7 +692,13 @@ impl WrapperProfile for CodexWrapper {
         Ok(())
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
+    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
+        // Codex `exec` is the non-interactive entrypoint; interactive
+        // sessions use the default TUI (no `exec`). Only inject when
+        // the caller is running non-interactively.
+        if !non_interactive {
+            return;
+        }
         let entrypoint = "exec";
         let aliases: &[&str] = &["e"];
         if !args
@@ -518,11 +707,6 @@ impl WrapperProfile for CodexWrapper {
         {
             args.insert(0, entrypoint.to_string());
         }
-
-        // NOTE: prompt validation is deferred to validate_final_args() because
-        // the prompt may not be in args yet (e.g. composition pipelines
-        // compute delivery after non-interactive setup).
-        Ok(())
     }
 
     fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
@@ -537,6 +721,41 @@ impl WrapperProfile for CodexWrapper {
                 "Codex only supports --output json; {format} was skipped"
             )),
         }
+    }
+
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let (tmp_home, _overlay_path) =
+                    super::system_prompt::create_ephemeral_overlay_home(
+                        ".codex",
+                        "AGENTS.override.md",
+                        &prompt.composed_markdown,
+                    )?;
+                app.env.push((
+                    std::ffi::OsString::from("HOME"),
+                    tmp_home.path().as_os_str().to_owned(),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
+            }
+            SystemPromptMode::Replace => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                app.args.push("-c".to_string());
+                app.args
+                    .push(format!("model_instructions_file={}", tmp.path().display()));
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+        }
+        Ok(app)
     }
 
     fn apply_sandbox(&self, args: &mut Vec<String>) -> Option<String> {
@@ -569,18 +788,6 @@ impl WrapperProfile for CodexWrapper {
                 args: vec![prompt.to_string()],
             })
         }
-    }
-
-    fn validate_final_args(
-        &self,
-        args: &[String],
-        non_interactive: bool,
-        has_stdin: bool,
-    ) -> Result<()> {
-        if non_interactive && !has_stdin && !has_non_flag_positional(&args[1..]) {
-            bail!("--non-interactive for codex requires a prompt after the entrypoint");
-        }
-        Ok(())
     }
 
     fn allowed_env_keys(&self) -> &'static [&'static str] {
@@ -622,6 +829,10 @@ impl WrapperProfile for CodexWrapper {
 
     fn supports_interactive_inline_closure(&self) -> bool {
         true
+    }
+
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions::positional_after("exec")
     }
 }
 
@@ -731,22 +942,11 @@ impl WrapperProfile for GeminiWrapper {
         true
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
+    fn apply_non_interactive_flags(&self, args: &mut [String]) -> Result<()> {
         if has_flag(args, "-i") || has_flag(args, "--prompt-interactive") {
             bail!("--non-interactive conflicts with interactive prompt mode for gemini");
         }
-        if has_flag(args, "-p") || has_flag(args, "--prompt") {
-            return Ok(());
-        }
-        // Convert a bare positional prompt to --prompt so Gemini CLI
-        // runs in explicit headless mode even when stdin is a TTY.
-        if let Some(index) = find_first_positional(args) {
-            let prompt = args.remove(index);
-            args.push("--prompt".to_string());
-            args.push(prompt);
-            return Ok(());
-        }
-        bail!("--non-interactive for gemini requires a prompt (positional or --prompt/-p)");
+        Ok(())
     }
 
     fn apply_output_format(&self, args: &mut Vec<String>, format: OutputFormat) -> Option<String> {
@@ -773,6 +973,42 @@ impl WrapperProfile for GeminiWrapper {
                 None
             }
         }
+    }
+
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let (tmp_home, _overlay_path) =
+                    super::system_prompt::create_ephemeral_overlay_home(
+                        ".gemini",
+                        "GEMINI.md",
+                        &prompt.composed_markdown,
+                    )?;
+                app.env.push((
+                    std::ffi::OsString::from("HOME"),
+                    tmp_home.path().as_os_str().to_owned(),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
+            }
+            SystemPromptMode::Replace => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                app.env.push((
+                    std::ffi::OsString::from("GEMINI_SYSTEM_MD"),
+                    std::ffi::OsString::from(tmp.path().display().to_string()),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+        }
+        Ok(app)
     }
 
     fn prompt_delivery(
@@ -802,6 +1038,14 @@ impl WrapperProfile for GeminiWrapper {
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         args.push("--output-format".to_string());
         args.push("stream-json".to_string());
+    }
+
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions {
+            prompt_flags: &["-p", "--prompt"],
+            entrypoint: None,
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+        }
     }
 }
 
@@ -847,11 +1091,48 @@ impl WrapperProfile for KimiWrapper {
         &["KIMI_API_KEY"]
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
-        if !has_flag(args, "--print") {
+    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
+        if non_interactive && !has_flag(args, "--print") {
             args.push("--print".to_string());
         }
-        Ok(())
+    }
+
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                app.warnings.push(
+                    "Kimi does not support append-mode system prompts; this flag was skipped"
+                        .to_string(),
+                );
+            }
+            SystemPromptMode::Replace => {
+                let mut prompt_tmp = tempfile::NamedTempFile::new()?;
+                prompt_tmp.write_all(prompt.composed_markdown.as_bytes())?;
+
+                let agent_yaml = format!(
+                    "extend: default\nsystem_prompt_path: {}\n",
+                    prompt_tmp.path().display()
+                );
+                let mut agent_tmp = tempfile::NamedTempFile::new()?;
+                agent_tmp.write_all(agent_yaml.as_bytes())?;
+
+                app.args.push("--agent-file".to_string());
+                app.args.push(agent_tmp.path().display().to_string());
+                app.artifacts
+                    .push(SystemPromptArtifact::TempFile(prompt_tmp));
+                app.artifacts
+                    .push(SystemPromptArtifact::TempFile(agent_tmp));
+            }
+        }
+        Ok(app)
     }
 
     fn prompt_delivery(
@@ -895,6 +1176,14 @@ impl WrapperProfile for KimiWrapper {
         args.push("--print".to_string());
         args.push("--output-format".to_string());
         args.push("stream-json".to_string());
+    }
+
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions {
+            prompt_flags: &["--prompt"],
+            entrypoint: None,
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+        }
     }
 }
 
@@ -950,26 +1239,48 @@ impl WrapperProfile for QwenWrapper {
         Ok(())
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
+    fn apply_non_interactive_flags(&self, args: &mut [String]) -> Result<()> {
         if has_flag(args, "-i") || has_flag(args, "--prompt-interactive") {
             bail!("--non-interactive conflicts with interactive prompt mode for qwen");
         }
-        if has_flag(args, "-p") || has_flag(args, "--prompt") {
-            return Ok(());
-        }
-        // Convert a bare positional prompt to --prompt so Qwen CLI
-        // runs in explicit headless mode even when stdin is a TTY.
-        if let Some(index) = find_first_positional(args) {
-            let prompt = args.remove(index);
-            args.push("--prompt".to_string());
-            args.push(prompt);
-            return Ok(());
-        }
-        bail!("--non-interactive for qwen requires a prompt (positional or --prompt/-p)");
+        Ok(())
     }
 
     fn allowed_env_keys(&self) -> &'static [&'static str] {
         &["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
+    }
+
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let (tmp_home, _overlay_path) =
+                    super::system_prompt::create_ephemeral_overlay_home(
+                        ".qwen",
+                        "QWEN.md",
+                        &prompt.composed_markdown,
+                    )?;
+                app.env.push((
+                    std::ffi::OsString::from("HOME"),
+                    tmp_home.path().as_os_str().to_owned(),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempDir(tmp_home));
+            }
+            SystemPromptMode::Replace => {
+                app.warnings.push(
+                    "Qwen does not support replace-mode system prompts; this flag was skipped"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(app)
     }
 
     fn apply_sandbox(&self, args: &mut Vec<String>) -> Option<String> {
@@ -1019,6 +1330,14 @@ impl WrapperProfile for QwenWrapper {
         args.push("--output-format".to_string());
         args.push("stream-json".to_string());
     }
+
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions {
+            prompt_flags: &["-p", "--prompt"],
+            entrypoint: None,
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1054,27 +1373,71 @@ impl WrapperProfile for OpencodeWrapper {
         Ok(())
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::{SystemPromptApplication, SystemPromptArtifact};
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+
+                let config = serde_json::json!({
+                    "instructions": [tmp.path().display().to_string()]
+                });
+                app.env.push((
+                    std::ffi::OsString::from("OPENCODE_CONFIG_CONTENT"),
+                    std::ffi::OsString::from(config.to_string()),
+                ));
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+            SystemPromptMode::Replace => {
+                let mut tmp = tempfile::NamedTempFile::new()?;
+                tmp.write_all(prompt.composed_markdown.as_bytes())?;
+                app.args.push("--system".to_string());
+                app.args.push(tmp.path().display().to_string());
+                app.artifacts.push(SystemPromptArtifact::TempFile(tmp));
+            }
+        }
+        Ok(app)
+    }
+
+    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
+        if !non_interactive {
+            return;
+        }
         let entrypoint = "run";
         if args.first().is_none_or(|first| first != entrypoint) {
             args.insert(0, entrypoint.to_string());
         }
-
-        // NOTE: prompt validation is deferred to validate_final_args() because
-        // the prompt may not be in args yet (e.g. composition pipelines
-        // compute delivery after non-interactive setup).
-        Ok(())
     }
 
     fn apply_non_interactive_defaults(&self, args: &mut Vec<String>) {
         if has_flag(args, "--model") || has_flag(args, "-m") {
             return;
         }
-        let model = non_empty_env_var("OPENCODE_MODEL")
-            .or_else(|| non_empty_env_var("MODEL"))
-            .unwrap_or_else(|| "minimax/MiniMax-M2.5-highspeed".to_string());
+        let Some(model) = non_empty_env_var("OPENCODE_MODEL") else {
+            return;
+        };
         args.push("--model".to_string());
         args.push(model);
+    }
+
+    fn validate_non_interactive_requirements(&self, args: &[String]) -> Result<()> {
+        if has_flag(args, "--model") || has_flag(args, "-m") {
+            return Ok(());
+        }
+        bail!(
+            "OpenCode cannot use its configured default model in non-interactive mode.\n\
+             Pass `--model MODEL` to Claudine, or set `OPENCODE_MODEL` in the environment \
+             before launching.\n\
+             Interactive OpenCode sessions can continue using OpenCode's default model."
+        )
     }
 
     fn apply_model(
@@ -1126,7 +1489,15 @@ impl WrapperProfile for OpencodeWrapper {
                     prompt.len() / 1024
                 );
             }
-            Ok(PromptDelivery::AppendArgs(vec![prompt.to_string()]))
+            // Separate the positional prompt with `--` so OpenCode's yargs
+            // parser stops looking for flags. Composed prompts commonly
+            // start with a bullet (`- ...`) or other `-`-prefixed token,
+            // which yargs would otherwise treat as an unrecognized option
+            // and respond to by printing `opencode run` help and exiting.
+            Ok(PromptDelivery::AppendArgs(vec![
+                "--".to_string(),
+                prompt.to_string(),
+            ]))
         } else {
             // Interactive TUI: use --prompt flag which auto-submits the
             // message (OpenCode PR #4510).  This keeps stdin inherited so
@@ -1152,18 +1523,6 @@ impl WrapperProfile for OpencodeWrapper {
         }
     }
 
-    fn validate_final_args(
-        &self,
-        args: &[String],
-        non_interactive: bool,
-        has_stdin: bool,
-    ) -> Result<()> {
-        if non_interactive && !has_stdin && !has_non_flag_positional(&args[1..]) {
-            bail!("--non-interactive for opencode requires a prompt after the entrypoint");
-        }
-        Ok(())
-    }
-
     fn supports_structured_stream(&self) -> bool {
         true
     }
@@ -1175,6 +1534,10 @@ impl WrapperProfile for OpencodeWrapper {
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         args.push("--format".to_string());
         args.push("json".to_string());
+    }
+
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions::positional_after("run")
     }
 }
 
@@ -1215,16 +1578,38 @@ impl WrapperProfile for GooseWrapper {
         Ok(())
     }
 
-    fn apply_non_interactive(&self, args: &mut Vec<String>) -> Result<()> {
+    fn apply_system_prompt(
+        &self,
+        prompt: &PreparedSystemPrompt,
+        _interactive: bool,
+        _cwd: &Path,
+    ) -> Result<super::system_prompt::SystemPromptApplication> {
+        use super::system_prompt::SystemPromptApplication;
+
+        let mut app = SystemPromptApplication::empty();
+        match prompt.mode {
+            SystemPromptMode::Append => {
+                app.args.push("--system".to_string());
+                app.args.push(prompt.composed_markdown.clone());
+            }
+            SystemPromptMode::Replace => {
+                app.warnings.push(
+                    "Goose does not support replace-mode system prompts; this flag was skipped"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(app)
+    }
+
+    fn apply_entrypoint(&self, args: &mut Vec<String>, non_interactive: bool) {
+        if !non_interactive {
+            return;
+        }
         let entrypoint = "run";
         if args.first().is_none_or(|first| first != entrypoint) {
             args.insert(0, entrypoint.to_string());
         }
-
-        // NOTE: prompt validation is deferred to validate_final_args() because
-        // the prompt may not be in args yet (e.g. composition pipelines
-        // compute delivery after non-interactive setup).
-        Ok(())
     }
 
     fn apply_model(
@@ -1258,20 +1643,12 @@ impl WrapperProfile for GooseWrapper {
         }
     }
 
-    fn validate_final_args(
-        &self,
-        args: &[String],
-        non_interactive: bool,
-        has_stdin: bool,
-    ) -> Result<()> {
-        if non_interactive
-            && !has_stdin
-            && !has_flag(args, "-t")
-            && !has_non_flag_positional(&args[1..])
-        {
-            bail!("--non-interactive for goose requires a prompt after the entrypoint");
+    fn prompt_arg_conventions(&self) -> PromptArgConventions {
+        PromptArgConventions {
+            prompt_flags: &["-t", "--text"],
+            entrypoint: Some("run"),
+            value_taking_flags: COMMON_VALUE_TAKING_FLAGS,
         }
-        Ok(())
     }
 }
 
@@ -1281,45 +1658,6 @@ impl WrapperProfile for GooseWrapper {
 
 fn non_empty_env_var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
-}
-
-pub(super) fn has_non_flag_positional(args: &[String]) -> bool {
-    find_first_positional(args).is_some()
-}
-
-/// Return the index of the first positional (non-flag) argument.
-fn find_first_positional(args: &[String]) -> Option<usize> {
-    let mut skip_next = false;
-    for (index, arg) in args.iter().enumerate() {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-
-        if arg == "--" {
-            return Some(index);
-        }
-
-        // Skip known value-taking flags so their values aren't mistaken for
-        // positional arguments.
-        if arg == "-m"
-            || arg == "--model"
-            || arg == "--output-format"
-            || arg == "-o"
-            || arg == "--auth-type"
-            || arg == "--sandbox-image"
-            || arg == "--approval-mode"
-        {
-            skip_next = true;
-            continue;
-        }
-
-        if !arg.starts_with('-') {
-            return Some(index);
-        }
-    }
-
-    None
 }
 
 fn has_any_flag(args: &[String], primary: &str, aliases: &[&str]) -> bool {
@@ -1347,6 +1685,178 @@ fn option_value(args: &[String], option: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt extraction — consolidates the old extract_user_prompt /
+// find_prompt_location / strip_prompt_from_args per-provider logic into
+// one provider-blind algorithm that dispatches on PromptArgConventions.
+// ---------------------------------------------------------------------------
+
+/// Extract a prompt from raw passthrough args, returning the cleaned
+/// args and the typed `PromptSource`.
+///
+/// This is the *single* place in the codebase that knows how to locate
+/// a prompt inside provider passthrough arguments. It replaces the
+/// previous per-provider extractors (`extract_user_prompt`,
+/// `find_prompt_location`, `strip_prompt_from_args`) and the inline
+/// positional-to-flag shuffling that used to live in
+/// `apply_non_interactive` for Gemini and Qwen.
+///
+/// Precedence (highest wins):
+/// 1. A prompt-carrying flag from `prompt_arg_conventions().prompt_flags`
+///    (e.g. `--prompt VALUE`, `-p=VALUE`)
+/// 2. A bare positional arg (after skipping the entrypoint subcommand
+///    and any value-taking flags)
+/// 3. `has_piped_stdin == true` → `PromptSource::InheritStdin`
+/// 4. Otherwise → `PromptSource::None`
+///
+/// Whenever a flag or positional is returned as the prompt, it is
+/// removed from the returned `Vec<String>` so downstream trait methods
+/// see clean args with zero prompt characters.
+///
+/// ## Errors
+///
+/// Returns an error if a prompt-carrying flag appears in `passthrough`
+/// without a following value (e.g. a bare trailing `--prompt`). Silent
+/// fall-through in that case would drop the user's intent — piped
+/// stdin, if present, would take its place. Surface the problem at
+/// extraction time instead.
+pub(crate) fn extract_prompt_source_from_passthrough(
+    profile: &dyn WrapperProfile,
+    passthrough: &[String],
+    has_piped_stdin: bool,
+) -> Result<(Vec<String>, PromptSource)> {
+    let conv = profile.prompt_arg_conventions();
+    let mut args: Vec<String> = passthrough.to_vec();
+
+    // 1. Look for a prompt-carrying flag.
+    if let Some((prompt, indices)) = find_prompt_flag(&args, conv.prompt_flags)? {
+        // Remove the matched indices in reverse order so earlier
+        // indices stay valid while splicing.
+        for idx in indices.iter().rev() {
+            args.remove(*idx);
+        }
+        return Ok((args, PromptSource::Inline(prompt)));
+    }
+
+    // 2. Look for a positional prompt, skipping the entrypoint (if any)
+    //    and any value-taking flags.
+    if let Some(idx) = find_positional_prompt_index(&args, &conv) {
+        let prompt = args.remove(idx);
+        return Ok((args, PromptSource::Inline(prompt)));
+    }
+
+    // 3. Piped stdin.
+    if has_piped_stdin {
+        return Ok((args, PromptSource::InheritStdin));
+    }
+
+    // 4. No prompt.
+    Ok((args, PromptSource::None))
+}
+
+/// Find a prompt delivered via one of `prompt_flags`. Returns the prompt
+/// text and the argv indices to remove.
+///
+/// Supports four shapes:
+/// - `--prompt VALUE`      → two indices
+/// - `--prompt=VALUE`      → one index
+/// - `-p VALUE`            → two indices
+/// - `-p=VALUE`            → one index
+fn find_prompt_flag(
+    args: &[String],
+    prompt_flags: &[&str],
+) -> Result<Option<(String, Vec<usize>)>> {
+    for (idx, arg) in args.iter().enumerate() {
+        for flag in prompt_flags {
+            if arg == flag {
+                let value = args.get(idx + 1).cloned().ok_or_else(|| {
+                    eyre!("prompt flag `{flag}` requires a value but none was provided")
+                })?;
+                return Ok(Some((value, vec![idx, idx + 1])));
+            }
+            let inline_prefix = format!("{flag}=");
+            if let Some(value) = arg.strip_prefix(&inline_prefix) {
+                return Ok(Some((value.to_string(), vec![idx])));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Find the index of the first positional prompt candidate in `args`,
+/// honoring the entrypoint skip and the set of value-taking flags.
+fn find_positional_prompt_index(args: &[String], conv: &PromptArgConventions) -> Option<usize> {
+    let mut skip_next = false;
+    for (idx, arg) in args.iter().enumerate() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+
+        // Skip the entrypoint subcommand if it matches at index 0.
+        if idx == 0
+            && let Some(entry) = conv.entrypoint
+            && arg == entry
+        {
+            continue;
+        }
+
+        if arg == "--" {
+            return (idx + 1 < args.len()).then_some(idx + 1);
+        }
+
+        // Skip value-taking flags so their values are not mistaken for
+        // positional prompts. Handle both `--flag value` and
+        // `--flag=value` shapes.
+        if let Some(eq_idx) = arg.find('=')
+            && conv
+                .value_taking_flags
+                .iter()
+                .any(|flag| arg[..eq_idx] == **flag)
+        {
+            continue;
+        }
+        if conv.value_taking_flags.iter().any(|flag| arg == *flag) {
+            skip_next = true;
+            continue;
+        }
+
+        if !arg.starts_with('-') {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+/// Generic "is the prompt requirement satisfied?" check for the wrap
+/// pipeline. Called from every call site after all `apply_*` methods
+/// have run and `prompt_delivery` has placed any inline prompt.
+///
+/// Returns `Ok(())` when any of the following holds:
+/// - `non_interactive == false` (interactive sessions never require a
+///   preloaded prompt — the user will type one)
+/// - `source.has_prompt_or_stdin()` is true (inline prompt or piped
+///   stdin reaches the child)
+///
+/// Otherwise bails with a provider-agnostic error message that
+/// interpolates `provider_name` so the user knows which wrap failed.
+pub(crate) fn require_prompt_present(
+    provider_name: &str,
+    non_interactive: bool,
+    source: &PromptSource,
+) -> Result<()> {
+    if !non_interactive {
+        return Ok(());
+    }
+    if source.has_prompt_or_stdin() {
+        return Ok(());
+    }
+    bail!(
+        "--non-interactive for {provider_name} requires a prompt \
+         (positional, via a prompt flag, or piped on stdin)"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1359,35 +1869,32 @@ mod tests {
         profile_for_provider(provider).unwrap()
     }
 
+    // -- PromptSource tests ------------------------------------------------
+
     #[test]
-    fn codex_non_interactive_ensures_exec_once() {
-        let p = profile(Provider::Codex);
-        let mut args = vec!["exec".to_string(), "--json".to_string(), "task".to_string()];
-
-        p.apply_non_interactive(&mut args).unwrap();
-        p.apply_non_interactive(&mut args).unwrap();
-
-        assert_eq!(args, vec!["exec", "--json", "task"]);
+    fn prompt_source_as_inline_returns_text_for_inline_variant() {
+        let source = PromptSource::Inline("hello".to_string());
+        assert_eq!(source.as_inline(), Some("hello"));
     }
 
     #[test]
-    fn codex_non_interactive_prepends_exec() {
-        let p = profile(Provider::Codex);
-        let mut args = vec!["--json".to_string(), "summarize".to_string()];
-
-        p.apply_non_interactive(&mut args).unwrap();
-
-        assert_eq!(args, vec!["exec", "--json", "summarize"]);
+    fn prompt_source_as_inline_returns_none_for_non_inline_variants() {
+        assert_eq!(PromptSource::None.as_inline(), None);
+        assert_eq!(PromptSource::InheritStdin.as_inline(), None);
     }
 
     #[test]
-    fn codex_non_interactive_rejects_missing_prompt() {
-        let p = profile(Provider::Codex);
-        let mut args = vec!["--json".to_string()];
+    fn prompt_source_is_none_only_true_for_none_variant() {
+        assert!(PromptSource::None.is_none());
+        assert!(!PromptSource::Inline("hi".to_string()).is_none());
+        assert!(!PromptSource::InheritStdin.is_none());
+    }
 
-        p.apply_non_interactive(&mut args).unwrap();
-        let err = p.validate_final_args(&args, true, false).unwrap_err();
-        assert!(err.to_string().contains("requires a prompt"));
+    #[test]
+    fn prompt_source_has_prompt_or_stdin_accepts_inline_and_stdin() {
+        assert!(!PromptSource::None.has_prompt_or_stdin());
+        assert!(PromptSource::Inline("x".to_string()).has_prompt_or_stdin());
+        assert!(PromptSource::InheritStdin.has_prompt_or_stdin());
     }
 
     #[test]
@@ -1423,74 +1930,38 @@ mod tests {
     }
 
     #[test]
-    fn qwen_non_interactive_rejects_prompt_interactive() {
+    fn qwen_apply_non_interactive_flags_rejects_prompt_interactive() {
         let p = profile(Provider::QwenCode);
         let mut args = vec!["-i".to_string(), "task".to_string()];
-
-        let error = p.apply_non_interactive(&mut args).unwrap_err();
-        assert!(error.to_string().contains("conflicts"));
+        let err = p.apply_non_interactive_flags(&mut args).unwrap_err();
+        assert!(err.to_string().contains("conflicts"));
     }
 
     #[test]
-    fn gemini_non_interactive_converts_positional_to_prompt_flag() {
-        let p = profile(Provider::Gemini);
-        let mut args = vec!["hi".to_string()];
-
-        p.apply_non_interactive(&mut args).unwrap();
-
-        assert_eq!(args, vec!["--prompt", "hi"]);
-    }
-
-    #[test]
-    fn gemini_non_interactive_preserves_existing_prompt_flag() {
-        let p = profile(Provider::Gemini);
-        let mut args = vec!["--prompt".to_string(), "hi".to_string()];
-
-        p.apply_non_interactive(&mut args).unwrap();
-
-        assert_eq!(args, vec!["--prompt", "hi"]);
-    }
-
-    #[test]
-    fn gemini_non_interactive_converts_positional_with_other_flags() {
-        let p = profile(Provider::Gemini);
-        let mut args = vec![
-            "--model".to_string(),
-            "flash".to_string(),
-            "explain this".to_string(),
-        ];
-
-        p.apply_non_interactive(&mut args).unwrap();
-
-        assert_eq!(args, vec!["--model", "flash", "--prompt", "explain this"]);
-    }
-
-    #[test]
-    fn gemini_non_interactive_skips_approval_mode_value() {
-        let p = profile(Provider::Gemini);
-        let mut args = vec![
-            "--approval-mode".to_string(),
-            "yolo".to_string(),
-            "explain this".to_string(),
-        ];
-
-        p.apply_non_interactive(&mut args).unwrap();
-
-        // "yolo" must stay as --approval-mode's value, not be stolen as a positional
-        assert_eq!(
-            args,
-            vec!["--approval-mode", "yolo", "--prompt", "explain this"]
-        );
-    }
-
-    #[test]
-    fn qwen_non_interactive_converts_positional_to_prompt_flag() {
+    fn qwen_apply_non_interactive_flags_allows_empty_args_for_composition() {
         let p = profile(Provider::QwenCode);
-        let mut args = vec!["hi".to_string()];
+        let mut args: Vec<String> = Vec::new();
+        p.apply_non_interactive_flags(&mut args).unwrap();
+        assert!(args.is_empty());
+    }
 
-        p.apply_non_interactive(&mut args).unwrap();
+    /// Regression test for the composition pipeline path: non-interactive
+    /// flag application must NOT bail when args are empty, because the
+    /// prompt arrives later via `prompt_delivery`.
+    #[test]
+    fn gemini_apply_non_interactive_flags_allows_empty_args_for_composition() {
+        let p = profile(Provider::Gemini);
+        let mut args: Vec<String> = Vec::new();
+        p.apply_non_interactive_flags(&mut args).unwrap();
+        assert!(args.is_empty());
+    }
 
-        assert_eq!(args, vec!["--prompt", "hi"]);
+    #[test]
+    fn gemini_apply_non_interactive_flags_rejects_interactive_mode_flags() {
+        let p = profile(Provider::Gemini);
+        let mut args = vec!["-i".to_string()];
+        let err = p.apply_non_interactive_flags(&mut args).unwrap_err();
+        assert!(err.to_string().contains("conflicts"));
     }
 
     #[test]
@@ -1515,14 +1986,13 @@ mod tests {
     }
 
     #[test]
-    fn opencode_non_interactive_defaults_add_model_when_missing() {
+    fn opencode_non_interactive_defaults_do_not_inject_a_hard_coded_model() {
         let p = profile(Provider::OpenCode);
         let mut args = vec!["run".to_string(), "status".to_string()];
 
         p.apply_non_interactive_defaults(&mut args);
 
-        assert!(args.contains(&"--model".to_string()));
-        assert!(args.contains(&"minimax/MiniMax-M2.5-highspeed".to_string()));
+        assert_eq!(args, vec!["run", "status"]);
     }
 
     #[test]
@@ -1542,13 +2012,17 @@ mod tests {
     }
 
     #[test]
-    fn opencode_non_interactive_rejects_missing_prompt() {
+    fn opencode_non_interactive_validation_requires_a_model() {
         let p = profile(Provider::OpenCode);
-        let mut args = vec!["--json".to_string()];
+        let args = vec!["run".to_string(), "status".to_string()];
 
-        p.apply_non_interactive(&mut args).unwrap();
-        let err = p.validate_final_args(&args, true, false).unwrap_err();
-        assert!(err.to_string().contains("requires a prompt"));
+        let error = p.validate_non_interactive_requirements(&args).unwrap_err();
+        assert!(
+            error.to_string().contains(
+                "OpenCode cannot use its configured default model in non-interactive mode"
+            )
+        );
+        assert!(error.to_string().contains("OPENCODE_MODEL"));
     }
 
     #[test]
@@ -1560,7 +2034,35 @@ mod tests {
             .unwrap()
             .apply_to(&mut args);
         assert_eq!(stdin_seed, None);
-        assert_eq!(args, vec!["run", "summarize staged files"]);
+        assert_eq!(args, vec!["run", "--", "summarize staged files"]);
+    }
+
+    #[test]
+    fn opencode_non_interactive_prompt_starting_with_dash_is_separated_with_end_of_options() {
+        // Regression: OpenCode's yargs parser prints help and exits when a
+        // positional prompt begins with `-`. Claudine must emit `--` before
+        // the prompt so composed bullet-list prompts are delivered intact.
+        let p = profile(Provider::OpenCode);
+        let mut args = vec![
+            "run".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+        ];
+        p.prompt_delivery(&args, "- implement the plan\n- use the skill", true)
+            .unwrap()
+            .apply_to(&mut args);
+        let sep_index = args
+            .iter()
+            .position(|a| a == "--")
+            .expect("`--` separator must be present");
+        let prompt_index = args
+            .iter()
+            .position(|a| a == "- implement the plan\n- use the skill")
+            .expect("prompt must be present as a positional");
+        assert!(
+            sep_index < prompt_index,
+            "`--` must precede the prompt: {args:?}"
+        );
     }
 
     #[test]
@@ -1575,16 +2077,6 @@ mod tests {
         let unique: HashSet<_> = env_overrides.into_iter().collect();
         assert_eq!(unique.len(), 1);
         assert!(unique.contains(&("GOOSE_MODE".to_string(), "auto".to_string())));
-    }
-
-    #[test]
-    fn goose_non_interactive_rejects_missing_prompt() {
-        let p = profile(Provider::Goose);
-        let mut args = Vec::new();
-
-        p.apply_non_interactive(&mut args).unwrap();
-        let err = p.validate_final_args(&args, true, false).unwrap_err();
-        assert!(err.to_string().contains("requires a prompt"));
     }
 
     #[test]
@@ -1698,5 +2190,253 @@ mod tests {
         let warning = p.apply_sandbox(&mut args);
         assert!(warning.is_some());
         assert!(args.is_empty());
+    }
+
+    // -- PromptArgConventions tests -----------------------------------------
+
+    #[test]
+    fn prompt_arg_conventions_claude_uses_defaults() {
+        let conv = profile(Provider::Claude).prompt_arg_conventions();
+        assert!(conv.prompt_flags.is_empty());
+        assert_eq!(conv.entrypoint, None);
+    }
+
+    #[test]
+    fn prompt_arg_conventions_codex_uses_exec_entrypoint() {
+        let conv = profile(Provider::Codex).prompt_arg_conventions();
+        assert_eq!(conv.entrypoint, Some("exec"));
+        assert!(conv.prompt_flags.is_empty());
+    }
+
+    #[test]
+    fn prompt_arg_conventions_gemini_uses_prompt_flags() {
+        let conv = profile(Provider::Gemini).prompt_arg_conventions();
+        assert_eq!(conv.prompt_flags, &["-p", "--prompt"]);
+        assert_eq!(conv.entrypoint, None);
+    }
+
+    #[test]
+    fn prompt_arg_conventions_goose_uses_run_entrypoint_and_text_flags() {
+        let conv = profile(Provider::Goose).prompt_arg_conventions();
+        assert_eq!(conv.entrypoint, Some("run"));
+        assert_eq!(conv.prompt_flags, &["-t", "--text"]);
+    }
+
+    #[test]
+    fn prompt_arg_conventions_kimi_uses_long_prompt_flag_only() {
+        let conv = profile(Provider::KimiCode).prompt_arg_conventions();
+        assert_eq!(conv.prompt_flags, &["--prompt"]);
+        assert_eq!(conv.entrypoint, None);
+    }
+
+    #[test]
+    fn prompt_arg_conventions_opencode_uses_run_entrypoint() {
+        let conv = profile(Provider::OpenCode).prompt_arg_conventions();
+        assert_eq!(conv.entrypoint, Some("run"));
+        assert!(conv.prompt_flags.is_empty());
+    }
+
+    #[test]
+    fn prompt_arg_conventions_qwen_uses_prompt_flags() {
+        let conv = profile(Provider::QwenCode).prompt_arg_conventions();
+        assert_eq!(conv.prompt_flags, &["-p", "--prompt"]);
+        assert_eq!(conv.entrypoint, None);
+    }
+
+    // -- extract_prompt_source_from_passthrough ----------------------------
+
+    fn extract(
+        provider: Provider,
+        passthrough: &[&str],
+        has_piped_stdin: bool,
+    ) -> (Vec<String>, PromptSource) {
+        let args: Vec<String> = passthrough.iter().map(|s| s.to_string()).collect();
+        extract_prompt_source_from_passthrough(profile(provider), &args, has_piped_stdin)
+            .expect("extract_prompt_source_from_passthrough should succeed")
+    }
+
+    #[test]
+    fn extract_claude_no_args_yields_none() {
+        let (args, source) = extract(Provider::Claude, &[], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::None);
+    }
+
+    #[test]
+    fn extract_claude_bare_positional_yields_inline() {
+        let (args, source) = extract(Provider::Claude, &["hello"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hello".to_string()));
+    }
+
+    #[test]
+    fn extract_claude_piped_stdin_yields_inherit_stdin() {
+        let (args, source) = extract(Provider::Claude, &[], true);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::InheritStdin);
+    }
+
+    #[test]
+    fn extract_claude_flag_before_positional_is_preserved() {
+        let (args, source) = extract(Provider::Claude, &["--model", "opus", "fix the bug"], false);
+        assert_eq!(args, vec!["--model", "opus"]);
+        assert_eq!(source, PromptSource::Inline("fix the bug".to_string()));
+    }
+
+    #[test]
+    fn extract_codex_skips_exec_entrypoint() {
+        let (args, source) = extract(Provider::Codex, &["exec", "do it"], false);
+        assert_eq!(args, vec!["exec"]);
+        assert_eq!(source, PromptSource::Inline("do it".to_string()));
+    }
+
+    #[test]
+    fn extract_codex_without_exec_still_finds_positional() {
+        let (args, source) = extract(Provider::Codex, &["--json", "task"], false);
+        assert_eq!(args, vec!["--json"]);
+        assert_eq!(source, PromptSource::Inline("task".to_string()));
+    }
+
+    #[test]
+    fn extract_gemini_long_prompt_flag() {
+        let (args, source) = extract(Provider::Gemini, &["--prompt", "hi"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hi".to_string()));
+    }
+
+    #[test]
+    fn extract_gemini_short_prompt_flag() {
+        let (args, source) = extract(Provider::Gemini, &["-p", "hi"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hi".to_string()));
+    }
+
+    #[test]
+    fn extract_gemini_inline_prompt_flag() {
+        let (args, source) = extract(Provider::Gemini, &["--prompt=hi"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hi".to_string()));
+    }
+
+    #[test]
+    fn extract_gemini_positional_prompt_after_model_flag() {
+        let (args, source) = extract(
+            Provider::Gemini,
+            &["--model", "flash", "explain this"],
+            false,
+        );
+        assert_eq!(args, vec!["--model", "flash"]);
+        assert_eq!(source, PromptSource::Inline("explain this".to_string()));
+    }
+
+    #[test]
+    fn extract_gemini_positional_skips_approval_mode_value() {
+        let (args, source) = extract(
+            Provider::Gemini,
+            &["--approval-mode", "yolo", "explain this"],
+            false,
+        );
+        assert_eq!(args, vec!["--approval-mode", "yolo"]);
+        assert_eq!(source, PromptSource::Inline("explain this".to_string()));
+    }
+
+    #[test]
+    fn extract_goose_text_flag() {
+        let (args, source) = extract(Provider::Goose, &["run", "-t", "hello"], false);
+        assert_eq!(args, vec!["run"]);
+        assert_eq!(source, PromptSource::Inline("hello".to_string()));
+    }
+
+    #[test]
+    fn extract_kimi_prompt_flag() {
+        let (args, source) = extract(Provider::KimiCode, &["--prompt", "hi"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hi".to_string()));
+    }
+
+    #[test]
+    fn extract_opencode_skips_run_entrypoint() {
+        let (args, source) = extract(Provider::OpenCode, &["run", "build it"], false);
+        assert_eq!(args, vec!["run"]);
+        assert_eq!(source, PromptSource::Inline("build it".to_string()));
+    }
+
+    #[test]
+    fn extract_qwen_long_prompt_flag() {
+        let (args, source) = extract(Provider::QwenCode, &["--prompt", "hi"], false);
+        assert!(args.is_empty());
+        assert_eq!(source, PromptSource::Inline("hi".to_string()));
+    }
+
+    #[test]
+    fn extract_flags_only_returns_none_when_no_piped_stdin() {
+        let (args, source) = extract(Provider::Codex, &["exec", "--json"], false);
+        assert_eq!(args, vec!["exec", "--json"]);
+        assert_eq!(source, PromptSource::None);
+    }
+
+    #[test]
+    fn extract_flags_only_with_piped_stdin_returns_inherit_stdin() {
+        let (args, source) = extract(Provider::Codex, &["exec", "--json"], true);
+        assert_eq!(args, vec!["exec", "--json"]);
+        assert_eq!(source, PromptSource::InheritStdin);
+    }
+
+    #[test]
+    fn extract_dangling_prompt_flag_returns_error() {
+        // Regression test: a prompt flag with no following value must
+        // surface as an error rather than silently falling through to the
+        // positional / stdin / None branches. Silent fall-through is the
+        // original DRY-providers bug this refactor exists to prevent.
+        let args: Vec<String> = vec!["--prompt".to_string()];
+        let err = extract_prompt_source_from_passthrough(profile(Provider::Gemini), &args, false)
+            .expect_err("dangling --prompt must return an error");
+        let message = err.to_string();
+        assert!(
+            message.contains("--prompt"),
+            "error message should mention the flag: {message}"
+        );
+        assert!(
+            message.contains("requires a value"),
+            "error message should mention missing value: {message}"
+        );
+    }
+
+    #[test]
+    fn extract_positional_with_equals_is_not_mistaken_for_flag() {
+        // Regression test: a positional argument containing `=` (e.g.
+        // an env-var-style token like `KEY=VALUE`) must not be mistaken
+        // for a value-taking flag by `find_positional_prompt_index`.
+        // `KEY` is not in the known value-taking flag list, so `KEY=VALUE`
+        // must be treated as the first positional prompt (not skipped), and
+        // the second positional remains in args.
+        let (args, source) = extract(Provider::Claude, &["KEY=VALUE", "the actual prompt"], false);
+        assert_eq!(args, vec!["the actual prompt".to_string()]);
+        assert_eq!(source, PromptSource::Inline("KEY=VALUE".to_string()));
+    }
+
+    // -- require_prompt_present tests -----------------------------------------
+
+    #[test]
+    fn require_prompt_present_passes_in_interactive_mode_with_no_source() {
+        require_prompt_present("claude", false, &PromptSource::None).unwrap();
+    }
+
+    #[test]
+    fn require_prompt_present_passes_with_inline_prompt() {
+        require_prompt_present("claude", true, &PromptSource::Inline("x".to_string())).unwrap();
+    }
+
+    #[test]
+    fn require_prompt_present_passes_with_inherit_stdin() {
+        require_prompt_present("claude", true, &PromptSource::InheritStdin).unwrap();
+    }
+
+    #[test]
+    fn require_prompt_present_fails_non_interactive_with_no_source() {
+        let err = require_prompt_present("codex", true, &PromptSource::None).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("codex"));
+        assert!(message.contains("requires a prompt"));
     }
 }

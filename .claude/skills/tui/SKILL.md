@@ -141,6 +141,10 @@ See [Bubble Tea Architecture](./bubble-tea-architecture.md) for commands, async,
 - [Widget Collections](./widget-collections.md) -- tui-popup, tui-big-text, tui-scrollview, edtui, tui-logger
 - [Web Deployment](./web-deployment.md) -- Ratzilla WASM backends (WebGL2, Canvas, DOM), Trunk, GitHub Pages
 
+### Validation & Testing
+
+- [Testing TUI Applications](./testing-a-tui.md) -- architectural separation, TestBackend, snapshot testing (insta), input simulation, CI/CD best practices
+
 ### Bubble Tea (Go)
 
 - [Architecture](./bubble-tea-architecture.md) -- Elm pattern, messages/commands, state management, async, navigation

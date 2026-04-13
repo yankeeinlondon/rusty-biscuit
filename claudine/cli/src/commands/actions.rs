@@ -8,7 +8,8 @@ use biscuit_terminal::components::table::table::{Table, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
 use claudine::actions::HookAction;
-use claudine::dispatch::loader::load_config;
+use claudine::config::claudine_config::ClaudineConfig;
+use claudine::dispatch::loader::load_claudine_config;
 
 use crate::cli_utils::event_name_pascal;
 use crate::log;
@@ -17,7 +18,7 @@ use crate::log;
 pub struct ActionsArgs {}
 
 pub fn run(_args: ActionsArgs, verbose: bool) -> Result<()> {
-    let config = match load_config(None, None) {
+    let config = match load_claudine_config(None, None) {
         Ok(cfg) => cfg,
         Err(e) => {
             log::error(&format!("Failed to load config: {}", e));
@@ -38,22 +39,16 @@ fn action_type_name(action: &HookAction) -> &'static str {
     action.type_pascal_case()
 }
 
-fn run_simple(config: &claudine::events::HookerConfig, term: &Terminal) -> Result<()> {
+fn run_simple(config: &ClaudineConfig, term: &Terminal) -> Result<()> {
     let mut action_to_events: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    for provider_config in config.providers.values() {
-        for (event, binding) in &provider_config.events {
-            if !binding.enabled {
-                continue;
-            }
-
-            for action in &binding.actions {
-                let action_name = action_type_name(action);
-                action_to_events
-                    .entry(action_name.to_string())
-                    .or_default()
-                    .push(event.as_slug().to_string());
-            }
+    for (event, actions) in &config.actions {
+        for action in actions {
+            let action_name = action_type_name(action);
+            action_to_events
+                .entry(action_name.to_string())
+                .or_default()
+                .push(event.as_slug().to_string());
         }
     }
 
@@ -62,7 +57,7 @@ fn run_simple(config: &claudine::events::HookerConfig, term: &Terminal) -> Resul
         log::data("No configured actions found.");
         log::data("");
         log::data(
-            "{{dim}}Run {{blue}}claudine init{{reset}}{{dim}} to configure event hooks.{{reset}}",
+            "{{dim}}Run {{blue}}claudine config{{reset}}{{dim}} to configure event hooks.{{reset}}",
         );
         return Ok(());
     }
@@ -95,11 +90,11 @@ fn run_simple(config: &claudine::events::HookerConfig, term: &Terminal) -> Resul
 fn action_with_params(action: &HookAction) -> String {
     match action {
         HookAction::SoundEffect {
-            name,
+            effect,
             volume,
             speed,
         } => {
-            let mut s = format!("{}({name}", action.type_pascal_case());
+            let mut s = format!("{}({effect}", action.type_pascal_case());
             if *volume != 1.0 {
                 s.push_str(&format!(", vol={}", volume));
             }
@@ -109,7 +104,7 @@ fn action_with_params(action: &HookAction) -> String {
             s.push(')');
             s
         }
-        HookAction::Speak { message } => {
+        HookAction::Speak { message, .. } => {
             let truncated = if message.len() > 30 {
                 format!("{}…", &message[..27])
             } else {
@@ -117,48 +112,11 @@ fn action_with_params(action: &HookAction) -> String {
             };
             format!("{}({truncated})", action.type_pascal_case())
         }
-        HookAction::Log { target } => {
-            let params = match target {
-                claudine::actions::LogTarget::File { path, rotate_daily } => {
-                    let mut p = String::new();
-                    if !*rotate_daily {
-                        p.push_str(&format!("rotate_daily: {}", rotate_daily));
-                    }
-                    if path.is_some() {
-                        if !p.is_empty() {
-                            p.push_str(", ");
-                        }
-                        p.push_str("path: ...");
-                    }
-                    p
-                }
-                claudine::actions::LogTarget::Server {
-                    url, timeout_ms, ..
-                } => {
-                    let mut p = format!("url: {}", url);
-                    if *timeout_ms != 10_000 {
-                        p.push_str(&format!(", timeout: {}ms", timeout_ms));
-                    }
-                    p
-                }
-                _ => String::new(),
-            };
+        HookAction::Bash { command, params } => {
             if params.is_empty() {
-                format!("{}()", action.type_pascal_case())
-            } else {
-                format!("{}({{{params}}})", action.type_pascal_case())
-            }
-        }
-        HookAction::FireAndForget { command, args } => {
-            if let Some(args) = args {
-                format!(
-                    "{}({} {})",
-                    action.type_pascal_case(),
-                    command,
-                    args.join(" ")
-                )
-            } else {
                 format!("{}({})", action.type_pascal_case(), command)
+            } else {
+                format!("{}({} {})", action.type_pascal_case(), command, params)
             }
         }
         HookAction::Call {
@@ -198,22 +156,16 @@ fn action_with_params(action: &HookAction) -> String {
     }
 }
 
-fn run_verbose(config: &claudine::events::HookerConfig, term: &Terminal) -> Result<()> {
+fn run_verbose(config: &ClaudineConfig, term: &Terminal) -> Result<()> {
     let mut action_to_events: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    for provider_config in config.providers.values() {
-        for (event, binding) in &provider_config.events {
-            if !binding.enabled {
-                continue;
-            }
-
-            for action in &binding.actions {
-                let action_key = action_with_params(action);
-                action_to_events
-                    .entry(action_key)
-                    .or_default()
-                    .push(event.as_slug().to_string());
-            }
+    for (event, actions) in &config.actions {
+        for action in actions {
+            let action_key = action_with_params(action);
+            action_to_events
+                .entry(action_key)
+                .or_default()
+                .push(event.as_slug().to_string());
         }
     }
 
@@ -222,7 +174,7 @@ fn run_verbose(config: &claudine::events::HookerConfig, term: &Terminal) -> Resu
         log::data("No configured actions found.");
         log::data("");
         log::data(
-            "{{dim}}Run {{blue}}claudine init{{reset}}{{dim}} to configure event hooks.{{reset}}",
+            "{{dim}}Run {{blue}}claudine config{{reset}}{{dim}} to configure event hooks.{{reset}}",
         );
         return Ok(());
     }

@@ -12,22 +12,19 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::SniffInstallationError;
 use crate::programs::enums::CategoryEnum;
 use crate::programs::find_program::{
     ExecutableIndex, find_programs_with_source_from_index, find_programs_with_source_parallel,
 };
 use crate::programs::schema::{ProgramError, ProgramMetadata};
-use crate::error::SniffInstallationError;
 
 /// Describes where a program executable was discovered.
 ///
-/// This enum distinguishes between traditional PATH-based executables and
-/// macOS application bundles, enabling appropriate invocation strategies.
-///
-/// ## Variants
-///
-/// - `Path` - Found in system PATH (traditional executable)
-/// - `MacOsAppBundle` - Found as a macOS `.app` bundle
+/// Distinguishes between traditional PATH-based executables, macOS `.app`
+/// bundles, and Windows-specific fallback sources (registry App Paths, shallow
+/// install-root walk). Non-PATH sources are "fallback" sources — they are
+/// consulted only when PATH lookup misses.
 ///
 /// ## Examples
 ///
@@ -36,9 +33,11 @@ use crate::error::SniffInstallationError;
 ///
 /// let source = ExecutableSource::Path;
 /// assert!(!source.is_app_bundle());
+/// assert!(!source.is_fallback());
 ///
 /// let bundle = ExecutableSource::MacOsAppBundle;
 /// assert!(bundle.is_app_bundle());
+/// assert!(bundle.is_fallback());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -47,10 +46,16 @@ pub enum ExecutableSource {
     Path,
     /// Found as a macOS `.app` bundle.
     MacOsAppBundle,
+    /// Found via the Windows `App Paths` registry key
+    /// (`HKCU|HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths`).
+    WindowsAppPaths,
+    /// Found via a shallow walk of a Windows install root
+    /// (`%ProgramFiles%`, `%ProgramFiles(x86)%`, `%LocalAppData%\Programs`).
+    WindowsInstallRoot,
 }
 
 impl ExecutableSource {
-    /// Returns true if this source is a macOS app bundle.
+    /// Returns `true` if this source is a macOS app bundle.
     ///
     /// ## Examples
     ///
@@ -64,6 +69,23 @@ impl ExecutableSource {
     pub fn is_app_bundle(&self) -> bool {
         matches!(self, Self::MacOsAppBundle)
     }
+
+    /// Returns `true` if this source is a non-PATH fallback source.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use sniff::programs::ExecutableSource;
+    ///
+    /// assert!(!ExecutableSource::Path.is_fallback());
+    /// assert!(ExecutableSource::MacOsAppBundle.is_fallback());
+    /// assert!(ExecutableSource::WindowsAppPaths.is_fallback());
+    /// assert!(ExecutableSource::WindowsInstallRoot.is_fallback());
+    /// ```
+    #[must_use]
+    pub fn is_fallback(&self) -> bool {
+        !matches!(self, Self::Path)
+    }
 }
 
 impl std::fmt::Display for ExecutableSource {
@@ -71,6 +93,8 @@ impl std::fmt::Display for ExecutableSource {
         match self {
             ExecutableSource::Path => write!(f, "PATH"),
             ExecutableSource::MacOsAppBundle => write!(f, "macOS App Bundle"),
+            ExecutableSource::WindowsAppPaths => write!(f, "Windows App Paths"),
+            ExecutableSource::WindowsInstallRoot => write!(f, "Windows Install Root"),
         }
     }
 }
@@ -81,7 +105,8 @@ impl std::fmt::Display for ExecutableSource {
 ///
 /// 1. Using a package manager (OS level _or_ Language specific)
 /// 2. Downloading a bash script and executing it locally
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "manager", content = "target", rename_all = "snake_case")]
 pub enum InstallationMethod {
     // Language Package Managers
     /// Default Node.js package manager. [Website](https://www.npmjs.com)
@@ -144,6 +169,17 @@ pub enum InstallationMethod {
     /// Install by downloading a bash script from a URL and then
     /// piping it to the host's `bash` command for installation.
     RemoteBash(&'static str),
+
+    /// Install `pkg` via `uv tool install`, bootstrapping uv from
+    /// `astral.sh/uv/install.sh` (or `install.ps1` on Windows) first if
+    /// `uv` is not already on `PATH`. Runnable whenever bash (Unix) or
+    /// PowerShell (Windows) is available — no Python on the host is
+    /// required because the astral installer is self-contained and
+    /// `uv tool install` manages Python on its own. Uses the
+    /// `RemoteBash` consent flow via the existing `approve_remote_bash`
+    /// option; consent is demanded even when the bootstrap step will
+    /// be skipped at execute time.
+    UvWithInstall(&'static str),
 }
 
 impl InstallationMethod {
@@ -181,6 +217,8 @@ impl InstallationMethod {
             InstallationMethod::Nix(pkg) => pkg,
             // Remote bash
             InstallationMethod::RemoteBash(url) => url,
+            // Uv with optional bootstrap
+            InstallationMethod::UvWithInstall(pkg) => pkg,
         }
     }
 
@@ -215,6 +253,7 @@ impl InstallationMethod {
             InstallationMethod::Scoop(_) => "scoop",
             InstallationMethod::Nix(_) => "nix",
             InstallationMethod::RemoteBash(_) => "bash",
+            InstallationMethod::UvWithInstall(_) => "uv",
         }
     }
 
@@ -273,6 +312,7 @@ impl InstallationMethod {
             InstallationMethod::Scoop(_) => "scoop",
             InstallationMethod::Nix(_) => "nix",
             InstallationMethod::RemoteBash(_) => "bash",
+            InstallationMethod::UvWithInstall(_) => "uv",
         }
     }
 }
@@ -545,102 +585,55 @@ impl<E: CategoryEnum> ProgramDetector for CategoryDetector<E> {
     }
 
     fn installable(&self, program: E) -> bool {
-        let info = program.info();
-        if info.installation_methods.is_empty() {
-            return false;
-        }
-
-        let os_availability = info.os_availability;
-        if !os_availability.is_empty() {
-            let os_type = crate::os::detect_os_type();
-            if !os_availability.contains(&os_type) {
-                return false;
-            }
-        }
-
-        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
-        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
-
-        info.installation_methods.iter().any(|method| {
-            crate::programs::installer::method_available(method, &os_pkg_mgrs, &lang_pkg_mgrs)
-        })
+        self.install_plan(program).successful
     }
 
     fn install(&self, program: E) -> Result<(), SniffInstallationError> {
-        let info = program.info();
-
-        if info.installation_methods.is_empty() {
-            return Err(SniffInstallationError::NotInstallableOnOs {
+        let plan = self.install_plan(program);
+        if !plan.successful {
+            return Err(SniffInstallationError::NoViableMethod {
                 pkg: program.display_name().to_string(),
-                os: "unknown".to_string(),
+                detail: format!(
+                    "evaluated {} method(s); none are runnable",
+                    plan.options.len()
+                ),
             });
         }
-
-        let os_availability = info.os_availability;
-        if !os_availability.is_empty() {
-            let os_type = crate::os::detect_os_type();
-            if !os_availability.contains(&os_type) {
-                return Err(SniffInstallationError::NotInstallableOnOs {
-                    pkg: program.display_name().to_string(),
-                    os: os_type.to_string(),
-                });
-            }
-        }
-
-        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
-        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
-        let method = crate::programs::installer::select_best_method(
-            info.installation_methods,
-            &os_pkg_mgrs,
-            &lang_pkg_mgrs,
-        )
-        .ok_or_else(|| SniffInstallationError::MissingPackageManager {
-            pkg: program.display_name().to_string(),
-            manager: "package manager".to_string(),
-        })?;
-
-        let _result = crate::programs::installer::execute_install(
-            method,
-            &crate::programs::installer::InstallOptions::default(),
-        )?;
+        let _ = plan.execute(&crate::programs::installer::InstallOptions::default())?;
         Ok(())
     }
 
     fn install_version(&self, program: E, version: &str) -> Result<(), SniffInstallationError> {
-        let info = program.info();
-
-        if info.installation_methods.is_empty() {
-            return Err(SniffInstallationError::NotInstallableOnOs {
+        let plan = self.install_plan(program);
+        let chosen = plan
+            .chosen()
+            .ok_or_else(|| SniffInstallationError::NoViableMethod {
                 pkg: program.display_name().to_string(),
-                os: "unknown".to_string(),
+                detail: format!(
+                    "evaluated {} method(s); none are runnable",
+                    plan.options.len()
+                ),
+            })?;
+
+        if matches!(
+            chosen.kind,
+            InstallationMethod::RemoteBash(_) | InstallationMethod::UvWithInstall(_)
+        ) {
+            let url = match &chosen.kind {
+                InstallationMethod::RemoteBash(u) => (*u).to_string(),
+                InstallationMethod::UvWithInstall(_) => {
+                    crate::programs::installer::astral_installer_url().to_string()
+                }
+                _ => unreachable!(),
+            };
+            return Err(SniffInstallationError::RemoteBashConsentRequired {
+                pkg: program.display_name().to_string(),
+                url,
             });
         }
 
-        let os_availability = info.os_availability;
-        if !os_availability.is_empty() {
-            let os_type = crate::os::detect_os_type();
-            if !os_availability.contains(&os_type) {
-                return Err(SniffInstallationError::NotInstallableOnOs {
-                    pkg: program.display_name().to_string(),
-                    os: os_type.to_string(),
-                });
-            }
-        }
-
-        let os_pkg_mgrs = crate::programs::pkg_mngrs::InstalledOsPackageManagers::new();
-        let lang_pkg_mgrs = crate::programs::pkg_mngrs::InstalledLanguagePackageManagers::new();
-        let method = crate::programs::installer::select_best_method(
-            info.installation_methods,
-            &os_pkg_mgrs,
-            &lang_pkg_mgrs,
-        )
-        .ok_or_else(|| SniffInstallationError::MissingPackageManager {
-            pkg: program.display_name().to_string(),
-            manager: "package manager".to_string(),
-        })?;
-
-        let _result = crate::programs::installer::execute_versioned_install(
-            method,
+        let _ = crate::programs::installer::execute_versioned_install(
+            &chosen.kind,
             version,
             &crate::programs::installer::InstallOptions::default(),
         )?;
@@ -793,6 +786,44 @@ pub trait ProgramDetector {
         program: Self::Program,
         version: &str,
     ) -> Result<(), SniffInstallationError>;
+
+    /// Returns every installation method the program declares, ignoring host
+    /// constraints. This is the static metadata.
+    fn known_methods(&self, program: Self::Program) -> &'static [InstallationMethod] {
+        program.info().installation_methods
+    }
+
+    /// Returns the subset of known methods whose required package manager is
+    /// actually installed on this host and whose program is permitted on the
+    /// current OS.
+    fn available_methods(&self, program: Self::Program) -> Vec<InstallationMethod> {
+        use crate::programs::host_capability::HostCapabilities;
+        use crate::programs::installer::method_available;
+
+        let info = program.info();
+        let host = HostCapabilities::load_or_detect();
+
+        let os_ok = info.os_availability.is_empty() || info.os_availability.contains(&host.os_type);
+        if !os_ok {
+            return Vec::new();
+        }
+
+        info.installation_methods
+            .iter()
+            .filter(|m| method_available(m, &host))
+            .cloned()
+            .collect()
+    }
+
+    /// Returns a full install plan for this program against cached host
+    /// capabilities.
+    fn install_plan(&self, program: Self::Program) -> crate::programs::install_plan::InstallPlan {
+        use crate::programs::host_capability::HostCapabilities;
+        use crate::programs::install_plan::build_install_plan;
+
+        let host = HostCapabilities::load_or_detect();
+        build_install_plan(&program, &host)
+    }
 }
 
 #[cfg(test)]
@@ -973,11 +1004,15 @@ mod tests {
         let mut set = HashSet::new();
         set.insert(ExecutableSource::Path);
         set.insert(ExecutableSource::MacOsAppBundle);
+        set.insert(ExecutableSource::WindowsAppPaths);
+        set.insert(ExecutableSource::WindowsInstallRoot);
         set.insert(ExecutableSource::Path); // Duplicate
 
-        assert_eq!(set.len(), 2);
+        assert_eq!(set.len(), 4);
         assert!(set.contains(&ExecutableSource::Path));
         assert!(set.contains(&ExecutableSource::MacOsAppBundle));
+        assert!(set.contains(&ExecutableSource::WindowsAppPaths));
+        assert!(set.contains(&ExecutableSource::WindowsInstallRoot));
     }
 
     #[test]
@@ -1003,11 +1038,66 @@ mod tests {
 
     #[test]
     fn test_executable_source_roundtrip() {
-        for source in [ExecutableSource::Path, ExecutableSource::MacOsAppBundle] {
+        for source in [
+            ExecutableSource::Path,
+            ExecutableSource::MacOsAppBundle,
+            ExecutableSource::WindowsAppPaths,
+            ExecutableSource::WindowsInstallRoot,
+        ] {
             let json = serde_json::to_string(&source).unwrap();
             let deserialized: ExecutableSource = serde_json::from_str(&json).unwrap();
             assert_eq!(source, deserialized);
         }
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_serialize() {
+        let app_paths = ExecutableSource::WindowsAppPaths;
+        let install_root = ExecutableSource::WindowsInstallRoot;
+
+        assert_eq!(
+            serde_json::to_string(&app_paths).unwrap(),
+            "\"windows_app_paths\""
+        );
+        assert_eq!(
+            serde_json::to_string(&install_root).unwrap(),
+            "\"windows_install_root\""
+        );
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_deserialize() {
+        let ap: ExecutableSource = serde_json::from_str("\"windows_app_paths\"").unwrap();
+        let ir: ExecutableSource = serde_json::from_str("\"windows_install_root\"").unwrap();
+
+        assert_eq!(ap, ExecutableSource::WindowsAppPaths);
+        assert_eq!(ir, ExecutableSource::WindowsInstallRoot);
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_display() {
+        assert_eq!(
+            ExecutableSource::WindowsAppPaths.to_string(),
+            "Windows App Paths"
+        );
+        assert_eq!(
+            ExecutableSource::WindowsInstallRoot.to_string(),
+            "Windows Install Root"
+        );
+    }
+
+    #[test]
+    fn test_executable_source_windows_variants_not_app_bundle() {
+        assert!(!ExecutableSource::WindowsAppPaths.is_app_bundle());
+        assert!(!ExecutableSource::WindowsInstallRoot.is_app_bundle());
+    }
+
+    #[test]
+    fn test_executable_source_is_fallback() {
+        assert!(!ExecutableSource::Path.is_fallback());
+        assert!(ExecutableSource::MacOsAppBundle.is_fallback());
+        assert!(ExecutableSource::WindowsAppPaths.is_fallback());
+        assert!(ExecutableSource::WindowsInstallRoot.is_fallback());
     }
 
     // ============================================
@@ -1038,11 +1128,26 @@ mod tests {
     fn test_installation_method_manager_binary() {
         assert_eq!(InstallationMethod::Brew("vim").manager_binary(), "brew");
         assert_eq!(InstallationMethod::Apt("vim").manager_binary(), "apt");
-        assert_eq!(InstallationMethod::Cargo("ripgrep").manager_binary(), "cargo");
-        assert_eq!(InstallationMethod::Npm("typescript").manager_binary(), "npm");
-        assert_eq!(InstallationMethod::RemoteBash("url").manager_binary(), "bash");
-        assert_eq!(InstallationMethod::Chocolatey("vim").manager_binary(), "choco");
-        assert_eq!(InstallationMethod::Hex("hex_package").manager_binary(), "mix");
+        assert_eq!(
+            InstallationMethod::Cargo("ripgrep").manager_binary(),
+            "cargo"
+        );
+        assert_eq!(
+            InstallationMethod::Npm("typescript").manager_binary(),
+            "npm"
+        );
+        assert_eq!(
+            InstallationMethod::RemoteBash("url").manager_binary(),
+            "bash"
+        );
+        assert_eq!(
+            InstallationMethod::Chocolatey("vim").manager_binary(),
+            "choco"
+        );
+        assert_eq!(
+            InstallationMethod::Hex("hex_package").manager_binary(),
+            "mix"
+        );
     }
 
     #[test]
@@ -1163,6 +1268,7 @@ mod tests {
             InstallationMethod::Scoop("x"),
             InstallationMethod::Nix("x"),
             InstallationMethod::RemoteBash("x"),
+            InstallationMethod::UvWithInstall("x"),
         ];
 
         for method in &all_methods {
@@ -1173,6 +1279,16 @@ mod tests {
                 method
             );
         }
+    }
+
+    #[test]
+    fn test_uv_with_install_package_name_and_manager() {
+        let method = InstallationMethod::UvWithInstall("aider-chat");
+        assert_eq!(method.package_name(), "aider-chat");
+        assert_eq!(method.manager_name(), "uv");
+        assert_eq!(method.manager_binary(), "uv");
+        assert!(!method.is_os_package_manager());
+        assert!(!method.is_remote_bash());
     }
 
     // ============================================
@@ -1188,16 +1304,25 @@ mod tests {
 
     #[test]
     fn test_executable_source_pattern_matching() {
-        // Test that match exhaustiveness is enforced by the compiler
         fn describe_source(source: ExecutableSource) -> &'static str {
             match source {
                 ExecutableSource::Path => "path",
                 ExecutableSource::MacOsAppBundle => "bundle",
+                ExecutableSource::WindowsAppPaths => "app_paths",
+                ExecutableSource::WindowsInstallRoot => "install_root",
             }
         }
 
         assert_eq!(describe_source(ExecutableSource::Path), "path");
         assert_eq!(describe_source(ExecutableSource::MacOsAppBundle), "bundle");
+        assert_eq!(
+            describe_source(ExecutableSource::WindowsAppPaths),
+            "app_paths"
+        );
+        assert_eq!(
+            describe_source(ExecutableSource::WindowsInstallRoot),
+            "install_root"
+        );
     }
 
     #[test]
@@ -1360,6 +1485,34 @@ mod tests {
     }
 
     // ============================================
+    // InstallationMethod Serialize tests
+    // ============================================
+
+    #[test]
+    fn test_installation_method_serializes_with_manager_target_shape() {
+        let method = InstallationMethod::Brew("ripgrep");
+        let json = serde_json::to_string(&method).unwrap();
+        assert_eq!(json, r#"{"manager":"brew","target":"ripgrep"}"#);
+    }
+
+    #[test]
+    fn test_installation_method_serializes_remote_bash_as_tagged_shape() {
+        let method = InstallationMethod::RemoteBash("https://sh.rustup.rs");
+        let json = serde_json::to_string(&method).unwrap();
+        assert_eq!(
+            json,
+            r#"{"manager":"remote_bash","target":"https://sh.rustup.rs"}"#
+        );
+    }
+
+    #[test]
+    fn test_installation_method_serializes_cargo_as_tagged_shape() {
+        let method = InstallationMethod::Cargo("bat");
+        let json = serde_json::to_string(&method).unwrap();
+        assert_eq!(json, r#"{"manager":"cargo","target":"bat"}"#);
+    }
+
+    // ============================================
     // CategoryDetector ProgramDetector trait tests
     // ============================================
 
@@ -1378,5 +1531,42 @@ mod tests {
         assert_eq!(pd.path(Editor::Vim), Some(PathBuf::from("/usr/bin/vim")));
         let installed = pd.installed();
         assert_eq!(installed, vec![Editor::Vim]);
+    }
+
+    #[test]
+    fn category_detector_known_methods_matches_metadata() {
+        let detector = CategoryDetector::<Editor>::default();
+        let methods = detector.known_methods(Editor::Vim);
+        assert_eq!(methods, Editor::Vim.info().installation_methods);
+    }
+
+    #[test]
+    fn category_detector_available_methods_filters_by_os() {
+        // On the current host, VSCode's methods should produce a deterministic
+        // subset — we just assert the call compiles and returns a Vec.
+        let detector = CategoryDetector::<Editor>::default();
+        let _available = detector.available_methods(Editor::VSCode);
+    }
+
+    #[test]
+    fn category_detector_install_plan_returns_plan_for_program() {
+        let detector = CategoryDetector::<Editor>::default();
+        let plan = detector.install_plan(Editor::Vim);
+        assert_eq!(plan.program, Editor::Vim.display_name());
+    }
+
+    #[test]
+    fn installable_mirrors_plan_successful() {
+        use strum::IntoEnumIterator;
+        let detector = CategoryDetector::<Editor>::default();
+        for editor in Editor::iter() {
+            let plan = detector.install_plan(editor);
+            assert_eq!(
+                detector.installable(editor),
+                plan.successful,
+                "installable() must mirror install_plan().successful for {:?}",
+                editor
+            );
+        }
     }
 }

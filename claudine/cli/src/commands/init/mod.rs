@@ -10,18 +10,20 @@ use clap::Args;
 use color_eyre::eyre::Result;
 
 use claudine::actions::HookAction;
+use claudine::config::claudine_config::{ClaudineConfig, DefaultSounds, TtsValue};
 use claudine::config::{
-    AgentInfo, RegistrationResult, SkipReason, discover_agents_full, get_configurator,
+    AgentInfo, ProviderHookPlan, RegistrationResult, SkipReason, discover_agents_full,
+    get_configurator,
 };
+use claudine::dispatch::loader::{load_claudine_config, save_claudine_config};
 use claudine::events::{
-    AgenticEvent, CanonicalProviderSettings, EventBinding, GlobalSettings, HookerConfig,
-    LinkingSettings, Provider, ProviderConfig, recommended_sound,
+    AgenticEvent, CanonicalProviderSettings, EventBinding, Provider, recommended_sound,
 };
 use claudine::linking::{
     CanonicalSelection, LinkableResource, ResourceScope, ranked_provider_preferences,
     resolve_repo_root, select_canonical_provider, set_canonical_provider,
 };
-use claudine::services::{ProtectConfig, ProtectPosture};
+use claudine::services::ProtectConfig;
 
 use crate::log;
 
@@ -67,7 +69,9 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 
         if !global_config.exists() {
             log::warn("No global ~/.claudine/config.json found.");
-            log::message("Consider running `claudine init` first to set up global defaults.");
+            log::message(
+                "Run any claudine command to trigger initialization, or run `claudine config`.",
+            );
             log::message("");
         }
     }
@@ -116,68 +120,65 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("");
     log::message("Phase 4: Protect Defaults");
     log::message("-------------------------");
-    let protect_posture = prompts::prompt_protect_posture_with_default(defaults.protect_posture)?;
-    let protect_defaults = protect_posture
-        .map(|posture| ProtectConfig::provider_aware_defaults(&installed_providers, posture));
+    let protect_enabled = prompts::prompt_protect_enabled(defaults.protect_enabled.or(Some(true)))?;
+    let protect = if protect_enabled {
+        ProtectConfig::default()
+    } else {
+        ProtectConfig {
+            enabled: false,
+            ..ProtectConfig::default()
+        }
+    };
 
-    // Build provider-specific event bindings:
-    // - include every event the provider can register via native hooks
-    // - include empty actions as explicit no-op bindings
-    let mut provider_event_bindings: HashMap<Provider, HashMap<AgenticEvent, EventBinding>> =
-        HashMap::new();
-    for agent in &selected_agents {
-        provider_event_bindings.insert(
-            agent.provider,
-            build_provider_event_bindings(agent.provider, &action_profile),
-        );
+    let first_agent = selected_agents.first().expect("at least one agent");
+
+    let mut actions = HashMap::new();
+    let hook_events = provider_hook_events(first_agent.provider);
+    for event in &hook_events {
+        let event_actions = actions_for_event(*event, &action_profile);
+        actions.insert(*event, event_actions);
     }
 
-    let total_bindings: usize = provider_event_bindings
-        .values()
-        .map(std::collections::HashMap::len)
-        .sum();
+    let total_bindings = actions.len();
 
     log::message("");
     log::message(&format!("Prepared {total_bindings} event binding(s):"));
     for agent in &selected_agents {
-        let count = provider_event_bindings
-            .get(&agent.provider)
-            .map(std::collections::HashMap::len)
-            .unwrap_or(0);
+        let count = provider_hook_events(agent.provider).len();
         log::message(&format!("  {}: {} events", agent.provider, count));
     }
     log::message("");
 
-    // Build global settings (non-interactive)
-    let mut settings = GlobalSettings::default();
-    let scope = if repo_scope {
-        ResourceScope::Repo
+    let canonical_provider = if repo_scope {
+        None
     } else {
-        ResourceScope::User
+        let scope = ResourceScope::User;
+        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+        let mut canonical = CanonicalProviderSettings::default();
+        for resource in LinkableResource::ALL {
+            if let CanonicalSelection::Selected { provider, .. } = select_canonical_provider(
+                scope,
+                resource,
+                &installed_providers,
+                &preference,
+                &home_dir,
+                &repo_root,
+            ) {
+                set_canonical_provider(&mut canonical, scope, resource, provider);
+            }
+        }
+        Some(canonical)
     };
-    let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
-    settings.linking = build_linking_settings(
-        scope,
-        &installed_providers,
-        &preference,
-        &home_dir,
-        &repo_root,
-    );
-    settings.protect = protect_defaults;
 
-    // Build final config with per-provider configuration
-    let mut providers = HashMap::new();
-    for agent in &selected_agents {
-        let events = provider_event_bindings
-            .remove(&agent.provider)
-            .unwrap_or_default();
-        providers.insert(agent.provider, ProviderConfig { events });
-    }
-
-    let config = HookerConfig {
-        version: "1.0".to_string(),
-        settings,
-        providers,
+    let config = ClaudineConfig {
+        tts: TtsValue::default(),
+        messenger: None,
+        logging: true,
+        protect,
+        actions,
+        preferred_agent: first_agent.provider,
+        canonical_provider: canonical_provider.and_then(|_| preference.first().copied()),
+        default_sounds: DefaultSounds::default(),
     };
 
     // Phase 5: Write and Register
@@ -185,7 +186,6 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("Phase 5: Write Configuration");
     log::message("-----------------------------");
 
-    // Determine config path
     let config_path = if repo_scope {
         repo_root.join(".claudine").join("config.json")
     } else {
@@ -195,12 +195,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
             .join("config.json")
     };
 
-    // Write config file
-    let json = serde_json::to_string_pretty(&config)?;
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&config_path, &json)?;
+    save_claudine_config(&config, &config_path)?;
     log::message(&format!("Wrote config to {}", config_path.display()));
 
     // Handle .gitignore in repo mode
@@ -213,8 +208,12 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("Registering with available agents:");
     for agent in &selected_agents {
         let provider = agent.provider;
+        let plan = ProviderHookPlan {
+            events: config.actions.keys().copied().collect(),
+            canonical_for: None,
+        };
         let configurator = get_configurator(provider);
-        match configurator.register(&config, None) {
+        match configurator.register(&plan, None) {
             Ok(RegistrationResult::Registered { event_count }) => {
                 log::message(&format!("  {provider}: registered ({event_count} events)"));
             }
@@ -246,7 +245,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
 struct InitDefaults {
     provider_preferences: Vec<Provider>,
     action_profile: Option<prompts::InitActionProfile>,
-    protect_posture: Option<Option<ProtectPosture>>,
+    protect_enabled: Option<bool>,
 }
 
 fn load_init_defaults(repo_scope: bool, repo_root: &std::path::Path) -> InitDefaults {
@@ -255,27 +254,16 @@ fn load_init_defaults(repo_scope: bool, repo_root: &std::path::Path) -> InitDefa
     };
 
     InitDefaults {
-        provider_preferences: config
-            .settings
-            .linking
-            .as_ref()
-            .map(|linking| linking.preference.clone())
-            .unwrap_or_default(),
+        provider_preferences: vec![],
         action_profile: infer_action_profile(&config),
-        protect_posture: Some(
-            config
-                .settings
-                .protect
-                .as_ref()
-                .map(|protect| protect.posture),
-        ),
+        protect_enabled: Some(config.protect.enabled),
     }
 }
 
 fn load_existing_init_config(
     repo_scope: bool,
     repo_root: &std::path::Path,
-) -> Option<HookerConfig> {
+) -> Option<ClaudineConfig> {
     let home = dirs::home_dir()?;
     let user_config = home.join(".claudine").join("config.json");
     let repo_config = repo_root.join(".claudine").join("config.json");
@@ -287,48 +275,31 @@ fn load_existing_init_config(
     }
 }
 
-fn read_config_if_exists(path: &std::path::Path) -> Option<HookerConfig> {
-    let content = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&content).ok()
+fn read_config_if_exists(path: &std::path::Path) -> Option<ClaudineConfig> {
+    if !path.is_file() {
+        return None;
+    }
+    load_claudine_config(Some(path), None).ok()
 }
 
-fn infer_action_profile(config: &HookerConfig) -> Option<prompts::InitActionProfile> {
+fn infer_action_profile(config: &ClaudineConfig) -> Option<prompts::InitActionProfile> {
     let mut configured_events = HashSet::new();
-    let mut logged_events = HashSet::new();
-    let mut log_target: Option<claudine::actions::LogTarget> = None;
     let mut input_required_actions = Vec::new();
 
-    for provider_config in config.providers.values() {
-        for (event, binding) in &provider_config.events {
-            if !binding.enabled {
-                continue;
-            }
+    for (event, actions) in &config.actions {
+        if actions.is_empty() {
+            continue;
+        }
 
-            configured_events.insert(*event);
+        configured_events.insert(*event);
 
-            if let Some(target) = binding.actions.iter().find_map(|action| match action {
-                HookAction::Log { target } => Some(target.clone()),
-                _ => None,
-            }) {
-                logged_events.insert(*event);
-                if log_target.is_none() {
-                    log_target = Some(target);
-                }
-            }
-
-            if input_required_actions.is_empty()
-                && matches!(
-                    event,
-                    AgenticEvent::PermissionRequest | AgenticEvent::HumanInTheLoop
-                )
-            {
-                input_required_actions = binding
-                    .actions
-                    .iter()
-                    .filter(|action| !matches!(action, HookAction::Log { .. }))
-                    .cloned()
-                    .collect();
-            }
+        if input_required_actions.is_empty()
+            && matches!(
+                event,
+                AgenticEvent::PermissionRequest | AgenticEvent::HumanInTheLoop
+            )
+        {
+            input_required_actions = actions.clone();
         }
     }
 
@@ -336,25 +307,8 @@ fn infer_action_profile(config: &HookerConfig) -> Option<prompts::InitActionProf
         return None;
     }
 
-    let logging = if logged_events.is_empty() {
-        prompts::LoggingProfile::None
-    } else {
-        let target = log_target.unwrap_or(claudine::actions::LogTarget::File {
-            path: None,
-            rotate_daily: true,
-        });
-        if logged_events == configured_events {
-            prompts::LoggingProfile::All { target }
-        } else {
-            prompts::LoggingProfile::Some {
-                target,
-                events: logged_events,
-            }
-        }
-    };
-
     Some(prompts::InitActionProfile {
-        logging,
+        logging: prompts::LoggingProfile::None,
         input_required_actions,
     })
 }
@@ -419,22 +373,27 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
             .join("config.json")
     };
 
-    // Write config file
-    let json = serde_json::to_string_pretty(&config)?;
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&config_path, &json)?;
+    save_claudine_config(&config, &config_path)?;
     log::message(&format!("  Wrote config to {}", config_path.display()));
 
-    // Register with providers included in this config
+    // Register with providers
     log::message("");
     log::message("Registering with configured providers:");
-    let mut providers: Vec<Provider> = config.providers.keys().copied().collect();
+    let all_agents = discover_agents_full();
+    let installed_providers = installed_provider_list(&all_agents);
+    let mut providers: Vec<Provider> = installed_providers
+        .iter()
+        .copied()
+        .filter(|provider| !provider_hook_events(*provider).is_empty())
+        .collect();
     providers.sort_by_key(|provider| provider.to_string());
     for provider in providers {
+        let plan = ProviderHookPlan {
+            events: config.actions.keys().copied().collect(),
+            canonical_for: None,
+        };
         let configurator = get_configurator(provider);
-        match configurator.register(&config, None) {
+        match configurator.register(&plan, None) {
             Ok(RegistrationResult::Registered { event_count }) => {
                 log::message(&format!("  {provider}: registered ({event_count} events)"));
             }
@@ -462,54 +421,74 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     Ok(())
 }
 
-fn default_config(repo_scope: bool) -> Result<HookerConfig> {
-    let scope = if repo_scope {
-        ResourceScope::Repo
-    } else {
-        ResourceScope::User
-    };
+fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
     let all_agents = discover_agents_full();
     let installed_providers = installed_provider_list(&all_agents);
-    let preference = ranked_provider_preferences(&installed_providers, &[]);
-    let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
-    let cwd = std::env::current_dir()?;
-    let repo_root = resolve_repo_root(&cwd);
-    let settings = GlobalSettings {
-        linking: build_linking_settings(
-            scope,
-            &installed_providers,
-            &preference,
-            &home_dir,
-            &repo_root,
-        ),
-        protect: Some(ProtectConfig::provider_aware_defaults(
-            &installed_providers,
-            ProtectPosture::Balanced,
-        )),
-        ..GlobalSettings::default()
-    };
 
-    // Apply to installed providers that can register at least one event via hooks.
     let quick_providers: Vec<Provider> = installed_providers
         .iter()
         .copied()
         .filter(|provider| !provider_hook_events(*provider).is_empty())
         .collect();
 
-    let mut providers = HashMap::new();
-    for provider in quick_providers {
-        providers.insert(
-            provider,
-            ProviderConfig {
-                events: create_quick_provider_events(provider),
-            },
-        );
+    let preferred_agent = quick_providers.first().copied().unwrap_or(Provider::Claude);
+
+    let mut actions = HashMap::new();
+    if let Some(&first_provider) = quick_providers.first() {
+        for event in provider_hook_events(first_provider) {
+            let event_actions = if matches!(
+                event,
+                AgenticEvent::SessionStart
+                    | AgenticEvent::TurnComplete
+                    | AgenticEvent::ToolError
+                    | AgenticEvent::PermissionRequest
+                    | AgenticEvent::HumanInTheLoop
+            ) {
+                vec![HookAction::SoundEffect {
+                    effect: recommended_sound(&event).to_string(),
+                    volume: 1.0,
+                    speed: 1.0,
+                }]
+            } else {
+                vec![]
+            };
+            actions.insert(event, event_actions);
+        }
     }
 
-    Ok(HookerConfig {
-        version: "1.0".to_string(),
-        settings,
-        providers,
+    let canonical_provider = if repo_scope {
+        None
+    } else {
+        let cwd = std::env::current_dir()?;
+        let repo_root = resolve_repo_root(&cwd);
+        let scope = ResourceScope::User;
+        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+        let preference = ranked_provider_preferences(&installed_providers, &[]);
+        let mut canonical = CanonicalProviderSettings::default();
+        for resource in LinkableResource::ALL {
+            if let CanonicalSelection::Selected { provider, .. } = select_canonical_provider(
+                scope,
+                resource,
+                &installed_providers,
+                &preference,
+                &home_dir,
+                &repo_root,
+            ) {
+                set_canonical_provider(&mut canonical, scope, resource, provider);
+            }
+        }
+        preference.first().copied()
+    };
+
+    Ok(ClaudineConfig {
+        tts: TtsValue::default(),
+        messenger: None,
+        logging: true,
+        protect: ProtectConfig::default(),
+        actions,
+        preferred_agent,
+        canonical_provider,
+        default_sounds: DefaultSounds::default(),
     })
 }
 
@@ -522,39 +501,6 @@ fn installed_provider_list(agents: &[AgentInfo]) -> Vec<Provider> {
     providers.sort_by_key(|provider| provider.to_string());
     providers.dedup();
     providers
-}
-
-fn build_linking_settings(
-    scope: ResourceScope,
-    installed_providers: &[Provider],
-    preference: &[Provider],
-    home_dir: &std::path::Path,
-    repo_root: &std::path::Path,
-) -> Option<LinkingSettings> {
-    if installed_providers.is_empty() {
-        return None;
-    }
-
-    let preference = ranked_provider_preferences(installed_providers, preference);
-    let mut canonical_provider = CanonicalProviderSettings::default();
-
-    for resource in LinkableResource::ALL {
-        if let CanonicalSelection::Selected { provider, .. } = select_canonical_provider(
-            scope,
-            resource,
-            installed_providers,
-            &preference,
-            home_dir,
-            repo_root,
-        ) {
-            set_canonical_provider(&mut canonical_provider, scope, resource, provider);
-        }
-    }
-
-    Some(LinkingSettings {
-        preference,
-        canonical_provider,
-    })
 }
 
 fn provider_hook_events(provider: Provider) -> Vec<AgenticEvent> {
@@ -589,22 +535,6 @@ fn actions_for_event(
 ) -> Vec<HookAction> {
     let mut actions = Vec::new();
 
-    match &action_profile.logging {
-        prompts::LoggingProfile::None => {}
-        prompts::LoggingProfile::All { target } => {
-            actions.push(HookAction::Log {
-                target: target.clone(),
-            });
-        }
-        prompts::LoggingProfile::Some { target, events } => {
-            if events.contains(&event) {
-                actions.push(HookAction::Log {
-                    target: target.clone(),
-                });
-            }
-        }
-    }
-
     if matches!(
         event,
         AgenticEvent::PermissionRequest | AgenticEvent::HumanInTheLoop
@@ -628,7 +558,7 @@ fn create_quick_provider_events(provider: Provider) -> HashMap<AgenticEvent, Eve
                     | AgenticEvent::HumanInTheLoop
             ) {
                 vec![HookAction::SoundEffect {
-                    name: recommended_sound(&event).to_string(),
+                    effect: recommended_sound(&event).to_string(),
                     volume: 1.0,
                     speed: 1.0,
                 }]
@@ -651,30 +581,19 @@ fn create_quick_provider_events(provider: Provider) -> HashMap<AgenticEvent, Eve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claudine::actions::LogTarget;
 
-    fn config_with_provider_events(
-        provider: Provider,
-        events: Vec<(AgenticEvent, Vec<HookAction>)>,
-    ) -> HookerConfig {
-        let event_map = events
-            .into_iter()
-            .map(|(event, actions)| {
-                (
-                    event,
-                    EventBinding {
-                        enabled: true,
-                        actions,
-                        matcher: None,
-                    },
-                )
-            })
-            .collect();
+    fn config_with_actions(events: Vec<(AgenticEvent, Vec<HookAction>)>) -> ClaudineConfig {
+        let actions = events.into_iter().collect();
 
-        HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings::default(),
-            providers: HashMap::from([(provider, ProviderConfig { events: event_map })]),
+        ClaudineConfig {
+            tts: TtsValue::default(),
+            messenger: None,
+            logging: true,
+            protect: ProtectConfig::default(),
+            actions,
+            preferred_agent: Provider::Claude,
+            canonical_provider: None,
+            default_sounds: DefaultSounds::default(),
         }
     }
 
@@ -726,16 +645,11 @@ mod tests {
     }
 
     #[test]
-    fn interactive_profile_applies_logging_and_input_sound() {
+    fn interactive_profile_applies_input_sound() {
         let profile = prompts::InitActionProfile {
-            logging: prompts::LoggingProfile::All {
-                target: LogTarget::File {
-                    path: None,
-                    rotate_daily: true,
-                },
-            },
+            logging: prompts::LoggingProfile::None,
             input_required_actions: vec![HookAction::SoundEffect {
-                name: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
+                effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
                 volume: 1.0,
                 speed: 1.0,
             }],
@@ -743,47 +657,18 @@ mod tests {
 
         let bindings = build_provider_event_bindings(Provider::Claude, &profile);
 
-        // Non-input event gets logging only.
-        let session_start = bindings
-            .get(&AgenticEvent::SessionStart)
-            .expect("session_start should exist for Claude");
-        assert_eq!(session_start.actions.len(), 1);
-        assert!(matches!(session_start.actions[0], HookAction::Log { .. }));
-
-        // Input-required event gets logging + sound.
-        let hitl = bindings
-            .get(&AgenticEvent::HumanInTheLoop)
-            .expect("human_in_the_loop should exist for Claude");
-        assert_eq!(hitl.actions.len(), 2);
-        assert!(matches!(hitl.actions[0], HookAction::Log { .. }));
-        assert!(matches!(hitl.actions[1], HookAction::SoundEffect { .. }));
-    }
-
-    #[test]
-    fn interactive_profile_logs_only_selected_events_when_configured() {
-        let profile = prompts::InitActionProfile {
-            logging: prompts::LoggingProfile::Some {
-                target: LogTarget::File {
-                    path: None,
-                    rotate_daily: true,
-                },
-                events: [AgenticEvent::TurnComplete].into_iter().collect(),
-            },
-            input_required_actions: vec![],
-        };
-
-        let bindings = build_provider_event_bindings(Provider::Claude, &profile);
-
-        let turn_complete = bindings
-            .get(&AgenticEvent::TurnComplete)
-            .expect("turn_complete should exist for Claude");
-        assert_eq!(turn_complete.actions.len(), 1);
-        assert!(matches!(turn_complete.actions[0], HookAction::Log { .. }));
-
+        // Non-input event gets no actions.
         let session_start = bindings
             .get(&AgenticEvent::SessionStart)
             .expect("session_start should exist for Claude");
         assert!(session_start.actions.is_empty());
+
+        // Input-required event gets sound.
+        let hitl = bindings
+            .get(&AgenticEvent::HumanInTheLoop)
+            .expect("human_in_the_loop should exist for Claude");
+        assert_eq!(hitl.actions.len(), 1);
+        assert!(matches!(hitl.actions[0], HookAction::SoundEffect { .. }));
     }
 
     #[test]
@@ -818,80 +703,24 @@ mod tests {
     #[test]
     fn quick_mode_seeds_provider_aware_protect_defaults() {
         let config = default_config(false).expect("default config should build");
-        let protect = config.settings.protect.expect("protect defaults missing");
 
-        assert_eq!(protect.posture, ProtectPosture::Balanced);
+        assert!(config.protect.enabled);
     }
 
     #[test]
-    fn infer_action_profile_restores_all_event_logging() {
-        let target = LogTarget::File {
-            path: None,
-            rotate_daily: true,
-        };
-        let config = config_with_provider_events(
-            Provider::Claude,
-            vec![
-                (
-                    AgenticEvent::SessionStart,
-                    vec![HookAction::Log {
-                        target: target.clone(),
-                    }],
-                ),
-                (
-                    AgenticEvent::TurnComplete,
-                    vec![HookAction::Log {
-                        target: target.clone(),
-                    }],
-                ),
-            ],
-        );
-
-        let profile = infer_action_profile(&config).expect("profile should be inferred");
-        match profile.logging {
-            prompts::LoggingProfile::All {
-                target: inferred_target,
-            } => assert_eq!(inferred_target, target),
-            other => panic!("expected all-event logging, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn infer_action_profile_restores_some_logging_and_input_actions() {
-        let target = LogTarget::File {
-            path: None,
-            rotate_daily: true,
-        };
+    fn infer_action_profile_restores_input_actions() {
         let sound = HookAction::SoundEffect {
-            name: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
+            effect: recommended_sound(&AgenticEvent::HumanInTheLoop).to_string(),
             volume: 1.0,
             speed: 1.0,
         };
-        let config = config_with_provider_events(
-            Provider::Claude,
-            vec![
-                (
-                    AgenticEvent::TurnComplete,
-                    vec![HookAction::Log {
-                        target: target.clone(),
-                    }],
-                ),
-                (AgenticEvent::SessionStart, vec![]),
-                (AgenticEvent::HumanInTheLoop, vec![sound.clone()]),
-            ],
-        );
+        let config = config_with_actions(vec![
+            (AgenticEvent::SessionStart, vec![]),
+            (AgenticEvent::HumanInTheLoop, vec![sound.clone()]),
+        ]);
 
         let profile = infer_action_profile(&config).expect("profile should be inferred");
-        match profile.logging {
-            prompts::LoggingProfile::Some {
-                target: inferred_target,
-                events,
-            } => {
-                assert_eq!(inferred_target, target);
-                assert_eq!(events, HashSet::from([AgenticEvent::TurnComplete]));
-            }
-            other => panic!("expected some-event logging, got {other:?}"),
-        }
+        assert!(matches!(profile.logging, prompts::LoggingProfile::None));
         assert_eq!(profile.input_required_actions, vec![sound]);
     }
 }

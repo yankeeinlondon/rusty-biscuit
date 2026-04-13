@@ -663,8 +663,13 @@ mod tests {
     #[test]
     fn test_markdown_toc_heading_count() {
         let mut toc = MarkdownToc::new();
-        let mut root =
-            MarkdownTocNode::new(HeadingLevel::H1, "Root".to_string(), "root".to_string(), (0, 100), (1, 10));
+        let mut root = MarkdownTocNode::new(
+            HeadingLevel::H1,
+            "Root".to_string(),
+            "root".to_string(),
+            (0, 100),
+            (1, 10),
+        );
         root.children.push(MarkdownTocNode::new(
             HeadingLevel::H2,
             "Child".to_string(),
@@ -694,8 +699,20 @@ mod tests {
     #[test]
     fn test_markdown_toc_max_level() {
         let mut toc = MarkdownToc::new();
-        let mut h1 = MarkdownTocNode::new(HeadingLevel::H1, "H1".to_string(), "h1".to_string(), (0, 100), (1, 10));
-        let mut h2 = MarkdownTocNode::new(HeadingLevel::H2, "H2".to_string(), "h2".to_string(), (10, 50), (2, 5));
+        let mut h1 = MarkdownTocNode::new(
+            HeadingLevel::H1,
+            "H1".to_string(),
+            "h1".to_string(),
+            (0, 100),
+            (1, 10),
+        );
+        let mut h2 = MarkdownTocNode::new(
+            HeadingLevel::H2,
+            "H2".to_string(),
+            "h2".to_string(),
+            (10, 50),
+            (2, 5),
+        );
         h2.children.push(MarkdownTocNode::new(
             HeadingLevel::H4,
             "H4".to_string(),

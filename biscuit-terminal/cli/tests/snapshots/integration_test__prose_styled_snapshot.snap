@@ -1,0 +1,6 @@
+---
+source: biscuit-terminal/cli/tests/integration_test.rs
+assertion_line: 1399
+expression: stdout
+---
+[1mError:[22m something went [31mwrong[39m in the [3mmodule[23m[0m

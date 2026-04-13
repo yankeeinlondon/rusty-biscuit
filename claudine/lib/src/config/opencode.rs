@@ -2,11 +2,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
-use crate::events::{HookerConfig, Provider};
+use crate::events::Provider;
 
 use super::atomic::atomic_write;
 use super::claudine_command;
-use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
+use super::trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
 
 /// Plugin filename in the plugins directory.
 const PLUGIN_FILENAME: &str = "claudine-bridge.ts";
@@ -128,7 +128,7 @@ impl AgentConfigurator for OpenCodeConfigurator {
 
     fn register(
         &self,
-        config: &HookerConfig,
+        plan: &ProviderHookPlan,
         config_dir: Option<&Path>,
     ) -> Result<RegistrationResult> {
         let opencode_path = config_path(config_dir);
@@ -143,34 +143,30 @@ impl AgentConfigurator for OpenCodeConfigurator {
         }
 
         // Check if already in sync (same events registered as in config)
-        if self.is_in_sync(config, config_dir)? {
+        if self.is_in_sync(plan, config_dir)? {
             return Ok(RegistrationResult::Skipped(SkipReason::AlreadyRegistered));
         }
 
-        // Get events configured for this provider
-        let provider_config = match config.providers.get(&Provider::OpenCode) {
-            Some(pc) => pc,
-            None => {
-                // No config for OpenCode - remove plugin
-                self.deregister(config_dir)?;
-                return Ok(RegistrationResult::Registered { event_count: 0 });
-            }
-        };
+        // If no events, deregister
+        if plan.events.is_empty() {
+            self.deregister(config_dir)?;
+            return Ok(RegistrationResult::Registered { event_count: 0 });
+        }
 
         // Generate the bridge plugin TypeScript file in the plugin directory.
         // OpenCode automatically discovers plugins from ~/.config/opencode/plugins/
         // so we don't need to modify opencode.json at all.
         let plugin_path = plugin_dir(config_dir).join(PLUGIN_FILENAME);
-        let bridge_source = generate_bridge(provider_config);
+        let bridge_source = generate_bridge(&plan.events);
         if let Some(parent) = plugin_path.parent() {
             fs::create_dir_all(parent)?;
         }
         atomic_write(&plugin_path, bridge_source.as_bytes())?;
 
         // Count only events that OpenCode supports
-        let event_count = provider_config
+        let event_count = plan
             .events
-            .keys()
+            .iter()
             .filter(|e| {
                 Provider::OpenCode
                     .registration_native_event_name(e)
@@ -211,37 +207,30 @@ impl AgentConfigurator for OpenCodeConfigurator {
 
 impl OpenCodeConfigurator {
     /// Check if the registered hooks match the expected events from config.
-    fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
+    fn is_in_sync(&self, plan: &ProviderHookPlan, config_dir: Option<&Path>) -> Result<bool> {
         use std::collections::HashSet;
 
         let registered: HashSet<String> = self.registered_events(config_dir)?.into_iter().collect();
 
-        let expected: HashSet<String> = config
-            .providers
-            .get(&Provider::OpenCode)
-            .map(|p| {
-                p.events
-                    .iter()
-                    .filter(|(event, binding)| {
-                        binding.enabled
-                            && Provider::OpenCode
-                                .registration_native_event_name(event)
-                                .is_some()
-                    })
-                    .map(|(event, _)| event.to_string())
-                    .collect()
+        let expected: HashSet<String> = plan
+            .events
+            .iter()
+            .filter(|event| {
+                Provider::OpenCode
+                    .registration_native_event_name(event)
+                    .is_some()
             })
-            .unwrap_or_default();
+            .map(|event| event.to_string())
+            .collect();
 
         Ok(registered == expected)
     }
 }
 
 /// Generate the bridge TypeScript source with event mappings.
-fn generate_bridge(provider_config: &crate::events::ProviderConfig) -> String {
-    let entries: Vec<String> = provider_config
-        .events
-        .keys()
+fn generate_bridge(events: &[crate::events::AgenticEvent]) -> String {
+    let entries: Vec<String> = events
+        .iter()
         .filter_map(|event| {
             // Skip events that OpenCode doesn't support
             let opencode_name = Provider::OpenCode.registration_native_event_name(event)?;
@@ -312,32 +301,16 @@ fn extract_events_from_bridge(source: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use tempfile::TempDir;
 
-    use crate::events::{AgenticEvent, EventBinding, GlobalSettings, ProviderConfig};
+    use crate::events::AgenticEvent;
 
     use super::*;
 
-    fn test_config(events: Vec<AgenticEvent>) -> HookerConfig {
-        let mut event_map = HashMap::new();
-        for event in events {
-            event_map.insert(
-                event,
-                EventBinding {
-                    enabled: true,
-                    actions: vec![],
-                    matcher: None,
-                },
-            );
-        }
-        let mut providers = HashMap::new();
-        providers.insert(Provider::OpenCode, ProviderConfig { events: event_map });
-        HookerConfig {
-            version: "1.0".to_string(),
-            settings: GlobalSettings::default(),
-            providers,
+    fn test_plan(events: Vec<AgenticEvent>) -> ProviderHookPlan {
+        ProviderHookPlan {
+            events,
+            canonical_for: None,
         }
     }
 
@@ -353,7 +326,7 @@ mod tests {
 
         let configurator = OpenCodeConfigurator;
         // Use events that OpenCode supports via the event hook (not tool hooks)
-        let config = test_config(vec![
+        let config = test_plan(vec![
             AgenticEvent::TurnComplete,
             AgenticEvent::PermissionRequest,
         ]);
@@ -389,7 +362,7 @@ mod tests {
         .unwrap();
 
         let configurator = OpenCodeConfigurator;
-        let config = test_config(vec![AgenticEvent::TurnComplete]);
+        let config = test_plan(vec![AgenticEvent::TurnComplete]);
         configurator.register(&config, Some(tmp.path())).unwrap();
 
         let bridge_path = tmp.path().join("plugin").join("claudine-bridge.ts");
@@ -452,7 +425,7 @@ mod tests {
         // - If CLI is not installed → returns NotDetected
         let tmp = TempDir::new().unwrap();
         let configurator = OpenCodeConfigurator;
-        let config = test_config(vec![AgenticEvent::TurnComplete]);
+        let config = test_plan(vec![AgenticEvent::TurnComplete]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
 
@@ -517,7 +490,7 @@ mod tests {
         fs::write(&opencode, original_content).unwrap();
 
         let configurator = OpenCodeConfigurator;
-        let config = test_config(vec![AgenticEvent::TurnComplete]);
+        let config = test_plan(vec![AgenticEvent::TurnComplete]);
         configurator.register(&config, Some(tmp.path())).unwrap();
 
         // opencode.json should be completely unchanged
@@ -527,29 +500,27 @@ mod tests {
 
     #[test]
     fn bridge_uses_shared_permission_mappings() {
-        let config = test_config(vec![
+        let plan = test_plan(vec![
             AgenticEvent::PermissionRequest,
             AgenticEvent::HumanInTheLoop,
         ]);
-        let provider_config = config.providers.get(&Provider::OpenCode).unwrap();
 
-        let source = generate_bridge(provider_config);
+        let source = generate_bridge(&plan.events);
         assert!(source.contains("\"permission.ask\": \"permission_request\""));
         assert!(source.contains("\"permission.asked\": \"human_in_the_loop\""));
     }
 
     #[test]
     fn bridge_uses_shared_mappings_for_core_opencode_events() {
-        let config = test_config(vec![
+        let plan = test_plan(vec![
             AgenticEvent::BeforePrompt,
             AgenticEvent::BeforeTool,
             AgenticEvent::AfterTool,
             AgenticEvent::BeforeModel,
             AgenticEvent::AfterModel,
         ]);
-        let provider_config = config.providers.get(&Provider::OpenCode).unwrap();
 
-        let source = generate_bridge(provider_config);
+        let source = generate_bridge(&plan.events);
         assert!(source.contains("\"chat.message\": \"before_prompt\""));
         assert!(source.contains("\"tool.execute.before\": \"before_tool\""));
         assert!(source.contains("\"tool.execute.after\": \"after_tool\""));
@@ -561,10 +532,9 @@ mod tests {
 
     #[test]
     fn bridge_invokes_handle_with_stdin_payload_contract() {
-        let config = test_config(vec![AgenticEvent::TurnComplete]);
-        let provider_config = config.providers.get(&Provider::OpenCode).unwrap();
+        let plan = test_plan(vec![AgenticEvent::TurnComplete]);
 
-        let source = generate_bridge(provider_config);
+        let source = generate_bridge(&plan.events);
         assert!(source.contains("execFileSync(CLAUDINE_BIN"));
         assert!(source.contains("invokeClaudine"));
         assert!(source.contains("createClaudineInvoker(\"open_code\")"));

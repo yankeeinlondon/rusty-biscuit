@@ -4,15 +4,8 @@ use serde_json::Value;
 
 use crate::actions::HookResponse;
 use crate::events::{AgenticEvent, EventMeta, Provider};
-use crate::permissions::query::{CommandQuery, PathQuery};
-use crate::services::ProtectObservation;
-use crate::services::protect::intent::ProtectIntent;
-use crate::services::protect::observe::default_observe_protect;
 
-use super::{
-    AdapterError, ProviderAdapter, extract_tool_input_path, replace_intents_preserving_completion,
-    str_field,
-};
+use super::{AdapterError, ProviderAdapter, str_field};
 
 pub(crate) struct CodexAdapter;
 
@@ -89,83 +82,6 @@ impl ProviderAdapter for CodexAdapter {
         Ok((event, meta))
     }
 
-    fn observe_protect(
-        &self,
-        event: &AgenticEvent,
-        meta: &EventMeta,
-    ) -> Option<ProtectObservation> {
-        let mut obs = default_observe_protect(event, meta)?;
-
-        // Codex-specific: refine intents from item type and tool input.
-        if let Some(item_type) = meta.extra.get("item_type").and_then(Value::as_str) {
-            let mut intents = Vec::new();
-
-            match item_type {
-                "command_execution" => {
-                    // Extract command from tool_input.params.command (array or string)
-                    let cmd = meta
-                        .tool_input
-                        .as_ref()
-                        .and_then(|v| v.get("params"))
-                        .and_then(|p| {
-                            p.get("command")
-                                .and_then(|c| {
-                                    c.as_array().map(|arr| {
-                                        arr.iter()
-                                            .filter_map(Value::as_str)
-                                            .collect::<Vec<_>>()
-                                            .join(" ")
-                                    })
-                                })
-                                .or_else(|| {
-                                    p.get("command")
-                                        .and_then(Value::as_str)
-                                        .map(ToOwned::to_owned)
-                                })
-                        })
-                        .or_else(|| {
-                            meta.tool_input
-                                .as_ref()
-                                .and_then(|v| v.get("command"))
-                                .and_then(Value::as_str)
-                                .map(ToOwned::to_owned)
-                        });
-                    if let Some(cmd) = cmd {
-                        intents.push(ProtectIntent::ExecuteCommand(CommandQuery::from_raw(&cmd)));
-                    }
-                }
-                "file_change" => {
-                    let path = extract_tool_input_path(meta);
-                    if let Some(path) = path {
-                        intents.push(ProtectIntent::WritePath(PathQuery::file(&path)));
-                    }
-                }
-                "mcp_tool_call" => {
-                    let server = meta.tool_name.as_deref().unwrap_or("unknown");
-                    intents.push(ProtectIntent::UseMcpServer {
-                        server: server.to_owned(),
-                    });
-                    if let Some(tool) = meta
-                        .tool_input
-                        .as_ref()
-                        .and_then(|v| v.get("tool"))
-                        .and_then(Value::as_str)
-                    {
-                        intents.push(ProtectIntent::UseMcpTool {
-                            server: server.to_owned(),
-                            tool: tool.to_owned(),
-                        });
-                    }
-                }
-                _ => return Some(obs),
-            }
-
-            replace_intents_preserving_completion(&mut obs, intents);
-        }
-
-        Some(obs)
-    }
-
     fn can_block(&self, _event: &AgenticEvent) -> bool {
         false
     }
@@ -184,17 +100,6 @@ impl ProviderAdapter for CodexAdapter {
 
     fn exit_code(&self, _event: &AgenticEvent, _response: &HookResponse) -> Option<i32> {
         None
-    }
-
-    fn map_protect_outcome(
-        &self,
-        _event: &AgenticEvent,
-        decision: &crate::services::ProtectDecision,
-    ) -> Result<HookResponse, AdapterError> {
-        Ok(self.map_non_blocking_protect_outcome(
-            decision,
-            "codex: no native blocking hook, downgraded to advisory",
-        ))
     }
 }
 

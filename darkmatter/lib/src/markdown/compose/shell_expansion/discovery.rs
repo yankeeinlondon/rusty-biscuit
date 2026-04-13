@@ -11,10 +11,13 @@ use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOperation;
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeSource;
+use crate::markdown::compose::frontmatter_interpolation::interpolate_frontmatter;
+use crate::markdown::compose::frontmatter_shell_expansion::scan_frontmatter;
+use crate::markdown::compose::prepare_frontmatter_for_compose;
 use crate::markdown::compose::shell_expansion::alias::resolve_alias;
 use crate::markdown::compose::shell_expansion::parser::parse_directives;
 use crate::markdown::compose::shell_expansion::policy::normalize_command;
-use crate::markdown::compose::shell_expansion::types::ShellCommandEntry;
+use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellCommandOrigin};
 use crate::markdown::compose::types::SourceRange;
 use crate::markdown::types::MarkdownResult;
 
@@ -79,23 +82,6 @@ pub fn collect_shell_commands(
     markdown: &Markdown,
     options: &ComposeOptions,
 ) -> MarkdownResult<Vec<ShellCommandEntry>> {
-    // Run compose with only interpolation + transclusion (no shell execution).
-    // ::shell directives remain as text in the composed output.
-    let discovery_options = options.clone().only(&[
-        ComposeOperation::FrontmatterInterpolation,
-        ComposeOperation::TextReplacement,
-        ComposeOperation::PageBlocks,
-        ComposeOperation::Interpolation,
-        ComposeOperation::BlockTransclusion,
-        ComposeOperation::FrontmatterTransclusion,
-    ]);
-
-    let (composed, report) = markdown.compose_with(discovery_options)?;
-
-    // Parse ::shell directives from the fully-resolved content.
-    // ShellExpansionError converts into MarkdownError via From impl.
-    let directives = parse_directives(composed.content())?;
-
     let default_source = match &options.source {
         ComposeSource::File(p) => p.clone(),
         _ => PathBuf::from("<unknown>"),
@@ -104,6 +90,69 @@ pub fn collect_shell_commands(
     // Build entries, resolving aliases and deduplicating by normalized form.
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
+
+    // ── Phase 1: Discover frontmatter shell commands ───────────────
+    {
+        let mut fm_clone = markdown.clone();
+        let pre_interpolation_snapshot =
+            prepare_frontmatter_for_compose(&mut fm_clone, options, true);
+        if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
+            let _ = interpolate_frontmatter(fm_clone.frontmatter_mut(), options.context(), false);
+        }
+
+        let candidates =
+            scan_frontmatter(fm_clone.frontmatter(), pre_interpolation_snapshot.as_ref())?;
+
+        for candidate in candidates {
+            let (executable, args) = if which::which(&candidate.executable).is_ok() {
+                (candidate.executable.clone(), candidate.args.clone())
+            } else if let Some(resolved) = resolve_alias(&candidate.executable) {
+                let mut merged_args = resolved.args;
+                merged_args.extend_from_slice(&candidate.args);
+                (resolved.executable, merged_args)
+            } else {
+                (candidate.executable.clone(), candidate.args.clone())
+            };
+
+            let normalized = normalize_command(&executable, &args);
+
+            if seen.insert(normalized.clone()) {
+                entries.push(ShellCommandEntry {
+                    raw_command: candidate.raw_command,
+                    executable,
+                    args,
+                    normalized,
+                    source_file: default_source.clone(),
+                    origin: ShellCommandOrigin::Frontmatter {
+                        key: candidate.key.clone(),
+                    },
+                });
+            }
+        }
+    }
+
+    // ── Phase 2: Discover body shell commands ──────────────────────
+    // Run compose with only interpolation + transclusion (no shell execution).
+    // ::shell directives remain as text in the composed output.
+    let discovery_ops: Vec<_> = [
+        ComposeOperation::FrontmatterInterpolation,
+        ComposeOperation::TextReplacement,
+        ComposeOperation::PageBlocks,
+        ComposeOperation::Interpolation,
+        ComposeOperation::BlockTransclusion,
+        ComposeOperation::FrontmatterTransclusion,
+    ]
+    .into_iter()
+    .filter(|op| options.is_enabled(*op))
+    .collect();
+
+    let discovery_options = options.clone().only(&discovery_ops);
+
+    let (composed, report) = markdown.compose_with(discovery_options)?;
+
+    // Parse ::shell directives from the fully-resolved content.
+    // ShellExpansionError converts into MarkdownError via From impl.
+    let directives = parse_directives(composed.content())?;
 
     for directive in directives {
         let (executable, args) = if which::which(&directive.executable).is_ok() {
@@ -122,7 +171,7 @@ pub fn collect_shell_commands(
             // Look up provenance from the source map
             let (source_file, line) = lookup_provenance(
                 directive.span.start,
-                directive.line,
+                directive.origin.line_number(),
                 &report.source_map,
                 composed.content(),
                 &default_source,
@@ -134,7 +183,7 @@ pub fn collect_shell_commands(
                 args,
                 normalized,
                 source_file,
-                line,
+                origin: ShellCommandOrigin::Body { line },
             });
         }
     }
@@ -321,6 +370,111 @@ replace:
             child_path.canonicalize().unwrap()
         );
         // Line 2 in child.md (line 1 is "# Child", line 2 is "::shell echo from-child")
-        assert_eq!(child_entry.line, 2, "line should be 2 in the child file");
+        assert_eq!(
+            child_entry.origin,
+            ShellCommandOrigin::Body { line: 2 },
+            "line should be 2 in the child file"
+        );
+    }
+
+    #[test]
+    fn discovers_frontmatter_shell_commands() {
+        let content = "---\nfiles: \"$(sniff repo dirty-files)\"\n---\n# Doc\n::shell echo body\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 2, "entries: {:?}", entries);
+        let executables: Vec<&str> = entries.iter().map(|e| e.executable.as_str()).collect();
+        assert!(
+            executables.contains(&"sniff"),
+            "Missing sniff: {:?}",
+            executables
+        );
+        assert!(
+            executables.contains(&"echo"),
+            "Missing echo: {:?}",
+            executables
+        );
+    }
+
+    #[test]
+    fn frontmatter_shell_commands_use_frontmatter_origin() {
+        let content = "---\nfiles: \"$(echo fm-cmd)\"\n---\n# Doc\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        match &entries[0].origin {
+            ShellCommandOrigin::Frontmatter { key } => assert_eq!(key, "files"),
+            other => panic!("Expected Frontmatter origin, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn frontmatter_and_body_commands_deduplicate() {
+        // Same command in both frontmatter and body — should only appear once
+        let content = "---\nval: \"$(echo hello)\"\n---\n::shell echo hello\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        // Deduplicated by normalized form
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn frontmatter_interpolation_resolves_before_discovery() {
+        let content = "---\nname: world\ncmd: \"$(echo {{name}})\"\n---\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_command, "echo world");
+    }
+
+    #[test]
+    fn discovery_uses_external_state_before_frontmatter_scan() {
+        let content = "---\ncmd: \"{{tool}}\"\n---\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new()
+            .with_external_state(serde_json::json!({"tool": "$(echo external)"}));
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_command, "echo external");
+    }
+
+    #[test]
+    fn discovery_uses_set_overrides_before_frontmatter_scan() {
+        let content = "---\ncmd: \"$(echo before)\"\n---\n";
+        let md: Markdown = content.into();
+        let options =
+            ComposeOptions::new().with_set_overrides(serde_json::json!({"cmd": "$(echo after)"}));
+
+        let entries = collect_shell_commands(&md, &options).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].raw_command, "echo after");
+    }
+
+    #[test]
+    fn discovery_rejects_interpolated_frontmatter_executable() {
+        let content = "---\ncmd_name: echo\ncmd: \"$({{cmd_name}} hello)\"\n---\n";
+        let md: Markdown = content.into();
+        let options = ComposeOptions::new();
+
+        let err = collect_shell_commands(&md, &options).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Frontmatter shell executable may not come from interpolation")
+        );
     }
 }

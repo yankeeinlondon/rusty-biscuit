@@ -97,6 +97,9 @@ pub mod editors;
 pub mod enums;
 pub mod find_program;
 pub mod headless_audio;
+pub mod host_capability;
+pub mod install_interview;
+pub mod install_plan;
 pub mod installer;
 pub mod inventory;
 pub mod macos_bundle;
@@ -106,6 +109,8 @@ pub mod terminal_apps;
 pub mod tts_clients;
 pub mod types;
 pub mod utilities;
+#[cfg(target_os = "windows")]
+pub(crate) mod windows_apps;
 
 use serde::{Deserialize, Serialize};
 use tracing::{info_span, instrument};
@@ -121,6 +126,16 @@ pub use find_program::{
     find_programs_with_source_from_index, find_programs_with_source_parallel,
 };
 pub use headless_audio::InstalledHeadlessAudio;
+pub use host_capability::{
+    CACHE_SCHEMA_VERSION, HostCapabilities, HostCapabilityCacheFile, default_cache_path,
+    load_host_capabilities_from, save_host_capabilities_to,
+};
+pub use install_interview::{
+    InstallInterviewDelegate, InstallInterviewEvent, InstallInterviewInput,
+    InstallInterviewOptions, InstallInterviewOutcome, InstallOutputStream, InstallStatusKind,
+    RetryChoice, RetryPrompt, RetryPromptChoice, run_install_interview,
+};
+pub use install_plan::{InstallPlan, InstallPlanOption, InstallPlanReason, build_install_plan};
 pub use installer::{
     InstallOptions, InstallResult, execute_install, execute_versioned_install, get_install_command,
     get_versioned_install_command,

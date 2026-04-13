@@ -283,5 +283,11 @@ fn write_duration_manifest(
         "    EFFECT_DURATIONS.iter().find(|entry| entry.name == name).map(|entry| entry.duration_ms)"
     )?;
     writeln!(file, "}}")?;
+    writeln!(file)?;
+    writeln!(file, "pub(crate) const EFFECT_NAMES: &[&str] = &[")?;
+    for (name, _) in durations {
+        writeln!(file, "    \"{}\",", name)?;
+    }
+    writeln!(file, "];")?;
     Ok(())
 }

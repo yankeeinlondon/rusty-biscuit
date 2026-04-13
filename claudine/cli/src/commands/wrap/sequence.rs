@@ -3,16 +3,28 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
-    self, CompositionExecutionRequest, CompositionMode, PrepareOptions, ResolvedCompositionSource,
-    SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceStepResult,
-    SystemPromptInput,
+    self, CompositionExecutionRequest, CompositionMode, PrepareOptions, PreparedComposition,
+    ResolvedCompositionSource, SequenceExecutionOptions, SequencePlan, SequenceRunSummary,
+    SequenceStepResult,
 };
+use claudine::harness::{HarnessResolutionContext, has_harness_properties, parse_harness_plan};
 use color_eyre::eyre::{Result, eyre};
 
 use crate::commands::compose::SharedComposeArgs;
 use crate::log;
+
+/// Context data for a single step in the sequence.
+///
+/// Captures the per-step environment overrides and the prepared composition
+/// so that Phase 2 execution can reuse the work done during Phase 1 pre-flight.
+struct StepContext {
+    env_overrides: BTreeMap<String, String>,
+    prepared: PreparedComposition,
+}
 
 /// Execute a full sequence: iterate steps, compose each, and report results.
 pub(crate) fn execute_sequence(
@@ -32,10 +44,13 @@ pub(crate) fn execute_sequence(
     let total_steps = plan.steps.len();
 
     if !silent {
-        log::message(&format!(
-            "Sequence: {} step(s), fail_fast={}",
+        let term = log::terminal();
+        let status = Status::from_prose(format!(
+            "<b>Sequence:</b> <yellow>{}</yellow> step(s), <i>fail_fast</i> is set to <blue>{}</blue>",
             total_steps, effective_fail_fast
-        ));
+        ))
+        .state(StatusState::Info);
+        log::message(&status.render(&term));
     }
 
     let mut summary = SequenceRunSummary {
@@ -54,32 +69,26 @@ pub(crate) fn execute_sequence(
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
 
+    // ── Phase 1: run pre-flight shell discovery for every step ─────────
+    //
+    // Template `::shell` directives can reference per-step state
+    // (`{{state.name}}`, `{{previous_state.foo}}`, etc.) so each step's
+    // discovery pass needs its own compose context. Running the whole
+    // pass up-front means any required approval prompts fire BEFORE
+    // the first agent launches — the operator reviews all shell commands
+    // (both template and harness) once and then walks away.
+    let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
     for step_index in 0..total_steps {
-        let step = &plan.steps[step_index];
         let overlay = build_step_overlay(&plan, step_index);
-
-        if !silent {
-            log::message(&format!(
-                "[{}/{}] {}",
-                step_index + 1,
-                total_steps,
-                step.name
-            ));
-        }
-
-        let start = std::time::Instant::now();
-
         let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
 
         let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
         env_overrides.insert("FAIL_FAST".to_string(), effective_fail_fast.to_string());
 
-        // Pre-flight shell approval for this step.
-        //
-        // The compose context used for ::shell discovery must see the same
-        // `FAIL_FAST` value the child process will see, otherwise the
-        // template interpolation used for pre-flight may diverge from
-        // runtime. Build a context explicitly and inject env overrides.
+        // The compose context used for ::shell discovery must see the
+        // same `FAIL_FAST` value the child process will see, otherwise
+        // the template interpolation used for pre-flight may diverge
+        // from runtime.
         let compose_options = {
             let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
             for (key, value) in &env_overrides {
@@ -94,11 +103,11 @@ pub(crate) fn execute_sequence(
         let approval_options = super::build_harness_shell_options_with_cache(
             &source.resolved_path,
             None,
-            shared.interactive,
             Some(Arc::clone(&shared_approval_cache)),
         );
 
-        let preflight = composition::resolve_shell_approvals(
+        // ── Template pre-flight ───────────────────────────────────────
+        let template_preflight = composition::resolve_shell_approvals(
             Some(&source.markdown),
             Some(&compose_options),
             None,
@@ -106,54 +115,79 @@ pub(crate) fn execute_sequence(
         )
         .map_err(|e| eyre!("{e}"))?;
 
-        cumulative_approved.extend(preflight.approved_commands.iter().cloned());
+        cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
 
+        // ── Prepare composition ───────────────────────────────────────
         let prepare_options = PrepareOptions {
-            set_overrides: Some(step_set_overrides),
+            set_overrides: Some(step_set_overrides.clone()),
             pre_approved_commands: Some(cumulative_approved.clone()),
             env_overrides: env_overrides.clone(),
         };
 
-        let prepared = match composition::prepare_direct(source, prepare_options) {
-            Ok(p) => p,
-            Err(e) => {
-                let duration = start.elapsed();
-                let error_msg = e.to_string();
-                if !silent {
-                    log::error(&format!(
-                        "step {}/{} failed: {}",
-                        step_index + 1,
-                        total_steps,
-                        error_msg
-                    ));
-                }
-                summary.failed += 1;
-                summary.steps.push(SequenceStepResult {
-                    step: step_index + 1,
-                    name: step.name.clone(),
-                    success: false,
-                    error: Some(error_msg),
-                    duration,
-                });
-                if effective_fail_fast {
-                    break;
-                }
-                continue;
-            }
-        };
+        let prepared = composition::prepare_direct(source, prepare_options)
+            .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
 
-        let system_prompt = shared
-            .system_prompt
-            .as_ref()
-            .map(|prompt| SystemPromptInput::Inline {
-                prompt: prompt.clone(),
-            })
-            .or_else(|| {
-                shared
-                    .system_prompt_file
-                    .as_ref()
-                    .map(|path| SystemPromptInput::File { path: path.clone() })
-            });
+        // ── Harness pre-flight ────────────────────────────────────────
+        if has_harness_properties(&prepared.effective_frontmatter) {
+            let effective_repo_root = prepared.source_repo_root.as_deref();
+            let resolve_ctx = HarnessResolutionContext {
+                source_path: &prepared.resolved_path,
+                repo_root: effective_repo_root,
+            };
+            let plan = parse_harness_plan(
+                &prepared.effective_frontmatter,
+                &prepared.resolved_path,
+                &resolve_ctx,
+            )
+            .map_err(|e| eyre!("{e}"))?;
+
+            let harness_preflight =
+                composition::resolve_shell_approvals(None, None, Some(&plan), &approval_options)
+                    .map_err(|e| eyre!("{e}"))?;
+
+            cumulative_approved.extend(harness_preflight.approved_commands.iter().cloned());
+        }
+
+        step_contexts.push(StepContext {
+            env_overrides,
+            prepared,
+        });
+    }
+
+    if !silent {
+        let status = Status::from_prose(format!(
+            "<b>Preflight:</b> shell commands approved for all \
+             <yellow>{}</yellow> step(s) in the sequence",
+            total_steps
+        ))
+        .state(StatusState::Info);
+        log::message(&status.render(&log::terminal()));
+    }
+
+    // ── Phase 2: execute each step ─────────────────────────────────────
+    for (step_index, step_ctx) in step_contexts.iter().enumerate() {
+        let step = &plan.steps[step_index];
+
+        if !silent {
+            let status = Status::from_prose(format!(
+                "[<yellow>{}/{}</yellow>] <i>starting</i> <b>{}</b>",
+                step_index + 1,
+                total_steps,
+                step.name
+            ))
+            .state(StatusState::Info);
+            log::message(&status.render(&log::terminal()));
+        }
+
+        let start = std::time::Instant::now();
+
+        // Use the prepared composition from Phase 1 instead of re-preparing
+        let prepared = step_ctx.prepared.clone();
+
+        let system_prompt_args = claudine::system_prompt::SystemPromptArgs {
+            append_file: shared.append_system_prompt.clone(),
+            replace_file: shared.replace_system_prompt.clone(),
+        };
 
         let request = CompositionExecutionRequest {
             mode: CompositionMode::ChainedDocument,
@@ -161,11 +195,12 @@ pub(crate) fn execute_sequence(
             prepared,
             explicit_provider: shared.explicit_provider(),
             excluded: shared.excluded(),
+            sequence: true,
             yolo: shared.yolo,
             include: shared.include.clone(),
             model: shared.model.clone(),
             output: shared.output,
-            system_prompt,
+            system_prompt_args,
             timeout: shared.timeout,
             operation: shared.operation.clone(),
             sandbox: shared.sandbox,
@@ -177,7 +212,7 @@ pub(crate) fn execute_sequence(
             session_interactive: shared.interactive,
             quiet: shared.quiet,
             silent: shared.silent,
-            env_overrides: env_overrides.clone(),
+            env_overrides: step_ctx.env_overrides.clone(),
             shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
         };
 
@@ -196,12 +231,14 @@ pub(crate) fn execute_sequence(
                     duration,
                 });
                 if !silent {
-                    log::message(&format!(
-                        "step {}/{} succeeded (via {})",
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> succeeded (<dim><i>via {}</i></dim>)",
                         step_index + 1,
                         total_steps,
                         outcome.provider
-                    ));
+                    ))
+                    .state(StatusState::Success);
+                    log::message(&status.render(&log::terminal()));
                 }
             }
             Ok(outcome) => {
@@ -218,12 +255,14 @@ pub(crate) fn execute_sequence(
                     duration,
                 });
                 if !silent {
-                    log::error(&format!(
-                        "step {}/{} failed: {}",
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> failed: {}",
                         step_index + 1,
                         total_steps,
                         error_msg
-                    ));
+                    ))
+                    .state(StatusState::Failure);
+                    log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
                     break;
@@ -240,12 +279,14 @@ pub(crate) fn execute_sequence(
                     duration,
                 });
                 if !silent {
-                    log::error(&format!(
-                        "step {}/{} failed: {}",
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> failed: {}",
                         step_index + 1,
                         total_steps,
                         error_msg
-                    ));
+                    ))
+                    .state(StatusState::Failure);
+                    log::message(&status.render(&log::terminal()));
                 }
                 if effective_fail_fast {
                     break;
@@ -258,15 +299,19 @@ pub(crate) fn execute_sequence(
     if !silent {
         eprintln!();
         if summary.failed == 0 {
-            log::message(&format!(
-                "Sequence finished: {} succeeded, 0 failed",
+            let status = Status::from_prose(format!(
+                "Sequence finished: <green>{}</green> succeeded, 0 failed",
                 summary.succeeded
-            ));
+            ))
+            .state(StatusState::Success);
+            log::message(&status.render(&log::terminal()));
         } else {
-            log::error(&format!(
-                "Sequence finished: {} succeeded, {} failed",
+            let status = Status::from_prose(format!(
+                "Sequence finished: <green>{}</green> succeeded, <red>{}</red> failed",
                 summary.succeeded, summary.failed
-            ));
+            ))
+            .state(StatusState::Failure);
+            log::message(&status.render(&log::terminal()));
         }
     }
 

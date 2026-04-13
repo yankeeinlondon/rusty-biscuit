@@ -37,7 +37,7 @@ pub async fn run(args: HandleArgs) -> Result<()> {
 
     let event_label = args.event.as_deref().unwrap_or("event");
     debug!(%provider, event = %event_label, "Handling event");
-    let outcome = claudine::dispatch::dispatch(&raw, provider, &env).await?;
+    let outcome = claudine::dispatch::dispatch_canonical(&raw, provider, &env).await?;
     if args.json {
         let output = serde_json::json!({
             "provider": provider.as_slug(),

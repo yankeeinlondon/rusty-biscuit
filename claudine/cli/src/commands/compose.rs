@@ -7,14 +7,13 @@
 //! [`execute_composition_request`] for wrapper-grade execution.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
 
 use clap::Args;
 use claudine::composition::{
     self, CompositionExecutionRequest, CompositionMode, OutputFormat as CompositionOutputFormat,
-    SystemPromptInput,
 };
 use claudine::events::Provider;
+use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, eyre};
 
 use super::wrap::composition::execute_composition_request;
@@ -84,22 +83,23 @@ pub struct SharedComposeArgs {
     #[arg(short = 'o', long = "output", value_name = "FORMAT")]
     pub output: Option<CompositionOutputFormat>,
 
-    /// Set or append an inline system prompt.
+    /// Append a system prompt from a file.
     #[arg(
-        short = 's',
-        long = "system-prompt",
-        value_name = "PROMPT",
-        conflicts_with = "system_prompt_file"
-    )]
-    pub system_prompt: Option<String>,
-
-    /// Load the system prompt from a file.
-    #[arg(
-        long = "system-prompt-file",
+        long = "append-system-prompt",
+        visible_alias = "asp",
         value_name = "FILE",
-        conflicts_with = "system_prompt"
+        conflicts_with = "replace_system_prompt"
     )]
-    pub system_prompt_file: Option<PathBuf>,
+    pub append_system_prompt: Option<String>,
+
+    /// Replace the provider's system prompt with contents from a file.
+    #[arg(
+        long = "replace-system-prompt",
+        visible_alias = "rsp",
+        value_name = "FILE",
+        conflicts_with = "append_system_prompt"
+    )]
+    pub replace_system_prompt: Option<String>,
 
     /// Timeout in seconds (sends SIGTERM then SIGKILL). Only valid in non-interactive mode.
     #[arg(short = 't', long = "timeout", value_name = "SECONDS")]
@@ -121,7 +121,7 @@ pub struct SharedComposeArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Show only the header line; suppress env details and info messages.
+    /// Suppress env details and info messages, but still show the system prompt when set.
     #[arg(short = 'q', long)]
     pub quiet: bool,
 
@@ -163,17 +163,11 @@ impl SharedComposeArgs {
         self.exclude.iter().copied().collect()
     }
 
-    fn system_prompt_input(&self) -> Option<SystemPromptInput> {
-        self.system_prompt
-            .as_ref()
-            .map(|prompt| SystemPromptInput::Inline {
-                prompt: prompt.clone(),
-            })
-            .or_else(|| {
-                self.system_prompt_file
-                    .as_ref()
-                    .map(|path| SystemPromptInput::File { path: path.clone() })
-            })
+    pub(crate) fn system_prompt_args(&self) -> SystemPromptArgs {
+        SystemPromptArgs {
+            append_file: self.append_system_prompt.clone(),
+            replace_file: self.replace_system_prompt.clone(),
+        }
     }
 }
 
@@ -204,7 +198,9 @@ pub fn run_compose(args: ComposeArgs, verbose: u8) -> Result<()> {
     let code = match run_compose_inner(args, verbose) {
         Ok(code) => code,
         Err(error) => {
-            log::error(&error.to_string());
+            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
+                log::error(&error.to_string());
+            }
             1
         }
     };
@@ -216,7 +212,9 @@ pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
     let code = match run_inline_compose_inner(args, verbose) {
         Ok(code) => code,
         Err(error) => {
-            log::error(&error.to_string());
+            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
+                log::error(&error.to_string());
+            }
             1
         }
     };
@@ -226,7 +224,7 @@ pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
 fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
     let ComposeArgs { shared, file } = args;
     let set_overrides = parse_set_json(shared.set.as_deref())?;
-    let system_prompt = shared.system_prompt_input();
+    let system_prompt_args = shared.system_prompt_args();
 
     let source = composition::resolve_composition_source(&file).map_err(|e| eyre!("{e}"))?;
 
@@ -240,8 +238,14 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         opts
     };
 
-    let approval_options =
-        super::wrap::build_harness_shell_options(&source.resolved_path, None, shared.interactive);
+    let shared_approval_cache =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+
+    let approval_options = super::wrap::build_harness_shell_options_with_cache(
+        &source.resolved_path,
+        None,
+        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    );
 
     let preflight = composition::resolve_shell_approvals(
         Some(&source.markdown),
@@ -259,7 +263,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
             ..Default::default()
         },
     )
-    .map_err(|e| eyre!("{e}"))?;
+    .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::ChainedDocument,
@@ -271,7 +275,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         include: shared.include,
         model: shared.model,
         output: shared.output,
-        system_prompt,
+        system_prompt_args,
         timeout: shared.timeout,
         operation: shared.operation,
         sandbox: shared.sandbox,
@@ -284,7 +288,8 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         quiet: shared.quiet,
         silent: shared.silent,
         env_overrides: std::collections::BTreeMap::new(),
-        shared_approval_cache: None,
+        shared_approval_cache: Some(shared_approval_cache),
+        sequence: false,
     };
 
     execute_composition_request(request, verbose)
@@ -293,7 +298,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
 fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32> {
     let InlineComposeArgs { shared, file } = args;
     let set_overrides = parse_set_json(shared.set.as_deref())?;
-    let system_prompt = shared.system_prompt_input();
+    let system_prompt_args = shared.system_prompt_args();
     let show_checks = !shared.silent;
     let term = if show_checks {
         Some(crate::log::terminal())
@@ -346,8 +351,14 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         opts
     };
 
-    let approval_options =
-        super::wrap::build_harness_shell_options(&source.resolved_path, None, shared.interactive);
+    let shared_approval_cache =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+
+    let approval_options = super::wrap::build_harness_shell_options_with_cache(
+        &source.resolved_path,
+        None,
+        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    );
 
     let preflight = composition::resolve_shell_approvals(
         Some(&source.markdown),
@@ -365,7 +376,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
             ..Default::default()
         },
     )
-    .map_err(|e| eyre!("{e}"))?;
+    .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,
@@ -377,7 +388,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         include: shared.include,
         model: shared.model,
         output: shared.output,
-        system_prompt,
+        system_prompt_args,
         timeout: shared.timeout,
         operation: shared.operation,
         sandbox: shared.sandbox,
@@ -390,7 +401,8 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         quiet: shared.quiet,
         silent: shared.silent,
         env_overrides: std::collections::BTreeMap::new(),
-        shared_approval_cache: None,
+        shared_approval_cache: Some(shared_approval_cache),
+        sequence: false,
     };
 
     execute_composition_request(request, verbose)

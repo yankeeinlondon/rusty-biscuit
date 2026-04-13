@@ -60,7 +60,7 @@ pub fn resolve_shell_approvals(
             all_commands.push((
                 entry.normalized.clone(),
                 entry.source_file.clone(),
-                entry.line,
+                entry.origin.line_number(),
             ));
         }
     }
@@ -737,6 +737,9 @@ mod tests {
             }
             other => panic!("expected File source, got: {other:?}"),
         }
-        assert!(req.line > 0, "line should be the real line number, not 0");
+        assert!(
+            req.origin.line_number() > 0,
+            "line should be the real line number, not 0"
+        );
     }
 }

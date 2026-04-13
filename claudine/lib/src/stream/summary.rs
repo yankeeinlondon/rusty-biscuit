@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::badges::SessionBadge;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
 
@@ -62,9 +63,15 @@ pub struct StreamExecutionSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_prompts: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_input_prompts: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<RateLimitInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_usage: Option<ContextUsage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub badges: Vec<SessionBadge>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_summary: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -89,8 +96,11 @@ impl Default for StreamExecutionSummary {
             token_usage: None,
             cost_usd: None,
             tool_calls: None,
+            permission_prompts: None,
+            user_input_prompts: None,
             rate_limit: None,
             context_usage: None,
+            badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
         }
@@ -137,8 +147,11 @@ mod tests {
             }),
             cost_usd: Some(0.0042),
             tool_calls: Some(5),
+            permission_prompts: None,
+            user_input_prompts: None,
             rate_limit: None,
             context_usage: None,
+            badges: Vec::new(),
             raw_summary: Some(serde_json::json!({"stop_reason": "end_turn"})),
             stderr_text: Some("stderr text".into()),
         };
@@ -206,5 +219,61 @@ mod tests {
         assert_eq!(summary.error_kind.as_deref(), Some("billing_error"));
         let json = serde_json::to_string(&summary).unwrap();
         assert!(json.contains("billing_error"));
+    }
+
+    #[test]
+    fn badges_default_is_empty_vec() {
+        let summary = StreamExecutionSummary::default();
+        assert!(summary.badges.is_empty());
+    }
+
+    #[test]
+    fn empty_badges_vec_is_skipped_in_serde_output() {
+        let summary = StreamExecutionSummary::default();
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(!json.contains("badges"));
+    }
+
+    #[test]
+    fn non_empty_badges_vec_round_trips() {
+        use crate::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
+        let summary = StreamExecutionSummary {
+            badges: vec![SessionBadge {
+                category: BadgeCategory::Billing,
+                severity: BadgeSeverity::Error,
+                label: "Billing".into(),
+                message: "Insufficient credits".into(),
+                remediation_url: Some("https://console.anthropic.com/settings/billing".into()),
+            }],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(json.contains("Insufficient credits"));
+        let restored: StreamExecutionSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.badges.len(), 1);
+        assert_eq!(restored.badges[0].category, BadgeCategory::Billing);
+    }
+
+    #[test]
+    fn permission_counters_round_trip() {
+        let summary = StreamExecutionSummary {
+            permission_prompts: Some(3),
+            user_input_prompts: Some(1),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(json.contains("\"permission_prompts\":3"));
+        assert!(json.contains("\"user_input_prompts\":1"));
+        let restored: StreamExecutionSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.permission_prompts, Some(3));
+        assert_eq!(restored.user_input_prompts, Some(1));
+    }
+
+    #[test]
+    fn permission_counters_skip_none() {
+        let summary = StreamExecutionSummary::default();
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(!json.contains("permission_prompts"));
+        assert!(!json.contains("user_input_prompts"));
     }
 }

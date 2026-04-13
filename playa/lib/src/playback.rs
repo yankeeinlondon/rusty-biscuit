@@ -1,3 +1,5 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hasher;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -61,7 +63,7 @@ pub fn playa_with_player_and_options(
         });
     }
 
-    let source = resolve_source(&audio)?;
+    let source = resolve_source(&audio, options.speed)?;
     let mut command = build_player_command(player, metadata, &source, &options)?;
     command
         .stdin(Stdio::null())
@@ -183,7 +185,7 @@ pub async fn playa_with_player_and_options_async(
         });
     }
 
-    let source = resolve_source_async(&audio).await?;
+    let source = resolve_source_async(&audio, options.speed).await?;
     let (binary, args) = build_player_args(player, metadata, &source, &options)?;
 
     let mut command = tokio::process::Command::new(binary);
@@ -399,82 +401,112 @@ fn build_player_command(
     Ok(command)
 }
 
-fn resolve_source(audio: &AudioData) -> Result<ResolvedSource, PlaybackError> {
+fn resolve_source(audio: &AudioData, speed: Option<f32>) -> Result<ResolvedSource, PlaybackError> {
     match audio {
         AudioData::FilePath(path) => Ok(ResolvedSource::Path(path.clone())),
         AudioData::Url(url) => Ok(ResolvedSource::Url(url.as_str().to_string())),
         AudioData::Bytes(bytes) => {
-            let path = write_temp_audio(bytes.as_ref())?;
+            let path = write_temp_audio(bytes.as_ref(), speed)?;
             Ok(ResolvedSource::Path(path))
         }
     }
 }
 
-fn write_temp_audio(bytes: &[u8]) -> Result<PathBuf, PlaybackError> {
-    let mut attempts = 0;
-    while attempts < 3 {
-        attempts += 1;
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_else(|_| Duration::from_nanos(0))
-            .as_nanos();
-        let filename = format!("playa-{}-{}.audio", std::process::id(), timestamp);
-        let path = std::env::temp_dir().join(filename);
+fn temp_audio_hash(bytes: &[u8], speed: Option<f32>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hasher.write(bytes);
+    if let Some(s) = speed {
+        hasher.write(&s.to_le_bytes());
+    }
+    hasher.finish()
+}
 
-        if path.exists() {
+fn temp_audio_dir() -> PathBuf {
+    std::env::temp_dir().join("playa")
+}
+
+fn cleanup_stale_temp_files() {
+    let dir = match std::fs::read_dir(temp_audio_dir()) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+
+    let cutoff = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_secs().saturating_sub(24 * 60 * 60),
+        Err(_) => return,
+    };
+
+    for entry in dir.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "audio") {
             continue;
         }
+        if let Ok(metadata) = path.metadata()
+            && let Ok(modified) = metadata.modified()
+            && let Ok(age) = modified.duration_since(UNIX_EPOCH)
+            && age.as_secs() < cutoff
+        {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
 
-        std::fs::write(&path, bytes)?;
+fn write_temp_audio(bytes: &[u8], speed: Option<f32>) -> Result<PathBuf, PlaybackError> {
+    cleanup_stale_temp_files();
+
+    let dir = temp_audio_dir();
+    std::fs::create_dir_all(&dir)?;
+
+    let hash = temp_audio_hash(bytes, speed);
+    let filename = format!("{:016x}.audio", hash);
+    let path = dir.join(filename);
+
+    if path.exists() {
         return Ok(path);
     }
 
-    Err(PlaybackError::Io(std::io::Error::new(
-        std::io::ErrorKind::AlreadyExists,
-        "failed to create unique temp file",
-    )))
-}
+    let tmp_path = dir.join(format!("{:016x}.tmp", hash));
+    std::fs::write(&tmp_path, bytes)?;
+    std::fs::rename(&tmp_path, &path)?;
 
-/// Generate a unique temp file path for audio bytes.
-#[cfg(feature = "async")]
-fn generate_temp_path() -> PathBuf {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_else(|_| Duration::from_nanos(0))
-        .as_nanos();
-    let filename = format!("playa-{}-{}.audio", std::process::id(), timestamp);
-    std::env::temp_dir().join(filename)
+    Ok(path)
 }
 
 #[cfg(feature = "async")]
-async fn write_temp_audio_async(bytes: &[u8]) -> Result<PathBuf, PlaybackError> {
-    let mut attempts = 0;
-    while attempts < 3 {
-        attempts += 1;
-        let path = generate_temp_path();
+async fn write_temp_audio_async(
+    bytes: &[u8],
+    speed: Option<f32>,
+) -> Result<PathBuf, PlaybackError> {
+    cleanup_stale_temp_files();
 
-        // Use tokio::fs for async file check and write
-        if tokio::fs::try_exists(&path).await.unwrap_or(false) {
-            continue;
-        }
+    let dir = temp_audio_dir();
+    tokio::fs::create_dir_all(&dir).await?;
 
-        tokio::fs::write(&path, bytes).await?;
+    let hash = temp_audio_hash(bytes, speed);
+    let filename = format!("{:016x}.audio", hash);
+    let path = dir.join(filename);
+
+    if tokio::fs::try_exists(&path).await.unwrap_or(false) {
         return Ok(path);
     }
 
-    Err(PlaybackError::Io(std::io::Error::new(
-        std::io::ErrorKind::AlreadyExists,
-        "failed to create unique temp file",
-    )))
+    let tmp_path = dir.join(format!("{:016x}.tmp", hash));
+    tokio::fs::write(&tmp_path, bytes).await?;
+    tokio::fs::rename(&tmp_path, &path).await?;
+
+    Ok(path)
 }
 
 #[cfg(feature = "async")]
-async fn resolve_source_async(audio: &AudioData) -> Result<ResolvedSource, PlaybackError> {
+async fn resolve_source_async(
+    audio: &AudioData,
+    speed: Option<f32>,
+) -> Result<ResolvedSource, PlaybackError> {
     match audio {
         AudioData::FilePath(path) => Ok(ResolvedSource::Path(path.clone())),
         AudioData::Url(url) => Ok(ResolvedSource::Url(url.as_str().to_string())),
         AudioData::Bytes(bytes) => {
-            let path = write_temp_audio_async(bytes.as_ref()).await?;
+            let path = write_temp_audio_async(bytes.as_ref(), speed).await?;
             Ok(ResolvedSource::Path(path))
         }
     }
@@ -963,6 +995,47 @@ mod tests {
         assert!(args.contains(&OsStr::new("/tmp/test.wav")));
     }
 
+    #[test]
+    fn temp_audio_hash_differs_for_different_speed() {
+        let bytes = b"hello";
+        let h1 = temp_audio_hash(bytes, None);
+        let h2 = temp_audio_hash(bytes, Some(1.0));
+        let h3 = temp_audio_hash(bytes, Some(2.0));
+        assert_ne!(h1, h2, "None vs Some(1.0) should differ");
+        assert_ne!(h2, h3, "different speeds should differ");
+    }
+
+    #[test]
+    fn temp_audio_hash_same_inputs_same_output() {
+        let bytes = b"hello";
+        let h1 = temp_audio_hash(bytes, Some(1.5));
+        let h2 = temp_audio_hash(bytes, Some(1.5));
+        assert_eq!(h1, h2, "same inputs should produce same hash");
+    }
+
+    #[test]
+    fn temp_audio_hash_differs_for_different_bytes() {
+        let h1 = temp_audio_hash(b"hello", None);
+        let h2 = temp_audio_hash(b"world", None);
+        assert_ne!(h1, h2, "different bytes should produce different hashes");
+    }
+
+    #[test]
+    fn write_temp_audio_caches_by_content_and_speed() {
+        let bytes = b"test audio cache sync";
+        let path1 = write_temp_audio(bytes, Some(1.0)).unwrap();
+        let path2 = write_temp_audio(bytes, Some(1.0)).unwrap();
+
+        assert_eq!(path1, path2, "same content+speed should cache hit");
+        assert!(path1.exists());
+
+        let path3 = write_temp_audio(bytes, Some(2.0)).unwrap();
+        assert_ne!(path1, path3, "different speed should be different file");
+
+        let _ = std::fs::remove_file(&path1);
+        let _ = std::fs::remove_file(&path3);
+    }
+
     // Async variant tests (feature-gated)
     #[cfg(feature = "async")]
     mod async_tests {
@@ -1037,13 +1110,27 @@ mod tests {
         #[tokio::test]
         async fn write_temp_audio_async_creates_file() {
             let bytes = b"test audio data";
-            let path = write_temp_audio_async(bytes).await.unwrap();
+            let path = write_temp_audio_async(bytes, None).await.unwrap();
 
             assert!(path.exists());
-            assert!(path.to_string_lossy().contains("playa-"));
+            assert!(path.to_string_lossy().ends_with(".audio"));
 
-            // Cleanup
             let _ = tokio::fs::remove_file(&path).await;
+        }
+
+        #[tokio::test]
+        async fn write_temp_audio_async_caches_by_content_and_speed() {
+            let bytes = b"test audio data v2";
+            let path1 = write_temp_audio_async(bytes, Some(1.5)).await.unwrap();
+            let path2 = write_temp_audio_async(bytes, Some(1.5)).await.unwrap();
+
+            assert_eq!(path1, path2, "same content+speed should cache hit");
+
+            let path3 = write_temp_audio_async(bytes, Some(2.0)).await.unwrap();
+            assert_ne!(path1, path3, "different speed should be different file");
+
+            let _ = tokio::fs::remove_file(&path1).await;
+            let _ = tokio::fs::remove_file(&path3).await;
         }
     }
 }

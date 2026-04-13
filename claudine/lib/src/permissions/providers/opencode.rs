@@ -16,6 +16,7 @@ use crate::permissions::change::{
     CommandPattern, PolicyChange, PolicyChangeOp, PolicyChangeTarget, PolicyPersistence,
 };
 use crate::permissions::context::{CliPolicyInput, PolicyContext};
+use crate::permissions::json_utils::ensure_json_value;
 use crate::permissions::mutation::{
     ConfigEditPlan, OneShotMutationPlan, PersistentMutationPlan, PolicyMutationPlan,
 };
@@ -613,25 +614,14 @@ fn set_permission_pattern(root: &mut Value, path: &[&str], pattern: &str, effect
     if !target.is_object() {
         *target = Value::Object(Map::new());
     }
-    target
-        .as_object_mut()
-        .expect("object")
+    debug_assert!(
+        target.is_object(),
+        "set_permission_pattern: type mismatch after set — expected object, got {:?}",
+        target
+    );
+    // SAFETY: the value is guaranteed to be an Object because we just set it above
+    unsafe { target.as_object_mut().unwrap_unchecked() }
         .insert(pattern.to_owned(), Value::String(effect.to_owned()));
-}
-
-fn ensure_json_value<'a>(root: &'a mut Value, path: &[&str]) -> &'a mut Value {
-    let mut current = root;
-    for key in path {
-        if !current.is_object() {
-            *current = Value::Object(Map::new());
-        }
-        current = current
-            .as_object_mut()
-            .expect("object")
-            .entry((*key).to_owned())
-            .or_insert(Value::Null);
-    }
-    current
 }
 
 #[cfg(test)]
