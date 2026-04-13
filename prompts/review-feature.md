@@ -14,10 +14,10 @@ We have just completed a feature defined in "{{dir}}":
 
 ::block when="spec"
 - specification: "{{dir}}/{{spec}}"
-::endblock
+::end-block
 ::block when="design"
 - technical design: "{{dir}}/{{design}}"
-::endblock
+::end-block
 
 Read both the specification and design documents and then perform a review on the implementation:
 

@@ -6,13 +6,14 @@ roots and vault roots. For the full treatment, see
 
 ### Reference Kinds
 
-| Prefix                | Kind         | Resolves against                                         |
-|-----------------------|--------------|----------------------------------------------------------|
-| _(none)_ or `./`     | **Relative** | Current working directory                                |
-| `/`                   | **Absolute** | Used verbatim                                            |
-| `@`                   | **Magic**    | Prepended paths → git root → HOME → appended paths      |
-| `!`                   | **Package**  | Cargo workspace package area (git root fallback)         |
-| `vault:` or `vault::` | **Vault**   | Configured vault roots + `$VAULT` env var                |
+| Prefix                | Kind                  | Resolves against                                         |
+|-----------------------|-----------------------|----------------------------------------------------------|
+| `./` or `../`         | **Relative**          | Current working directory (no fallback)                  |
+| _(none)_              | **Implicit Relative** | CWD, then git repository root                            |
+| `/`                   | **Absolute**          | Used verbatim                                            |
+| `@`                   | **Magic**             | Prepended paths → git root → HOME → appended paths       |
+| `!`                   | **Package**           | Cargo workspace package area (git root fallback)         |
+| `vault:` or `vault::` | **Vault**             | Configured vault roots + `$VAULT` env var                |
 
 Any kind can be prefixed with `%` for recursive directory search, and any
 segment can contain `{{VAR_NAME}}` environment variable interpolation.
