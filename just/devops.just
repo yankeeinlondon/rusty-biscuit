@@ -46,3 +46,27 @@ commit *args="":
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
+
+
+# Lint a package
+_lint pkg:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    echo -e "Linting {{bold}}{{pkg}}{{reset}}"
+    echo
+    cargo clippy -p {{pkg}} -- -D warnings || ( just _speak "The {{pkg}} has failing lints" && echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing lints!" && exit 1 )
+
+_fix_lint pkg agent="claude" *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    echo -e "Fixing the lint problems in {{bold}}{{pkg}}{{reset}}"
+    echo
+    claudine {{agent}} "The package '{{pkg}}' in rusty-biscuit monorepo has lint errors. Run 'just lint' and fix all lint warnings/errors. Provide a full explanation for what was done." -y {{args}} || (just _speak "Failure trying to fix the lint errors in the package {{pkg}}" && exit 1)
+    echo
+    echo -e "✅ {{green}}The {{bold}}{{pkg}}{{reset}}{{green}} has had all lints now fixed!"
+    echo
+    sniff repo git-status
