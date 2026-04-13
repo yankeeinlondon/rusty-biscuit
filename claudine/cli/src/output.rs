@@ -687,25 +687,7 @@ fn truncate_args(args: &str, max_chars: usize) -> String {
     format!("{truncated}{SUFFIX}")
 }
 
-pub(crate) fn shell_escape(arg: &str) -> String {
-    if arg.is_empty() {
-        return "''".to_string();
-    }
-
-    if arg
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '='))
-    {
-        return arg.to_string();
-    }
-
-    let escaped = arg
-        .replace('\'', "'\\''")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t");
-    format!("'{escaped}'")
-}
+pub(crate) use biscuit_terminal::utils::text::shell_escape_for_display as shell_escape;
 
 /// Format the session start line for non-interactive prompts.
 ///
@@ -949,16 +931,6 @@ mod tests {
         let args = "'some long prompt'";
         let result = truncate_args(args, 2);
         assert_eq!(result, "...\"");
-    }
-
-    #[test]
-    fn shell_escape_replaces_newlines() {
-        assert_eq!(shell_escape("Hi.\nHow are you?"), "'Hi.\\nHow are you?'");
-    }
-
-    #[test]
-    fn shell_escape_replaces_tabs_and_carriage_returns() {
-        assert_eq!(shell_escape("a\tb\rc"), "'a\\tb\\rc'");
     }
 
     #[test]
