@@ -320,6 +320,20 @@ fn format_sample_rate(rate: f64) -> String {
     }
 }
 
+/// Format a sample rate (Hz) as a compact kHz string.
+///
+/// Integer kHz values render without a decimal (`48000.0` → `"48k"`).
+/// Non-integer kHz values render with a single decimal place
+/// (`44100.0` → `"44.1k"`).
+fn format_sample_rate_khz(rate_hz: f64) -> String {
+    let khz = rate_hz / 1000.0;
+    if (khz - khz.round()).abs() < 0.01 {
+        format!("{}k", khz.round() as i64)
+    } else {
+        format!("{:.1}k", khz)
+    }
+}
+
 /// Render a list of audio devices with verbosity levels.
 ///
 /// - Default: name, kind, direction, default markers
@@ -401,4 +415,32 @@ pub fn render_audio_devices_section(
     writeln!(out).unwrap();
 
     out
+}
+
+#[cfg(test)]
+mod audio_format_tests {
+    use super::format_sample_rate_khz;
+
+    #[test]
+    fn khz_integer_khz() {
+        assert_eq!(format_sample_rate_khz(48000.0), "48k");
+        assert_eq!(format_sample_rate_khz(96000.0), "96k");
+        assert_eq!(format_sample_rate_khz(192000.0), "192k");
+    }
+
+    #[test]
+    fn khz_fractional_khz() {
+        assert_eq!(format_sample_rate_khz(44100.0), "44.1k");
+        assert_eq!(format_sample_rate_khz(88200.0), "88.2k");
+    }
+
+    #[test]
+    fn khz_sub_khz_or_weird() {
+        assert_eq!(format_sample_rate_khz(500.0), "0.5k");
+    }
+
+    #[test]
+    fn khz_zero_returns_empty() {
+        assert_eq!(format_sample_rate_khz(0.0), "0k");
+    }
 }
