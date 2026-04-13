@@ -2,6 +2,7 @@ pub(crate) mod env;
 pub(crate) mod exec;
 pub(crate) mod profile;
 pub(crate) mod repo_home;
+pub(crate) mod stream_io;
 pub(crate) mod system_prompt;
 
 use biscuit_terminal::components::renderable::Renderable;
@@ -15,6 +16,7 @@ use claudine::events::{
 use claudine::stream::parser::{EventMeta as StreamEventMeta, StreamEventSink};
 use claudine::stream::progress::{self, InFlightTool, LiveMetrics};
 use claudine::stream::stderr::{Verbosity, format_warning};
+use stream_io::StreamOutput;
 use color_eyre::eyre::{Result, eyre};
 use inquire::Select;
 use profile::{OutputFormat, WrapperProfile};
@@ -376,6 +378,7 @@ pub(crate) struct LiveStreamSink {
     context_extra: HashMap<String, serde_json::Value>,
     dispatch: StreamDispatchFn,
     live_metrics: LiveMetrics,
+    stream_output: Arc<StreamOutput>,
 }
 
 impl LiveStreamSink {
@@ -452,6 +455,7 @@ impl LiveStreamSink {
             context_extra: HashMap::new(),
             dispatch: Box::new(dispatch),
             live_metrics: progress::new_live_metrics(),
+            stream_output: StreamOutput::new(),
         }
     }
 
@@ -461,6 +465,13 @@ impl LiveStreamSink {
     /// sink is consumed on construction.
     pub(crate) fn live_metrics(&self) -> LiveMetrics {
         self.live_metrics.clone()
+    }
+
+    /// Clone the shared stream output coordinator. Callers pass the handle to
+    /// the heartbeat thread and the stdout reader so all writes to stdout and
+    /// stderr respect the same newline-boundary discipline.
+    pub(crate) fn stream_output(&self) -> Arc<StreamOutput> {
+        self.stream_output.clone()
     }
 
     fn merge_state(&mut self, meta: &StreamEventMeta) {
@@ -493,15 +504,16 @@ impl LiveStreamSink {
                 session_id,
                 self.model.as_deref(),
             );
-            eprintln!("{line}");
-            eprintln!(); // blank line before execution output
+            self.stream_output.emit_stderr_line(&line);
+            self.stream_output.emit_stderr_line("");
             self.start_emitted = true;
         }
     }
 
     fn emit_warning_line(&self, message: &str) {
         if self.verbosity != Verbosity::Silent {
-            eprintln!("{}", format_warning(message));
+            self.stream_output
+                .emit_stderr_line(&format_warning(message));
         }
     }
 
@@ -527,7 +539,7 @@ impl LiveStreamSink {
             let rendered = Status::new(desc)
                 .state(StatusState::ToolUse)
                 .render(&wrap_terminal());
-            eprintln!("{rendered}");
+            self.stream_output.emit_stderr_line(&rendered);
         }
     }
 
@@ -539,7 +551,7 @@ impl LiveStreamSink {
             let rendered = Status::new(desc)
                 .state(StatusState::ToolUse)
                 .render(&wrap_terminal());
-            eprintln!("{rendered}");
+            self.stream_output.emit_stderr_line(&rendered);
         }
     }
 
@@ -1643,6 +1655,7 @@ fn run_provider_wrapper_inner(
             )
             .with_context_extra(dispatch_context.clone());
             let live_metrics = sink.live_metrics();
+            let stream_output = sink.stream_output();
             let parser = claudine::stream::create_parser(provider, sink, parser_config);
             let mut _spawned = false;
             let stream_result = exec::run_child_stream(
@@ -1658,6 +1671,7 @@ fn run_provider_wrapper_inner(
                 parser,
                 &mut _spawned,
                 Some(live_metrics),
+                Some(stream_output),
             )?;
             let mut summary = stream_result.data;
             if let Some(codex_output) = structured_codex_output.as_ref() {
@@ -2065,6 +2079,7 @@ fn execute_harness_attempt(
         )
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
+        let stream_output = sink.stream_output();
         let parser = claudine::stream::create_parser(provider, sink, parser_config);
         let stream_result = exec::run_child_stream(
             binary_path,
@@ -2079,6 +2094,7 @@ fn execute_harness_attempt(
             parser,
             child_spawned,
             Some(live_metrics),
+            Some(stream_output),
         )?;
         let termination = stream_result.termination;
         let mut summary = stream_result.data;

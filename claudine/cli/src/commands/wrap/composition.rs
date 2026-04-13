@@ -1118,6 +1118,7 @@ fn run_structured_inline(
     )
     .with_context_extra(dispatch_context.clone());
     let live_metrics = sink.live_metrics();
+    let stream_output = sink.stream_output();
     let parser = claudine::stream::create_parser(provider, sink, parser_config);
     let stream_result = exec::run_child_stream(
         binary_path,
@@ -1132,6 +1133,7 @@ fn run_structured_inline(
         parser,
         child_spawned,
         Some(live_metrics),
+        Some(stream_output),
     )?;
     let termination = stream_result.termination;
     let mut summary = stream_result.data;
@@ -1376,6 +1378,7 @@ fn execute_direct_without_harness(
         )
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
+        let stream_output = sink.stream_output();
         let parser = claudine::stream::create_parser(provider, sink, parser_config);
         let stream_result = exec::run_child_stream(
             binary_path,
@@ -1390,6 +1393,7 @@ fn execute_direct_without_harness(
             parser,
             child_spawned,
             Some(live_metrics),
+            Some(stream_output),
         )?;
         let mut summary = stream_result.data;
         if let Some(codex_output) = structured_codex_output {
