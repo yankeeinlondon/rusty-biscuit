@@ -70,3 +70,17 @@ _fix_lint pkg agent="claude" *args="":
     echo -e "✅ {{green}}The {{bold}}{{pkg}}{{reset}}{{green}} has had all lints now fixed!"
     echo
     sniff repo git-status
+
+# Show dependencies for this package area
+deps:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    sniff repo deps "$(sniff repo package-area)"
+
+
+# Show all README.md files in the package
+_readme_files:
+    @sniff docs --readme --json "$(sniff repo package-area)"'
+
