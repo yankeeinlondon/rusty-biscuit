@@ -1,13 +1,13 @@
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 use git2::Repository;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
 use crate::filesystem::blast_radius::{is_documentation_path, is_source_code_path};
 use crate::filesystem::git::ConventionalCommit;
-use crate::filesystem::git::detection::get_commit_files;
+use crate::filesystem::git::detection::{DeltaKind, get_commit_files};
 use crate::filesystem::repo::{Package, detect_repo};
 use crate::{Result, SniffError};
 
@@ -148,13 +148,22 @@ fn parse_commit_message(message: &str) -> (String, Vec<String>) {
 // Data types
 // ---------------------------------------------------------------------------
 
+/// A file touched by a commit together with the kind of change.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitFileChange {
+    /// Path relative to the repository root.
+    pub path: String,
+    /// How the file was changed (added, modified, deleted, renamed, copied).
+    pub kind: DeltaKind,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitDesc {
     pub hash: String,
     pub datetime: String,
     pub packages: Option<Vec<String>>,
     pub package_areas: Option<Vec<String>>,
-    pub files: Vec<String>,
+    pub files: Vec<CommitFileChange>,
     pub description: String,
     pub bullet_points: Vec<String>,
 }
@@ -342,9 +351,12 @@ fn collect_commits_in_range(
 
         let sha = oid.to_string();
         let files_raw = get_commit_files(repo, &sha);
-        let files: Vec<String> = files_raw
+        let files: Vec<CommitFileChange> = files_raw
             .iter()
-            .map(|(p, _)| p.to_string_lossy().to_string())
+            .map(|(p, k)| CommitFileChange {
+                path: p.to_string_lossy().to_string(),
+                kind: *k,
+            })
             .collect();
 
         let message = commit.message().unwrap_or("").trim();
@@ -426,9 +438,12 @@ fn collect_commits_from_hash_to_head(
 
         let sha = oid.to_string();
         let files_raw = get_commit_files(repo, &sha);
-        let files: Vec<String> = files_raw
+        let files: Vec<CommitFileChange> = files_raw
             .iter()
-            .map(|(p, _)| p.to_string_lossy().to_string())
+            .map(|(p, k)| CommitFileChange {
+                path: p.to_string_lossy().to_string(),
+                kind: *k,
+            })
             .collect();
 
         let message = commit.message().unwrap_or("").trim();
@@ -484,92 +499,57 @@ fn collect_commits_from_hash_to_head(
 // ---------------------------------------------------------------------------
 
 impl CommitDescSet {
+    /// Render every commit in the set using the commit-centric layout.
     pub fn describe(&self, plain: bool) -> String {
+        self.render_commit_centric(None, plain)
+    }
+
+    /// Render only commits that touched at least one source-code file,
+    /// and list only the matching files under "Files Impacted".
+    pub fn source_code_changes(&self, plain: bool) -> String {
+        self.render_commit_centric(Some(ChangeKind::SourceCode), plain)
+    }
+
+    /// Render only commits that touched at least one documentation file,
+    /// and list only the matching files under "Files Impacted".
+    pub fn documentation_changes(&self, plain: bool) -> String {
+        self.render_commit_centric(Some(ChangeKind::Documentation), plain)
+    }
+
+    fn render_commit_centric(&self, filter: Option<ChangeKind>, plain: bool) -> String {
         let mut out = String::new();
 
-        for commit in &self.commits {
-            let date_str = extract_display_date(&commit.datetime);
-
-            out.push_str(&format!("## {}\n\n", date_str));
-
-            let short_hash = &commit.hash[..commit.hash.len().min(8)];
-            out.push_str(&format!("- **Commit:** {}\n", short_hash));
-
-            out.push_str("- **Files:**\n");
-            for file in &commit.files {
-                if plain {
-                    out.push_str(&format!("    - {}\n", file));
-                } else {
-                    let url = file_url(&self.repo_root.join(file));
-                    out.push_str(&format!("    - [{}]({})\n", file, url));
-                }
-            }
-
-            out.push_str(&format!("- **Description:** {}\n", commit.description));
-            for bp in &commit.bullet_points {
-                out.push_str(&format!("    - {}\n", bp));
-            }
-
-            out.push('\n');
+        if let Some(kind) = filter {
+            let title = match kind {
+                ChangeKind::SourceCode => "Source Code Changes",
+                ChangeKind::Documentation => "Documentation Changes",
+            };
+            out.push_str(&format!("### {} (_{}_)\n\n", title, self.period_label));
         }
 
-        out
-    }
-
-    pub fn source_code_changes(&self, plain: bool) -> String {
-        self.file_grouped_changes(ChangeKind::SourceCode, plain)
-    }
-
-    pub fn documentation_changes(&self, plain: bool) -> String {
-        self.file_grouped_changes(ChangeKind::Documentation, plain)
-    }
-
-    fn file_grouped_changes(&self, kind: ChangeKind, plain: bool) -> String {
-        let title = match kind {
-            ChangeKind::SourceCode => "Source Code Changes",
-            ChangeKind::Documentation => "Documentation Changes",
-        };
-
-        let mut file_commits: BTreeMap<String, Vec<&CommitDesc>> = BTreeMap::new();
+        let today = Local::now().date_naive();
+        let mut emitted = 0usize;
 
         for commit in &self.commits {
-            for file in &commit.files {
-                let path = PathBuf::from(file);
-                let matches = match kind {
-                    ChangeKind::SourceCode => is_source_code_path(&path),
-                    ChangeKind::Documentation => is_documentation_path(&path),
-                };
-                if matches {
-                    file_commits.entry(file.clone()).or_default().push(commit);
-                }
+            let files: Vec<&CommitFileChange> = match filter {
+                None => commit.files.iter().collect(),
+                Some(kind) => commit
+                    .files
+                    .iter()
+                    .filter(|f| file_matches_kind(&f.path, kind))
+                    .collect(),
+            };
+
+            if files.is_empty() {
+                continue;
             }
+
+            render_commit_block(&mut out, commit, &files, &self.repo_root, today, plain);
+            emitted += 1;
         }
 
-        if file_commits.is_empty() {
+        if filter.is_some() && emitted == 0 {
             return String::new();
-        }
-
-        let mut out = format!("### {} (_{}_)\n\n", title, self.period_label);
-
-        for (file, commits) in &file_commits {
-            if plain {
-                out.push_str(&format!("- {}\n", file));
-            } else {
-                let url = file_url(&self.repo_root.join(file));
-                out.push_str(&format!("- [{}]({})\n", file, url));
-            }
-
-            for commit in commits {
-                let date_str = extract_display_date(&commit.datetime);
-                let short_hash = &commit.hash[..commit.hash.len().min(8)];
-                out.push_str(&format!(
-                    "    - {} - _{}_ as part of commit **{}**\n",
-                    date_str, commit.description, short_hash
-                ));
-                for bp in &commit.bullet_points {
-                    out.push_str(&format!("        - {}\n", bp));
-                }
-            }
         }
 
         out
@@ -582,6 +562,117 @@ enum ChangeKind {
     Documentation,
 }
 
+fn file_matches_kind(path: &str, kind: ChangeKind) -> bool {
+    let p = PathBuf::from(path);
+    match kind {
+        ChangeKind::SourceCode => is_source_code_path(&p),
+        ChangeKind::Documentation => is_documentation_path(&p),
+    }
+}
+
+/// Append one commit's block to `out` in the commit-centric layout:
+///
+/// ```text
+/// - [shorthash] type(scope) at 1:01pm Today: description
+///
+///     **Description:**
+///
+///     - bullet 1
+///
+///     **Files Impacted:**
+///
+///     - modified: [path](file://...)
+/// ```
+fn render_commit_block(
+    out: &mut String,
+    commit: &CommitDesc,
+    files: &[&CommitFileChange],
+    repo_root: &Path,
+    today: NaiveDate,
+    plain: bool,
+) {
+    let short_hash = &commit.hash[..commit.hash.len().min(7)];
+    let time_label = commit_time_label(&commit.datetime, today);
+    let (prefix, message) = split_conventional(&commit.description);
+
+    let header = match (prefix, message) {
+        (Some(pfx), msg) => format!(
+            "- [{hash}] {prefix} at {time}: {msg}\n",
+            hash = short_hash,
+            prefix = pfx,
+            time = time_label,
+            msg = msg,
+        ),
+        (None, msg) => format!(
+            "- [{hash}] at {time}: {msg}\n",
+            hash = short_hash,
+            time = time_label,
+            msg = msg,
+        ),
+    };
+    out.push_str(&header);
+    out.push('\n');
+
+    if !commit.bullet_points.is_empty() {
+        out.push_str("    **Description:**\n\n");
+        for bp in &commit.bullet_points {
+            out.push_str(&format!("    - {}\n", bp));
+        }
+        out.push('\n');
+    }
+
+    out.push_str("    **Files Impacted:**\n\n");
+    for file in files {
+        let label = file.kind.to_string();
+        if plain {
+            out.push_str(&format!("    - {}: {}\n", label, file.path));
+        } else {
+            let url = file_url(&repo_root.join(&file.path));
+            out.push_str(&format!("    - {}: [{}]({})\n", label, file.path, url));
+        }
+    }
+    out.push('\n');
+}
+
+/// Split a commit description like `refactor(sniff): improve X` into
+/// `(Some("refactor(sniff)"), "improve X")`. If the description is not in
+/// conventional-commit form, returns `(None, <description>)`.
+fn split_conventional(description: &str) -> (Option<String>, String) {
+    let parsed = ConventionalCommit::parse(description);
+    match parsed.operation {
+        Some(op) => {
+            let prefix = match parsed.scope {
+                Some(scope) => format!("{}({})", op, scope),
+                None => op,
+            };
+            (Some(prefix), parsed.description)
+        }
+        None => (None, description.to_string()),
+    }
+}
+
+/// Format a commit timestamp like `1:01pm Today` / `12:32pm Yesterday` /
+/// `2026-04-01 at 9:30am`, converted to the viewer's local timezone so that
+/// "Today"/"Yesterday" labels line up with what the reader expects.
+fn commit_time_label(datetime_rfc3339: &str, today_local: NaiveDate) -> String {
+    let Ok(dt) = DateTime::parse_from_rfc3339(datetime_rfc3339) else {
+        return datetime_rfc3339.to_string();
+    };
+
+    let local = dt.with_timezone(&Local);
+    let time_str = local.format("%-I:%M%P").to_string();
+    let commit_date = local.date_naive();
+    let yesterday = today_local - Duration::days(1);
+
+    if commit_date == today_local {
+        format!("{} Today", time_str)
+    } else if commit_date == yesterday {
+        format!("{} Yesterday", time_str)
+    } else {
+        format!("{} at {}", commit_date.format("%Y-%m-%d"), time_str)
+    }
+}
+
 /// Convert an absolute file path to a proper `file://` URI.
 ///
 /// Uses `url::Url::from_file_path` for correct cross-platform encoding
@@ -590,14 +681,6 @@ fn file_url(path: &Path) -> String {
     url::Url::from_file_path(path)
         .map(|u| u.to_string())
         .unwrap_or_else(|()| format!("file://{}", path.to_string_lossy()))
-}
-
-fn extract_display_date(datetime: &str) -> String {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(datetime) {
-        dt.format("%Y-%m-%d at %H:%M").to_string()
-    } else {
-        datetime.to_string()
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -646,14 +729,9 @@ impl CommitDescSet {
         let pkg_relative = PathBuf::from(&pkg.relative);
 
         for commit in &mut self.commits {
-            let filtered_files: Vec<String> = commit
+            commit
                 .files
-                .iter()
-                .filter(|f| PathBuf::from(f).starts_with(&pkg_relative))
-                .cloned()
-                .collect();
-
-            commit.files = filtered_files;
+                .retain(|f| PathBuf::from(&f.path).starts_with(&pkg_relative));
 
             if commit.files.is_empty() {
                 continue;
@@ -661,8 +739,8 @@ impl CommitDescSet {
 
             let mut new_pkgs = BTreeSet::new();
             let mut new_areas = BTreeSet::new();
-            for file_path in &commit.files {
-                let path = PathBuf::from(file_path);
+            for file in &commit.files {
+                let path = PathBuf::from(&file.path);
                 for p in packages.iter() {
                     if path.starts_with(PathBuf::from(&p.relative)) {
                         new_pkgs.insert(p.name.clone());
@@ -717,17 +795,10 @@ impl CommitDescSet {
             .collect();
 
         for commit in &mut self.commits {
-            let filtered_files: Vec<String> = commit
-                .files
-                .iter()
-                .filter(|f| {
-                    let path = PathBuf::from(f);
-                    package_roots.iter().any(|root| path.starts_with(root))
-                })
-                .cloned()
-                .collect();
-
-            commit.files = filtered_files;
+            commit.files.retain(|f| {
+                let path = PathBuf::from(&f.path);
+                package_roots.iter().any(|root| path.starts_with(root))
+            });
 
             if commit.files.is_empty() {
                 continue;
@@ -735,8 +806,8 @@ impl CommitDescSet {
 
             let mut new_pkgs = BTreeSet::new();
             let mut new_areas = BTreeSet::new();
-            for file_path in &commit.files {
-                let path = PathBuf::from(file_path);
+            for file in &commit.files {
+                let path = PathBuf::from(&file.path);
                 for p in packages.iter() {
                     if path.starts_with(PathBuf::from(&p.relative)) {
                         new_pkgs.insert(p.name.clone());
@@ -936,6 +1007,13 @@ mod tests {
     mod rendering_tests {
         use super::*;
 
+        fn fc(path: &str, kind: DeltaKind) -> CommitFileChange {
+            CommitFileChange {
+                path: path.to_string(),
+                kind,
+            }
+        }
+
         fn sample_set() -> CommitDescSet {
             CommitDescSet {
                 commits: vec![CommitDesc {
@@ -944,9 +1022,9 @@ mod tests {
                     packages: Some(vec!["sniff".to_string()]),
                     package_areas: Some(vec!["sniff".to_string()]),
                     files: vec![
-                        "sniff/lib/src/lib.rs".to_string(),
-                        "sniff/lib/README.md".to_string(),
-                        "sniff/lib/Cargo.toml".to_string(),
+                        fc("sniff/lib/src/lib.rs", DeltaKind::Modified),
+                        fc("sniff/lib/README.md", DeltaKind::Added),
+                        fc("sniff/lib/Cargo.toml", DeltaKind::Modified),
                     ],
                     description: "feat(sniff): add recent commits".to_string(),
                     bullet_points: vec![
@@ -961,14 +1039,31 @@ mod tests {
         }
 
         #[test]
-        fn describe_produces_markdown() {
+        fn describe_renders_commit_centric_header() {
             let set = sample_set();
             let md = set.describe(true);
-            assert!(md.contains("## 2026-04-09 at 14:30"));
-            assert!(md.contains("**Commit:** a1b2c3d4"));
-            assert!(md.contains("sniff/lib/src/lib.rs"));
-            assert!(md.contains("**Description:**"));
-            assert!(md.contains("added period parsing"));
+            // Header: - [shorthash] <conventional prefix> at <time>: <message>
+            assert!(
+                md.contains("- [a1b2c3d] feat(sniff) at "),
+                "expected commit-centric header with short hash + conventional prefix, got:\n{}",
+                md
+            );
+            assert!(
+                md.contains(": add recent commits"),
+                "expected conventional-commit message suffix, got:\n{}",
+                md
+            );
+        }
+
+        #[test]
+        fn describe_renders_description_and_files_impacted_blocks() {
+            let set = sample_set();
+            let md = set.describe(true);
+            assert!(md.contains("    **Description:**\n"));
+            assert!(md.contains("    - added period parsing"));
+            assert!(md.contains("    **Files Impacted:**\n"));
+            assert!(md.contains("    - modified: sniff/lib/src/lib.rs"));
+            assert!(md.contains("    - added: sniff/lib/README.md"));
         }
 
         #[test]
@@ -992,21 +1087,26 @@ mod tests {
         }
 
         #[test]
-        fn source_code_changes_filters_correctly() {
+        fn source_code_changes_filters_files_within_commits() {
             let set = sample_set();
             let md = set.source_code_changes(true);
-            assert!(md.contains("Source Code Changes"));
-            assert!(md.contains("sniff/lib/src/lib.rs"));
+            assert!(md.contains("### Source Code Changes"));
+            // The commit header is still there
+            assert!(md.contains("- [a1b2c3d] feat(sniff) at "));
+            // Source file shows up in Files Impacted
+            assert!(md.contains("- modified: sniff/lib/src/lib.rs"));
+            // Non-source files are dropped even though commit touched them
             assert!(!md.contains("README.md"));
             assert!(!md.contains("Cargo.toml"));
         }
 
         #[test]
-        fn documentation_changes_filters_correctly() {
+        fn documentation_changes_filters_files_within_commits() {
             let set = sample_set();
             let md = set.documentation_changes(true);
-            assert!(md.contains("Documentation Changes"));
-            assert!(md.contains("sniff/lib/README.md"));
+            assert!(md.contains("### Documentation Changes"));
+            assert!(md.contains("- [a1b2c3d] feat(sniff) at "));
+            assert!(md.contains("- added: sniff/lib/README.md"));
             assert!(!md.contains("sniff/lib/src/lib.rs"));
             assert!(!md.contains("Cargo.toml"));
         }
@@ -1015,11 +1115,11 @@ mod tests {
         fn source_code_changes_empty_when_none() {
             let set = CommitDescSet {
                 commits: vec![CommitDesc {
-                    hash: "abc123".to_string(),
+                    hash: "abc1234".to_string(),
                     datetime: "2026-04-09T14:30:00+00:00".to_string(),
                     packages: None,
                     package_areas: None,
-                    files: vec!["README.md".to_string()],
+                    files: vec![fc("README.md", DeltaKind::Modified)],
                     description: "docs only".to_string(),
                     bullet_points: vec![],
                 }],
@@ -1029,6 +1129,39 @@ mod tests {
             };
             let md = set.source_code_changes(true);
             assert!(md.is_empty());
+        }
+
+        #[test]
+        fn describe_header_without_conventional_commit() {
+            let set = CommitDescSet {
+                commits: vec![CommitDesc {
+                    hash: "deadbeef".to_string(),
+                    datetime: "2026-04-09T14:30:00+00:00".to_string(),
+                    packages: None,
+                    package_areas: None,
+                    files: vec![fc("src/lib.rs", DeltaKind::Modified)],
+                    description: "ship it".to_string(),
+                    bullet_points: vec![],
+                }],
+                period_label: "last 3 days".to_string(),
+                repo_root: PathBuf::from("/repo"),
+                packages: None,
+            };
+            let md = set.describe(true);
+            assert!(md.contains("- [deadbee] at "));
+            assert!(md.contains(": ship it"));
+        }
+
+        #[test]
+        fn commit_time_label_absolute_for_old_commit() {
+            // Date well in the past to avoid "Today"/"Yesterday" flakiness.
+            let today = NaiveDate::from_ymd_opt(2026, 4, 9).unwrap();
+            let label = commit_time_label("2024-01-15T09:05:00+00:00", today);
+            assert!(
+                label.starts_with("2024-01-15 at "),
+                "expected absolute-date label, got: {}",
+                label
+            );
         }
     }
 
@@ -1045,7 +1178,10 @@ mod tests {
                         datetime: "2026-04-09T14:30:00+00:00".to_string(),
                         packages: None,
                         package_areas: None,
-                        files: vec!["src/lib.rs".to_string()],
+                        files: vec![CommitFileChange {
+                            path: "src/lib.rs".to_string(),
+                            kind: DeltaKind::Modified,
+                        }],
                         description: "feat(sniff): add action filtering".to_string(),
                         bullet_points: vec![],
                     },
@@ -1054,7 +1190,10 @@ mod tests {
                         datetime: "2026-04-09T13:30:00+00:00".to_string(),
                         packages: None,
                         package_areas: None,
-                        files: vec!["src/lib.rs".to_string()],
+                        files: vec![CommitFileChange {
+                            path: "src/lib.rs".to_string(),
+                            kind: DeltaKind::Modified,
+                        }],
                         description: "fix(sniff): preserve filtered output".to_string(),
                         bullet_points: vec![],
                     },
@@ -1063,7 +1202,10 @@ mod tests {
                         datetime: "2026-04-09T12:30:00+00:00".to_string(),
                         packages: None,
                         package_areas: None,
-                        files: vec!["src/lib.rs".to_string()],
+                        files: vec![CommitFileChange {
+                            path: "src/lib.rs".to_string(),
+                            kind: DeltaKind::Modified,
+                        }],
                         description: "ship it".to_string(),
                         bullet_points: vec![],
                     },
@@ -1211,39 +1353,40 @@ mod tests {
             ]
         }
 
+        fn fc(path: &str) -> CommitFileChange {
+            CommitFileChange {
+                path: path.to_string(),
+                kind: DeltaKind::Modified,
+            }
+        }
+
         fn cross_package_set() -> CommitDescSet {
             CommitDescSet {
                 commits: vec![
                     CommitDesc {
-                        hash: "abc123".to_string(),
+                        hash: "abc1234".to_string(),
                         datetime: "2026-04-09T14:30:00+00:00".to_string(),
                         packages: Some(vec!["pkg-a".to_string(), "pkg-b".to_string()]),
                         package_areas: Some(vec!["pkg".to_string()]),
-                        files: vec![
-                            "pkg-a/src/lib.rs".to_string(),
-                            "pkg-b/src/main.rs".to_string(),
-                        ],
+                        files: vec![fc("pkg-a/src/lib.rs"), fc("pkg-b/src/main.rs")],
                         description: "cross-package commit".to_string(),
                         bullet_points: vec![],
                     },
                     CommitDesc {
-                        hash: "def456".to_string(),
+                        hash: "def4567".to_string(),
                         datetime: "2026-04-09T13:00:00+00:00".to_string(),
                         packages: Some(vec!["pkg-a".to_string()]),
                         package_areas: Some(vec!["pkg".to_string()]),
-                        files: vec!["pkg-a/src/lib.rs".to_string()],
+                        files: vec![fc("pkg-a/src/lib.rs")],
                         description: "pkg-a only".to_string(),
                         bullet_points: vec![],
                     },
                     CommitDesc {
-                        hash: "ghi789".to_string(),
+                        hash: "ghi7890".to_string(),
                         datetime: "2026-04-09T12:00:00+00:00".to_string(),
                         packages: Some(vec!["apps-web".to_string(), "apps-browser".to_string()]),
                         package_areas: Some(vec!["apps".to_string()]),
-                        files: vec![
-                            "apps/web/src/index.ts".to_string(),
-                            "apps/browser/src/main.ts".to_string(),
-                        ],
+                        files: vec![fc("apps/web/src/index.ts"), fc("apps/browser/src/main.ts")],
                         description: "apps commit".to_string(),
                         bullet_points: vec![],
                     },
@@ -1264,9 +1407,9 @@ mod tests {
             for commit in &set.commits {
                 for file in &commit.files {
                     assert!(
-                        file.starts_with("pkg-a/"),
+                        file.path.starts_with("pkg-a/"),
                         "File {} should be under pkg-a/",
-                        file
+                        file.path
                     );
                 }
             }
@@ -1290,9 +1433,9 @@ mod tests {
             for commit in &set.commits {
                 for file in &commit.files {
                     assert!(
-                        file.starts_with("apps/"),
+                        file.path.starts_with("apps/"),
                         "File {} should be under apps/",
-                        file
+                        file.path
                     );
                 }
             }
@@ -1306,7 +1449,7 @@ mod tests {
             assert!(!set.commits.is_empty());
             for commit in &set.commits {
                 assert!(
-                    commit.files.iter().all(|f| f.starts_with("apps/")),
+                    commit.files.iter().all(|f| f.path.starts_with("apps/")),
                     "All files should be under apps/ area"
                 );
             }

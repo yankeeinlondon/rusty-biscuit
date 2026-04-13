@@ -1,7 +1,8 @@
 ---
-dir: ""
+dir: "$(pwd)"
 spec: ""
 design: ""
+review: "review"
 iteration: 1
 success:
     say: "Feature review {{iteration}} has completed"
@@ -11,24 +12,29 @@ failure:
 
 We have just completed a feature defined in "{{dir}}":
 
-- the specification file is located at: "{{dir}}/{{spec}}"
-- the technical design is located at: "{{dir}}/{{design}}"
+::block when="spec"
+- specification: "{{dir}}/{{spec}}"
+::end-block
+::block when="design"
+- technical design: "{{dir}}/{{design}}"
+::end-block
 
+::block when="spec && design"
 Read both the specification and design documents and then perform a review on the implementation:
+::endblock
+::block when="spec"
+Read both the specification document and then perform a review on the implementation:
+::endblock
+::block when="design"
+Read both the specification document and then perform a review on the implementation:
+::endblock
 
 - look for gaps in functionality that were designed but not implemented
 - features who's implementation is broken or incomplete
 - functionality which is light on test coverage (we expect strong unit and integration testing for everything)
 - are there any changes which would make the code more ergonomic, more performant, or both?
 
-::block when="iteration == 1"
-Save your review suggestions to "{{dir}}/review.md"
-::end-block
-
-::block when="iteration != 1"
-Save your review suggestions to "{{dir}}/review-{{iteration}}.md"
-::end-block
-
+Save your review suggestions to "{{dir}}/{{review}}-{{iteration}}.md"
 
 **IMPORTANT:**
 

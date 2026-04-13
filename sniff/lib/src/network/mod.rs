@@ -1,12 +1,16 @@
 use crate::Result;
+use crate::performance;
 use crate::request::NetworkRequest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(feature = "network")]
 use std::net::IpAddr;
+#[cfg(any(target_os = "windows", test))]
 use std::process::Command;
 #[cfg(feature = "network")]
 use std::sync::Mutex;
+use std::time::Instant;
+use tracing::Level;
 #[cfg(feature = "network")]
 use tracing::{debug, info};
 use tracing::{instrument, warn};
@@ -16,6 +20,18 @@ pub use interface::{InterfaceFlags, IpAddresses, Ipv4Address, Ipv6Address, Netwo
 
 #[cfg(feature = "network")]
 const DEFAULT_WAN_IP_ENDPOINTS: &[&str] = &["https://api64.ipify.org"];
+
+/// Environment variable that overrides the WAN IP echo endpoints.
+///
+/// Expected format is a comma-separated list of URLs. When set and
+/// non-empty, the first successful response drives the WAN IP result
+/// exactly like the default production endpoints.
+///
+/// This exists primarily to let benches, integration tests, and
+/// air-gapped corporate deployments point WAN IP detection at a known
+/// address (e.g. a `wiremock` server) instead of the public internet.
+#[cfg(feature = "network")]
+const WAN_IP_ENDPOINTS_ENV: &str = "SNIFF_WAN_IP_ENDPOINTS";
 
 /// Default TTL for cached WAN IP results (5 minutes).
 #[cfg(feature = "network")]
@@ -140,13 +156,31 @@ pub fn detect_network_with_request(request: &NetworkRequest) -> Result<NetworkIn
     // Run WAN IP lookup concurrently with local interface enumeration
     // so neither blocks the other.
     std::thread::scope(|s| {
+        let collector = performance::current_collector();
         let wan_handle = if request.include_wan_ip {
-            Some(s.spawn(move || detect_wan_ip(request.force_refresh)))
+            Some(s.spawn(move || {
+                performance::with_current_collector(collector, || {
+                    let started = Instant::now();
+                    let result = detect_wan_ip(request.force_refresh);
+                    performance::record_logged_stage(
+                        "network.wan_ip",
+                        started.elapsed(),
+                        Level::DEBUG,
+                    );
+                    result
+                })
+            }))
         } else {
             None
         };
 
+        let local_started = Instant::now();
         let local_result = detect_local_interfaces();
+        performance::record_logged_stage(
+            "network.local_interfaces",
+            local_started.elapsed(),
+            Level::DEBUG,
+        );
 
         let wan_ip_address = wan_handle.map(|h| h.join().unwrap()).unwrap_or(None);
 
@@ -236,6 +270,35 @@ fn detect_local_interfaces()
     Ok((interfaces, primary, ip_addresses))
 }
 
+/// Resolve the WAN IP echo endpoint list, preferring the
+/// `SNIFF_WAN_IP_ENDPOINTS` environment variable over the compiled-in
+/// defaults when it is set to a non-empty value.
+///
+/// Expected env var format: comma-separated URLs. Empty entries are
+/// skipped; if every entry is empty, the defaults are returned.
+#[cfg(feature = "network")]
+fn resolve_wan_ip_endpoints() -> Vec<String> {
+    if let Ok(raw) = std::env::var(WAN_IP_ENDPOINTS_ENV) {
+        let parsed: Vec<String> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+        if !parsed.is_empty() {
+            debug!(
+                count = parsed.len(),
+                "using WAN IP endpoints from SNIFF_WAN_IP_ENDPOINTS"
+            );
+            return parsed;
+        }
+    }
+    DEFAULT_WAN_IP_ENDPOINTS
+        .iter()
+        .map(|endpoint| (*endpoint).to_string())
+        .collect()
+}
+
 #[cfg(feature = "network")]
 #[derive(Debug, Clone)]
 struct WanIpDetector {
@@ -252,10 +315,7 @@ impl WanIpDetector {
                 .timeout(std::time::Duration::from_secs(1))
                 .build()
                 .ok(),
-            endpoints: DEFAULT_WAN_IP_ENDPOINTS
-                .iter()
-                .map(|endpoint| endpoint.to_string())
-                .collect(),
+            endpoints: resolve_wan_ip_endpoints(),
         }
     }
 
@@ -304,16 +364,23 @@ impl WanIpDetector {
 #[cfg(feature = "network")]
 fn detect_wan_ip(force_refresh: bool) -> Option<String> {
     // Check cache first (unless refresh is forced)
+    if force_refresh {
+        performance::increment_counter("network.wan_ip.cache_forced_refreshes", 1);
+    }
     if !force_refresh
         && let Ok(guard) = WAN_IP_CACHE.lock()
         && let Some(entry) = guard.as_ref()
     {
         if entry.fetched_at.elapsed() < WAN_IP_TTL {
+            performance::increment_counter("network.wan_ip.cache_hits", 1);
             debug!("WAN IP served from cache");
             return entry.value.clone();
         }
+        performance::increment_counter("network.wan_ip.cache_expired", 1);
         debug!("WAN IP cache expired");
     }
+
+    performance::increment_counter("network.wan_ip.cache_misses", 1);
 
     // Fetch fresh value
     let value = WanIpDetector::new().detect();
@@ -523,15 +590,13 @@ fn detect_default_route_interface(interfaces: &[NetworkInterface]) -> Option<Str
     ))]
     {
         let _ = interfaces;
-        command_output("route", &["-n", "get", "default"])
-            .and_then(|output| parse_bsd_default_route_interface(&output))
+        detect_bsd_default_route_interface_native()
     }
 
     #[cfg(target_os = "linux")]
     {
         let _ = interfaces;
-        command_output("ip", &["route", "show", "default"])
-            .and_then(|output| parse_linux_default_route_interface(&output))
+        detect_linux_default_route_interface_native()
     }
 
     #[cfg(target_os = "windows")]
@@ -556,6 +621,235 @@ fn detect_default_route_interface(interfaces: &[NetworkInterface]) -> Option<Str
     }
 }
 
+#[cfg(target_os = "linux")]
+fn detect_linux_default_route_interface_native() -> Option<String> {
+    std::fs::read_to_string("/proc/net/route")
+        .ok()
+        .and_then(|output| parse_linux_proc_default_route_interface(&output))
+}
+
+#[cfg(target_os = "linux")]
+fn parse_linux_proc_default_route_interface(output: &str) -> Option<String> {
+    let mut best: Option<(&str, u32)> = None;
+
+    for line in output.lines().skip(1) {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 8 || cols[1] != "00000000" {
+            continue;
+        }
+
+        let flags = match u16::from_str_radix(cols[3], 16) {
+            Ok(flags) => flags,
+            Err(_) => continue,
+        };
+        if flags & libc::RTF_UP as u16 == 0 {
+            continue;
+        }
+
+        let metric = match cols[6].parse::<u32>() {
+            Ok(metric) => metric,
+            Err(_) => continue,
+        };
+        match best {
+            None => best = Some((cols[0], metric)),
+            Some((_, best_metric)) if metric < best_metric => best = Some((cols[0], metric)),
+            _ => {}
+        }
+    }
+
+    best.map(|(interface, _)| interface.to_string())
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn detect_bsd_default_route_interface_native() -> Option<String> {
+    let mut mib = [
+        libc::CTL_NET,
+        libc::PF_ROUTE,
+        0,
+        libc::AF_INET,
+        libc::NET_RT_FLAGS,
+        libc::RTF_GATEWAY,
+    ];
+    let mut len: libc::size_t = 0;
+
+    unsafe {
+        if libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as _,
+            std::ptr::null_mut(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return None;
+        }
+    }
+
+    if len == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0_u8; len];
+    unsafe {
+        if libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as _,
+            buffer.as_mut_ptr().cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return None;
+        }
+    }
+
+    parse_bsd_route_dump(&buffer[..len])
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn parse_bsd_route_dump(buffer: &[u8]) -> Option<String> {
+    let mut offset = 0;
+
+    while offset + std::mem::size_of::<libc::rt_msghdr>() <= buffer.len() {
+        let header = unsafe { &*(buffer[offset..].as_ptr().cast::<libc::rt_msghdr>()) };
+        let message_len = header.rtm_msglen as usize;
+        if message_len == 0 || offset + message_len > buffer.len() {
+            break;
+        }
+
+        if is_default_bsd_route_message(header, &buffer[offset..offset + message_len]) {
+            return interface_name_from_index(header.rtm_index as u32);
+        }
+
+        offset += message_len;
+    }
+
+    None
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn is_default_bsd_route_message(header: &libc::rt_msghdr, message: &[u8]) -> bool {
+    let data = &message[std::mem::size_of::<libc::rt_msghdr>()..];
+    let destination = sockaddr_from_route_message(data, header.rtm_addrs, libc::RTAX_DST as usize);
+    let Some(destination) = destination else {
+        return false;
+    };
+
+    unsafe {
+        if (*destination).sa_family as i32 != libc::AF_INET {
+            return false;
+        }
+
+        let destination = destination.cast::<libc::sockaddr_in>();
+        (*destination).sin_addr.s_addr == 0
+    }
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn sockaddr_from_route_message(
+    data: &[u8],
+    addrs_mask: i32,
+    desired_index: usize,
+) -> Option<*const libc::sockaddr> {
+    let mut offset = 0;
+
+    for index in 0..(libc::RTAX_MAX as usize) {
+        if addrs_mask & (1 << index) == 0 {
+            continue;
+        }
+
+        if offset >= data.len() {
+            return None;
+        }
+
+        let sockaddr = unsafe { &*(data[offset..].as_ptr().cast::<libc::sockaddr>()) };
+        let sockaddr_len = sockaddr_len(sockaddr);
+
+        if index == desired_index {
+            return Some(sockaddr as *const libc::sockaddr);
+        }
+
+        offset += align_sockaddr_len(sockaddr_len);
+    }
+
+    None
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn sockaddr_len(sockaddr: &libc::sockaddr) -> usize {
+    let len = sockaddr.sa_len as usize;
+    if len == 0 {
+        std::mem::size_of::<libc::sockaddr>()
+    } else {
+        len
+    }
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn align_sockaddr_len(len: usize) -> usize {
+    let align = std::mem::size_of::<libc::c_long>();
+    (len + align - 1) & !(align - 1)
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+fn interface_name_from_index(index: u32) -> Option<String> {
+    let mut buffer = [0_u8; libc::IF_NAMESIZE];
+    let name = unsafe { libc::if_indextoname(index, buffer.as_mut_ptr().cast()) };
+    if name.is_null() {
+        return None;
+    }
+
+    unsafe { std::ffi::CStr::from_ptr(name) }
+        .to_str()
+        .ok()
+        .map(|name| name.to_string())
+}
+
+#[cfg(any(target_os = "windows", test))]
 fn command_output(program: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
     if !output.status.success() {
@@ -565,14 +859,7 @@ fn command_output(program: &str, args: &[&str]) -> Option<String> {
     String::from_utf8(output.stdout).ok()
 }
 
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "dragonfly",
-    test
-))]
+#[cfg(test)]
 fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
     output.lines().find_map(|line| {
         line.trim()
@@ -580,17 +867,6 @@ fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .map(ToOwned::to_owned)
-    })
-}
-
-#[cfg(target_os = "linux")]
-fn parse_linux_default_route_interface(output: &str) -> Option<String> {
-    output.lines().find_map(|line| {
-        let tokens: Vec<_> = line.split_whitespace().collect();
-        tokens
-            .windows(2)
-            .find(|window| window[0] == "dev")
-            .map(|window| window[1].to_string())
     })
 }
 
@@ -893,6 +1169,48 @@ mod tests {
             format!("{}/valid", server.uri()),
         ]);
         assert_eq!(detector.detect(), Some("2001:db8::7".to_string()));
+    }
+
+    #[cfg(feature = "network")]
+    #[test]
+    fn test_resolve_wan_ip_endpoints_prefers_env_override() {
+        // This test mutates process-wide environment state. It must not
+        // run in parallel with other tests that also read the env var,
+        // and it restores the original value on exit.
+        let key = WAN_IP_ENDPOINTS_ENV;
+        let original = std::env::var(key).ok();
+        // SAFETY: single-threaded test body; `std::env::set_var` is
+        // `unsafe` since Rust 1.85 but this block does no concurrent
+        // env access.
+        unsafe {
+            std::env::set_var(
+                key,
+                "https://first.example.test, https://second.example.test ,",
+            );
+        }
+
+        let endpoints = resolve_wan_ip_endpoints();
+        assert_eq!(
+            endpoints,
+            vec![
+                "https://first.example.test".to_string(),
+                "https://second.example.test".to_string(),
+            ]
+        );
+
+        // Empty value should fall back to the defaults.
+        unsafe {
+            std::env::set_var(key, "   ,  ,  ");
+        }
+        let endpoints = resolve_wan_ip_endpoints();
+        assert_eq!(endpoints.len(), DEFAULT_WAN_IP_ENDPOINTS.len());
+
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
     }
 
     #[test]
@@ -1306,11 +1624,14 @@ destination: default
 
     #[test]
     #[cfg(target_os = "linux")]
-    fn test_parse_linux_default_route_interface() {
-        let output = "default via 192.168.1.1 dev wlp3s0 proto dhcp src 192.168.1.42 metric 600";
+    fn test_parse_linux_proc_default_route_interface() {
+        let output = "\
+Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT
+wlp3s0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0
+eth0\t00000000\t0100A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0";
         assert_eq!(
-            parse_linux_default_route_interface(output),
-            Some("wlp3s0".to_string())
+            parse_linux_proc_default_route_interface(output),
+            Some("eth0".to_string())
         );
     }
 

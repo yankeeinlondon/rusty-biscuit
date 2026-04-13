@@ -179,7 +179,7 @@ fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> V
 }
 
 /// Parse a single markdown file into its metadata.
-fn parse_markdown_meta(
+pub(crate) fn parse_markdown_meta(
     path: &Path,
     repo_root: &Path,
     packages: &[(String, PathBuf)],
@@ -459,13 +459,30 @@ fn file_mtime(path: &Path) -> DateTime<Utc> {
 ///
 /// Matches the file's relative path against known package directories.
 /// Returns `None` if the file is in the repo root or not in any package.
-fn determine_package(relative_path: &Path, packages: &[(String, PathBuf)]) -> Option<String> {
+pub(crate) fn determine_package(
+    relative_path: &Path,
+    packages: &[(String, PathBuf)],
+) -> Option<String> {
     for (name, pkg_path) in packages {
         if relative_path.starts_with(pkg_path) {
             return Some(name.clone());
         }
     }
     None
+}
+
+pub(crate) fn assign_packages(
+    docs: &mut [MarkdownMeta],
+    packages: &[(String, PathBuf)],
+    repo_root: &Path,
+) {
+    for doc in docs {
+        let relative_path = Path::new(&doc.relative);
+        doc.package = determine_package(relative_path, packages);
+        if doc.filepath.is_relative() {
+            doc.filepath = repo_root.join(&doc.relative);
+        }
+    }
 }
 
 #[cfg(test)]

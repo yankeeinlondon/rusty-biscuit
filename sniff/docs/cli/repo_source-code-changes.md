@@ -9,7 +9,7 @@ blast_radius:
 
 # The `sniff repo source-code-changes` Subcommand
 
-Lists source code files changed within a time period, grouped by file. Each file entry shows which commits touched it and why. This is the file-centric complement to `recent-commits`, which is commit-centric.
+Lists source-code changes within a time period in a **commit-centric** layout: one block per commit, with only the commit's source-code files surfaced under **Files Impacted**. Commits that did not touch any source-code files are skipped entirely. This shares the same rendering template as `recent-commits` and `documentation-changes`, so the three commands differ only in which files they include.
 
 ## What Counts as Source Code
 
@@ -24,21 +24,46 @@ Configuration files (`.toml`, `.json`, `.yaml`), documentation (`.md`, `.txt`), 
 
 ## Default Behavior
 
-When no period is specified, defaults to `3d` (last 3 days). Output is rendered as Markdown with a heading that includes the period label:
+When no period is specified, defaults to `3d` (last 3 days). Output is rendered as Markdown with a heading that includes the period label, followed by one block per commit:
 
 ```
-### Source Code Changes (last 3d)
+### Source Code Changes (today)
 
-- sniff/lib/src/filesystem/git/recent_commits.rs
-    - 2026-04-09 at 14:32 - refactor(sniff): use let-chains and simplify parse_commit_message as part of commit 34b6d18a
-        - Replaced nested if/match blocks with let-chains
-    - 2026-04-08 at 09:15 - fix(sniff): preserve empty commits and use time-monotonic sort as part of commit 43b3be02
-        - Empty commits are no longer dropped during range walking
-- sniff/cli/src/output/recent_commits.rs
-    - 2026-04-09 at 14:32 - refactor(sniff): use let-chains and simplify parse_commit_message as part of commit 34b6d18a
+- [f89f844] refactor(sniff) at 1:01pm Today: improve Option chaining and narrow cfg guards
+
+    **Description:**
+
+    - Use and_then() instead of map().flatten() for more idiomatic Option chaining
+    - Remove unnecessary as i32 cast on header.rtm_addrs (already the correct type)
+    - Narrow parse_bsd_default_route_interface cfg from multi-platform to test-only
+
+    **Files Impacted:**
+
+    - modified: sniff/lib/src/filesystem/mod.rs
+    - modified: sniff/lib/src/network/mod.rs
+
+- [c8df5b9] test(sniff) at 12:32pm Today: apply cargo fmt to benchmarks and tests
+
+    **Description:**
+
+    - Reformat import ordering and line wrapping in benchmark cases
+    - Add uv_with_install_plan integration test for UvWithInstall auto-append flow
+    - Standardize assertion formatting across test files
+
+    **Files Impacted:**
+
+    - modified: sniff/lib/tests/bench_ids_sync.rs
+    - added: sniff/lib/tests/uv_with_install_plan.rs
+    - modified: sniff/lib/tests/windows_app_paths_orphan.rs
 ```
 
-File paths are rendered as clickable OSC8 hyperlinks (pointing to `file://` URIs) in terminals that support them.
+Notes:
+
+- **Files Impacted** lists only source-code files; any non-source files touched by the same commit are hidden from this view.
+- Each file is prefixed by its change kind (`added`, `modified`, `deleted`, `renamed`, `copied`).
+- File paths are rendered as clickable OSC8 hyperlinks (pointing to `file://` URIs) in terminals that support them.
+- Commit timestamps are displayed in the viewer's local timezone with `Today`/`Yesterday` labels.
+- Terminal styling (bold hash, blue conventional prefix with dim scope, italic `at`, bold time) is shared with [`sniff repo recent-commits`](./repo_recent-commits.md#styled-terminal-output); see that document for the full styling table. `--plain` strips all ANSI escapes.
 
 ## Period Argument
 
@@ -71,10 +96,17 @@ The optional `PERIOD` argument accepts several formats:
 | Argument | Description |
 |----------|-------------|
 | `[PERIOD]` | Time period (default: `3d`) |
+| `--action <feat\|chore\|refactor\|test\|style\|fix>` | Filter to one or more conventional commit actions |
 | `--package <PKG>` | Scope to commits touching a specific package |
 | `--package-area <AREA>` | Scope to commits touching a specific package area |
 | `--no-error` | Exit 0 with no output when no results found |
 | `--on-error <MESSAGE>` | Message to display when no results found |
+
+## Conventional Commit Action Filtering
+
+Use `--action` to keep only commits whose summary matches one of these conventional commit actions: `feat`, `chore`, `refactor`, `test`, `style`, `fix`.
+
+The flag may be repeated; multiple `--action` values are OR'd together. Non-conventional commits are excluded when `--action` filtering is active.
 
 ## Package Scoping
 
@@ -94,6 +126,8 @@ sniff repo source-code-changes today              # Since midnight
 sniff repo source-code-changes yesterday          # Yesterday only
 sniff repo source-code-changes 2026-04-01         # Specific date
 sniff repo source-code-changes a1b2c3d            # From hash to HEAD
+sniff repo source-code-changes --action fix       # Only conventional fix commits
+sniff repo source-code-changes --action feat --action refactor
 sniff repo source-code-changes 2w --package sniff # Last 2 weeks, sniff package only
 ```
 
@@ -103,7 +137,7 @@ sniff repo source-code-changes 2w --package sniff # Last 2 weeks, sniff package 
 sniff --json repo source-code-changes 1w
 ```
 
-Returns the same `CommitDescSet` object as `recent-commits`. The file-grouped rendering is a text-only view — JSON always returns the full commit list:
+Returns the same `CommitDescSet` object as `recent-commits` — JSON is not filtered down to source-code files, it always carries every changed file for the commit. The text-only rendering is the only view that prunes non-source-code files:
 
 ```json
 {
@@ -114,8 +148,8 @@ Returns the same `CommitDescSet` object as `recent-commits`. The file-grouped re
       "packages": ["sniff", "sniff-cli"],
       "package_areas": ["sniff"],
       "files": [
-        "sniff/lib/src/filesystem/git/recent_commits.rs",
-        "sniff/cli/src/output/recent_commits.rs"
+        { "path": "sniff/lib/src/filesystem/git/recent_commits.rs", "kind": "modified" },
+        { "path": "sniff/cli/src/output/recent_commits.rs",        "kind": "modified" }
       ],
       "description": "refactor(sniff): use let-chains and simplify parse_commit_message",
       "bullet_points": [
@@ -127,6 +161,8 @@ Returns the same `CommitDescSet` object as `recent-commits`. The file-grouped re
   "repo_root": "/absolute/path/to/repo"
 }
 ```
+
+Each `files` item is a record of `{ path, kind }` where `kind` is one of `added`, `modified`, `deleted`, `renamed`, `copied`.
 
 ## Plain Output (`--plain`)
 

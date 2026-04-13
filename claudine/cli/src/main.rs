@@ -1,4 +1,3 @@
-use clap::Parser;
 use claudine::events::Provider;
 use color_eyre::eyre::Result;
 
@@ -12,6 +11,10 @@ mod table_utils;
 mod telemetry;
 
 use args::{Cli, Commands};
+
+const WRAPPER_SUBCOMMANDS: &[&str] = &[
+    "claude", "codex", "gemini", "kimi", "qwen", "opencode", "goose",
+];
 
 fn wrapper_command(
     command: Commands,
@@ -52,6 +55,43 @@ async fn ensure_config_exists() -> Result<()> {
     }
 }
 
+/// Two-pass CLI parsing for wrapper subcommands.
+///
+/// Pass 1: build the `Command` with `ignore_errors(true)` on the wrapper
+/// subcommands so that unknown flags (belonging to the underlying agent)
+/// are collected into the `passthrough` bucket instead of causing a clap
+/// error. Extract global flags and the subcommand name.
+///
+/// Pass 2: re-build with strict parsing for non-wrapper subcommands.
+fn parse_cli() -> Cli {
+    use clap::{CommandFactory, FromArgMatches, Parser};
+
+    let raw_args: Vec<String> = std::env::args().collect();
+    let is_wrapper = raw_args
+        .get(1)
+        .is_some_and(|arg| WRAPPER_SUBCOMMANDS.contains(&arg.as_str()));
+
+    if !is_wrapper {
+        return Cli::parse();
+    }
+
+    // Lenient pass: allow unknown args so they flow into passthrough.
+    // Build a command tree where wrapper subcommands ignore unknown args.
+    let mut cmd = <Cli as CommandFactory>::command();
+    let names: Vec<String> = WRAPPER_SUBCOMMANDS.iter().map(|s| s.to_string()).collect();
+    for name in &names {
+        if let Some(sub) = cmd.find_subcommand_mut(name) {
+            let muted = std::mem::replace(sub, clap::Command::new("__placeholder__"));
+            let _ = std::mem::replace(sub, muted.ignore_errors(true));
+        }
+    }
+
+    match cmd.try_get_matches_from(&raw_args) {
+        Ok(matches) => Cli::from_arg_matches(&matches).unwrap_or_else(|_| Cli::parse()),
+        Err(_) => Cli::parse(),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
@@ -63,7 +103,7 @@ async fn main() -> Result<()> {
         unsafe { std::env::set_var("NO_COLOR", "1") };
     }
 
-    let cli = Cli::parse();
+    let cli = parse_cli();
     log::set_plain(cli.plain);
     telemetry::init_tracing(cli.debug);
     let root_span = telemetry::root_span(&cli);
@@ -71,6 +111,17 @@ async fn main() -> Result<()> {
 
     if cli.help || cli.command.is_none() {
         return commands::help::run();
+    }
+
+    // Ensure config exists before dispatching any command that needs it.
+    // Commands like `completions` work without config; everything else
+    // (hooks, compose, wrap, etc.) requires an initialized config file.
+    let command_ref = cli.command.as_ref().unwrap();
+    if command_ref.requires_config() {
+        let config_path = claudine::dispatch::loader::user_config_path();
+        if !config_path.exists() {
+            return commands::init_wizard::run_initialization().await;
+        }
     }
 
     let command = match wrapper_command(cli.command.unwrap()) {

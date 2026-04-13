@@ -4,6 +4,7 @@
         "pathspec",
         "timedatectl",
         "worktree",
-        "worktrees"
+        "worktrees",
+        "ZENMUX"
     ]
 }

@@ -1,6 +1,6 @@
 # Program Detection
 
-Parallel detection across 8 categories with macOS app bundle support.
+Parallel detection across 8 categories with macOS app bundle and Windows fallback support. A single shared `ExecutableIndex` scans `PATH` and platform-specific fallback directories once, then all categories perform O(1) HashMap lookups against it in parallel via `rayon::join` pairs.
 
 ## Categories
 
@@ -50,6 +50,22 @@ Searches:
 1. `$PATH` directories
 2. `/Applications/*.app/Contents/MacOS/`
 3. `~/Applications/*.app/Contents/MacOS/`
+
+## Windows Fallback Chain
+
+On Windows, the executable search expands beyond PATH:
+
+1. **PATH** — `CreateProcess`-compatible, returns `ExecutableSource::Path`.
+2. **App Paths registry** — `HKCU` then `HKLM`
+   (`SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths`). HKCU wins ties.
+   Env vars expanded via `ExpandEnvironmentStringsW`; orphaned entries filtered.
+   Returns `ExecutableSource::WindowsAppPaths`.
+3. **Install-root walk** — one level deep under `%ProgramFiles%`,
+   `%ProgramFiles(x86)%`, and `%LocalAppData%\Programs`. Returns
+   `ExecutableSource::WindowsInstallRoot`.
+
+Combined Windows scan cost: 40–80 ms warm cache, built once inside
+`ExecutableIndex::build()`.
 
 ## CLI Subcommands
 

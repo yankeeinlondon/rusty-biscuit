@@ -16,8 +16,10 @@ You are a **senior-level Rust developer and project manager** with extensive exp
 
 Your team has completed the implementation of:
 
+::block when="{{spec}}"
 - spec: {{dir}}/{{spec || "spec.md"}}
-::block when="file_exists({{dir}}/{{design || "tech-design.md"}})"
+::end-block
+::block when="{{design}}"
 - tech-design: {{dir}}/{{design || "tech-design.md"}}
 ::end-block
 

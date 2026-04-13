@@ -184,14 +184,6 @@ These checks are about whether the expected input or output files exist and are 
 
 The typed file checks matter because "the file exists" is often too weak. A JSON file that exists but is malformed is not a usable prerequisite. Claudine treats those as distinct validation concerns so the error is closer to the real problem.
 
-### Repository State Checks
-
-These checks look at dirty source state:
-
-- `no_dirty_source_code`
-- `has_dirty_source_code`
-
-These are useful when a prompt is intended to work from a clean baseline, or when a prompt is only meaningful if the user has already made local edits that the agent is supposed to inspect.
 
 ### Shell-Based Checks
 

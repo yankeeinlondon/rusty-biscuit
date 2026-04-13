@@ -178,7 +178,7 @@ MCP state is stored separately in `~/.claudine/mcp/`:
 
 | Package | Description |
 |---------|-------------|
-| [claudine (lib)](./lib/) | Event model, provider adapters, dispatch pipeline, structured stream parsing (6 providers), shared-resource linking, MCP catalog/sync/runtime support, composition pipelines, harness validations, permissions policy engine |
+| [claudine (lib)](./lib/) | Event model, provider adapters, dispatch pipeline, structured stream parsing with strongly typed protocol models (6 providers), shared-resource linking, MCP catalog/sync/runtime support, composition pipelines, harness validations, permissions policy engine |
 | [claudine-cli](./cli/) | Binary `claudine` — setup wizard, hook inspection, shared-resource commands (`skills`/`commands`/`agents`), MCP management, provider wrappers with structured streaming, and composition pipelines (`compose`/`inline-compose`/`sequence`) |
 
 ## Documentation

@@ -29,13 +29,13 @@ A comprehensive Rust library for system detection:
 
 - **OS Detection**: Distribution, kernel, architecture, package managers, locale, timezone, NTP status
 - **Hardware Detection**: CPU (with SIMD), GPU (Metal support), memory, storage, audio devices
-- **Network Detection**: Interface enumeration with IPv4/IPv6 addresses plus WAN IP lookup
+- **Network Detection**: Interface enumeration with IPv4/IPv6 addresses plus WAN IP lookup (TTL-cached)
 - **Filesystem Analysis**: Git repos, monorepo tools, language detection, file type classification, EditorConfig, document discovery, blast radius, justfile detection, recent commits
-- **Programs Module**: Detect installed programs across 8 categories with install support
+- **Programs Module**: Detect installed programs across 8 categories with install support and remote-bash consent gating
 - **Services Module**: Detect and list system services across 10+ init systems
 - **Remote Inspection**: Query GitHub, GitLab, Gitea, and Bitbucket APIs for repository metadata
 
-See [sniff/lib/README.md](lib/README.md) for detailed API documentation.
+The library exposes three API tiers: `detect()` for convenience, `detect_with_plan(DetectionPlan)` for fine-grained control, and module-level functions for expert composition. See [sniff/lib/README.md](lib/README.md) for the full API and [sniff/docs/sniff-library-architecture.md](docs/sniff-library-architecture.md) for the cost model and shared-work design.
 
 ### 2. Sniff CLI (`sniff/cli`)
 
@@ -136,7 +136,12 @@ sniff/
 │   │   └── services/         # System service detection (10+ init systems)
 │   └── Cargo.toml
 └── docs/             # Package documentation
+    └── sniff-library-architecture.md   # API tiers, cost model, shared-work design
 ```
+
+## Further Reading
+
+- [sniff/docs/sniff-library-architecture.md](docs/sniff-library-architecture.md) -- cost profile per subsection, shared-work strategies, and common caller profiles
 
 ## License
 

@@ -486,6 +486,30 @@ fn reference_add_vault_searches_vault() {
 }
 
 #[test]
+fn reference_implicit_relative_bare_filename() {
+    // Bare filename (no `./` prefix) is ImplicitRelative and must resolve
+    // against the CLI crate's CWD end-to-end through the binary.
+    bf().arg("reference")
+        .arg("Cargo.toml")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("biscuit-file/cli/Cargo.toml"))
+        .stdout(predicate::str::starts_with("/"));
+}
+
+#[test]
+fn reference_implicit_relative_falls_back_to_git_root() {
+    // `CLAUDE.md` lives at the repo root, not inside `biscuit-file/cli`.
+    // Implicit relative resolution should fall back to the git root.
+    bf().arg("reference")
+        .arg("CLAUDE.md")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("CLAUDE.md"))
+        .stdout(predicate::str::starts_with("/"));
+}
+
+#[test]
 fn reference_invalid_syntax_exits_2() {
     bf().arg("reference")
         .arg("{{invalid-name}}/foo.md")
@@ -519,7 +543,8 @@ fn debug_flag_produces_stderr_output() {
         .arg(fixture("sample.toml"))
         .assert()
         .success()
-        .stderr(predicate::str::contains("processing input").or(
-            predicate::str::contains("biscuit_file"),
-        ));
+        .stderr(
+            predicate::str::contains("processing input")
+                .or(predicate::str::contains("biscuit_file")),
+        );
 }

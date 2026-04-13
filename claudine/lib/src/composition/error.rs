@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
+
 use crate::events::Provider;
 use thiserror::Error;
 
@@ -35,6 +37,23 @@ pub enum CompositionError {
     /// Darkmatter composition failed.
     #[error("compose failed: {0}")]
     ComposeFailed(String),
+
+    /// A shell expansion directive inside the composed document failed in a
+    /// structurally-known way. Carries the underlying `ShellExpansionError`
+    /// so the CLI layer can render a rich, source-aware error report.
+    ///
+    /// The `Display` impl of this variant intentionally matches the legacy
+    /// `ComposeFailed` wrapper so callers that only use `to_string()` stay
+    /// compatible, while callers that want structured data can `match` on
+    /// the variant itself.
+    #[error("compose failed: Shell expansion failed: {error}")]
+    ShellExpansionFailed {
+        /// The file being composed when the shell expansion error fired.
+        source_path: PathBuf,
+        /// The underlying structured shell expansion error.
+        #[source]
+        error: Box<ShellExpansionError>,
+    },
 
     /// No installed providers can run composition.
     #[error("no runnable providers available (all excluded or uninstalled)")]

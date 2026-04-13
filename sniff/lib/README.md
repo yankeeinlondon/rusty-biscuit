@@ -93,14 +93,21 @@ let result = detect_with_config(config)?;
 
 ```rust
 use sniff::{
-    hardware::detect_hardware,
+    hardware::{detect_hardware, detect_hardware_summary},
     network::detect_network,
-    os::detect_os,
+    os::{detect_os, detect_os_with_request},
+    filesystem::git::GitRepo,
+    filesystem::repo::detect_repo_structure,
+    request::OsRequest,
 };
+use std::path::Path;
 
-// Detect only hardware
+// Detect only hardware (full, includes audio + GPU + storage)
 let hw = detect_hardware()?;
 println!("CPU: {} ({})", hw.cpu.brand, hw.cpu.arch);
+
+// Lightweight hardware summary: CPU + memory only, skips ~1.5s audio detection
+let hw_summary = detect_hardware_summary()?;
 
 // Detect only network
 let net = detect_network()?;
@@ -108,10 +115,16 @@ for iface in &net.interfaces {
     println!("Interface: {}", iface.name);
 }
 
-// Detect only OS
-let os = detect_os()?;
+// OS with tuned detail level (skip NTP which can take up to 10s on Linux)
+let os = detect_os_with_request(&OsRequest::summary())?;
 println!("OS: {} {}", os.name, os.version);
+
+// Expert composition: discover a git repo and sniff workspace structure only
+let git = GitRepo::discover(Path::new("."))?;
+let repo = detect_repo_structure(Path::new("."))?;
 ```
+
+See [../docs/sniff-library-architecture.md](../docs/sniff-library-architecture.md) for a full breakdown of per-subsection costs, shared-work strategies, and common caller profiles.
 
 ## Architecture
 
@@ -588,17 +601,21 @@ Detects installed programs across 8 categories with parallel execution and macOS
 | Headless Audio | afplay, pacat, aplay | PATH lookup |
 | AI CLI | claude, aider, goose | PATH lookup |
 
+**Performance notes:**
+
+`ProgramsInfo::detect()` builds a single shared `ExecutableIndex` by scanning every `PATH` directory and macOS app bundle location once, then runs all 8 categories in parallel using `rayon::join` pairs. Per-program lookups are O(1) HashMap hits rather than repeated filesystem traversals, so the total cost is dominated by the one-time index build.
+
 **Example:**
 
 ```rust
 use sniff::programs::ProgramsInfo;
 
-// Detect all installed programs (parallel)
+// Detect all installed programs (parallel, shared index)
 let programs = ProgramsInfo::detect();
 
 println!("Editors: {:?}", programs.editors);
 println!("Utilities: {:?}", programs.utilities);
-println!("AI CLI tools: {:?}", programs.ai_cli);
+println!("AI CLI tools: {:?}", programs.ai_clients);
 
 // Access metadata
 for editor in &programs.editors {
@@ -619,6 +636,26 @@ match source {
     ExecutableSource::NotFound => println!("Not installed"),
 }
 ```
+
+**Windows Fallback Chain:**
+
+On Windows the executable search expands beyond PATH to cover registry-installed
+GUI apps and traditional installers:
+
+1. **PATH** — `CreateProcess`-compatible, returns `ExecutableSource::Path`.
+2. **App Paths registry** — `HKCU` then `HKLM`
+   (`SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths`). HKCU wins ties to
+   match `ShellExecuteEx`. Environment variables in the target path are
+   expanded via `ExpandEnvironmentStringsW` and orphaned entries (whose target
+   no longer exists) are dropped. Returns `ExecutableSource::WindowsAppPaths`.
+3. **Install-root walk** — one directory deep under `%ProgramFiles%`,
+   `%ProgramFiles(x86)%`, and `%LocalAppData%\Programs`. Returns
+   `ExecutableSource::WindowsInstallRoot`. Catches VS Code-style
+   user-scope installers that never register with App Paths.
+
+The combined Windows scan costs 40–80 ms on a warm filesystem. It runs once
+inside `ExecutableIndex::build()`, so the eight program-detection categories
+amortize the cost.
 
 ### Services Module
 
@@ -829,6 +866,64 @@ cargo test -p sniff --features network
 - Network: Interface detection, filtering, primary selection
 - Filesystem: Git parsing, monorepo detection, language analysis
 - Package: Manager detection, registry queries (network)
+
+## Benchmarking and Profiling
+
+The library ships with a Criterion benchmark harness under
+`sniff/lib/benches/` and lightweight example binaries under
+`sniff/lib/examples/` intended for flamegraph profiling.
+
+```bash
+# Run the full Criterion suite (HTML reports land in target/criterion)
+just bench
+
+# Run a single domain
+just bench-system
+just bench-hardware
+just bench-filesystem
+just bench-inventory
+
+# End-to-end CLI benchmarks (requires `hyperfine` on PATH)
+just bench-cli
+
+# Generate a flamegraph from a profiling example
+just profile profile_detect_full
+just profile profile_filesystem
+just profile profile_hardware
+
+# Profile the sniff CLI directly
+just profile-cli --json
+```
+
+Criterion output is written to `target/criterion/` with HTML reports at
+`target/criterion/report/index.html`. Flamegraphs use a dedicated
+`[profile.profiling]` Cargo profile (release + debuginfo, no stripping)
+so sampled stacks resolve symbols without changing normal release
+builds.
+
+The `--perf` flag on the CLI exposes structured per-stage timings from
+the library's `PerformanceCollector`; Criterion wall-clock numbers are
+the primary regression surface, while `--perf` stage breakdowns are
+useful for explaining *where* an observed regression lives.
+
+**Platform notes:**
+
+- Audio device and GPU/Metal benches are most meaningful on macOS.
+  They still compile and run on Linux/Windows but mostly exercise
+  stub paths.
+- The `services_detect` bench depends on which init system is present
+  (systemd, launchd, etc.) — variance between hosts is expected.
+
+**Which benches track regressions:**
+
+- `system::detect_summary` and `system::detect_full` are the headline
+  regression signals.
+- `filesystem_git::git_summary_monorepo`,
+  `filesystem_repo::repo_structure_monorepo`, and
+  `inventory::programs_detect` cover the highest-risk shared-walk and
+  fan-out paths.
+- Audio/GPU benches are informational and should not be used to gate
+  merges across platforms.
 
 ## Design Principles
 

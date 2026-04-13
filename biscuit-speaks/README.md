@@ -79,7 +79,6 @@ The **biscuit-speaks** library caters to both ends of this spectrum as well as a
     - the _speed_ at which the text is spoken can be modified from its default speed by using the `with_speed(SpeedLevel)` builder function
     - if not set programmatically the speed will also be influenced by the `PREFER_SPEED` environment variable set to either `fast` or `slow` (capitalization doesn't matter).
 
-
 One important point to note, when you don't specify the provider, the general rule of thumb is use the highest quality provider which is available. However, there is one exception ... we will not use a cloud based API (for now that just means ElevenLabs) unless explicitly asked to. That's not because it isn't high quality (it is) but because it could cost money (even though the free tier is generous). For this reason we felt it would be better to require a caller to explicitly use a cloud based provider.
 
 ## Usage
@@ -97,7 +96,6 @@ let hello = Speak::new("Hello World");
 // and language all set to the defaults
 hello.play().await?;
 ```
-
 
 ### Being More Explicit
 
@@ -120,7 +118,6 @@ Speak::new("Custom voice")
 // Fire-and-forget (ignores errors)
 biscuit_speaks::speak_when_able("Task complete!", &TtsConfig::default()).await;
 ```
-
 
 ## Deferred Providers
 

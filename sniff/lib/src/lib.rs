@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::time::Instant;
+use tracing::Level;
 use tracing::instrument;
 
 pub mod error;
@@ -8,6 +10,7 @@ pub mod hardware;
 pub mod network;
 pub mod os;
 pub mod package;
+pub mod performance;
 pub mod programs;
 #[cfg(feature = "remote")]
 pub mod remote;
@@ -21,6 +24,7 @@ pub use error::{Result, SniffError};
 pub use filesystem::FilesystemInfo;
 pub use hardware::HardwareInfo;
 pub use network::NetworkInfo;
+pub use performance::PerformanceReport;
 pub use programs::{ProgramMetadata, ProgramsInfo};
 pub use request::DetectionPlan;
 
@@ -34,8 +38,10 @@ pub use os::OsInfo;
 ///
 /// Contains OS, hardware, network, and filesystem information gathered
 /// by the sniff library. All fields are optional to allow partial
-/// detection when using flags.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// detection when using flags. The `Default` impl yields an all-`None`
+/// instance, which downstream callers can use as a graceful fallback when
+/// a detection plan fails (e.g. `detect_with_plan(plan).unwrap_or_default()`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SniffResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub os: Option<OsInfo>,
@@ -45,6 +51,8 @@ pub struct SniffResult {
     pub network: Option<NetworkInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filesystem: Option<FilesystemInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub performance: Option<PerformanceReport>,
 }
 
 /// Configuration for the detect operation.
@@ -77,6 +85,8 @@ pub struct SniffConfig {
     pub skip_network: bool,
     /// Skip filesystem detection
     pub skip_filesystem: bool,
+    /// Include structured performance data in the result
+    pub include_performance: bool,
 }
 
 impl Default for SniffConfig {
@@ -89,6 +99,7 @@ impl Default for SniffConfig {
             skip_hardware: false,
             skip_network: false,
             skip_filesystem: false,
+            include_performance: false,
         }
     }
 }
@@ -140,6 +151,12 @@ impl SniffConfig {
         self.skip_filesystem = true;
         self
     }
+
+    /// Include structured performance data in the result.
+    pub fn performance(mut self, enable: bool) -> Self {
+        self.include_performance = enable;
+        self
+    }
 }
 
 impl From<SniffConfig> for DetectionPlan {
@@ -172,6 +189,7 @@ impl From<SniffConfig> for DetectionPlan {
             } else {
                 Some(FilesystemRequest::new().git(git_request))
             },
+            include_performance: config.include_performance,
         }
     }
 }
@@ -242,58 +260,114 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
     hw = plan.hardware.is_some(),
     net = plan.network.is_some(),
     fs = plan.filesystem.is_some(),
+    perf = plan.include_performance,
 ))]
 pub fn detect_with_plan(plan: DetectionPlan) -> Result<SniffResult> {
+    let started = Instant::now();
     let base = plan
         .base_dir
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let collector = plan
+        .include_performance
+        .then(performance::PerformanceCollector::new_shared);
 
-    // Run all four domains concurrently using scoped threads.
-    // Each domain is independent, so there is no ordering constraint.
-    let (os, hardware, network, filesystem) = std::thread::scope(|s| {
-        let os_handle = plan.os.as_ref().map(|req| {
-            s.spawn(move || {
-                let _span = tracing::info_span!("detect_os").entered();
-                os::detect_os_with_request(req)
-            })
+    let mut result = performance::with_current_collector(collector.clone(), || {
+        // Run all four domains concurrently using scoped threads.
+        // Each domain is independent, so there is no ordering constraint.
+        let (os, hardware, network, filesystem) = std::thread::scope(|s| {
+            let os_collector = collector.clone();
+            let os_handle = plan.os.as_ref().map(|req| {
+                s.spawn(move || {
+                    performance::with_current_collector(os_collector, || {
+                        let _span = tracing::info_span!("detect_os").entered();
+                        let started = Instant::now();
+                        let result = os::detect_os_with_request(req);
+                        performance::record_logged_stage(
+                            "detect.os",
+                            started.elapsed(),
+                            Level::INFO,
+                        );
+                        result
+                    })
+                })
+            });
+
+            let hw_collector = collector.clone();
+            let hw_handle = plan.hardware.as_ref().map(|req| {
+                s.spawn(move || {
+                    performance::with_current_collector(hw_collector, || {
+                        let _span = tracing::info_span!("detect_hardware").entered();
+                        let started = Instant::now();
+                        let result = hardware::detect_hardware_with_request(req);
+                        performance::record_logged_stage(
+                            "detect.hardware",
+                            started.elapsed(),
+                            Level::INFO,
+                        );
+                        result
+                    })
+                })
+            });
+
+            let net_collector = collector.clone();
+            let net_handle = plan.network.as_ref().map(|req| {
+                s.spawn(move || {
+                    performance::with_current_collector(net_collector, || {
+                        let _span = tracing::info_span!("detect_network").entered();
+                        let started = Instant::now();
+                        let result = network::detect_network_with_request(req);
+                        performance::record_logged_stage(
+                            "detect.network",
+                            started.elapsed(),
+                            Level::INFO,
+                        );
+                        result
+                    })
+                })
+            });
+
+            let fs_collector = collector.clone();
+            let fs_handle = plan.filesystem.as_ref().map(|req| {
+                s.spawn(move || {
+                    performance::with_current_collector(fs_collector, || {
+                        let _span = tracing::info_span!("detect_filesystem").entered();
+                        let started = Instant::now();
+                        let result = filesystem::detect_filesystem_with_request(&base, req);
+                        performance::record_logged_stage(
+                            "detect.filesystem",
+                            started.elapsed(),
+                            Level::INFO,
+                        );
+                        result
+                    })
+                })
+            });
+
+            let os = os_handle.map(|h| h.join().unwrap()).transpose();
+            let hardware = hw_handle.map(|h| h.join().unwrap()).transpose();
+            let network = net_handle.map(|h| h.join().unwrap()).transpose();
+            let filesystem = fs_handle.map(|h| h.join().unwrap()).transpose();
+
+            (os, hardware, network, filesystem)
         });
 
-        let hw_handle = plan.hardware.as_ref().map(|req| {
-            s.spawn(move || {
-                let _span = tracing::info_span!("detect_hardware").entered();
-                hardware::detect_hardware_with_request(req)
-            })
-        });
+        let result = SniffResult {
+            os: os?,
+            hardware: hardware?,
+            network: network?,
+            filesystem: filesystem?,
+            performance: None,
+        };
+        performance::record_logged_stage("detect.total", started.elapsed(), Level::INFO);
+        Ok::<_, SniffError>(result)
+    })?;
 
-        let net_handle = plan.network.as_ref().map(|req| {
-            s.spawn(move || {
-                let _span = tracing::info_span!("detect_network").entered();
-                network::detect_network_with_request(req)
-            })
-        });
+    if let Some(collector) = collector {
+        result.performance = Some(collector.snapshot(started.elapsed()));
+    }
 
-        let fs_handle = plan.filesystem.as_ref().map(|req| {
-            s.spawn(move || {
-                let _span = tracing::info_span!("detect_filesystem").entered();
-                filesystem::detect_filesystem_with_request(&base, req)
-            })
-        });
-
-        let os = os_handle.map(|h| h.join().unwrap()).transpose();
-        let hardware = hw_handle.map(|h| h.join().unwrap()).transpose();
-        let network = net_handle.map(|h| h.join().unwrap()).transpose();
-        let filesystem = fs_handle.map(|h| h.join().unwrap()).transpose();
-
-        (os, hardware, network, filesystem)
-    });
-
-    Ok(SniffResult {
-        os: os?,
-        hardware: hardware?,
-        network: network?,
-        filesystem: filesystem?,
-    })
+    Ok(result)
 }
 
 #[cfg(test)]

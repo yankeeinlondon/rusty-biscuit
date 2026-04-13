@@ -2,23 +2,23 @@
 
 ## Validation Structure
 
-The _pre_ and _post_ validation stage of a Claudine transaction consist of an enumerated set of operations which can be used to provide validation. Every validation operation takes a `name` property as it's first parameter but can also exposes some optional parameters to help in expressing how to handle failures.
+The _pre_ and _post_ validation stage of a Claudine transaction consist of an enumerated set of operations which can be used to provide validation. Every validation operation takes a primary subject as its first parameter. For file-oriented validations, the expanded object form uses a `file` field.
 
 It's important to understand that the following two definitions of the **file_exists** validation are identical in scope:
 
 - **Shorthand**
 
     ```yaml
-    pre_validations:
+    pre_checks:
         - file_exists: "@path/to/file"
     ```
 
 - **Full Syntax**
 
     ```yaml
-    pre_validations:
+    pre_checks:
         - file_exists:
-            - name: "@path/to/file"
+            file: "@path/to/file"
     ```
 
 Assuming we're all lazy (_a reasonable assumption_), why not just use the shorthand form? Well you'll be happy to hear that we try to reward this form of laziness by providing good defaults for the shorthand so you can do just that. However, if you want more fine grained control over handling or messaging then you'll need to leverage the longer form.
@@ -49,12 +49,12 @@ For every validation which returns **false** we are now
 
 These checks are about whether the expected input or output files exist and are structurally sane:
 
-- `file_exists(name)`
-- `dir_exists(name)`
-- `json_file_exists(name)`
-- `yaml_file_exists(name)`
-- `toml_file_exists(name)`
-- `has_write_permission(name)`
+- `file_exists(file)`
+- `dir_exists(dir)`
+- `json_file_exists(file)`
+- `yaml_file_exists(file)`
+- `toml_file_exists(file)`
+- `has_write_permission(file)`
 
 The typed file checks matter because "the file exists" is often too weak. A JSON file that exists but is malformed is not a usable prerequisite. Claudine treats those as distinct validation concerns so the error is closer to the real problem.
 
@@ -63,9 +63,9 @@ The typed file checks matter because "the file exists" is often too weak. A JSON
 
 These checks look at dirty source state:
 
-- `no_dirty_source_code`
-- `has_dirty_source_code`
-- `no_merge_conflicts`
+- `no_dirty_source_code()`
+- `has_dirty_source_code()`
+- `no_merge_conflicts()`
 
 These are useful when a prompt is intended to work from a clean baseline, or when a prompt is only meaningful if the user has already made local edits that the agent is supposed to inspect.
 
@@ -80,5 +80,4 @@ In order to give you more flexibility in how and what you check, we provide the 
     - `any`
 - Atomic
     - `not`
-
 

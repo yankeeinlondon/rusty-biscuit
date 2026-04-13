@@ -13,12 +13,23 @@ pub(crate) fn detect_repo_inner(
     root: &Path,
     structure_only: bool,
 ) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
-    // Build manifest index once for the entire tree
-    let manifest_index = if structure_only {
+    detect_repo_inner_with_shared(root, structure_only, None, None)
+}
+
+pub(crate) fn detect_repo_inner_with_shared(
+    root: &Path,
+    structure_only: bool,
+    shared_manifest_index: Option<&ManifestIndex>,
+    shared_repo_inventory: Option<&FileInventory>,
+) -> Result<(Option<RepoInfo>, Option<FileInventory>)> {
+    // Build manifest index once for the entire tree unless the caller already
+    // provided the shared view from a higher-level walk.
+    let manifest_index = if structure_only || shared_manifest_index.is_some() {
         None
     } else {
         Some(ManifestIndex::build(root))
     };
+    let manifest_index = shared_manifest_index.or(manifest_index.as_ref());
 
     let mut workspace_tools = Vec::new();
     let mut packages = Vec::new();
@@ -29,12 +40,12 @@ pub(crate) fn detect_repo_inner(
         &mut packages,
     );
     collect_repo_info(
-        detect_nx(root, manifest_index.as_ref())?,
+        detect_nx(root, manifest_index)?,
         &mut workspace_tools,
         &mut packages,
     );
     collect_repo_info(
-        detect_turborepo(root, manifest_index.as_ref())?,
+        detect_turborepo(root, manifest_index)?,
         &mut workspace_tools,
         &mut packages,
     );
@@ -54,7 +65,7 @@ pub(crate) fn detect_repo_inner(
         &mut packages,
     );
     collect_repo_info(
-        detect_lerna(root, manifest_index.as_ref())?,
+        detect_lerna(root, manifest_index)?,
         &mut workspace_tools,
         &mut packages,
     );
@@ -67,7 +78,7 @@ pub(crate) fn detect_repo_inner(
         // Full mode: discover nested packages using the manifest index
         let lock_versions = CargoLockVersions::parse(&root.join("Cargo.lock"));
         let workspace_packages = packages.clone();
-        let index = manifest_index.as_ref().unwrap();
+        let index = manifest_index.expect("full repo detection requires a manifest index");
         for package in &workspace_packages {
             packages.extend(discover_packages_from_index(
                 &package.path,
@@ -83,7 +94,9 @@ pub(crate) fn detect_repo_inner(
     let mut packages = merge_packages(packages);
     let repo_inventory = if !structure_only {
         // Build shared repo-level file inventory once for all packages
-        let inventory = crate::filesystem::file_types::scan_file_inventory(root).ok();
+        let inventory = shared_repo_inventory
+            .cloned()
+            .or_else(|| crate::filesystem::file_types::scan_file_inventory(root).ok());
         refresh_package_boundaries(&mut packages, inventory.as_ref());
         inventory
     } else {
