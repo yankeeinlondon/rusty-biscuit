@@ -132,16 +132,15 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
         }
         eprintln!();
     }
-    if app.repo_dirty {
-        if let Some(ref path) = app.repo_config_path {
-            if let Some(ref repo_cfg) = app.repo_config {
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
-                eprintln!("Repo configuration saved to {}", path.display());
-            }
+    if app.repo_dirty
+        && let Some(ref path) = app.repo_config_path
+        && let Some(ref repo_cfg) = app.repo_config
+    {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
         }
+        claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
+        eprintln!("Repo configuration saved to {}", path.display());
     }
 
     Ok(())
