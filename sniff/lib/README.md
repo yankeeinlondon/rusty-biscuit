@@ -637,6 +637,26 @@ match source {
 }
 ```
 
+**Windows Fallback Chain:**
+
+On Windows the executable search expands beyond PATH to cover registry-installed
+GUI apps and traditional installers:
+
+1. **PATH** — `CreateProcess`-compatible, returns `ExecutableSource::Path`.
+2. **App Paths registry** — `HKCU` then `HKLM`
+   (`SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths`). HKCU wins ties to
+   match `ShellExecuteEx`. Environment variables in the target path are
+   expanded via `ExpandEnvironmentStringsW` and orphaned entries (whose target
+   no longer exists) are dropped. Returns `ExecutableSource::WindowsAppPaths`.
+3. **Install-root walk** — one directory deep under `%ProgramFiles%`,
+   `%ProgramFiles(x86)%`, and `%LocalAppData%\Programs`. Returns
+   `ExecutableSource::WindowsInstallRoot`. Catches VS Code-style
+   user-scope installers that never register with App Paths.
+
+The combined Windows scan costs 40–80 ms on a warm filesystem. It runs once
+inside `ExecutableIndex::build()`, so the eight program-detection categories
+amortize the cost.
+
 ### Services Module
 
 Detects system services across multiple init systems.

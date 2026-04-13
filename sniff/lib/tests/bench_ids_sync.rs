@@ -23,8 +23,7 @@ fn text_file_path() -> PathBuf {
 
 fn load_text_file_ids() -> Vec<String> {
     let path = text_file_path();
-    let raw =
-        fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let raw = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     raw.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
@@ -45,10 +44,7 @@ fn text_file_matches_rust_constant() {
 #[test]
 fn every_ci_bench_id_is_well_formed() {
     for id in CI_BENCH_IDS {
-        assert!(
-            id.contains('/'),
-            "bench ID {id} should be '<group>/<name>'"
-        );
+        assert!(id.contains('/'), "bench ID {id} should be '<group>/<name>'");
         assert!(!id.starts_with('/'), "bench ID {id} starts with '/'");
         assert!(!id.ends_with('/'), "bench ID {id} ends with '/'");
         assert!(!id.contains(' '), "bench ID {id} contains whitespace");
@@ -58,8 +54,8 @@ fn every_ci_bench_id_is_well_formed() {
 #[test]
 fn ci_filter_regex_compiles_and_matches_exactly() {
     let filter = ci_filter_regex();
-    let re =
-        regex::Regex::new(&filter).unwrap_or_else(|e| panic!("invalid filter regex: {filter}: {e}"));
+    let re = regex::Regex::new(&filter)
+        .unwrap_or_else(|e| panic!("invalid filter regex: {filter}: {e}"));
 
     for id in CI_BENCH_IDS {
         assert!(

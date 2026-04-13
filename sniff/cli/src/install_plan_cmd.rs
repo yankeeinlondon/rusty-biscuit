@@ -8,10 +8,7 @@ use std::error::Error;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::terminal::Terminal;
-use inquire::Confirm;
-use sniff::programs::{
-    InstallOptions, InstallPlan, InstallPlanOption, InstallPlanReason, InstallationMethod,
-};
+use sniff::programs::{InstallPlan, InstallPlanOption, InstallPlanReason, InstallationMethod};
 
 /// Render the plan to a `String` ready for printing to stdout.
 ///
@@ -25,8 +22,20 @@ use sniff::programs::{
 ///
 /// When `verbose` is set, each failed option is rendered above the success
 /// line so users can see what was skipped and why.
+///
+/// Uses a `Terminal::default()` for rendering. To supply a real detected
+/// terminal, use [`render_install_plan_with`].
+#[allow(dead_code)]
 pub fn render_install_plan(plan: &InstallPlan, verbose: bool) -> String {
     let terminal = Terminal::default();
+    render_install_plan_with(plan, verbose, &terminal)
+}
+
+/// Render the plan to a `String` using the supplied `terminal` for width and
+/// capability detection.
+///
+/// See [`render_install_plan`] for a description of the rendering branches.
+pub fn render_install_plan_with(plan: &InstallPlan, verbose: bool, terminal: &Terminal) -> String {
     let mut out = String::new();
 
     if plan.successful {
@@ -37,7 +46,7 @@ pub fn render_install_plan(plan: &InstallPlan, verbose: bool) -> String {
                     opt.kind.manager_name(),
                     opt.reason
                 );
-                out.push_str(&Prose::new(line).render(&terminal));
+                out.push_str(&Prose::new(line).render(terminal));
                 out.push('\n');
             }
             if !plan.failed_with_reason().is_empty() {
@@ -46,10 +55,10 @@ pub fn render_install_plan(plan: &InstallPlan, verbose: bool) -> String {
         }
         let chosen = plan.chosen().expect("successful plan has a chosen option");
         let success_line = render_success_line(&plan.program, chosen);
-        out.push_str(&Prose::new(success_line).render(&terminal));
+        out.push_str(&Prose::new(success_line).render(terminal));
         out.push('\n');
     } else {
-        out.push_str(&render_failure_block(plan, &terminal));
+        out.push_str(&render_failure_block(plan, terminal));
     }
 
     out
@@ -100,12 +109,14 @@ fn render_failure_block(plan: &InstallPlan, terminal: &Terminal) -> String {
 /// Returns true if the plan's chosen option is a `RemoteBash` method, in
 /// which case the CLI must prompt for a second explicit confirmation even
 /// when `--yes` is passed.
+#[allow(dead_code)]
 pub fn should_require_remote_bash_consent(plan: &InstallPlan) -> bool {
     plan.chosen()
         .is_some_and(|o| matches!(o.kind, InstallationMethod::RemoteBash(_)))
 }
 
 /// Exit code for ctrl-c / interrupted prompts.
+#[allow(dead_code)]
 pub const EXIT_INTERRUPTED: i32 = 130;
 
 /// Full "render + confirm + execute" flow. Called by the CLI dispatcher for
@@ -116,61 +127,34 @@ pub fn execute_install_flow(
     skip_confirm: bool,
     plain: bool,
 ) -> Result<(), Box<dyn Error>> {
-    // 1. Render
-    let rendered = render_install_plan(plan, /* verbose */ false);
-    crate::output::emit_text(&rendered, plain);
-
-    // 2. Failure: exit cleanly, nothing to do
-    if !plan.successful {
-        return Ok(());
-    }
-
-    // 3. Base confirmation
-    if !dry_run && !skip_confirm {
-        match Confirm::new("Proceed with installation?")
-            .with_default(true)
-            .prompt()
-        {
-            Ok(true) => {}
-            Ok(false) => return Ok(()),
-            Err(inquire::InquireError::OperationCanceled) => return Ok(()),
-            Err(inquire::InquireError::OperationInterrupted) => {
-                std::process::exit(EXIT_INTERRUPTED)
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
-
-    // 4. Remote-bash extra confirmation (never skipped)
-    let remote_bash = should_require_remote_bash_consent(plan);
-    if remote_bash && !dry_run {
-        eprintln!();
-        let warning = "<yellow>Warning:</yellow> this will download and execute a remote shell script. Continue?";
-        let terminal = Terminal::default();
-        eprintln!("{}", Prose::new(warning).render(&terminal));
-        match Confirm::new("I understand; proceed with remote-bash install?")
-            .with_default(false)
-            .prompt()
-        {
-            Ok(true) => {}
-            Ok(false) => return Ok(()),
-            Err(inquire::InquireError::OperationCanceled) => return Ok(()),
-            Err(inquire::InquireError::OperationInterrupted) => {
-                std::process::exit(EXIT_INTERRUPTED)
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
-
-    // 5. Execute
-    let opts = InstallOptions {
-        dry_run,
-        skip_confirm: true,
-        timeout_secs: 120,
-        approve_remote_bash: remote_bash,
+    use sniff::programs::{
+        InstallInterviewInput, InstallInterviewOptions, InstallInterviewOutcome,
+        run_install_interview,
     };
-    plan.execute(&opts)?;
-    Ok(())
+
+    let input = InstallInterviewInput {
+        program: plan.program.clone(),
+        website: plan.website,
+        plan: plan.clone(),
+    };
+
+    let terminal = Terminal::new();
+    let mut ui = crate::install_ui::CliInstallUi::new(terminal, plain);
+
+    let mut opts = InstallInterviewOptions::default();
+    opts.install.dry_run = dry_run;
+    opts.install.skip_confirm = skip_confirm;
+    opts.install.approve_remote_bash = false; // delegate asks the user
+    opts.install.timeout_secs = 120;
+    opts.prompt_on_failure = true;
+
+    match run_install_interview(&input, &opts, &mut ui)? {
+        InstallInterviewOutcome::Installed { .. }
+        | InstallInterviewOutcome::DryRun { .. }
+        | InstallInterviewOutcome::AbortedByUser
+        | InstallInterviewOutcome::NotInstallable => Ok(()),
+        InstallInterviewOutcome::Failed { .. } => Err("installation failed".into()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -295,7 +279,8 @@ pub fn dispatch(
 
     match kind {
         InstallCommandKind::InstallPlan => {
-            let rendered = render_install_plan(&plan, /* verbose */ true);
+            let terminal = Terminal::new();
+            let rendered = render_install_plan_with(&plan, /* verbose */ true, &terminal);
             crate::output::emit_text(&rendered, plain);
             Ok(())
         }
@@ -509,5 +494,37 @@ mod tests {
         };
         let err = apply_via(&mut plan, "apt").unwrap_err();
         assert!(err.contains("cannot override an unavailable method"));
+    }
+
+    #[test]
+    fn render_install_plan_with_real_terminal_contains_program_and_manager() {
+        let plan = fake_success_plan(false);
+        let terminal = Terminal::default();
+        let rendered = render_install_plan_with(&plan, false, &terminal);
+        assert!(rendered.contains("Vim"));
+        assert!(rendered.to_lowercase().contains("brew"));
+    }
+
+    #[test]
+    fn render_install_plan_default_wrapper_still_works() {
+        let plan = fake_success_plan(false);
+        let rendered = render_install_plan(&plan, false);
+        assert!(rendered.contains("Vim"));
+    }
+
+    #[test]
+    fn execute_install_flow_dry_run_delegates_to_interview_runner() {
+        // Drives the flow in dry-run/plain mode. We can't assert on emitted text
+        // from execute_install_flow directly (it writes to stdout), but we can
+        // observe that the function returns Ok.
+        let plan = fake_success_plan(false); // uses Brew, no sudo
+        let result = execute_install_flow(
+            &plan, /*dry_run*/ true, /*skip_confirm*/ true, /*plain*/ true,
+        );
+        assert!(
+            result.is_ok(),
+            "dry-run should succeed, got: {:?}",
+            result.err().map(|e| e.to_string())
+        );
     }
 }
