@@ -420,6 +420,68 @@ fn longest_common_prefix_len(values: &[&str]) -> usize {
     len
 }
 
+/// Which group ("Input" or "Output") a device line is being rendered under.
+/// Used to decide whether the default marker should be appended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GroupSide {
+    Input,
+    Output,
+}
+
+/// Build the inline markup for one device line (no bullet, no newline).
+///
+/// Format: `{name}{name_suffix?} (<kind>[, {rates}]){ default-marker?}`.
+fn build_device_line(
+    dev: &sniff::hardware::AudioDeviceInfo,
+    name_suffix: &str,
+    side: GroupSide,
+) -> String {
+    let kind_markup = style_audio_kind(dev.kind);
+
+    let mut rates: Vec<f64> = dev.available_sample_rates.clone();
+    if dev.sample_rate > 0.0 {
+        rates.push(dev.sample_rate);
+    }
+    rates.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    rates.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+
+    let rates_markup: String = if rates.is_empty() {
+        String::new()
+    } else {
+        let current = dev.sample_rate;
+        rates
+            .iter()
+            .map(|r| {
+                let label = format_sample_rate_khz(*r);
+                if current > 0.0 && (*r - current).abs() < 0.01 {
+                    format!("<b>{}</b>", label)
+                } else {
+                    format!("<dim>{}</dim>", label)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
+    let parens = if rates_markup.is_empty() {
+        format!("({})", kind_markup)
+    } else {
+        format!("({}, {})", kind_markup, rates_markup)
+    };
+
+    let is_default_here = match side {
+        GroupSide::Input => dev.is_default_input,
+        GroupSide::Output => dev.is_default_output,
+    };
+    let marker = if is_default_here {
+        " <b><yellow>*</yellow></b>"
+    } else {
+        ""
+    };
+
+    format!("{}{} {}{}", dev.name, name_suffix, parens, marker)
+}
+
 /// Render a list of audio devices with verbosity levels.
 ///
 /// - Default: name, kind, direction, default markers
@@ -649,5 +711,71 @@ mod audio_suffix_tests {
                 "<dim>b</dim>".to_string(),
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod audio_line_tests {
+    use super::{build_device_line, GroupSide};
+    use sniff::hardware::{AudioDeviceInfo, AudioDeviceKind, AudioDirection};
+
+    fn macbook_speakers() -> AudioDeviceInfo {
+        AudioDeviceInfo {
+            name: "MacBook Pro Speakers".to_string(),
+            uid: "BuiltInSpeakerDevice".to_string(),
+            kind: AudioDeviceKind::BuiltIn,
+            direction: AudioDirection::Output,
+            is_default_input: false,
+            is_default_output: true,
+            sample_rate: 48000.0,
+            available_sample_rates: vec![44100.0, 48000.0, 96000.0],
+            input_channels: 0,
+            output_channels: 2,
+        }
+    }
+
+    #[test]
+    fn output_side_shows_default_marker() {
+        let line = build_device_line(&macbook_speakers(), "", GroupSide::Output);
+        assert_eq!(
+            line,
+            "MacBook Pro Speakers (<dim>Built-in</dim>, <dim>44.1k</dim> <b>48k</b> <dim>96k</dim>) <b><yellow>*</yellow></b>"
+        );
+    }
+
+    #[test]
+    fn input_side_omits_default_output_marker() {
+        let line = build_device_line(&macbook_speakers(), "", GroupSide::Input);
+        assert_eq!(
+            line,
+            "MacBook Pro Speakers (<dim>Built-in</dim>, <dim>44.1k</dim> <b>48k</b> <dim>96k</dim>)"
+        );
+    }
+
+    #[test]
+    fn name_suffix_is_appended_before_parens() {
+        let line = build_device_line(&macbook_speakers(), "<dim>:1</dim>", GroupSide::Output);
+        assert!(line.starts_with("MacBook Pro Speakers<dim>:1</dim> ("));
+    }
+
+    #[test]
+    fn missing_rates_drops_the_rate_segment() {
+        let mut dev = macbook_speakers();
+        dev.sample_rate = 0.0;
+        dev.available_sample_rates.clear();
+        let line = build_device_line(&dev, "", GroupSide::Output);
+        assert_eq!(
+            line,
+            "MacBook Pro Speakers (<dim>Built-in</dim>) <b><yellow>*</yellow></b>"
+        );
+    }
+
+    #[test]
+    fn current_rate_not_in_available_list_is_still_rendered_bold() {
+        let mut dev = macbook_speakers();
+        dev.sample_rate = 192000.0;
+        dev.available_sample_rates = vec![48000.0, 96000.0];
+        let line = build_device_line(&dev, "", GroupSide::Output);
+        assert!(line.contains("<dim>48k</dim> <dim>96k</dim> <b>192k</b>"));
     }
 }
