@@ -894,7 +894,7 @@ fn test_terminal_apps_subcommand_json_output() {
 #[test]
 fn test_audio_subcommand_text_output() {
     cargo_bin_cmd!("sniff")
-        .arg("audio")
+        .arg("audio-players")
         .assert()
         .success()
         .stdout(predicate::str::contains("Name"))
@@ -904,7 +904,7 @@ fn test_audio_subcommand_text_output() {
 #[test]
 fn test_audio_subcommand_json_output() {
     cargo_bin_cmd!("sniff")
-        .args(["audio", "--json"])
+        .args(["audio-players", "--json"])
         .assert()
         .success();
 }
