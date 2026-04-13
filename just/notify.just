@@ -3,9 +3,12 @@
 _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
 
-# play a sound effect if `playa` CLI is installed (never errors)
-_play effect background="":
-    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
+# play a sound effect (blocking)
+_play effect:
+    @playa effect "{{effect}}" >/dev/null 2>&1 || exit 0
+
+_play_background effect:
+    @playa effect "{{effect}}" --background >/dev/null 2>&1 || exit 0
 
 _notify message title:
     #!/usr/bin/env bash
