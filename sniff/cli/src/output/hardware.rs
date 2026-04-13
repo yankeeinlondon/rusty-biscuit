@@ -529,10 +529,7 @@ fn build_group_list(
 /// embedded "Audio Devices" subsection inside `sniff hardware`. The output
 /// does NOT start with a leading newline — callers decide on preceding
 /// spacing. It does end with a trailing newline after the footer.
-fn render_audio_device_list(
-    devices: &[sniff::hardware::AudioDeviceInfo],
-    verbose: u8,
-) -> String {
+fn render_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbose: u8) -> String {
     use biscuit_terminal::{
         components::{
             compose::Compose,
@@ -553,14 +550,20 @@ fn render_audio_device_list(
         .iter()
         .enumerate()
         .filter(|(_, d)| {
-            matches!(d.direction, AudioDirection::Input | AudioDirection::InputOutput)
+            matches!(
+                d.direction,
+                AudioDirection::Input | AudioDirection::InputOutput
+            )
         })
         .collect();
     let mut output_devs: Vec<(usize, &sniff::hardware::AudioDeviceInfo)> = devices
         .iter()
         .enumerate()
         .filter(|(_, d)| {
-            matches!(d.direction, AudioDirection::Output | AudioDirection::InputOutput)
+            matches!(
+                d.direction,
+                AudioDirection::Output | AudioDirection::InputOutput
+            )
         })
         .collect();
 
@@ -654,32 +657,50 @@ mod audio_kind_tests {
 
     #[test]
     fn built_in() {
-        assert_eq!(style_audio_kind(AudioDeviceKind::BuiltIn), "<dim>Built-in</dim>");
+        assert_eq!(
+            style_audio_kind(AudioDeviceKind::BuiltIn),
+            "<dim>Built-in</dim>"
+        );
     }
 
     #[test]
     fn usb() {
-        assert_eq!(style_audio_kind(AudioDeviceKind::Usb), "<indigo-500>USB</indigo-500>");
+        assert_eq!(
+            style_audio_kind(AudioDeviceKind::Usb),
+            "<indigo-500>USB</indigo-500>"
+        );
     }
 
     #[test]
     fn bluetooth() {
-        assert_eq!(style_audio_kind(AudioDeviceKind::Bluetooth), "<blue>Bluetooth</blue>");
+        assert_eq!(
+            style_audio_kind(AudioDeviceKind::Bluetooth),
+            "<blue>Bluetooth</blue>"
+        );
     }
 
     #[test]
     fn thunderbolt() {
-        assert_eq!(style_audio_kind(AudioDeviceKind::Thunderbolt), "<yellow>Thunderbolt</yellow>");
+        assert_eq!(
+            style_audio_kind(AudioDeviceKind::Thunderbolt),
+            "<yellow>Thunderbolt</yellow>"
+        );
     }
 
     #[test]
     fn hdmi() {
-        assert_eq!(style_audio_kind(AudioDeviceKind::Hdmi), "<yellow>HDMI</yellow>");
+        assert_eq!(
+            style_audio_kind(AudioDeviceKind::Hdmi),
+            "<yellow>HDMI</yellow>"
+        );
     }
 
     #[test]
     fn virtual_kind() {
-        assert_eq!(style_audio_kind(AudioDeviceKind::Virtual), "<dim><i>Virtual</i></dim>");
+        assert_eq!(
+            style_audio_kind(AudioDeviceKind::Virtual),
+            "<dim><i>Virtual</i></dim>"
+        );
     }
 
     #[test]
@@ -770,7 +791,7 @@ mod audio_suffix_tests {
 
 #[cfg(test)]
 mod audio_line_tests {
-    use super::{build_device_line, GroupSide};
+    use super::{GroupSide, build_device_line};
     use sniff::hardware::{AudioDeviceInfo, AudioDeviceKind, AudioDirection};
 
     fn macbook_speakers() -> AudioDeviceInfo {
@@ -900,7 +921,11 @@ mod audio_section_tests {
     fn default_markers_are_side_specific() {
         let devices = vec![speakers(), interface_io_default_out_only()];
         let out = render_audio_devices_section(&devices, 0);
-        assert!(out.contains("*"), "expected at least one * marker:\n{}", out);
+        assert!(
+            out.contains("*"),
+            "expected at least one * marker:\n{}",
+            out
+        );
     }
 
     #[test]
@@ -922,7 +947,11 @@ mod audio_section_tests {
     #[test]
     fn verbose_one_adds_channel_counts() {
         let out = render_audio_devices_section(&[speakers()], 1);
-        assert!(out.contains("Output channels:") && out.contains(" 2"), "missing -v extras:\n{}", out);
+        assert!(
+            out.contains("Output channels:") && out.contains(" 2"),
+            "missing -v extras:\n{}",
+            out
+        );
     }
 
     #[test]
