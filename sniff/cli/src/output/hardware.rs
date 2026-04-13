@@ -596,7 +596,7 @@ fn render_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbos
     out.push('\n');
 
     let footer = Status::from_prose(
-        "<i><dim> - items with <b><yellow>*</yellow></b> are the <b>default</b> for the input/output</dim></i>",
+        "<i><dim>items with <b><yellow>*</yellow></b> are the <b>default</b> for the input/output</dim></i>",
     )
     .state(StatusState::Info)
     .theme(StatusTheme::Circular);
