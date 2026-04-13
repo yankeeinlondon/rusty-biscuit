@@ -1,6 +1,7 @@
 import "../just/features.just"
 import "../just/notify.just"
 import "../just/ai.just"
+import "../just/devops.just"
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
@@ -14,6 +15,8 @@ YELLOW := '\033[33m'
 BLUE := '\033[34m'
 MAGENTA := '\033[35m'
 CYAN := '\033[36m'
+
+
 
 PACKAGE := "Claudine"
 LIB_NAME := PACKAGE + " Library"
@@ -39,38 +42,17 @@ default:
     echo
 
 
-
-# Ask Claude Code via a prompt file in a non-interactive session
-# NOTE: just hangs when large multi-line strings are passed via {{PROMPT}} parameters.
-# All callers should write their prompt to a temp file and call this recipe instead.
-_claude_file PROMPT_FILE:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo -e "\033[2m⏳ claude is working (max 30 turns)...\033[0m" >&2
-    (while true; do sleep 30; printf "." >&2; done) &
-    DOTS_PID=$!
-    trap 'kill $DOTS_PID 2>/dev/null || true' EXIT
-    unset ANTHROPIC_API_KEY
-    PROMPT_CONTENT="$(cat "{{PROMPT_FILE}}")"
-    cd .. && claude --dangerously-skip-permissions --max-turns 30 -p "$PROMPT_CONTENT"
-    echo -e "\n\033[2m✓ claude finished\033[0m" >&2
-
-
-
 # Build the library and CLI
 build *args="":
-    @echo -e "Building {{LIB_NAME}}"
-    @echo
-    @cargo build -p {{LIBRARY}} {{args}} || ( just _speak "The {{LIB_NAME}} build failed!" && echo -e "\n❌ The {{LIB_NAME}} build failed!" && exit 1)
-    @echo
-    @echo -e "✅ {{BOLD}}{{LIB_NAME}}{{RESET}} built successfully"
-    @echo
-    @echo -e "Building {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    @cargo build -p {{CLI}} {{args}} || ( just _speak "The {{CLI_NAME}} build failed!" && echo -e "\n❌ The {{CLI_NAME}} build failed!" && exit 1)
-    @echo
-    @echo -e "✅ {{BOLD}}{{CLI_NAME}}{{RESET}} built successfully"
-    @echo
+    @just _build claudine "Claudine Library" {{args}}
+    @just _build claudine-cli "Claudine CLI" {{args}}
+
+# Install the CLI
+install *args="":
+    @just build
+    @just _install "{{CLI_PATH}}" "{{PACKAGE}}" "{{args}}"
+
+
 
 # Test both library and CLI.
 # Primary verification for Claudine uses `cargo nextest run`.
@@ -170,25 +152,6 @@ commit *args="":
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
 
-# Install the CLI
-install *args="":
-    @echo
-    @echo -e "Building {{BOLD}}biscuit-terminal{{RESET}} Library"
-    @cargo build -p biscuit-terminal --release || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo -e "Building {{BOLD}}darkmatter{{RESET}} Library"
-    @cargo build -p darkmatter --release || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo
-    @echo -e "{{BOLD}}Building {{LIB_NAME}}{{RESET}}"
-    @echo
-    @cargo build -p {{LIBRARY}} --release  || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo
-    @echo -e "{{BOLD}}{{YELLOW}}Installing {{CLI_NAME}}{{RESET}}"
-    @echo
-    @cargo install --path {{CLI_PATH}} {{args}} || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo
-    @echo -e "✅ {{BOLD}}{{GREEN}}{{CLI_NAME}} installed{{RESET}}"
-    @echo
-    @playa effect drop-4 2>/dev/null || exit 0
 
 # Validate the source code without doing a full build
 check:
