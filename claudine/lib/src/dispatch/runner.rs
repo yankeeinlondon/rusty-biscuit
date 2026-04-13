@@ -9,12 +9,7 @@ use tokio::process::Command;
 use tracing::{debug, info_span, warn};
 
 use super::template::interpolate;
-<<<<<<< Updated upstream
 use crate::actions::bash_executor;
-||||||| Stash base
-=======
-use crate::actions::bash_executor::{self, ValidatedCommand};
->>>>>>> Stashed changes
 use crate::actions::{
     CompiledMapper, HookAction, HookDecision, HookResponse, Mapper, ReportFormat, ReportHandler,
 };
@@ -390,7 +385,6 @@ fn execute_sound_effect(name: &str, volume: f32, speed: f32) {
     });
 }
 
-<<<<<<< Updated upstream
 /// Determine which default sound (if any) should play for the given event.
 ///
 /// Maps canonical events to sound categories:
@@ -442,14 +436,6 @@ pub(crate) fn play_default_sound_for_event(
 ///   `sh -c`.
 /// - The `shell_escape()` helper in `bash_executor` is intentionally
 ///   not used here — it is for callers that build `sh -c` strings.
-||||||| Stash base
-/// Execute a shell command asynchronously via `sh -c "command params"`.
-=======
-/// Execute a shell command asynchronously.
-///
-/// Validates the command against the blocklist, resolves JS/TS interpreters,
-/// and shell-escapes all interpolated parameters before execution.
->>>>>>> Stashed changes
 fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
     let cmd = interpolate(command, meta);
 
@@ -462,56 +448,6 @@ fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
     };
 
     let rendered_params = interpolate(params, meta);
-<<<<<<< Updated upstream
-
-    // Validate the command before execution
-    let validated = match bash_executor::validate_command(&cmd) {
-        Ok(v) => v,
-        Err(error) => {
-            warn!(%cmd, %error, "Bash action command validation failed");
-            return;
-        }
-||||||| Stash base
-    let full_command = if rendered_params.is_empty() {
-        cmd.clone()
-    } else {
-        format!("{cmd} {rendered_params}")
-=======
-    let escaped_params = if rendered_params.is_empty() {
-        String::new()
-    } else {
-        rendered_params
-            .split_whitespace()
-            .map(bash_executor::shell_escape)
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
-
-    let full_command = match &validated {
-        ValidatedCommand::Direct(binary) => {
-            if escaped_params.is_empty() {
-                bash_executor::shell_escape(binary)
-            } else {
-                format!("{} {escaped_params}", bash_executor::shell_escape(binary))
-            }
-        }
-        ValidatedCommand::Interpreted { interpreter, script } => {
-            if escaped_params.is_empty() {
-                format!(
-                    "{} {}",
-                    bash_executor::shell_escape(interpreter),
-                    bash_executor::shell_escape(script)
-                )
-            } else {
-                format!(
-                    "{} {} {escaped_params}",
-                    bash_executor::shell_escape(interpreter),
-                    bash_executor::shell_escape(script)
-                )
-            }
-        }
->>>>>>> Stashed changes
-    };
 
     // Parse rendered_params using shell-words to correctly handle quoted arguments
     // and interpolated values containing spaces (e.g., `--message 'hello world'`).
@@ -1227,7 +1163,6 @@ mod tests {
 
         assert!(result.is_none());
     }
-<<<<<<< Updated upstream
 
     // =========================================================================
     // shell_words argv interpolation contract tests
@@ -1271,91 +1206,10 @@ mod tests {
         };
         assert!(args.is_empty());
     }
-||||||| Stash base
-=======
 
     // =========================================================================
     // Bash execution security tests
     // =========================================================================
-
-    #[tokio::test]
-    async fn bash_action_with_blocked_command_does_not_fail_pipeline() {
-        // A blocked command (rm) should be silently skipped, not crash the action pipeline.
-        let actions = vec![
-            HookAction::Bash {
-                command: "rm".to_string(),
-                params: "-rf /".to_string(),
-            },
-            HookAction::Report { handler: None },
-        ];
-
-        let messaging = crate::messaging::RuntimeMessagingSettings::default();
-
-        let result = execute_actions(
-            &actions,
-            None,
-            &meta(),
-            &GlobalSettings::default(),
-            &messaging,
-            false,
-            None,
-        )
-        .await;
-
-        // Pipeline completes successfully — blocked bash action is skipped
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn bash_action_v2_with_blocked_command_does_not_fail_pipeline() {
-        let config = claudine_config_with_tts(TtsValue::Boolean(false));
-        let messaging = RuntimeMessagingSettings::default();
-
-        let actions = vec![
-            HookAction::Bash {
-                command: "rm".to_string(),
-                params: String::new(),
-            },
-            HookAction::Report { handler: None },
-        ];
-
-        let result = execute_actions_v2(
-            &actions,
-            None,
-            &meta(),
-            &config,
-            &messaging,
-            false,
-            None,
-        )
-        .await;
-
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn bash_action_with_safe_command_succeeds() {
-        let config = claudine_config_with_tts(TtsValue::Boolean(false));
-        let messaging = RuntimeMessagingSettings::default();
-
-        let actions = vec![HookAction::Bash {
-            command: "echo".to_string(),
-            params: "safe output".to_string(),
-        }];
-
-        let result = execute_actions_v2(
-            &actions,
-            None,
-            &meta(),
-            &config,
-            &messaging,
-            false,
-            None,
-        )
-        .await;
-
-        assert!(result.is_ok());
-    }
 
     #[test]
     fn validate_command_blocks_rm() {
@@ -1371,7 +1225,6 @@ mod tests {
     fn shell_escape_neutralizes_injection() {
         let escaped = bash_executor::shell_escape("$(rm -rf /)");
         assert_eq!(escaped, "'$(rm -rf /)'");
-        // Single-quoted strings prevent shell expansion
     }
 
     #[test]
@@ -1385,5 +1238,4 @@ mod tests {
         let escaped = bash_executor::shell_escape("`rm -rf /`");
         assert_eq!(escaped, "'`rm -rf /`'");
     }
->>>>>>> Stashed changes
 }
