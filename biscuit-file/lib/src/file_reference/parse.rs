@@ -16,6 +16,11 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
     }
 
     let (recursive, remainder) = strip_recursive(raw);
+    if recursive && remainder.is_empty() {
+        return Err(FileReferenceError::InvalidSyntax(
+            "`%` prefix requires a path".to_string(),
+        ));
+    }
     let (kind, path_str) = detect_kind(remainder);
     let template = parse_template(path_str)?;
 
@@ -302,6 +307,15 @@ mod tests {
     fn explicit_dot_slash_is_relative() {
         let parsed = parse("./foo.md").unwrap();
         assert!(matches!(parsed.kind, ReferenceKind::Relative(_)));
+    }
+
+    #[test]
+    fn lone_recursive_prefix_rejected() {
+        let err = parse("%").unwrap_err();
+        assert!(
+            matches!(err, FileReferenceError::InvalidSyntax(_)),
+            "expected InvalidSyntax, got: {err}"
+        );
     }
 
     #[test]
