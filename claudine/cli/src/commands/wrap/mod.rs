@@ -4,6 +4,8 @@ pub(crate) mod profile;
 pub(crate) mod repo_home;
 pub(crate) mod system_prompt;
 
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
 use clap::Args;
 use claudine::composition::lifecycle::LifecycleSignal;
@@ -11,6 +13,7 @@ use claudine::events::{
     AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta, Provider,
 };
 use claudine::stream::parser::{EventMeta as StreamEventMeta, StreamEventSink};
+use claudine::stream::progress::{self, InFlightTool, LiveMetrics};
 use claudine::stream::stderr::{Verbosity, format_warning};
 use color_eyre::eyre::{Result, eyre};
 use inquire::Select;
@@ -22,6 +25,7 @@ use std::fs;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tracing::{Span, debug, info_span};
 
 use crate::log;
@@ -371,6 +375,7 @@ pub(crate) struct LiveStreamSink {
     summary_details: Arc<Mutex<StructuredSummaryDetails>>,
     context_extra: HashMap<String, serde_json::Value>,
     dispatch: StreamDispatchFn,
+    live_metrics: LiveMetrics,
 }
 
 impl LiveStreamSink {
@@ -446,7 +451,16 @@ impl LiveStreamSink {
             summary_details,
             context_extra: HashMap::new(),
             dispatch: Box::new(dispatch),
+            live_metrics: progress::new_live_metrics(),
         }
+    }
+
+    /// Clone the live metrics handle for sharing with the heartbeat thread.
+    ///
+    /// Must be called before the sink is moved into `create_parser` since the
+    /// sink is consumed on construction.
+    pub(crate) fn live_metrics(&self) -> LiveMetrics {
+        self.live_metrics.clone()
     }
 
     fn merge_state(&mut self, meta: &StreamEventMeta) {
@@ -491,19 +505,41 @@ impl LiveStreamSink {
         }
     }
 
-    fn emit_tool_progress_line(&self, meta: &StreamEventMeta) {
-        if self.verbosity != Verbosity::Silent
-            && let Some(line) = format_tool_progress_line(meta)
-        {
-            eprintln!("{line}");
+    fn record_tool_start(&self, meta: &StreamEventMeta) {
+        let id = tool_event_id(meta);
+        let name = string_from_extra(&meta.extra, &["tool_name", "name"]);
+        if let Ok(mut state) = self.live_metrics.lock() {
+            state.record_tool_start(id, name, std::time::Instant::now());
         }
     }
 
-    fn emit_tool_result_line(&self, meta: &StreamEventMeta) {
-        if self.verbosity != Verbosity::Silent
-            && let Some(line) = format_tool_result_line(meta)
-        {
-            eprintln!("{line}");
+    fn record_tool_end(&self, meta: &StreamEventMeta) -> Option<InFlightTool> {
+        let id = string_from_extra(&meta.extra, &["tool_id", "id"]);
+        let mut state = self.live_metrics.lock().ok()?;
+        state.record_tool_end(id.as_deref(), std::time::Instant::now())
+    }
+
+    fn emit_tool_progress_line(&self, meta: &StreamEventMeta) {
+        if self.verbosity == Verbosity::Silent {
+            return;
+        }
+        if let Some(desc) = progress::describe_tool_start(meta) {
+            let rendered = Status::new(desc)
+                .state(StatusState::ToolUse)
+                .render(&wrap_terminal());
+            eprintln!("{rendered}");
+        }
+    }
+
+    fn emit_tool_result_line(&self, meta: &StreamEventMeta, duration: Option<Duration>) {
+        if self.verbosity == Verbosity::Silent {
+            return;
+        }
+        if let Some(desc) = progress::describe_tool_end(meta, duration) {
+            let rendered = Status::new(desc)
+                .state(StatusState::ToolUse)
+                .render(&wrap_terminal());
+            eprintln!("{rendered}");
         }
     }
 
@@ -570,10 +606,12 @@ impl LiveStreamSink {
             self.emit_agent_session_id();
         }
         if event == AgenticEvent::BeforeTool {
+            self.record_tool_start(meta);
             self.emit_tool_progress_line(meta);
         }
         if event == AgenticEvent::AfterTool {
-            self.emit_tool_result_line(meta);
+            let duration = self.record_tool_end(meta).map(|t| t.started_at.elapsed());
+            self.emit_tool_result_line(meta, duration);
         }
         if event == AgenticEvent::TurnError
             && let Some(message) = dispatch_meta.error.as_deref()
@@ -672,75 +710,17 @@ fn value_to_string(value: &serde_json::Value) -> Option<String> {
         .or_else(|| serde_json::to_string(value).ok())
 }
 
-fn compact_value_for_log(value: &serde_json::Value, max_chars: usize) -> String {
-    let rendered = serde_json::to_string(value).unwrap_or_else(|_| value.to_string());
-    truncate_for_log(&rendered, max_chars)
+/// Resolve a stable id for a tool event.
+///
+/// Providers that assign ids (Claude, OpenCode) use them; providers without ids
+/// (some Gemini variants) fall back to the tool name so the live-metrics state
+/// can still pair start/end events.
+fn tool_event_id(meta: &StreamEventMeta) -> String {
+    string_from_extra(&meta.extra, &["tool_id", "id"])
+        .or_else(|| string_from_extra(&meta.extra, &["tool_name", "name"]))
+        .unwrap_or_else(|| "tool".to_string())
 }
 
-fn truncate_for_log(value: &str, max_chars: usize) -> String {
-    let count = value.chars().count();
-    if count <= max_chars {
-        return value.to_string();
-    }
-
-    let truncated: String = value.chars().take(max_chars.saturating_sub(3)).collect();
-    format!("{truncated}...")
-}
-
-fn format_tool_progress_line(meta: &StreamEventMeta) -> Option<String> {
-    let tool_name = string_from_extra(&meta.extra, &["tool_name", "name"]);
-    let tool_input = value_from_extra(
-        &meta.extra,
-        &["tool_input", "parameters", "input", "arguments"],
-    );
-
-    match (tool_name, tool_input) {
-        (Some(tool_name), Some(tool_input)) => Some(format!(
-            "tool: {tool_name} {}",
-            compact_value_for_log(&tool_input, 120)
-        )),
-        (Some(tool_name), None) => Some(format!("tool: {tool_name}")),
-        (None, Some(tool_input)) => {
-            Some(format!("tool: {}", compact_value_for_log(&tool_input, 120)))
-        }
-        (None, None) => None,
-    }
-}
-
-fn format_tool_result_line(meta: &StreamEventMeta) -> Option<String> {
-    let tool_name = string_from_extra(&meta.extra, &["tool_name", "name"]);
-    let tool_id = string_from_extra(&meta.extra, &["tool_id", "id"]);
-    let status = string_from_extra(&meta.extra, &["status"]);
-    let error = string_from_extra(&meta.extra, &["error_message", "message"]).or_else(|| {
-        value_from_extra(&meta.extra, &["error"]).and_then(|value| value_to_string(&value))
-    });
-    let tool_response = value_from_extra(
-        &meta.extra,
-        &["tool_response", "output", "result", "content"],
-    );
-
-    let mut parts = Vec::new();
-    if let Some(tool_name) = tool_name {
-        parts.push(tool_name);
-    }
-    if let Some(tool_id) = tool_id {
-        parts.push(format!("id={tool_id}"));
-    }
-    if let Some(status) = status {
-        parts.push(format!("status={status}"));
-    }
-    if let Some(error) = error {
-        parts.push(format!("error={}", truncate_for_log(&error, 80)));
-    }
-    if let Some(tool_response) = tool_response {
-        parts.push(format!(
-            "result={}",
-            compact_value_for_log(&tool_response, 120)
-        ));
-    }
-
-    (!parts.is_empty()).then(|| format!("tool result: {}", parts.join(" ")))
-}
 
 pub(crate) fn structured_verbosity(silent: bool, quiet: bool) -> Verbosity {
     if silent {
@@ -1654,18 +1634,16 @@ fn run_provider_wrapper_inner(
             let parser_config = claudine::stream::ParserConfig {
                 model: args.model.clone(),
             };
-            let parser = claudine::stream::create_parser(
+            let sink = LiveStreamSink::new(
                 provider,
-                LiveStreamSink::new(
-                    provider,
-                    env_context.clone(),
-                    child_cwd,
-                    stream_verbosity,
-                    summary_details.clone(),
-                )
-                .with_context_extra(dispatch_context.clone()),
-                parser_config,
-            );
+                env_context.clone(),
+                child_cwd,
+                stream_verbosity,
+                summary_details.clone(),
+            )
+            .with_context_extra(dispatch_context.clone());
+            let live_metrics = sink.live_metrics();
+            let parser = claudine::stream::create_parser(provider, sink, parser_config);
             let mut _spawned = false;
             let stream_result = exec::run_child_stream(
                 binary_path.as_path(),
@@ -1679,6 +1657,7 @@ fn run_provider_wrapper_inner(
                 stdin_seed.as_deref(),
                 parser,
                 &mut _spawned,
+                Some(live_metrics),
             )?;
             let mut summary = stream_result.data;
             if let Some(codex_output) = structured_codex_output.as_ref() {
@@ -2077,18 +2056,16 @@ fn execute_harness_attempt(
     let (exit_code, termination, session_id, final_response, stderr_text) = if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig::default();
-        let parser = claudine::stream::create_parser(
+        let sink = LiveStreamSink::new(
             provider,
-            LiveStreamSink::new(
-                provider,
-                env_context.clone(),
-                child_cwd,
-                stream_verbosity,
-                summary_details.clone(),
-            )
-            .with_context_extra(dispatch_context.clone()),
-            parser_config,
-        );
+            env_context.clone(),
+            child_cwd,
+            stream_verbosity,
+            summary_details.clone(),
+        )
+        .with_context_extra(dispatch_context.clone());
+        let live_metrics = sink.live_metrics();
+        let parser = claudine::stream::create_parser(provider, sink, parser_config);
         let stream_result = exec::run_child_stream(
             binary_path,
             &launch.args,
@@ -2101,6 +2078,7 @@ fn execute_harness_attempt(
             launch.stdin_seed.as_deref(),
             parser,
             child_spawned,
+            Some(live_metrics),
         )?;
         let termination = stream_result.termination;
         let mut summary = stream_result.data;
@@ -4119,44 +4097,6 @@ mod tests {
 
         assert_eq!(metas[5].event, AgenticEvent::TurnComplete);
         assert_eq!(metas[5].session_id.as_deref(), Some("thread-1"));
-    }
-
-    #[test]
-    fn tool_progress_line_includes_compact_parameters() {
-        let mut meta = StreamEventMeta::default();
-        meta.extra.insert(
-            "tool_name".into(),
-            serde_json::Value::String("shell".into()),
-        );
-        meta.extra.insert(
-            "tool_input".into(),
-            serde_json::json!({"cmd": "git status"}),
-        );
-
-        assert_eq!(
-            format_tool_progress_line(&meta).as_deref(),
-            Some(r#"tool: shell {"cmd":"git status"}"#)
-        );
-    }
-
-    #[test]
-    fn tool_result_line_surfaces_status_and_result() {
-        let mut meta = StreamEventMeta::default();
-        meta.extra.insert(
-            "tool_name".into(),
-            serde_json::Value::String("search".into()),
-        );
-        meta.extra
-            .insert("tool_id".into(), serde_json::Value::String("tool-1".into()));
-        meta.extra
-            .insert("status".into(), serde_json::Value::String("success".into()));
-        meta.extra
-            .insert("tool_response".into(), serde_json::json!({"hits": 3}));
-
-        assert_eq!(
-            format_tool_result_line(&meta).as_deref(),
-            Some(r#"tool result: search id=tool-1 status=success result={"hits":3}"#)
-        );
     }
 
     #[test]

@@ -8,8 +8,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
 use claudine::stream::parser::{StreamChunk, StreamParseError, StreamParser};
+use claudine::stream::progress::{self, LiveMetrics};
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 use tracing::{Span, info_span};
@@ -812,6 +815,7 @@ pub(crate) fn run_child_stream(
     stdin_seed: Option<&str>,
     parser: Box<dyn StreamParser>,
     child_spawned: &mut bool,
+    live_metrics: Option<LiveMetrics>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
@@ -848,7 +852,7 @@ pub(crate) fn run_child_stream(
     let mut child = command.spawn()?;
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
-    let heartbeat = spawn_progress_heartbeat(show_progress_heartbeat, started_at);
+    let heartbeat = spawn_progress_heartbeat(show_progress_heartbeat, started_at, live_metrics);
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
@@ -991,6 +995,7 @@ pub(crate) fn run_child_stream(
 fn spawn_progress_heartbeat(
     enabled: bool,
     started_at: Instant,
+    live_metrics: Option<LiveMetrics>,
 ) -> Option<(Arc<AtomicBool>, thread::JoinHandle<()>)> {
     if !enabled {
         return None;
@@ -1001,15 +1006,12 @@ fn spawn_progress_heartbeat(
     let handle = thread::spawn(move || {
         let interval = Duration::from_secs(30);
         let mut next_tick = started_at + interval;
+        let term = crate::log::terminal();
 
         while !done_flag.load(Ordering::Relaxed) {
             let now = Instant::now();
             if now >= next_tick {
-                let elapsed_ms = started_at.elapsed().as_millis() as u64;
-                eprintln!(
-                    "status: still running ({} elapsed)",
-                    claudine::stream::stderr::format_duration(elapsed_ms)
-                );
+                emit_progress_heartbeat(started_at, live_metrics.as_ref(), interval, &term);
                 next_tick += interval;
                 continue;
             }
@@ -1022,6 +1024,36 @@ fn spawn_progress_heartbeat(
     });
 
     Some((done, handle))
+}
+
+fn emit_progress_heartbeat(
+    started_at: Instant,
+    live_metrics: Option<&LiveMetrics>,
+    quiet_window: Duration,
+    term: &Terminal,
+) {
+    let elapsed = started_at.elapsed();
+    let now = Instant::now();
+
+    let description = match live_metrics {
+        Some(metrics) => {
+            let Ok(state) = metrics.lock() else {
+                return;
+            };
+            progress::describe_heartbeat(&state, elapsed, now, quiet_window)
+        }
+        None => progress::describe_heartbeat(
+            &claudine::stream::progress::LiveMetricsState::default(),
+            elapsed,
+            now,
+            quiet_window,
+        ),
+    };
+
+    if let Some(desc) = description {
+        let rendered = Status::new(desc).state(StatusState::Info).render(term);
+        eprintln!("{rendered}");
+    }
 }
 
 fn stop_progress_heartbeat(heartbeat: Option<(Arc<AtomicBool>, thread::JoinHandle<()>)>) {
@@ -1045,7 +1077,9 @@ pub(crate) fn run_child_stream_capture(
     stderr_noise_prefixes: &[&str],
     stdin_seed: Option<&str>,
     parser: Box<dyn StreamParser>,
+    live_metrics: Option<LiveMetrics>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
+    let _ = live_metrics; // capture variant does not currently emit heartbeat
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
 
@@ -1241,6 +1275,7 @@ printf '%s\n' '{"type":"result","duration_ms":25}'
             &[],
             None,
             parser,
+            None,
         )
         .unwrap();
         let summary = result.data;
@@ -1290,6 +1325,7 @@ printf '%s\n' '{"type":"step_finish","part":{"reason":"stop","cost":0.02,"tokens
             None,
             parser,
             &mut spawned,
+            None,
         )
         .unwrap();
         let summary = result.data;
@@ -1415,6 +1451,7 @@ cat >/dev/null
             None,
             parser,
             &mut spawned,
+            None,
         )
         .unwrap();
 
