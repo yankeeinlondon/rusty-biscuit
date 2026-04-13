@@ -1,4 +1,26 @@
+TODAY := `date +%F`
 
+
+# Emit an OSC8 hyperlink: `$(just _link "text" "https://example.com")`
+# Uses %b for display so embedded `\033[..m` SGR codes are interpreted.
+# Uses BEL (\a) as the OSC string terminator instead of ESC+backslash so the
+# captured output can be safely interpolated into later `echo -e` calls —
+# a trailing backslash would otherwise merge with a following `\033...` and
+# be consumed by echo's backslash interpretation.
+_link display url:
+    @printf '\033]8;;%s\a%b\033]8;;\a' '{{url}}' '{{display}}'
+
+# Resolve a path to an absolute path; works for non-existent paths.
+# `$(just _abs_path ./foo)`
+_abs_path rel_path:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    path="{{rel_path}}"
+    if [[ "${path}" = /* ]]; then
+        printf '%s\n' "${path}"
+    else
+        printf '%s/%s\n' "$(pwd)" "${path#./}"
+    fi
 
 
 _title_case str:
@@ -105,3 +127,22 @@ implement-review-suggestions feat="" iteration="1":
     echo
     echo "🎉 the {{ITALIC}}implementation{{RESET}} of the review ({{DIM}}{{BLUE}}${review}{{RESET}}) for {{BOLD}}{{YELLOW}}${feature}{{RESET}} has completed"
     echo
+
+
+# creates a new feature and then prompts for next steps
+feature feat:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    file="features/_unscheduled/{{feat}}/spec.md"
+    file_link="$(just _link "{{BLUE}}{{feat}}{{RESET}}" "$(just _abs_path "{{feat}}")")"
+    if [[ -f "${file}" ]]; then
+        echo -e "The feature {{BLUE}}${file_link}{{RESET}} already exists inside the {{ITALIC}}_unscheduled{{RESET}} folder"
+        exit 0
+    fi
+    if md edit "${file}"; then
+        echo -e "The spec file has been created at {{BLUE}}${file}{{RESET}}"
+    else
+        rm -f "${file}"
+        echo -e "the feature had no content so was removed"
+    fi
+
