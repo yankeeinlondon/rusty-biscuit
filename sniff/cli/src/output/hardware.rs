@@ -338,13 +338,8 @@ fn style_audio_kind(kind: sniff::hardware::AudioDeviceKind) -> String {
 /// For each device, compute the `<dim>…</dim>` suffix (if any) that should be
 /// appended to its name so that name collisions are visually disambiguated.
 ///
-/// Non-colliding devices get `""`.
-///
-/// Colliding devices (two or more with the same `name`) get a suffix derived
-/// from the longest common prefix of their `uid`s. If every device in a
-/// collision group would produce the same suffix (e.g. identical uids, or
-/// any group member ends up with an empty tail), we fall back to 1-based
-/// `:1`, `:2`, … ordered by lexicographic uid.
+/// Non-colliding devices get `""`. Colliding devices get `:1`, `:2`, …
+/// ordered by lexicographic uid.
 fn build_name_suffixes(devices: &[sniff::hardware::AudioDeviceInfo]) -> Vec<String> {
     use std::collections::HashMap;
 
@@ -360,50 +355,14 @@ fn build_name_suffixes(devices: &[sniff::hardware::AudioDeviceInfo]) -> Vec<Stri
             continue;
         }
 
-        let uids: Vec<&str> = indices.iter().map(|&i| devices[i].uid.as_str()).collect();
-        let prefix_len = longest_common_prefix_len(&uids);
-        let tails: Vec<&str> = uids.iter().map(|u| &u[prefix_len..]).collect();
-
-        let mut unique_tails = tails.clone();
-        unique_tails.sort();
-        unique_tails.dedup();
-
-        if unique_tails.len() == indices.len() && tails.iter().all(|t| !t.is_empty()) {
-            for (i, tail) in indices.iter().zip(tails.iter()) {
-                suffixes[*i] = format!("<dim>{}</dim>", tail);
-            }
-        } else {
-            let mut ordered: Vec<usize> = indices.clone();
-            ordered.sort_by(|a, b| devices[*a].uid.cmp(&devices[*b].uid));
-            for (rank, idx) in ordered.iter().enumerate() {
-                suffixes[*idx] = format!("<dim>:{}</dim>", rank + 1);
-            }
+        let mut ordered: Vec<usize> = indices.clone();
+        ordered.sort_by(|a, b| devices[*a].uid.cmp(&devices[*b].uid));
+        for (rank, idx) in ordered.iter().enumerate() {
+            suffixes[*idx] = format!("<dim>:{}</dim>", rank + 1);
         }
     }
 
     suffixes
-}
-
-/// Length in bytes of the longest common prefix of every string in `values`,
-/// rounded down to the nearest char boundary in the first string.
-fn longest_common_prefix_len(values: &[&str]) -> usize {
-    if values.is_empty() {
-        return 0;
-    }
-    let first = values[0].as_bytes();
-    let mut len = first.len();
-    for v in &values[1..] {
-        let b = v.as_bytes();
-        len = len.min(b.len());
-        len = (0..len).take_while(|&i| b[i] == first[i]).count();
-        if len == 0 {
-            return 0;
-        }
-    }
-    while len > 0 && !values[0].is_char_boundary(len) {
-        len -= 1;
-    }
-    len
 }
 
 /// Which group ("Input" or "Output") a device line is being rendered under.
@@ -542,6 +501,13 @@ fn render_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbos
     };
     use sniff::hardware::AudioDirection;
 
+    // Short-circuit when no devices were detected: there is nothing worth
+    // styling, and skipping Terminal::new() avoids an unnecessary terminal
+    // capability probe on platforms (e.g. WSL 1) where probes are costly.
+    if devices.is_empty() {
+        return "Audio Devices: none detected\n".to_string();
+    }
+
     let terminal = Terminal::new();
 
     let suffixes = build_name_suffixes(devices);
@@ -585,7 +551,7 @@ fn render_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbos
 
     let mut doc = Compose::default();
     doc.add_prose(Prose::new("<b><uu>Audio Devices</uu></b>"));
-    doc.add_text("\n");
+    doc.add_text("\n\n");
     doc.add_unordered_list(outer);
 
     let mut out = doc.display(&terminal).to_string();
@@ -730,42 +696,33 @@ mod audio_suffix_tests {
     }
 
     #[test]
-    fn collision_with_clean_trailing_suffix() {
+    fn collision_uses_numeric_suffix_ordered_by_uid() {
         let devices = vec![
-            dev("LG UltraFine Display Audio", "LGDisplayAudio:1"),
-            dev("LG UltraFine Display Audio", "LGDisplayAudio:2"),
+            dev("LG UltraFine Display Audio", "LGDisplayAudio:b"),
+            dev("LG UltraFine Display Audio", "LGDisplayAudio:a"),
         ];
         let suffixes = build_name_suffixes(&devices);
+        // Sorted by UID: "LGDisplayAudio:a" → :1, "LGDisplayAudio:b" → :2
         assert_eq!(
             suffixes,
-            vec!["<dim>1</dim>".to_string(), "<dim>2</dim>".to_string()]
+            vec!["<dim>:2</dim>".to_string(), "<dim>:1</dim>".to_string()]
         );
     }
 
     #[test]
-    fn collision_with_identical_uids_falls_back_to_indexed() {
-        let devices = vec![dev("Clone", "same-uid"), dev("Clone", "same-uid")];
-        let suffixes = build_name_suffixes(&devices);
-        assert_eq!(
-            suffixes,
-            vec!["<dim>:1</dim>".to_string(), "<dim>:2</dim>".to_string()]
-        );
-    }
-
-    #[test]
-    fn collision_three_way_with_shared_prefix() {
+    fn collision_three_way() {
         let devices = vec![
-            dev("Clone", "prefix_alpha"),
-            dev("Clone", "prefix_beta"),
-            dev("Clone", "prefix_gamma"),
+            dev("Clone", "uid-c"),
+            dev("Clone", "uid-a"),
+            dev("Clone", "uid-b"),
         ];
         let suffixes = build_name_suffixes(&devices);
         assert_eq!(
             suffixes,
             vec![
-                "<dim>alpha</dim>".to_string(),
-                "<dim>beta</dim>".to_string(),
-                "<dim>gamma</dim>".to_string(),
+                "<dim>:3</dim>".to_string(),
+                "<dim>:1</dim>".to_string(),
+                "<dim>:2</dim>".to_string(),
             ]
         );
     }
@@ -773,17 +730,17 @@ mod audio_suffix_tests {
     #[test]
     fn collision_leaves_non_colliding_devices_empty() {
         let devices = vec![
-            dev("Clone", "prefix_a"),
+            dev("Clone", "uid-a"),
             dev("Solo", "unrelated"),
-            dev("Clone", "prefix_b"),
+            dev("Clone", "uid-b"),
         ];
         let suffixes = build_name_suffixes(&devices);
         assert_eq!(
             suffixes,
             vec![
-                "<dim>a</dim>".to_string(),
+                "<dim>:1</dim>".to_string(),
                 "".to_string(),
-                "<dim>b</dim>".to_string(),
+                "<dim>:2</dim>".to_string(),
             ]
         );
     }
@@ -937,11 +894,20 @@ mod audio_section_tests {
     }
 
     #[test]
-    fn empty_device_list_still_renders_both_groups_with_none() {
+    fn empty_device_list_emits_concise_message() {
+        // When the platform reports no audio devices at all (e.g. WSL 1, headless
+        // Linux without ALSA), skip the Input/Output grouping and return a single
+        // line. This avoids invoking `Terminal::new()`, whose terminal-capability
+        // probes hang on WSL 1.
         let out = render_audio_devices_section(&[], 0);
-        assert!(out.contains("Input"));
-        assert!(out.contains("Output"));
-        assert!(out.contains("none"));
+        assert!(out.contains("Audio Devices"), "title missing:\n{}", out);
+        assert!(
+            out.contains("none detected"),
+            "'none detected' message missing:\n{}",
+            out
+        );
+        assert!(!out.contains("Input"));
+        assert!(!out.contains("Output"));
     }
 
     #[test]
