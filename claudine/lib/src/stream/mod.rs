@@ -5,6 +5,7 @@ pub mod gemini;
 pub mod kimi;
 pub mod opencode;
 pub mod parser;
+pub mod progress;
 pub mod protocol;
 pub mod qwen;
 pub mod reporting;
