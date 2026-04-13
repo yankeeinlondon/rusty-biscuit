@@ -2519,9 +2519,11 @@ fn test_repo_source_code_changes_json_exact_fields() {
     // At least one commit should have a .rs file
     let has_rs_file = commits.iter().any(|c| {
         c["files"].as_array().is_some_and(|files| {
-            files
-                .iter()
-                .any(|f| f.as_str().is_some_and(|s| s.ends_with(".rs")))
+            files.iter().any(|f| {
+                f["path"]
+                    .as_str()
+                    .is_some_and(|s| s.ends_with(".rs"))
+            })
         })
     });
     assert!(has_rs_file, "Source code changes should include .rs files");
@@ -2552,9 +2554,11 @@ fn test_repo_documentation_changes_json_exact_fields() {
     // At least one commit should have a .md file
     let has_md_file = commits.iter().any(|c| {
         c["files"].as_array().is_some_and(|files| {
-            files
-                .iter()
-                .any(|f| f.as_str().is_some_and(|s| s.ends_with(".md")))
+            files.iter().any(|f| {
+                f["path"]
+                    .as_str()
+                    .is_some_and(|s| s.ends_with(".md"))
+            })
         })
     });
     assert!(
@@ -2583,19 +2587,19 @@ fn test_repo_recent_commits_plain_output_exact_structure() {
 
     // Plain output should contain markdown structure
     assert!(
-        stdout.contains("**Commit:**"),
-        "Plain output should have commit markers"
+        stdout.contains("[") && stdout.contains("] at "),
+        "Plain output should have `[hash] at TIME` commit markers, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("**Files:**"),
-        "Plain output should have files section"
+        stdout.contains("**Files Impacted:**"),
+        "Plain output should have files section, got:\n{stdout}"
     );
     assert!(
-        stdout.contains("**Description:**"),
-        "Plain output should have description"
+        stdout.contains("add file"),
+        "Plain output should include the commit description, got:\n{stdout}"
     );
     assert!(
         stdout.contains("src/main.rs"),
-        "Plain output should list the committed file"
+        "Plain output should list the committed file, got:\n{stdout}"
     );
 }
