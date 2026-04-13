@@ -334,6 +334,21 @@ fn format_sample_rate_khz(rate_hz: f64) -> String {
     }
 }
 
+/// Return the styled markup for an [`AudioDeviceKind`] as used in the
+/// parenthesized device descriptor.
+fn style_audio_kind(kind: sniff::hardware::AudioDeviceKind) -> String {
+    use sniff::hardware::AudioDeviceKind as K;
+    match kind {
+        K::BuiltIn => "<dim>Built-in</dim>".to_string(),
+        K::Usb => "<indigo-500>USB</indigo-500>".to_string(),
+        K::Bluetooth => "<blue>Bluetooth</blue>".to_string(),
+        K::Thunderbolt => "<yellow>Thunderbolt</yellow>".to_string(),
+        K::Hdmi => "<yellow>HDMI</yellow>".to_string(),
+        K::Virtual => "<dim><i>Virtual</i></dim>".to_string(),
+        K::Unknown => "Unknown".to_string(),
+    }
+}
+
 /// Render a list of audio devices with verbosity levels.
 ///
 /// - Default: name, kind, direction, default markers
@@ -442,5 +457,46 @@ mod audio_format_tests {
     #[test]
     fn khz_zero_returns_empty() {
         assert_eq!(format_sample_rate_khz(0.0), "0k");
+    }
+}
+
+#[cfg(test)]
+mod audio_kind_tests {
+    use super::style_audio_kind;
+    use sniff::hardware::AudioDeviceKind;
+
+    #[test]
+    fn built_in() {
+        assert_eq!(style_audio_kind(AudioDeviceKind::BuiltIn), "<dim>Built-in</dim>");
+    }
+
+    #[test]
+    fn usb() {
+        assert_eq!(style_audio_kind(AudioDeviceKind::Usb), "<indigo-500>USB</indigo-500>");
+    }
+
+    #[test]
+    fn bluetooth() {
+        assert_eq!(style_audio_kind(AudioDeviceKind::Bluetooth), "<blue>Bluetooth</blue>");
+    }
+
+    #[test]
+    fn thunderbolt() {
+        assert_eq!(style_audio_kind(AudioDeviceKind::Thunderbolt), "<yellow>Thunderbolt</yellow>");
+    }
+
+    #[test]
+    fn hdmi() {
+        assert_eq!(style_audio_kind(AudioDeviceKind::Hdmi), "<yellow>HDMI</yellow>");
+    }
+
+    #[test]
+    fn virtual_kind() {
+        assert_eq!(style_audio_kind(AudioDeviceKind::Virtual), "<dim><i>Virtual</i></dim>");
+    }
+
+    #[test]
+    fn unknown_is_plain() {
+        assert_eq!(style_audio_kind(AudioDeviceKind::Unknown), "Unknown");
     }
 }
