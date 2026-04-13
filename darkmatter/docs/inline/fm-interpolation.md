@@ -10,6 +10,7 @@ blast_radius:
   - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
   - darkmatter/lib/src/markdown/compose/interpolation/lexer.rs
   - darkmatter/lib/src/markdown/compose/context/capture.rs
+  - darkmatter/lib/src/markdown/compose/context/mod.rs
   - darkmatter/cli/src/commands.rs
 ---
 
@@ -94,7 +95,7 @@ Frontmatter interpolation resolves against three sources:
 | Prefix | Source | Example |
 |---|---|---|
 | *(none)* | Non-templated frontmatter seed values | `{{ base }}` |
-| `ctx.` | Runtime context | `{{ ctx.today }}` |
+| `ctx.` | Runtime context (demand-driven) | `{{ ctx.today }}` |
 | `env.` | Environment variables | `{{ env.HOME }}` |
 
 Dotted access into nested seed values is supported:
@@ -107,6 +108,23 @@ meta:
 path: "{{meta.owner.name}}"
 ---
 ```
+
+### Context Variable Groups
+
+The `ctx.*` namespace provides 70+ runtime variables organized into demand-driven groups. Only groups whose variables are actually referenced in the document are captured, avoiding unnecessary work (e.g., git queries, subprocess calls).
+
+| Group | Variables (examples) |
+|---|---|
+| DateTime | `today`, `yesterday`, `tomorrow`, `now`, `now_utc`, `year`, `month`, `month_name`, `day`, `day_abbr`, `time`, `timezone`, `season`, `timestamp` |
+| Repo | `repo`, `repo_root`, `is_monorepo`, `packages`, `current_package`, `current_package_area` |
+| FileChanges | `dirty_files`, `staged_files`, `untracked_files`, `dirty_packages`, `staged_packages` |
+| Languages | `programming_language`, `programming_languages_in_repo`, `package_manager` |
+| Documents | `docs_readme`, `docs_blast_radius`, `docs_drift`, `docs_skill` |
+| Os | `os`, `os_distro`, `os_version`, `os_package_manager` |
+| Hardware | `memory_total`, `memory_used`, `memory_avail`, `cpu_cores`, `cpu_arch` |
+| Gpu | `gpu` |
+
+Each group also provides `_list` variants (markdown bullet list) alongside CSV variants where applicable (e.g., `dirty_files` vs `dirty_files_list`). DateTime variables have `_utc` counterparts.
 
 ## Supported Value Shapes
 
@@ -247,4 +265,5 @@ This document may need review when any of these files change:
 - `darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs`
 - `darkmatter/lib/src/markdown/compose/interpolation/lexer.rs`
 - `darkmatter/lib/src/markdown/compose/context/capture.rs`
+- `darkmatter/lib/src/markdown/compose/context/mod.rs`
 - `darkmatter/cli/src/commands.rs`

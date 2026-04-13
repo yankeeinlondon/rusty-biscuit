@@ -5,9 +5,11 @@
 use crate::detection::get_providers_for_strategy;
 use crate::errors::{AllProvidersFailed, TtsError};
 use crate::providers::cloud::ElevenLabsProvider;
-use crate::providers::host::{
-    ESpeakProvider, EchogardenProvider, GttsProvider, KokoroTtsProvider, SapiProvider, SayProvider,
-};
+#[cfg(target_os = "windows")]
+use crate::providers::host::SapiProvider;
+#[cfg(target_os = "macos")]
+use crate::providers::host::SayProvider;
+use crate::providers::host::{ESpeakProvider, EchogardenProvider, GttsProvider, KokoroTtsProvider};
 use crate::traits::TtsExecutor;
 use crate::types::{
     AudioFormat, CloudTtsProvider, Gender, HostTtsProvider, Language, SpeakResult, TtsConfig,
@@ -323,6 +325,7 @@ impl Speak {
     /// Execute TTS with a host provider.
     async fn execute_host_provider(&self, provider: HostTtsProvider) -> Result<(), TtsError> {
         match provider {
+            #[cfg(target_os = "macos")]
             HostTtsProvider::Say => {
                 let executor = SayProvider;
                 executor.speak(&self.text, &self.config).await
@@ -343,6 +346,7 @@ impl Speak {
                 let executor = KokoroTtsProvider::new();
                 executor.speak(&self.text, &self.config).await
             }
+            #[cfg(target_os = "windows")]
             HostTtsProvider::Sapi => {
                 let executor = SapiProvider::new();
                 executor.speak(&self.text, &self.config).await
@@ -374,6 +378,7 @@ impl Speak {
         provider: HostTtsProvider,
     ) -> Result<SpeakResult, TtsError> {
         match provider {
+            #[cfg(target_os = "macos")]
             HostTtsProvider::Say => {
                 let executor = SayProvider;
                 executor.speak_with_result(&self.text, &self.config).await
@@ -394,6 +399,7 @@ impl Speak {
                 let executor = KokoroTtsProvider::new();
                 executor.speak_with_result(&self.text, &self.config).await
             }
+            #[cfg(target_os = "windows")]
             HostTtsProvider::Sapi => {
                 let executor = SapiProvider::new();
                 executor.speak_with_result(&self.text, &self.config).await

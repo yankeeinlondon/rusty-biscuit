@@ -253,7 +253,9 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<InlineCssBlock>> {
-        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::InlineCss))
+        Ok(self
+            .composed_references(options)?
+            .filter_convert(ReferenceKind::InlineCss))
     }
 
     /// Returns CSS `@import` references across the composed document graph.
@@ -261,7 +263,9 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<ImportReference>> {
-        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::CssImport))
+        Ok(self
+            .composed_references(options)?
+            .filter_convert(ReferenceKind::CssImport))
     }
 
     /// Returns inline script blocks across the composed document graph.
@@ -269,7 +273,9 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<InlineScriptBlock>> {
-        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::InlineScript))
+        Ok(self
+            .composed_references(options)?
+            .filter_convert(ReferenceKind::InlineScript))
     }
 
     /// Returns `<script src="...">` import references across the composed document graph.
@@ -277,7 +283,9 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<ImportReference>> {
-        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::ScriptImport))
+        Ok(self
+            .composed_references(options)?
+            .filter_convert(ReferenceKind::ScriptImport))
     }
 
     /// Returns font import references across the composed document graph.
@@ -285,7 +293,9 @@ impl Markdown {
         &self,
         options: ReferenceGraphOptions,
     ) -> MarkdownResult<Vec<ImportReference>> {
-        Ok(self.composed_references(options)?.filter_convert(ReferenceKind::FontImport))
+        Ok(self
+            .composed_references(options)?
+            .filter_convert(ReferenceKind::FontImport))
     }
 
     // ── Phase 2: Extended extraction (local, single-document) ──────

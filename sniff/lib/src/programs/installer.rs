@@ -31,7 +31,7 @@ use strum::IntoEnumIterator;
 
 use crate::error::SniffInstallationError;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
-use crate::programs::pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
+use crate::programs::host_capability::HostCapabilities;
 use crate::programs::schema::ProgramMetadata;
 use crate::programs::types::InstallationMethod;
 
@@ -53,6 +53,12 @@ pub struct InstallOptions {
     pub skip_confirm: bool,
     /// Timeout in seconds for the installation command.
     pub timeout_secs: u64,
+    /// Whether the caller has explicitly approved executing a RemoteBash method.
+    ///
+    /// Defaults to `false`. The plan executor returns
+    /// `SniffInstallationError::RemoteBashConsentRequired` if the selected
+    /// option is `RemoteBash` and this flag is `false`.
+    pub approve_remote_bash: bool,
 }
 
 impl Default for InstallOptions {
@@ -61,6 +67,7 @@ impl Default for InstallOptions {
             dry_run: false,
             skip_confirm: false,
             timeout_secs: DEFAULT_TIMEOUT_SECS,
+            approve_remote_bash: false,
         }
     }
 }
@@ -89,6 +96,12 @@ impl InstallOptions {
     /// Sets the timeout for the installation command.
     pub fn with_timeout(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
+        self
+    }
+
+    /// Sets whether RemoteBash execution is pre-approved.
+    pub fn with_approve_remote_bash(mut self, approve: bool) -> Self {
+        self.approve_remote_bash = approve;
         self
     }
 }
@@ -130,42 +143,37 @@ impl InstallResult {
     }
 }
 
-pub(crate) fn method_available(
-    method: &InstallationMethod,
-    os_pkg_mgrs: &InstalledOsPackageManagers,
-    lang_pkg_mgrs: &InstalledLanguagePackageManagers,
-) -> bool {
+pub(crate) fn method_available(method: &InstallationMethod, host: &HostCapabilities) -> bool {
     if method.is_remote_bash() {
-        return false;
+        return host.has_bash;
     }
 
     let binary = method.manager_binary();
 
     if method.is_os_package_manager() {
-        OsPackageManager::iter().any(|mgr| {
-            mgr.binary_name() == binary && os_pkg_mgrs.is_installed(mgr)
-        })
+        OsPackageManager::iter()
+            .any(|mgr| mgr.binary_name() == binary && host.os_pkg_mgrs.is_installed(mgr))
     } else {
-        LanguagePackageManager::iter().any(|mgr| {
-            mgr.binary_name() == binary && lang_pkg_mgrs.is_installed(mgr)
-        })
+        LanguagePackageManager::iter()
+            .any(|mgr| mgr.binary_name() == binary && host.lang_pkg_mgrs.is_installed(mgr))
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn select_best_method<'a>(
     methods: &'a [InstallationMethod],
-    os_pkg_mgrs: &InstalledOsPackageManagers,
-    lang_pkg_mgrs: &InstalledLanguagePackageManagers,
+    host: &HostCapabilities,
 ) -> Option<&'a InstallationMethod> {
-    if let Some(method) = methods.iter().find(|method| {
-        method.is_os_package_manager() && method_available(method, os_pkg_mgrs, lang_pkg_mgrs)
-    }) {
+    if let Some(method) = methods
+        .iter()
+        .find(|method| method.is_os_package_manager() && method_available(method, host))
+    {
         return Some(method);
     }
 
-    methods.iter().find(|method| {
-        !method.is_os_package_manager() && method_available(method, os_pkg_mgrs, lang_pkg_mgrs)
-    })
+    methods
+        .iter()
+        .find(|method| !method.is_os_package_manager() && method_available(method, host))
 }
 
 /// Validates that a package name is safe for shell execution.
@@ -193,10 +201,40 @@ fn validate_package_name(pkg: &str) -> Result<(), SniffInstallationError> {
     Ok(())
 }
 
+/// Validates a remote-bash URL and returns it unchanged on success.
+///
+/// Rejects URLs that are not `https://`, contain single quotes, backslashes,
+/// or control characters. This keeps the URL safe to interpolate into a
+/// single-quoted `sh -c` string without shell-escape risk.
+fn validate_remote_bash_url(url: &str) -> Result<(), SniffInstallationError> {
+    if !url.starts_with("https://") {
+        return Err(SniffInstallationError::InstallationError {
+            pkg: url.to_string(),
+            cmd: "remote-bash URL must use https://".to_string(),
+        });
+    }
+    if url.contains('\'') || url.contains('\\') || url.chars().any(|c| c.is_control()) {
+        return Err(SniffInstallationError::InstallationError {
+            pkg: url.to_string(),
+            cmd: "remote-bash URL contains forbidden characters".to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Builds the install command for a package manager method.
 fn build_install_command(
     method: &InstallationMethod,
 ) -> Result<Vec<String>, SniffInstallationError> {
+    if let InstallationMethod::RemoteBash(url) = method {
+        validate_remote_bash_url(url)?;
+        // Single-quote the URL. Single quotes in POSIX sh are strictly literal,
+        // and we've already rejected URLs containing `'`, so the URL cannot
+        // break out of the quoted argument.
+        let shell_cmd = format!("curl -sSfL '{url}' | bash");
+        return Ok(vec!["sh".into(), "-c".into(), shell_cmd]);
+    }
+
     let pkg = method.package_name();
     validate_package_name(pkg)?;
 
@@ -312,13 +350,8 @@ fn build_install_command(
         InstallationMethod::Cpan(pkg) => vec!["cpan".into(), (*pkg).into()],
         InstallationMethod::Cpanm(pkg) => vec!["cpanm".into(), (*pkg).into()],
 
-        // Remote Bash - NOT SUPPORTED for security reasons
-        InstallationMethod::RemoteBash(url) => {
-            return Err(SniffInstallationError::InstallationError {
-                pkg: url.to_string(),
-                cmd: "Remote bash installation requires manual execution for security".to_string(),
-            });
-        }
+        // Remote Bash is handled before this match statement.
+        InstallationMethod::RemoteBash(_) => unreachable!("handled above"),
     };
 
     Ok(cmd)
@@ -604,20 +637,30 @@ pub fn get_versioned_install_command(
 mod tests {
     use super::*;
 
-    fn empty_os_pkg_mgrs() -> InstalledOsPackageManagers {
-        InstalledOsPackageManagers::default()
+    fn empty_host() -> HostCapabilities {
+        HostCapabilities::default()
     }
 
-    fn empty_lang_pkg_mgrs() -> InstalledLanguagePackageManagers {
-        InstalledLanguagePackageManagers::default()
+    fn host_with_cargo() -> HostCapabilities {
+        HostCapabilities {
+            lang_pkg_mgrs: serde_json::from_str(r#"{"cargo": true}"#).unwrap(),
+            ..HostCapabilities::default()
+        }
     }
 
-    fn os_pkg_mgrs_with_brew() -> InstalledOsPackageManagers {
-        serde_json::from_str(r#"{"brew": true}"#).unwrap()
+    fn host_with_brew_and_cargo() -> HostCapabilities {
+        HostCapabilities {
+            os_pkg_mgrs: serde_json::from_str(r#"{"brew": true}"#).unwrap(),
+            lang_pkg_mgrs: serde_json::from_str(r#"{"cargo": true}"#).unwrap(),
+            ..HostCapabilities::default()
+        }
     }
 
-    fn lang_pkg_mgrs_with_cargo() -> InstalledLanguagePackageManagers {
-        serde_json::from_str(r#"{"cargo": true}"#).unwrap()
+    fn host_with_bash() -> HostCapabilities {
+        HostCapabilities {
+            has_bash: true,
+            ..HostCapabilities::default()
+        }
     }
 
     #[test]
@@ -659,9 +702,47 @@ mod tests {
     }
 
     #[test]
-    fn test_build_install_command_remote_bash_rejected() {
+    fn test_build_install_command_remote_bash_returns_curl_bash_pipeline() {
         let method = InstallationMethod::RemoteBash("https://example.com/install.sh");
+        let cmd = build_install_command(&method).unwrap();
+        assert_eq!(
+            cmd,
+            vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "curl -sSfL 'https://example.com/install.sh' | bash".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_install_command_remote_bash_rejects_non_https() {
+        let method = InstallationMethod::RemoteBash("http://example.com/install.sh");
         assert!(build_install_command(&method).is_err());
+    }
+
+    #[test]
+    fn test_build_install_command_remote_bash_rejects_single_quote_in_url() {
+        let method = InstallationMethod::RemoteBash("https://example.com/install'.sh");
+        assert!(build_install_command(&method).is_err());
+    }
+
+    #[test]
+    fn test_build_install_command_remote_bash_rejects_backslash_in_url() {
+        let method = InstallationMethod::RemoteBash("https://example.com/install\\.sh");
+        assert!(build_install_command(&method).is_err());
+    }
+
+    #[test]
+    fn test_remote_bash_dry_run_returns_command_without_executing() {
+        let method = InstallationMethod::RemoteBash("https://sh.rustup.rs");
+        let result = execute_install(&method, &InstallOptions::dry_run()).unwrap();
+        assert!(!result.executed);
+        assert!(
+            result
+                .command
+                .contains("curl -sSfL 'https://sh.rustup.rs' | bash")
+        );
     }
 
     #[test]
@@ -703,11 +784,10 @@ mod tests {
     }
 
     #[test]
-    fn test_method_available_filters_remote_bash() {
-        let os_pkg_mgrs = empty_os_pkg_mgrs();
-        let lang_pkg_mgrs = empty_lang_pkg_mgrs();
+    fn test_method_available_remote_bash_requires_bash() {
         let method = InstallationMethod::RemoteBash("https://example.com/install.sh");
-        assert!(!method_available(&method, &os_pkg_mgrs, &lang_pkg_mgrs));
+        assert!(!method_available(&method, &empty_host()));
+        assert!(method_available(&method, &host_with_bash()));
     }
 
     #[test]
@@ -716,22 +796,20 @@ mod tests {
             InstallationMethod::Cargo("bat"),
             InstallationMethod::Brew("bat"),
         ];
-        let os_pkg_mgrs = os_pkg_mgrs_with_brew();
-        let lang_pkg_mgrs = lang_pkg_mgrs_with_cargo();
+        let host = host_with_brew_and_cargo();
 
-        let selected = select_best_method(&methods, &os_pkg_mgrs, &lang_pkg_mgrs)
-            .expect("Expected a method to be selected");
+        let selected =
+            select_best_method(&methods, &host).expect("Expected a method to be selected");
         assert!(matches!(selected, InstallationMethod::Brew(_)));
     }
 
     #[test]
     fn test_select_best_method_falls_back_to_language_manager() {
         let methods = [InstallationMethod::Cargo("bat")];
-        let os_pkg_mgrs = empty_os_pkg_mgrs();
-        let lang_pkg_mgrs = lang_pkg_mgrs_with_cargo();
+        let host = host_with_cargo();
 
-        let selected = select_best_method(&methods, &os_pkg_mgrs, &lang_pkg_mgrs)
-            .expect("Expected a method to be selected");
+        let selected =
+            select_best_method(&methods, &host).expect("Expected a method to be selected");
         assert!(matches!(selected, InstallationMethod::Cargo(_)));
     }
 
@@ -740,9 +818,18 @@ mod tests {
         let methods = [InstallationMethod::RemoteBash(
             "https://example.com/install.sh",
         )];
-        let os_pkg_mgrs = empty_os_pkg_mgrs();
-        let lang_pkg_mgrs = empty_lang_pkg_mgrs();
-        assert!(select_best_method(&methods, &os_pkg_mgrs, &lang_pkg_mgrs).is_none());
+        // No bash, no managers → nothing runnable.
+        assert!(select_best_method(&methods, &empty_host()).is_none());
+    }
+
+    #[test]
+    fn test_select_best_method_picks_remote_bash_when_bash_available() {
+        let methods = [InstallationMethod::RemoteBash(
+            "https://example.com/install.sh",
+        )];
+        let host = host_with_bash();
+        let selected = select_best_method(&methods, &host).expect("expected bash-backed choice");
+        assert!(matches!(selected, InstallationMethod::RemoteBash(_)));
     }
 
     #[test]
@@ -773,5 +860,17 @@ mod tests {
         let method = InstallationMethod::Brew("ripgrep");
         let cmd = get_install_command(&method).unwrap();
         assert!(cmd.contains("brew install ripgrep"));
+    }
+
+    #[test]
+    fn test_install_options_default_does_not_approve_remote_bash() {
+        let opts = InstallOptions::default();
+        assert!(!opts.approve_remote_bash);
+    }
+
+    #[test]
+    fn test_install_options_with_approve_remote_bash_sets_flag() {
+        let opts = InstallOptions::default().with_approve_remote_bash(true);
+        assert!(opts.approve_remote_bash);
     }
 }

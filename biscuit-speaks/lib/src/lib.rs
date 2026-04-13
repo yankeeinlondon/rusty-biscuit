@@ -52,7 +52,10 @@ pub use cache::{
     bust_host_capability_cache, populate_cache_for_all_providers, populate_cache_for_provider,
     read_from_cache, update_provider_in_cache,
 };
-pub use detection::{get_available_providers, get_providers_for_strategy, parse_provider_name};
+pub use detection::{
+    default_voice_name, get_available_providers, get_providers_for_strategy, parse_provider_name,
+    provider_base_quality,
+};
 pub use errors::{AllProvidersFailed, TtsError};
 pub use gender_inference::infer_gender;
 pub use providers::cloud::ElevenLabsProvider;

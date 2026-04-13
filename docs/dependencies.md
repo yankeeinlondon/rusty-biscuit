@@ -993,6 +993,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: testing, snapshots, tdd_
 
+- [criterion](https://github.com/bheisler/criterion.rs) _v0.5_ [📄](https://docs.rs/criterion)
+
+    _Statistics-driven micro-benchmarking framework for Rust with HTML reports and regression detection. Used by `sniff/lib/benches/perf.rs`._
+
+    _Tags: testing, benchmarking, performance_
+
 - [predicates](https://github.com/assert-rs/predicates-rs) _v3.1_
 
     _Boolean-valued predicate functions for flexible assertions._

@@ -41,6 +41,9 @@ pub struct DetectionPlan {
     pub network: Option<NetworkRequest>,
     /// Filesystem detection request. None skips filesystem detection entirely.
     pub filesystem: Option<FilesystemRequest>,
+    /// Include structured performance metrics in the response payload.
+    #[serde(default)]
+    pub include_performance: bool,
 }
 
 impl Default for DetectionPlan {
@@ -51,6 +54,7 @@ impl Default for DetectionPlan {
             hardware: Some(HardwareRequest::full()),
             network: Some(NetworkRequest::full()),
             filesystem: Some(FilesystemRequest::default()),
+            include_performance: false,
         }
     }
 }
@@ -102,6 +106,11 @@ impl DetectionPlan {
 
     pub fn without_filesystem(mut self) -> Self {
         self.filesystem = None;
+        self
+    }
+
+    pub fn performance(mut self, include: bool) -> Self {
+        self.include_performance = include;
         self
     }
 }

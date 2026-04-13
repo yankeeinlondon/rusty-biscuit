@@ -2,7 +2,7 @@
 //!
 //! This module defines [`ClaudineConfig`], the canonical flat configuration
 //! schema written to `~/.claudine/config.json`. It replaces the old
-//! per-provider `HookerConfig` with a single cross-provider event map.
+//! per-provider config format with a single cross-provider event map.
 
 use std::collections::HashMap;
 
@@ -233,7 +233,7 @@ pub struct ClaudineConfig {
     pub messenger: Option<ClaudineMessengerConfig>,
 
     /// Whether the logging service is enabled.
-    #[serde(default)]
+    #[serde(default = "default_logging")]
     pub logging: bool,
 
     /// Protect service configuration.
@@ -259,8 +259,64 @@ pub struct ClaudineConfig {
     pub default_sounds: DefaultSounds,
 }
 
+fn default_logging() -> bool {
+    true
+}
+
 fn default_protect() -> ProtectConfig {
     ProtectConfig::default()
+}
+
+// ============================================================================
+// RepoOverrideConfig
+// ============================================================================
+
+/// Repo-scoped configuration override.
+///
+/// A repo config file (`{repo}/.claudine/config.json`) only contains the
+/// fields that are allowed to differ per-repo. Unlike [`ClaudineConfig`],
+/// all fields are optional, so a repo file that contains only
+/// `{ "canonical_provider": "gemini" }` will deserialize successfully.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepoOverrideConfig {
+    /// Override the canonical provider for this repo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_provider: Option<Provider>,
+
+    /// Override or extend actions for this repo (per-event replacement).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
+
+    /// Override the active messenger configuration key for this repo.
+    ///
+    /// - `None` (absent): no override, inherit from user config.
+    /// - `Some(None)` (JSON `null`): disable messenger for this repo.
+    /// - `Some(Some(key))`: use the named configuration for this repo.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_messenger_override"
+    )]
+    pub active_messenger: Option<Option<String>>,
+}
+
+impl RepoOverrideConfig {
+    pub fn is_empty(&self) -> bool {
+        self.canonical_provider.is_none()
+            && self.actions.is_empty()
+            && self.active_messenger.is_none()
+    }
+}
+
+fn deserialize_optional_messenger_override<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<String> = serde::Deserialize::deserialize(deserializer)?;
+    Ok(Some(value))
 }
 
 impl Default for ClaudineConfig {
@@ -268,7 +324,7 @@ impl Default for ClaudineConfig {
         Self {
             tts: TtsValue::default(),
             messenger: None,
-            logging: false,
+            logging: true,
             protect: ProtectConfig::default(),
             actions: HashMap::new(),
             preferred_agent: Provider::Claude,
@@ -695,7 +751,7 @@ mod tests {
         let config: ClaudineConfig =
             serde_json::from_value(serde_json::json!({ "preferred_agent": "claude" })).unwrap();
         assert!(matches!(config.tts, TtsValue::Boolean(false)));
-        assert!(!config.logging);
+        assert!(config.logging);
         assert!(config.protect.enabled);
         assert!(config.actions.is_empty());
         assert!(config.messenger.is_none());
@@ -861,6 +917,404 @@ mod tests {
         }))
         .unwrap();
         assert!(config.validate().is_ok());
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 5.1: TUI write-path fix tests
+    // -------------------------------------------------------------------------
+
+    /// Verifies that creating a sound effect action for any event using
+    /// `recommended_sound` produces a valid playa sound effect name, and
+    /// that the resulting config passes `validate()`.
+    #[test]
+    fn sound_effect_action_with_recommended_sound_is_valid() {
+        use crate::events::recommended_sound;
+
+        let all_events = [
+            AgenticEvent::SessionStart,
+            AgenticEvent::SessionEnd,
+            AgenticEvent::BeforePrompt,
+            AgenticEvent::BeforeTool,
+            AgenticEvent::AfterTool,
+            AgenticEvent::ToolError,
+            AgenticEvent::PermissionRequest,
+            AgenticEvent::HumanInTheLoop,
+            AgenticEvent::TurnComplete,
+            AgenticEvent::TurnError,
+            AgenticEvent::SubagentStart,
+            AgenticEvent::SubagentStop,
+            AgenticEvent::BeforeModel,
+            AgenticEvent::AfterModel,
+            AgenticEvent::BeforeCompact,
+            AgenticEvent::Notification,
+        ];
+
+        for event in all_events {
+            let effect = recommended_sound(&event).to_string();
+            assert!(
+                playa::SoundEffect::from_name(&effect).is_some(),
+                "recommended_sound for {event:?} returned '{effect}' which is not a valid playa sound effect"
+            );
+
+            // Build a config with this action and verify it validates
+            let mut actions = HashMap::new();
+            actions.insert(
+                event,
+                vec![HookAction::SoundEffect {
+                    effect,
+                    volume: 1.0,
+                    speed: 1.0,
+                }],
+            );
+            let config = ClaudineConfig {
+                actions,
+                ..Default::default()
+            };
+            assert!(
+                config.validate().is_ok(),
+                "config with recommended sound for {event:?} should validate"
+            );
+        }
+    }
+
+    /// When no prior voice is set, selecting a voice for one gender should
+    /// produce `VoiceSelection::Single`, not a `Gendered` with a placeholder.
+    #[test]
+    fn voice_selection_single_when_no_prior_voice() {
+        // Simulate TUI behavior: voice is None, user picks a female voice
+        let current_voice: Option<VoiceSelection> = None;
+        let voice_name = "Samantha".to_string();
+
+        // This matches the TUI code path: (_, GenderTab::Female) => Single
+        let new_voice = match &current_voice {
+            Some(VoiceSelection::Gendered { male, .. }) => VoiceSelection::Gendered {
+                male: male.clone(),
+                female: voice_name,
+            },
+            _ => VoiceSelection::Single(voice_name),
+        };
+
+        assert!(
+            matches!(new_voice, VoiceSelection::Single(ref v) if v == "Samantha"),
+            "should produce Single, not Gendered, when no prior voice is set"
+        );
+    }
+
+    /// When voice is currently `Single` and user picks a different gender,
+    /// the result should be a new `Single`, not `Gendered` with a placeholder.
+    #[test]
+    fn voice_selection_single_when_prior_was_single() {
+        let current_voice = Some(VoiceSelection::Single("Alex".to_string()));
+        let voice_name = "Samantha".to_string();
+
+        // Matches TUI: (_, GenderTab::Female) arm — Single is not Gendered
+        let new_voice = match &current_voice {
+            Some(VoiceSelection::Gendered { male, .. }) => VoiceSelection::Gendered {
+                male: male.clone(),
+                female: voice_name,
+            },
+            _ => VoiceSelection::Single(voice_name),
+        };
+
+        assert!(
+            matches!(new_voice, VoiceSelection::Single(ref v) if v == "Samantha"),
+            "should produce Single when prior was also Single"
+        );
+    }
+
+    /// When voice is `Gendered` and user updates one gender, the other
+    /// gender's voice is preserved.
+    #[test]
+    fn voice_selection_preserves_gendered_when_updating_one_gender() {
+        let current_voice = Some(VoiceSelection::Gendered {
+            male: "Alex".to_string(),
+            female: "Samantha".to_string(),
+        });
+        let new_female = "Karen".to_string();
+
+        // Matches TUI: (Some(Gendered { male, .. }), GenderTab::Female) arm
+        let new_voice = match &current_voice {
+            Some(VoiceSelection::Gendered { male, .. }) => VoiceSelection::Gendered {
+                male: male.clone(),
+                female: new_female,
+            },
+            _ => unreachable!("current is Gendered"),
+        };
+
+        match new_voice {
+            VoiceSelection::Gendered { male, female } => {
+                assert_eq!(male, "Alex", "male voice should be preserved");
+                assert_eq!(female, "Karen", "female voice should be updated");
+            }
+            _ => panic!("should still be Gendered"),
+        }
+    }
+
+    /// A messenger config with configurations but no `active_config`
+    /// passes validation. This is the safe state the TUI should create
+    /// when adding a new messenger route without filling required fields.
+    #[test]
+    fn messenger_without_active_config_passes_validation() {
+        let config = ClaudineConfig {
+            messenger: Some(ClaudineMessengerConfig {
+                active_config: None,
+                configurations: HashMap::from([(
+                    "wip".to_string(),
+                    MessengerProviderConfig::Discord {
+                        channel_id: String::new(), // intentionally empty (WIP)
+                        bot_token_env: "DISCORD_BOT_TOKEN".to_string(),
+                    },
+                )]),
+            }),
+            ..Default::default()
+        };
+        assert!(
+            config.validate().is_ok(),
+            "config with no active_config should validate even when configs have empty fields"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 5.4: Validation round-trip tests
+    // -------------------------------------------------------------------------
+
+    /// Validates that each type of invalid data is independently rejected
+    /// by `validate()`.
+    #[test]
+    fn validate_rejects_blank_messenger_active_config() {
+        let config = ClaudineConfig {
+            messenger: Some(ClaudineMessengerConfig {
+                active_config: Some("   ".to_string()),
+                configurations: HashMap::new(),
+            }),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("blank"), "error: {msg}");
+    }
+
+    #[test]
+    fn validate_rejects_unknown_attention_sound() {
+        let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
+            "default_sounds": {
+                "attention": "nonexistent-sound-xyz"
+            }
+        }))
+        .unwrap();
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("attention") && msg.contains("nonexistent-sound-xyz"),
+            "error: {msg}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_unknown_error_sound() {
+        let config: ClaudineConfig = serde_json::from_value(serde_json::json!({
+            "preferred_agent": "claude",
+            "default_sounds": {
+                "error": "bogus-sound-name"
+            }
+        }))
+        .unwrap();
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("error") && msg.contains("bogus-sound-name"),
+            "error: {msg}"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // RepoOverrideConfig — deny_unknown_fields
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn repo_override_rejects_preferred_agent_field() {
+        let result = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "preferred_agent": "claude"
+        }));
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("preferred_agent"),
+            "error should mention the unknown field: {msg}"
+        );
+    }
+
+    #[test]
+    fn repo_override_rejects_logging_field() {
+        let result = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "logging": true
+        }));
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("logging"),
+            "error should mention the unknown field: {msg}"
+        );
+    }
+
+    #[test]
+    fn repo_override_accepts_canonical_provider() {
+        let config = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "canonical_provider": "gemini"
+        }))
+        .unwrap();
+        assert_eq!(config.canonical_provider, Some(Provider::Gemini));
+        assert!(config.actions.is_empty());
+    }
+
+    #[test]
+    fn repo_override_accepts_actions() {
+        let config = serde_json::from_value::<RepoOverrideConfig>(serde_json::json!({
+            "actions": {
+                "session_start": [
+                    { "type": "sound_effect", "effect": "doorbell" }
+                ]
+            }
+        }))
+        .unwrap();
+        assert!(config.canonical_provider.is_none());
+        assert!(config.actions.contains_key(&AgenticEvent::SessionStart));
+        assert_eq!(config.actions[&AgenticEvent::SessionStart].len(), 1);
+    }
+
+    #[test]
+    fn repo_override_with_active_messenger_round_trips() {
+        let json = r#"{ "active_messenger": "work-slack" }"#;
+        let repo: RepoOverrideConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(repo.active_messenger, Some(Some("work-slack".to_string())));
+        let serialized = serde_json::to_string(&repo).unwrap();
+        assert!(serialized.contains("work-slack"));
+    }
+
+    #[test]
+    fn repo_override_with_null_active_messenger_disables() {
+        let json = r#"{ "active_messenger": null }"#;
+        let repo: RepoOverrideConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(repo.active_messenger, Some(None));
+    }
+
+    #[test]
+    fn repo_override_without_active_messenger_is_no_override() {
+        let json = r#"{}"#;
+        let repo: RepoOverrideConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(repo.active_messenger, None);
+    }
+
+    /// Comprehensive round-trip: build a fully-populated valid config,
+    /// validate it, serialize, deserialize, and validate again.
+    #[test]
+    fn validate_round_trip_fully_populated_config() {
+        let mut actions = HashMap::new();
+        actions.insert(
+            AgenticEvent::SessionStart,
+            vec![HookAction::SoundEffect {
+                effect: "doorbell".to_string(),
+                volume: 0.8,
+                speed: 1.0,
+            }],
+        );
+        actions.insert(
+            AgenticEvent::TurnComplete,
+            vec![
+                HookAction::Speak {
+                    message: "Done!".to_string(),
+                    voice: Some("Samantha".to_string()),
+                    gender: Some(Gender::Female),
+                },
+                HookAction::Report { handler: None },
+            ],
+        );
+
+        let config = ClaudineConfig {
+            tts: TtsValue::Config(TtsConfigSettings {
+                provider: "say".to_string(),
+                voice: Some(VoiceSelection::Gendered {
+                    male: "Alex".to_string(),
+                    female: "Samantha".to_string(),
+                }),
+                gender: Gender::Male,
+            }),
+            messenger: Some(ClaudineMessengerConfig {
+                active_config: Some("work".to_string()),
+                configurations: HashMap::from([
+                    (
+                        "work".to_string(),
+                        MessengerProviderConfig::Slack {
+                            channel_id: "C0ABC".to_string(),
+                            bot_token_env: "SLACK_BOT_TOKEN".to_string(),
+                        },
+                    ),
+                    (
+                        "personal".to_string(),
+                        MessengerProviderConfig::Signal {
+                            recipient: "+15551234567".to_string(),
+                            rpc_url_env: "SIGNAL_RPC_URL".to_string(),
+                            account_env: "SIGNAL_ACCOUNT".to_string(),
+                        },
+                    ),
+                ]),
+            }),
+            logging: true,
+            protect: ProtectConfig::default(),
+            actions,
+            preferred_agent: Provider::Codex,
+            canonical_provider: Some(Provider::Gemini),
+            default_sounds: DefaultSounds {
+                success: Some("doorbell".to_string()),
+                attention: Some("bong".to_string()),
+                error: Some("space-alarm".to_string()),
+            },
+        };
+
+        // First validation pass
+        config.validate().expect("initial validation should pass");
+
+        // Serialize and deserialize
+        let json = serde_json::to_value(&config).unwrap();
+        let roundtripped: ClaudineConfig = serde_json::from_value(json).unwrap();
+
+        // Second validation pass
+        roundtripped
+            .validate()
+            .expect("round-tripped validation should pass");
+
+        // Verify key fields survived the round-trip
+        assert_eq!(roundtripped.preferred_agent, Provider::Codex);
+        assert_eq!(roundtripped.canonical_provider, Some(Provider::Gemini));
+        assert!(roundtripped.logging);
+        assert_eq!(
+            roundtripped.actions.len(),
+            2,
+            "both event action entries should survive"
+        );
+        assert_eq!(
+            roundtripped.actions[&AgenticEvent::TurnComplete].len(),
+            2,
+            "multi-action event should preserve all actions"
+        );
+        match &roundtripped.tts {
+            TtsValue::Config(cfg) => {
+                assert_eq!(cfg.provider, "say");
+                assert_eq!(cfg.gender, Gender::Male);
+                match &cfg.voice {
+                    Some(VoiceSelection::Gendered { male, female }) => {
+                        assert_eq!(male, "Alex");
+                        assert_eq!(female, "Samantha");
+                    }
+                    other => panic!("expected Gendered voice, got {other:?}"),
+                }
+            }
+            other => panic!("expected Config TTS, got {other:?}"),
+        }
+        let messenger = roundtripped.messenger.unwrap();
+        assert_eq!(messenger.active_config.as_deref(), Some("work"));
+        assert_eq!(messenger.configurations.len(), 2);
     }
 
     // -------------------------------------------------------------------------

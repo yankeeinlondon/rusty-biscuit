@@ -39,9 +39,9 @@
 //!
 //! let client = Anthropic::with_base_url("https://staging.example.com/v1");
 //! ```
-use crate::shared::{RequestParts, SchematicError};
-pub use schematic_definitions::anthropic::*;
 use serde::{Deserialize, Serialize};
+pub use schematic_definitions::anthropic::*;
+use crate::shared::{RequestParts, SchematicError};
 /// Request for `CreateMessage` endpoint.
 ///
 /// ## Example
@@ -87,7 +87,7 @@ impl CreateMessageRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -147,7 +147,7 @@ impl CountTokensRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -216,9 +216,7 @@ pub struct RetrieveModelRequest {
 impl RetrieveModelRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(model_id: impl Into<String>) -> Self {
-        Self {
-            model_id: model_id.into(),
-        }
+        Self { model_id: model_id.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -297,7 +295,9 @@ impl AnthropicRequest {
             Self::CountTokens(_) => {
                 <CountTokensRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListModels(_) => <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListModels(_) => {
+                <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::RetrieveModel(_) => {
                 <RetrieveModelRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -345,7 +345,9 @@ impl Anthropic {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "https://api.anthropic.com/v1";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some("https://docs.anthropic.com/en/api/messages");
+    pub const DOCS_URL: Option<&'static str> = Some(
+        "https://docs.anthropic.com/en/api/messages",
+    );
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
@@ -356,9 +358,10 @@ impl Anthropic {
                 header: "X-Api-Key".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::ApiKey {
-                    header: "X-Api-Key".to_string(),
-                }],
+                explicit: vec![
+                    schematic_define::AuthMethod::ApiKey { header : "X-Api-Key"
+                    .to_string() }
+                ],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "X-Api-Key".to_string(),
                 }),
@@ -370,9 +373,9 @@ impl Anthropic {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "ANTHROPIC_API_KEY".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec!["ANTHROPIC_API_KEY".to_string()],
+                        ),
                         header: "X-Api-Key".to_string(),
                     }),
                     oauth_client_id: None,
@@ -399,9 +402,10 @@ impl Anthropic {
                 header: "X-Api-Key".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::ApiKey {
-                    header: "X-Api-Key".to_string(),
-                }],
+                explicit: vec![
+                    schematic_define::AuthMethod::ApiKey { header : "X-Api-Key"
+                    .to_string() }
+                ],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "X-Api-Key".to_string(),
                 }),
@@ -413,9 +417,9 @@ impl Anthropic {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "ANTHROPIC_API_KEY".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec!["ANTHROPIC_API_KEY".to_string()],
+                        ),
                         header: "X-Api-Key".to_string(),
                     }),
                     oauth_client_id: None,
@@ -448,9 +452,10 @@ impl Anthropic {
                 header: "X-Api-Key".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::ApiKey {
-                    header: "X-Api-Key".to_string(),
-                }],
+                explicit: vec![
+                    schematic_define::AuthMethod::ApiKey { header : "X-Api-Key"
+                    .to_string() }
+                ],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "X-Api-Key".to_string(),
                 }),
@@ -462,9 +467,9 @@ impl Anthropic {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "ANTHROPIC_API_KEY".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec!["ANTHROPIC_API_KEY".to_string()],
+                        ),
                         header: "X-Api-Key".to_string(),
                     }),
                     oauth_client_id: None,
@@ -486,7 +491,10 @@ impl Anthropic {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+    pub fn with_client_and_base_url(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: base_url.into(),
@@ -495,9 +503,10 @@ impl Anthropic {
                 header: "X-Api-Key".to_string(),
             },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::ApiKey {
-                    header: "X-Api-Key".to_string(),
-                }],
+                explicit: vec![
+                    schematic_define::AuthMethod::ApiKey { header : "X-Api-Key"
+                    .to_string() }
+                ],
                 env_fallback: Some(schematic_define::EnvAuthStrategy::ApiKey {
                     header: "X-Api-Key".to_string(),
                 }),
@@ -509,9 +518,9 @@ impl Anthropic {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "ANTHROPIC_API_KEY".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec!["ANTHROPIC_API_KEY".to_string()],
+                        ),
                         header: "X-Api-Key".to_string(),
                     }),
                     oauth_client_id: None,
@@ -648,20 +657,21 @@ impl Anthropic {
                     .as_ref()
                     .map(|api_key| api_key.header.clone())
             });
-        header.and_then(|header| {
-            self.headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|env_name| std::env::var(env_name).ok())
-                })
-                .map(|value| (header, value))
-        })
+        header
+            .and_then(|header| {
+                self.headers
+                    .env_mapping()
+                    .api_key
+                    .as_ref()
+                    .and_then(|api_key| {
+                        api_key
+                            .names
+                            .names()
+                            .iter()
+                            .find_map(|env_name| std::env::var(env_name).ok())
+                    })
+                    .map(|value| (header, value))
+            })
     }
     /// Returns a clone of this client configured with an explicit API key.
     #[must_use]
@@ -777,9 +787,7 @@ impl<'a> AnthropicVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError>
-            + Send
-            + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -807,15 +815,13 @@ impl<'a> AnthropicVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError>
-            + Send
-            + Sync
-            + 'static,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
     {
-        self.response_mutators.insert(
-            R::ENDPOINT_ID,
-            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-        );
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -841,15 +847,17 @@ impl<'a> AnthropicVariantBuilder<'a> {
         let headers = match self.headers {
             Some(headers) => headers,
             None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
-            {
-                self.base.headers.clone().with_env_mapping(
-                    schematic_define::RestApi::legacy_env_mapping_for(
-                        &auth_strategy,
-                        &env_auth,
-                        self.base.env_username.as_deref(),
-                    ),
-                )
+                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
+                self.base
+                    .headers
+                    .clone()
+                    .with_env_mapping(
+                        schematic_define::RestApi::legacy_env_mapping_for(
+                            &auth_strategy,
+                            &env_auth,
+                            self.base.env_username.as_deref(),
+                        ),
+                    )
             }
             None => self.base.headers.clone(),
         };
@@ -877,10 +885,12 @@ impl Anthropic {
             .explicit
             .iter()
             .map(|method| match method {
-                schematic_define::AuthMethod::BearerToken { header } => match header.as_deref() {
-                    Some(header) => format!("an explicit bearer token in `{header}`"),
-                    None => "an explicit bearer token".to_string(),
-                },
+                schematic_define::AuthMethod::BearerToken { header } => {
+                    match header.as_deref() {
+                        Some(header) => format!("an explicit bearer token in `{header}`"),
+                        None => "an explicit bearer token".to_string(),
+                    }
+                }
                 schematic_define::AuthMethod::ApiKey { header } => {
                     format!("an explicit API key in `{header}`")
                 }
@@ -896,20 +906,22 @@ impl Anthropic {
     }
     fn env_fallback_var_names(&self) -> Vec<String> {
         match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => self
-                .headers
-                .env_mapping()
-                .bearer_token
-                .as_ref()
-                .map(|list| list.names().to_vec())
-                .unwrap_or_default(),
-            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => self
-                .headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .map(|api_key| api_key.names.names().to_vec())
-                .unwrap_or_default(),
+            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => {
+                self.headers
+                    .env_mapping()
+                    .bearer_token
+                    .as_ref()
+                    .map(|list| list.names().to_vec())
+                    .unwrap_or_default()
+            }
+            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => {
+                self.headers
+                    .env_mapping()
+                    .api_key
+                    .as_ref()
+                    .map(|api_key| api_key.names.names().to_vec())
+                    .unwrap_or_default()
+            }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
                 let mut vars = Vec::new();
                 if let Some(user) = self.headers.env_mapping().basic_user.as_ref() {
@@ -932,10 +944,13 @@ impl Anthropic {
             options.push(explicit_methods.join(", "));
         }
         if !env_fallback_vars.is_empty() {
-            options.push(format!(
-                "set one of the fallback env vars `{}`",
-                env_fallback_vars.join("`, `")
-            ));
+            options
+                .push(
+                    format!(
+                        "set one of the fallback env vars `{}`", env_fallback_vars
+                        .join("`, `")
+                    ),
+                );
         }
         let mut message = if options.is_empty() {
             "Authentication required.".to_string()
@@ -954,15 +969,19 @@ impl Anthropic {
             env_fallback_vars,
         }
     }
-    fn apply_env_fallback(&self, headers: schematic_define::Headers) -> schematic_define::Headers {
+    fn apply_env_fallback(
+        &self,
+        headers: schematic_define::Headers,
+    ) -> schematic_define::Headers {
         let env_mapping = self.headers.env_mapping().clone();
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                let token = env_mapping.bearer_token.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let token = env_mapping
+                    .bearer_token
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
                 match (token, header.as_deref()) {
                     (Some(token), Some(header)) => {
                         headers.use_bearer_token_with_header(token, header)
@@ -972,31 +991,38 @@ impl Anthropic {
                 }
             }
             Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
-                let key = env_mapping.api_key.as_ref().and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let key = env_mapping
+                    .api_key
+                    .as_ref()
+                    .and_then(|api_key| {
+                        api_key
+                            .names
+                            .names()
+                            .iter()
+                            .find_map(|name| std::env::var(name).ok())
+                    });
                 match key {
                     Some(key) => headers.header(header.clone(), key),
                     None => headers,
                 }
             }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let username = env_mapping.basic_user.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
-                let password = env_mapping.basic_pass.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let username = env_mapping
+                    .basic_user
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
+                let password = env_mapping
+                    .basic_pass
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
                 match (username, password) {
-                    (Some(username), Some(password)) => headers.use_basic_auth(username, password),
+                    (Some(username), Some(password)) => {
+                        headers.use_basic_auth(username, password)
+                    }
                     _ => headers,
                 }
             }
@@ -1007,10 +1033,12 @@ impl Anthropic {
     fn headers_satisfy_fallback(&self, headers: &schematic_define::Headers) -> bool {
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                header.as_deref().map_or_else(
-                    || headers.has_authorization(),
-                    |header| headers.has_header(header),
-                )
+                header
+                    .as_deref()
+                    .map_or_else(
+                        || headers.has_authorization(),
+                        |header| headers.has_header(header),
+                    )
             }
             Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
                 headers.has_header(header)
@@ -1025,8 +1053,7 @@ impl Anthropic {
         if !headers.has_explicit_auth() {
             headers = self.apply_env_fallback(headers);
         }
-        if self.auth_is_required()
-            && !headers.has_explicit_auth()
+        if self.auth_is_required() && !headers.has_explicit_auth()
             && !self.headers_satisfy_fallback(&headers)
         {
             return Err(self.authentication_required_error());
@@ -1149,7 +1176,11 @@ impl Anthropic {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)

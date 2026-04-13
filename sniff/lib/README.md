@@ -5,9 +5,9 @@
 ## Features
 
 - **OS Detection**: Distribution, kernel, architecture, package managers, locale, timezone
-- **Hardware Detection**: CPU with SIMD capabilities, GPU with Metal/Vulkan support, memory, storage
+- **Hardware Detection**: CPU with SIMD capabilities, GPU with Metal/Vulkan support, memory, storage, audio devices
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses, flags, and WAN IP lookup
-- **Filesystem Analysis**: Git repositories, monorepo tools, structured language detection, broad file associations, EditorConfig
+- **Filesystem Analysis**: Git repositories, monorepo tools, structured language detection, broad file associations, EditorConfig, blast radius, justfile detection, recent commits
 - **Package Management**: Unified abstraction for 110+ OS and language package managers
 - **Programs Detection**: 8 categories (editors, utilities, package managers, TTS, terminals, AI tools)
 - **Services Detection**: Init system detection and service listing across systemd, launchd, OpenRC, etc.
@@ -93,14 +93,21 @@ let result = detect_with_config(config)?;
 
 ```rust
 use sniff::{
-    hardware::detect_hardware,
+    hardware::{detect_hardware, detect_hardware_summary},
     network::detect_network,
-    os::detect_os,
+    os::{detect_os, detect_os_with_request},
+    filesystem::git::GitRepo,
+    filesystem::repo::detect_repo_structure,
+    request::OsRequest,
 };
+use std::path::Path;
 
-// Detect only hardware
+// Detect only hardware (full, includes audio + GPU + storage)
 let hw = detect_hardware()?;
 println!("CPU: {} ({})", hw.cpu.brand, hw.cpu.arch);
+
+// Lightweight hardware summary: CPU + memory only, skips ~1.5s audio detection
+let hw_summary = detect_hardware_summary()?;
 
 // Detect only network
 let net = detect_network()?;
@@ -108,10 +115,16 @@ for iface in &net.interfaces {
     println!("Interface: {}", iface.name);
 }
 
-// Detect only OS
-let os = detect_os()?;
+// OS with tuned detail level (skip NTP which can take up to 10s on Linux)
+let os = detect_os_with_request(&OsRequest::summary())?;
 println!("OS: {} {}", os.name, os.version);
+
+// Expert composition: discover a git repo and sniff workspace structure only
+let git = GitRepo::discover(Path::new("."))?;
+let repo = detect_repo_structure(Path::new("."))?;
 ```
+
+See [../docs/sniff-library-architecture.md](../docs/sniff-library-architecture.md) for a full breakdown of per-subsection costs, shared-work strategies, and common caller profiles.
 
 ## Architecture
 
@@ -119,13 +132,15 @@ println!("OS: {} {}", os.name, os.version);
 
 ```
 sniff/
-├── os              # Operating system detection
-├── hardware        # CPU, GPU, memory, storage
-├── network         # Network interfaces
-├── filesystem      # Git, monorepo, languages, file associations
-├── package         # Package manager abstraction
-├── programs        # Installed program detection (8 categories)
-├── services        # System service and init system detection
+├── os/             # Operating system detection (distro, locale, time, package managers)
+├── hardware/       # CPU, GPU, memory, storage, audio devices
+├── network/        # Network interfaces
+├── filesystem/     # Git, monorepo, languages, file types, docs, blast radius, just
+├── package/        # Package manager abstraction (110+)
+├── programs/       # Installed program detection and install (8 categories)
+├── remote/         # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
+├── services/       # System service and init system detection
+├── request         # Fine-grained detection control (DetectionPlan, request types)
 └── error           # Error types
 ```
 
@@ -189,6 +204,7 @@ Detects operating system information across Windows, macOS, Linux, and BSD syste
 - `SystemPackageManagers` - Detected system package managers
 - `LocaleInfo` - Locale and encoding information
 - `TimeInfo` - Timezone, UTC offset, NTP status, DST
+- `NtpStatus` - NTP synchronization state (Synchronized, NotSynchronized, Unknown)
 
 **Detection Strategy:**
 
@@ -196,7 +212,8 @@ Detects operating system information across Windows, macOS, Linux, and BSD syste
 2. **Linux Distribution**: Parses `/etc/os-release`, `/etc/lsb-release`, `/etc/system-release`
 3. **Package Managers**: PATH-based detection of 40+ package managers
 4. **Locale**: Parses `LC_ALL`, `LANG` environment variables
-5. **Timezone**: System API queries for timezone, offset, NTP status
+5. **Timezone**: System API queries for timezone, offset, DST
+6. **NTP Status**: Platform-specific detection (macOS: `sntp`, Windows: `w32tm`, Linux: `timedatectl`)
 
 **Example:**
 
@@ -233,6 +250,8 @@ Cross-platform hardware detection with detailed CPU, GPU, memory, and storage in
 - `GpuCapabilities` - Raytracing, mesh shaders, unified memory
 - `MemoryInfo` - Total, available, used memory
 - `StorageInfo` - Disk type (SSD/HDD), filesystem, mount point
+- `AudioDevices` - Input and output audio devices with sample rates
+- `AudioDeviceInfo` - Individual audio device details
 
 **SIMD Detection:**
 
@@ -245,6 +264,12 @@ Uses architecture-specific intrinsics:
 
 - **macOS**: Metal API with full capability detection
 - **Other platforms**: Returns empty vector (future: Vulkan/D3D12 support)
+
+**Audio Device Detection:**
+
+- **macOS**: Core Audio API for input/output devices with sample rates
+- **Linux**: PulseAudio (`pactl`) and ALSA (`arecord`/`aplay`) enumeration
+- **Windows**: PowerShell `Get-AudioDevice` or `Get-PnpDevice` fallback
 
 **Example:**
 
@@ -330,11 +355,15 @@ Comprehensive filesystem analysis including Git, monorepo detection, language br
 
 **Submodules:**
 
-1. **Git Detection** (`filesystem::git`)
-2. **Repository Detection** (`filesystem::repo`)
-3. **Language Analysis** (`filesystem::languages`)
-4. **EditorConfig** (`filesystem::formatting`)
-5. **Document Discovery** (`filesystem::docs`)
+1. **Git Detection** (`filesystem::git`) - Repository status, commits, worktrees, remotes
+2. **Repository Detection** (`filesystem::repo`) - Monorepo tools, package enumeration
+3. **Language Analysis** (`filesystem::languages`) - File extension-based language detection
+4. **File Type Classification** (`filesystem::file_types`) - Broad file association (programming, config, docs, etc.)
+5. **EditorConfig** (`filesystem::formatting`) - Formatting rule detection
+6. **Document Discovery** (`filesystem::docs`) - Markdown documents with content hashing
+7. **Blast Radius** (`filesystem::blast_radius`) - Impact analysis for changed source files
+8. **Justfile Detection** (`filesystem::just`) - Justfile discovery and recipe parsing
+9. **Recent Commits** (`filesystem::git::recent_commits`) - Duration/hash/date-based commit queries
 
 #### Git Detection
 
@@ -572,17 +601,21 @@ Detects installed programs across 8 categories with parallel execution and macOS
 | Headless Audio | afplay, pacat, aplay | PATH lookup |
 | AI CLI | claude, aider, goose | PATH lookup |
 
+**Performance notes:**
+
+`ProgramsInfo::detect()` builds a single shared `ExecutableIndex` by scanning every `PATH` directory and macOS app bundle location once, then runs all 8 categories in parallel using `rayon::join` pairs. Per-program lookups are O(1) HashMap hits rather than repeated filesystem traversals, so the total cost is dominated by the one-time index build.
+
 **Example:**
 
 ```rust
 use sniff::programs::ProgramsInfo;
 
-// Detect all installed programs (parallel)
+// Detect all installed programs (parallel, shared index)
 let programs = ProgramsInfo::detect();
 
 println!("Editors: {:?}", programs.editors);
 println!("Utilities: {:?}", programs.utilities);
-println!("AI CLI tools: {:?}", programs.ai_cli);
+println!("AI CLI tools: {:?}", programs.ai_clients);
 
 // Access metadata
 for editor in &programs.editors {
@@ -686,7 +719,7 @@ pub type Result<T> = std::result::Result<T, SniffError>;
 ```toml
 [features]
 default = []
-network = ["reqwest"]  # Enable network-based registry queries
+network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls"]
 remote = ["network"]   # Enable remote repository inspection
 ```
 
@@ -752,16 +785,17 @@ let metadata = provider.get_repo_metadata("rust-lang", "cargo").await?;
 
 ## Platform Support
 
-| Platform | OS Detection | Hardware | Network | Git | GPU |
-|----------|:------------:|:--------:|:-------:|:---:|:---:|
-| **Linux** | ✓ | ✓ | ✓ | ✓ | - |
-| **macOS** | ✓ | ✓ | ✓ | ✓ | ✓ (Metal) |
-| **Windows** | ✓ | ✓ | ✓ | ✓ | - |
-| **BSD** | ✓ | ✓ | ✓ | ✓ | - |
+| Platform | OS Detection | Hardware | Network | Git | GPU | Audio Devices |
+|----------|:------------:|:--------:|:-------:|:---:|:---:|:-------------:|
+| **Linux** | ✓ | ✓ | ✓ | ✓ | - | ✓ (PulseAudio/ALSA) |
+| **macOS** | ✓ | ✓ | ✓ | ✓ | ✓ (Metal) | ✓ (Core Audio) |
+| **Windows** | ✓ | ✓ | ✓ | ✓ | - | ✓ (PowerShell) |
+| **BSD** | ✓ | ✓ | ✓ | ✓ | - | - |
 
 **Notes:**
 
 - GPU detection currently only supported on macOS (Metal API)
+- Audio device detection uses platform-specific APIs (Core Audio, PulseAudio/ALSA, PowerShell)
 - Network interface detection requires appropriate permissions
 - Git operations require valid repository
 
@@ -769,16 +803,23 @@ let metadata = provider.get_repo_metadata("rust-lang", "cargo").await?;
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `sysinfo` | 0.37 | CPU, memory, storage detection |
+| `sysinfo` | 0.38 | CPU, memory, storage detection |
 | `git2` | 0.20 | Git repository inspection |
 | `biscuit-hash` | workspace | xxHash content hashing for document fingerprinting |
-| `metal` | 0.33 | macOS GPU detection (target-specific) |
+| `biscuit-file` | workspace | TOML/YAML file parsing |
 | `getifaddrs` | 0.6 | Network interface enumeration |
-| `toml` | 0.9 | Cargo.toml parsing |
-| `serde_yaml` | 0.9 | pnpm-workspace.yaml parsing |
-| `reqwest` | 0.12 | HTTP client (network feature) |
+| `hyperpolyglot` | 0.1 | Language detection |
+| `rayon` | 1.11 | Parallel iteration for program detection |
+| `which` | 8.0 | Executable discovery on PATH |
+| `ec4rs` | 1 | EditorConfig resolution |
+| `walkdir` | 2.5 | Recursive directory traversal |
+| `reqwest` | 0.13 | HTTP client (network feature, optional) |
+| `chrono` | 0.4 | Date/time handling |
+| `strum` | 0.28 | Enum utilities and iteration |
 | `thiserror` | 2.0 | Error type derivation |
 | `serde` | 1.0 | Serialization support |
+| `coreaudio-sys` | 0.2 | macOS audio device detection (target-specific) |
+| `windows` | 0.62 | Windows service/audio detection (target-specific) |
 
 ## Testing
 
@@ -805,6 +846,64 @@ cargo test -p sniff --features network
 - Network: Interface detection, filtering, primary selection
 - Filesystem: Git parsing, monorepo detection, language analysis
 - Package: Manager detection, registry queries (network)
+
+## Benchmarking and Profiling
+
+The library ships with a Criterion benchmark harness under
+`sniff/lib/benches/` and lightweight example binaries under
+`sniff/lib/examples/` intended for flamegraph profiling.
+
+```bash
+# Run the full Criterion suite (HTML reports land in target/criterion)
+just bench
+
+# Run a single domain
+just bench-system
+just bench-hardware
+just bench-filesystem
+just bench-inventory
+
+# End-to-end CLI benchmarks (requires `hyperfine` on PATH)
+just bench-cli
+
+# Generate a flamegraph from a profiling example
+just profile profile_detect_full
+just profile profile_filesystem
+just profile profile_hardware
+
+# Profile the sniff CLI directly
+just profile-cli --json
+```
+
+Criterion output is written to `target/criterion/` with HTML reports at
+`target/criterion/report/index.html`. Flamegraphs use a dedicated
+`[profile.profiling]` Cargo profile (release + debuginfo, no stripping)
+so sampled stacks resolve symbols without changing normal release
+builds.
+
+The `--perf` flag on the CLI exposes structured per-stage timings from
+the library's `PerformanceCollector`; Criterion wall-clock numbers are
+the primary regression surface, while `--perf` stage breakdowns are
+useful for explaining *where* an observed regression lives.
+
+**Platform notes:**
+
+- Audio device and GPU/Metal benches are most meaningful on macOS.
+  They still compile and run on Linux/Windows but mostly exercise
+  stub paths.
+- The `services_detect` bench depends on which init system is present
+  (systemd, launchd, etc.) — variance between hosts is expected.
+
+**Which benches track regressions:**
+
+- `system::detect_summary` and `system::detect_full` are the headline
+  regression signals.
+- `filesystem_git::git_summary_monorepo`,
+  `filesystem_repo::repo_structure_monorepo`, and
+  `inventory::programs_detect` cover the highest-risk shared-walk and
+  fan-out paths.
+- Audio/GPU benches are informational and should not be used to gate
+  merges across platforms.
 
 ## Design Principles
 
@@ -870,4 +969,4 @@ Planned features:
 
 ## License
 
-Part of the Dockhand monorepo. See top-level LICENSE file.
+Part of the Rusty Biscuit monorepo. See top-level LICENSE file.

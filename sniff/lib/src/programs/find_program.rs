@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::{debug, instrument, trace};
 use which::which;
 
@@ -41,7 +41,9 @@ pub fn find_programs_parallel(programs: &[&str]) -> HashMap<String, Option<PathB
         .collect() // 3. Collect results back into a HashMap
 }
 
-use super::macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
+use super::macos_bundle::find_macos_app_bundle;
+#[cfg(target_os = "macos")]
+use super::macos_bundle::get_app_bundle_name;
 use super::types::ExecutableSource;
 
 /// Pre-built index of executables available on PATH and macOS app bundles.
@@ -70,6 +72,8 @@ use super::types::ExecutableSource;
 pub struct ExecutableIndex {
     /// Maps binary name to resolved path (first occurrence wins = PATH precedence)
     path_executables: HashMap<String, PathBuf>,
+    /// Number of PATH directories scanned while building the index.
+    path_dir_count: usize,
     /// Maps binary name to app bundle path (macOS only)
     #[cfg(target_os = "macos")]
     bundle_executables: HashMap<String, PathBuf>,
@@ -89,10 +93,24 @@ impl ExecutableIndex {
     /// A fully populated index ready for O(1) lookups.
     #[instrument(skip_all)]
     pub fn build() -> Self {
+        Self::build_with_bundles(true)
+    }
+
+    #[instrument(skip_all)]
+    pub fn build_path_only() -> Self {
+        Self::build_with_bundles(false)
+    }
+
+    fn build_with_bundles(include_bundles: bool) -> Self {
+        #[cfg(not(target_os = "macos"))]
+        let _ = include_bundles;
+
         let mut path_executables = HashMap::new();
+        let mut path_dir_count = 0;
 
         if let Some(path_var) = std::env::var_os("PATH") {
             for dir in std::env::split_paths(&path_var) {
+                path_dir_count += 1;
                 trace!(dir = %dir.display(), "scanning PATH directory");
                 if let Ok(entries) = std::fs::read_dir(&dir) {
                     for entry in entries.filter_map(|e| e.ok()) {
@@ -129,8 +147,13 @@ impl ExecutableIndex {
 
         Self {
             path_executables,
+            path_dir_count,
             #[cfg(target_os = "macos")]
-            bundle_executables: build_bundle_index(),
+            bundle_executables: if include_bundles {
+                build_bundle_index()
+            } else {
+                HashMap::new()
+            },
         }
     }
 
@@ -164,6 +187,10 @@ impl ExecutableIndex {
     /// - `None` - Program not found in PATH
     pub fn find(&self, program: &str) -> Option<PathBuf> {
         self.path_executables.get(program).cloned()
+    }
+
+    pub fn path_dir_count(&self) -> usize {
+        self.path_dir_count
     }
 }
 
@@ -289,7 +316,7 @@ fn build_bundle_index() -> HashMap<String, PathBuf> {
 
 /// Checks if a bundle exists and returns the path to its executable.
 #[cfg(target_os = "macos")]
-fn check_bundle_executable(bundle_path: &Path, binary_name: &str) -> Option<PathBuf> {
+fn check_bundle_executable(bundle_path: &std::path::Path, binary_name: &str) -> Option<PathBuf> {
     if !bundle_path.exists() {
         return None;
     }
@@ -764,9 +791,11 @@ mod tests {
     /// Verifies the index does not include non-executable files.
     #[test]
     fn test_executable_index_excludes_non_executable() {
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
         use std::fs;
         use tempfile::tempdir;
 
+        let _lock = ENV_MUTEX.lock().unwrap();
         let dir = tempdir().unwrap();
         let non_exec = dir.path().join("not-a-program");
         fs::write(&non_exec, "data").unwrap();
@@ -779,15 +808,14 @@ mod tests {
         }
 
         // Temporarily prepend our dir to PATH and build the index
+        let mut env = ScopedEnv::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
         let mut new_path = std::ffi::OsString::from(dir.path());
         new_path.push(":");
         new_path.push(&original_path);
+        env.set_os("PATH", &new_path);
 
-        // Safety: single-threaded test; restored immediately
-        unsafe { std::env::set_var("PATH", &new_path) };
         let index = ExecutableIndex::build();
-        unsafe { std::env::set_var("PATH", &original_path) };
 
         assert!(
             index.find("not-a-program").is_none(),
@@ -799,23 +827,25 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_executable_index_includes_executable() {
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
+        let _lock = ENV_MUTEX.lock().unwrap();
         let dir = tempdir().unwrap();
         let exec = dir.path().join("test-exec-prog");
         fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
         fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
 
+        let mut env = ScopedEnv::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
         let mut new_path = std::ffi::OsString::from(dir.path());
         new_path.push(":");
         new_path.push(&original_path);
+        env.set_os("PATH", &new_path);
 
-        unsafe { std::env::set_var("PATH", &new_path) };
         let index = ExecutableIndex::build();
-        unsafe { std::env::set_var("PATH", &original_path) };
 
         assert!(
             index.find("test-exec-prog").is_some(),

@@ -1070,33 +1070,30 @@ fn run_install(pkg: Option<&str>) {
             })
             .collect();
 
-        match Select::new("Select a TTS provider to install", options).prompt() {
-            Ok(selection) => {
-                println!();
-                println!(
-                    "Installing {}...",
-                    tts_client_display_name(selection.client)
-                );
-                match installed.install(selection.client) {
-                    Ok(()) => {
-                        println!(
-                            "  {} {} installed successfully!",
-                            "✓".green().bold(),
-                            tts_client_display_name(selection.client)
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "  {} Failed to install {}: {}",
-                            "✗".red().bold(),
-                            tts_client_display_name(selection.client),
-                            e
-                        );
-                        std::process::exit(1);
-                    }
+        if let Ok(selection) = Select::new("Select a TTS provider to install", options).prompt() {
+            println!();
+            println!(
+                "Installing {}...",
+                tts_client_display_name(selection.client)
+            );
+            match installed.install(selection.client) {
+                Ok(()) => {
+                    println!(
+                        "  {} {} installed successfully!",
+                        "✓".green().bold(),
+                        tts_client_display_name(selection.client)
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "  {} Failed to install {}: {}",
+                        "✗".red().bold(),
+                        tts_client_display_name(selection.client),
+                        e
+                    );
+                    std::process::exit(1);
                 }
             }
-            Err(_) => {}
         }
     }
 }

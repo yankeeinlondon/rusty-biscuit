@@ -1,5 +1,6 @@
 ---
 source: sniff/cli/tests/snapshots.rs
+assertion_line: 117
 expression: "normalize_text(&run_stdout(&[\"--help\"]))"
 ---
 sniff 0.1.0
@@ -9,6 +10,7 @@ Usage: sniff [OPTIONS] [COMMAND]
 
   -b, --base <BASE>  Base directory for filesystem analysis
       --json         Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
+      --perf         Include structured performance timings and counters in the output
   -v, --verbose...   Increase output verbosity
       --plain        Strip terminal escape codes from text output
   -h, --help         Print help
@@ -35,10 +37,11 @@ Commands:
     sniff blast-radius    Find docs affected by changed source files
 
   Programs:
-    sniff programs        Show all installed programs
-    sniff editors         Show editors (supports 'install' subcommand)
-    sniff utilities       Show utilities
-    sniff agents          Show AI agent CLI tools
+    sniff programs                        Show all installed programs
+    sniff programs install-plan <name>    Explain how a program would be installed
+    sniff editors                         Show editors (supports 'install' and 'install-plan')
+    sniff utilities                       Show utilities
+    sniff agents                          Show AI agent CLI tools
 
   Services:
     sniff services        Show running services

@@ -1,18 +1,18 @@
 pub mod atomic;
 pub(crate) mod backup;
-pub mod migration;
-pub mod claudine_config;
 mod claude;
+pub mod claudine_config;
 mod codex;
 mod gemini;
 mod goose;
 mod kimicode;
+pub mod migration;
 mod opencode;
 mod qwen;
 mod roo;
 mod trait_def;
 
-pub use trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
+pub use trait_def::{AgentConfigurator, ProviderHookPlan, RegistrationResult, SkipReason};
 
 use std::path::PathBuf;
 

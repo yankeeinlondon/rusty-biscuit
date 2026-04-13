@@ -4,7 +4,7 @@ use std::path::Path;
 
 use biscuit_file::serde_yaml_ng;
 use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
@@ -16,6 +16,7 @@ use crate::permissions::canonical::{
 };
 use crate::permissions::change::{PolicyChange, PolicyChangeOp, PolicyPersistence};
 use crate::permissions::context::{CliPolicyInput, PolicyContext};
+use crate::permissions::json_utils::ensure_json_value;
 use crate::permissions::mutation::{
     ConfigEditPlan, OneShotMutationPlan, PersistentMutationPlan, PolicyMutationPlan,
 };
@@ -438,19 +439,18 @@ impl ProviderPolicyBackend for RooPolicyBackend {
                         matches!(mode, CanonicalApprovalMode::AlwaysAsk),
                     ));
                 }
-                _ => supported = false,
+                _ => {
+                    supported = false;
+                    break;
+                }
             }
         }
 
-        let mut warnings = Vec::new();
         if !supported {
-            warnings.push(PolicyWarning {
-                code: "unsupported_roo_mutation".to_owned(),
-                message:
-                    "Roo mutation planning only supports `SetApprovalMode` until more stable edit targets are modeled."
-                        .to_owned(),
-                source_id: None,
-            });
+            return Ok(PolicyMutationPlan::unsupported(
+                Provider::RooCode,
+                "Roo mutation planning only supports `SetApprovalMode` until more stable edit targets are modeled.",
+            ));
         }
 
         let one_shot_plan = build_one_shot_plan(change);
@@ -473,8 +473,8 @@ impl ProviderPolicyBackend for RooPolicyBackend {
                 })
             },
             one_shot_plan,
-            warnings,
-            supported,
+            warnings: Vec::new(),
+            supported: true,
         })
     }
 }
@@ -933,21 +933,6 @@ fn build_one_shot_plan(change: &PolicyChange) -> Option<OneShotMutationPlan> {
         env: BTreeMap::new(),
         fidelity: crate::permissions::MappingFidelity::Approximate,
     })
-}
-
-fn ensure_json_value<'a>(root: &'a mut Value, path: &[&str]) -> &'a mut Value {
-    let mut current = root;
-    for key in path {
-        if !current.is_object() {
-            *current = Value::Object(Map::new());
-        }
-        current = current
-            .as_object_mut()
-            .expect("object")
-            .entry((*key).to_owned())
-            .or_insert(Value::Null);
-    }
-    current
 }
 
 #[cfg(test)]

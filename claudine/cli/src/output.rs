@@ -1,7 +1,11 @@
+pub(crate) mod error_report;
+pub(crate) mod shell_expansion_error;
+
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+use biscuit_terminal::discovery::eval::strip_ansi_codes;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
 use biscuit_terminal::utils::layout::WordWrap;
@@ -21,6 +25,18 @@ pub(crate) enum ComposeDisplay {
     Compose,
     /// Inline composition (`claudine inline-compose`).
     InlineCompose,
+}
+
+fn trim_trailing_blank_rendered_lines(rendered: &str) -> String {
+    let mut lines: Vec<&str> = rendered.lines().collect();
+    while let Some(last) = lines.last() {
+        if strip_ansi_codes(last).trim().is_empty() {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
+    lines.join("\n")
 }
 
 /// Print the one-line header: `Claudine ▸ Provider [badges] prompt`
@@ -134,7 +150,6 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
     log::message(&Prose::new("<bold>Agent Prompt:</bold>").render(term));
-    log::message("");
 
     let display_text = if verbose {
         prompt.to_string()
@@ -168,7 +183,7 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
     // Wrap in a BlockQuote with green border, left margin, and no additional
     // word wrapping (Darkmatter already wrapped to the correct width).
     let mut block = BlockQuote::new(
-        RenderableContent::from(rendered.trim_end().to_string()),
+        RenderableContent::from(trim_trailing_blank_rendered_lines(&rendered)),
         None::<&str>,
     )
     .with_left_block_color(Color::Tailwind(Tailwind::Green700))
@@ -188,6 +203,91 @@ pub(crate) fn log_compose_prompt(prompt: &str, verbose: bool, term: &Terminal) {
             .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
             .render(term),
         );
+    }
+}
+
+pub(crate) fn log_system_prompt(
+    effective_sp: &claudine::system_prompt::EffectiveSystemPrompt,
+    verbose: bool,
+    silent: bool,
+    quiet: bool,
+    term: &Terminal,
+) {
+    use biscuit_terminal::utils::color::{Color, Tailwind};
+    use darkmatter::markdown::Markdown;
+    use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
+
+    if silent {
+        return;
+    }
+
+    match effective_sp {
+        claudine::system_prompt::EffectiveSystemPrompt::None => {
+            if verbose && !quiet {
+                let mut block = BlockQuote::new(
+                    RenderableContent::from("the system prompt has not been modified".to_string()),
+                    None::<&str>,
+                )
+                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
+                .with_border("▌ ");
+                block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                log::message(&block.render(term));
+            }
+        }
+        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source: _ } => {
+            if verbose && !quiet {
+                let mut block = BlockQuote::new(
+                    RenderableContent::from("the system prompt has been disabled".to_string()),
+                    None::<&str>,
+                )
+                .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
+                .with_border("▌ ");
+                block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                block.layout_mut().right_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
+                log::message(&block.render(term));
+            }
+        }
+        claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
+            let variant_label = match prepared.mode {
+                claudine::system_prompt::SystemPromptMode::Append => "appended",
+                claudine::system_prompt::SystemPromptMode::Replace => "replaced",
+            };
+            log::message(
+                &Prose::new(format!(
+                    "<bold>System Prompt(<dim><i>{variant_label}</i></dim>):</bold>"
+                ))
+                .render(term),
+            );
+
+            let full_text = &prepared.composed_markdown;
+
+            let left_margin: u16 = 2;
+            let right_margin: u16 = 2;
+            let border_width: u16 = 2;
+            let content_width = (term.width() as u16)
+                .saturating_sub(border_width)
+                .saturating_sub(left_margin)
+                .saturating_sub(right_margin);
+            let mut opts = TerminalOptions::default();
+            opts.max_width = Some(content_width);
+            let rendered = match for_terminal(&Markdown::new(full_text.trim()), opts) {
+                Ok(r) => r,
+                Err(_) => full_text.clone(),
+            };
+
+            let mut block = BlockQuote::new(
+                RenderableContent::from(trim_trailing_blank_rendered_lines(&rendered)),
+                None::<&str>,
+            )
+            .with_left_block_color(Color::Tailwind(Tailwind::Orange700))
+            .with_border("▌ ");
+            block.layout_mut().left_margin =
+                biscuit_terminal::utils::layout::Margin::Chars(left_margin as u32);
+            block.layout_mut().right_margin =
+                biscuit_terminal::utils::layout::Margin::Chars(right_margin as u32);
+            log::message(&block.render(term));
+        }
     }
 }
 
@@ -325,7 +425,11 @@ pub(crate) fn log_dry_run(
 
 pub(crate) fn summarize_value(key: &str, value: &str) -> String {
     if key == "AGENT_PARAMS" && value.len() > 120 {
-        return format!("{}...", &value[..117]);
+        let mut end = 117;
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        return format!("{}...", &value[..end]);
     }
     value.to_string()
 }
@@ -338,13 +442,6 @@ pub(crate) fn package_name_display(env_plan: &EnvPlan) -> Option<String> {
         "{package} <dim>(area: {})</dim>",
         package_context.package_area
     ))
-}
-
-pub(crate) fn opencode_non_interactive_model_hint() -> String {
-    "<bold><blue>Info:</blue></bold> Opencode requires a model be specified when run in \
-     non-interactive mode. You can specify with the --model switch or set either OPENCODE_MODEL \
-     or MODEL environment variables."
-        .to_string()
 }
 
 pub(crate) fn repo_flag_info_message(
@@ -718,17 +815,31 @@ pub(crate) fn capitalize_provider(provider: Provider) -> String {
     }
 }
 
-/// Try to reformat a raw API error line (e.g. `API Error: 529 {"type":"error",...}`)
-/// into a human-readable message. Returns `None` if the line doesn't match.
+/// Try to reformat a raw error line into a human-readable message.
+///
+/// Recognizes multiple patterns:
+/// - `API Error: NNN {json}` — provider API errors with structured JSON
+/// - `error: {message}` — generic CLI errors
+/// - `Error: {message}` — capitalised generic errors
+/// - `fatal: {message}` — fatal errors
+/// - Lines containing `unrecognized argument`, `unknown flag`, `missing required argument`
+///
+/// Returns `None` if the line doesn't match any known pattern.
 pub(crate) fn try_format_api_error(line: &str, term: &Terminal) -> Option<String> {
-    // Match pattern: "API Error: NNN {json}" or "API Error: NNN ..." at minimum
+    if let Some(result) = try_format_structured_api_error(line, term) {
+        return Some(result);
+    }
+
+    try_format_cli_error(line, term)
+}
+
+/// Format structured API error JSON (e.g. `API Error: 529 {"type":"error",...}`).
+fn try_format_structured_api_error(line: &str, term: &Terminal) -> Option<String> {
     let rest = line.strip_prefix("API Error: ")?;
 
-    // Extract status code
     let (status_str, json_part) = rest.split_once(' ')?;
     let status: u16 = status_str.parse().ok()?;
 
-    // Try to parse the JSON for a friendly message
     let friendly = if let Ok(obj) = serde_json::from_str::<serde_json::Value>(json_part) {
         let error_type = obj
             .get("error")
@@ -746,7 +857,6 @@ pub(crate) fn try_format_api_error(line: &str, term: &Terminal) -> Option<String
             "<red><bold>API Error ({status}):</bold></red> {message}"
         )];
 
-        // Add context for known error types
         match error_type {
             "overloaded_error" => {
                 parts.push("<dim>The API is temporarily overloaded. This is usually transient — retrying the command may succeed.</dim>".to_string());
@@ -759,6 +869,30 @@ pub(crate) fn try_format_api_error(line: &str, term: &Terminal) -> Option<String
                     "<dim>Rate limit exceeded. Wait a moment before retrying.</dim>".to_string(),
                 );
             }
+            "authentication_error" => {
+                parts.push(
+                    "<dim>Authentication failed. Check your API key and provider credentials.</dim>"
+                        .to_string(),
+                );
+            }
+            "permission_error" | "forbidden_error" => {
+                parts.push(
+                    "<dim>Permission denied. The API key may not have access to this resource or model.</dim>"
+                        .to_string(),
+                );
+            }
+            "invalid_request_error" => {
+                parts.push(
+                    "<dim>The request was malformed. Check prompt length and parameter values.</dim>"
+                        .to_string(),
+                );
+            }
+            "not_found_error" => {
+                parts.push(
+                    "<dim>The requested resource (model, thread, etc.) was not found.</dim>"
+                        .to_string(),
+                );
+            }
             _ => {}
         }
 
@@ -768,7 +902,6 @@ pub(crate) fn try_format_api_error(line: &str, term: &Terminal) -> Option<String
 
         parts.join("\n")
     } else {
-        // Not valid JSON, just format the raw message
         format!(
             "<red><bold>API Error ({status}):</bold></red> {}",
             json_part.trim()
@@ -778,10 +911,44 @@ pub(crate) fn try_format_api_error(line: &str, term: &Terminal) -> Option<String
     Some(Prose::new(friendly).render(term))
 }
 
+/// Format common CLI error patterns that are not API JSON errors.
+///
+/// Recognised line-start prefixes (`error: `, `Error: `, `fatal: `) are stripped
+/// from the rendered body so that the styled `Error:` label added by this
+/// function is not doubled with a plain-text `error:` already inside the line.
+fn try_format_cli_error(line: &str, term: &Terminal) -> Option<String> {
+    let lower = line.to_lowercase();
+
+    let stripped_prefix = line
+        .strip_prefix("error: ")
+        .or_else(|| line.strip_prefix("Error: "))
+        .or_else(|| line.strip_prefix("fatal: "));
+
+    let is_cli_error = stripped_prefix.is_some()
+        || lower.contains("unrecognized argument")
+        || lower.contains("unknown flag")
+        || lower.contains("unknown option")
+        || lower.contains("unexpected argument")
+        || lower.contains("missing required argument")
+        || lower.contains("required argument")
+        || lower.contains("the following required arguments were not provided")
+        || lower.contains("permission denied")
+        || lower.contains("not authorized")
+        || lower.contains("authentication failed");
+
+    if !is_cli_error {
+        return None;
+    }
+
+    let body = stripped_prefix.unwrap_or(line);
+    Some(Prose::new(format!("<red><bold>Error:</bold></red> {body}")).render(term))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use biscuit_terminal::terminal::Terminal;
+    use proptest::prelude::*;
 
     /// Create a Terminal without real terminal probing (avoids TTY hangs in tests).
     fn test_terminal() -> Terminal {
@@ -812,7 +979,83 @@ mod tests {
     fn try_format_api_error_returns_none_for_non_match() {
         let term = test_terminal();
         assert!(try_format_api_error("some random line", &term).is_none());
-        assert!(try_format_api_error("Error: something", &term).is_none());
+        assert!(try_format_api_error("completely unrelated output", &term).is_none());
+    }
+
+    #[test]
+    fn try_format_api_error_catches_error_prefix() {
+        let term = test_terminal();
+        let result = try_format_api_error("Error: something went wrong", &term);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("something went wrong"));
+    }
+
+    #[test]
+    fn try_format_api_error_catches_unknown_flag() {
+        let term = test_terminal();
+        let result = try_format_api_error("error: unrecognized argument '--foo'", &term);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn try_format_api_error_catches_missing_required() {
+        let term = test_terminal();
+        let result = try_format_api_error(
+            "error: the following required arguments were not provided:",
+            &term,
+        );
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn try_format_cli_error_strips_lowercase_error_prefix() {
+        let term = test_terminal();
+        let rendered = try_format_api_error("error: unrecognized argument '--foo'", &term).unwrap();
+        let plain = strip_ansi_codes(&rendered);
+
+        assert!(
+            !plain.to_lowercase().contains("error: error:"),
+            "styled label must not duplicate the stripped prefix: {plain}"
+        );
+        assert!(
+            plain.contains("unrecognized argument '--foo'"),
+            "body should still include the underlying message: {plain}"
+        );
+    }
+
+    #[test]
+    fn try_format_cli_error_strips_capital_error_prefix() {
+        let term = test_terminal();
+        let rendered = try_format_api_error("Error: something went wrong", &term).unwrap();
+        let plain = strip_ansi_codes(&rendered);
+
+        assert!(
+            !plain.contains("Error: Error:"),
+            "styled label must not duplicate the stripped prefix: {plain}"
+        );
+        assert!(plain.contains("something went wrong"));
+    }
+
+    #[test]
+    fn try_format_cli_error_strips_fatal_prefix() {
+        let term = test_terminal();
+        let rendered = try_format_api_error("fatal: boom", &term).unwrap();
+        let plain = strip_ansi_codes(&rendered);
+
+        assert!(!plain.contains("Error: fatal:"));
+        assert!(!plain.contains("fatal: fatal:"));
+        assert!(plain.contains("boom"));
+    }
+
+    #[test]
+    fn try_format_cli_error_keeps_line_when_prefix_not_at_start() {
+        // Lines without a known start-of-line prefix are forwarded verbatim
+        // after the styled label (no stripping).
+        let term = test_terminal();
+        let rendered = try_format_api_error("unknown flag --bar", &term).unwrap();
+        let plain = strip_ansi_codes(&rendered);
+
+        assert!(plain.contains("unknown flag --bar"));
     }
 
     #[test]
@@ -867,6 +1110,15 @@ mod tests {
     }
 
     #[test]
+    fn trim_trailing_blank_rendered_lines_removes_plain_and_ansi_blank_lines() {
+        let rendered = "first\nsecond\n\x1b[32m\x1b[0m\n\n";
+        assert_eq!(
+            trim_trailing_blank_rendered_lines(rendered),
+            "first\nsecond"
+        );
+    }
+
+    #[test]
     fn truncate_args_respects_char_boundaries() {
         // Multi-byte chars: each é is 2 bytes
         let args = "ééééééééééé";
@@ -884,5 +1136,28 @@ mod tests {
             &term,
         );
         assert!(rendered.contains('\n'));
+    }
+
+    #[test]
+    fn style_cli_switches_only_wraps_switch_tokens() {
+        let styled = style_cli_switches("Use --plain or -v but do not touch email@example.com.");
+        assert!(styled.contains("<blue>--plain</blue>"));
+        assert!(styled.contains("<blue>-v</blue>"));
+        assert!(styled.contains("email@example.com"));
+    }
+
+    proptest! {
+        #[test]
+        fn truncate_args_respects_budget_for_arbitrary_utf8(input in any::<String>(), budget in 0usize..128) {
+            let truncated = truncate_args(&input, budget);
+
+            if input.len() > budget && budget <= 4 {
+                prop_assert_eq!(truncated.as_str(), "...\"");
+            } else {
+                prop_assert!(truncated.len() <= budget);
+            }
+
+            prop_assert!(std::str::from_utf8(truncated.as_bytes()).is_ok());
+        }
     }
 }

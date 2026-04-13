@@ -64,6 +64,38 @@ pub fn is_source_code_path(path: &Path) -> bool {
     false
 }
 
+/// Returns `true` if the path refers to a documentation file.
+///
+/// Classification uses the file-type registry (exact filename match, then
+/// extension match). Paths whose association is `Documentation` are considered
+/// documentation. This includes bare filenames like `README`, `CHANGELOG`,
+/// and `CONTRIBUTING` (without extension) as well as extension-based matches.
+pub fn is_documentation_path(path: &Path) -> bool {
+    let file_name = match path.file_name().and_then(|n| n.to_str()) {
+        Some(name) => name,
+        None => return false,
+    };
+
+    if let Some(desc) = lookup_exact_filename(file_name)
+        && matches!(desc.association, FileAssociation::Documentation)
+    {
+        return true;
+    }
+
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let lower = ext.to_ascii_lowercase();
+        if matches!(lower.as_str(), "md" | "mdx" | "rst" | "txt" | "adoc") {
+            return true;
+        }
+
+        if let Some(desc) = lookup_extension(ext) {
+            return matches!(desc.association, FileAssociation::Documentation);
+        }
+    }
+
+    false
+}
+
 // ---------------------------------------------------------------------------
 // Changed-path collection
 // ---------------------------------------------------------------------------
@@ -410,6 +442,75 @@ mod tests {
         #[test]
         fn yaml_is_not_source_code() {
             assert!(!is_source_code_path(&PathBuf::from("config.yaml")));
+        }
+    }
+
+    mod documentation_detection {
+        use super::*;
+
+        #[test]
+        fn markdown_file_is_documentation() {
+            assert!(is_documentation_path(&PathBuf::from("docs/README.md")));
+        }
+
+        #[test]
+        fn mdx_file_is_documentation() {
+            assert!(is_documentation_path(&PathBuf::from("docs/guide.mdx")));
+        }
+
+        #[test]
+        fn rst_file_is_documentation() {
+            assert!(is_documentation_path(&PathBuf::from("docs/index.rst")));
+        }
+
+        #[test]
+        fn txt_file_is_documentation() {
+            assert!(is_documentation_path(&PathBuf::from("LICENSE.txt")));
+        }
+
+        #[test]
+        fn adoc_file_is_documentation() {
+            assert!(is_documentation_path(&PathBuf::from("docs/guide.adoc")));
+        }
+
+        #[test]
+        fn bare_readme_is_documentation() {
+            assert!(is_documentation_path(&PathBuf::from("README")));
+        }
+
+        #[test]
+        fn bare_changelog_is_documentation() {
+            assert!(is_documentation_path(&PathBuf::from("CHANGELOG")));
+        }
+
+        #[test]
+        fn bare_contributing_is_documentation() {
+            assert!(is_documentation_path(&PathBuf::from("CONTRIBUTING")));
+        }
+
+        #[test]
+        fn readme_md_is_documentation() {
+            assert!(is_documentation_path(&PathBuf::from("readme.md")));
+        }
+
+        #[test]
+        fn changelog_md_is_documentation() {
+            assert!(is_documentation_path(&PathBuf::from("changelog.md")));
+        }
+
+        #[test]
+        fn rust_file_is_not_documentation() {
+            assert!(!is_documentation_path(&PathBuf::from("src/lib.rs")));
+        }
+
+        #[test]
+        fn json_is_not_documentation() {
+            assert!(!is_documentation_path(&PathBuf::from("package.json")));
+        }
+
+        #[test]
+        fn png_is_not_documentation() {
+            assert!(!is_documentation_path(&PathBuf::from("images/logo.png")));
         }
     }
 

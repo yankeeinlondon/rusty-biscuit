@@ -40,10 +40,16 @@ pub fn run() -> Result<()> {
     table.layout_mut().left_margin = Margin::Chars(1);
 
     for provider in PROVIDERS_DISPLAY_ORDER {
-        let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
-        let provider_cell: TableCellContent = Prose::new(provider_link)
-            .render(&crate::log::optimistic_terminal(None))
-            .into();
+        let provider_cell: TableCellContent = if crate::log::is_plain()
+            || std::env::var_os("NO_COLOR").is_some()
+        {
+            provider.to_string().into()
+        } else {
+            let provider_link = format!(r#"<a href="{}">{}</a>"#, provider.docs_url(), provider);
+            Prose::new(provider_link)
+                .render(&crate::log::optimistic_terminal(None))
+                .into()
+        };
 
         table.add_row(vec![
             provider_cell,

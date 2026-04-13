@@ -36,8 +36,7 @@ use super::{
     StructuredSummaryDetails, WrapperHarnessPermissionProbe,
     build_harness_shell_options_with_cache, emit_stream_summary_no_separator_with_context,
     emit_stream_summary_with_context, materialized_harness_prompt_from_prepared,
-    resolve_binary_path, run_harness_loop, strip_prompt_from_args, structured_verbosity,
-    switch_process_cwd, wrap_terminal,
+    resolve_binary_path, run_harness_loop, structured_verbosity, switch_process_cwd, wrap_terminal,
 };
 use crate::log;
 
@@ -359,8 +358,10 @@ pub(crate) fn execute_composition_request_inner(
         // Note: yolo support already consumed at env_plan build time
     }
 
+    profile.apply_entrypoint(&mut child_args, effective_non_interactive);
+
     if effective_non_interactive {
-        profile.apply_non_interactive(&mut child_args)?;
+        profile.apply_non_interactive_flags(&mut child_args)?;
         // Only apply default model if --model was not explicitly provided.
         if request.model.is_none() {
             profile.apply_non_interactive_defaults(&mut child_args);
@@ -385,6 +386,18 @@ pub(crate) fn execute_composition_request_inner(
         }
     }
 
+    if provider == Provider::OpenCode
+        && effective_non_interactive
+        && request.model.is_none()
+        && let Some(model) = super::model_value_from_args(&child_args)
+    {
+        env_plan.env.insert("MODEL".into(), model.into());
+    }
+
+    if effective_non_interactive {
+        profile.validate_non_interactive_requirements(&child_args)?;
+    }
+
     // Universal --output flag
     if let Some(ref output_str) = request.output {
         let format: super::profile::OutputFormat = (*output_str).into();
@@ -403,22 +416,18 @@ pub(crate) fn execute_composition_request_inner(
             package_area_root: None,
             package_root: None,
         });
-    let effective_sp =
-        claudine::system_prompt::resolve_and_prepare(&request.system_prompt_args, &launch_context)
-            .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
+        &request.system_prompt_args,
+        &launch_context,
+        effective_non_interactive,
+    )
+    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
 
     let mut sp_artifacts: Vec<super::system_prompt::SystemPromptArtifact> = Vec::new();
 
     match &effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::None => {}
-        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source } => {
-            if !quiet && !silent {
-                log::info(&format!(
-                    "system prompt disabled by empty {}",
-                    super::system_prompt::describe_source(source),
-                ));
-            }
-        }
+        claudine::system_prompt::EffectiveSystemPrompt::None
+        | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
             let application =
                 profile.apply_system_prompt(prepared, !effective_non_interactive, &launch_cwd)?;
@@ -487,6 +496,11 @@ pub(crate) fn execute_composition_request_inner(
     // task body and may stop parsing subsequent flags. Appending the prompt too
     // early can silently disable structured-output flags, leaving Claudine
     // waiting forever for a stream the provider never enters.
+    //
+    // Snapshot args before prompt delivery so the harness loop gets a
+    // prompt-free base (the harness manages prompt delivery itself).
+    let args_before_prompt = child_args.clone();
+    let prompt_source = super::profile::PromptSource::Inline(effective_prompt.clone());
     let stdin_seed = profile
         .prompt_delivery(&child_args, &effective_prompt, effective_non_interactive)?
         .apply_to(&mut child_args);
@@ -494,7 +508,11 @@ pub(crate) fn execute_composition_request_inner(
     let effective_repo_root = source_repo_root.or(env_plan.repo_root.as_deref());
     let child_cwd = env_plan.child_cwd.as_path();
 
-    profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
+    super::profile::require_prompt_present(
+        profile.binary(),
+        effective_non_interactive,
+        &prompt_source,
+    )?;
 
     let sp_display_lines = super::system_prompt::describe_effective(&effective_sp);
 
@@ -529,7 +547,6 @@ pub(crate) fn execute_composition_request_inner(
     let shell_options = build_harness_shell_options_with_cache(
         &request.prepared.resolved_path,
         effective_repo_root,
-        request.session_interactive,
         request.shared_approval_cache.clone(),
     );
 
@@ -547,8 +564,11 @@ pub(crate) fn execute_composition_request_inner(
             },
         )
     } else {
-        match claudine::dispatch::loader::load_runtime_config(None, effective_repo_root) {
-            Ok(config) => (config.settings().clone(), config.messaging().clone()),
+        match claudine::dispatch::loader::load_claudine_config(None, effective_repo_root) {
+            Ok(config) => (
+                claudine::dispatch::loader::bridge_tts_settings(&config),
+                claudine::dispatch::loader::bridge_messaging_settings(&config),
+            ),
             Err(_) => (
                 claudine::events::GlobalSettings::default(),
                 claudine::messaging::RuntimeMessagingSettings {
@@ -596,7 +616,7 @@ pub(crate) fn execute_composition_request_inner(
         }
 
         // ── Pre-flight shell approval for harness commands ───────────
-        let harness_preflight = claudine::composition::resolve_shell_approvals(
+        let _harness_preflight = claudine::composition::resolve_shell_approvals(
             None, // template commands already approved during compose
             None,
             Some(&plan),
@@ -606,13 +626,6 @@ pub(crate) fn execute_composition_request_inner(
             guard.emit_blocked_or_failure();
             eyre!("{e}")
         })?;
-
-        if !request.quiet && !request.silent && harness_preflight.total_discovered > 0 {
-            log::info(&format!(
-                "Pre-flight: {} harness shell command(s) approved",
-                harness_preflight.total_discovered,
-            ));
-        }
 
         // Plan is validated; the harness loop will re-parse if needed.
         drop(plan);
@@ -634,6 +647,23 @@ pub(crate) fn execute_composition_request_inner(
         })?;
     }
 
+    // Emit a single preflight-complete indicator for direct compose and
+    // inline-compose runs. Sequence runs handle their own preflight
+    // messaging in the orchestrator (`wrap::sequence::execute_sequence`)
+    // and must not re-emit per step.
+    if !request.sequence && !silent && !quiet {
+        let compose_label = if is_inline {
+            "inline composition"
+        } else {
+            "composition"
+        };
+        let status = Status::from_prose(format!(
+            "<b>Preflight:</b> shell commands approved for this {compose_label}"
+        ))
+        .state(StatusState::Info);
+        log::message(&status.render(&term));
+    }
+
     // -- Preflight output (env details + prompt block) ---------------------
     // The header was already emitted early (right after profile lookup).
     // Now emit the env details and prompt block with full env_plan.
@@ -645,19 +675,24 @@ pub(crate) fn execute_composition_request_inner(
     let env_context = claudine::events::detect_environment_fast(env_detect_root);
 
     if !silent {
-        // Everything below is suppressed by --quiet (consistent with direct-wrap)
         if !quiet && (request.session_interactive || detail_requested) {
             crate::output::log_wrapper_env_details(&env_plan, None, &term, verbose);
         }
 
-        // Composed prompt block: shown in non-interactive mode only.  In
-        // interactive mode the prompt is delivered into the session (via
-        // positional arg or stdin), making preamble display redundant.
+        crate::output::log_system_prompt(&effective_sp, detail_requested, silent, quiet, &term);
+
+        if matches!(
+            effective_sp,
+            claudine::system_prompt::EffectiveSystemPrompt::Ready(_)
+        ) && effective_non_interactive
+        {
+            crate::log::message("");
+        }
+
         if effective_non_interactive {
             crate::output::log_compose_prompt(&request.prepared.prompt, detail_requested, &term);
         }
 
-        // Blank line to separate preamble from execution output
         if !quiet {
             crate::log::message("");
         }
@@ -685,8 +720,7 @@ pub(crate) fn execute_composition_request_inner(
             next_resume_session_id: None,
         };
 
-        let mut harness_base_args = child_args.clone();
-        strip_prompt_from_args(provider, &mut harness_base_args);
+        let mut harness_base_args = args_before_prompt.clone();
         if !use_structured {
             profile.prepare_captured_output(&mut harness_base_args);
         }
@@ -1095,6 +1129,7 @@ fn run_structured_inline(
         None,
         stderr_noise,
         profile.suppress_structured_stderr_on_success(),
+        stream_verbosity != Verbosity::Silent,
         stdin_seed,
         parser,
         child_spawned,
@@ -1353,6 +1388,7 @@ fn execute_direct_without_harness(
             None,
             stderr_noise,
             profile.suppress_structured_stderr_on_success(),
+            stream_verbosity != Verbosity::Silent,
             stdin_seed,
             parser,
             child_spawned,
@@ -1466,8 +1502,9 @@ fn load_config_favorite(cwd: &Path) -> Option<Provider> {
         .ok()
         .flatten()
         .map(|info| info.repo_root);
-    let config = claudine::dispatch::loader::load_config(None, repo_root.as_deref()).ok()?;
-    config.settings.linking?.preference.first().copied()
+    let config =
+        claudine::dispatch::loader::load_claudine_config(None, repo_root.as_deref()).ok()?;
+    Some(config.preferred_agent)
 }
 
 // -- Legacy composition session event --------------------------------------

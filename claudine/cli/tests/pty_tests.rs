@@ -4,15 +4,8 @@ use expectrl::{Expect, Session};
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
-
-#[cfg(unix)]
-fn write_executable(path: &std::path::Path, content: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    fs::write(path, content).unwrap();
-    let mut perms = fs::metadata(path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(path, perms).unwrap();
-}
+mod common;
+use common::write_executable;
 
 #[cfg(unix)]
 #[test]

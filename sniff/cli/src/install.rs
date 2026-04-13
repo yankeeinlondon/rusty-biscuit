@@ -103,97 +103,84 @@ resolve_program!(
 resolve_program!(resolve_agent, sniff::programs::AiCli, "AI agent");
 
 // ---------------------------------------------------------------------------
-// Direct install (single program by name)
+// Cross-category resolved program type and resolver
 // ---------------------------------------------------------------------------
 
-macro_rules! direct_install_category {
-    ($name:expr, $resolve_fn:ident, $detector_type:ty) => {{
-        let program = $resolve_fn($name)?;
-        let detector = <$detector_type>::new();
-        if detector.is_installed(program) {
-            println!("{} is already installed.", program.display_name());
-            return Ok(());
-        }
-        if !detector.installable(program) {
-            return Err(
-                format!("{} is not installable on this OS.", program.display_name()).into(),
-            );
-        }
-        println!("Installing {}...", program.display_name());
-        detector.install(program)?;
-        println!("Successfully installed {}.", program.display_name());
-        Ok(())
-    }};
+/// A program identified by the name the user typed.
+#[derive(Debug, Clone, Copy)]
+pub enum ResolvedProgram {
+    Editor(sniff::programs::Editor),
+    Utility(sniff::programs::Utility),
+    LanguagePackageManager(sniff::programs::LanguagePackageManager),
+    OsPackageManager(sniff::programs::OsPackageManager),
+    TtsClient(sniff::programs::TtsClient),
+    TerminalApp(sniff::programs::TerminalApp),
+    HeadlessAudio(sniff::programs::HeadlessAudio),
+    AiCli(sniff::programs::AiCli),
 }
 
-pub fn direct_install(filter: OutputFilter, name: &str) -> Result<(), Box<dyn Error>> {
+/// Resolve a program name scoped to a specific output filter category.
+///
+/// For `OutputFilter::Programs`, falls back to the cross-category
+/// [`resolve_program`]. For all other program filters, restricts resolution to
+/// the matching category so that error messages name the category correctly
+/// (e.g., "Unknown editor" rather than "Unknown program").
+pub fn resolve_program_in_category(
+    name: &str,
+    filter: crate::output::OutputFilter,
+) -> Result<ResolvedProgram, ResolveError> {
+    use crate::output::OutputFilter;
     match filter {
-        OutputFilter::Editors => {
-            direct_install_category!(name, resolve_editor, sniff::programs::InstalledEditors)
-        }
-        OutputFilter::Utilities => {
-            direct_install_category!(name, resolve_utility, sniff::programs::InstalledUtilities)
-        }
+        OutputFilter::Editors => resolve_editor(name).map(ResolvedProgram::Editor),
+        OutputFilter::Utilities => resolve_utility(name).map(ResolvedProgram::Utility),
         OutputFilter::LanguagePackageManagers => {
-            direct_install_category!(
-                name,
-                resolve_lang_pkg_mgr,
-                sniff::programs::InstalledLanguagePackageManagers
-            )
+            resolve_lang_pkg_mgr(name).map(ResolvedProgram::LanguagePackageManager)
         }
         OutputFilter::OsPackageManagers => {
-            direct_install_category!(
-                name,
-                resolve_os_pkg_mgr,
-                sniff::programs::InstalledOsPackageManagers
-            )
+            resolve_os_pkg_mgr(name).map(ResolvedProgram::OsPackageManager)
         }
-        OutputFilter::TtsClients => {
-            direct_install_category!(
-                name,
-                resolve_tts_client,
-                sniff::programs::InstalledTtsClients
-            )
-        }
-        OutputFilter::TerminalApps => {
-            direct_install_category!(
-                name,
-                resolve_terminal_app,
-                sniff::programs::InstalledTerminalApps
-            )
-        }
-        OutputFilter::HeadlessAudio => {
-            direct_install_category!(name, resolve_audio, sniff::programs::InstalledHeadlessAudio)
-        }
-        OutputFilter::AiClients => {
-            direct_install_category!(name, resolve_agent, sniff::programs::InstalledAiClients)
-        }
-        OutputFilter::Programs => {
-            // Search all categories, install first match
-            let categories = [
-                OutputFilter::Editors,
-                OutputFilter::Utilities,
-                OutputFilter::LanguagePackageManagers,
-                OutputFilter::OsPackageManagers,
-                OutputFilter::TtsClients,
-                OutputFilter::TerminalApps,
-                OutputFilter::HeadlessAudio,
-                OutputFilter::AiClients,
-            ];
-
-            for category in categories {
-                if direct_install(category, name).is_ok() {
-                    return Ok(());
-                }
-            }
-
-            Err(format!(
-                "Unknown program '{}'. Use a category subcommand (e.g., sniff editors install {0}) to see valid names.",
-                name
-            ).into())
-        }
-        _ => unreachable!("direct_install only called for program filters"),
+        OutputFilter::TtsClients => resolve_tts_client(name).map(ResolvedProgram::TtsClient),
+        OutputFilter::TerminalApps => resolve_terminal_app(name).map(ResolvedProgram::TerminalApp),
+        OutputFilter::HeadlessAudio => resolve_audio(name).map(ResolvedProgram::HeadlessAudio),
+        OutputFilter::AiClients => resolve_agent(name).map(ResolvedProgram::AiCli),
+        // For Programs or any other filter, fall back to cross-category search.
+        _ => resolve_program(name),
     }
+}
+
+/// Resolve a free-form program name to a specific category enum variant.
+///
+/// Tries each category in a deterministic order. Returns an error listing the
+/// categories searched if no match is found.
+pub fn resolve_program(name: &str) -> Result<ResolvedProgram, ResolveError> {
+    if let Ok(p) = resolve_editor(name) {
+        return Ok(ResolvedProgram::Editor(p));
+    }
+    if let Ok(p) = resolve_utility(name) {
+        return Ok(ResolvedProgram::Utility(p));
+    }
+    if let Ok(p) = resolve_lang_pkg_mgr(name) {
+        return Ok(ResolvedProgram::LanguagePackageManager(p));
+    }
+    if let Ok(p) = resolve_os_pkg_mgr(name) {
+        return Ok(ResolvedProgram::OsPackageManager(p));
+    }
+    if let Ok(p) = resolve_tts_client(name) {
+        return Ok(ResolvedProgram::TtsClient(p));
+    }
+    if let Ok(p) = resolve_terminal_app(name) {
+        return Ok(ResolvedProgram::TerminalApp(p));
+    }
+    if let Ok(p) = resolve_audio(name) {
+        return Ok(ResolvedProgram::HeadlessAudio(p));
+    }
+    if let Ok(p) = resolve_agent(name) {
+        return Ok(ResolvedProgram::AiCli(p));
+    }
+    Err(ResolveError(format!(
+        "Unknown program '{}'. Searched categories: editors, utilities, language package managers, OS package managers, TTS clients, terminal apps, headless audio, AI agents",
+        name
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -408,5 +395,29 @@ mod tests {
     fn resolve_agent_by_snake_case() {
         let agent = resolve_agent("claude").unwrap();
         assert_eq!(agent, sniff::programs::AiCli::Claude);
+    }
+
+    #[test]
+    fn resolve_program_editor_by_binary() {
+        let resolved = resolve_program("vim").unwrap();
+        assert!(matches!(
+            resolved,
+            ResolvedProgram::Editor(sniff::programs::Editor::Vim)
+        ));
+    }
+
+    #[test]
+    fn resolve_program_utility_alternate() {
+        let resolved = resolve_program("rg").unwrap();
+        assert!(matches!(
+            resolved,
+            ResolvedProgram::Utility(sniff::programs::Utility::Ripgrep)
+        ));
+    }
+
+    #[test]
+    fn resolve_program_unknown_name_errors() {
+        let err = resolve_program("definitely-not-a-real-program-xyz").unwrap_err();
+        assert!(err.to_string().contains("Unknown program"));
     }
 }

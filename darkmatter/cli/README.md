@@ -102,6 +102,12 @@ md compose README.md --state '{"name":"Alice","env":"prod"}'
 # JSON5 is also accepted (unquoted keys, trailing commas)
 md compose README.md --state '{name: "Alice", env: "prod"}'
 
+# Override values with shorthand setters
+md compose README.md iteration=1 draft=false name=Alice
+
+# Shorthand setters can appear before the input path too
+md compose iteration=1 README.md
+
 # Include frontmatter in output
 md compose README.md --fm
 
@@ -111,7 +117,15 @@ echo "# Hello {{ name }}" | md compose - --state '{"name":"Alice"}'
 # Render compose output as HTML or JSON
 md compose README.md --output html
 md compose README.md --output json
+
+# Adjust shell command timeouts during compose
+md compose README.md --timeout 3
+
+# Convert timed out shell commands into empty strings and warnings
+md compose README.md --timeout 3 --allow-shell-timeout
 ```
+
+During `compose`, Darkmatter supports both body `::shell ...` directives and top-level frontmatter `$(...)` expressions. Both use the same whitelist/blacklist and approval flow. Frontmatter shell expansion stores trimmed `stdout` only; body shell expansion stores combined `stdout` + `stderr`.
 
 ### Frontmatter Set
 

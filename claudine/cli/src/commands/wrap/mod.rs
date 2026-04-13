@@ -182,30 +182,38 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
 pub(crate) fn build_harness_shell_options(
     source_path: &Path,
     repo_root: Option<&Path>,
-    interactive: bool,
 ) -> claudine::harness::ShellApprovalOptions {
-    build_harness_shell_options_with_cache(source_path, repo_root, interactive, None)
+    build_harness_shell_options_with_cache(source_path, repo_root, None)
 }
 
 /// Build shell approval options, optionally reusing a shared approval
 /// cache. Callers like the sequence orchestrator pass a shared cache so
 /// that "allow once" approvals from earlier steps carry over to later
 /// ones for the duration of the sequence run.
+///
+/// The interactive approval handler is installed whenever the process
+/// can actually prompt — i.e. stdin and stderr are both TTYs. This is
+/// independent of whether the spawned agent runs in interactive mode:
+/// shell approval happens during preflight, before any agent is launched,
+/// so there is no TTY contention. Non-TTY environments (CI, piped input)
+/// get no handler and unapproved commands hard-fail as before.
 pub(crate) fn build_harness_shell_options_with_cache(
     source_path: &Path,
     repo_root: Option<&Path>,
-    interactive: bool,
     shared_cache: Option<claudine::composition::SharedApprovalCache>,
 ) -> claudine::harness::ShellApprovalOptions {
+    let approval_handler: Option<
+        std::sync::Arc<dyn darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler>,
+    > = if darkmatter_cli::approval::can_prompt_interactively() {
+        Some(std::sync::Arc::new(
+            darkmatter_cli::approval::CliShellApprovalHandler,
+        ))
+    } else {
+        None
+    };
     let mut opts = claudine::harness::ShellApprovalOptions {
         policy_root: harness_policy_root(source_path, repo_root),
-        approval_handler: if interactive {
-            Some(std::sync::Arc::new(
-                darkmatter_cli::approval::CliShellApprovalHandler,
-            ))
-        } else {
-            None
-        },
+        approval_handler,
         ..Default::default()
     };
     if let Some(cache) = shared_cache {
@@ -748,6 +756,70 @@ pub(crate) fn wrap_terminal() -> Terminal {
     crate::log::terminal()
 }
 
+/// Shared startup detection results for the direct wrap path.
+///
+/// Populated by a single `sniff::detect_with_plan` call and consumed by
+/// three independent downstream structures that would otherwise each
+/// trigger their own full repo walk.
+pub(crate) struct WrapStartupDetection {
+    pub(crate) env_context: EnvironmentContext,
+    pub(crate) launch_context: claudine::system_prompt::LaunchContext,
+    pub(crate) launch_workspace: env::LaunchWorkspaceContext,
+}
+
+/// Run one sniff-based filesystem scan and build every startup context
+/// the direct wrap path needs from the shared result.
+///
+/// On a cold filesystem cache in a large monorepo the previous pipeline
+/// walked the tree 3-5 times (once in `detect_environment_fast`, once in
+/// `LaunchContext::from_cwd`, and twice inside `build_child_env`). This
+/// helper collapses that into a single scan and then builds the three
+/// consumer contexts from borrowed data, falling back to empty contexts
+/// on detection errors so startup never blocks on an unrelated failure.
+pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
+    use sniff::request::*;
+
+    let plan = DetectionPlan::new()
+        .base_dir(cwd.to_path_buf())
+        .without_os()
+        .without_hardware()
+        .without_network()
+        .filesystem(
+            FilesystemRequest::new()
+                .git(GitRequest::summary())
+                .repo(RepoRequest::structure())
+                .without_file_inventory()
+                .without_docs()
+                .without_formatting(),
+        );
+
+    let result = sniff::detect_with_plan(plan).unwrap_or_default();
+
+    let launch_context = claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
+
+    let (git_root, repo) = result
+        .filesystem
+        .as_ref()
+        .map(|f| {
+            (
+                f.git.as_ref().map(|g| g.repo_root.clone()),
+                f.repo.as_ref().cloned(),
+            )
+        })
+        .unwrap_or((None, None));
+
+    let launch_workspace =
+        env::launch_workspace_context_from_repo_info(cwd, git_root.as_deref(), repo.as_ref());
+
+    let env_context = claudine::events::environment_context_from_sniff_result(result);
+
+    WrapStartupDetection {
+        env_context,
+        launch_context,
+        launch_workspace,
+    }
+}
+
 pub(crate) fn switch_process_cwd(child_cwd: &Path) -> Result<()> {
     let current = std::env::current_dir()?;
     if current != child_cwd {
@@ -803,6 +875,22 @@ fn has_explicit_native_output_request(provider: Provider, args: &[String]) -> bo
 }
 
 /// Shared wrapper args for provider subcommands.
+///
+/// Boolean flags like `--yolo`, `--interactive`, `--quiet`, `--silent`,
+/// `--verbose`, and `--repo` are declared here for clap to parse AND also
+/// extracted from the passthrough bucket by `extract_wrapper_flags_from_passthrough`.
+/// The two sources are OR-merged so flags work whether placed on either side of
+/// the first positional argument. This avoids bug #2.2 (dual-source truth) by
+/// keeping clap as the primary parser while the passthrough extractor serves as
+/// a fallback for flags that land after `trailing_var_arg` has started capturing.
+///
+/// The extractor honours the POSIX `--` convention: anything on or after the
+/// first `--` separator is treated as opaque agent arguments and is never
+/// rewritten by Claudine, even when it collides with a Claudine flag name. See
+/// `find_passthrough_dash_boundary` for the detection strategy.
+///
+/// Unknown flags (belonging to the underlying agent) flow into `passthrough`
+/// thanks to `ignore_errors(true)` on wrapper subcommands (see `parse_cli`).
 #[derive(Debug, Clone, Args)]
 pub struct WrapperArgs {
     /// Print help for this wrapper command.
@@ -855,7 +943,7 @@ pub struct WrapperArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Show only the header line; suppress env details and info messages.
+    /// Suppress env details and info messages, but still show the system prompt when set.
     #[arg(short = 'q', long)]
     pub quiet: bool,
 
@@ -888,6 +976,10 @@ pub struct WrapperArgs {
     pub strict: bool,
 
     /// Arguments forwarded to the wrapped provider CLI.
+    ///
+    /// Because wrapper subcommands use `ignore_errors(true)` (see `parse_cli`
+    /// in main.rs), unknown flags from the underlying agent CLI land here
+    /// instead of causing a clap error.
     #[arg(
         value_name = "ARGS",
         num_args = 0..,
@@ -904,18 +996,34 @@ pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs, verbose: u8) 
         return Ok(());
     }
 
-    let code = match run_provider_wrapper_inner(provider, args, verbose) {
-        Ok(code) => code,
+    let (code, stderr_capture) = match run_provider_wrapper_inner(provider, args, verbose) {
+        Ok((code, stderr)) => (code, stderr),
         Err(error) => {
-            log::error(&error.to_string());
-            1
+            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
+                log::error(&error.to_string());
+            }
+            (1, None)
         }
     };
+
+    if code != 0 {
+        let term = wrap_terminal();
+        let report = crate::output::error_report::AgentErrorReport::from_exit_code(
+            provider,
+            code,
+            stderr_capture.as_deref(),
+        );
+        report.render(&term);
+    }
 
     std::process::exit(code);
 }
 
-fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8) -> Result<i32> {
+fn run_provider_wrapper_inner(
+    provider: Provider,
+    args: WrapperArgs,
+    verbose: u8,
+) -> Result<(i32, Option<String>)> {
     let profile = profile::profile_for_provider(provider).ok_or_else(|| {
         eyre!(
             "'{}' cannot be wrapped (it is a VS Code extension)",
@@ -923,19 +1031,28 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         )
     })?;
     let cwd = std::env::current_dir()?;
-    let env_context = claudine::events::detect_environment_fast(&cwd);
+
+    // One sniff-based scan produces the raw git + repo-structure data that
+    // the rest of startup needs. The result is consumed by three separate
+    // consumers (EnvironmentContext, LaunchContext, LaunchWorkspaceContext)
+    // without ever walking the filesystem again — this avoids the 3-5
+    // redundant tree walks the earlier pipeline performed.
+    let startup = detect_wrap_startup(&cwd);
+    let env_context = startup.env_context;
+    let launch_context = startup.launch_context;
+    let launch_workspace = startup.launch_workspace;
+
     let term = wrap_terminal();
 
-    let clients = InstalledAiClients::new();
     let binary_path = info_span!(
         "wrapper_binary_resolution",
         provider = %provider,
     )
-    .in_scope(|| resolve_binary_path(profile, &clients))?;
+    .in_scope(|| resolve_binary_path_direct(profile))?;
 
     let raw_agent_params: Vec<String> = std::env::args().skip(2).collect();
     let mut child_args = args.passthrough.clone();
-    let extracted = extract_wrapper_flags_from_passthrough(&mut child_args);
+    let extracted = extract_wrapper_flags_from_passthrough(&mut child_args)?;
     let yolo_requested = args.yolo || extracted.yolo;
     let mut yolo_enabled = yolo_requested;
     let interactive_requested = args.interactive || extracted.interactive;
@@ -947,11 +1064,24 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
 
-    // Determine if a prompt is present (implies non-interactive by default)
-    let has_prompt = has_prompt_source(&child_args, None);
+    // In the direct-wrap path the child inherits stdin automatically —
+    // we don't need to detect or seed it. Pass false so that a non-tty
+    // test environment (or any shell running without an attached terminal)
+    // doesn't accidentally classify the session as non-interactive.
+    // Composition (Task 14) is where InheritStdin / stdin_seed matters.
+    let has_piped_stdin = false;
 
-    // Default: interactive when no prompt, non-interactive when prompt present
-    // --interactive/-i overrides the default back to interactive
+    // Extract the prompt up-front into a typed PromptSource, leaving
+    // child_args free of any prompt characters. Downstream apply_*
+    // methods see clean args; prompt_delivery is the only code path
+    // that places the prompt back in.
+    let (extracted_args, mut prompt_source) =
+        profile::extract_prompt_source_from_passthrough(profile, &child_args, has_piped_stdin)?;
+    child_args = extracted_args;
+
+    // Default: non-interactive when a prompt reaches the child, interactive
+    // otherwise. --interactive/-i overrides the default back to interactive.
+    let has_prompt = prompt_source.has_prompt_or_stdin();
     let non_interactive_requested = if interactive_requested {
         false
     } else {
@@ -982,6 +1112,21 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         ));
     }
 
+    // Prompt delivery: re-insert the inline prompt into child argv (or set
+    // stdin_seed for providers that consume it from stdin). This happens
+    // before apply_yolo so that the prompt occupies its natural position in
+    // the arg list — consistent with the ordering the old pipeline produced.
+    let effective_non_interactive = non_interactive_requested;
+    let stdin_seed: Option<String> = if let Some(prompt) = prompt_source.as_inline() {
+        profile
+            .prompt_delivery(&child_args, prompt, effective_non_interactive)?
+            .apply_to(&mut child_args)
+    } else {
+        None
+    };
+
+    profile::require_prompt_present(profile.binary(), effective_non_interactive, &prompt_source)?;
+
     profile.reject_direct_yolo(&child_args)?;
     reject_retired_composition_flags(&child_args)?;
 
@@ -992,8 +1137,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         yolo_enabled = false;
     }
 
+    profile.apply_entrypoint(&mut child_args, non_interactive_requested);
+
     if non_interactive_requested {
-        profile.apply_non_interactive(&mut child_args)?;
+        profile.apply_non_interactive_flags(&mut child_args)?;
         // Only apply default model if the user didn't pass --model explicitly
         // (apply_model handles it below when args.model is Some).
         if args.model.is_none() {
@@ -1017,8 +1164,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         env_overrides.push(("MODEL".to_string(), model));
     }
 
-    if provider == Provider::OpenCode && non_interactive_requested {
-        deferred_messages.push(crate::output::opencode_non_interactive_model_hint());
+    if non_interactive_requested {
+        profile.validate_non_interactive_requirements(&child_args)?;
     }
 
     // Universal --output flag
@@ -1033,30 +1180,18 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         append_file: args.append_system_prompt.clone(),
         replace_file: args.replace_system_prompt.clone(),
     };
-    let launch_context =
-        claudine::system_prompt::LaunchContext::from_cwd(&cwd).unwrap_or_else(|_| {
-            claudine::system_prompt::LaunchContext {
-                cwd: cwd.clone(),
-                repo_root: None,
-                package_area_root: None,
-                package_root: None,
-            }
-        });
-    let effective_sp = claudine::system_prompt::resolve_and_prepare(&sp_args, &launch_context)
-        .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
+        &sp_args,
+        &launch_context,
+        non_interactive_requested,
+    )
+    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
 
     let mut sp_artifacts: Vec<super::wrap::system_prompt::SystemPromptArtifact> = Vec::new();
 
     match &effective_sp {
-        claudine::system_prompt::EffectiveSystemPrompt::None => {}
-        claudine::system_prompt::EffectiveSystemPrompt::Disabled { source } => {
-            if !args.quiet && !args.silent {
-                log::info(&format!(
-                    "system prompt disabled by empty {}",
-                    super::wrap::system_prompt::describe_source(source),
-                ));
-            }
-        }
+        claudine::system_prompt::EffectiveSystemPrompt::None
+        | claudine::system_prompt::EffectiveSystemPrompt::Disabled { .. } => {}
         claudine::system_prompt::EffectiveSystemPrompt::Ready(prepared) => {
             let application =
                 profile.apply_system_prompt(prepared, !non_interactive_requested, &cwd)?;
@@ -1091,25 +1226,18 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     let needs_mcp_shadow_home = (args.mcp || !args.mcp_use.is_empty())
         && matches!(provider, Provider::Codex | Provider::Gemini);
 
-    let mut env_plan = env::build_child_env(
+    let mut env_plan = env::build_child_env_with_launch(
         profile,
         provider,
         &args.include,
         yolo_enabled,
         !non_interactive_requested,
         &raw_agent_params,
-        &cwd,
         &env_overrides,
         repo_requested,
         needs_mcp_shadow_home,
-        None,
+        launch_workspace,
     )?;
-    let stdin_seed: Option<String> = None;
-
-    // -- Final argument validation -------------------------------------------
-    let effective_non_interactive = non_interactive_requested;
-    profile.validate_final_args(&child_args, effective_non_interactive, stdin_seed.is_some())?;
-
     if args.timeout.is_some() && !effective_non_interactive {
         return Err(eyre!(
             "--timeout can only be used in non-interactive mode \
@@ -1139,7 +1267,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         let catalog =
             McpCatalogStore::load().map_err(|e| eyre!("failed to load MCP catalog: {e}"))?;
         let (cleaned_prompt, prompt_tags) =
-            extract_tags_from_child_args(provider, &mut child_args, lex_tags);
+            extract_tags_from_prompt(prompt_source.as_inline(), lex_tags);
+        if let Some(ref cleaned) = cleaned_prompt {
+            prompt_source = profile::PromptSource::Inline(cleaned.clone());
+        }
         let prompt_is_interactive =
             std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
         let mut session = compute_session_set(
@@ -1294,18 +1425,19 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &term,
             sp_display_lines.as_deref(),
         );
-        return Ok(0);
+        return Ok((0, None));
     }
 
     switch_process_cwd(child_cwd)?;
 
-    let prompt_display = extract_user_prompt(&args.passthrough);
+    let prompt_display = prompt_source.as_inline().map(|s| s.to_string());
     let dispatch_context = HashMap::new();
 
     // Interactive override: user explicitly forced -i with a prompt present
     let interactive_override = interactive_requested && has_prompt;
 
-    // Output verbosity: --silent suppresses everything, --quiet shows header only
+    // Output verbosity: --silent suppresses everything, --quiet hides env/info preamble
+    // but still shows the system prompt when one is active.
     if !silent_requested {
         // Header line (shown for both default and --quiet)
         crate::output::log_wrapper_header(
@@ -1324,7 +1456,6 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             &term,
         );
 
-        // Everything below is suppressed by --quiet
         if !quiet_requested {
             crate::output::log_wrapper_env_details(&env_plan, mcp_runtime.as_ref(), &term, verbose);
 
@@ -1348,8 +1479,24 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
             for message in &deferred_messages {
                 log::message(&crate::output::post_env_message(message, &term));
             }
+        }
 
-            // Blank line to separate preamble from execution output
+        crate::output::log_system_prompt(
+            &effective_sp,
+            detail_requested,
+            silent_requested,
+            quiet_requested,
+            &term,
+        );
+
+        // Blank line to separate preamble from execution output. Keep it aligned with
+        // whichever preamble blocks were actually emitted.
+        if !quiet_requested
+            || matches!(
+                effective_sp,
+                claudine::system_prompt::EffectiveSystemPrompt::Ready(_)
+            )
+        {
             log::message("");
         }
     }
@@ -1359,7 +1506,15 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     } else {
         &[]
     };
-    let stderr_noise = profile.stderr_noise_prefixes();
+    // Interactive TUIs (Codex, OpenCode, etc.) must inherit stderr directly.
+    // A non-empty stderr filter causes `exec::run_child` to pipe stderr,
+    // which flips `isolate_process_group` on and leaves the child in a
+    // background pgroup — it then hangs on SIGTTIN when reading the TTY.
+    let stderr_noise = if effective_non_interactive {
+        profile.stderr_noise_prefixes()
+    } else {
+        &[]
+    };
 
     // Decide whether to use internal structured stream parsing.
     // Conditions: provider supports it, non-interactive, no explicit output format.
@@ -1381,8 +1536,10 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     };
 
     let wrapper_harness = {
-        let base_prompt =
-            extract_prompt_from_child_args(provider, &child_args, stdin_seed.as_deref());
+        let base_prompt = prompt_source
+            .as_inline()
+            .map(|s| s.to_string())
+            .or_else(|| stdin_seed.clone());
         let harness_source = base_prompt.as_ref().and_then(|_| {
             find_wrapper_harness_source(provider, env_plan.repo_root.as_deref(), &cwd)
         });
@@ -1395,11 +1552,8 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
                     source_path: &source_path,
                     repo_root: env_plan.repo_root.as_deref(),
                 };
-                let shell_options = build_harness_shell_options(
-                    &source_path,
-                    env_plan.repo_root.as_deref(),
-                    !effective_non_interactive,
-                );
+                let shell_options =
+                    build_harness_shell_options(&source_path, env_plan.repo_root.as_deref());
                 let plan = claudine::harness::parse_harness_plan(
                     &seed.frontmatter,
                     &source_path,
@@ -1430,149 +1584,152 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
     // Execute the provider. Composition and harness execution are handled by
     // `claudine compose` / `claudine inline-compose` through the wrapper-grade
     // composition executor; the wrapper path handles plain prompt passthrough.
-    let exit_code = if let Some((source_path, base_prompt, initial_materialized, shell_options)) =
-        wrapper_harness
-    {
-        let mut prompt_state = HarnessPromptState {
-            mode: HarnessPromptMode::Passthrough,
-            original_ref: source_path.display().to_string(),
-            source_path,
-            base_prompt: Some(base_prompt),
-            overlay: indexmap::IndexMap::new(),
-            prompt_tail: Vec::new(),
-            next_prompt_override: None,
-            next_resume_session_id: None,
-        };
+    let (exit_code, stderr_capture) =
+        if let Some((source_path, base_prompt, initial_materialized, shell_options)) =
+            wrapper_harness
+        {
+            let mut prompt_state = HarnessPromptState {
+                mode: HarnessPromptMode::Passthrough,
+                original_ref: source_path.display().to_string(),
+                source_path,
+                base_prompt: Some(base_prompt),
+                overlay: indexmap::IndexMap::new(),
+                prompt_tail: Vec::new(),
+                next_prompt_override: None,
+                next_resume_session_id: None,
+            };
 
-        let mut harness_base_args = child_args.clone();
-        strip_prompt_from_args(provider, &mut harness_base_args);
-        if !use_structured {
-            profile.prepare_captured_output(&mut harness_base_args);
-        }
-
-        let source_path_for_lifecycle = prompt_state.source_path.clone();
-        let default_lifecycle = claudine::composition::LifecycleConfig::default();
-        let default_lifecycle_settings = claudine::events::GlobalSettings::default();
-        let default_lifecycle_messaging = claudine::messaging::RuntimeMessagingSettings {
-            user: None,
-            repo: None,
-        };
-        let default_lifecycle_ctx = claudine::composition::LifecycleRuntimeContext {
-            settings: &default_lifecycle_settings,
-            messaging: &default_lifecycle_messaging,
-            term: &term,
-            source_path: &source_path_for_lifecycle,
-            repo_root: env_plan.repo_root.as_deref(),
-        };
-        let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
-
-        run_harness_loop(
-            provider,
-            profile,
-            binary_path.as_path(),
-            child_cwd,
-            effective_non_interactive,
-            args.timeout,
-            &harness_base_args,
-            &env_plan.env,
-            &mut prompt_state,
-            env_plan.repo_root.as_deref(),
-            shell_options,
-            use_structured,
-            structured_codex_output.as_ref(),
-            stdout_noise,
-            stderr_noise,
-            profile.suppress_structured_stderr_on_success(),
-            !silent_requested,
-            stream_verbosity,
-            detail_requested,
-            &env_context,
-            &dispatch_context,
-            Some(initial_materialized),
-            &term,
-            &default_lifecycle,
-            &default_lifecycle_ctx,
-            &default_lifecycle_emitter,
-        )?
-    } else if use_structured {
-        let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-        let parser_config = claudine::stream::ParserConfig {
-            model: args.model.clone(),
-        };
-        let parser = claudine::stream::create_parser(
-            provider,
-            LiveStreamSink::new(
-                provider,
-                env_context.clone(),
-                child_cwd,
-                stream_verbosity,
-                summary_details.clone(),
-            )
-            .with_context_extra(dispatch_context.clone()),
-            parser_config,
-        );
-        let mut _spawned = false;
-        let stream_result = exec::run_child_stream(
-            binary_path.as_path(),
-            &child_args,
-            &env_plan.env,
-            child_cwd,
-            args.timeout,
-            stderr_noise,
-            profile.suppress_structured_stderr_on_success(),
-            stdin_seed.as_deref(),
-            parser,
-            &mut _spawned,
-        )?;
-        let mut summary = stream_result.data;
-        if let Some(codex_output) = structured_codex_output.as_ref() {
-            codex_output.apply_to_summary(&mut summary);
-        }
-        if provider == Provider::Codex && !summary.assistant_text.is_empty() {
-            let text = &summary.assistant_text;
-            if std::io::stdout().is_terminal() {
-                let rendered = crate::output::render_assistant_markdown(text, &term);
-                std::io::stdout().write_all(rendered.as_bytes())?;
-                if !rendered.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            } else {
-                std::io::stdout().write_all(text.as_bytes())?;
-                if !text.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
+            let mut harness_base_args = child_args.clone();
+            if !use_structured {
+                profile.prepare_captured_output(&mut harness_base_args);
             }
-            std::io::stdout().flush()?;
-        }
 
-        emit_stream_summary(
-            &summary,
-            profile,
-            &env_context,
-            stream_verbosity,
-            detail_requested,
-            &summary_details.lock().unwrap().clone(),
-        );
+            let source_path_for_lifecycle = prompt_state.source_path.clone();
+            let default_lifecycle = claudine::composition::LifecycleConfig::default();
+            let default_lifecycle_settings = claudine::events::GlobalSettings::default();
+            let default_lifecycle_messaging = claudine::messaging::RuntimeMessagingSettings {
+                user: None,
+                repo: None,
+            };
+            let default_lifecycle_ctx = claudine::composition::LifecycleRuntimeContext {
+                settings: &default_lifecycle_settings,
+                messaging: &default_lifecycle_messaging,
+                term: &term,
+                source_path: &source_path_for_lifecycle,
+                repo_root: env_plan.repo_root.as_deref(),
+            };
+            let default_lifecycle_emitter = claudine::composition::DefaultLifecycleEmitter;
 
-        summary.exit_code
-    } else {
-        // Legacy path: forward I/O to terminal
-        let mut _spawned = false;
-        let result = exec::run_child(
-            binary_path.as_path(),
-            &child_args,
-            &env_plan.env,
-            child_cwd,
-            args.timeout,
-            exec::ChildIoOptions {
-                stdout_noise_prefixes: stdout_noise,
-                stderr_noise_prefixes: stderr_noise,
-                stdin_seed: stdin_seed.as_deref(),
-            },
-            &mut _spawned,
-        )?;
-        result.data
-    };
+            let harness_code = run_harness_loop(
+                provider,
+                profile,
+                binary_path.as_path(),
+                child_cwd,
+                effective_non_interactive,
+                args.timeout,
+                &harness_base_args,
+                &env_plan.env,
+                &mut prompt_state,
+                env_plan.repo_root.as_deref(),
+                shell_options,
+                use_structured,
+                structured_codex_output.as_ref(),
+                stdout_noise,
+                stderr_noise,
+                profile.suppress_structured_stderr_on_success(),
+                !silent_requested,
+                stream_verbosity,
+                detail_requested,
+                &env_context,
+                &dispatch_context,
+                Some(initial_materialized),
+                &term,
+                &default_lifecycle,
+                &default_lifecycle_ctx,
+                &default_lifecycle_emitter,
+            )?;
+            (harness_code, None)
+        } else if use_structured {
+            let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+            let parser_config = claudine::stream::ParserConfig {
+                model: args.model.clone(),
+            };
+            let parser = claudine::stream::create_parser(
+                provider,
+                LiveStreamSink::new(
+                    provider,
+                    env_context.clone(),
+                    child_cwd,
+                    stream_verbosity,
+                    summary_details.clone(),
+                )
+                .with_context_extra(dispatch_context.clone()),
+                parser_config,
+            );
+            let mut _spawned = false;
+            let stream_result = exec::run_child_stream(
+                binary_path.as_path(),
+                &child_args,
+                &env_plan.env,
+                child_cwd,
+                args.timeout,
+                stderr_noise,
+                profile.suppress_structured_stderr_on_success(),
+                stream_verbosity != Verbosity::Silent,
+                stdin_seed.as_deref(),
+                parser,
+                &mut _spawned,
+            )?;
+            let mut summary = stream_result.data;
+            if let Some(codex_output) = structured_codex_output.as_ref() {
+                codex_output.apply_to_summary(&mut summary);
+            }
+            if provider == Provider::Codex && !summary.assistant_text.is_empty() {
+                let text = &summary.assistant_text;
+                if std::io::stdout().is_terminal() {
+                    let rendered = crate::output::render_assistant_markdown(text, &term);
+                    std::io::stdout().write_all(rendered.as_bytes())?;
+                    if !rendered.ends_with('\n') {
+                        std::io::stdout().write_all(b"\n")?;
+                    }
+                } else {
+                    std::io::stdout().write_all(text.as_bytes())?;
+                    if !text.ends_with('\n') {
+                        std::io::stdout().write_all(b"\n")?;
+                    }
+                }
+                std::io::stdout().flush()?;
+            }
+
+            emit_stream_summary(
+                &summary,
+                profile,
+                &env_context,
+                stream_verbosity,
+                detail_requested,
+                &summary_details.lock().unwrap().clone(),
+            );
+
+            let stderr_text = summary.stderr_text.clone();
+            (summary.exit_code, stderr_text)
+        } else {
+            // Legacy path: forward I/O to terminal
+            let mut _spawned = false;
+            let result = exec::run_child(
+                binary_path.as_path(),
+                &child_args,
+                &env_plan.env,
+                child_cwd,
+                args.timeout,
+                exec::ChildIoOptions {
+                    stdout_noise_prefixes: stdout_noise,
+                    stderr_noise_prefixes: stderr_noise,
+                    stdin_seed: stdin_seed.as_deref(),
+                },
+                &mut _spawned,
+            )?;
+            (result.data, None)
+        };
 
     // MCP injector cleanup: remove temp files written during injection
     if let Some((injector, injection_result)) = mcp_cleanup
@@ -1581,7 +1738,7 @@ fn run_provider_wrapper_inner(provider: Provider, args: WrapperArgs, verbose: u8
         tracing::warn!("MCP injector cleanup failed: {e}");
     }
 
-    Ok(exit_code)
+    Ok((exit_code, stderr_capture))
 }
 
 fn merge_frontmatter_overlay(
@@ -1594,55 +1751,6 @@ fn merge_frontmatter_overlay(
         } else {
             overlay.insert(key.clone(), value.clone());
         }
-    }
-}
-
-pub(crate) fn strip_prompt_from_args(provider: Provider, args: &mut Vec<String>) {
-    match provider {
-        Provider::Gemini | Provider::QwenCode => {
-            let mut index = 0;
-            while index < args.len() {
-                if args[index] == "--prompt" || args[index] == "-p" {
-                    if index + 1 < args.len() {
-                        args.drain(index..=index + 1);
-                    } else {
-                        args.remove(index);
-                    }
-                    return;
-                }
-                if args[index].starts_with("--prompt=") || args[index].starts_with("-p=") {
-                    args.remove(index);
-                    return;
-                }
-                index += 1;
-            }
-        }
-        Provider::Goose => {
-            if let Some(index) = args.iter().position(|arg| arg == "-t" || arg == "--text") {
-                if index + 1 < args.len() {
-                    args.drain(index..=index + 1);
-                } else {
-                    args.remove(index);
-                }
-            }
-        }
-        Provider::Codex | Provider::OpenCode => {
-            if let Some(location) = find_prompt_location(provider, args) {
-                match location {
-                    PromptLocation::Value(index) => {
-                        if index < args.len() {
-                            args.remove(index);
-                        }
-                    }
-                    PromptLocation::Inline { index, .. } => {
-                        if index < args.len() {
-                            args.remove(index);
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
     }
 }
 
@@ -1724,9 +1832,10 @@ fn materialize_passthrough_harness_seed(
     let options =
         darkmatter::markdown::compose::ComposeOptions::new().with_source_file(source_path);
     let (composed, _report) = source_markdown.compose_with(options).map_err(|e| {
-        eyre!(
-            "Darkmatter compose failed for '{}': {e}",
-            source_path.display()
+        crate::output::shell_expansion_error::pretty_markdown_report(
+            source_path,
+            &format!("Darkmatter compose failed for '{}'", source_path.display()),
+            e,
         )
     })?;
 
@@ -1791,9 +1900,13 @@ fn materialize_harness_prompt(
             let options = darkmatter::markdown::compose::ComposeOptions::new()
                 .with_source_file(&state.source_path);
             let (composed, _report) = effective_markdown.compose_with(options).map_err(|e| {
-                eyre!(
-                    "Darkmatter compose failed for '{}': {e}",
-                    state.source_path.display()
+                crate::output::shell_expansion_error::pretty_markdown_report(
+                    &state.source_path,
+                    &format!(
+                        "Darkmatter compose failed for '{}'",
+                        state.source_path.display()
+                    ),
+                    e,
                 )
             })?;
             let prompt = state.base_prompt.clone().ok_or_else(|| {
@@ -1813,9 +1926,13 @@ fn materialize_harness_prompt(
             let options = darkmatter::markdown::compose::ComposeOptions::new()
                 .with_source_file(&state.source_path);
             let (composed, _report) = effective_markdown.compose_with(options).map_err(|e| {
-                eyre!(
-                    "Darkmatter compose failed for '{}': {e}",
-                    state.source_path.display()
+                crate::output::shell_expansion_error::pretty_markdown_report(
+                    &state.source_path,
+                    &format!(
+                        "Darkmatter compose failed for '{}'",
+                        state.source_path.display()
+                    ),
+                    e,
                 )
             })?;
             let body = composed.content().to_string();
@@ -1842,7 +1959,12 @@ fn materialize_harness_prompt(
                 &source,
                 claudine::composition::PrepareOptions::default(),
             )
-            .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+            .map_err(|e| match e {
+                claudine::composition::CompositionError::ShellExpansionFailed { .. } => {
+                    crate::output::shell_expansion_error::pretty_or_report(e)
+                }
+                other => eyre!("frontmatter-prompt: {other}"),
+            })?;
             (
                 prepared.prompt,
                 prepared.effective_frontmatter,
@@ -1900,10 +2022,11 @@ fn build_harness_launch(
     state.next_prompt_override = None;
 
     let prompt = strip_prompt_tags_for_provider(provider, &materialized.prompt);
+    let prompt_source = profile::PromptSource::Inline(prompt.clone());
     let stdin_seed = profile
         .prompt_delivery(&args, &prompt, effective_non_interactive)?
         .apply_to(&mut args);
-    profile.validate_final_args(&args, effective_non_interactive, stdin_seed.is_some())?;
+    profile::require_prompt_present(profile.binary(), effective_non_interactive, &prompt_source)?;
 
     let mut env = base_env.clone();
     for (key, value) in &materialized.env_overrides {
@@ -1974,6 +2097,7 @@ fn execute_harness_attempt(
             launch.timeout,
             stderr_noise,
             suppress_stderr_on_success,
+            stream_verbosity != Verbosity::Silent,
             launch.stdin_seed.as_deref(),
             parser,
             child_spawned,
@@ -2648,91 +2772,106 @@ pub(crate) fn run_harness_loop(
         }
 
         // Shell audit preflight.
-        // Composition flows (Compose/Inline) already preflight ::shell directives
-        // during composition — re-parsing raw source would reintroduce commands
-        // hidden by false ::block directives.  Only passthrough mode needs raw
-        // source-page audit.
-        let source_text = match prompt_state.mode {
-            HarnessPromptMode::Passthrough => {
-                std::fs::read_to_string(&prompt_state.source_path).ok()
-            }
-            _ => None,
-        };
-        let auditable =
-            claudine::harness::collect_auditable_commands(&plan, source_text.as_deref())?;
+        //
+        // Composition flows (Compose/Inline) preflight all shell commands
+        // before the provider starts — template directives during composition
+        // and harness commands in execute_composition_request.  The per-
+        // attempt audit below is redundant for those modes because:
+        //
+        //   1. source_text is None, so source-page ::shell directives are
+        //      excluded (they were discovered via Darkmatter's graph walker
+        //      during composition, which respects ::block when="false").
+        //   2. Harness commands were approved and cached during the
+        //      composition preflight pass.
+        //   3. The approval handler is frozen after attempt 1, so no new
+        //      interactive prompts are possible.
+        //
+        // Only Passthrough mode needs the per-attempt audit because it reads
+        // raw source text and the source file may change between
+        // redirect/retry iterations.
+        if matches!(prompt_state.mode, HarnessPromptMode::Passthrough) {
+            let source_text = std::fs::read_to_string(&prompt_state.source_path).ok();
 
-        let audit_report = info_span!(
-            "harness_shell_audit",
-            attempt,
-            command_count = auditable.len(),
-        )
-        .in_scope(|| {
-            claudine::harness::audit_shell_commands(&auditable, harness_context.shell_options())
-        });
+            let auditable =
+                claudine::harness::collect_auditable_commands(&plan, source_text.as_deref())?;
 
-        if show_checks {
-            claudine::harness::report::report_shell_audit_header(audit_report.outcomes.len(), term);
-            claudine::harness::report::report_shell_audit_outcomes(&audit_report, term);
-        }
+            let audit_report = info_span!(
+                "harness_shell_audit",
+                attempt,
+                command_count = auditable.len(),
+            )
+            .in_scope(|| {
+                claudine::harness::audit_shell_commands(&auditable, harness_context.shell_options())
+            });
 
-        if !audit_report.all_passed() {
-            let failed = audit_report.failures();
-            let (source_failures, harness_failures): (Vec<_>, Vec<_>) =
-                failed.into_iter().partition(|o| {
-                    matches!(
-                        o.command.source,
-                        claudine::harness::AuditedCommandSource::ComposeSourceLine { .. }
-                    )
-                });
-
-            // Source-page ::shell failures are terminal in v1 — no recovery.
-            if !source_failures.is_empty() {
-                if show_checks {
-                    claudine::harness::report::report_unhandled_failure(
-                        "shell audit failed for source-page directives — cannot proceed",
-                        term,
-                    );
-                }
-                guard.emit_blocked_or_failure();
-                return Err(eyre!(
-                    "shell audit failed: {} denied directive(s) in source page",
-                    source_failures.len()
-                ));
-            }
-
-            // Non-source failures flow through handler resolution.
-            if !harness_failures.is_empty() {
-                let contexts = claudine::harness::build_audit_failure_context(
-                    &harness_failures,
-                    provider.as_slug(),
-                    plan.source_path.as_path(),
-                    attempt,
-                );
-                if let Some(next_plan) = try_resolve_handler(
-                    &contexts,
-                    &plan,
-                    attempt,
-                    DEFAULT_MAX_RETRIES,
-                    profile,
-                    None,
-                    &prompt_state.source_path,
-                    repo_root,
-                    show_checks,
+            if show_checks {
+                claudine::harness::report::report_shell_audit_header(
+                    audit_report.outcomes.len(),
                     term,
-                )? {
-                    attempt = next_plan.next_attempt;
-                    apply_next_attempt_plan(prompt_state, &next_plan);
-                    continue;
-                }
-                let msg = format!(
-                    "shell audit failed: {} denied command(s)",
-                    harness_failures.len()
                 );
-                if show_checks {
-                    claudine::harness::report::report_unhandled_failure(&msg, term);
+                claudine::harness::report::report_shell_audit_outcomes(&audit_report, term);
+            }
+
+            if !audit_report.all_passed() {
+                let failed = audit_report.failures();
+                let (source_failures, harness_failures): (Vec<_>, Vec<_>) =
+                    failed.into_iter().partition(|o| {
+                        matches!(
+                            o.command.source,
+                            claudine::harness::AuditedCommandSource::ComposeSourceLine { .. }
+                        )
+                    });
+
+                // Source-page ::shell failures are terminal in v1 — no recovery.
+                if !source_failures.is_empty() {
+                    if show_checks {
+                        claudine::harness::report::report_unhandled_failure(
+                            "shell audit failed for source-page directives — cannot proceed",
+                            term,
+                        );
+                    }
+                    guard.emit_blocked_or_failure();
+                    return Err(eyre!(
+                        "shell audit failed: {} denied directive(s) in source page",
+                        source_failures.len()
+                    ));
                 }
-                guard.emit_blocked_or_failure();
-                return Err(eyre!("shell audit failed"));
+
+                // Non-source failures flow through handler resolution.
+                if !harness_failures.is_empty() {
+                    let contexts = claudine::harness::build_audit_failure_context(
+                        &harness_failures,
+                        provider.as_slug(),
+                        plan.source_path.as_path(),
+                        attempt,
+                    );
+                    if let Some(next_plan) = try_resolve_handler(
+                        &contexts,
+                        &plan,
+                        attempt,
+                        DEFAULT_MAX_RETRIES,
+                        profile,
+                        None,
+                        &prompt_state.source_path,
+                        repo_root,
+                        show_checks,
+                        term,
+                    )? {
+                        attempt = next_plan.next_attempt;
+                        continue;
+                    }
+
+                    let msg = format!(
+                        "shell audit failed: {} command(s) denied. \
+                         No handler available to resolve.",
+                        harness_failures.len()
+                    );
+                    if show_checks {
+                        claudine::harness::report::report_unhandled_failure(&msg, term);
+                    }
+                    guard.emit_blocked_or_failure();
+                    return Err(eyre!("shell audit failed"));
+                }
             }
         }
 
@@ -3047,14 +3186,26 @@ pub(crate) fn resolve_binary_path(
     clients: &InstalledAiClients,
 ) -> Result<PathBuf> {
     let ai_cli = profile.provider().sniff_ai_cli();
-    clients.path(ai_cli).ok_or_else(|| {
-        eyre!(
-            "cannot run wrapped {} session because '{}' is not installed or not on PATH (docs: {})",
-            profile.provider(),
-            profile.binary(),
-            profile.provider().docs_url()
-        )
-    })
+    clients
+        .path(ai_cli)
+        .ok_or_else(|| binary_missing_error(profile))
+}
+
+/// Resolve the child binary path directly via `which`, without scanning the
+/// entire set of known AI CLIs. Used on the hot path of the direct wrapper
+/// so we don't pay for a full PATH walk over ~9 binaries when only one is
+/// needed.
+pub(crate) fn resolve_binary_path_direct(profile: &dyn WrapperProfile) -> Result<PathBuf> {
+    which::which(profile.binary()).map_err(|_| binary_missing_error(profile))
+}
+
+fn binary_missing_error(profile: &dyn WrapperProfile) -> color_eyre::eyre::Error {
+    eyre!(
+        "cannot run wrapped {} session because '{}' is not installed or not on PATH (docs: {})",
+        profile.provider(),
+        profile.binary(),
+        profile.provider().docs_url()
+    )
 }
 
 fn model_value_from_args(args: &[String]) -> Option<String> {
@@ -3279,11 +3430,42 @@ fn format_summary_prose(
         None => parts.push("<i>no tool calls</i>".to_string()),
     }
 
+    if let Some(pp) = summary.permission_prompts {
+        parts.push(format!(
+            "{pp} <i>permission prompt{}</i>",
+            if pp == 1 { "" } else { "s" }
+        ));
+    }
+
+    if let Some(uip) = summary.user_input_prompts {
+        parts.push(format!(
+            "{uip} <i>user input prompt{}</i>",
+            if uip == 1 { "" } else { "s" }
+        ));
+    }
+
     if parts.is_empty() {
         return None;
     }
 
-    Some(format!("<dim>{prefix} {}</dim>", parts.join(" \u{00b7} ")))
+    let mut out = format!("<dim>{prefix} {}</dim>", parts.join(" \u{00b7} "));
+    for badge in &summary.badges {
+        let color = match badge.severity {
+            claudine::stream::badges::BadgeSeverity::Error => "red",
+            claudine::stream::badges::BadgeSeverity::Warning => "yellow",
+            claudine::stream::badges::BadgeSeverity::Info => "cyan",
+        };
+        out.push('\n');
+        out.push_str(&format!(
+            "<{color}>\u{26a0} <bold>{}</bold> \u{2014} {}</{color}>",
+            badge.label, badge.message
+        ));
+        if let Some(url) = &badge.remediation_url {
+            out.push('\n');
+            out.push_str(&format!("  <dim>\u{2192} {url}</dim>"));
+        }
+    }
+    Some(out)
 }
 
 fn format_verbose_summary_details_prose(
@@ -3328,42 +3510,19 @@ fn format_verbose_summary_details_prose(
     Some(format!("<dim>{}</dim>", parts.join(" \u{00b7} ")))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PromptLocation {
-    Value(usize),
-    Inline { index: usize, prefix: &'static str },
-}
-
-fn extract_tags_from_child_args(
-    provider: Provider,
-    args: &mut [String],
+fn extract_tags_from_prompt(
+    prompt: Option<&str>,
     extract_tags: fn(&str) -> (String, Vec<String>),
 ) -> (Option<String>, Vec<String>) {
-    let Some(location) = find_prompt_location(provider, args) else {
+    let Some(prompt) = prompt else {
         return (None, Vec::new());
     };
-
-    let prompt = match location {
-        PromptLocation::Value(index) => args[index].clone(),
-        PromptLocation::Inline { index, prefix } => args[index]
-            .strip_prefix(prefix)
-            .unwrap_or_default()
-            .to_string(),
-    };
-
-    let (cleaned_prompt, tags) = extract_tags(&prompt);
+    let (cleaned, tags) = extract_tags(prompt);
     if tags.is_empty() {
-        return (None, tags);
+        (None, Vec::new())
+    } else {
+        (Some(cleaned), tags)
     }
-
-    match location {
-        PromptLocation::Value(index) => args[index] = cleaned_prompt.clone(),
-        PromptLocation::Inline { index, prefix } => {
-            args[index] = format!("{prefix}{cleaned_prompt}");
-        }
-    }
-
-    (Some(cleaned_prompt), tags)
 }
 
 fn bootstrap_mcp_state(repo_root: Option<&std::path::Path>) -> Result<bool> {
@@ -3407,112 +3566,6 @@ fn bootstrap_mcp_state(repo_root: Option<&std::path::Path>) -> Result<bool> {
     Ok(true)
 }
 
-fn find_prompt_location(provider: Provider, args: &[String]) -> Option<PromptLocation> {
-    match provider {
-        Provider::Gemini => find_gemini_prompt_location(args),
-        Provider::Codex => find_positional_prompt_location(args, 0),
-        Provider::OpenCode => find_positional_prompt_location(args, 0),
-        _ => None,
-    }
-}
-
-fn find_gemini_prompt_location(args: &[String]) -> Option<PromptLocation> {
-    for (index, arg) in args.iter().enumerate() {
-        if arg == "--prompt" || arg == "-p" {
-            return (index + 1 < args.len()).then_some(PromptLocation::Value(index + 1));
-        }
-        if arg.starts_with("--prompt=") {
-            return Some(PromptLocation::Inline {
-                index,
-                prefix: "--prompt=",
-            });
-        }
-        if arg.starts_with("-p=") {
-            return Some(PromptLocation::Inline {
-                index,
-                prefix: "-p=",
-            });
-        }
-    }
-
-    find_positional_prompt_location(args, 0)
-}
-
-fn find_positional_prompt_location(args: &[String], start_index: usize) -> Option<PromptLocation> {
-    let mut skip_next = false;
-
-    for (index, arg) in args.iter().enumerate().skip(start_index) {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-
-        if index == 0 && (arg == "exec" || arg == "run" || arg == "e") {
-            continue;
-        }
-
-        if arg == "--" {
-            return (index + 1 < args.len()).then_some(PromptLocation::Value(index + 1));
-        }
-
-        if takes_value(arg) {
-            skip_next = !arg.contains('=');
-            continue;
-        }
-
-        if !arg.starts_with('-') {
-            return Some(PromptLocation::Value(index));
-        }
-    }
-
-    None
-}
-
-fn takes_value(arg: &str) -> bool {
-    matches!(
-        arg,
-        "-m" | "--model"
-            | "-o"
-            | "--output"
-            | "--output-format"
-            | "--approval-mode"
-            | "--config"
-            | "-c"
-            | "--profile"
-            | "--system-prompt"
-            | "--sandbox-image"
-    )
-}
-
-/// Extract the user's prompt string from the raw passthrough args.
-/// Returns the first non-switch argument, if any.
-fn extract_user_prompt(passthrough: &[String]) -> Option<String> {
-    passthrough
-        .iter()
-        .find(|arg| !arg.starts_with('-'))
-        .cloned()
-}
-
-fn extract_prompt_from_child_args(
-    provider: Provider,
-    child_args: &[String],
-    stdin_seed: Option<&str>,
-) -> Option<String> {
-    if let Some(seed) = stdin_seed {
-        return Some(seed.to_string());
-    }
-
-    find_prompt_location(provider, child_args)
-        .and_then(|location| match location {
-            PromptLocation::Value(index) => child_args.get(index).cloned(),
-            PromptLocation::Inline { index, prefix } => child_args
-                .get(index)
-                .and_then(|value| value.strip_prefix(prefix))
-                .map(ToOwned::to_owned),
-        })
-        .or_else(|| extract_user_prompt(child_args))
-}
-
 fn print_wrapper_help(provider: Provider) {
     let slug = provider.as_slug();
     println!(
@@ -3533,7 +3586,7 @@ fn print_wrapper_help(provider: Provider) {
           \x20     --rsp <FILE>             Replace the provider's system prompt with contents from a file\n\
           \x20 -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)\n\
          \x20     --dry-run             Show what would be executed without launching the child\n\
-         \x20 -q, --quiet              Show only the header line; suppress env details and info\n\
+         \x20 -q, --quiet              Suppress env details and info; still show the system prompt when set\n\
          \x20     --silent              Suppress all Claudine preflight output\n\
          \x20     --operation <OP>      Set the OPERATION env var for the wrapped session\n\
          \x20     --sandbox             Enable provider-specific sandboxing\n\
@@ -3543,16 +3596,6 @@ fn print_wrapper_help(provider: Provider) {
          \x20     --strict              Treat unresolved or ambiguous MCP tags as hard errors\n\
          \x20 -h, --help               Print help"
     );
-}
-
-/// Returns true if a prompt string is present — either as a remaining
-/// non-switch arg in `child_args` or via stdin.
-fn has_prompt_source(child_args: &[String], stdin_seed: Option<&str>) -> bool {
-    if stdin_seed.is_some() {
-        return true;
-    }
-    // Check for a non-switch positional arg in passthrough
-    child_args.iter().any(|arg| !arg.starts_with('-'))
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -3566,16 +3609,59 @@ struct ExtractedWrapperFlags {
     operation: Option<String>,
 }
 
-fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWrapperFlags {
+/// Locate the POSIX `--` separator in the wrapper passthrough vector.
+///
+/// Returns the index of the first `--` that delimits agent-only arguments.
+/// Two cases are handled:
+///
+/// 1. The `--` literal is present in the passthrough vector itself (clap
+///    preserves it when it appears after the first positional, thanks to
+///    `trailing_var_arg`). The boundary is at that index.
+/// 2. The `--` was consumed by clap as a separator (it appeared before any
+///    positional argument) and is therefore absent from the passthrough. We
+///    fall back to the raw process arguments: count the tokens that followed
+///    `--` in the original command line and mark the corresponding tail of
+///    the passthrough as protected.
+///
+/// Returns `None` when no `--` was provided on the command line at all.
+fn find_passthrough_dash_boundary(passthrough: &[String]) -> Option<usize> {
+    let raw: Vec<String> = std::env::args().collect();
+    find_passthrough_dash_boundary_with_raw(passthrough, &raw)
+}
+
+fn find_passthrough_dash_boundary_with_raw(
+    passthrough: &[String],
+    raw_args: &[String],
+) -> Option<usize> {
+    if let Some(pos) = passthrough.iter().position(|arg| arg == "--") {
+        return Some(pos);
+    }
+
+    let raw_pos = raw_args.iter().position(|arg| arg == "--")?;
+    let tail_count = raw_args.len() - raw_pos - 1;
+    Some(passthrough.len().saturating_sub(tail_count))
+}
+
+fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> Result<ExtractedWrapperFlags> {
+    let boundary = find_passthrough_dash_boundary(args).unwrap_or(args.len());
+    extract_wrapper_flags_from_passthrough_with_boundary(args, boundary)
+}
+
+fn extract_wrapper_flags_from_passthrough_with_boundary(
+    args: &mut Vec<String>,
+    boundary: usize,
+) -> Result<ExtractedWrapperFlags> {
+    let boundary = boundary.min(args.len());
     let mut extracted = ExtractedWrapperFlags::default();
     let mut skip_next = false;
     let mut remove_indices = Vec::new();
 
-    for (i, arg) in args.iter().enumerate() {
+    for i in 0..boundary {
         if skip_next {
             skip_next = false;
             continue;
         }
+        let arg = &args[i];
         match arg.as_str() {
             "-y" | "--yolo" => {
                 extracted.yolo = true;
@@ -3602,12 +3688,21 @@ fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWr
                 remove_indices.push(i);
             }
             "--operation" | "--op" => {
-                if let Some(value) = args.get(i + 1) {
-                    extracted.operation = Some(value.clone());
-                    remove_indices.push(i);
-                    remove_indices.push(i + 1);
-                    skip_next = true;
+                let next = args.get(i + 1);
+                let value_within_boundary = i + 1 < boundary;
+                let next_is_separator = next.map(|v| v == "--").unwrap_or(false);
+
+                if next.is_none() || !value_within_boundary || next_is_separator {
+                    return Err(eyre!(
+                        "missing value for `{arg}`; pass a value like `{arg} <OP>` \
+                         before any `--` separator"
+                    ));
                 }
+
+                extracted.operation = Some(next.unwrap().clone());
+                remove_indices.push(i);
+                remove_indices.push(i + 1);
+                skip_next = true;
             }
             _ => {
                 if let Some(value) = arg.strip_prefix("--operation=") {
@@ -3621,12 +3716,12 @@ fn extract_wrapper_flags_from_passthrough(args: &mut Vec<String>) -> ExtractedWr
         }
     }
 
-    // Remove in reverse order to preserve indices
+    // Remove in reverse order to preserve indices.
     for i in remove_indices.into_iter().rev() {
         args.remove(i);
     }
 
-    extracted
+    Ok(extracted)
 }
 
 #[cfg(test)]
@@ -3704,7 +3799,7 @@ mod tests {
             "-y".to_string(),
         ];
 
-        let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
 
         assert!(extracted.yolo);
         assert!(extracted.interactive);
@@ -3715,7 +3810,7 @@ mod tests {
     fn extract_wrapper_flags_lifts_interactive_long_form() {
         let mut args = vec!["--interactive".to_string(), "do something".to_string()];
 
-        let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
 
         assert!(extracted.interactive);
         assert_eq!(args, vec!["do something"]);
@@ -3730,42 +3825,11 @@ mod tests {
             "task".to_string(),
         ];
 
-        let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
 
         // Old flags should NOT be consumed by Claudine
         assert!(!extracted.interactive);
         assert_eq!(args, vec!["-n", "--non-interactive", "--ni", "task"]);
-    }
-
-    #[test]
-    fn has_prompt_source_detects_positional_arg() {
-        // No prompt → no prompt source
-        assert!(!has_prompt_source(&[], None));
-
-        // Non-switch arg in child_args → prompt source
-        assert!(has_prompt_source(&["fix the bug".to_string()], None));
-
-        // Switch-only args → no prompt source
-        assert!(!has_prompt_source(&["--json".to_string()], None));
-
-        // stdin_seed → prompt source
-        assert!(has_prompt_source(&[], Some("hello")));
-    }
-
-    #[test]
-    fn extract_user_prompt_finds_first_non_switch() {
-        assert_eq!(
-            extract_user_prompt(&["--json".to_string(), "fix bug".to_string()]),
-            Some("fix bug".to_string())
-        );
-        assert_eq!(
-            extract_user_prompt(&["--json".to_string(), "--verbose".to_string()]),
-            None
-        );
-        assert_eq!(
-            extract_user_prompt(&["hello world".to_string()]),
-            Some("hello world".to_string())
-        );
     }
 
     #[test]
@@ -3776,7 +3840,7 @@ mod tests {
             "commit".to_string(),
         ];
 
-        let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
 
         assert_eq!(extracted.operation.as_deref(), Some("commit"));
         assert_eq!(args, vec!["do something"]);
@@ -3786,7 +3850,7 @@ mod tests {
     fn extract_wrapper_flags_lifts_operation_equals_form() {
         let mut args = vec!["do something".to_string(), "--operation=deploy".to_string()];
 
-        let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
 
         assert_eq!(extracted.operation.as_deref(), Some("deploy"));
         assert_eq!(args, vec!["do something"]);
@@ -3796,10 +3860,171 @@ mod tests {
     fn extract_wrapper_flags_lifts_op_equals_form() {
         let mut args = vec!["do something".to_string(), "--op=review".to_string()];
 
-        let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
 
         assert_eq!(extracted.operation.as_deref(), Some("review"));
         assert_eq!(args, vec!["do something"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_respects_double_dash_in_passthrough() {
+        // User typed: claudine claude prompt -- --silent -y
+        //
+        // clap collects the tail verbatim because `trailing_var_arg` began
+        // capturing at `prompt`, so the passthrough literally contains `--`.
+        // Anything at or after that `--` must be opaque to Claudine.
+        let mut args = vec![
+            "prompt".to_string(),
+            "--".to_string(),
+            "--silent".to_string(),
+            "-y".to_string(),
+        ];
+
+        let extracted = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, 1).unwrap();
+
+        assert!(!extracted.silent);
+        assert!(!extracted.yolo);
+        assert_eq!(args, vec!["prompt", "--", "--silent", "-y"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_respects_double_dash_consumed_by_clap() {
+        // User typed: claudine claude -- prompt --silent
+        //
+        // clap consumed `--` as the positional separator so it is absent from
+        // the passthrough vector. Boundary detection must recover the tail
+        // count from the raw process arguments.
+        let mut args = vec!["prompt".to_string(), "--silent".to_string()];
+
+        let raw = vec![
+            "claudine".to_string(),
+            "claude".to_string(),
+            "--".to_string(),
+            "prompt".to_string(),
+            "--silent".to_string(),
+        ];
+        let boundary = find_passthrough_dash_boundary_with_raw(&args, &raw).unwrap();
+        let extracted =
+            extract_wrapper_flags_from_passthrough_with_boundary(&mut args, boundary).unwrap();
+
+        assert!(!extracted.silent);
+        assert_eq!(args, vec!["prompt", "--silent"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_extracts_before_dash_but_not_after() {
+        // User typed: claudine claude -y prompt -- --yolo
+        //
+        // `-y` BEFORE the prompt is consumed by clap (not present in
+        // passthrough). The trailing `--yolo` after `--` must remain untouched
+        // so it can collide with an agent-owned flag without being stolen.
+        let mut args = vec!["prompt".to_string(), "--".to_string(), "--yolo".to_string()];
+
+        let extracted = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, 1).unwrap();
+
+        assert!(!extracted.yolo);
+        assert_eq!(args, vec!["prompt", "--", "--yolo"]);
+    }
+
+    #[test]
+    fn find_passthrough_dash_boundary_detects_literal_separator() {
+        let passthrough = vec!["prompt".to_string(), "--".to_string(), "rest".to_string()];
+        let raw = vec![
+            "claudine".to_string(),
+            "claude".to_string(),
+            "prompt".to_string(),
+            "--".to_string(),
+            "rest".to_string(),
+        ];
+
+        assert_eq!(
+            find_passthrough_dash_boundary_with_raw(&passthrough, &raw),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn find_passthrough_dash_boundary_uses_raw_tail_when_clap_strips_dash() {
+        let passthrough = vec!["prompt".to_string(), "--silent".to_string()];
+        let raw = vec![
+            "claudine".to_string(),
+            "claude".to_string(),
+            "--".to_string(),
+            "prompt".to_string(),
+            "--silent".to_string(),
+        ];
+
+        assert_eq!(
+            find_passthrough_dash_boundary_with_raw(&passthrough, &raw),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn find_passthrough_dash_boundary_returns_none_without_dash() {
+        let passthrough = vec!["prompt".to_string()];
+        let raw = vec![
+            "claudine".to_string(),
+            "claude".to_string(),
+            "prompt".to_string(),
+        ];
+
+        assert_eq!(
+            find_passthrough_dash_boundary_with_raw(&passthrough, &raw),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_wrapper_flags_errors_on_dangling_operation_flag() {
+        let mut args = vec!["prompt".to_string(), "--operation".to_string()];
+        let boundary = args.len();
+
+        let err =
+            extract_wrapper_flags_from_passthrough_with_boundary(&mut args, boundary).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("--operation"),
+            "expected error to mention --operation, got: {message}"
+        );
+        assert!(
+            message.to_lowercase().contains("missing value"),
+            "expected error to describe the missing value, got: {message}"
+        );
+    }
+
+    #[test]
+    fn extract_wrapper_flags_errors_on_dangling_op_alias() {
+        let mut args = vec!["prompt".to_string(), "--op".to_string()];
+        let boundary = args.len();
+
+        let err =
+            extract_wrapper_flags_from_passthrough_with_boundary(&mut args, boundary).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("--op"),
+            "expected error to mention --op, got: {message}"
+        );
+    }
+
+    #[test]
+    fn extract_wrapper_flags_errors_when_operation_value_is_dash_separator() {
+        // User typed: claudine claude --operation -- prompt
+        //
+        // `--operation` would otherwise greedily consume `--` as its value,
+        // which is nonsensical. Require a real value before the separator.
+        let mut args = vec![
+            "--operation".to_string(),
+            "--".to_string(),
+            "prompt".to_string(),
+        ];
+
+        let err = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, 1).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("--operation"),
+            "expected error to mention --operation, got: {message}"
+        );
     }
 
     #[test]
@@ -4026,29 +4251,23 @@ mod tests {
     #[test]
     fn extracts_tags_from_codex_prompt_position() {
         let _ = make_catalog_with_servers(&["calendar"]);
-        let mut args = vec![
-            "exec".to_string(),
-            "--json".to_string(),
-            "fix #calendar bugs".to_string(),
-        ];
+        let prompt = "fix #calendar bugs";
 
-        let (cleaned, tags) = extract_tags_from_child_args(Provider::Codex, &mut args, lex_tags);
+        let (cleaned, tags) = extract_tags_from_prompt(Some(prompt), lex_tags);
 
         assert_eq!(tags, vec!["calendar"]);
         assert_eq!(cleaned.as_deref(), Some("fix bugs"));
-        assert_eq!(args[2], "fix bugs");
     }
 
     #[test]
     fn extracts_tags_from_gemini_prompt_flag() {
         let _ = make_catalog_with_servers(&["slack"]);
-        let mut args = vec!["--prompt".to_string(), "debug #slack auth".to_string()];
+        let prompt = "debug #slack auth";
 
-        let (cleaned, tags) = extract_tags_from_child_args(Provider::Gemini, &mut args, lex_tags);
+        let (cleaned, tags) = extract_tags_from_prompt(Some(prompt), lex_tags);
 
         assert_eq!(tags, vec!["slack"]);
         assert_eq!(cleaned.as_deref(), Some("debug auth"));
-        assert_eq!(args[1], "debug auth");
     }
 
     #[cfg(test)]
@@ -4071,7 +4290,12 @@ mod tests {
                 }
 
                 // Shuffle manually or just accept order for now
-                let extracted = extract_wrapper_flags_from_passthrough(&mut args);
+                // Pass a boundary equal to args.len() so std::env::args() is
+                // not consulted inside the proptest runner.
+                let boundary = args.len();
+                let extracted =
+                    extract_wrapper_flags_from_passthrough_with_boundary(&mut args, boundary)
+                        .unwrap();
 
                 // All 'others' should still be there
                 assert_eq!(args.len(), others.len());
@@ -4087,5 +4311,105 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn format_summary_prose_appends_badge_markup() {
+        use claudine::events::Provider;
+        use claudine::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
+        use claudine::stream::summary::StreamExecutionSummary;
+        let summary = StreamExecutionSummary {
+            provider: Provider::Claude,
+            duration_ms: Some(1000),
+            badges: vec![SessionBadge {
+                category: BadgeCategory::Billing,
+                severity: BadgeSeverity::Error,
+                label: "Billing".into(),
+                message: "Insufficient credits".into(),
+                remediation_url: Some("https://console.anthropic.com/settings/billing".into()),
+            }],
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("Billing"));
+        assert!(rendered.contains("Insufficient credits"));
+        assert!(rendered.contains("https://console.anthropic.com/settings/billing"));
+    }
+
+    #[test]
+    fn format_summary_prose_without_badges_has_no_badge_markup() {
+        use claudine::events::Provider;
+        use claudine::stream::summary::StreamExecutionSummary;
+        let summary = StreamExecutionSummary {
+            provider: Provider::Claude,
+            duration_ms: Some(1000),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(!rendered.contains("Billing"));
+        assert!(!rendered.contains("\u{26a0}"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_permission_prompts_singular() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            tool_calls: Some(4),
+            permission_prompts: Some(1),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("1 <i>permission prompt</i>"));
+        assert!(!rendered.contains("permission prompts"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_permission_prompts_plural() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            tool_calls: Some(4),
+            permission_prompts: Some(3),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("3 <i>permission prompts</i>"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_user_input_prompts_singular() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            user_input_prompts: Some(1),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("1 <i>user input prompt</i>"));
+        assert!(!rendered.contains("user input prompts"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_both_counters() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(41_000),
+            tool_calls: Some(12),
+            permission_prompts: Some(2),
+            user_input_prompts: Some(1),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("2 <i>permission prompts</i>"));
+        assert!(rendered.contains("1 <i>user input prompt</i>"));
+    }
+
+    #[test]
+    fn format_summary_prose_omits_permission_clauses_when_unset() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            tool_calls: Some(4),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(!rendered.contains("permission"));
+        assert!(!rendered.contains("user input"));
     }
 }

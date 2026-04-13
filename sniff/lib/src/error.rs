@@ -109,6 +109,16 @@ pub enum SniffError {
         message: String,
     },
 
+    /// The specified commit hash is not an ancestor of HEAD.
+    #[error("commit {hash} is not reachable from HEAD")]
+    HashNotReachable { hash: String },
+
+    /// Invalid period specifier for recent-commits queries.
+    #[error(
+        "invalid period specifier: '{0}'. Expected duration (e.g., 3d, 1w), date (YYYY-MM-DD), hash, 'today', or 'yesterday'."
+    )]
+    InvalidPeriod(String),
+
     /// Rate limited by the hosting provider API.
     #[error("rate limited by {provider} API{}", retry_after.map(|s| format!(", retry after {}s", s)).unwrap_or_default())]
     RateLimited {
@@ -138,6 +148,19 @@ pub enum SniffInstallationError {
         "The package {pkg} requires a package manager ({manager}) which is NOT installed on this computer!"
     )]
     MissingPackageManager { pkg: String, manager: String },
+
+    /// No runnable installation method exists for this program on this host.
+    ///
+    /// The embedded `detail` is human-readable and already aware of the rejection
+    /// reasons for every evaluated method. Callers that want the full plan should
+    /// call `install_plan()` directly rather than relying on `install()`.
+    #[error("No viable installation method for {pkg}: {detail}")]
+    NoViableMethod { pkg: String, detail: String },
+
+    /// A remote-bash installation was selected but execution has not been
+    /// authorized by the caller.
+    #[error("Installing {pkg} via remote bash requires explicit consent (url: {url})")]
+    RemoteBashConsentRequired { pkg: String, url: String },
 }
 
 /// Convenience Result type for Sniff operations.
@@ -222,5 +245,28 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("ripgrep"));
         assert!(msg.contains("brew"));
+    }
+
+    #[test]
+    fn test_no_viable_method_display() {
+        let err = SniffInstallationError::NoViableMethod {
+            pkg: "vim".to_string(),
+            detail: "no runnable installation method".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("vim"));
+        assert!(msg.contains("no runnable installation method"));
+    }
+
+    #[test]
+    fn test_remote_bash_consent_required_display() {
+        let err = SniffInstallationError::RemoteBashConsentRequired {
+            pkg: "rustup".to_string(),
+            url: "https://sh.rustup.rs".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("rustup"));
+        assert!(msg.contains("https://sh.rustup.rs"));
+        assert!(msg.to_lowercase().contains("consent"));
     }
 }

@@ -11,13 +11,14 @@ Cross-platform system detection library and CLI for Rust.
 
 | Category | Detection |
 |----------|-----------|
-| OS | Distribution, kernel, architecture, package managers, locale, timezone |
+| OS | Distribution, kernel, architecture, package managers, locale, timezone, NTP status |
 | Hardware | CPU (with SIMD), GPU (Metal), memory, storage, audio devices |
-| Network | Interface enumeration with IPv4/IPv6, WAN IP |
-| Filesystem | Git repos, monorepos, languages, EditorConfig, document discovery |
-| Programs | 8 categories with macOS bundle support (parallel via Rayon) |
-| Services | 11 init systems (systemd, launchd, OpenRC, runit, etc.) |
+| Network | Interface enumeration with IPv4/IPv6, WAN IP (TTL-cached) |
+| Filesystem | Git repos, monorepos, languages, file types, EditorConfig, docs, blast radius, justfiles, recent commits |
+| Programs | 8 categories with macOS bundle support, install + remote-bash consent (parallel via Rayon, shared executable index) |
+| Services | 10+ init systems (systemd, launchd, OpenRC, runit, etc.) |
 | Packages | 110+ package manager abstraction |
+| Remote | GitHub, GitLab, Gitea, Bitbucket repository metadata |
 
 ## API Tiers
 
@@ -76,43 +77,67 @@ let result = detect_with_config(config)?;
 
 | Type | Presets | Controls |
 |------|---------|----------|
-| `OsRequest` | `summary()`, `full()` | Package managers, locale, NTP/time |
+| `OsRequest` | `summary()`, `full()` | Package managers, locale, timezone, NTP status (up to 10s on Linux) |
 | `HardwareRequest` | `summary()`, `full()` | Storage, GPU, audio (~1.5s macOS) |
-| `NetworkRequest` | `interfaces_only()`, `full()` | WAN IP lookup (HTTP) |
-| `GitRequest` | `summary()`, `full()`, `deep()` | Commits, file changes, worktrees, remote refresh |
-| `RepoRequest` | `structure()`, `full()` | Per-package language scanning |
-| `FilesystemRequest` | `new()` (default full) | Composes git + repo + inventory + formatting + docs |
-| `DetectionPlan` | `new()` (default full) | Composes all domains |
+| `NetworkRequest` | `interfaces_only()`, `full()` | WAN IP lookup (HTTP); `.force_refresh(true)` bypasses the TTL cache |
+| `GitRequest` | `summary()`, `full()`, `deep()` | Commits, per-file stats, worktrees, unified diffs, remote refresh |
+| `RepoRequest` | `structure()`, `full()` | Per-package language scanning (10-50x slower than `structure()`) |
+| `FilesystemRequest` | `new()` (default full) | Composes git + repo + file inventory + formatting + docs |
+| `DetectionPlan` | `new()` (default full) | Composes all four domains (os, hardware, network, filesystem) |
+
+**Git preset cheat sheet:**
+- `summary()` -- branch + dirty counts only (no commits, no worktrees)
+- `full()` -- 10 commits, per-file change stats, worktrees; no unified diffs, no network
+- `deep()` -- adds full unified diffs, remote refresh, branch details, and per-commit containment
 
 ## Key Types
 
 | Type | Description |
 |------|-------------|
-| `SniffResult` | Top-level: os, hardware, network, filesystem (all Optional) |
+| `SniffResult` | Top-level: os, hardware, network, filesystem (all `Option<T>`) |
 | `DetectionPlan` | Plan-based config with per-domain request types |
-| `ProgramsInfo` | 8 category fields with parallel detection via Rayon |
-| `ServicesInfo` | Init system + service list |
+| `ProgramsInfo` | 8 category fields with shared `ExecutableIndex` + parallel Rayon detection |
+| `ServicesInfo` | Init system + service list (via `ServiceManager::detect()`) |
 | `Package` | Package path, languages, managers, dependencies |
+| `GitRepo` | libgit2 handle from `GitRepo::discover(path)` |
+
+## Shared-Work Highlights
+
+- **Top-level concurrency**: OS, hardware, network, filesystem run in scoped threads via `detect_with_plan`
+- **Staged filesystem**: git → repo → file inventory → formatting → docs; each stage reuses earlier work
+- **Shared repo inventory**: full repo detection returns its `FileInventory` alongside the `RepoInfo` via `detect_repo_with_inventory`, so the file-inventory stage skips rescanning
+- **Manifest Index**: single walk records every `Cargo.toml`/`package.json`/`pyproject.toml`/`go.mod` for full repo mode; structure mode skips it entirely
+- **Git status layers**: counts-only vs full file changes vs full unified diffs, selectable via `GitRequest` flags
+- **ExecutableIndex**: scans `PATH` + macOS bundles once, shared across all 8 program categories via `Arc`
 
 ## CLI
 
 ```bash
-sniff                      # Full system info (JSON output)
+sniff                      # Show help
+sniff --json               # Full system info (JSON output)
 sniff hardware             # Hardware only (text output)
 sniff cpu                  # Just CPU info
+sniff audio-devices        # Audio input/output devices
 sniff programs             # All programs
 sniff editors              # Just editors
+sniff editors install      # Install an editor (interactive)
 sniff agents               # AI CLI tools
 sniff services             # System services
 sniff docs                 # Markdown documents
 sniff topics               # Table of available topics
-sniff structure            # Structural overview
+sniff just                 # Justfiles and recipes
+sniff repo                 # Repository/monorepo structure
+sniff repo git-status      # Git status with commit history
+sniff repo remote origin   # Inspect remote repository
+sniff repo recent-commits 1w  # Commits from last week
+sniff repo source-code-changes today  # Today's source changes
+sniff blast-radius         # Docs affected by dirty changes
 sniff hardware --json      # Subcommand with JSON output
 ```
 
 **Output modes:**
-- No subcommand: JSON (all data)
-- With subcommand: Text (default), `--json` for JSON
+- No subcommand: help (use `--json` for full JSON)
+- With subcommand: Text (default), `--json` for JSON, `--plain` for unstyled
 
 ## Detailed Topics
 

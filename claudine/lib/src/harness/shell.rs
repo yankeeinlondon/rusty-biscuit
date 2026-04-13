@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use darkmatter::markdown::compose::ComposeSource;
+use darkmatter::markdown::compose::ShellCommandOrigin;
 use darkmatter::markdown::compose::shell_expansion::tokenize::tokenize;
 use darkmatter::markdown::compose::shell_expansion::{
     ShellApprovalHandler, ShellExpansionOptions, check_builtin_blacklist, check_user_blacklist,
@@ -107,7 +108,9 @@ pub fn validate_and_approve_command_parts(
         Some(path) => ComposeSource::File(path.to_path_buf()),
         None => policy_source.clone(),
     };
-    let display_line = source_line.unwrap_or(0);
+    let display_origin = ShellCommandOrigin::Body {
+        line: source_line.unwrap_or(0),
+    };
 
     let shell_opts = ShellExpansionOptions {
         timeout: std::time::Duration::from_secs(30),
@@ -151,8 +154,9 @@ pub fn validate_and_approve_command_parts(
     if let Some(decision) = options
         .approval_cache
         .lock()
-        .ok()
-        .and_then(|cache| cache.get(&normalized).copied())
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&normalized)
+        .copied()
     {
         match decision {
             CachedApprovalDecision::Allowed => {
@@ -180,7 +184,7 @@ pub fn validate_and_approve_command_parts(
     if let Some(ref handler) = options.approval_handler {
         let request = darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest {
             source: display_source.clone(),
-            line: display_line,
+            origin: display_origin,
             raw_command: raw.clone(),
             executable: executable.to_string(),
             args: args.clone(),
@@ -271,18 +275,20 @@ fn cache_approval_decision(
     normalized: &str,
     decision: CachedApprovalDecision,
 ) {
-    if let Ok(mut cache) = cache.lock() {
-        cache.insert(normalized.to_string(), decision);
-    }
+    let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+    cache.insert(normalized.to_string(), decision);
 }
 
-/// Execute an approved command and return its exit code and stdout/stderr.
+/// Execute an approved command asynchronously and return its exit code and stdout/stderr.
+///
+/// Uses `tokio::process::Command` so the async runtime can await the child
+/// process without busy-waiting or blocking a worker thread.
 ///
 /// Enforces the given timeout: if the command does not complete within the
 /// duration, it is killed with SIGKILL and an error is returned.
 ///
 /// Returns `(exit_code, stdout, stderr)`.
-pub fn execute_approved_command(
+pub async fn execute_approved_command(
     command: &ApprovedRuntimeCommand,
     working_dir: Option<&std::path::Path>,
     timeout: std::time::Duration,
@@ -292,7 +298,7 @@ pub fn execute_approved_command(
         detail: format!("executable '{}' not found in PATH", command.executable),
     })?;
 
-    let mut cmd = std::process::Command::new(&exe);
+    let mut cmd = tokio::process::Command::new(&exe);
     cmd.args(&command.args);
     if let Some(dir) = working_dir {
         cmd.current_dir(dir);
@@ -305,51 +311,52 @@ pub fn execute_approved_command(
         detail: format!("failed to spawn '{}': {e}", command.executable),
     })?;
 
-    // Poll for completion with timeout enforcement
-    let start = std::time::Instant::now();
-    let poll_interval = std::time::Duration::from_millis(50);
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
 
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                // Process finished — collect output
-                let mut stdout_buf = Vec::new();
-                let mut stderr_buf = Vec::new();
-                if let Some(mut out) = child.stdout.take() {
-                    use std::io::Read;
-                    let _ = out.read_to_end(&mut stdout_buf);
+    let result = tokio::time::timeout(timeout, child.wait()).await;
+
+    match result {
+        Ok(Ok(status)) => {
+            let exit_code = status.code().unwrap_or(-1);
+
+            let stdout = match stdout_pipe {
+                Some(mut pipe) => {
+                    use tokio::io::AsyncReadExt;
+                    let mut buf = Vec::new();
+                    let _ = pipe.read_to_end(&mut buf).await;
+                    String::from_utf8_lossy(&buf).to_string()
                 }
-                if let Some(mut err) = child.stderr.take() {
-                    use std::io::Read;
-                    let _ = err.read_to_end(&mut stderr_buf);
+                None => String::new(),
+            };
+
+            let stderr = match stderr_pipe {
+                Some(mut pipe) => {
+                    use tokio::io::AsyncReadExt;
+                    let mut buf = Vec::new();
+                    let _ = pipe.read_to_end(&mut buf).await;
+                    String::from_utf8_lossy(&buf).to_string()
                 }
-                let exit_code = status.code().unwrap_or(-1);
-                let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
-                let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
-                return Ok((exit_code, stdout, stderr));
-            }
-            Ok(None) => {
-                // Still running — check timeout
-                if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(HarnessError::HandlerFailed {
-                        action: "shell_command".to_string(),
-                        detail: format!(
-                            "command '{}' timed out after {}s",
-                            command.raw,
-                            timeout.as_secs()
-                        ),
-                    });
-                }
-                std::thread::sleep(poll_interval);
-            }
-            Err(e) => {
-                return Err(HarnessError::HandlerFailed {
-                    action: "shell_command".to_string(),
-                    detail: format!("failed to wait for '{}': {e}", command.executable),
-                });
-            }
+                None => String::new(),
+            };
+
+            Ok((exit_code, stdout, stderr))
+        }
+        Ok(Err(e)) => Err(HarnessError::HandlerFailed {
+            action: "shell_command".to_string(),
+            detail: format!("failed to wait for '{}': {e}", command.executable),
+        }),
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            Err(HarnessError::HandlerFailed {
+                action: "shell_command".to_string(),
+                detail: format!(
+                    "command '{}' timed out after {}s",
+                    command.raw,
+                    timeout.as_secs()
+                ),
+            })
         }
     }
 }
@@ -472,28 +479,28 @@ mod tests {
         assert_eq!(handler.approvals(), 1);
     }
 
-    #[test]
-    fn execute_echo_command() {
+    #[tokio::test]
+    async fn execute_echo_command() {
         let cmd = ApprovedRuntimeCommand {
             raw: "echo hello".to_string(),
             executable: "echo".to_string(),
             args: vec!["hello".to_string()],
         };
-        let result = execute_approved_command(&cmd, None, std::time::Duration::from_secs(5));
+        let result = execute_approved_command(&cmd, None, std::time::Duration::from_secs(5)).await;
         assert!(result.is_ok());
         let (exit_code, stdout, _stderr) = result.unwrap();
         assert_eq!(exit_code, 0);
         assert!(stdout.trim() == "hello");
     }
 
-    #[test]
-    fn execute_failing_command() {
+    #[tokio::test]
+    async fn execute_failing_command() {
         let cmd = ApprovedRuntimeCommand {
             raw: "false".to_string(),
             executable: "false".to_string(),
             args: vec![],
         };
-        let result = execute_approved_command(&cmd, None, std::time::Duration::from_secs(5));
+        let result = execute_approved_command(&cmd, None, std::time::Duration::from_secs(5)).await;
         assert!(result.is_ok());
         let (exit_code, _, _) = result.unwrap();
         assert_ne!(exit_code, 0);
@@ -528,7 +535,8 @@ mod tests {
             "request should carry the real source file, not a dummy path"
         );
         assert_eq!(
-            captured.line, 42,
+            captured.origin,
+            darkmatter::markdown::compose::ShellCommandOrigin::Body { line: 42 },
             "request should carry the real line number"
         );
     }

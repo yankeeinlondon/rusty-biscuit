@@ -1,7 +1,7 @@
 ---
 start: 
-    speak: "hi"
+    say: "hi"
 success:
-    speak: "winner, winner, winner, TV dinner"
+    say: "winner, winner, winner, TV dinner"
 ---
 Hi how are you?

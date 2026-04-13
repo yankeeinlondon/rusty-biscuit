@@ -6,10 +6,12 @@ The darkmatter compose pipeline provides document preparation through three phas
 
 **Inline Pre** (serial):
 
-1. **Text Replacement** - `replace:` frontmatter replaces literal strings
-2. **Page Blocks** - `::block`/`::end-block` conditional regions
-3. **Interpolation** - `{{ variable }}` expressions expand to values
-4. **Shell Expansion** - `::shell` directives execute commands
+1. **Frontmatter Interpolation** - `{{ variable }}` in frontmatter resolves before effective state is built
+2. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter
+3. **Text Replacement** - `replace:` frontmatter replaces literal strings
+4. **Page Blocks** - `::block`/`::end-block` conditional regions
+5. **Interpolation** - `{{ variable }}` expressions expand to values
+6. **Shell Expansion** - `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
 
 **Transclusion** (prepared serially, resolved concurrently via Rayon):
 

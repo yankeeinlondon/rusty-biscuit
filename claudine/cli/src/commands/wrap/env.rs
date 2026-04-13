@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{Result, bail};
 use sniff::filesystem::git::detect_git;
-use sniff::filesystem::repo::{Package, detect_repo};
+use sniff::filesystem::repo::{Package, RepoInfo, detect_repo};
 
 use super::profile::WrapperProfile;
 use super::repo_home;
@@ -57,6 +57,44 @@ pub(crate) fn build_child_env(
     force_shadow_home: bool,
     repo_root_hint: Option<&Path>,
 ) -> Result<EnvPlan> {
+    let launch_ctx = resolve_launch_workspace_context(cwd, repo_root_hint);
+    build_child_env_with_launch(
+        profile,
+        provider,
+        include,
+        yolo,
+        interactive,
+        agent_params,
+        env_overrides,
+        repo,
+        force_shadow_home,
+        launch_ctx,
+    )
+}
+
+/// Same as `build_child_env`, but takes a pre-computed
+/// [`LaunchWorkspaceContext`] instead of re-running the sniff-based
+/// workspace/package detection internally.
+///
+/// Use this on hot paths where the caller has already resolved the
+/// launch workspace from a shared `SniffResult` — e.g. the direct
+/// provider wrapper in `run_provider_wrapper_inner`, which needs both
+/// an `EnvironmentContext` and a `LaunchContext` from the same scan
+/// and therefore also has the data to build a `LaunchWorkspaceContext`
+/// without any additional filesystem walks.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_child_env_with_launch(
+    profile: &dyn WrapperProfile,
+    provider: claudine::events::Provider,
+    include: &[String],
+    yolo: bool,
+    interactive: bool,
+    agent_params: &[String],
+    env_overrides: &[(String, String)],
+    repo: bool,
+    force_shadow_home: bool,
+    launch_ctx: LaunchWorkspaceContext,
+) -> Result<EnvPlan> {
     let include_set = validate_include_names(include)?;
     let auto_include: HashSet<String> = profile
         .allowed_env_keys()
@@ -107,7 +145,6 @@ pub(crate) fn build_child_env(
         set_added_env(&mut env, &mut added, key, value.clone());
     }
 
-    let launch_ctx = resolve_launch_workspace_context(cwd, repo_root_hint);
     warnings.extend(launch_ctx.warnings.iter().cloned());
 
     let mut shadow_home_path = None;
@@ -324,12 +361,19 @@ fn resolve_launch_workspace_context(
     launch_cwd: &Path,
     repo_root_hint: Option<&Path>,
 ) -> LaunchWorkspaceContext {
+    // `repo_root` is metadata — guardrails, MCP defaults, harness path
+    // resolution. When composing a document, the caller passes the
+    // document's enclosing git root as a hint so those subsystems key
+    // off the document's repo (e.g. `@`-references, per-repo guardrails).
     let repo_root = repo_root_hint
         .map(Path::to_path_buf)
         .or_else(|| detect_repo_root(launch_cwd));
-    let child_cwd = repo_root
-        .clone()
-        .unwrap_or_else(|| launch_cwd.to_path_buf());
+    // `child_cwd` is the directory the spawned provider process will
+    // run in. It must ALWAYS follow the user's launch directory, never
+    // the document hint — otherwise a sequence that composes a markdown
+    // file from an unrelated nested clone would jump OpenCode/Claude/etc.
+    // into that clone and flag the user's real worktree as external.
+    let child_cwd = detect_repo_root(launch_cwd).unwrap_or_else(|| launch_cwd.to_path_buf());
 
     match resolve_monorepo_package_context(launch_cwd) {
         Ok(repo_ctx) => LaunchWorkspaceContext {
@@ -351,6 +395,80 @@ fn resolve_launch_workspace_context(
             )],
         },
     }
+}
+
+/// Build a [`LaunchWorkspaceContext`] from data already produced by a
+/// single `sniff::detect_with_plan` call, without performing any further
+/// filesystem walks.
+///
+/// `git_root` should come from the filesystem git section of the shared
+/// `SniffResult`; `repo` should come from its repo section. Callers that
+/// have neither can pass `None` for both — the resulting context will
+/// behave as if no repo was detected.
+pub(crate) fn launch_workspace_context_from_repo_info(
+    launch_cwd: &Path,
+    git_root: Option<&Path>,
+    repo: Option<&RepoInfo>,
+) -> LaunchWorkspaceContext {
+    let repo_root = git_root
+        .map(Path::to_path_buf)
+        .or_else(|| repo.map(|r| r.root.clone()));
+    let child_cwd = repo_root
+        .clone()
+        .unwrap_or_else(|| launch_cwd.to_path_buf());
+
+    let (package_context, warnings) = match repo {
+        Some(repo) if repo.is_monorepo => match repo.packages.as_deref() {
+            Some(packages) => resolve_package_context_from_packages(launch_cwd, repo, packages),
+            None => (
+                None,
+                vec![format!(
+                    "monorepo detected at '{}' but no packages were reported",
+                    repo.root.display()
+                )],
+            ),
+        },
+        _ => (None, Vec::new()),
+    };
+
+    LaunchWorkspaceContext {
+        launch_cwd: launch_cwd.to_path_buf(),
+        repo_root,
+        child_cwd,
+        package_context,
+        warnings,
+    }
+}
+
+fn resolve_package_context_from_packages(
+    cwd: &Path,
+    repo: &RepoInfo,
+    packages: &[Package],
+) -> (Option<PackageContext>, Vec<String>) {
+    if let Some(package_ctx) = select_package_for_cwd(cwd, packages) {
+        return (Some(package_ctx), Vec::new());
+    }
+
+    if let Some(package_area) = select_package_area_for_cwd(cwd, &repo.root, packages) {
+        let candidates = package_candidates_for_area(&package_area, packages);
+        return (
+            Some(PackageContext {
+                package_area,
+                package: None,
+                candidates,
+            }),
+            Vec::new(),
+        );
+    }
+
+    (
+        None,
+        vec![format!(
+            "monorepo detected at '{}' but no package area matched cwd '{}'",
+            repo.root.display(),
+            cwd.display()
+        )],
+    )
 }
 
 fn resolve_monorepo_package_context(cwd: &Path) -> Result<RepoContext> {
@@ -779,7 +897,11 @@ mod tests {
     }
 
     #[test]
-    fn repo_root_hint_overrides_cwd_detection() {
+    fn repo_root_hint_sets_metadata_but_not_child_cwd() {
+        // The hint describes the composition source's enclosing repo
+        // (used for guardrails, MCP, harness path resolution). The
+        // child process must still spawn in the user's launch directory
+        // — never in whatever repo the document happens to live in.
         let profile = profile_for_provider(claudine::events::Provider::Claude).unwrap();
         let cwd = tempfile::tempdir().unwrap();
         let hint_dir = tempfile::tempdir().unwrap();
@@ -799,9 +921,8 @@ mod tests {
         )
         .unwrap();
 
-        // repo_root should be the hint, not whatever CWD detection found.
         assert_eq!(plan.repo_root.as_deref(), Some(hint_dir.path()));
-        assert_eq!(plan.child_cwd.as_path(), hint_dir.path());
+        assert_eq!(plan.child_cwd.as_path(), cwd.path());
     }
 
     #[test]

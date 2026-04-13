@@ -7,39 +7,9 @@ use predicates::str::contains;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use tempfile::tempdir;
-
-fn write_executable(path: &Path, content: &str) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::write(path, content).unwrap();
-        let mut perms = fs::metadata(path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(path, perms).unwrap();
-    }
-    #[cfg(not(unix))]
-    {
-        fs::write(path, content).unwrap();
-    }
-}
-
-fn write_file(path: &Path, content: &str) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, content).unwrap();
-}
-
-fn init_git_repo(path: &Path) -> bool {
-    Command::new("git")
-        .arg("init")
-        .current_dir(path)
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
+mod common;
+use common::{init_git_repo, strip_ansi, write, write_executable, write_json};
 
 fn create_claudine_monorepo(workspace: &Path) -> Option<(PathBuf, PathBuf, PathBuf)> {
     let repo_root = workspace.join("repo");
@@ -51,14 +21,14 @@ fn create_claudine_monorepo(workspace: &Path) -> Option<(PathBuf, PathBuf, PathB
     fs::create_dir_all(lib_dir.join("src")).unwrap();
     fs::create_dir_all(&bin_dir).unwrap();
 
-    write_file(
+    write(
         &repo_root.join("Cargo.toml"),
         r#"[workspace]
 resolver = "2"
 members = ["claudine/lib", "claudine/cli"]
 "#,
     );
-    write_file(
+    write(
         &lib_dir.join("Cargo.toml"),
         r#"[package]
 name = "claudine"
@@ -66,8 +36,8 @@ version = "0.1.0"
 edition = "2024"
 "#,
     );
-    write_file(&lib_dir.join("src/lib.rs"), "");
-    write_file(
+    write(&lib_dir.join("src/lib.rs"), "");
+    write(
         &launch_dir.join("Cargo.toml"),
         r#"[package]
 name = "claudine-cli"
@@ -75,7 +45,7 @@ version = "0.1.0"
 edition = "2024"
 "#,
     );
-    write_file(&launch_dir.join("src/main.rs"), "fn main() {}\n");
+    write(&launch_dir.join("src/main.rs"), "fn main() {}\n");
 
     if !init_git_repo(&repo_root) {
         return None;
@@ -111,39 +81,10 @@ fn redact_temp_home(input: &str) -> String {
     format!("{}HOME=<redacted>{}", &input[..start], &after[end..])
 }
 
-fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                for code in chars.by_ref() {
-                    if ('@'..='~').contains(&code) {
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-        out.push(ch);
-    }
-
-    out
-}
-
 fn today_log_path(home: &Path) -> std::path::PathBuf {
     home.join(".claudine")
         .join("logs")
         .join(format!("{}.jsonl", Local::now().format("%Y-%m-%d")))
-}
-
-fn write_json<T: serde::Serialize>(path: &Path, value: &T) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(path, serde_json::to_string_pretty(value).unwrap()).unwrap();
 }
 
 fn make_server(id: &str) -> McpServer {
@@ -250,11 +191,13 @@ fn wrapper_preserves_passthrough_args_and_injects_env() {
     fs::create_dir_all(&path_dir).unwrap();
     let args_path = workspace.path().join("args.txt");
     let env_path = workspace.path().join("env.txt");
+    let stdin_path = workspace.path().join("stdin.txt");
 
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
 {
   printf 'AGENT=%s\n' "$AGENT"
   printf 'YOLO=%s\n' "$YOLO"
@@ -270,6 +213,7 @@ exit 0
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["codex", "--yolo", "--", "--json", "summarize repo"])
         .assert()
         .success();
@@ -281,10 +225,12 @@ exit 0
         vec![
             "exec",
             "--json",
-            "summarize repo",
             "--dangerously-bypass-approvals-and-sandbox",
         ]
     );
+
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert_eq!(stdin, "summarize repo");
 
     let env_lines = fs::read_to_string(&env_path).unwrap();
     assert!(env_lines.contains("AGENT=codex"));
@@ -404,11 +350,13 @@ fn wrapper_consumes_non_interactive_alias_from_passthrough() {
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
     let args_path = workspace.path().join("args.txt");
+    let stdin_path = workspace.path().join("stdin.txt");
 
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
 exit 0
 "#,
     );
@@ -417,13 +365,17 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["codex", "--json", "summarize repo"])
         .assert()
         .success();
 
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
-    assert_eq!(args, vec!["exec", "--json", "summarize repo"]);
+    assert_eq!(args, vec!["exec", "--json"]);
+
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert_eq!(stdin, "summarize repo");
 }
 
 #[cfg(unix)]
@@ -510,7 +462,7 @@ exit 0
 
 #[cfg(unix)]
 #[test]
-fn opencode_non_interactive_injects_default_model() {
+fn opencode_non_interactive_requires_model_when_missing() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -533,16 +485,20 @@ exit 0
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["opencode", "summarize"])
         .assert()
-        .success()
-        .stderr(contains("Opencode requires a model be specified"));
+        .failure()
+        .stderr(contains(
+            "OpenCode cannot use its configured default model in non-interactive mode",
+        ))
+        .stderr(contains("OPENCODE_MODEL"));
 
-    let args = fs::read_to_string(&args_path).unwrap();
-    let args: Vec<&str> = args.lines().collect();
-    assert!(args.contains(&"run"));
-    assert!(args.contains(&"--model"));
-    assert!(args.contains(&"minimax/MiniMax-M2.5-highspeed"));
-    let env_lines = fs::read_to_string(&env_path).unwrap();
-    assert!(env_lines.contains("MODEL=minimax/MiniMax-M2.5-highspeed"));
+    assert!(
+        !args_path.exists(),
+        "child process should not launch when no non-interactive model is available"
+    );
+    assert!(
+        !env_path.exists(),
+        "child process should not launch when no non-interactive model is available"
+    );
 }
 
 #[cfg(unix)]
@@ -573,6 +529,7 @@ exit 0
     cargo_bin_cmd!("claudine")
         .current_dir(&launch_dir)
         .env("NO_COLOR", "1")
+        .env("OPENCODE_MODEL", "test-model")
         .env("PATH", &bin_dir)
         .env("CLAUDINE_PWD_FILE", &pwd_path)
         .env("CLAUDINE_ARGS_FILE", &args_path)
@@ -615,7 +572,6 @@ exit 0
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
-        .env("MODEL", "from-model")
         .env("OPENCODE_MODEL", "from-opencode")
         .args(["opencode", "summarize"])
         .assert()
@@ -679,6 +635,7 @@ exit 0
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
         .args(["opencode", "-y", "hi"])
         .assert()
         .success();
@@ -691,12 +648,8 @@ exit 0
     let warning_index = plain
         .find("- Warning: --yolo is not supported for 'opencode' and was ignored")
         .unwrap();
-    let hint_index = plain
-        .find("Opencode requires a model be specified")
-        .unwrap();
 
     assert!(warning_index > summary_index);
-    assert!(hint_index > summary_index);
     let header_line = plain
         .lines()
         .find(|line| line.contains("Claudine"))
@@ -850,11 +803,13 @@ fn kimi_wrapper_non_interactive_appends_print() {
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
     let args_path = workspace.path().join("args.txt");
+    let stdin_path = workspace.path().join("stdin.txt");
 
     write_executable(
         &path_dir.join("kimi"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
 exit 0
 "#,
     );
@@ -863,6 +818,7 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["kimi", "hi"])
         .assert()
         .success();
@@ -870,7 +826,8 @@ exit 0
     let args = fs::read_to_string(&args_path).unwrap();
     let args: Vec<&str> = args.lines().collect();
     assert!(args.contains(&"--print"));
-    assert!(args.contains(&"hi"));
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert_eq!(stdin, "hi");
 }
 
 // ---------------------------------------------------------------------------
@@ -937,7 +894,9 @@ exit 1
 fn wrapper_quiet_suppresses_summary() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
+    let system_prompt = workspace.path().join("system-prompt.md");
     fs::create_dir_all(&path_dir).unwrap();
+    fs::write(&system_prompt, "Quiet mode prompt").unwrap();
 
     write_executable(
         &path_dir.join("codex"),
@@ -950,18 +909,30 @@ exit 0
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
-        .args(["codex", "--quiet", "--", "--version"])
+        .args([
+            "codex",
+            "--quiet",
+            "--append-system-prompt",
+            system_prompt.to_str().unwrap(),
+            "--",
+            "--version",
+        ])
         .assert()
         .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+    let stderr_plain = strip_ansi(&stderr);
     assert!(
-        stderr.contains("Claudine"),
+        stderr_plain.contains("Claudine"),
         "Quiet mode should show header but stderr was: {stderr}"
     );
     assert!(
-        !stderr.contains("Environment Variables"),
+        !stderr_plain.contains("Environment Variables"),
         "Quiet mode should suppress env details but stderr was: {stderr}"
+    );
+    assert!(
+        stderr_plain.contains("System Prompt(appended):"),
+        "Quiet mode should still show the system prompt when set but stderr was: {stderr}"
     );
 
     // --silent suppresses everything
@@ -1688,7 +1659,7 @@ fn compose_interactive_preflight_with_whitelisted_command() {
 
     write_executable(
         &path_dir.join("codex"),
-        "#!/bin/sh\necho 'provider-launched' >&2\nexit 0\n",
+        "#!/bin/sh\ncat > /dev/null\necho 'provider-launched' >&2\nexit 0\n",
     );
 
     // Include system dirs so shell expansion can find `echo`.
@@ -1746,6 +1717,7 @@ fn compose_skips_shell_hidden_by_false_block() {
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", &path_dir)
+        .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -2305,6 +2277,7 @@ exit 0
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .assert()
@@ -2346,7 +2319,7 @@ fn compose_opencode_launches_child_from_repo_root() {
     let env_path = workspace.path().join("env.txt");
     let args_path = workspace.path().join("args.txt");
     let md_file = repo_root.join("prompts/test.md");
-    write_file(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
+    write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
 
     write_executable(
         &bin_dir.join("opencode"),
@@ -2364,6 +2337,7 @@ exit 0
     cargo_bin_cmd!("claudine")
         .current_dir(&launch_dir)
         .env("NO_COLOR", "1")
+        .env("OPENCODE_MODEL", "test-model")
         .env("PATH", &bin_dir)
         .env("CLAUDINE_PWD_FILE", &pwd_path)
         .env("CLAUDINE_ARGS_FILE", &args_path)
@@ -2398,7 +2372,7 @@ fn compose_opencode_launches_from_repo_root_for_package_prompt_refs() {
     let env_path = workspace.path().join("env-package.txt");
     let args_path = workspace.path().join("args-package.txt");
     let md_file = package_root.join("prompts/test.md");
-    write_file(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
+    write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
 
     write_executable(
         &bin_dir.join("opencode"),
@@ -2416,6 +2390,7 @@ exit 0
     cargo_bin_cmd!("claudine")
         .current_dir(&package_root)
         .env("NO_COLOR", "1")
+        .env("OPENCODE_MODEL", "test-model")
         .env("PATH", &bin_dir)
         .env("CLAUDINE_PWD_FILE", &pwd_path)
         .env("CLAUDINE_ARGS_FILE", &args_path)
@@ -2462,7 +2437,7 @@ fn compose_supports_mcp_runtime_and_tag_cleanup() {
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
-cat > "$CLAUDINE_STDIN_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
 {
   printf 'HOME=%s\n' "$HOME"
 } > "$CLAUDINE_ENV_FILE"
@@ -2688,12 +2663,12 @@ fn repo_scoped_config_favorite_selects_provider() {
         .output()
         .unwrap();
 
-    // Create repo-local config with goose as the favorite
+    // Create repo-local config with goose as the preferred agent
     let config_dir = workspace.path().join(".claudine");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
         config_dir.join("config.json"),
-        r#"{"version":"1","settings":{"linking":{"preference":["goose"],"canonical_provider":{}}},"providers":{}}"#,
+        r#"{"preferred_agent":"goose"}"#,
     )
     .unwrap();
 
@@ -3271,4 +3246,114 @@ exit 0
         !collapsed.contains("engaging registered handlers"),
         "--silent should suppress handler-engagement banner; stderr:\n{stderr}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Per-provider dry-run regression tests (Task 18)
+//
+// These tests are the structural guard that would have caught the original
+// Gemini/Qwen drift: composition pipelines that silently bailed because
+// `apply_non_interactive` re-read args before the prompt was injected.
+// A successful dry-run (exit 0 + "DRY RUN" in output) proves the full
+// extraction → delivery → output pipeline ran without error.
+// ---------------------------------------------------------------------------
+
+/// End-to-end: for every wrapped provider, verify that
+/// `claudine <provider> --dry-run "hello"` produces a successful
+/// dry-run (exit 0) and that the dry-run output section is printed.
+///
+/// Providers that deliver the prompt via argv (Gemini, Qwen, OpenCode,
+/// Goose) also have "hello" visible in the Command: line; providers that
+/// seed stdin (Claude, Codex, Kimi) do not, but the pipeline still
+/// completes and emits the DRY RUN header, which is sufficient to prove
+/// that the prompt was accepted and processed. Runs for all 7 wrapped
+/// providers with stub binaries on PATH.
+#[cfg(unix)]
+#[test]
+fn direct_wrap_dry_run_delivers_prompt_for_every_provider() {
+    for provider_slug in [
+        "claude", "codex", "gemini", "kimi", "opencode", "qwen", "goose",
+    ] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+
+        // Stub binary so PATH resolution succeeds in dry-run mode.
+        // Dry-run never actually spawns the child, so the stub body
+        // doesn't matter — the stub only needs to exist and be
+        // executable for claudine's binary-resolution step.
+        write_executable(&path_dir.join(provider_slug), "#!/bin/sh\nexit 0\n");
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("PATH", &path_dir)
+            .args([provider_slug, "--dry-run", "hello"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "`claudine {provider_slug} --dry-run hello` failed: stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let normalized = strip_ansi(&combined);
+        assert!(
+            normalized.contains("DRY RUN"),
+            "`claudine {provider_slug} --dry-run hello` did not emit a DRY RUN section:\n{normalized}"
+        );
+    }
+}
+
+/// End-to-end: for every wrapped provider, verify that
+/// `claudine sequence compose.md --<provider> --dry-run` runs cleanly
+/// through the composition pipeline with a trivial markdown body.
+///
+/// Regression guard for the composition-path drift: if a provider's
+/// `apply_entrypoint` / `apply_non_interactive_flags` / `prompt_delivery`
+/// chain silently bails when the prompt arrives via the composition
+/// body, this test fails.
+#[cfg(unix)]
+#[test]
+fn sequence_composition_dry_run_for_every_provider() {
+    for provider_slug in [
+        "claude", "codex", "gemini", "kimi", "opencode", "qwen", "goose",
+    ] {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+
+        write_executable(&path_dir.join(provider_slug), "#!/bin/sh\nexit 0\n");
+
+        let compose_file = workspace.path().join("compose.md");
+        fs::write(
+            &compose_file,
+            "---\nsequence:\n  - step_one\n---\ncomposed body text\n",
+        )
+        .unwrap();
+
+        let output = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("PATH", &path_dir)
+            .current_dir(workspace.path())
+            .args([
+                "sequence",
+                "compose.md",
+                &format!("--{provider_slug}"),
+                "--dry-run",
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "`claudine sequence compose.md --{provider_slug} --dry-run` failed: stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }

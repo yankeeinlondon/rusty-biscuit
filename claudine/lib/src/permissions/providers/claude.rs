@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use crate::error::{ClaudineError, Result};
 use crate::events::Provider;
@@ -16,6 +16,7 @@ use crate::permissions::change::{
     CommandPattern, PolicyChange, PolicyChangeOp, PolicyChangeTarget, PolicyPersistence,
 };
 use crate::permissions::context::{CliPolicyInput, PolicyContext};
+use crate::permissions::json_utils::{ensure_json_array, ensure_json_value};
 use crate::permissions::mutation::{
     ConfigEditPlan, OneShotMutationPlan, PersistentMutationPlan, PolicyMutationPlan,
 };
@@ -910,29 +911,6 @@ fn set_json_string(root: &mut Value, path: &[&str], value: &str) {
 
 fn set_json_bool(root: &mut Value, path: &[&str], value: bool) {
     *ensure_json_value(root, path) = Value::Bool(value);
-}
-
-fn ensure_json_array<'a>(root: &'a mut Value, path: &[&str]) -> &'a mut Vec<Value> {
-    let value = ensure_json_value(root, path);
-    if !value.is_array() {
-        *value = Value::Array(Vec::new());
-    }
-    value.as_array_mut().expect("array")
-}
-
-fn ensure_json_value<'a>(root: &'a mut Value, path: &[&str]) -> &'a mut Value {
-    let mut current = root;
-    for key in path {
-        if !current.is_object() {
-            *current = Value::Object(Map::new());
-        }
-        current = current
-            .as_object_mut()
-            .expect("object")
-            .entry((*key).to_owned())
-            .or_insert(Value::Null);
-    }
-    current
 }
 
 fn string_array(value: Option<&Value>) -> Vec<String> {

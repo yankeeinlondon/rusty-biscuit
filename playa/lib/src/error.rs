@@ -41,7 +41,10 @@ pub enum PlaybackError {
     #[error("audio detection failed: {0}")]
     Detection(#[from] DetectionError),
     /// No installed player can handle the requested format.
-    #[error("no compatible player available for {format:?}")]
+    #[error(
+        "no compatible player available for {format:?}{}",
+        format_install_hint()
+    )]
     NoCompatiblePlayer {
         /// The requested format.
         format: AudioFormat,
@@ -114,4 +117,14 @@ pub enum InvalidAudio {
     /// Audio detection failed.
     #[error("audio detection failed: {0}")]
     Detection(#[from] DetectionError),
+}
+
+#[cfg(target_os = "windows")]
+fn format_install_hint() -> &'static str {
+    " — install mpv (https://mpv.io) or FFmpeg (https://ffmpeg.org) for audio playback"
+}
+
+#[cfg(not(target_os = "windows"))]
+fn format_install_hint() -> &'static str {
+    ""
 }

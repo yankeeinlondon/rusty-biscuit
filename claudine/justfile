@@ -141,31 +141,45 @@ _claude_file PROMPT_FILE:
 build *args="":
     @echo -e "Building {{LIB_NAME}}"
     @echo
-    cargo build -p {{LIBRARY}} {{args}} || ( just _speak "The {{LIB_NAME}} build failed!" && echo -e "\n❌ The {{LIB_NAME}} build failed!" && exit 1)
+    @cargo build -p {{LIBRARY}} {{args}} || ( just _speak "The {{LIB_NAME}} build failed!" && echo -e "\n❌ The {{LIB_NAME}} build failed!" && exit 1)
     @echo
     @echo -e "✅ {{BOLD}}{{LIB_NAME}}{{RESET}} built successfully"
     @echo
     @echo -e "Building {{BOLD}}{{CLI_NAME}}{{RESET}}"
     @echo
-    cargo build -p {{CLI}} {{args}} || ( just _speak "The {{CLI_NAME}} build failed!" && echo -e "\n❌ The {{CLI_NAME}} build failed!" && exit 1)
+    @cargo build -p {{CLI}} {{args}} || ( just _speak "The {{CLI_NAME}} build failed!" && echo -e "\n❌ The {{CLI_NAME}} build failed!" && exit 1)
     @echo
     @echo -e "✅ {{BOLD}}{{CLI_NAME}}{{RESET}} built successfully"
     @echo
 
-# Test both library and CLI
+# Test both library and CLI.
+# Primary verification for Claudine uses `cargo nextest run`.
+# PTY smoke tests remain manual-only via `cargo test -p claudine-cli --test pty_tests -- --ignored`.
+# Snapshot changes should be reviewed with `cargo insta review` / `cargo insta accept`.
 test:
-    @echo
-    @echo -e "🏃 Testing {{BOLD}}{{LIB_NAME}}{{RESET}}"
-    @echo
-    cargo test -p {{LIBRARY}} || ( just _speak "The {{LIB_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing tests!" && exit 1 )
-    @echo
-    @echo -e "✅ {{BOLD}}{{GREEN}}{{LIB_NAME}} has passed all tests{{RESET}}"
-    @echo
-    @echo -e "Testing {{BOLD}}{{CLI_NAME}}{{RESET}}"
-    @echo
-    @cargo test -p "{{CLI}}" || ( just _speak "The {{CLI_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing tests!" && exit 1 )
-    @echo
-    @echo -e "✅ {{BOLD}}{{GREEN}}{{CLI_NAME}} has passed all tests{{RESET}}"
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if cargo nextest --version >/dev/null 2>&1; then
+        TEST_RUNNER=(cargo nextest run)
+        echo -e "{{DIM}}Using cargo nextest run for Claudine verification{{RESET}}"
+    else
+        TEST_RUNNER=(cargo test)
+        echo -e "{{YELLOW}}cargo-nextest is not installed; falling back to cargo test{{RESET}}"
+    fi
+
+    echo
+    echo -e "🏃 Testing {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    echo
+    "${TEST_RUNNER[@]}" -p {{LIBRARY}} || ( just _speak "The {{LIB_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing tests!" && exit 1 )
+    echo
+    echo -e "✅ {{BOLD}}{{GREEN}}{{LIB_NAME}} has passed all tests{{RESET}}"
+    echo
+    echo -e "Testing {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    echo
+    "${TEST_RUNNER[@]}" -p "{{CLI}}" || ( just _speak "The {{CLI_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing tests!" && exit 1 )
+    echo
+    echo -e "✅ {{BOLD}}{{GREEN}}{{CLI_NAME}} has passed all tests{{RESET}}"
 
 # Lint both the library and CLI
 lint:
@@ -183,21 +197,21 @@ lint-fix:
     @echo
     @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{LIB_NAME}}{{RESET}}"
     @echo
-    @cargo clippy --fix -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints even after attempt to autofix" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
+    @cargo clippy --fix -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints even after attempt to autofix" && @echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
     @echo
     @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{CLI_NAME}}{{RESET}}"
     @echo
     cargo clippy --fix -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
 
 _lint_fix_library ERR_FILE:
-    echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{LIB_NAME}}{{RESET}}; kicking off AI to fix.\n"
-    echo "{{LIBRARY}} Fix the lint errors in {{LIB_NAME}}:" > "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    echo "" >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    cat {{ERR_FILE}} >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
-    just _claude_file "/tmp/{{LIBRARY}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
-    echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}} are now fixed"
-    just _speak "Claude Code believes it has fixed all lint errors in {{LIB_NAME}}"
-    cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
+    @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{LIB_NAME}}{{RESET}}; kicking off AI to fix.\n"
+    @echo "{{LIBRARY}} Fix the lint errors in {{LIB_NAME}}:" > "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    @echo "" >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    @cat {{ERR_FILE}} >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    @just _claude_file "/tmp/{{LIBRARY}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
+    @echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}} are now fixed"
+    @just _speak "Claude Code believes it has fixed all lint errors in {{LIB_NAME}}"
+    @cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
 
 _lint_fix_cli ERR_FILE:
     @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{CLI_NAME}}{{RESET}}; kicking off AI to fix.\n"
@@ -229,6 +243,7 @@ commit *args="":
     @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
     @echo ""
     @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
+    @echo test | gpg --clearsign --output /dev/null
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
     @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y {{args}}
     @just _speak "git commits completed in rusty-biscuit monorepo"
@@ -278,13 +293,6 @@ codex *args="":
 # Open Claude Code
 gem *args="":
     @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
-
-
-implement topic phase plan="":
-    @echo
-    @echo -e "{{BOLD}}Phase {{phase}}:{{RESET}} {{DIM}}{{topic}}{{RESET}}"
-    @echo
-    @claudine compose @prompts/implement.md --set '{ topic: "{{topic}}", phase: "{{phase}}", plan: "{{plan}}" }' --yolo
 
 
 git-conflict:
@@ -337,6 +345,15 @@ review *args="":
     @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
     @just _speak "Review for {{LIB_NAME}} package has completed."
 
+implement:
+    @claudine compose @prompts/implement-review.md --claude -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 1, spec: "spec.md", design: "tech-design.md", }'
+    @git add . && just commit
+    @claudine compose @prompts/review-feature.md --codex -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", spec: "spec.md", design: "tech-design.md", iteration: 2 }'
+    @claudine compose @prompts/implement-review.md --claude -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 2, spec: "spec.md", design: "tech-design.md" }'
+    @git add . && just commit || exit 0
+    @claudine compose @prompts/review-feature.md --codex -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", spec: "spec.md", design: "tech-design.md", iteration: 3 }'
+    @claudine compose @prompts/implement-review.md --claude -y --set '{ dir: "@claudine/features/2026-04-7-refactor-config", iteration: 3, spec: "spec.md", design: "tech-design.md" }'
+    @git add . && just commit || exit 0
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).

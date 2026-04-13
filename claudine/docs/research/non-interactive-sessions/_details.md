@@ -1,9 +1,9 @@
 ---
 sequence: "@claudine/docs/providers.yaml"
 success: 
-    speak: "Completed research for {{state.name}}"
+    say: "Completed research for {{state.name}}"
 error:
-    speak: "Error during research of {{state.name}}"
+    say: "Error during research of {{state.name}}"
 operation: "research"
 skip_when:
     file_exists:
@@ -12,7 +12,7 @@ skip_when:
         stderr: "The research on non-interactive sessions for <b>{{state.name}}</b> is already in place. Skipping."
 post_checks:
     file_exists:
-        name: "{{state.file}}"
+        file: "{{state.file}}"
         say: "The research on {{state.name}} was completed but the file is missing!"
         stderr: "The research on {{state.name}} was completed but the file is missing! Expected results to be saved to <b>{{state.file}}</b>."
 ---

@@ -2823,7 +2823,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // Keybinding help
     if is_detail {
         let help = Paragraph::new(
-            " A: Agent │ U: User provider │ R: Repo provider │ S: Success sound │ A: Attention │ E: Error "
+            " A: Agent │ U: User provider │ R: Repo provider │ S: Success sound │ N: Attention │ E: Error "
         ).style(Style::default().fg(Color::DarkGray));
         frame.render_widget(help, chunks[6]);
     }

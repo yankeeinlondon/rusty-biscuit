@@ -7,49 +7,9 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::str::contains;
 use std::fs;
-use std::path::Path;
 use tempfile::tempdir;
-
-fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                for code in chars.by_ref() {
-                    if ('@'..='~').contains(&code) {
-                        break;
-                    }
-                }
-            }
-            continue;
-        }
-        out.push(ch);
-    }
-
-    out
-}
-
-/// Prepend the test's fake bin directory to the real PATH so the
-/// fake provider shadows real binaries while system tools like `cat`
-/// remain available to provider scripts.
-fn augmented_path(fake_bin: &Path) -> std::ffi::OsString {
-    let system_path = std::env::var_os("PATH").unwrap_or_default();
-    let mut paths: Vec<std::path::PathBuf> = vec![fake_bin.to_path_buf()];
-    paths.extend(std::env::split_paths(&system_path));
-    std::env::join_paths(paths).expect("join_paths")
-}
-
-#[cfg(unix)]
-fn write_executable(path: &Path, content: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    fs::write(path, content).unwrap();
-    let mut perms = fs::metadata(path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(path, perms).unwrap();
-}
+mod common;
+use common::{augmented_path, strip_ansi, write_executable};
 
 // ============================================================================
 // Validation tests
@@ -226,6 +186,60 @@ exit 0
     assert!(
         plain.contains("2 succeeded") && plain.contains("1 failed"),
         "summary should record 2 successes and 1 failure; stderr: {plain}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn sequence_opencode_requires_model_when_missing() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let args_path = workspace.path().join("opencode-args.txt");
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+sequence:
+  - only
+---
+Run step {{state}}
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .current_dir(workspace.path())
+        .args(["sequence", "--opencode", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("OpenCode cannot use its configured default model"),
+        "stderr should explain the missing non-interactive OpenCode model; stderr: {plain}"
+    );
+    assert!(
+        plain.contains("OPENCODE_MODEL"),
+        "stderr should tell the user how to provide the model; stderr: {plain}"
+    );
+    assert!(
+        !args_path.exists(),
+        "OpenCode should not launch when the model is missing"
     );
 }
 

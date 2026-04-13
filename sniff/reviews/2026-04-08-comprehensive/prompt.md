@@ -65,12 +65,12 @@ Review the project across these dimensions:
 
 10. **Tooling / quality gates**
 
-- Consider whether the project appears reviewable under:
-    - `cargo fmt`
-    - `cargo clippy`
-    - `cargo test`
-- If appropriate, suggest targeted Clippy linting improvements.
-- Do not recommend enabling every Clippy lint blindly.
+    - Consider whether the project appears reviewable under:
+        - `cargo fmt`
+        - `cargo clippy`
+        - `cargo test`
+    - If appropriate, suggest targeted Clippy linting improvements.
+    - Do not recommend enabling every Clippy lint blindly.
 
 ## Review Method
 
