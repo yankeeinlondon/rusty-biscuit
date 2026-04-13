@@ -132,10 +132,10 @@ fn collect_roots(
         ReferenceKind::Relative(_) => Ok(vec![ctx.cwd.clone()]),
         ReferenceKind::ImplicitRelative(_) => {
             let mut roots = vec![ctx.cwd.clone()];
-            if let Some(git_root) = find_git_root(&ctx.cwd)? {
-                if git_root != ctx.cwd {
-                    roots.push(git_root);
-                }
+            if let Some(git_root) = find_git_root(&ctx.cwd)?
+                && git_root != ctx.cwd
+            {
+                roots.push(git_root);
             }
             Ok(roots)
         }
@@ -404,8 +404,7 @@ mod tests {
             home_dir: None,
             env: std::collections::HashMap::new(),
         };
-        let roots =
-            collect_roots(&parsed.kind, &MagicPathList::default(), &[], &ctx).unwrap();
+        let roots = collect_roots(&parsed.kind, &MagicPathList::default(), &[], &ctx).unwrap();
         // /tmp has no git repo, so only CWD is returned.
         assert_eq!(roots, vec![PathBuf::from("/tmp")]);
     }
