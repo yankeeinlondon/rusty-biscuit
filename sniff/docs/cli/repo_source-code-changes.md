@@ -80,6 +80,9 @@ The optional `PERIOD` argument accepts several formats:
 | Named | `yesterday` | Midnight-to-midnight UTC yesterday |
 | Date | `2026-04-01` | All commits on that date (YYYY-MM-DD) |
 | Hash | `a1b2c3d` | All commits from that hash to HEAD |
+| Count | `10`, `25` | The last N commits reachable from HEAD (bare positive integer) |
+
+An all-digit argument is always interpreted as a count, even when it is long enough to look like a SHA. See [`sniff repo recent-commits`](./repo_recent-commits.md#period-argument) for details.
 
 ### Duration Units
 
@@ -126,6 +129,7 @@ sniff repo source-code-changes today              # Since midnight
 sniff repo source-code-changes yesterday          # Yesterday only
 sniff repo source-code-changes 2026-04-01         # Specific date
 sniff repo source-code-changes a1b2c3d            # From hash to HEAD
+sniff repo source-code-changes 10                  # The last 10 commits
 sniff repo source-code-changes --action fix       # Only conventional fix commits
 sniff repo source-code-changes --action feat --action refactor
 sniff repo source-code-changes 2w --package sniff # Last 2 weeks, sniff package only
