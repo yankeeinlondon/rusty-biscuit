@@ -1,4 +1,4 @@
-
+TODAY := `date +%F`
 
 
 _title_case str:
@@ -105,3 +105,16 @@ implement-review-suggestions feat="" iteration="1":
     echo
     echo "🎉 the {{ITALIC}}implementation{{RESET}} of the review ({{DIM}}{{BLUE}}${review}{{RESET}}) for {{BOLD}}{{YELLOW}}${feature}{{RESET}} has completed"
     echo
+
+
+# creates a new feature and then prompts for next steps
+feature feat:
+    #!/usr/bin/env bash
+    file="features/_unscheduled/{{feat}}.md"
+    if $(md edit "${file}"); then
+        echo "The spec file has been created at {{BLUE}}${file}{{RESET}}"
+    else
+        rm "${file}" >/dev/null
+        echo "the feature had no content so was removed"
+    fi
+
