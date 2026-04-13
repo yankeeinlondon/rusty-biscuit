@@ -349,6 +349,77 @@ fn style_audio_kind(kind: sniff::hardware::AudioDeviceKind) -> String {
     }
 }
 
+/// For each device, compute the `<dim>…</dim>` suffix (if any) that should be
+/// appended to its name so that name collisions are visually disambiguated.
+///
+/// Non-colliding devices get `""`.
+///
+/// Colliding devices (two or more with the same `name`) get a suffix derived
+/// from the longest common prefix of their `uid`s. If every device in a
+/// collision group would produce the same suffix (e.g. identical uids, or
+/// any group member ends up with an empty tail), we fall back to 1-based
+/// `:1`, `:2`, … ordered by lexicographic uid.
+fn build_name_suffixes(devices: &[sniff::hardware::AudioDeviceInfo]) -> Vec<String> {
+    use std::collections::HashMap;
+
+    let mut groups: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (idx, dev) in devices.iter().enumerate() {
+        groups.entry(dev.name.as_str()).or_default().push(idx);
+    }
+
+    let mut suffixes: Vec<String> = vec![String::new(); devices.len()];
+
+    for (_name, indices) in groups {
+        if indices.len() < 2 {
+            continue;
+        }
+
+        let uids: Vec<&str> = indices.iter().map(|&i| devices[i].uid.as_str()).collect();
+        let prefix_len = longest_common_prefix_len(&uids);
+        let tails: Vec<&str> = uids.iter().map(|u| &u[prefix_len..]).collect();
+
+        let mut unique_tails = tails.clone();
+        unique_tails.sort();
+        unique_tails.dedup();
+
+        if unique_tails.len() == indices.len() && tails.iter().all(|t| !t.is_empty()) {
+            for (i, tail) in indices.iter().zip(tails.iter()) {
+                suffixes[*i] = format!("<dim>{}</dim>", tail);
+            }
+        } else {
+            let mut ordered: Vec<usize> = indices.clone();
+            ordered.sort_by(|a, b| devices[*a].uid.cmp(&devices[*b].uid));
+            for (rank, idx) in ordered.iter().enumerate() {
+                suffixes[*idx] = format!("<dim>:{}</dim>", rank + 1);
+            }
+        }
+    }
+
+    suffixes
+}
+
+/// Length in bytes of the longest common prefix of every string in `values`,
+/// rounded down to the nearest char boundary in the first string.
+fn longest_common_prefix_len(values: &[&str]) -> usize {
+    if values.is_empty() {
+        return 0;
+    }
+    let first = values[0].as_bytes();
+    let mut len = first.len();
+    for v in &values[1..] {
+        let b = v.as_bytes();
+        len = len.min(b.len());
+        len = (0..len).take_while(|&i| b[i] == first[i]).count();
+        if len == 0 {
+            return 0;
+        }
+    }
+    while len > 0 && !values[0].is_char_boundary(len) {
+        len -= 1;
+    }
+    len
+}
+
 /// Render a list of audio devices with verbosity levels.
 ///
 /// - Default: name, kind, direction, default markers
@@ -498,5 +569,85 @@ mod audio_kind_tests {
     #[test]
     fn unknown_is_plain() {
         assert_eq!(style_audio_kind(AudioDeviceKind::Unknown), "Unknown");
+    }
+}
+
+#[cfg(test)]
+mod audio_suffix_tests {
+    use super::build_name_suffixes;
+    use sniff::hardware::AudioDeviceInfo;
+
+    fn dev(name: &str, uid: &str) -> AudioDeviceInfo {
+        AudioDeviceInfo {
+            name: name.to_string(),
+            uid: uid.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn no_collision_no_suffix() {
+        let devices = vec![dev("Speakers", "uid-a"), dev("Microphone", "uid-b")];
+        let suffixes = build_name_suffixes(&devices);
+        assert_eq!(suffixes, vec!["".to_string(), "".to_string()]);
+    }
+
+    #[test]
+    fn collision_with_clean_trailing_suffix() {
+        let devices = vec![
+            dev("LG UltraFine Display Audio", "LGDisplayAudio:1"),
+            dev("LG UltraFine Display Audio", "LGDisplayAudio:2"),
+        ];
+        let suffixes = build_name_suffixes(&devices);
+        assert_eq!(
+            suffixes,
+            vec!["<dim>1</dim>".to_string(), "<dim>2</dim>".to_string()]
+        );
+    }
+
+    #[test]
+    fn collision_with_identical_uids_falls_back_to_indexed() {
+        let devices = vec![dev("Clone", "same-uid"), dev("Clone", "same-uid")];
+        let suffixes = build_name_suffixes(&devices);
+        assert_eq!(
+            suffixes,
+            vec!["<dim>:1</dim>".to_string(), "<dim>:2</dim>".to_string()]
+        );
+    }
+
+    #[test]
+    fn collision_three_way_with_shared_prefix() {
+        let devices = vec![
+            dev("Clone", "prefix_alpha"),
+            dev("Clone", "prefix_beta"),
+            dev("Clone", "prefix_gamma"),
+        ];
+        let suffixes = build_name_suffixes(&devices);
+        assert_eq!(
+            suffixes,
+            vec![
+                "<dim>alpha</dim>".to_string(),
+                "<dim>beta</dim>".to_string(),
+                "<dim>gamma</dim>".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn collision_leaves_non_colliding_devices_empty() {
+        let devices = vec![
+            dev("Clone", "prefix_a"),
+            dev("Solo", "unrelated"),
+            dev("Clone", "prefix_b"),
+        ];
+        let suffixes = build_name_suffixes(&devices);
+        assert_eq!(
+            suffixes,
+            vec![
+                "<dim>a</dim>".to_string(),
+                "".to_string(),
+                "<dim>b</dim>".to_string(),
+            ]
+        );
     }
 }
