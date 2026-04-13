@@ -462,24 +462,17 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
     devices
 }
 
-/// Detects audio devices on Linux by parsing `/proc/asound/cards`.
-///
-/// Each card entry has two lines:
-/// ```text
-///  0 [PCH            ]: HDA-Intel - HDA Intel PCH
-///                       HDA Intel PCH at 0xf7d34000 irq 34
-/// ```
-///
-/// The device kind is inferred from the card name (HDMI, USB, Bluetooth).
-/// Channel counts and sample rates are not available from this source.
+/// Parsed ALSA card header from `/proc/asound/cards`.
 #[cfg(target_os = "linux")]
-pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
-    let contents = match std::fs::read_to_string("/proc/asound/cards") {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
+struct AlsaCard {
+    id: u32,
+    name: String,
+}
 
-    let mut devices = Vec::new();
+/// Parses `/proc/asound/cards` contents into `(card_id, long_name)` entries.
+#[cfg(target_os = "linux")]
+fn parse_alsa_cards(contents: &str) -> Vec<AlsaCard> {
+    let mut cards = Vec::new();
     for line in contents.lines() {
         // Card lines start with a number: " 0 [PCH  ]: HDA-Intel - HDA Intel PCH"
         let trimmed = line.trim();
@@ -487,28 +480,124 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
             continue;
         }
 
-        // Extract the long name after " - "
-        let name = trimmed.split(" - ").nth(1).unwrap_or(trimmed).to_string();
-
-        let name_upper = name.to_uppercase();
-        let kind = if name_upper.contains("HDMI") {
-            AudioDeviceKind::Hdmi
-        } else if name_upper.contains("USB") {
-            AudioDeviceKind::Usb
-        } else if name_upper.contains("BLUETOOTH") || name_upper.contains("BT") {
-            AudioDeviceKind::Bluetooth
-        } else {
-            AudioDeviceKind::BuiltIn
+        let Some(id_str) = trimmed.split_whitespace().next() else {
+            continue;
+        };
+        let Ok(id) = id_str.parse::<u32>() else {
+            continue;
         };
 
-        // Extract card index for a stable UID
-        let uid = trimmed.split_whitespace().next().unwrap_or("0").to_string();
+        let name = trimmed.split(" - ").nth(1).unwrap_or(trimmed).to_string();
+        cards.push(AlsaCard { id, name });
+    }
+    cards
+}
+
+/// Parsed direction flags for an ALSA card from `/proc/asound/pcm`.
+#[cfg(target_os = "linux")]
+#[derive(Default, Clone, Copy)]
+struct AlsaCardDirections {
+    has_playback: bool,
+    has_capture: bool,
+}
+
+/// Parses `/proc/asound/pcm` contents into per-card direction flags.
+///
+/// Each line looks like:
+/// ```text
+/// 00-00: ALC257 Analog : ALC257 Analog : playback 1 : capture 1
+/// 01-03: HDMI 0 : HDA Intel HDMI : playback 1
+/// ```
+#[cfg(target_os = "linux")]
+fn parse_alsa_pcm(contents: &str) -> std::collections::HashMap<u32, AlsaCardDirections> {
+    use std::collections::HashMap;
+
+    let mut map: HashMap<u32, AlsaCardDirections> = HashMap::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // First token: "CC-DD:" where CC is the card id.
+        let Some(head) = trimmed.split(':').next() else {
+            continue;
+        };
+        let Some(card_str) = head.split('-').next() else {
+            continue;
+        };
+        let Ok(card_id) = card_str.trim().parse::<u32>() else {
+            continue;
+        };
+
+        let entry = map.entry(card_id).or_default();
+        for field in trimmed.split(':').map(str::trim) {
+            if field.starts_with("playback ") {
+                entry.has_playback = true;
+            } else if field.starts_with("capture ") {
+                entry.has_capture = true;
+            }
+        }
+    }
+    map
+}
+
+/// Classifies an ALSA card name into an [`AudioDeviceKind`].
+#[cfg(target_os = "linux")]
+fn classify_alsa_kind(name: &str) -> AudioDeviceKind {
+    let upper = name.to_uppercase();
+    if upper.contains("HDMI") {
+        AudioDeviceKind::Hdmi
+    } else if upper.contains("USB") {
+        AudioDeviceKind::Usb
+    } else if upper.contains("BLUETOOTH") || upper.contains("BT") {
+        AudioDeviceKind::Bluetooth
+    } else {
+        AudioDeviceKind::BuiltIn
+    }
+}
+
+/// Detects audio devices on Linux by parsing ALSA procfs.
+///
+/// Reads `/proc/asound/cards` to enumerate sound cards with their names and
+/// `/proc/asound/pcm` to determine which cards expose playback (output) or
+/// capture (input) streams. If `/proc/asound/pcm` is unavailable, all cards
+/// default to output-only.
+///
+/// The device kind is inferred from the card name (HDMI, USB, Bluetooth).
+/// Channel counts, sample rates, and system default status are not available
+/// from this source.
+#[cfg(target_os = "linux")]
+pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
+    let cards_raw = match std::fs::read_to_string("/proc/asound/cards") {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let cards = parse_alsa_cards(&cards_raw);
+    let directions = std::fs::read_to_string("/proc/asound/pcm")
+        .map(|s| parse_alsa_pcm(&s))
+        .unwrap_or_default();
+
+    let mut devices = Vec::with_capacity(cards.len());
+    for card in cards {
+        let dirs = directions.get(&card.id).copied().unwrap_or(AlsaCardDirections {
+            has_playback: true,
+            has_capture: false,
+        });
+
+        let direction = match (dirs.has_capture, dirs.has_playback) {
+            (true, true) => AudioDirection::InputOutput,
+            (true, false) => AudioDirection::Input,
+            (false, true) => AudioDirection::Output,
+            (false, false) => continue,
+        };
 
         devices.push(AudioDeviceInfo {
-            name,
-            uid: format!("card{uid}"),
-            kind,
-            direction: AudioDirection::Output,
+            name: card.name.clone(),
+            uid: format!("card{}", card.id),
+            kind: classify_alsa_kind(&card.name),
+            direction,
             ..Default::default()
         });
     }
@@ -689,6 +778,70 @@ mod tests {
         assert!(
             has_default_output,
             "Expected a default output device on macOS"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn alsa_cards_parses_card_entries() {
+        let sample = "\
+ 0 [PCH            ]: HDA-Intel - HDA Intel PCH
+                      HDA Intel PCH at 0xf7d34000 irq 34
+ 1 [NVidia         ]: HDA-Intel - HDA NVidia
+                      HDA NVidia at 0xf7d80000 irq 17
+";
+        let cards = parse_alsa_cards(sample);
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].id, 0);
+        assert_eq!(cards[0].name, "HDA Intel PCH");
+        assert_eq!(cards[1].id, 1);
+        assert_eq!(cards[1].name, "HDA NVidia");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn alsa_pcm_detects_playback_and_capture() {
+        let sample = "\
+00-00: ALC257 Analog : ALC257 Analog : playback 1 : capture 1
+00-02: ALC257 Alt Analog : ALC257 Alt Analog : capture 1
+01-03: HDMI 0 : HDA Intel HDMI : playback 1
+01-07: HDMI 1 : HDA Intel HDMI : playback 1
+";
+        let map = parse_alsa_pcm(sample);
+        let card0 = map.get(&0).copied().unwrap_or_default();
+        assert!(card0.has_playback);
+        assert!(card0.has_capture);
+
+        let card1 = map.get(&1).copied().unwrap_or_default();
+        assert!(card1.has_playback);
+        assert!(!card1.has_capture);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn alsa_pcm_capture_only_card() {
+        let sample = "02-00: USB Mic : USB Audio : capture 1\n";
+        let map = parse_alsa_pcm(sample);
+        let card = map.get(&2).copied().unwrap_or_default();
+        assert!(!card.has_playback);
+        assert!(card.has_capture);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn classify_alsa_kind_matches_expected_categories() {
+        assert_eq!(classify_alsa_kind("HDA Intel PCH"), AudioDeviceKind::BuiltIn);
+        assert_eq!(
+            classify_alsa_kind("HDA Intel HDMI"),
+            AudioDeviceKind::Hdmi
+        );
+        assert_eq!(
+            classify_alsa_kind("Blue Yeti USB Microphone"),
+            AudioDeviceKind::Usb
+        );
+        assert_eq!(
+            classify_alsa_kind("Sony WH-1000XM5 (Bluetooth)"),
+            AudioDeviceKind::Bluetooth
         );
     }
 }
