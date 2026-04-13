@@ -999,7 +999,9 @@ pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs, verbose: u8) 
     let (code, stderr_capture) = match run_provider_wrapper_inner(provider, args, verbose) {
         Ok((code, stderr)) => (code, stderr),
         Err(error) => {
-            log::error(&error.to_string());
+            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
+                log::error(&error.to_string());
+            }
             (1, None)
         }
     };
@@ -1830,9 +1832,10 @@ fn materialize_passthrough_harness_seed(
     let options =
         darkmatter::markdown::compose::ComposeOptions::new().with_source_file(source_path);
     let (composed, _report) = source_markdown.compose_with(options).map_err(|e| {
-        eyre!(
-            "Darkmatter compose failed for '{}': {e}",
-            source_path.display()
+        crate::output::shell_expansion_error::pretty_markdown_report(
+            source_path,
+            &format!("Darkmatter compose failed for '{}'", source_path.display()),
+            e,
         )
     })?;
 
@@ -1897,9 +1900,13 @@ fn materialize_harness_prompt(
             let options = darkmatter::markdown::compose::ComposeOptions::new()
                 .with_source_file(&state.source_path);
             let (composed, _report) = effective_markdown.compose_with(options).map_err(|e| {
-                eyre!(
-                    "Darkmatter compose failed for '{}': {e}",
-                    state.source_path.display()
+                crate::output::shell_expansion_error::pretty_markdown_report(
+                    &state.source_path,
+                    &format!(
+                        "Darkmatter compose failed for '{}'",
+                        state.source_path.display()
+                    ),
+                    e,
                 )
             })?;
             let prompt = state.base_prompt.clone().ok_or_else(|| {
@@ -1919,9 +1926,13 @@ fn materialize_harness_prompt(
             let options = darkmatter::markdown::compose::ComposeOptions::new()
                 .with_source_file(&state.source_path);
             let (composed, _report) = effective_markdown.compose_with(options).map_err(|e| {
-                eyre!(
-                    "Darkmatter compose failed for '{}': {e}",
-                    state.source_path.display()
+                crate::output::shell_expansion_error::pretty_markdown_report(
+                    &state.source_path,
+                    &format!(
+                        "Darkmatter compose failed for '{}'",
+                        state.source_path.display()
+                    ),
+                    e,
                 )
             })?;
             let body = composed.content().to_string();
@@ -1948,7 +1959,12 @@ fn materialize_harness_prompt(
                 &source,
                 claudine::composition::PrepareOptions::default(),
             )
-            .map_err(|e| eyre!("frontmatter-prompt: {e}"))?;
+            .map_err(|e| match e {
+                claudine::composition::CompositionError::ShellExpansionFailed { .. } => {
+                    crate::output::shell_expansion_error::pretty_or_report(e)
+                }
+                other => eyre!("frontmatter-prompt: {other}"),
+            })?;
             (
                 prepared.prompt,
                 prepared.effective_frontmatter,
@@ -3414,11 +3430,42 @@ fn format_summary_prose(
         None => parts.push("<i>no tool calls</i>".to_string()),
     }
 
+    if let Some(pp) = summary.permission_prompts {
+        parts.push(format!(
+            "{pp} <i>permission prompt{}</i>",
+            if pp == 1 { "" } else { "s" }
+        ));
+    }
+
+    if let Some(uip) = summary.user_input_prompts {
+        parts.push(format!(
+            "{uip} <i>user input prompt{}</i>",
+            if uip == 1 { "" } else { "s" }
+        ));
+    }
+
     if parts.is_empty() {
         return None;
     }
 
-    Some(format!("<dim>{prefix} {}</dim>", parts.join(" \u{00b7} ")))
+    let mut out = format!("<dim>{prefix} {}</dim>", parts.join(" \u{00b7} "));
+    for badge in &summary.badges {
+        let color = match badge.severity {
+            claudine::stream::badges::BadgeSeverity::Error => "red",
+            claudine::stream::badges::BadgeSeverity::Warning => "yellow",
+            claudine::stream::badges::BadgeSeverity::Info => "cyan",
+        };
+        out.push('\n');
+        out.push_str(&format!(
+            "<{color}>\u{26a0} <bold>{}</bold> \u{2014} {}</{color}>",
+            badge.label, badge.message
+        ));
+        if let Some(url) = &badge.remediation_url {
+            out.push('\n');
+            out.push_str(&format!("  <dim>\u{2192} {url}</dim>"));
+        }
+    }
+    Some(out)
 }
 
 fn format_verbose_summary_details_prose(
@@ -4264,5 +4311,105 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn format_summary_prose_appends_badge_markup() {
+        use claudine::events::Provider;
+        use claudine::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
+        use claudine::stream::summary::StreamExecutionSummary;
+        let summary = StreamExecutionSummary {
+            provider: Provider::Claude,
+            duration_ms: Some(1000),
+            badges: vec![SessionBadge {
+                category: BadgeCategory::Billing,
+                severity: BadgeSeverity::Error,
+                label: "Billing".into(),
+                message: "Insufficient credits".into(),
+                remediation_url: Some("https://console.anthropic.com/settings/billing".into()),
+            }],
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("Billing"));
+        assert!(rendered.contains("Insufficient credits"));
+        assert!(rendered.contains("https://console.anthropic.com/settings/billing"));
+    }
+
+    #[test]
+    fn format_summary_prose_without_badges_has_no_badge_markup() {
+        use claudine::events::Provider;
+        use claudine::stream::summary::StreamExecutionSummary;
+        let summary = StreamExecutionSummary {
+            provider: Provider::Claude,
+            duration_ms: Some(1000),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(!rendered.contains("Billing"));
+        assert!(!rendered.contains("\u{26a0}"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_permission_prompts_singular() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            tool_calls: Some(4),
+            permission_prompts: Some(1),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("1 <i>permission prompt</i>"));
+        assert!(!rendered.contains("permission prompts"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_permission_prompts_plural() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            tool_calls: Some(4),
+            permission_prompts: Some(3),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("3 <i>permission prompts</i>"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_user_input_prompts_singular() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            user_input_prompts: Some(1),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("1 <i>user input prompt</i>"));
+        assert!(!rendered.contains("user input prompts"));
+    }
+
+    #[test]
+    fn format_summary_prose_renders_both_counters() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(41_000),
+            tool_calls: Some(12),
+            permission_prompts: Some(2),
+            user_input_prompts: Some(1),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(rendered.contains("2 <i>permission prompts</i>"));
+        assert!(rendered.contains("1 <i>user input prompt</i>"));
+    }
+
+    #[test]
+    fn format_summary_prose_omits_permission_clauses_when_unset() {
+        let summary = claudine::stream::summary::StreamExecutionSummary {
+            duration_ms: Some(18_000),
+            tool_calls: Some(4),
+            ..Default::default()
+        };
+        let rendered = super::format_summary_prose(&summary).unwrap();
+        assert!(!rendered.contains("permission"));
+        assert!(!rendered.contains("user input"));
     }
 }

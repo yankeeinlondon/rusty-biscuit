@@ -198,7 +198,9 @@ pub fn run_compose(args: ComposeArgs, verbose: u8) -> Result<()> {
     let code = match run_compose_inner(args, verbose) {
         Ok(code) => code,
         Err(error) => {
-            log::error(&error.to_string());
+            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
+                log::error(&error.to_string());
+            }
             1
         }
     };
@@ -210,7 +212,9 @@ pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
     let code = match run_inline_compose_inner(args, verbose) {
         Ok(code) => code,
         Err(error) => {
-            log::error(&error.to_string());
+            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
+                log::error(&error.to_string());
+            }
             1
         }
     };
@@ -259,7 +263,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
             ..Default::default()
         },
     )
-    .map_err(|e| eyre!("{e}"))?;
+    .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::ChainedDocument,
@@ -372,7 +376,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
             ..Default::default()
         },
     )
-    .map_err(|e| eyre!("{e}"))?;
+    .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,

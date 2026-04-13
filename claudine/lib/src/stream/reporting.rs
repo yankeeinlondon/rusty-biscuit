@@ -108,6 +108,14 @@ pub fn summary_to_event_meta_with_context(
         extra.insert("tool_calls".into(), Value::Number(tc.into()));
     }
 
+    // Permission activity counters (Codex today; omitted when absent)
+    if let Some(pp) = summary.permission_prompts {
+        extra.insert("permission_prompts".into(), Value::Number(pp.into()));
+    }
+    if let Some(uip) = summary.user_input_prompts {
+        extra.insert("user_input_prompts".into(), Value::Number(uip.into()));
+    }
+
     let mut provider_summary = serde_json::Map::new();
     if let Some(raw_summary) = &summary.raw_summary {
         provider_summary.insert("raw_summary".into(), raw_summary.clone());
@@ -124,6 +132,12 @@ pub fn summary_to_event_meta_with_context(
     }
     if !provider_summary.is_empty() {
         extra.insert("provider_summary".into(), Value::Object(provider_summary));
+    }
+
+    if !summary.badges.is_empty()
+        && let Ok(value) = serde_json::to_value(&summary.badges)
+    {
+        extra.insert("badges".into(), value);
     }
 
     EventMeta {
@@ -199,8 +213,11 @@ mod tests {
             }),
             cost_usd: Some(0.0042),
             tool_calls: Some(5),
+            permission_prompts: None,
+            user_input_prompts: None,
             rate_limit: None,
             context_usage: None,
+            badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
         }
@@ -381,5 +398,63 @@ mod tests {
 
         assert_eq!(meta_plain.extra.len(), meta_none.extra.len());
         assert!(!meta_none.extra.contains_key("composition_file_ref"));
+    }
+
+    #[test]
+    fn summary_to_event_meta_serializes_badges_when_present() {
+        use crate::stream::badges::{BadgeCategory, BadgeSeverity, SessionBadge};
+        let mut summary = make_test_summary();
+        summary.badges = vec![SessionBadge {
+            category: BadgeCategory::Billing,
+            severity: BadgeSeverity::Error,
+            label: "Billing".into(),
+            message: "Insufficient credits".into(),
+            remediation_url: Some("https://console.anthropic.com/settings/billing".into()),
+        }];
+        let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &make_test_env());
+        let badges = meta.extra.get("badges").unwrap();
+        let arr = badges.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["category"], Value::String("billing".into()));
+        assert_eq!(arr[0]["severity"], Value::String("error".into()));
+        assert_eq!(arr[0]["label"], Value::String("Billing".into()));
+        assert_eq!(
+            arr[0]["message"],
+            Value::String("Insufficient credits".into())
+        );
+        assert_eq!(
+            arr[0]["remediation_url"],
+            Value::String("https://console.anthropic.com/settings/billing".into())
+        );
+    }
+
+    #[test]
+    fn summary_to_event_meta_omits_badges_when_empty() {
+        let summary = make_test_summary();
+        let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &make_test_env());
+        assert!(!meta.extra.contains_key("badges"));
+    }
+
+    #[test]
+    fn summary_event_includes_permission_counters_when_populated() {
+        let summary = StreamExecutionSummary {
+            provider: Provider::Codex,
+            permission_prompts: Some(2),
+            user_input_prompts: Some(1),
+            ..Default::default()
+        };
+        let env = EnvironmentContext::default();
+        let meta = summary_to_event_meta(&summary, StreamProtocol::Jsonl, &env);
+        assert_eq!(meta.extra["permission_prompts"], Value::Number(2.into()));
+        assert_eq!(meta.extra["user_input_prompts"], Value::Number(1.into()));
+    }
+
+    #[test]
+    fn summary_event_omits_permission_counters_when_absent() {
+        let summary = StreamExecutionSummary::default();
+        let env = EnvironmentContext::default();
+        let meta = summary_to_event_meta(&summary, StreamProtocol::Jsonl, &env);
+        assert!(!meta.extra.contains_key("permission_prompts"));
+        assert!(!meta.extra.contains_key("user_input_prompts"));
     }
 }
