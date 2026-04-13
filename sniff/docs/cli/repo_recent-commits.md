@@ -50,6 +50,23 @@ Notes:
 - File paths are rendered as clickable OSC8 hyperlinks (pointing to `file://` URIs) in terminals that support them.
 - The **Description** sub-block is omitted entirely when the commit body has no bullet points.
 
+### Styled terminal output
+
+When rendered to a terminal (anything other than `--plain` or `--json`), the header line uses the following visual treatment so the most important parts of each commit pop without forcing the reader to look up the hash or rewrite the sentence in their head:
+
+| Part of the header | Style |
+|--------------------|-------|
+| `[hash]` — short commit SHA | **bold** (brackets stay unstyled) |
+| Conventional-commit action (e.g. `refactor`) | blue |
+| Scope inside the parens (e.g. `sniff`) | blue **and** dim |
+| The parens `(` / `)` around the scope | blue (not dim) |
+| The literal word `at` before the time | *italic* |
+| Time + relative day label (e.g. `1:01pm Today`) | **bold** |
+| `**Description:**` / `**Files Impacted:**` labels | **bold** |
+| File paths | OSC8 hyperlink to the `file://` URI |
+
+`--plain` keeps the same semantic markdown but strips every ANSI escape so the output is usable in logs, pipes, and PR bodies.
+
 ## Period Argument
 
 ```

@@ -63,6 +63,7 @@ Notes:
 - Each file is prefixed by its change kind (`added`, `modified`, `deleted`, `renamed`, `copied`).
 - File paths are rendered as clickable OSC8 hyperlinks (pointing to `file://` URIs) in terminals that support them.
 - Commit timestamps are displayed in the viewer's local timezone with `Today`/`Yesterday` labels.
+- Terminal styling (bold hash, blue conventional prefix with dim scope, italic `at`, bold time) is shared with [`sniff repo recent-commits`](./repo_recent-commits.md#styled-terminal-output); see that document for the full styling table. `--plain` strips all ANSI escapes.
 
 ## Period Argument
 
