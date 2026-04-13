@@ -179,7 +179,7 @@ lint:
     @echo
     @echo -e "Linting {{BOLD}}{{CLI_NAME}}{{RESET}}"
     @echo
-    @cargo clippy -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
+    @cargo clippy -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME_SPEAK}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
 
 # Lint (and fix) both the library and CLI
 lint-fix:
@@ -383,4 +383,4 @@ drift *args="":
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} {{DOCS_SUMMARY}} >/dev/null || true

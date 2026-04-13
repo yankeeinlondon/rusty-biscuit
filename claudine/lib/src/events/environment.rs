@@ -316,12 +316,7 @@ pub fn detect_environment(cwd: &Path) -> EnvironmentContext {
         .without_network()
         .filesystem(FilesystemRequest::new().git(GitRequest::full().commit_count(1)));
 
-    let result = sniff::detect_with_plan(plan).unwrap_or(sniff::SniffResult {
-        os: None,
-        hardware: None,
-        network: None,
-        filesystem: None,
-    });
+    let result = sniff::detect_with_plan(plan).unwrap_or_default();
 
     let mut context = EnvironmentContext::from(result);
     apply_wrapper_package_context(&mut context, &lookup_env_var);
@@ -351,12 +346,7 @@ pub fn detect_environment_fast(cwd: &Path) -> EnvironmentContext {
                 .without_formatting(),
         );
 
-    let result = sniff::detect_with_plan(plan).unwrap_or(sniff::SniffResult {
-        os: None,
-        hardware: None,
-        network: None,
-        filesystem: None,
-    });
+    let result = sniff::detect_with_plan(plan).unwrap_or_default();
 
     let mut context = EnvironmentContext::from(result);
     apply_wrapper_package_context(&mut context, &lookup_env_var);
@@ -474,12 +464,7 @@ mod tests {
 
     #[test]
     fn from_empty_sniff_result() {
-        let result = sniff::SniffResult {
-            os: None,
-            hardware: None,
-            network: None,
-            filesystem: None,
-        };
+        let result = sniff::SniffResult::default();
         let ctx = EnvironmentContext::from(result);
         assert!(ctx.os.os_type.is_empty());
         assert!(ctx.hardware.arch.is_empty());

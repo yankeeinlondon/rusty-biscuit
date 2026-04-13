@@ -61,9 +61,7 @@ impl LaunchContext {
     /// context will have no `repo_root` / package scopes.
     pub fn from_sniff_result(result: &sniff::SniffResult, cwd: &Path) -> Self {
         let fs = result.filesystem.as_ref();
-        let git_root = fs
-            .and_then(|f| f.git.as_ref())
-            .map(|g| g.repo_root.clone());
+        let git_root = fs.and_then(|f| f.git.as_ref()).map(|g| g.repo_root.clone());
         let repo = fs.and_then(|f| f.repo.as_ref());
 
         let (package_root, package_area_root) = match repo {

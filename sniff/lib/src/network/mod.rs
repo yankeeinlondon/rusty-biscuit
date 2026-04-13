@@ -21,6 +21,18 @@ pub use interface::{InterfaceFlags, IpAddresses, Ipv4Address, Ipv6Address, Netwo
 #[cfg(feature = "network")]
 const DEFAULT_WAN_IP_ENDPOINTS: &[&str] = &["https://api64.ipify.org"];
 
+/// Environment variable that overrides the WAN IP echo endpoints.
+///
+/// Expected format is a comma-separated list of URLs. When set and
+/// non-empty, the first successful response drives the WAN IP result
+/// exactly like the default production endpoints.
+///
+/// This exists primarily to let benches, integration tests, and
+/// air-gapped corporate deployments point WAN IP detection at a known
+/// address (e.g. a `wiremock` server) instead of the public internet.
+#[cfg(feature = "network")]
+const WAN_IP_ENDPOINTS_ENV: &str = "SNIFF_WAN_IP_ENDPOINTS";
+
 /// Default TTL for cached WAN IP results (5 minutes).
 #[cfg(feature = "network")]
 const WAN_IP_TTL: std::time::Duration = std::time::Duration::from_secs(300);
@@ -258,6 +270,35 @@ fn detect_local_interfaces()
     Ok((interfaces, primary, ip_addresses))
 }
 
+/// Resolve the WAN IP echo endpoint list, preferring the
+/// `SNIFF_WAN_IP_ENDPOINTS` environment variable over the compiled-in
+/// defaults when it is set to a non-empty value.
+///
+/// Expected env var format: comma-separated URLs. Empty entries are
+/// skipped; if every entry is empty, the defaults are returned.
+#[cfg(feature = "network")]
+fn resolve_wan_ip_endpoints() -> Vec<String> {
+    if let Ok(raw) = std::env::var(WAN_IP_ENDPOINTS_ENV) {
+        let parsed: Vec<String> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+        if !parsed.is_empty() {
+            debug!(
+                count = parsed.len(),
+                "using WAN IP endpoints from SNIFF_WAN_IP_ENDPOINTS"
+            );
+            return parsed;
+        }
+    }
+    DEFAULT_WAN_IP_ENDPOINTS
+        .iter()
+        .map(|endpoint| (*endpoint).to_string())
+        .collect()
+}
+
 #[cfg(feature = "network")]
 #[derive(Debug, Clone)]
 struct WanIpDetector {
@@ -274,10 +315,7 @@ impl WanIpDetector {
                 .timeout(std::time::Duration::from_secs(1))
                 .build()
                 .ok(),
-            endpoints: DEFAULT_WAN_IP_ENDPOINTS
-                .iter()
-                .map(|endpoint| endpoint.to_string())
-                .collect(),
+            endpoints: resolve_wan_ip_endpoints(),
         }
     }
 
@@ -832,17 +870,6 @@ fn parse_bsd_default_route_interface(output: &str) -> Option<String> {
     })
 }
 
-#[cfg(target_os = "linux")]
-fn parse_linux_default_route_interface(output: &str) -> Option<String> {
-    output.lines().find_map(|line| {
-        let tokens: Vec<_> = line.split_whitespace().collect();
-        tokens
-            .windows(2)
-            .find(|window| window[0] == "dev")
-            .map(|window| window[1].to_string())
-    })
-}
-
 #[cfg(any(target_os = "windows", test))]
 fn parse_windows_default_route_interface_ip(output: &str) -> Option<std::net::Ipv4Addr> {
     let mut best: Option<(std::net::Ipv4Addr, u32)> = None;
@@ -1142,6 +1169,48 @@ mod tests {
             format!("{}/valid", server.uri()),
         ]);
         assert_eq!(detector.detect(), Some("2001:db8::7".to_string()));
+    }
+
+    #[cfg(feature = "network")]
+    #[test]
+    fn test_resolve_wan_ip_endpoints_prefers_env_override() {
+        // This test mutates process-wide environment state. It must not
+        // run in parallel with other tests that also read the env var,
+        // and it restores the original value on exit.
+        let key = WAN_IP_ENDPOINTS_ENV;
+        let original = std::env::var(key).ok();
+        // SAFETY: single-threaded test body; `std::env::set_var` is
+        // `unsafe` since Rust 1.85 but this block does no concurrent
+        // env access.
+        unsafe {
+            std::env::set_var(
+                key,
+                "https://first.example.test, https://second.example.test ,",
+            );
+        }
+
+        let endpoints = resolve_wan_ip_endpoints();
+        assert_eq!(
+            endpoints,
+            vec![
+                "https://first.example.test".to_string(),
+                "https://second.example.test".to_string(),
+            ]
+        );
+
+        // Empty value should fall back to the defaults.
+        unsafe {
+            std::env::set_var(key, "   ,  ,  ");
+        }
+        let endpoints = resolve_wan_ip_endpoints();
+        assert_eq!(endpoints.len(), DEFAULT_WAN_IP_ENDPOINTS.len());
+
+        unsafe {
+            match original {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
     }
 
     #[test]
@@ -1550,16 +1619,6 @@ destination: default
         assert_eq!(
             parse_bsd_default_route_interface(output),
             Some("en7".to_string())
-        );
-    }
-
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn test_parse_linux_default_route_interface() {
-        let output = "default via 192.168.1.1 dev wlp3s0 proto dhcp src 192.168.1.42 metric 600";
-        assert_eq!(
-            parse_linux_default_route_interface(output),
-            Some("wlp3s0".to_string())
         );
     }
 

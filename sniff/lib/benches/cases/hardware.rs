@@ -21,15 +21,11 @@ use sniff::request::HardwareRequest;
 use crate::support::util;
 
 pub fn register(c: &mut Criterion) {
-    // ---------- leaf ----------
+    // ---------- leaf (fast) ----------
+    //
+    // GPU and storage enumeration are consistently fast on every
+    // supported platform, so they share the standard leaf group.
     let mut leaf_group = util::configure_group(c, "hardware_leaf");
-
-    leaf_group.bench_function("detect_audio_devices", |b| {
-        b.iter(|| {
-            let devices = detect_audio_devices();
-            black_box(devices);
-        });
-    });
 
     leaf_group.bench_function("detect_gpus", |b| {
         b.iter(|| {
@@ -46,6 +42,21 @@ pub fn register(c: &mut Criterion) {
     });
 
     leaf_group.finish();
+
+    // ---------- leaf (audio, slow) ----------
+    //
+    // macOS Core Audio and some Linux ALSA setups can take well over
+    // 1s per call, so this single-function group uses the slow config
+    // (10 samples, 15s measurement budget) to keep Criterion from
+    // panicking when a single iteration exceeds the default 10s.
+    let mut audio_group = util::configure_slow_group(c, "hardware_leaf_audio");
+    audio_group.bench_function("detect_audio_devices", |b| {
+        b.iter(|| {
+            let devices = detect_audio_devices();
+            black_box(devices);
+        });
+    });
+    audio_group.finish();
 
     // ---------- request-level ----------
     let mut group = util::configure_group(c, "hardware");

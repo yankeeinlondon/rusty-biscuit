@@ -1,9 +1,11 @@
+pub mod badges;
 pub mod claude;
 pub mod codex;
 pub mod gemini;
 pub mod kimi;
 pub mod opencode;
 pub mod parser;
+pub mod protocol;
 pub mod qwen;
 pub mod reporting;
 pub mod stderr;

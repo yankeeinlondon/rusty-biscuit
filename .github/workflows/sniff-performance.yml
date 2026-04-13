@@ -48,13 +48,32 @@ jobs:
         env:
           CARGO_TERM_COLOR: always
         run: |
-          cargo bench -p sniff --bench perf -- \
+          # Criterion accepts a single positional filter interpreted as
+          # a regex, so the narrow subset is expressed as one anchored
+          # alternation built from `sniff/lib/benches/ci-bench-ids.txt`.
+          # The IDs file is the single source of truth also mirrored
+          # into `benches/support/bench_ids.rs` and validated by the
+          # `bench_ids_sync` integration test.
+          ids_file="sniff/lib/benches/ci-bench-ids.txt"
+          if [[ ! -f "$ids_file" ]]; then
+            echo "Missing $ids_file" >&2
+            exit 1
+          fi
+          # Drop empty lines and backslash-escape regex metacharacters.
+          filter=$(
+            grep -v '^\s*$' "$ids_file" \
+              | sed 's/[][\\.^$|?*+(){}]/\\&/g' \
+              | paste -sd'|' -
+          )
+          pattern="^(${filter})$"
+          echo "Running Criterion filter: ${pattern}"
+          cargo bench \
+            -p sniff \
+            --features network \
+            --bench perf \
+            -- \
             --save-baseline ci \
-            "system/detect_summary" \
-            "system_full/detect_full" \
-            "filesystem_git/git_summary_monorepo" \
-            "filesystem_repo/repo_structure_monorepo" \
-            "inventory/programs_detect"
+            "${pattern}"
 
       - name: Upload Criterion report
         if: always()

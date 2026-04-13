@@ -23,7 +23,7 @@ claudine/lib/src/
 ├── permissions/    → Provider-agnostic policy engine (queries, mutations, canonical model)
 ├── reporting/      → JSONL-to-SQLite reporting index, sync, and typed queries
 ├── services/       → Cross-provider runtime policy services (Protect)
-├── stream/         → Structured stream parsing for 6 providers + summary/reporting
+├── stream/         → Structured stream parsing for 6 providers + typed protocol models + summary/reporting
 ├── system_prompt/  → System prompt discovery, CLI switch resolution, and preparation
 └── error.rs        → ClaudineError enum
 ```
@@ -210,8 +210,28 @@ Provider-native structured stream parsing for wrapped non-interactive sessions. 
 | `opencode` | NDJSON (`json`) | Accumulated per-step usage/cost |
 | `qwen` | stream-json | Final result/usage event |
 
+**Typed protocol models** (`stream::protocol`):
+
+Each of the 6 supported providers has a serde-derived event model in `stream/protocol/<provider>.rs`. Every module exports a tagged `*Event` enum (`#[serde(tag = "type")]`) plus one struct per variant payload. Shared design rules:
+
+- **Every field is optional** with `#[serde(default)]` so provider format evolution never breaks deserialization. There is no `#[serde(deny_unknown_fields)]` anywhere in `protocol/`.
+- **No unknown-variant fallback** — when a provider emits an event whose `type` string isn't listed in the enum, `serde_json::from_value::<*Event>` returns `Err(_)` and the parser silently skips the line, matching the legacy `_ => Ok(None)` arm.
+- **Helper methods carry alias resolution** — instead of exposing every field alias to handlers, each struct provides `resolved_*` / `take_*` helpers (e.g. `resolved_tool_name()`, `take_input()`) that walk all accepted aliases in a single place.
+
+Per-provider idioms:
+
+- **Claude** — `ClaudeEvent` has separate `Init` and `System` variants that both wrap `ClaudeInit`, funneling into the same handler. `ClaudeResult::effective_cost_usd()` picks `total_cost_usd` over the legacy `cost_usd`.
+- **Codex** — Dotted event names work cleanly with `#[serde(rename = "thread.created")]`. `CodexItem` is a single flat struct covering every item subtype, with `is_tool_item_kind()` / `is_permission_item_kind()` and a typed `merge_started()` operation. `turn.started` uses an empty `CodexTurnStarted {}` struct because internally-tagged unit variants in serde have quirky behavior around extra fields.
+- **Gemini** — `GeminiMessage.content` stays `Option<Value>` because Gemini emits content as either a plain string or an array of `{text: ...}` parts; the handler branches on `as_str()` vs `as_array()` after typed deserialization.
+- **OpenCode** — The most complex parser. Tool fields can appear at the top level of an event OR nested inside a `part` object; `OpenCodeTool` captures both via `#[serde(flatten)]` plus a separate `part: Option<OpenCodeToolFields>`, and `OpenCodeTool::resolve()` collapses both locations into a `ResolvedOpenCodeTool`. `OpenCodeStepStart` uses `#[serde(rename = "sessionID")]` for the camelCase session ID.
+- **Qwen** — The `system` event is dispatched only when `subtype == "session_start"` via `QwenSystem::is_session_start()` + `into_init()`. `QwenTool::take_input()` accepts five aliases: `input`, `parameters`, `arguments`, `args`, `params`.
+- **Kimi** — `KimiContent::resolved_text()` implements a three-way fallback (`content` array → top-level `text` → `content` as string). `KimiStatusUpdate::resolved_context()` returns a `KimiContextUsage` whose `computed_percent()` falls back to computing `used/total * 100.0` when the provider doesn't pre-supply `percent`.
+
+**Two-pass `feed_line` dispatch**: parsers parse the raw line into a `serde_json::Value` first (preserves the malformed-line error path and keeps a raw copy available for `raw_summary` construction in result events), then attempt typed deserialization into the provider-specific `*Event` enum. Every protocol module has a `#[cfg(test)] mod tests` block covering each event variant, the major field aliases, and the `unknown_event_type_fails_typed` contract — those tests are the safety net for provider format drift.
+
 **Infrastructure**:
 - `parser` — `StreamParser` trait and `StreamEventSink` callback interface for coarse event handling (session start, turn lifecycle, tool events)
+- `protocol` — Strongly typed serde-derived event models, one module per provider, plus a shared `ProtocolError` type
 - `summary` — `StreamExecutionSummary` struct: provider-agnostic metadata (session ID, model, tokens, cost, duration, tool calls, rate limits, context usage)
 - `token_usage` — `NormalizedTokenUsage` with input/output/total/cache_read fields
 - `stderr` — Verbosity-aware stderr formatting (start summary, completion summary, compact line for `--quiet`)
@@ -233,7 +253,7 @@ Sub-modules:
 - `resolve` — source resolution via `biscuit-file::FileReference` with read/write permission validation
 - `prepare` — builds a `PreparedComposition` (effective frontmatter, composed body, pre-execution hashes) via `prepare_direct()` / `prepare_inline()` with `PrepareOptions`
 - `select` — deterministic provider selection (explicit flag → single-installed → frontmatter hint → config favorite → interactive chooser)
-- `preflight` — shell approval collection and execution for `::shell` directives, `shell_command` validations, and `deviate`/`handle` commands
+- `preflight` — shell approval collection and execution for `::shell` directives, top-level frontmatter `$(...)` expressions, `shell_command` validations, and `deviate`/`handle` commands
 - `closure` — inline closure plan that merges provider-returned content back into the source file atomically (preserves frontmatter, updates `last_updated`)
 - `sequence` — sequence plan parser, normalizer, and per-step overlay builder for `claudine sequence`
 - `lifecycle` — `LifecycleEmitter` trait and `LifecycleRunGuard` RAII guard that emit lifecycle signals (start/success/failure) to external observers; includes `DefaultLifecycleEmitter` and programmatic handler hook integration

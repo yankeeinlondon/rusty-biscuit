@@ -36,8 +36,7 @@ use super::{
     StructuredSummaryDetails, WrapperHarnessPermissionProbe,
     build_harness_shell_options_with_cache, emit_stream_summary_no_separator_with_context,
     emit_stream_summary_with_context, materialized_harness_prompt_from_prepared,
-    resolve_binary_path, run_harness_loop, structured_verbosity,
-    switch_process_cwd, wrap_terminal,
+    resolve_binary_path, run_harness_loop, structured_verbosity, switch_process_cwd, wrap_terminal,
 };
 use crate::log;
 
@@ -387,6 +386,18 @@ pub(crate) fn execute_composition_request_inner(
         }
     }
 
+    if provider == Provider::OpenCode
+        && effective_non_interactive
+        && request.model.is_none()
+        && let Some(model) = super::model_value_from_args(&child_args)
+    {
+        env_plan.env.insert("MODEL".into(), model.into());
+    }
+
+    if effective_non_interactive {
+        profile.validate_non_interactive_requirements(&child_args)?;
+    }
+
     // Universal --output flag
     if let Some(ref output_str) = request.output {
         let format: super::profile::OutputFormat = (*output_str).into();
@@ -536,7 +547,6 @@ pub(crate) fn execute_composition_request_inner(
     let shell_options = build_harness_shell_options_with_cache(
         &request.prepared.resolved_path,
         effective_repo_root,
-        request.session_interactive,
         request.shared_approval_cache.clone(),
     );
 
@@ -606,7 +616,7 @@ pub(crate) fn execute_composition_request_inner(
         }
 
         // ── Pre-flight shell approval for harness commands ───────────
-        let harness_preflight = claudine::composition::resolve_shell_approvals(
+        let _harness_preflight = claudine::composition::resolve_shell_approvals(
             None, // template commands already approved during compose
             None,
             Some(&plan),
@@ -616,13 +626,6 @@ pub(crate) fn execute_composition_request_inner(
             guard.emit_blocked_or_failure();
             eyre!("{e}")
         })?;
-
-        if !request.quiet && !request.silent && harness_preflight.total_discovered > 0 {
-            log::info(&format!(
-                "Pre-flight: {} harness shell command(s) approved",
-                harness_preflight.total_discovered,
-            ));
-        }
 
         // Plan is validated; the harness loop will re-parse if needed.
         drop(plan);
@@ -642,6 +645,23 @@ pub(crate) fn execute_composition_request_inner(
             guard.emit_blocked_or_failure();
             eyre!("{reason}")
         })?;
+    }
+
+    // Emit a single preflight-complete indicator for direct compose and
+    // inline-compose runs. Sequence runs handle their own preflight
+    // messaging in the orchestrator (`wrap::sequence::execute_sequence`)
+    // and must not re-emit per step.
+    if !request.sequence && !silent && !quiet {
+        let compose_label = if is_inline {
+            "inline composition"
+        } else {
+            "composition"
+        };
+        let status = Status::from_prose(format!(
+            "<b>Preflight:</b> shell commands approved for this {compose_label}"
+        ))
+        .state(StatusState::Info);
+        log::message(&status.render(&term));
     }
 
     // -- Preflight output (env details + prompt block) ---------------------
@@ -1109,6 +1129,7 @@ fn run_structured_inline(
         None,
         stderr_noise,
         profile.suppress_structured_stderr_on_success(),
+        stream_verbosity != Verbosity::Silent,
         stdin_seed,
         parser,
         child_spawned,
@@ -1367,6 +1388,7 @@ fn execute_direct_without_harness(
             None,
             stderr_noise,
             profile.suppress_structured_stderr_on_success(),
+            stream_verbosity != Verbosity::Silent,
             stdin_seed,
             parser,
             child_spawned,

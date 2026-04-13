@@ -18,7 +18,7 @@ pub use audio::{AudioDeviceInfo, AudioDeviceKind, AudioDirection, detect_audio_d
 pub use cpu::{CpuInfo, SimdCapabilities, detect_simd};
 pub use gpu::{GpuCapabilities, GpuDeviceType, GpuInfo, detect_gpus};
 pub use memory::MemoryInfo;
-pub use storage::{StorageInfo, StorageKind};
+pub use storage::{StorageInfo, StorageKind, detect_storage};
 
 // Re-export OS types from the dedicated os module for backward compatibility.
 // The canonical path is now `sniff::os::*`.

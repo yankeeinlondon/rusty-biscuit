@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use super::parser::{EventMeta, StreamChunk, StreamEventSink, StreamParseError, StreamParser};
+use super::protocol::claude::{
+    ClaudeAssistant, ClaudeContentBlockDelta, ClaudeErrorEvent, ClaudeEvent, ClaudeInit,
+    ClaudeRateLimit, ClaudeResult, ClaudeToolResult, ClaudeToolUse,
+};
 use super::summary::{RateLimitInfo, StreamExecutionSummary};
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -67,16 +71,9 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         }
     }
 
-    fn tool_use_payload(obj: &Value) -> &Value {
-        obj.get("content_block").unwrap_or(obj)
-    }
-
-    fn handle_init(&mut self, obj: &Value) {
-        self.session_id = obj
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        self.model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
+    fn handle_init(&mut self, init: ClaudeInit) {
+        self.session_id = init.session_id;
+        self.model = init.model;
         super::trace_session_metadata(
             Provider::Claude,
             self.session_id.as_deref(),
@@ -95,21 +92,16 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         self.sink.on_session_start(&meta);
     }
 
-    fn handle_assistant_message(&mut self, obj: &Value) -> Option<StreamChunk> {
-        // Extract text from content array.
+    fn handle_assistant_message(&mut self, event: ClaudeAssistant) -> Option<StreamChunk> {
         // Claude Code wraps it as {"message":{"content":[...]}} while the
         // simplified test format uses {"content":[...]} at the top level.
-        let content = obj
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .or_else(|| obj.get("content"))
-            .and_then(|c| c.as_array())?;
+        let content = event.message.and_then(|m| m.content).or(event.content)?;
         let mut text_parts = String::new();
         for part in content {
-            if part.get("type").and_then(|t| t.as_str()) == Some("text")
-                && let Some(text) = part.get("text").and_then(|t| t.as_str())
+            if part.kind.as_deref() == Some("text")
+                && let Some(text) = part.text
             {
-                text_parts.push_str(text);
+                text_parts.push_str(&text);
             }
         }
         if text_parts.is_empty() {
@@ -119,70 +111,46 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         Some(StreamChunk::Text(super::ensure_message_newline(text_parts)))
     }
 
-    fn handle_content_block_delta(&mut self, obj: &Value) -> Option<StreamChunk> {
-        let delta = obj.get("delta")?;
-        let delta_type = delta.get("type").and_then(|t| t.as_str())?;
-        match delta_type {
+    fn handle_content_block_delta(
+        &mut self,
+        event: ClaudeContentBlockDelta,
+    ) -> Option<StreamChunk> {
+        let delta = event.delta?;
+        match delta.kind.as_deref()? {
             "text_delta" => {
-                let text = delta.get("text").and_then(|t| t.as_str())?;
-                self.assistant_text.push_str(text);
-                Some(StreamChunk::Text(text.to_string()))
+                let text = delta.text?;
+                self.assistant_text.push_str(&text);
+                Some(StreamChunk::Text(text))
             }
             "thinking_delta" => {
-                let text = delta.get("thinking").and_then(|t| t.as_str())?;
-                Some(StreamChunk::Thinking(text.to_string()))
+                let text = delta.thinking?;
+                Some(StreamChunk::Thinking(text))
             }
             _ => None,
         }
     }
 
-    fn handle_error(&mut self, obj: &Value) {
+    fn handle_error(&mut self, event: ClaudeErrorEvent) {
         self.is_error = true;
-        self.error_kind = obj
-            .get("error")
-            .and_then(|e| e.get("type"))
-            .and_then(|t| t.as_str())
-            .map(String::from);
-        self.error_message = obj
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(|m| m.as_str())
-            .map(String::from);
+        let detail = event.error;
+        self.error_kind = detail.as_ref().and_then(|d| d.kind.clone());
+        self.error_message = detail.and_then(|d| d.message);
 
         let meta = EventMeta::default();
         self.sink.on_turn_error(&meta);
     }
 
-    fn handle_result(&mut self, obj: &Value) {
-        // Duration
-        self.duration_ms = obj.get("duration_ms").and_then(|v| v.as_u64());
-        self.duration_api_ms = obj.get("duration_api_ms").and_then(|v| v.as_u64());
+    fn handle_result(&mut self, result: ClaudeResult, raw: Value) {
+        self.duration_ms = result.duration_ms;
+        self.duration_api_ms = result.duration_api_ms;
+        self.num_turns = result.num_turns.map(|v| v as u32);
+        self.provider_status = result.stop_reason;
+        self.cost_usd = result.total_cost_usd.or(result.cost_usd);
 
-        // Turns
-        self.num_turns = obj
-            .get("num_turns")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
-
-        // Stop reason / status
-        self.provider_status = obj
-            .get("stop_reason")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-
-        // Cost (Claude Code uses "total_cost_usd", older versions may use "cost_usd")
-        self.cost_usd = obj
-            .get("total_cost_usd")
-            .or_else(|| obj.get("cost_usd"))
-            .and_then(|v| v.as_f64());
-
-        // Token usage
-        if let Some(usage) = obj.get("usage") {
-            let input = usage.get("input_tokens").and_then(|v| v.as_u64());
-            let output = usage.get("output_tokens").and_then(|v| v.as_u64());
-            let cache_read = usage
-                .get("cache_read_input_tokens")
-                .and_then(|v| v.as_u64());
+        if let Some(usage) = result.usage {
+            let input = usage.input_tokens;
+            let output = usage.output_tokens;
+            let cache_read = usage.cache_read_input_tokens;
             let total = match (input, output) {
                 (Some(i), Some(o)) => Some(i + o),
                 _ => None,
@@ -195,8 +163,8 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
             });
         }
 
-        // Store compact raw summary (exclude large arrays)
-        let mut raw = obj.clone();
+        // Store compact raw summary (exclude large arrays) from the raw Value.
+        let mut raw = raw;
         if let Some(map) = raw.as_object_mut() {
             map.remove("tools");
             map.remove("skills");
@@ -212,14 +180,11 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         );
     }
 
-    fn handle_rate_limit(&mut self, obj: &Value) {
+    fn handle_rate_limit(&mut self, event: ClaudeRateLimit) {
         let info = RateLimitInfo {
-            is_throttled: obj.get("is_throttled").and_then(|v| v.as_bool()),
-            retry_after_ms: obj.get("retry_after_ms").and_then(|v| v.as_u64()),
-            message: obj
-                .get("message")
-                .and_then(|v| v.as_str())
-                .map(String::from),
+            is_throttled: event.is_throttled,
+            retry_after_ms: event.retry_after_ms,
+            message: event.message,
         };
         if let Some(msg) = &info.message {
             self.sink.on_warning(msg);
@@ -227,30 +192,14 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         self.rate_limit = Some(info);
     }
 
-    fn handle_tool_use(&mut self, obj: &Value) {
-        let payload = Self::tool_use_payload(obj);
+    fn handle_tool_use(&mut self, mut tu: ClaudeToolUse) {
         self.tool_calls += 1;
-        super::trace_tool_event(
-            Provider::Claude,
-            self.tool_calls,
-            payload
-                .get("name")
-                .or_else(|| obj.get("tool_name"))
-                .and_then(|value| value.as_str()),
-        );
-        let mut meta = EventMeta::default();
-        let tool_id = payload
-            .get("id")
-            .or_else(|| obj.get("tool_use_id"))
-            .and_then(|v| v.as_str())
-            .map(ToOwned::to_owned);
-        let tool_name = payload
-            .get("name")
-            .or_else(|| payload.get("tool_name"))
-            .and_then(|v| v.as_str())
-            .map(ToOwned::to_owned);
-        let tool_input = payload.get("input").cloned();
+        let tool_id = tu.resolved_tool_id().map(ToOwned::to_owned);
+        let tool_name = tu.resolved_tool_name().map(ToOwned::to_owned);
+        let tool_input = tu.take_input();
+        super::trace_tool_event(Provider::Claude, self.tool_calls, tool_name.as_deref());
 
+        let mut meta = EventMeta::default();
         if let Some(tool_id) = &tool_id {
             meta.extra
                 .insert("tool_id".into(), Value::String(tool_id.clone()));
@@ -268,12 +217,8 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         self.sink.on_before_tool(&meta);
     }
 
-    fn handle_tool_result(&mut self, obj: &Value) {
-        let tool_id = obj
-            .get("tool_use_id")
-            .or_else(|| obj.get("id"))
-            .and_then(|v| v.as_str())
-            .map(ToOwned::to_owned);
+    fn handle_tool_result(&mut self, tr: ClaudeToolResult) {
+        let tool_id = tr.resolved_tool_id().map(ToOwned::to_owned);
         let (tool_name, tool_input) = tool_id
             .as_ref()
             .and_then(|id| self.tool_uses.remove(id))
@@ -290,13 +235,8 @@ impl<S: StreamEventSink> ClaudeStreamParser<S> {
         if let Some(tool_input) = tool_input {
             meta.extra.insert("tool_input".into(), tool_input);
         }
-        if let Some(tool_response) = obj
-            .get("content")
-            .or_else(|| obj.get("output"))
-            .or_else(|| obj.get("result"))
-        {
-            meta.extra
-                .insert("tool_response".into(), tool_response.clone());
+        if let Some(tool_response) = tr.response() {
+            meta.extra.insert("tool_response".into(), tool_response);
         }
         self.sink.on_after_tool(&meta);
     }
@@ -310,7 +250,9 @@ impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
             return Ok(None);
         }
 
-        let obj: Value = serde_json::from_str(line).map_err(|e| {
+        // Parse as Value first so we preserve the existing malformed-line
+        // handling and retain the raw value for the `result` summary.
+        let raw: Value = serde_json::from_str(line).map_err(|e| {
             self.sink
                 .on_warning(&format!("Malformed JSON on line {}: {e}", self.line_num));
             super::trace_malformed_line(Provider::Claude, self.line_num, &e.to_string());
@@ -320,62 +262,57 @@ impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
             }
         })?;
 
-        let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let event_type = raw.get("type").and_then(|t| t.as_str()).unwrap_or("");
         super::trace_parser_event(Provider::Claude, event_type, self.line_num);
 
-        match event_type {
-            "init" | "system" => {
-                self.handle_init(&obj);
+        // Typed dispatch. Unknown event types and schema mismatches fall
+        // through to `Err(_)` and are silently skipped, preserving existing
+        // parser tolerance for provider format drift.
+        match serde_json::from_value::<ClaudeEvent>(raw.clone()) {
+            Ok(ClaudeEvent::Init(init) | ClaudeEvent::System(init)) => {
+                self.handle_init(init);
                 Ok(None)
             }
-            "assistant" => {
-                // Full assistant message with content array
-                let chunk = self.handle_assistant_message(&obj);
-                Ok(chunk)
-            }
-            "content_block_delta" => {
-                let chunk = self.handle_content_block_delta(&obj);
-                Ok(chunk)
-            }
-            "error" | "assistant.error" => {
-                self.handle_error(&obj);
+            Ok(ClaudeEvent::Assistant(assistant)) => Ok(self.handle_assistant_message(assistant)),
+            Ok(ClaudeEvent::ContentBlockDelta(delta)) => Ok(self.handle_content_block_delta(delta)),
+            Ok(ClaudeEvent::Error(err) | ClaudeEvent::AssistantError(err)) => {
+                self.handle_error(err);
                 Ok(None)
             }
-            "result" => {
-                self.handle_result(&obj);
+            Ok(ClaudeEvent::Result(result)) => {
+                self.handle_result(result, raw);
                 Ok(None)
             }
-            "rate_limit_event" => {
-                self.handle_rate_limit(&obj);
+            Ok(ClaudeEvent::RateLimit(rl)) => {
+                self.handle_rate_limit(rl);
                 Ok(None)
             }
-            "tool_use" | "content_block_start"
-                if obj
-                    .get("content_block")
-                    .and_then(|b| b.get("type"))
-                    .and_then(|t| t.as_str())
-                    == Some("tool_use") =>
-            {
-                self.handle_tool_use(&obj);
+            Ok(ClaudeEvent::ContentBlockStart(cbs)) => {
+                if let Some(block) = cbs.content_block
+                    && block.kind.as_deref() == Some("tool_use")
+                {
+                    self.handle_tool_use(block.into_tool_use());
+                }
                 Ok(None)
             }
-            "tool_use" => {
-                self.handle_tool_use(&obj);
+            Ok(ClaudeEvent::ToolUse(tu)) => {
+                self.handle_tool_use(tu);
                 Ok(None)
             }
-            "tool_result" => {
-                self.handle_tool_result(&obj);
+            Ok(ClaudeEvent::ToolResult(tr)) => {
+                self.handle_tool_result(tr);
                 Ok(None)
             }
-            _ => {
-                // Unknown event types are silently skipped
+            Err(_) => {
+                // Unknown or schema-mismatched event — silently skipped,
+                // matching existing behavior for unknown event types.
                 Ok(None)
             }
         }
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
-        StreamExecutionSummary {
+        let mut summary = StreamExecutionSummary {
             provider: Provider::Claude,
             session_id: self.session_id,
             model: self.model,
@@ -395,11 +332,16 @@ impl<S: StreamEventSink + Send> StreamParser for ClaudeStreamParser<S> {
             } else {
                 None
             },
+            permission_prompts: None,
+            user_input_prompts: None,
             rate_limit: self.rate_limit,
             context_usage: None,
+            badges: Vec::new(),
             raw_summary: self.raw_summary,
             stderr_text: None,
-        }
+        };
+        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::Claude);
+        summary
     }
 }
 
@@ -839,5 +781,60 @@ mod tests {
             summary.assistant_text,
             "The sky is blue because of Rayleigh scattering."
         );
+    }
+
+    #[test]
+    fn billing_error_populates_billing_badge_on_summary() {
+        let mut parser = make_parser();
+        let init =
+            r#"{"type":"init","session_id":"sess-err","model":"claude-sonnet-4-20250514"}"#;
+        parser.feed_line(init).unwrap();
+        let error = r#"{"type":"error","error":{"type":"billing_error","message":"Insufficient credits"}}"#;
+        parser.feed_line(error).unwrap();
+        let summary = parser.finish(1);
+        assert_eq!(summary.badges.len(), 1);
+        assert_eq!(
+            summary.badges[0].category,
+            crate::stream::badges::BadgeCategory::Billing
+        );
+        assert_eq!(summary.badges[0].message, "Insufficient credits");
+        assert_eq!(
+            summary.badges[0].remediation_url.as_deref(),
+            Some("https://console.anthropic.com/settings/billing")
+        );
+    }
+
+    #[test]
+    fn auth_error_populates_auth_badge_on_summary() {
+        let mut parser = make_parser();
+        let init =
+            r#"{"type":"init","session_id":"sess-auth","model":"claude-sonnet-4-20250514"}"#;
+        parser.feed_line(init).unwrap();
+        let error = r#"{"type":"error","error":{"type":"authentication_error","message":"Invalid API key"}}"#;
+        parser.feed_line(error).unwrap();
+        let summary = parser.finish(1);
+        assert_eq!(summary.badges.len(), 1);
+        assert_eq!(
+            summary.badges[0].category,
+            crate::stream::badges::BadgeCategory::Auth
+        );
+    }
+
+    #[test]
+    fn rate_limit_event_populates_rate_limit_badge_on_summary() {
+        let mut parser = make_recording_parser();
+        let init = r#"{"type":"init","session_id":"sess-rl","model":"claude-sonnet-4-20250514"}"#;
+        parser.feed_line(init).unwrap();
+        let rl = r#"{"type":"rate_limit_event","is_throttled":true,"retry_after_ms":5000,"message":"Rate limit exceeded"}"#;
+        parser.feed_line(rl).unwrap();
+        let result = r#"{"type":"result","duration_ms":5000,"usage":{"input_tokens":100,"output_tokens":50}}"#;
+        parser.feed_line(result).unwrap();
+        let summary = parser.finish(0);
+        assert_eq!(summary.badges.len(), 1);
+        assert_eq!(
+            summary.badges[0].category,
+            crate::stream::badges::BadgeCategory::RateLimit
+        );
+        assert!(summary.badges[0].message.contains("5.0s"));
     }
 }
