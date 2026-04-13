@@ -1,16 +1,11 @@
 use std::time::Duration;
 
 use biscuit_location::{Coordinates, LocationConfig, LocationService, ReverseGeocodeConfig};
-use tracing::{debug, info_span, Instrument};
+use tracing::{Instrument, debug, info, info_span};
 
 use crate::args::{Cli, Commands};
 use crate::output::{self, OutputMode};
 
-/// Execute the CLI command and write output to stdout.
-///
-/// Completions are handled by the caller in `main.rs` before this runs —
-/// they must execute without constructing a `LocationService` because they
-/// do not depend on any runtime configuration.
 pub async fn run(cli: Cli, mode: OutputMode) -> color_eyre::Result<()> {
     debug!(
         ?cli.command,
@@ -19,6 +14,10 @@ pub async fn run(cli: Cli, mode: OutputMode) -> color_eyre::Result<()> {
         ?mode,
         "dispatching command"
     );
+
+    if let Commands::FetchDb { force } = cli.command {
+        return run_fetch_db(force, cli.quiet, mode).await;
+    }
 
     let gps_timeout = match &cli.command {
         Commands::Gps { timeout } => Duration::from_secs(*timeout),
@@ -39,7 +38,7 @@ pub async fn run(cli: Cli, mode: OutputMode) -> color_eyre::Result<()> {
         reverse: reverse_config,
     };
 
-    let svc = LocationService::new(config)?;
+    let svc = LocationService::new(config).await?;
 
     match cli.command {
         Commands::Gps { .. } => {
@@ -79,12 +78,39 @@ pub async fn run(cli: Cli, mode: OutputMode) -> color_eyre::Result<()> {
             emit(&output::render_distance(value, unit, mode), cli.quiet);
         }
 
+        Commands::FetchDb { .. } => unreachable!("handled above"),
+
         Commands::Completions { .. } => {
-            // Handled in main.rs before this function runs.
             unreachable!("completions are handled in main before dispatch");
         }
     }
 
+    Ok(())
+}
+
+async fn run_fetch_db(force: bool, quiet: bool, mode: OutputMode) -> color_eyre::Result<()> {
+    use biscuit_location::resolve_maxmind_path;
+
+    let expected = resolve_maxmind_path(None);
+    if let Some(ref path) = expected {
+        if path.exists() && !force {
+            emit(
+                &output::render_info(
+                    &format!("Database already exists at {}", path.display()),
+                    mode,
+                ),
+                quiet,
+            );
+            return Ok(());
+        }
+    }
+
+    info!("downloading GeoLite2-City database from MaxMind");
+    let path = biscuit_location::download_database().await?;
+    emit(
+        &output::render_info(&format!("Downloaded database to {}", path.display()), mode),
+        quiet,
+    );
     Ok(())
 }
 
@@ -106,7 +132,6 @@ fn emit_location(
 
 fn emit(text: &str, quiet: bool) {
     if quiet {
-        // `--quiet` suppresses data output; keep stderr clean too.
         return;
     }
     println!("{text}");

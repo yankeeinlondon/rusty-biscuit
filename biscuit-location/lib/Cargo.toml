@@ -5,10 +5,13 @@ edition = "2024"
 
 [dependencies]
 dirs = "6"
+flate2 = "1"
 geo = "0.29"
 maxminddb = { version = "0.27", features = ["mmap"] }
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 serde = { version = "1", features = ["derive"] }
+tar = "0.4"
+tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
 url = "2"
@@ -30,7 +33,7 @@ futures-util = { version = "0.3", default-features = false }
 
 [features]
 default = ["reverse"]
-reverse = ["dep:reqwest"]
+reverse = []
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

@@ -1,6 +1,6 @@
-use geo::algorithm::line_measures::metric_spaces::Geodesic;
-use geo::algorithm::line_measures::Distance;
 use geo::Point;
+use geo::algorithm::line_measures::Distance;
+use geo::algorithm::line_measures::metric_spaces::Geodesic;
 
 use crate::types::{Coordinates, Distance as CoordDistance};
 
