@@ -146,11 +146,9 @@ pub fn render_hardware_section(
         writeln!(out).unwrap();
     }
 
-    // Print audio devices if available
     if !hardware.audio_devices.is_empty() {
-        writeln!(out, "Audio Devices:").unwrap();
-        out.push_str(&render_audio_device_list(&hardware.audio_devices, verbose));
         writeln!(out).unwrap();
+        out.push_str(&render_audio_device_list(&hardware.audio_devices, verbose));
     }
 
     writeln!(out, "Storage:").unwrap();
@@ -307,18 +305,6 @@ pub fn render_storage_section(
 // ============================================================================
 // Audio devices
 // ============================================================================
-
-/// Format a sample rate for display.
-///
-/// Integer rates (e.g., 48000.0) display without decimals.
-/// Fractional rates display with 1 decimal place.
-fn format_sample_rate(rate: f64) -> String {
-    if (rate - rate.round()).abs() < 0.01 {
-        format!("{}", rate as u64)
-    } else {
-        format!("{:.1}", rate)
-    }
-}
 
 /// Format a sample rate (Hz) as a compact kHz string.
 ///
@@ -482,86 +468,154 @@ fn build_device_line(
     format!("{}{} {}{}", dev.name, name_suffix, parens, marker)
 }
 
-/// Render a list of audio devices with verbosity levels.
+/// Build a `Prose` item for the "none" placeholder child of an empty group.
+fn empty_group_placeholder() -> biscuit_terminal::components::prose::Prose {
+    biscuit_terminal::components::prose::Prose::new("<dim><i>none</i></dim>")
+}
+
+/// Build the Input or Output group as a nested `UnorderedList`.
 ///
-/// - Default: name, kind, direction, default markers
-/// - `-v`: adds sample rate + channel counts
-/// - `-vv`: adds available sample rates + UID
-fn render_audio_device_list(devices: &[sniff::hardware::AudioDeviceInfo], verbose: u8) -> String {
-    let mut out = String::new();
+/// `rendered` is the subset of devices whose `direction` places them on
+/// this side, already sorted alphabetically (case-insensitive) by name.
+/// `all_name_suffixes` is indexed by the device's index in the *original*
+/// device slice.
+fn build_group_list(
+    heading: &str,
+    rendered: &[(usize, &sniff::hardware::AudioDeviceInfo)],
+    all_name_suffixes: &[String],
+    side: GroupSide,
+    verbose: u8,
+) -> biscuit_terminal::components::list::UnorderedList {
+    use biscuit_terminal::components::{list::UnorderedList, prose::Prose};
 
-    for dev in devices {
-        let mut markers = Vec::new();
-        if dev.is_default_output {
-            markers.push("default output");
-        }
-        if dev.is_default_input {
-            markers.push("default input");
-        }
+    let mut group = UnorderedList::empty();
+    group.add(Prose::new(format!("<b>{}</b>", heading)));
 
-        let marker_str = if markers.is_empty() {
-            String::new()
-        } else {
-            format!(" [{}]", markers.join(", "))
-        };
+    let mut children = UnorderedList::empty();
+    if rendered.is_empty() {
+        children.add(empty_group_placeholder());
+    } else {
+        for (original_idx, dev) in rendered {
+            let suffix = all_name_suffixes[*original_idx].as_str();
+            children.add(Prose::new(build_device_line(dev, suffix, side)));
 
-        writeln!(
-            out,
-            "  {} ({}, {}){}",
-            dev.name, dev.kind, dev.direction, marker_str
-        )
-        .unwrap();
-
-        if verbose > 0 {
-            if dev.sample_rate > 0.0 {
-                writeln!(
-                    out,
-                    "    Sample rate: {} Hz",
-                    format_sample_rate(dev.sample_rate)
-                )
-                .unwrap();
+            if verbose > 0 {
+                if dev.output_channels > 0 {
+                    children.add(Prose::new(format!(
+                        "  <dim>Output channels:</dim> {}",
+                        dev.output_channels
+                    )));
+                }
+                if dev.input_channels > 0 {
+                    children.add(Prose::new(format!(
+                        "  <dim>Input channels:</dim> {}",
+                        dev.input_channels
+                    )));
+                }
             }
-            if dev.output_channels > 0 {
-                writeln!(out, "    Output channels: {}", dev.output_channels).unwrap();
-            }
-            if dev.input_channels > 0 {
-                writeln!(out, "    Input channels: {}", dev.input_channels).unwrap();
+            if verbose > 1 && !dev.uid.is_empty() {
+                children.add(Prose::new(format!("  <dim>UID:</dim> {}", dev.uid)));
             }
         }
+    }
 
-        if verbose > 1 {
-            if !dev.available_sample_rates.is_empty() {
-                let rates: Vec<String> = dev
-                    .available_sample_rates
-                    .iter()
-                    .map(|r| format_sample_rate(*r))
-                    .collect();
-                writeln!(out, "    Available rates: {} Hz", rates.join(", ")).unwrap();
-            }
-            if !dev.uid.is_empty() {
-                writeln!(out, "    UID: {}", dev.uid).unwrap();
-            }
-        }
+    group.add(children);
+    group
+}
+
+/// Render a list of audio devices as the grouped Input/Output block.
+///
+/// This is the shared builder used by both `sniff audio-devices` and the
+/// embedded "Audio Devices" subsection inside `sniff hardware`. The output
+/// does NOT start with a leading newline — callers decide on preceding
+/// spacing. It does end with a trailing newline after the footer.
+fn render_audio_device_list(
+    devices: &[sniff::hardware::AudioDeviceInfo],
+    verbose: u8,
+) -> String {
+    use biscuit_terminal::{
+        components::{
+            compose::Compose,
+            list::UnorderedList,
+            prose::Prose,
+            renderable::Renderable,
+            status::{Status, StatusState, StatusTheme},
+        },
+        terminal::Terminal,
+    };
+    use sniff::hardware::AudioDirection;
+
+    let terminal = Terminal::new();
+
+    let suffixes = build_name_suffixes(devices);
+
+    let mut input_devs: Vec<(usize, &sniff::hardware::AudioDeviceInfo)> = devices
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| {
+            matches!(d.direction, AudioDirection::Input | AudioDirection::InputOutput)
+        })
+        .collect();
+    let mut output_devs: Vec<(usize, &sniff::hardware::AudioDeviceInfo)> = devices
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| {
+            matches!(d.direction, AudioDirection::Output | AudioDirection::InputOutput)
+        })
+        .collect();
+
+    input_devs.sort_by(|(_, a), (_, b)| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    output_devs.sort_by(|(_, a), (_, b)| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    let input_group = build_group_list("Input", &input_devs, &suffixes, GroupSide::Input, verbose);
+    let output_group = build_group_list(
+        "Output",
+        &output_devs,
+        &suffixes,
+        GroupSide::Output,
+        verbose,
+    );
+
+    let mut outer = UnorderedList::empty();
+    outer.add(input_group);
+    outer.add(output_group);
+
+    let mut doc = Compose::default();
+    doc.add_prose(Prose::new("<b><uu>Audio Devices</uu></b>"));
+    doc.add_text("\n");
+    doc.add_unordered_list(outer);
+
+    let mut out = doc.display(&terminal).to_string();
+
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push('\n');
+
+    let footer = Status::from_prose(
+        "<i><dim> - items with <b><yellow>*</yellow></b> are the <b>default</b> for the input/output</dim></i>",
+    )
+    .state(StatusState::Info)
+    .theme(StatusTheme::Circular);
+    out.push_str(&footer.display(&terminal).to_string());
+    if !out.ends_with('\n') {
+        out.push('\n');
     }
 
     out
 }
 
 /// Render standalone audio devices section (for `sniff audio-devices`).
+///
+/// Same block as [`render_audio_device_list`], but with a leading blank line
+/// so the title has breathing room when printed at the top of the standalone
+/// command's output.
 pub fn render_audio_devices_section(
     devices: &[sniff::hardware::AudioDeviceInfo],
     verbose: u8,
 ) -> String {
-    let mut out = String::new();
-
-    writeln!(out, "=== Audio Devices ===").unwrap();
-    if devices.is_empty() {
-        writeln!(out, "No audio devices detected").unwrap();
-    } else {
-        out.push_str(&render_audio_device_list(devices, verbose));
-    }
-    writeln!(out).unwrap();
-
+    let mut out = String::from("\n");
+    out.push_str(&render_audio_device_list(devices, verbose));
     out
 }
 
@@ -777,5 +831,107 @@ mod audio_line_tests {
         dev.available_sample_rates = vec![48000.0, 96000.0];
         let line = build_device_line(&dev, "", GroupSide::Output);
         assert!(line.contains("<dim>48k</dim> <dim>96k</dim> <b>192k</b>"));
+    }
+}
+
+#[cfg(test)]
+mod audio_section_tests {
+    use super::render_audio_devices_section;
+    use sniff::hardware::{AudioDeviceInfo, AudioDeviceKind, AudioDirection};
+
+    fn mic() -> AudioDeviceInfo {
+        AudioDeviceInfo {
+            name: "USB Microphone".to_string(),
+            uid: "usb-mic".to_string(),
+            kind: AudioDeviceKind::Usb,
+            direction: AudioDirection::Input,
+            is_default_input: true,
+            is_default_output: false,
+            sample_rate: 48000.0,
+            available_sample_rates: vec![48000.0, 96000.0],
+            input_channels: 1,
+            output_channels: 0,
+        }
+    }
+
+    fn speakers() -> AudioDeviceInfo {
+        AudioDeviceInfo {
+            name: "MacBook Pro Speakers".to_string(),
+            uid: "BuiltInSpeakerDevice".to_string(),
+            kind: AudioDeviceKind::BuiltIn,
+            direction: AudioDirection::Output,
+            is_default_input: false,
+            is_default_output: true,
+            sample_rate: 48000.0,
+            available_sample_rates: vec![44100.0, 48000.0, 96000.0],
+            input_channels: 0,
+            output_channels: 2,
+        }
+    }
+
+    fn interface_io_default_out_only() -> AudioDeviceInfo {
+        AudioDeviceInfo {
+            name: "USB Audio Interface".to_string(),
+            uid: "usb-iface".to_string(),
+            kind: AudioDeviceKind::Usb,
+            direction: AudioDirection::InputOutput,
+            is_default_input: false,
+            is_default_output: false,
+            sample_rate: 44100.0,
+            available_sample_rates: vec![44100.0],
+            input_channels: 2,
+            output_channels: 2,
+        }
+    }
+
+    #[test]
+    fn title_and_footer_appear() {
+        let devices = vec![mic(), speakers()];
+        let out = render_audio_devices_section(&devices, 0);
+        assert!(out.contains("Audio Devices"), "title missing:\n{}", out);
+        assert!(
+            out.contains("default") && out.contains("input/output"),
+            "footer missing:\n{}",
+            out
+        );
+    }
+
+    #[test]
+    fn default_markers_are_side_specific() {
+        let devices = vec![speakers(), interface_io_default_out_only()];
+        let out = render_audio_devices_section(&devices, 0);
+        assert!(out.contains("*"), "expected at least one * marker:\n{}", out);
+    }
+
+    #[test]
+    fn empty_input_group_shows_none_placeholder() {
+        let devices = vec![speakers()];
+        let out = render_audio_devices_section(&devices, 0);
+        assert!(out.contains("Input"), "Input header missing:\n{}", out);
+        assert!(out.contains("none"), "'none' placeholder missing:\n{}", out);
+    }
+
+    #[test]
+    fn empty_device_list_still_renders_both_groups_with_none() {
+        let out = render_audio_devices_section(&[], 0);
+        assert!(out.contains("Input"));
+        assert!(out.contains("Output"));
+        assert!(out.contains("none"));
+    }
+
+    #[test]
+    fn verbose_one_adds_channel_counts() {
+        let out = render_audio_devices_section(&[speakers()], 1);
+        assert!(out.contains("Output channels:") && out.contains(" 2"), "missing -v extras:\n{}", out);
+    }
+
+    #[test]
+    fn verbose_two_adds_uid() {
+        let out = render_audio_devices_section(&[speakers()], 2);
+        assert!(
+            out.contains("UID:") && out.contains("BuiltInSpeakerDevice"),
+            "missing -vv extras:\n{}",
+            out
+        );
     }
 }
