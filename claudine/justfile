@@ -49,6 +49,8 @@ build *args="":
 
 # Install the CLI
 install *args="":
+    @just _build biscuit-terminal "biscuit-file Library" {{args}}
+    @just _build darkmatter "Darkmatter Library" {{args}}
     @just build
     @just _install "{{CLI_PATH}}" "{{PACKAGE}}" "{{args}}"
 
@@ -138,19 +140,7 @@ lint-fix-ai:
     @echo -e "✅ No lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}}"
     @just _speak "No lint errors were found in {{PACKAGE}}"
 
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit *args="":
-    @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
-    @echo -e "{{DIM}}{{ITALIC}}- using the {{RESET}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{DIM}}model{{RESET}}"
-    @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{RESET}}"
-    @echo test | gpg --clearsign --output /dev/null
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y {{args}}
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
+
 
 
 # Validate the source code without doing a full build
