@@ -879,9 +879,7 @@ fn extract_file_ref(value: &Value, field: &str) -> Result<String, HarnessError> 
     }
     Err(HarnessError::PathResolutionFailed {
         raw: value.to_string(),
-        detail: format!(
-            "expected a file path string or an object with a `{field}` field"
-        ),
+        detail: format!("expected a file path string or an object with a `{field}` field"),
     })
 }
 
@@ -1275,7 +1273,10 @@ mod tests {
         let err = parse_harness_plan(&fm, source(), &test_ctx()).unwrap_err();
         let message = err.to_string();
 
-        assert!(message.contains("`file` field"), "unexpected error: {message}");
+        assert!(
+            message.contains("`file` field"),
+            "unexpected error: {message}"
+        );
         assert!(
             message.contains("\"name\":\"goose.md\""),
             "unexpected error: {message}"

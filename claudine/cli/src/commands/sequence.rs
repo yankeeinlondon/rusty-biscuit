@@ -38,7 +38,9 @@ pub fn run_sequence(args: SequenceArgs, verbose: u8) -> Result<()> {
     let code = match run_sequence_inner(args, verbose) {
         Ok(code) => code,
         Err(error) => {
-            log::error(&error.to_string());
+            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
+                log::error(&error.to_string());
+            }
             1
         }
     };

@@ -198,7 +198,9 @@ pub fn run_compose(args: ComposeArgs, verbose: u8) -> Result<()> {
     let code = match run_compose_inner(args, verbose) {
         Ok(code) => code,
         Err(error) => {
-            log::error(&error.to_string());
+            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
+                log::error(&error.to_string());
+            }
             1
         }
     };
@@ -210,7 +212,9 @@ pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
     let code = match run_inline_compose_inner(args, verbose) {
         Ok(code) => code,
         Err(error) => {
-            log::error(&error.to_string());
+            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
+                log::error(&error.to_string());
+            }
             1
         }
     };
@@ -234,7 +238,14 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         opts
     };
 
-    let approval_options = super::wrap::build_harness_shell_options(&source.resolved_path, None);
+    let shared_approval_cache =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+
+    let approval_options = super::wrap::build_harness_shell_options_with_cache(
+        &source.resolved_path,
+        None,
+        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    );
 
     let preflight = composition::resolve_shell_approvals(
         Some(&source.markdown),
@@ -252,7 +263,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
             ..Default::default()
         },
     )
-    .map_err(|e| eyre!("{e}"))?;
+    .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::ChainedDocument,
@@ -277,7 +288,7 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
         quiet: shared.quiet,
         silent: shared.silent,
         env_overrides: std::collections::BTreeMap::new(),
-        shared_approval_cache: None,
+        shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
     };
 
@@ -340,7 +351,14 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         opts
     };
 
-    let approval_options = super::wrap::build_harness_shell_options(&source.resolved_path, None);
+    let shared_approval_cache =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+
+    let approval_options = super::wrap::build_harness_shell_options_with_cache(
+        &source.resolved_path,
+        None,
+        Some(std::sync::Arc::clone(&shared_approval_cache)),
+    );
 
     let preflight = composition::resolve_shell_approvals(
         Some(&source.markdown),
@@ -358,7 +376,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
             ..Default::default()
         },
     )
-    .map_err(|e| eyre!("{e}"))?;
+    .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
 
     let request = CompositionExecutionRequest {
         mode: CompositionMode::InlineFrontmatterPrompt,
@@ -383,7 +401,7 @@ fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32>
         quiet: shared.quiet,
         silent: shared.silent,
         env_overrides: std::collections::BTreeMap::new(),
-        shared_approval_cache: None,
+        shared_approval_cache: Some(shared_approval_cache),
         sequence: false,
     };
 

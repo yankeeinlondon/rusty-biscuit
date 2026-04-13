@@ -7,13 +7,24 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use claudine::composition::sequence::build_step_overlay;
 use claudine::composition::{
-    self, CompositionExecutionRequest, CompositionMode, PrepareOptions, ResolvedCompositionSource,
-    SequenceExecutionOptions, SequencePlan, SequenceRunSummary, SequenceStepResult,
+    self, CompositionExecutionRequest, CompositionMode, PrepareOptions, PreparedComposition,
+    ResolvedCompositionSource, SequenceExecutionOptions, SequencePlan, SequenceRunSummary,
+    SequenceStepResult,
 };
+use claudine::harness::{HarnessResolutionContext, has_harness_properties, parse_harness_plan};
 use color_eyre::eyre::{Result, eyre};
 
 use crate::commands::compose::SharedComposeArgs;
 use crate::log;
+
+/// Context data for a single step in the sequence.
+///
+/// Captures the per-step environment overrides and the prepared composition
+/// so that Phase 2 execution can reuse the work done during Phase 1 pre-flight.
+struct StepContext {
+    env_overrides: BTreeMap<String, String>,
+    prepared: PreparedComposition,
+}
 
 /// Execute a full sequence: iterate steps, compose each, and report results.
 pub(crate) fn execute_sequence(
@@ -65,9 +76,8 @@ pub(crate) fn execute_sequence(
     // discovery pass needs its own compose context. Running the whole
     // pass up-front means any required approval prompts fire BEFORE
     // the first agent launches — the operator reviews all shell commands
-    // once and then walks away.
-    let mut step_contexts: Vec<(serde_json::Value, BTreeMap<String, String>)> =
-        Vec::with_capacity(total_steps);
+    // (both template and harness) once and then walks away.
+    let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
     for step_index in 0..total_steps {
         let overlay = build_step_overlay(&plan, step_index);
         let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
@@ -96,7 +106,8 @@ pub(crate) fn execute_sequence(
             Some(Arc::clone(&shared_approval_cache)),
         );
 
-        let preflight = composition::resolve_shell_approvals(
+        // ── Template pre-flight ───────────────────────────────────────
+        let template_preflight = composition::resolve_shell_approvals(
             Some(&source.markdown),
             Some(&compose_options),
             None,
@@ -104,8 +115,43 @@ pub(crate) fn execute_sequence(
         )
         .map_err(|e| eyre!("{e}"))?;
 
-        cumulative_approved.extend(preflight.approved_commands.iter().cloned());
-        step_contexts.push((step_set_overrides, env_overrides));
+        cumulative_approved.extend(template_preflight.approved_commands.iter().cloned());
+
+        // ── Prepare composition ───────────────────────────────────────
+        let prepare_options = PrepareOptions {
+            set_overrides: Some(step_set_overrides.clone()),
+            pre_approved_commands: Some(cumulative_approved.clone()),
+            env_overrides: env_overrides.clone(),
+        };
+
+        let prepared = composition::prepare_direct(source, prepare_options)
+            .map_err(crate::output::shell_expansion_error::pretty_or_report)?;
+
+        // ── Harness pre-flight ────────────────────────────────────────
+        if has_harness_properties(&prepared.effective_frontmatter) {
+            let effective_repo_root = prepared.source_repo_root.as_deref();
+            let resolve_ctx = HarnessResolutionContext {
+                source_path: &prepared.resolved_path,
+                repo_root: effective_repo_root,
+            };
+            let plan = parse_harness_plan(
+                &prepared.effective_frontmatter,
+                &prepared.resolved_path,
+                &resolve_ctx,
+            )
+            .map_err(|e| eyre!("{e}"))?;
+
+            let harness_preflight =
+                composition::resolve_shell_approvals(None, None, Some(&plan), &approval_options)
+                    .map_err(|e| eyre!("{e}"))?;
+
+            cumulative_approved.extend(harness_preflight.approved_commands.iter().cloned());
+        }
+
+        step_contexts.push(StepContext {
+            env_overrides,
+            prepared,
+        });
     }
 
     if !silent {
@@ -119,7 +165,7 @@ pub(crate) fn execute_sequence(
     }
 
     // ── Phase 2: execute each step ─────────────────────────────────────
-    for (step_index, (step_set_overrides, env_overrides)) in step_contexts.iter().enumerate() {
+    for (step_index, step_ctx) in step_contexts.iter().enumerate() {
         let step = &plan.steps[step_index];
 
         if !silent {
@@ -135,41 +181,8 @@ pub(crate) fn execute_sequence(
 
         let start = std::time::Instant::now();
 
-        let prepare_options = PrepareOptions {
-            set_overrides: Some(step_set_overrides.clone()),
-            pre_approved_commands: Some(cumulative_approved.clone()),
-            env_overrides: env_overrides.clone(),
-        };
-
-        let prepared = match composition::prepare_direct(source, prepare_options) {
-            Ok(p) => p,
-            Err(e) => {
-                let duration = start.elapsed();
-                let error_msg = e.to_string();
-                if !silent {
-                    let status = Status::from_prose(format!(
-                        "step <b><yellow>{}/{}</yellow></b> failed: {}",
-                        step_index + 1,
-                        total_steps,
-                        error_msg
-                    ))
-                    .state(StatusState::Failure);
-                    log::message(&status.render(&log::terminal()));
-                }
-                summary.failed += 1;
-                summary.steps.push(SequenceStepResult {
-                    step: step_index + 1,
-                    name: step.name.clone(),
-                    success: false,
-                    error: Some(error_msg),
-                    duration,
-                });
-                if effective_fail_fast {
-                    break;
-                }
-                continue;
-            }
-        };
+        // Use the prepared composition from Phase 1 instead of re-preparing
+        let prepared = step_ctx.prepared.clone();
 
         let system_prompt_args = claudine::system_prompt::SystemPromptArgs {
             append_file: shared.append_system_prompt.clone(),
@@ -199,7 +212,7 @@ pub(crate) fn execute_sequence(
             session_interactive: shared.interactive,
             quiet: shared.quiet,
             silent: shared.silent,
-            env_overrides: env_overrides.clone(),
+            env_overrides: step_ctx.env_overrides.clone(),
             shared_approval_cache: Some(Arc::clone(&shared_approval_cache)),
         };
 
