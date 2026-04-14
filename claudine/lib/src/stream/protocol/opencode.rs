@@ -524,6 +524,46 @@ mod tests {
     }
 
     #[test]
+    fn opencode_tool_state_fills_when_part_missing_fields() {
+        // When tool info lives under `part.state.*` (current OpenCode wire format
+        // per message-v2.ts) and is absent at top-level and `part.*`, resolve()
+        // must pick it up.
+        let event = parse(
+            r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
+                 "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
+        );
+        let OpenCodeEvent::ToolUse(tool) = event else {
+            panic!("expected ToolUse");
+        };
+        let resolved = tool.resolve();
+        assert_eq!(resolved.id.as_deref(), Some("t1"));
+        assert_eq!(resolved.name.as_deref(), Some("bash"));
+        assert_eq!(resolved.status.as_deref(), Some("completed"));
+        let input = resolved.input.expect("input from part.state");
+        assert_eq!(
+            input.get("command").and_then(Value::as_str),
+            Some("ls -la")
+        );
+        let output = resolved.output.expect("output from part.state");
+        assert_eq!(output.as_str(), Some("file.txt"));
+    }
+
+    #[test]
+    fn opencode_tool_part_fields_beat_state_when_both_present() {
+        // Priority: top-level > part.fields > part.state. When part.fields and
+        // part.state both carry `status`, part.fields must win.
+        let event = parse(
+            r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","status":"from_part",
+                 "state":{"status":"from_state"}}}"#,
+        );
+        let OpenCodeEvent::ToolUse(tool) = event else {
+            panic!("expected ToolUse");
+        };
+        let resolved = tool.resolve();
+        assert_eq!(resolved.status.as_deref(), Some("from_part"));
+    }
+
+    #[test]
     fn opencode_tool_args_params_aliases() {
         let event = parse(r#"{"type":"tool_use","args":{"x":1}}"#);
         let OpenCodeEvent::ToolUse(tool) = event else {

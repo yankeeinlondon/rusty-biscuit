@@ -15,7 +15,9 @@
 //! - `step_start` / `step_finish` → [`SemanticEvent::Info`] with a
 //!   `step_phase` marker so renderers / heartbeats can key off activity.
 //! - `text` / `text_delta` / `assistant_text` → [`SemanticEvent::OutputText`].
-//! - `tool_use` / `tool_start` → [`SemanticEvent::ToolCall`].
+//! - `tool_start` → [`SemanticEvent::ToolCall`] (pre-completion).
+//! - `tool_use` → paired [`SemanticEvent::ToolCall`] + [`SemanticEvent::ToolResult`]
+//!   (OpenCode emits `tool_use` only after the tool has reached `completed` / `error`).
 //! - `tool_result` / `tool_end` → [`SemanticEvent::ToolResult`].
 //! - `step_complete` / `turn_complete` → [`SemanticEvent::TurnComplete`].
 //! - `error` / `step_error` → [`SemanticEvent::Error`].
@@ -270,6 +272,8 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             self.tool_calls,
             resolved.name.as_deref(),
         );
+        // No tool_uses cache insert: the paired ToolResult is emitted inline,
+        // so nothing downstream needs to look up the input by id.
 
         let mut call_extra = self.base_extra(raw_kind);
         if let Some(id) = &resolved.id {
