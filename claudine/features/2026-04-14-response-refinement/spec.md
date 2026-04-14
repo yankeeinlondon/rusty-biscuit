@@ -237,13 +237,21 @@ It is ok to include a warning like this when running opencode in an interactive 
 
 The observations above span several independent fixes plus one cross-cutting concern (tool-call rendering). Treat this feature as an **epic** and decompose it into the following children. The contract-first child must ship first because later children populate its struct rather than formatting strings directly.
 
-### Epic Children (in order)
+### Epic Children
 
 1. **Tool-Call Display Contract** (must ship first) — protocol-level `ToolCallDisplay` type + single formatter in `claudine/cli/src/commands/wrap/live_semantic_sink.rs` + humanization rules + width rules.
 2. **Claude: hook/session ordering + rate-limit heuristic** — move hook events to trail the session-ID marker (with streaming-preservation constraint) and gate the rate-limit warning on `ANTHROPIC_API_KEY`.
-3. **Vertical-spacing normalization** — per-provider trim of observed blank runs; rule: "maximum one blank line between sections."
+3. **Section model and spacing normalization** — define the 9-section rendered output model and enforce at-most-one blank line between any two adjacent present sections. Must land **last**.
 4. **Gemini markdown rendering** — investigation-led fix for mid-list truncation and stray blank lines between list items.
-5. **OpenCode: YOLO support + tool-call accounting + misroute diagnostic** — accept `--dangerously-skip-permissions` for non-interactive, remove synthesized outgoing tool-call, count responses only, and investigate the current `⚙ firecrawl_firecrawl_search {…raw JSON…}` misroute.
+5. **OpenCode: assistant-text to stdout + YOLO + tool-call accounting + mis-routed render** — restore the missing final assistant response to stdout (P0 — OpenCode native works fine without claudine), accept `--dangerously-skip-permissions` for non-interactive, remove synthesized outgoing tool-call, count responses only, and investigate the current `⚙ firecrawl_firecrawl_search {…raw JSON…}` mis-routed render.
+
+### Child Sequencing
+
+```text
+Child 1 → (Child 2, Child 4, Child 5 in parallel) → Child 3 last
+```
+
+Rationale: Child 3 (section model + spacing) normalizes output that Children 2, 4, and 5 alter. Running it last avoids rework as the upstream children change what each section emits.
 
 ## Tool-Call Display Contract
 
@@ -255,7 +263,7 @@ This is Child 1. Everything downstream consumes it.
 ToolCallDisplay {
     direction: Direction,    // Outgoing | Incoming
     display_name: String,    // humanized
-    summary: Option<String>, // extracted context, ellipsized to width
+    summary: Option<String>, // extracted context
     status: Option<Status>,  // success | error | pending
 }
 ```
@@ -266,6 +274,24 @@ Subsequent per-provider children populate this struct. They do NOT format string
 
 - Outgoing: `🔧 → <DisplayName> · <dim><i><summary></i></dim>`
 - Incoming: `🔧 ← <DisplayName> · <dim><i><status-or-summary></i></dim>`
+
+### Status vs. Summary Priority (Incoming)
+
+For incoming tool events, **status always wins when present**. The dim-italic slot renders the status word (`successful`, `error`) whenever status is populated; only if status is absent does the formatter fall back to an output summary extracted from the response payload.
+
+### Status Styling
+
+- **Success:** the status word is rendered as dim italic (matches the rest of the slot).
+- **Error:** the status word `error` is rendered **red + bold** inside the dim-italic slot. The glyph and overall line format are unchanged.
+
+### Badge / Glyph Ownership
+
+The formatter does **not** write glyphs literally. It populates `biscuit_terminal::Status` using the existing `Status::ToolUse` state, which already renders the 🔧 glyph. The formatter's job is to construct a `Status` value with:
+
+- the correct state (`Status::ToolUse`),
+- a humanized description string (direction arrow + display name + ` · ` + summary or status slot).
+
+No new `Status` states are introduced by this feature.
 
 ### Humanization (Two-Tier Resolution)
 
@@ -280,10 +306,14 @@ Subsequent per-provider children populate this struct. They do NOT format string
 
 **Last resort:** the raw tool id is the final display.
 
-### Summary Truncation Width
+### Long-Name and Long-Summary Handling
 
-- **TTY:** use `biscuit_terminal::Terminal` available width; ellipsize (`…`) at the boundary after accounting for prefix overhead (icon + arrow + name + ` · `).
-- **Non-TTY / piped:** use `Terminal` optimistic defaults (the struct provides these).
+Long display names and long summary slots are **word-wrapped**, not truncated. The formatter leverages biscuit-terminal's built-in wrapping via the `Layout` struct already used by `Status`, `Prose`, and `UnorderedList`. When content exceeds available width, it flows to additional lines; it does NOT get cut at a boundary.
+
+### Width Rule
+
+- **TTY:** `biscuit_terminal::Terminal` provides the available width; biscuit-terminal components wrap accordingly via `Layout`.
+- **Non-TTY / piped:** `Terminal`'s optimistic defaults apply; the same `Layout` wrapping applies.
 
 ### Per-Tool-Type Context Extraction ("no JSON to the terminal")
 
@@ -292,9 +322,45 @@ Goal: never lose information — extract the meaningful slice of the tool argume
 - Web-search tools → extract `query`
 - File-reading tools → extract `path`
 - Shell tools → extract `command` (summarized)
-- Unknown tool shape → fall back to raw JSON (respecting width rules); do NOT hide the JSON entirely, since that removes the ability to iterate.
+- Unknown tool shape → fall back to raw JSON (respecting width / wrapping rules); do NOT hide the JSON entirely, since that removes the ability to iterate.
 
 This is **best-effort with per-tool hooks**, not a hard invariant enforced by assertion.
+
+## Section Model and Spacing Normalization
+
+This is Child 3. It ships **after** Children 1, 2, 4, and 5.
+
+### Section Model
+
+Rendered output for a single non-interactive run consists of at most these nine sections, in this fixed order:
+
+1. **Claudine execution line** — the header line announcing the wrapped invocation. _stderr._
+2. **ENV variables** — when shown (e.g., via `--verbose` or equivalent). _stderr._
+3. **System Prompt** — the system prompt passed to the provider, when shown. _stderr._
+4. **Agent Prompt** — the user/agent prompt passed to the provider, when shown. _stderr._
+5. **sessionID, model line** — the single provider-id + model identifier line (e.g., `- Claude session ID … · claude-opus-4-6[1m]`). _stderr._
+6. **Thinking prose** — streamed reasoning/thinking content from the provider, when available. _stderr._
+7. **Tool use and info/error events** — tool-call lines (Child 1 output) plus provider info/warning/error events. _stderr._
+8. **Final STDOUT** — the provider's final assistant response text. _stdout._
+9. **Final metadata lines** — the trailer (timing, token counts, cost, tool-call count, etc.). _stderr._
+
+Only section 8 routes to stdout. All other sections route to stderr.
+
+### Thinking Prose Rendering (Section 6)
+
+Thinking events render as a `BlockQuote` with a grey vertical line; the quoted content is dim-italic prose, word-wrapped via `Layout`. Section 6 is routed to stderr. This applies to **all** providers whose stream exposes thinking/reasoning (Claude, Codex, and any future provider that exposes it).
+
+Rationale: _the worst thing of all is a long wait with no feedback._ Showing thinking as its own section gives users continuous signal during long tool-using turns.
+
+### Spacing Rule (Structural)
+
+**At most one blank line between any two adjacent sections present in the rendered output.** Because sections are explicit, this rule is structurally enforceable rather than lexical.
+
+### Trim Location
+
+Spacing is enforced **at the sink level**, inside `claudine/cli/src/commands/wrap/live_semantic_sink.rs`, by deduplicating consecutive blank emissions as they are written to the output surface (stderr or stdout). This matches the existing pattern used for other cross-cutting sink-level concerns.
+
+**Parsers remain lossless.** Per-provider `*_semantic.rs` modules do NOT trim blank lines; they continue to emit whatever the upstream stream provided. Any earlier language framing this as "per-provider trim" is superseded by the sink-level approach.
 
 ## Per-Provider Fix Decisions
 
@@ -302,9 +368,11 @@ This is **best-effort with per-tool hooks**, not a hard invariant enforced by as
 
 Cross-reference: "OpenCode CLI" observations above.
 
-- **Tool-call accounting.** OpenCode only emits tool *responses*, never paired *requests*. Current code synthesizes a fake outgoing request for "balanced" rendering. **Remove the synthesis.** Emit only `SemanticEvent::ToolResult` from `handle_tool_use_completed` in `claudine/lib/src/stream/opencode_semantic.rs:267`. Count responses only — this is what lets the trailer metadata match the rendered line count.
+- **Assistant text missing from stdout (P0).** The spec's original OpenCode run produced the session trailer but NO assistant response text reached stdout. Running OpenCode directly (without claudine) renders the text fine, so this is a regression introduced by the claudine wrap pipeline. Restore stdout rendering of the assistant's final text. See Known Implementation-Time Investigations for the diagnostic plan.
+- **Tool-call accounting.** OpenCode only emits tool _responses_, never paired _requests_. Current code synthesizes a fake outgoing request for "balanced" rendering. **Remove the synthesis.** Emit only `SemanticEvent::ToolResult` from `handle_tool_use_completed` in `claudine/lib/src/stream/opencode_semantic.rs:267`. Count responses only — this is what lets the trailer metadata match the rendered line count.
 - **YOLO flag.** OpenCode DOES accept `--dangerously-skip-permissions` in non-interactive mode. Remove the current warning `- Warning: --yolo is not supported for 'opencode' and was ignored` for non-interactive invocations; pass the flag through. In interactive mode, keep a warning with refined copy: `- Warning: --yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored`.
-- **Misroute diagnostic.** See Known Implementation-Time Investigations below.
+- **Mis-routed render diagnostic.** See Known Implementation-Time Investigations below.
+- **Reasoning/thinking display.** Earlier notes about _suppressing_ OpenCode reasoning are superseded. Reasoning, when emitted, renders as section 6 per the section model — shown as a `BlockQuote` on stderr, not suppressed.
 
 ### Claude
 
@@ -312,35 +380,46 @@ Cross-reference: "Claude Code" observations above (duplicate SessionStart hook e
 
 - **Hook/session ordering.** Fix the ordering so hook events trail the session-ID marker (matches every other provider). **Constraint (load-bearing):** if reordering requires buffering that breaks live streaming, revert to current ordering and document why. Preserving streaming wins over cosmetic ordering.
 - **Rate-limit heuristic.** Gate the warning on `std::env::var("ANTHROPIC_API_KEY")`:
-  - **Present** → user is on API pricing; the rate-limit message reflects a real API-pricing quota; keep the warning.
-  - **Absent** → user is on a subscription; suppress the warning entirely.
+    - **Present** → user is on API pricing; the rate-limit message reflects a real API-pricing quota; keep the warning.
+    - **Absent** → user is on a subscription; **suppress the warning on stderr only**. The underlying event still flows through the JSONL log and the dispatch pipeline — suppression is stderr-only, matching the existing `SILENT_PROVIDER_EXTENSION_KINDS` precedent in `live_semantic_sink.rs`.
 - **Known limitation.** Bedrock (`CLAUDE_CODE_USE_BEDROCK`) / Vertex (`CLAUDE_CODE_USE_VERTEX`) users may need future refinement. Not in scope for this feature — see Out of Scope.
 
 ### Codex
 
 Cross-reference: "Codex CLI" observations above (correct icon, zero tool-call metadata, vertical-spacing issues).
 
-- Tool-call rendering is fixed by Child 1 once Codex populates `ToolCallDisplay` with its available fields.
-- Vertical spacing is addressed by Child 3.
+- The current `→ (tool)` / `← (tool)` rendering is missing **all** tool metadata (name, args, status, result). Investigation #5 below is a prerequisite for full Codex parity with Child 1's `ToolCallDisplay`.
+- Once Investigation #5 identifies which fields Codex actually exposes, Codex populates `ToolCallDisplay` with its available fields and picks up Child 1's canonical rendering.
+- Section-level spacing is addressed by Child 3.
 
 ### Gemini
 
 Cross-reference: "Gemini CLI" observations above.
 
 - **Tool-call rendering.** Current format is close; once Child 1 lands, align output to the canonical format:
-  - `🔧 → Google Web Search · <dim><i>NFL draft 2026 dates</i></dim>`
-  - `🔧 ← Google Web Search · <dim><i>successful</i></dim>`
+    - `🔧 → Google Web Search · <dim><i>NFL draft 2026 dates</i></dim>`
+    - `🔧 ← Google Web Search · <dim><i>successful</i></dim>`
 - **Markdown list rendering.** See Known Implementation-Time Investigations below.
 
 ## Known Implementation-Time Investigations
 
 These are spec'd investigation tasks, not unresolved design questions. Each must be reproduced against HEAD with tracing before the corresponding fix lands.
 
-### 1. OpenCode misroute: `⚙ firecrawl_firecrawl_search {…raw JSON…}`
+### 1. OpenCode assistant text missing from stdout (P0)
 
-The observed rendering uses the `⚙` Info icon (not a tool-call icon) and dumps raw JSON. This does NOT match any traced render path in the current parser/sink pipeline — yet this is current HEAD behavior (not a stale capture). Reproduce against HEAD with tracing to find the misroute **before** the parser rewrite lands in Child 5. Without this, the OpenCode rewrite risks preserving the bug.
+The spec's original OpenCode run produced the trailer metadata but NO assistant response text reached stdout. OpenCode native (run without claudine) renders the response normally, so the drop is introduced somewhere in the claudine wrap pipeline. Candidate root causes to investigate:
 
-### 2. Gemini markdown root cause
+- The `emit_output_text` closure on `LiveSemanticSink` may not be wired up for the OpenCode wrap command (compare to the Claude/Codex/Gemini wrap wiring).
+- `handle_text` in `claudine/lib/src/stream/opencode_semantic.rs` may fail to extract text when the `text` event payload uses the `part.text` shape observed in the captured fixtures (see event index 6 in both `opencode-yolo.jsonl` and `opencode-not-yolo.jsonl`).
+- A stdout writer may be opened but never flushed on non-interactive completion paths.
+
+Reproduce against HEAD with `RUST_LOG` / trace and determine which of the above (or combination) is live. Fix is blocking for Child 5.
+
+### 2. OpenCode mis-routed render: `⚙ firecrawl_firecrawl_search {…raw JSON…}`
+
+The observed rendering uses the `⚙` Info icon (not a tool-call icon) and dumps raw JSON. This does NOT match any traced render path in the current parser/sink pipeline — yet this is current HEAD behavior (not a stale capture). Reproduce against HEAD with tracing to find the mis-route **before** the parser rewrite lands in Child 5. Without this, the OpenCode rewrite risks preserving the bug.
+
+### 3. Gemini markdown root cause
 
 Symptoms: mid-list-item truncation and stray blank lines between list items.
 
@@ -351,14 +430,23 @@ Symptoms: mid-list-item truncation and stray blank lines between list items.
 - Buffer-until-logical-break in the Gemini parser, OR
 - A Darkmatter streaming-continuation fix.
 
-### 3. Current truncation-limit location
+### 4. Current truncation-limit location
 
-The current rendering truncates summary text "way before" terminal width. This is almost certainly a hardcoded small cap somewhere in the sink / `Status` / Prose pipeline. Locating and removing it is part of Child 1 — the width rules in the Tool-Call Display Contract cannot be implemented correctly without first removing whatever cap is currently in effect.
+The current rendering truncates summary text "way before" terminal width. This is almost certainly a hardcoded small cap somewhere in the sink / `Status` / Prose pipeline. Locating and removing it is part of Child 1 — the width + word-wrapping rules in the Tool-Call Display Contract cannot be implemented correctly without first removing whatever cap is currently in effect.
+
+### 5. Codex tool-event field extraction
+
+Observed Codex rendering is `→ (tool)` / `← (tool)` — tool name, arguments, status, and result are all missing from the rendered output. Investigation:
+
+- Audit `claudine/lib/src/stream/codex_semantic.rs` against real Codex stream output.
+- Identify which fields the Codex stream exposes (tool name, input, output, status, error) that the current parser currently ignores or drops.
+- Wire the extracted fields through `ToolCallDisplay` so Codex renders at parity with other providers (canonical `🔧 →` / `🔧 ←` with name + summary + status).
+
+**Blocks** the complete fix for the Codex per-provider subsection above.
 
 ## Out of Scope
 
 - **Bedrock/Vertex rate-limit heuristic.** `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` users may need a separate heuristic; explicitly deferred.
-- **Shared section-model for vertical spacing.** Child 3 applies per-provider trim of observed blank runs. A shared section model (unified notion of "section") is NOT introduced here. Noted risk: per-provider trim may regress; revisiting a section model is a future option.
 - **Render-path assertions.** The "no JSON to the terminal" guideline is best-effort with per-tool hooks and raw-JSON fallback — it is NOT enforced by runtime assertion.
 
 ## Acceptance Criteria & Testing
@@ -370,20 +458,37 @@ The current rendering truncates summary text "way before" terminal width. This i
 - Shape: **given fixture line(s) → parser emits expected semantic events → live sink renders expected lines.**
 - Add new tests for each specific symptom documented in the Observed Symptoms sections above.
 
-### Per-Provider Fixture → Assertion Examples
+### Per-Provider Fixture to Assertion Examples
 
-- **OpenCode** (`opencode-yolo.jsonl`, `opencode-not-yolo.jsonl`): a `tool_use` fixture line → exactly one `🔧 ←` line with `Firecrawl Search` display name and the `query` value as the summary; NO synthesized outgoing line; response count in the trailer matches the rendered line count.
+- **OpenCode** (`opencode-yolo.jsonl`, `opencode-not-yolo.jsonl`):
+    - A `tool_use` fixture line → exactly one `🔧 ←` line with `Firecrawl Search` display name and the `query` value as the summary; NO synthesized outgoing line; response count in the trailer matches the rendered line count.
+    - A `text` fixture event → its full content is written to stdout (regression test for the missing-assistant-text bug).
+    - `--yolo` in non-interactive mode → `--dangerously-skip-permissions` is forwarded to the OpenCode process AND no `not supported` warning is emitted.
+    - `--yolo` in interactive mode → refined warning emitted verbatim: `- Warning: --yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored`.
 - **Claude** (`claude.jsonl`):
-  - SessionStart hook events render AFTER the session-ID marker (if streaming-preservation permits; otherwise test documents the fallback).
-  - With `ANTHROPIC_API_KEY` unset → no `󰀨 rate limit` line in stderr.
-  - With `ANTHROPIC_API_KEY` set → `󰀨 rate limit` line remains.
-- **Gemini**: a streamed markdown list fixture → list items render contiguously (no stray blank lines between items) and no item is truncated mid-content.
-- **Codex**: tool-call events render via the canonical `🔧 →` / `🔧 ←` format once `ToolCallDisplay` is populated.
+    - SessionStart hook events render AFTER the session-ID marker (if streaming-preservation permits; otherwise test documents the fallback).
+    - With `ANTHROPIC_API_KEY` unset → no `󰀨 rate limit` line in stderr, but the underlying event still appears in the JSONL log.
+    - With `ANTHROPIC_API_KEY` set → `󰀨 rate limit` line remains on stderr.
+- **Gemini**: a streamed markdown list fixture → list items render contiguously (no stray blank lines between items) and no item is cut off mid-content.
+- **Codex**: tool-call events render via the canonical `🔧 →` / `🔧 ←` format with name + summary + status once Investigation #5 is completed and `ToolCallDisplay` is populated.
+
+### Spacing Acceptance Criterion (Testable)
+
+Against the full rendered output (stdout + stderr combined in emission order) for each provider fixture:
+
+- There are no two consecutive blank lines, AND
+- Between any two emissions originating from distinct sections (per the 9-section model), there is at most one blank line.
+
+This is asserted structurally — the sink's dedupe-of-consecutive-blank behavior guarantees it; tests verify against captured rendered output.
 
 ### Definition of Done
 
 - Child 1 (contract) shipped and all per-provider renders route through the single formatter.
 - Each Observed Symptom above has at least one corresponding test asserting the fixed behavior.
-- No `󰀨 rate limit` noise for subscription users.
-- No raw JSON payload rendered to the terminal for tools with a registered per-tool hook; unknown tools fall back to width-respected raw JSON.
-- Vertical spacing: maximum one blank line between sections for all four providers against their respective fixtures.
+- **OpenCode assistant response text reaches stdout for non-interactive runs** (matches OpenCode native output).
+- **OpenCode `--yolo` forwards `--dangerously-skip-permissions` in non-interactive mode** with no spurious warning.
+- No `󰀨 rate limit` noise on stderr for subscription users; underlying event still present in JSONL.
+- No raw JSON payload rendered to the terminal for tools with a registered per-tool hook; unknown tools fall back to word-wrapped raw JSON.
+- Section-model spacing rule holds for all four providers against their respective fixtures.
+- Thinking prose (section 6) renders as a `BlockQuote` on stderr for every provider that exposes reasoning/thinking in its stream.
+- Codex tool-call events render at parity with other providers once Investigation #5 lands.
