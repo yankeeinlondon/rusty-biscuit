@@ -30,13 +30,14 @@ use sniff::programs::InstalledAiClients;
 
 use super::env;
 use super::exec;
+use super::live_semantic_sink::LiveSemanticSink;
 use super::profile::{self, WrapperProfile};
 use super::{
-    HarnessPromptMode, HarnessPromptState, LiveStreamSink, StructuredCodexOutput,
-    StructuredSummaryDetails, WrapperHarnessPermissionProbe,
-    build_harness_shell_options_with_cache, emit_stream_summary_no_separator_with_context,
-    emit_stream_summary_with_context, materialized_harness_prompt_from_prepared,
-    resolve_binary_path, run_harness_loop, structured_verbosity, switch_process_cwd, wrap_terminal,
+    HarnessPromptMode, HarnessPromptState, StructuredCodexOutput, StructuredSummaryDetails,
+    WrapperHarnessPermissionProbe, build_harness_shell_options_with_cache,
+    emit_stream_summary_no_separator_with_context, emit_stream_summary_with_context,
+    materialized_harness_prompt_from_prepared, resolve_binary_path, run_harness_loop,
+    structured_verbosity, switch_process_cwd, wrap_terminal,
 };
 use crate::log;
 
@@ -1109,7 +1110,7 @@ fn run_structured_inline(
 ) -> Result<InlineRunResult> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig::default();
-    let sink = LiveStreamSink::new(
+    let sink = LiveSemanticSink::with_default_wiring(
         provider,
         env_context.clone(),
         child_cwd,
@@ -1119,8 +1120,15 @@ fn run_structured_inline(
     .with_context_extra(dispatch_context.clone());
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
-    let parser = claudine::stream::create_parser(provider, sink, parser_config);
-    let stream_result = exec::run_child_stream(
+    let build_parser: exec::SemanticParserBuilder = Box::new(
+        move |output_cb, reasoning_cb| {
+            let sink = sink
+                .with_output_text_sink(output_cb)
+                .with_reasoning_sink(reasoning_cb);
+            claudine::stream::create_semantic_parser(provider, sink, parser_config)
+        },
+    );
+    let stream_result = exec::run_child_stream_semantic(
         binary_path,
         child_args,
         child_env,
@@ -1130,10 +1138,11 @@ fn run_structured_inline(
         profile.suppress_structured_stderr_on_success(),
         stream_verbosity != Verbosity::Silent,
         stdin_seed,
-        parser,
+        build_parser,
         child_spawned,
-        Some(live_metrics),
-        Some(stream_output),
+        live_metrics,
+        stream_output,
+        claudine::stream::progress::HeartbeatPolicy::default(),
     )?;
     let termination = stream_result.termination;
     let mut summary = stream_result.data;
@@ -1369,7 +1378,7 @@ fn execute_direct_without_harness(
     if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig::default();
-        let sink = LiveStreamSink::new(
+        let sink = LiveSemanticSink::with_default_wiring(
             provider,
             env_context.clone(),
             child_cwd,
@@ -1379,8 +1388,15 @@ fn execute_direct_without_harness(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
-        let parser = claudine::stream::create_parser(provider, sink, parser_config);
-        let stream_result = exec::run_child_stream(
+        let build_parser: exec::SemanticParserBuilder = Box::new(
+            move |output_cb, reasoning_cb| {
+                let sink = sink
+                    .with_output_text_sink(output_cb)
+                    .with_reasoning_sink(reasoning_cb);
+                claudine::stream::create_semantic_parser(provider, sink, parser_config)
+            },
+        );
+        let stream_result = exec::run_child_stream_semantic(
             binary_path,
             child_args,
             child_env,
@@ -1390,10 +1406,11 @@ fn execute_direct_without_harness(
             profile.suppress_structured_stderr_on_success(),
             stream_verbosity != Verbosity::Silent,
             stdin_seed,
-            parser,
+            build_parser,
             child_spawned,
-            Some(live_metrics),
-            Some(stream_output),
+            live_metrics,
+            stream_output,
+            claudine::stream::progress::HeartbeatPolicy::default(),
         )?;
         let mut summary = stream_result.data;
         if let Some(codex_output) = structured_codex_output {

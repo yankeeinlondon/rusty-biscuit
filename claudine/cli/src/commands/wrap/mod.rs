@@ -78,6 +78,7 @@ impl StructuredCodexOutput {
     }
 }
 
+#[allow(dead_code)] // retained for tests until legacy LiveStreamSink is removed in Phase 3.6
 type StreamDispatchFn = Box<dyn Fn(AgenticEvent, DispatchEventMeta) + Send + Sync + 'static>;
 
 #[derive(Debug, Clone, Default)]
@@ -382,6 +383,7 @@ pub(crate) struct LiveStreamSink {
     stream_output: Arc<StreamOutput>,
 }
 
+#[allow(dead_code)] // legacy sink — removed in Phase 3.6 after semantic migration completes
 impl LiveStreamSink {
     pub(crate) fn new(
         provider: Provider,
@@ -695,6 +697,7 @@ impl StreamEventSink for LiveStreamSink {
     }
 }
 
+#[allow(dead_code)] // legacy helper — removed in Phase 3.6
 fn string_from_extra(
     extra: &std::collections::HashMap<String, serde_json::Value>,
     keys: &[&str],
@@ -709,6 +712,7 @@ fn string_from_extra(
     })
 }
 
+#[allow(dead_code)] // legacy helper — removed in Phase 3.6
 fn value_from_extra(
     extra: &std::collections::HashMap<String, serde_json::Value>,
     keys: &[&str],
@@ -716,6 +720,7 @@ fn value_from_extra(
     keys.iter().find_map(|key| extra.get(*key).cloned())
 }
 
+#[allow(dead_code)] // legacy helper — removed in Phase 3.6
 fn value_to_string(value: &serde_json::Value) -> Option<String> {
     value
         .as_str()
@@ -728,6 +733,7 @@ fn value_to_string(value: &serde_json::Value) -> Option<String> {
 /// Providers that assign ids (Claude, OpenCode) use them; providers without ids
 /// (some Gemini variants) fall back to the tool name so the live-metrics state
 /// can still pair start/end events.
+#[allow(dead_code)] // legacy helper — removed in Phase 3.6
 fn tool_event_id(meta: &StreamEventMeta) -> String {
     string_from_extra(&meta.extra, &["tool_id", "id"])
         .or_else(|| string_from_extra(&meta.extra, &["tool_name", "name"]))

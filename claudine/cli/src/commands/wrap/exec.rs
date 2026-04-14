@@ -842,7 +842,7 @@ pub(crate) fn run_child_capture(
 /// in the parser state. Stderr is forwarded normally (with noise filtering).
 ///
 /// Returns the stream execution summary (which includes exit code).
-#[allow(clippy::too_many_arguments)]
+#[allow(dead_code, clippy::too_many_arguments)] // replaced by run_child_stream_semantic; removed in Phase 3.6
 pub(crate) fn run_child_stream(
     binary: &Path,
     args: &[String],
