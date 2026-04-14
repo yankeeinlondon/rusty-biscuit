@@ -113,17 +113,6 @@ async fn main() -> Result<()> {
         return commands::help::run();
     }
 
-    // Ensure config exists before dispatching any command that needs it.
-    // Commands like `completions` work without config; everything else
-    // (hooks, compose, wrap, etc.) requires an initialized config file.
-    let command_ref = cli.command.as_ref().unwrap();
-    if command_ref.requires_config() {
-        let config_path = claudine::dispatch::loader::user_config_path();
-        if !config_path.exists() {
-            return commands::init_wizard::run_initialization().await;
-        }
-    }
-
     let command = match wrapper_command(cli.command.unwrap()) {
         Ok((provider, args)) => {
             // Wrapper commands also need config — check before launching

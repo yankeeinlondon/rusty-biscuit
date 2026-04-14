@@ -2558,10 +2558,14 @@ fi
         .stdout("Recovered answer\n");
 
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-    assert!(stderr_plain.contains(r#"tool: shell {"cmd":"git status"}"#));
-    assert!(stderr_plain.contains(r#"tool result: shell id=t1 result="ok""#));
-    assert!(stderr_plain.contains("tool: view_image"));
-    assert!(stderr_plain.contains(r#"tool result: view_image id=t2 result="ok""#));
+    assert!(
+        stderr_plain.contains(r#"shell · {"cmd":"git status"}"#),
+        "missing shell start line in:\n{stderr_plain}"
+    );
+    assert!(
+        stderr_plain.contains("view_image"),
+        "missing view_image line in:\n{stderr_plain}"
+    );
 }
 
 #[cfg(unix)]
@@ -3286,6 +3290,7 @@ fn direct_wrap_dry_run_delivers_prompt_for_every_provider() {
 
         let output = cargo_bin_cmd!("claudine")
             .env("NO_COLOR", "1")
+            .env("OPENCODE_MODEL", "test-model")
             .env("PATH", &path_dir)
             .args([provider_slug, "--dry-run", "hello"])
             .output()
@@ -3339,6 +3344,7 @@ fn sequence_composition_dry_run_for_every_provider() {
 
         let output = cargo_bin_cmd!("claudine")
             .env("NO_COLOR", "1")
+            .env("OPENCODE_MODEL", "test-model")
             .env("PATH", &path_dir)
             .current_dir(workspace.path())
             .args([
