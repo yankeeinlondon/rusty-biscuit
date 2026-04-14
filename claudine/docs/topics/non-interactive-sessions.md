@@ -140,6 +140,38 @@ Some providers emit debug/diagnostic lines mixed into their structured output. C
 - **stderr noise** — similar filtering for stderr
 - **Conditional stderr suppression** — some providers buffer all stderr and only surface it on non-zero exit (enabled via `suppress_structured_stderr_on_success`)
 
+### OpenCode default-mode TUI leakage
+
+When wrapping OpenCode with `--format json`, OpenCode still writes its default-mode TUI formatter output to stderr. Claudine suppresses those lines via the OpenCode wrapper's `stderr_noise_prefixes`:
+
+| Prefix | Meaning |
+|--------|---------|
+| `✱ ` | Status bullet used for Glob/Grep/Read lines |
+| `$ ` | Bare shell command echo lines |
+| `> build ` | Session banner |
+| `████ ` | Subheader marker |
+
+The helper lives in `claudine/cli/src/commands/wrap/profile.rs::opencode_default_tui_noise_prefixes()`. Add new entries there as future OpenCode releases surface additional formatter prefixes.
+
+## Status Line Rendering on STDERR
+
+`LiveSemanticSink` (in `claudine/cli/src/commands/wrap/live_semantic_sink.rs`) formats every stream event into a short status line on stderr. Two rules protect the rendering surface from low-signal noise:
+
+1. **No raw-JSON tails.** Both `summarize_provider_payload` (for `ProviderExtension` events) and `summarize_input` (for tool calls) walk a curated set of text locations — top-level string fields (`message`, `status`, `name`, `path`, `text`, `content`, `error.message`, `title`, `description`, ...), nested content arrays (`message.content[*].text`, `item.content.parts[*].text`, ...), and finally the first non-empty top-level string value. When none of those resolve to readable text, the sink renders only `provider/kind` (no ` · <payload>` tail) rather than a truncated JSON blob. The fidelity contract still holds because the full raw event is written to the JSONL semantic log regardless of how it renders.
+
+2. **Silent-kind allowlist.** Some extension kinds are high-volume or fully redundant with other typed events. They are named in `SILENT_PROVIDER_EXTENSION_KINDS` and produce **no** stderr line at all (dispatch and JSONL logging still happen). Current entries:
+
+    | Provider | Kind | Reason |
+    |----------|------|--------|
+    | Claude | `stream_event` | Partial assistant token deltas — already surfaced via `OutputText` |
+    | Claude | `hook_started` / `hook_response` / `hook_progress` | Hook lifecycle already surfaced as semantic events |
+
+   Add new entries to the allowlist in the same file rather than inventing new heuristics — explicit listing keeps the suppression visible and reviewable.
+
+### Gemini user-prompt echo
+
+Gemini replays the operator's own prompt back into the stream as a `message` event with `role: "user"` (and occasionally `role: "system"`). Since those never carry new information, the Gemini parser (`claudine/lib/src/stream/gemini_semantic.rs`) drops them silently instead of emitting a `ProviderExtension` that the sink would then render as a status line. Assistant-role messages continue to route through `OutputText` as normal.
+
 ## Composition Workflows
 
 `claudine compose` and `claudine inline-compose` are non-interactive-only entry points that add Markdown composition before provider execution:

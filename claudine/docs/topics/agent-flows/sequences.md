@@ -86,7 +86,8 @@ This YAML file could now be referenced in the Markdown like so:
 sequence: "path/to/data.yaml"
 ---
 Find the customer {{state.name}}, who is {{state.age}} years old in our corporate database 
-and **append** all the information we have on him to "reports/dodgy-people.md", add the information under an H2 heading of `## {{state.description}}`.
+and **append** all the information we have on him to "reports/dodgy-people.md", add the information under an 
+H2 heading of `## {{state.description}}`.
 ```
 
 ## Advanced Techniques
@@ -94,3 +95,9 @@ and **append** all the information we have on him to "reports/dodgy-people.md", 
 So far we've been showing you a very popular style of sequence which consists of changing key/values for each step's state but on each step we're using the body of the same document to act as the prompt.
 
 > **Note:** this approach has a surprisingly large amount of mileage. Whether you're iterating over variants which you want to prompt with similar prompts (this is what we do this repo often for research across the various providers we're supporting) or leveraging Darkmatter's `::block` templates to swap in and out various parts of the template based on the state.
+
+In this section, however, we'll explore some additional techniques which **sequences** are allowed to do:
+
+1. External Prompt Reference
+1. Shell Command Block
+1. 
