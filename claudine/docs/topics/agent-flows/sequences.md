@@ -98,6 +98,140 @@ So far we've been showing you a very popular style of sequence which consists of
 
 In this section, however, we'll explore some additional techniques which **sequences** are allowed to do:
 
-1. External Prompt Reference
-1. Shell Command Block
-1. 
+### Headless Sequences
+
+ We can define a _headless sequence_ by defining the YAML like we've done before but instead of then _referencing_ that YAML definition in a Markdown document we instead point the **claudine** CLI directly at the YAML:
+
+ ```sh
+ claudine sequence @defn.yaml
+ ```
+
+- the power of the **headed** sequences comes from running a sequence of "states" over the Markdown document which acts as a prompt
+- a **headless** sequence has no root document to act as the _prompt_ but instead leverages a combination of:
+
+    - Prompt References (`prompt` prop)
+    - Shell Command Blocks (`shell` prop)
+    - Named Groups (`group` prop)
+
+Let's start with an example of the first two (prompt references and shell command blocks):
+
+```yaml
+template:
+    - dir: "path/to/some/location"
+sequence:
+    - name: Design
+      prompt: "@prompt/design.md"
+    - name: Implement
+      prompt: "@prompt/implement.md"
+    - name: Commit
+      shell: "just lint"
+    - name: Review
+      prompt: "@prompt/review.md"
+```
+
+- in this example, we will serially run through the different steps/states just like we would with a **headed** sequence
+- but where the **headed** sequence would call an Agent at every step, using the document's body as the prompt
+- in this **headless** example we:
+    - use `prompt` property to make a file reference to a prompt document
+    - or we use `shell` to call one or more shell commands
+- we also define a `dir` property which will be the same across all steps/states
+    - in the **headed** section we mentioned that _template_ key/values typically would leverage _interpolation_ with other state properties
+    - you can, however, define templates without _interpolation_ and then these variables will act as a constant throughout the sequence
+
+### Parameters
+
+We are all familiar with the idea/concept of **parameters** in programming and Claudine embraces a formalism around parameter definition that offers a simple format to define a schema for what you expect your callers to provide to you.
+
+This topic of parameters is covered in more depth in the [Parameters in Claudine](../validations/parameters.md) document but we'll illustrate here how **headless sequences** can define and call into parameterized schemas.
+
+In the following example, our headless sequence definition will define:
+    
+- a _required_ parameter `dir` which must be a valid filepath reference, and
+- an _optional_ parameter `spec_file` a caller can provide if they want the spec file to have a non-standard name
+
+```yaml
+parameters:
+    dir: filepath
+    spec_file: Option<Filepath>
+template:
+    - spec: "{{dir}}/{{spec_file || "spec.md"}}"
+    - log: "{{dir}}/log.md"
+sequence:
+    - name: Design
+      prompt: "@prompt/design.md"
+    - name: Implement
+      prompt: "@prompt/implement.md"
+    - name: Commit
+      shell: "just lint"
+    - name: Review
+      prompt: "@prompt/review.md"
+```
+
+Now when someone calls this sequence, they must pass in `dir` or get an error:
+
+```sh
+claudine sequence @sequence/example.yaml dir=features/my-feature
+```
+
+Every step's `state` in the sequence will have all the properties from `parameters` and `template` made available to it. However, just like a **sequence** can define parameters, so too can a prompt document and if we want to pass our state into a prompt reference we would do it like:
+
+```yaml
+parameters:
+    dir: filepath
+    spec_file: Option<Filepath>
+template:
+    - spec: "{{dir}}/{{spec_file || "spec.md"}}"
+    - log: "{{dir}}/log.md"
+sequence:
+    - name: Design
+      prompt: "@prompt/design.md"
+      params:
+          dir: "{{dir}}"
+    - name: Implement
+      prompt: "@prompt/implement.md"
+      params:
+          log: "{{log}}"
+          spec: "{{spec}}"
+    - name: Commit
+      shell: "just lint"
+    - name: Review
+      prompt: "@prompt/review.md"
+```
+
+
+### Prompt References
+
+As we've already seen in the examples above, the `prompt` property has special meaning for a step in a _headless_ sequence:
+
+- the value of `prompt` property must be a filepath reference
+
+    > **Note:** the `FileReference` struct from **biscuit-file** is used to resolve all filepath references. This is consistent with all other file references in Claudine.
+
+- when a **step** is executed by Claudine, it will resolve the file path in `prompt` and _compose_ this document into an Agent prompt
+    - however, before we _compose_ it we will set the `state` in the prompt file's Frontmatter
+    - this allows the prompt document to use and work off of this state 
+    - when you control the prompt file you can make the `state` shape work for any prompt file
+    - this is fine, but often a prompt file will have many primitives which call into it and rather then trying to adapt to each callers internal state the prompt will instead define it's own parameters
+- any Markdown document which wants to be called as a prompt but needs some initial state
+- we always pass in the `state` object and in prompts which we control, it's not that hard to have `state` and it's key/values 
+
+---
+
+
+```yaml
+groups:
+    - name: ICR
+      members:
+        - name: Implement
+          prompt: "@prompt/implement.md"
+        - name: Commit
+          command: "just commit"
+        - name: Review
+          prompt: "@prompt/review.md"
+      until:
+        
+sequence:
+    - name: Design
+      prompt: "@prompt/design.md"
+    - name: "group::ICR"
+```

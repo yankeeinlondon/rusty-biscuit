@@ -2610,13 +2610,15 @@ fi
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
     // The sink now renders the first non-empty string value as the tool
     // input preview instead of a truncated JSON blob (Plan 3 hardening).
+    // Post response-refinement humanization (Task 1.2), tool names are
+    // title-cased (`shell` → `Shell`, `view_image` → `View Image`).
     assert!(
-        stderr_plain.contains("shell · git status"),
-        "missing shell start line with 'git status' preview in:\n{stderr_plain}"
+        stderr_plain.contains("Shell · git status"),
+        "missing Shell start line with 'git status' preview in:\n{stderr_plain}"
     );
     assert!(
-        stderr_plain.contains("view_image"),
-        "missing view_image line in:\n{stderr_plain}"
+        stderr_plain.contains("View Image"),
+        "missing View Image line in:\n{stderr_plain}"
     );
 }
 
