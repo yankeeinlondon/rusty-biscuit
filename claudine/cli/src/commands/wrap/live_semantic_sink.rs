@@ -1,8 +1,5 @@
-// This module is the forward-looking CLI sink. Phase 3.3 builds the sink
-// itself (covered by unit tests); call-site wiring in `exec.rs`,
-// `composition.rs`, and `sequence.rs` lands in Phase 3.4–3.5. Until then
-// the binary doesn't construct it, so the per-item dead-code lints would
-// be noisy.
+// Some helpers in this module exist for tests or future call sites; keeping
+// the per-item dead-code lints quiet matches the rest of the wrap module.
 #![allow(dead_code)]
 
 //! [`LiveSemanticSink`] — a CLI-side sink that consumes [`SemanticEvent`]s
