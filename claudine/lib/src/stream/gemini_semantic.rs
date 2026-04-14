@@ -44,6 +44,10 @@ pub struct GeminiSemanticStreamParser<S: SemanticEventSink> {
     error_message: Option<String>,
     raw_summary: Option<Value>,
     tool_uses: HashMap<String, (Option<String>, Option<Value>)>,
+    /// Accumulates streaming `delta: true` assistant text. Flushed on
+    /// paragraph boundaries (`\n\n`), on any non-text event, and at
+    /// `finish`. See Task 0c investigation for the flush-rule contract.
+    pending_text: String,
 }
 
 impl<S: SemanticEventSink> GeminiSemanticStreamParser<S> {
@@ -65,6 +69,7 @@ impl<S: SemanticEventSink> GeminiSemanticStreamParser<S> {
             error_message: None,
             raw_summary: None,
             tool_uses: HashMap::new(),
+            pending_text: String::new(),
         }
     }
 
@@ -100,14 +105,52 @@ impl<S: SemanticEventSink> GeminiSemanticStreamParser<S> {
             // line independently of the semantic event surface.
             return;
         }
+        let is_delta = msg.delta.unwrap_or(false);
         let Some(text) = msg.resolved_text() else {
             return;
         };
-        self.assistant_text.push_str(&text);
+
+        if is_delta {
+            // Streaming delta: append to the pending buffer and flush on
+            // paragraph boundaries. Per Task 0c, code-fence handling is
+            // deferred to the renderer; this parser only splits on "\n\n".
+            self.pending_text.push_str(&text);
+            while let Some(idx) = self.pending_text.find("\n\n") {
+                let flush_upto = idx + 2;
+                let chunk: String = self.pending_text.drain(..flush_upto).collect();
+                self.emit_output_text_chunk(chunk, raw_kind);
+            }
+        } else {
+            // Non-delta (single-shot) message: flush any buffered content
+            // first, then emit this message immediately with the usual
+            // trailing-newline normalization. Track the raw (unnormalized)
+            // text in `assistant_text` for summary fidelity.
+            self.flush_pending_text(raw_kind);
+            self.assistant_text.push_str(&text);
+            let normalized = super::ensure_message_newline(text);
+            self.sink.on_semantic_event(SemanticEvent::OutputText {
+                text: normalized,
+                extra: Value::Object(self.base_extra(raw_kind)),
+            });
+        }
+    }
+
+    fn emit_output_text_chunk(&mut self, chunk: String, raw_kind: &str) {
+        if chunk.is_empty() {
+            return;
+        }
+        self.assistant_text.push_str(&chunk);
         self.sink.on_semantic_event(SemanticEvent::OutputText {
-            text: super::ensure_message_newline(text),
+            text: chunk,
             extra: Value::Object(self.base_extra(raw_kind)),
         });
+    }
+
+    fn flush_pending_text(&mut self, raw_kind: &str) {
+        if !self.pending_text.is_empty() {
+            let drained = std::mem::take(&mut self.pending_text);
+            self.emit_output_text_chunk(drained, raw_kind);
+        }
     }
 
     fn handle_result(&mut self, result: GeminiResult, raw: Value, raw_kind: &str) {
@@ -301,7 +344,22 @@ impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S
             .to_string();
         super::trace_parser_event(Provider::Gemini, &raw_kind, self.line_num);
 
-        match serde_json::from_value::<GeminiEvent>(raw.clone()) {
+        let parsed = serde_json::from_value::<GeminiEvent>(raw.clone());
+        // Any event other than a streaming assistant `message` is a logical
+        // break in the text stream: flush the delta buffer so buffered prose
+        // is rendered before the next semantic event (SessionStart,
+        // TurnComplete, ToolCall, etc.). Non-delta messages handle their own
+        // flush inside `handle_message`.
+        let is_streaming_message = matches!(
+            &parsed,
+            Ok(GeminiEvent::Message(m))
+                if m.role.as_deref() == Some("assistant") && m.delta.unwrap_or(false)
+        );
+        if !is_streaming_message {
+            self.flush_pending_text(&raw_kind);
+        }
+
+        match parsed {
             Ok(GeminiEvent::Init(init) | GeminiEvent::System(init)) => {
                 self.handle_init(init, &raw_kind);
             }
@@ -327,7 +385,8 @@ impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S
         Ok(())
     }
 
-    fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
+    fn finish(mut self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
+        self.flush_pending_text("gemini_finish");
         let mut summary = StreamExecutionSummary {
             provider: Provider::Gemini,
             session_id: self.session_id,
@@ -580,6 +639,98 @@ mod tests {
             events.lock().unwrap()[0],
             SemanticEvent::Warning { .. }
         ));
+    }
+
+    #[test]
+    fn streamed_markdown_list_emits_contiguous_items() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/providers/gemini-markdown-list.ndjson");
+        let raw = std::fs::read_to_string(&path).expect("fixture exists");
+        let (events, mut parser) = new_parser();
+        for line in raw.lines() {
+            parser.feed_line(line).unwrap();
+        }
+        let text: String = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                SemanticEvent::OutputText { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        // No bullet item should appear split mid-content (i.e. emitted twice
+        // across two OutputText events — joined, no awkward internal split).
+        let bullet_lines: Vec<&str> = text
+            .lines()
+            .filter(|l| l.trim_start().starts_with("- ") || l.trim_start().starts_with("* "))
+            .collect();
+        assert!(!bullet_lines.is_empty(), "fixture must include bullet items");
+        for line in &bullet_lines {
+            assert!(
+                line.len() > 5,
+                "bullet item appears truncated or split: {line:?}\nfull text:\n{text}"
+            );
+        }
+        // No three-or-more consecutive newlines (would indicate stray blank
+        // lines from per-chunk emission).
+        assert!(!text.contains("\n\n\n"), "unexpected triple-newline in:\n{text}");
+    }
+
+    #[test]
+    fn delta_false_message_bypasses_buffer() {
+        // Non-delta messages must emit immediately, not be held back.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"init","session_id":"g1","model":"gemini-2.5"}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"message","role":"assistant","content":"one-shot answer"}"#)
+            .unwrap();
+        let kinds: Vec<&'static str> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|e| e.kind_str())
+            .collect();
+        assert!(
+            kinds.iter().any(|k| *k == "output_text"),
+            "non-delta message must emit output_text immediately; got {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn pending_delta_flushed_on_non_text_event() {
+        // Buffered text from a delta must be flushed when a non-text event
+        // (e.g. turn completion) arrives, even without an explicit blank line.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"init","session_id":"g1","model":"gemini-2.5"}"#)
+            .unwrap();
+        // Partial delta: no trailing \n\n
+        parser
+            .feed_line(r#"{"type":"message","role":"assistant","delta":true,"content":"partial "}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"message","role":"assistant","delta":true,"content":"more"}"#)
+            .unwrap();
+        // Turn completes — buffer must flush.
+        parser
+            .feed_line(r#"{"type":"result","usage":{"input_tokens":10,"output_tokens":20}}"#)
+            .unwrap();
+        let text: String = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                SemanticEvent::OutputText { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            text.contains("partial more"),
+            "buffered delta content must be flushed on terminal event; got {text:?}"
+        );
     }
 
     #[test]
