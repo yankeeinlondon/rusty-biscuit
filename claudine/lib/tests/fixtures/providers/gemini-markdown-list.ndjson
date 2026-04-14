@@ -1,0 +1,7 @@
+{"type":"init","timestamp":"2026-04-14T22:17:40.677Z","session_id":"8fe2e6c1-0431-483e-9b67-93b0478967c4","model":"auto-gemini-3"}
+{"type":"message","timestamp":"2026-04-14T22:17:40.678Z","role":"user","content":"list the four NFL conferences in markdown bullet form"}
+{"type":"message","timestamp":"2026-04-14T22:17:56.568Z","role":"assistant","content":"The NFL is actually divided into **two** conferences, not four. Each conference is then subdivided into","delta":true}
+{"type":"message","timestamp":"2026-04-14T22:17:56.704Z","role":"assistant","content":" **four divisions**.\n\nHere are the two conferences:\n\n* **American Football Conference (AFC)**\n* **National Football Conference","delta":true}
+{"type":"message","timestamp":"2026-04-14T22:17:56.827Z","role":"assistant","content":" (NFC)**\n\nEach of these conferences contains the following four divisions:\n\n* **East**\n* **North**\n*","delta":true}
+{"type":"message","timestamp":"2026-04-14T22:17:56.928Z","role":"assistant","content":" **South**\n* **West**","delta":true}
+{"type":"result","timestamp":"2026-04-14T22:17:57.129Z","status":"success","stats":{"total_tokens":81720,"input_tokens":80602,"output_tokens":261,"cached":36395,"input":44207,"duration_ms":16452,"tool_calls":1,"models":{"gemini-2.5-flash-lite":{"total_tokens":2683,"input_tokens":2535,"output_tokens":30,"cached":0,"input":2535},"gemini-3-flash-preview":{"total_tokens":79037,"input_tokens":78067,"output_tokens":231,"cached":36395,"input":41672}}}}

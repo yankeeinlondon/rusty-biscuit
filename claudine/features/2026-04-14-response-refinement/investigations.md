@@ -342,7 +342,155 @@ passthrough; the prefix-list entry is the load-bearing change.
 
 ## 0c — Gemini Markdown List Truncation
 
-_Reproduce per Phase 0c; record whether the fix lives in the parser or in Darkmatter._
+### Live reproduction (confirmed)
+
+Ran
+`cargo run -q -p claudine-cli -- gemini -- "list the four NFL conferences in markdown bullet form"`
+into `/tmp/gemini-stdout.txt`. stdout reproduces the spec symptom
+exactly — paragraphs and list items are split across lines at chunk
+boundaries:
+
+```
+The NFL actually consists of only **two** conferences, the AFC and the NFC. Each of these conferences
+ is divided into **four** divisions:
+
+* **North** (AFC North / NFC North)
+* **South**
+ (AFC South / NFC South)
+* **East** (AFC East / NFC East)
+* **West**
+ (AFC West / NFC West)
+```
+
+The `\n (AFC South / NFC South)` and `\n (AFC West / NFC West)` are
+the smoking gun: a bullet is split mid-item across two Gemini stream
+chunks, and the continuation (" (AFC …)") renders on its own line
+instead of concatenating into the bullet.
+
+Also captured the raw underlying stream via native
+`gemini --output-format stream-json -p "…" > /tmp/gemini-raw.ndjson`
+(12 lines). Gemini emits each assistant-message chunk as a
+`{"type":"message","role":"assistant","delta":true}` with `content`
+holding a partial slice that straddles markdown structure:
+
+- Chunk A ends with `"…subdivided into"` (no trailing newline, ends
+  mid-sentence).
+- Chunk B begins with `" **four divisions**.\n\n…\n* **National
+  Football Conference"` (leading space joins the prior sentence, ends
+  mid-bullet item after a bold run).
+- Chunk C begins with `" (NFC)**\n\n…\n* **East**\n* **North**\n*"`
+  (leading space completes the AFC bullet, ends with `"*"` — the
+  unfinished bullet marker for the next item).
+- Chunk D delivers `" **South**\n* **West**"`.
+
+So every chunk boundary lands inside a markdown construct, not at a
+logical break.
+
+### Code audit findings
+
+`claudine/lib/src/stream/gemini_semantic.rs:94-111`
+(`handle_message`) emits **one** `SemanticEvent::OutputText` per
+assistant `message` event. It does not buffer across events. Each chunk's
+`content` is passed through `ensure_message_newline` and shipped as a
+standalone OutputText, so the parser is faithfully propagating the
+chunk boundaries the provider gave it.
+
+`claudine/cli/src/commands/wrap/exec.rs:77-160` (`StreamTextRenderer`)
+is where the visible truncation is produced:
+
+- `push` (`exec.rs:77-114`) splits the incoming chunk on `\n` and then,
+  at lines 108-113, writes any trailing partial (no-newline) content
+  **raw to stdout** and sets `partial_line_committed = true`. That is
+  the mechanism by which chunk A's tail (`"…conferences"` / `"…North
+  Conference"`) gets emitted raw, and the next chunk's leading
+  ` **divisions**.\n` or ` (NFC)**\n` arrives as a new "line" once the
+  `\n` lands.
+- `process_line` (`exec.rs:118-160`) recognises bullet lines via
+  `is_stream_safe_list_item` (`exec.rs:200-205`) and calls
+  `flush_block` **per bullet** (lines 151-156). That means every list
+  item is rendered through Darkmatter as a standalone document rather
+  than as part of a cohesive list, and any chunk whose continuation
+  arrives *without* the leading `* ` marker (because the marker was in
+  the prior chunk) renders as plain prose on its own line.
+- `render_markdown` (`exec.rs:185-197`) calls
+  `render_assistant_markdown_with_options(text, …)` for the flushed
+  block. That helper invokes Darkmatter's terminal renderer on whatever
+  text slice it is handed, with no continuation state. Darkmatter
+  itself has no concept of "continue from the previous block"
+  (`rg streaming|stream_text|stream_markdown darkmatter/lib/src`
+  returns only `markdown/output/html.rs` unrelated). So a bullet
+  rendered in isolation gets paragraph-like treatment, not list-item
+  treatment.
+
+Net: the visible breakage is produced **in Claudine's CLI**, not in
+Gemini's parser and not inside Darkmatter. The parser emits exactly
+what Gemini streamed; the renderer's per-line flushing and per-item
+Darkmatter calls are what fragments the output.
+
+### Decision
+
+**Parser fix — buffer-until-logical-break in
+`claudine/lib/src/stream/gemini_semantic.rs::handle_message`.**
+
+Justification:
+
+- The raw stream confirms the hypothesis from the spec: Gemini chunks
+  split inside markdown structure (mid-sentence, mid-bullet, between
+  bullet marker and text). Claudine's `StreamTextRenderer` is designed
+  around complete lines and list items; it cannot reconstruct logical
+  breaks from chunks that do not respect them.
+- A renderer fix would require teaching Darkmatter a streaming
+  "continuation" mode and threading render state across calls. That is
+  a much larger change, touches a library that is used outside the
+  Gemini path, and does not fix the raw-partial-line committal in
+  `StreamTextRenderer::push` (which fires before Darkmatter is even
+  called).
+- Buffering inside `handle_message` keeps the streaming contract at
+  the parser boundary — by the time `SemanticEvent::OutputText` is
+  emitted, the text slice ends at a logical break (blank line, end of
+  list item, end of fenced code block, or turn end). The renderer
+  then sees the same shape it already gets from Claude/Codex/OpenCode,
+  and `flush_block` / `is_stream_safe_list_item` work correctly.
+- The `delta: true` flag on Gemini's streaming chunks is already
+  captured in `GeminiMessage::delta`
+  (`claudine/lib/src/stream/protocol/gemini.rs:41-49`), so the parser
+  has the signal it needs to buffer vs. flush without guessing.
+- The `result` terminal event (raw-kind `result`) is a safe "flush
+  anything buffered" point.
+
+Flush rules Task 2b.1 should implement (spec-level, not code):
+
+1. Append `content` to an internal `pending_text` buffer.
+2. Find the last index where a logical break ends — newline followed
+   by `\n` (blank line), newline at end of a fenced code block, or
+   the very end if the chunk itself ended with `\n` and is not
+   mid-bullet. Emit `pending_text[..flush_idx]` as OutputText and
+   retain the tail.
+3. On `result` (turn end) or `error`, flush any remaining
+   `pending_text` verbatim before emitting the terminal event.
+
+### Files referenced
+
+- `claudine/lib/src/stream/gemini_semantic.rs:94-111`
+  (`handle_message`), `:282-328` (`feed_line` dispatch).
+- `claudine/lib/src/stream/protocol/gemini.rs:41-74` (`GeminiMessage`
+  + `GeminiMessageContent`, including `delta` capture).
+- `claudine/cli/src/commands/wrap/exec.rs:77-160, 200-205`
+  (`StreamTextRenderer::push`, `process_line`, `flush_block`,
+  `is_stream_safe_list_item`).
+- `claudine/cli/src/commands/wrap/exec.rs:185-197`
+  (`render_markdown` → `render_assistant_markdown_with_options`).
+- Darkmatter audit (negative): `rg 'streaming|stream_text|stream_markdown'
+  darkmatter/lib/src` finds only unrelated HTML output code; no
+  streaming-continuation primitive exists.
+- Fixture: `claudine/lib/tests/fixtures/providers/gemini-markdown-list.ndjson`
+  (7-line captured slice of a live run: init + user echo + four
+  assistant-message chunks with `delta:true` straddling markdown
+  structure + terminal result). Captured live via
+  `gemini --output-format stream-json -p …`, not hand-constructed.
+- Live reproduction logs: `/tmp/gemini-stdout.txt` (wrapped run,
+  visible truncation), `/tmp/gemini-raw.ndjson` (native NDJSON,
+  source of the fixture slice).
 
 ## 0d — Hard-Coded Truncation Cap Location
 
