@@ -258,12 +258,10 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     }
 
     /// Handle OpenCode's `tool_use` event, which per the run.ts contract is
-    /// only emitted *after* a tool reaches `completed` or `error`. We emit a
-    /// ToolCall so the live sink counts the invocation and renders the input
-    /// preview, then immediately emit a matching ToolResult so the sink's
-    /// in-flight accounting doesn't leak (it used to grow forever because
-    /// nothing removed the entry — surfaced to the user as "N running" for
-    /// long-finished tools).
+    /// only emitted *after* a tool reaches `completed` or `error`. OpenCode
+    /// does not emit a paired request-side event, so we emit only a
+    /// `ToolResult` (no synthesized `ToolCall`). The `tool_calls` counter
+    /// still increments so trailer metadata matches the rendered line count.
     fn handle_tool_use_completed(&mut self, tool: OpenCodeTool, raw_kind: &str) {
         self.tool_calls += 1;
         let resolved = tool.resolve();
@@ -272,22 +270,6 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             self.tool_calls,
             resolved.name.as_deref(),
         );
-        // No tool_uses cache insert: the paired ToolResult is emitted inline,
-        // so nothing downstream needs to look up the input by id.
-
-        let mut call_extra = self.base_extra(raw_kind);
-        if let Some(id) = &resolved.id {
-            call_extra.insert("tool_id".into(), Value::from(id.as_str()));
-        }
-        if let Some(name) = &resolved.name {
-            call_extra.insert("tool_name".into(), Value::from(name.as_str()));
-        }
-        self.sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: resolved.name.clone(),
-            id: resolved.id.clone(),
-            input: resolved.input.clone(),
-            extra: Value::Object(call_extra),
-        });
 
         let mut result_extra = self.base_extra(raw_kind);
         if let Some(id) = &resolved.id {
@@ -672,7 +654,7 @@ mod tests {
     }
 
     #[test]
-    fn opencode_tool_use_emits_paired_call_and_result() {
+    fn opencode_tool_use_emits_tool_result_only() {
         use super::super::parser::SemanticStreamParser;
         use super::super::semantic::{SemanticEvent, SemanticEventSink};
         use std::sync::{Arc, Mutex};
@@ -700,24 +682,12 @@ mod tests {
         let kinds: Vec<&str> = captured.iter().map(|e| e.kind_str()).collect();
         assert_eq!(
             kinds,
-            vec!["tool_call", "tool_result"],
-            "tool_use must emit a paired ToolCall followed by ToolResult"
+            vec!["tool_result"],
+            "tool_use (completion) must emit only a ToolResult; OpenCode never emits a paired request"
         );
 
-        let SemanticEvent::ToolCall { name, input, .. } = &captured[0] else {
-            panic!("expected ToolCall first");
-        };
-        assert_eq!(name.as_deref(), Some("bash"));
-        assert_eq!(
-            input
-                .as_ref()
-                .and_then(|v| v.get("command"))
-                .and_then(|v| v.as_str()),
-            Some("ls -la")
-        );
-
-        let SemanticEvent::ToolResult { name, status, .. } = &captured[1] else {
-            panic!("expected ToolResult second");
+        let SemanticEvent::ToolResult { name, status, .. } = &captured[0] else {
+            panic!("expected ToolResult");
         };
         assert_eq!(name.as_deref(), Some("bash"));
         assert_eq!(status.as_deref(), Some("completed"));
@@ -757,5 +727,38 @@ mod tests {
             !summary_text.is_empty(),
             "concatenated OutputText must be non-empty"
         );
+    }
+
+    #[test]
+    fn tool_use_event_emits_only_tool_result_not_synthesized_call() {
+        let (events, mut parser) = new_parser();
+        parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#).unwrap();
+        parser
+            .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#)
+            .unwrap();
+        let kinds: Vec<&'static str> = events.lock().unwrap().iter().map(|e| e.kind_str()).collect();
+        let n_calls = kinds.iter().filter(|k| **k == "tool_call").count();
+        let n_results = kinds.iter().filter(|k| **k == "tool_result").count();
+        assert_eq!(
+            n_calls, 0,
+            "must not synthesize a ToolCall when only a completion was observed; got {kinds:?}"
+        );
+        assert_eq!(n_results, 1, "must emit exactly one ToolResult");
+    }
+
+    #[test]
+    fn tool_use_event_still_increments_tool_calls_counter() {
+        // Ensure the trailer count matches the rendered-line count by keeping
+        // `tool_calls += 1` even though no ToolCall event is emitted.
+        let (_events, mut parser) = new_parser();
+        parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#).unwrap();
+        parser
+            .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"tool_use","part":{"id":"t2","tool":"bash","state":{"status":"completed","input":{"command":"pwd"},"output":"/"}}}"#)
+            .unwrap();
+        let summary = Box::new(parser).finish(0);
+        assert_eq!(summary.tool_calls, Some(2), "both completions must count");
     }
 }

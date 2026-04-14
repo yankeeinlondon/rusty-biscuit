@@ -1634,7 +1634,7 @@ mod tests {
         }
 
         #[test]
-        fn opencode_tool_use_completion_shows_both_arrows() {
+        fn opencode_tool_use_completion_shows_incoming_arrow_only() {
             let lines = replay_to_stderr(Provider::OpenCode, &[
                 r#"{"type":"step_start","sessionID":"ses_1"}"#,
                 r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
@@ -1642,13 +1642,16 @@ mod tests {
             ], Some("gpt-4o".into()));
             let joined = lines.join("\n");
             assert!(
-                joined.contains('\u{2192}') && joined.contains('\u{2190}'),
-                "expected both → and ← arrows in {joined:?}"
+                joined.contains('\u{2190}'),
+                "incoming ← arrow must still render: {joined:?}"
             );
-            assert!(joined.contains("Bash"));
             assert!(
-                joined.contains("ls -la"),
-                "expected input preview on the tool line: {joined:?}"
+                !joined.contains('\u{2192}'),
+                "outgoing → arrow must NOT render (no synthesized ToolCall): {joined:?}"
+            );
+            assert!(
+                joined.contains("Bash"),
+                "humanized tool name must appear: {joined:?}"
             );
         }
 
