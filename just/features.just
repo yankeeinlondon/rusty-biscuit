@@ -15,6 +15,7 @@ blue := '\033[34m'
 magenta := '\033[35m'
 cyan := '\033[36m'
 
+agents := "claude\ncodex\nopencode\ngemini\nqwen\nroo\nkimi\n"
 
 
 # chooses a spec or design file to identify the feature
@@ -23,6 +24,12 @@ _choose_feature feat="":
     set -euo pipefail
     file="$(fd -g '*{spec,design}\.md' features/ | {{ if feat == ""  { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
     echo "${file}"
+
+_choose_agent:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    agent="$(echo "{{agents}}" | fzf --height=15 --border --border-label 'Choose the Agent to use')"
+
 
 # ask user to choose a spec file
 _choose_spec filter="":
@@ -141,7 +148,7 @@ implement-review-suggestions feat="" iteration="1":
     echo
 
 # adds a complimentary tech design to the specification file
-design-feature spec="":
+design-feature spec="" agent="codex":
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -151,10 +158,12 @@ design-feature spec="":
         file="$(just _choose_spec "{{spec}}")"
     fi
 
+    use_agent="$(echo {{agents}} | fzf --border --border-label "Choose an Agent")"
+
     dir="$(dirname ${file})"
     echo
-    echo -e "Designing the feature from the spec file: {{blue}}${file}{{reset}}"
-    claudine compose @prompts/design.md --codex -y --set "{ spec: \"${file}\", dir: \"${dir}\"  }"
+    echo -e "Designing the feature from the spec file: {{blue}}${file}{{reset}}. Using {{bold}}{{agent}}{{reset}} agent."
+    claudine compose @prompts/design.md --{{agent}} -y --set "{ spec: \"${file}\", dir: \"${dir}\"  }"
     echo
     echo -e "We now have a **technical design** document for this specification"
     if [[ "$(just _confirm "Are you ready to create a plan for this feature?")" == "y" ]]; then
@@ -214,6 +223,7 @@ plan-feature spec="" design="":
     else
         design_file="{{design}}"
     fi
+    agent="$(just _choose_agent)"
 
     if [[ -z "${design_file}" ]]; then
         design_info=""
@@ -229,7 +239,7 @@ plan-feature spec="" design="":
     echo
     echo -e "🏃‍♂️ creating a detailed {{bold}}plan{{reset}} from the {{blue}}${link_spec}{{reset}}${design_info}"
     echo
-    claudine compose @prompts/plan.md -y --claude --set "{ spec: \"${spec_file}\", design: \"${design_file}\" }"
+    claudine compose @prompts/plan.md -y --${agent} --set "{ spec: \"${spec_file}\", design: \"${design_file}\" }"
     echo
     echo -e "🎉 planning is complete!"
 
