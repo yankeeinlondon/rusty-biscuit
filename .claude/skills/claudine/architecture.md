@@ -223,7 +223,7 @@ The core event processing pipeline runs in 6 steps:
 1. **Select adapter** — `adapter_for(provider)`
 2. **Parse event** — adapter normalizes raw JSON into `(AgenticEvent, EventMeta)`
 3. **Load config** — merges user (`~/.claudine/config.json`) and repo (`.claudine/config.json`) configs, precompiling matcher and mapper regexes
-4. **Look up binding** — finds `RuntimeEventBinding` for this provider + event, checks enabled and non-empty actions
+4. **Look up binding** — finds `RuntimeEventBinding` for the canonical event (provider-agnostic), checks enabled and non-empty actions
 5. **Check matcher** — precompiled regex match against event metadata (filters actions)
 6. **Execute actions** — runs each action via `runner::execute_actions()`, collecting blocking responses from `Call` actions
 
@@ -236,25 +236,30 @@ The core event processing pipeline runs in 6 steps:
 
 ### Config Merge Strategy
 
-Repo-level provider configs completely replace user-level (not merged per-event) to give projects complete control. Settings merge field-by-field because they're global preferences. Nested structs like `linking` and `canonical_provider` also merge field-by-field — repo non-`None` values override user, but user-only fields (e.g. `user_skill`) survive when the repo config doesn't set them.
+User config (`ClaudineConfig`) is the full source of truth; repo config (`RepoOverrideConfig`) is an optional overlay where every field is `Option`-like. Per-event `actions` replace user-level actions per canonical event (a repo entry for `BeforeTool` fully replaces the user's `BeforeTool` actions; events not present in the repo config fall through to user). `canonical_provider` overrides when set. `messenger_override` uses three-state semantics: absent = inherit, `null` = disable, object = override. Global toggles (`logging`, `protect`, `preferred_agent`, etc.) live only in the user config.
 
 ## Configuration Schema
 
 ```rust
-pub struct HookerConfig {
-    pub version: String,
-    pub settings: GlobalSettings,
-    pub providers: HashMap<Provider, ProviderConfig>,
+// User scope: ~/.claudine/config.json
+pub struct ClaudineConfig {
+    pub tts: TtsValue,
+    pub messenger: Option<ClaudineMessengerConfig>,
+    pub logging: bool,
+    pub protect: ProtectConfig,
+    /// Canonical-event → actions (provider-agnostic).
+    pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
+    pub preferred_agent: Provider,
+    pub canonical_provider: Option<Provider>,
+    pub default_sounds: DefaultSounds,
 }
 
-pub struct ProviderConfig {
-    pub events: HashMap<AgenticEvent, EventBinding>,
-}
-
-pub struct EventBinding {
-    pub enabled: bool,
-    pub actions: Vec<HookAction>,
-    pub matcher: Option<String>,  // Regex filter
+// Repo scope: <repo>/.claudine/config.json (all fields optional)
+pub struct RepoOverrideConfig {
+    pub canonical_provider: Option<Provider>,
+    pub actions: HashMap<AgenticEvent, Vec<HookAction>>,
+    pub messenger_override: /* three-state: absent / null / object */,
+    // ...other optional overrides
 }
 ```
 
