@@ -19,6 +19,7 @@ const NERD_CIRCULAR_FAILURE: &str = "\u{f057}";
 const NERD_CIRCULAR_WARNING: &str = "\u{f0028}";
 const NERD_CIRCULAR_INFO: &str = "\u{f449}";
 const NERD_CIRCULAR_TOOL_USE: &str = "\u{f425}";
+const NERD_CIRCULAR_SUBAGENT: &str = "\u{f0012}";
 
 // ── Nerd Font icons ── Rounded theme ───────────────────────────────────────
 
@@ -29,6 +30,7 @@ const NERD_ROUNDED_FAILURE: &str = "\u{f136e}";
 const NERD_ROUNDED_WARNING: &str = "\u{f0af}";
 const NERD_ROUNDED_INFO: &str = "\u{f0bd4}";
 const NERD_ROUNDED_TOOL_USE: &str = "\u{f425}";
+const NERD_ROUNDED_SUBAGENT: &str = "\u{f0012}";
 
 // ── Nerd Font icons ── Timeline theme ──────────────────────────────────────
 
@@ -39,6 +41,7 @@ const NERD_TIMELINE_FAILURE: &str = "\u{f1537}";
 const NERD_TIMELINE_WARNING: &str = "\u{f0f95}";
 const NERD_TIMELINE_INFO: &str = "\u{f0bd4}";
 const NERD_TIMELINE_TOOL_USE: &str = "\u{f425}";
+const NERD_TIMELINE_SUBAGENT: &str = "\u{f0012}";
 
 // ── Unicode fallback icons (shared across all themes) ──────────────────────
 
@@ -49,6 +52,7 @@ const FB_FAILURE: &str = "\u{2a2b}"; // ⤫
 const FB_WARNING: &str = "\u{26a0}"; // ⚠
 const FB_INFO: &str = "\u{2139}"; // ℹ
 const FB_TOOL_USE: &str = "\u{1f527}"; // 🔧
+const FB_SUBAGENT: &str = "\u{1f916}"; // 🤖
 
 /// The state of a status item.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -60,6 +64,7 @@ pub enum StatusState {
     Warning,
     Info,
     ToolUse,
+    Subagent,
 }
 
 /// Visual theme controlling the icon set used by [`Status`].
@@ -84,10 +89,10 @@ struct StatusIconDef {
     color_alt: Option<Tailwind>,
 }
 
-/// Lookup table for all 21 (theme, state) icon definitions.
+/// Lookup table for all 24 (theme, state) icon definitions.
 static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>> =
     LazyLock::new(|| {
-        let mut m = HashMap::with_capacity(21);
+        let mut m = HashMap::with_capacity(24);
 
         // ── Circular ───────────────────────────────────────────────────
         m.insert(
@@ -150,6 +155,15 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
                 nerd: NERD_CIRCULAR_TOOL_USE,
                 fallback: FB_TOOL_USE,
                 color: Tailwind::Purple500,
+                color_alt: None,
+            },
+        );
+        m.insert(
+            (StatusTheme::Circular, StatusState::Subagent),
+            StatusIconDef {
+                nerd: NERD_CIRCULAR_SUBAGENT,
+                fallback: FB_SUBAGENT,
+                color: Tailwind::Violet500,
                 color_alt: None,
             },
         );
@@ -218,6 +232,15 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
                 color_alt: None,
             },
         );
+        m.insert(
+            (StatusTheme::Rounded, StatusState::Subagent),
+            StatusIconDef {
+                nerd: NERD_ROUNDED_SUBAGENT,
+                fallback: FB_SUBAGENT,
+                color: Tailwind::Violet500,
+                color_alt: None,
+            },
+        );
 
         // ── Timeline ───────────────────────────────────────────────────
         m.insert(
@@ -283,6 +306,15 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
                 color_alt: None,
             },
         );
+        m.insert(
+            (StatusTheme::Timeline, StatusState::Subagent),
+            StatusIconDef {
+                nerd: NERD_TIMELINE_SUBAGENT,
+                fallback: FB_SUBAGENT,
+                color: Tailwind::Violet500,
+                color_alt: None,
+            },
+        );
 
         m
     });
@@ -327,6 +359,7 @@ static ICON_LOOKUP: LazyLock<HashMap<(StatusTheme, StatusState), StatusIconDef>>
 /// | Warning    | ⚠        | orange-500 |
 /// | Info       | ℹ        | blue-500   |
 /// | ToolUse    | 🔧        | purple-500 |
+/// | Subagent   | 🤖        | violet-500 |
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
     state: StatusState,
