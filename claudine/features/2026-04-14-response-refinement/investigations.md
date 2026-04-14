@@ -543,7 +543,39 @@ they reach the renderer); other providers' behaviour is unchanged.
 
 ## 0d — Hard-Coded Truncation Cap Location
 
-_Locate the cap removed during Child 1; record file:line and any tests pinning it._
+### Summary text truncation caps in LiveSemanticSink
+
+The sink rendering pipeline caps summary text extracted from tool inputs and provider-extension payloads at two sites, both in `claudine/cli/src/commands/wrap/live_semantic_sink.rs`:
+
+**`summarize_input` (lines 552–580):** Extracts a summary from tool-call JSON input and caps at **60 characters**. Three call sites within the function:
+- Line 554: string value at input root level
+- Line 568: string value from well-known key (command, path, file_path, etc.)
+- Line 575: first non-empty string value (last-resort fallback)
+
+**`summarize_provider_payload` (lines 590–681):** Extracts summary from provider-extension event payloads and caps at **80 characters**. Four call sites within the function:
+- Line 623: string value from known nested path (message, status, name, error.message, etc.)
+- Line 656: string value from nested content array (message.content[*].text, etc.)
+- Line 663: string value from nested content array (item.content.parts[*].text, etc.)
+- Line 675: first non-empty top-level string value (last-resort fallback)
+
+**Helper function:** `truncate(s: &str, max_chars: usize) -> String` (line 704)
+- Counts UTF-8 characters, truncates to `max_chars - 1`, appends ellipsis (U+2026, `…`)
+- Used **only** by `summarize_input` and `summarize_provider_payload` in production code
+- Test functions in the same module do not depend on the cap value
+
+### Secondary caps audit: biscuit-terminal
+
+Searched `biscuit-terminal/lib/src/components/{status,prose}.rs` and the entire `biscuit-terminal/lib/src/` for hardcoded character limits via `truncate`, `.chars().take(N)`, `.split_at()`, and `const MAX_` patterns.
+
+**Finding:** No secondary character-limit caps found.
+- Line 1457 in `prose.rs` (`inner_content.truncate(start)`) is vector-truncation (content manipulation), not a character cap.
+- Constants `MAX_BYTES` (64) and `MAX_ITERATIONS` (100) in `fonts.rs` are unrelated to text rendering.
+- Status and Prose components rely on caller-provided text; no internal caps are imposed.
+- Layout wrapping defers entirely to terminal width negotiation.
+
+### Scope confirmation for Phase 1, Task 1.6
+
+Task 1.6 ("Remove the hardcoded truncation cap") must remove both the `summarize_input` and `summarize_provider_payload` caps (lines 554, 568, 575, 623, 656, 663, 675) and defer text wrapping to `biscuit-terminal`'s Layout engine, which has terminal-aware column budgets. No downstream cap removal is required in biscuit-terminal; the entire inventory is upstream in the sink's summary extractors.
 
 ## 0e — Codex Tool-Event Field Extraction
 
