@@ -1,18 +1,12 @@
 pub mod badges;
-pub mod claude;
 pub mod claude_semantic;
-pub mod codex;
 pub mod codex_semantic;
-pub mod gemini;
 pub mod gemini_semantic;
-pub mod kimi;
 pub mod kimi_semantic;
-pub mod opencode;
 pub mod opencode_semantic;
 pub mod parser;
 pub mod progress;
 pub mod protocol;
-pub mod qwen;
 pub mod qwen_semantic;
 pub mod reporting;
 pub mod semantic;
@@ -23,12 +17,8 @@ pub mod token_usage;
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
-use std::sync::{Arc, Mutex};
-
 use crate::events::Provider;
-use parser::{
-    LegacyCallbackBridge, LegacySemanticParser, SemanticStreamParser, StreamEventSink, StreamParser,
-};
+use parser::SemanticStreamParser;
 
 pub use semantic::{NullSemanticSink, SemanticEvent, SemanticEventSink};
 
@@ -63,83 +53,32 @@ pub struct ParserConfig {
     pub model: Option<String>,
 }
 
-/// Create the appropriate parser for a provider.
-pub fn create_parser(
-    provider: Provider,
-    sink: impl StreamEventSink + 'static,
-    config: ParserConfig,
-) -> Box<dyn StreamParser> {
-    match provider {
-        Provider::Claude => Box::new(claude::ClaudeStreamParser::new(sink)),
-        Provider::Codex => Box::new(codex::CodexStreamParser::new(sink, config.model)),
-        Provider::Gemini => Box::new(gemini::GeminiStreamParser::new(sink)),
-        Provider::KimiCode => Box::new(kimi::KimiStreamParser::new(sink)),
-        Provider::OpenCode => Box::new(opencode::OpenCodeStreamParser::new(sink, config.model)),
-        Provider::QwenCode => Box::new(qwen::QwenStreamParser::new(sink)),
-        _ => Box::new(claude::ClaudeStreamParser::new(sink)),
-    }
-}
-
 /// Create a semantic-event parser for a provider.
 ///
-/// This is the forward-looking parser factory for the `SemanticEvent` pipeline.
-/// Non-migrated providers are wrapped in [`LegacySemanticParser`], which
-/// translates legacy callbacks and `StreamChunk` returns into
-/// [`SemanticEvent`]s. Providers that have native
-/// [`SemanticStreamParser`] implementations can be added here as they are
-/// migrated, bypassing the adapter entirely.
+/// Every supported provider has a native [`SemanticStreamParser`]
+/// implementation that emits [`SemanticEvent`]s directly. Providers without
+/// a structured stream format fall back to the Claude parser as a degenerate
+/// no-op.
 pub fn create_semantic_parser<S: SemanticEventSink + 'static>(
     provider: Provider,
     sink: S,
     config: ParserConfig,
 ) -> Box<dyn SemanticStreamParser> {
-    // Providers with native `SemanticStreamParser` implementations bypass the
-    // legacy-callback adapter so they can emit the full suite of typed
-    // semantic events (including `ProviderExtension` for unknown kinds).
     match provider {
-        Provider::Claude => {
-            return Box::new(claude_semantic::ClaudeSemanticStreamParser::new(sink));
-        }
-        Provider::Codex => {
-            return Box::new(codex_semantic::CodexSemanticStreamParser::new(
-                sink,
-                config.model.clone(),
-            ));
-        }
-        Provider::Gemini => {
-            return Box::new(gemini_semantic::GeminiSemanticStreamParser::new(sink));
-        }
-        Provider::OpenCode => {
-            return Box::new(opencode_semantic::OpenCodeSemanticStreamParser::new(
-                sink,
-                config.model.clone(),
-            ));
-        }
-        Provider::KimiCode => {
-            return Box::new(kimi_semantic::KimiSemanticStreamParser::new(sink));
-        }
-        Provider::QwenCode => {
-            return Box::new(qwen_semantic::QwenSemanticStreamParser::new(sink));
-        }
-        _ => {}
-    }
-
-    // Other providers still go through the legacy-callback adapter until
-    // their Phase 2 native migrations land.
-    let queue: Arc<Mutex<Vec<SemanticEvent>>> = Arc::new(Mutex::new(Vec::new()));
-    let bridge = LegacyCallbackBridge::new(queue.clone());
-    let legacy_parser: Box<dyn StreamParser> = match provider {
-        Provider::Codex => Box::new(codex::CodexStreamParser::new(bridge, config.model.clone())),
-        Provider::Gemini => Box::new(gemini::GeminiStreamParser::new(bridge)),
-        Provider::KimiCode => Box::new(kimi::KimiStreamParser::new(bridge)),
-        Provider::OpenCode => Box::new(opencode::OpenCodeStreamParser::new(
-            bridge,
+        Provider::Claude => Box::new(claude_semantic::ClaudeSemanticStreamParser::new(sink)),
+        Provider::Codex => Box::new(codex_semantic::CodexSemanticStreamParser::new(
+            sink,
             config.model.clone(),
         )),
-        Provider::QwenCode => Box::new(qwen::QwenStreamParser::new(bridge)),
-        _ => Box::new(claude::ClaudeStreamParser::new(bridge)),
-    };
-    Box::new(LegacySemanticParser::new(legacy_parser, queue, sink))
+        Provider::Gemini => Box::new(gemini_semantic::GeminiSemanticStreamParser::new(sink)),
+        Provider::OpenCode => Box::new(opencode_semantic::OpenCodeSemanticStreamParser::new(
+            sink,
+            config.model.clone(),
+        )),
+        Provider::KimiCode => Box::new(kimi_semantic::KimiSemanticStreamParser::new(sink)),
+        Provider::QwenCode => Box::new(qwen_semantic::QwenSemanticStreamParser::new(sink)),
+        _ => Box::new(claude_semantic::ClaudeSemanticStreamParser::new(sink)),
+    }
 }
 
 /// Return the stream protocol used by a provider, if supported.
@@ -228,56 +167,8 @@ pub(crate) fn trace_malformed_line(provider: Provider, line_num: usize, message:
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
-    use serde_json::Value;
-
-    use super::parser::EventMeta;
-
-    pub(crate) struct ToolContractExpectation<'a> {
-        pub(crate) name: &'a str,
-        pub(crate) id: Option<&'a str>,
-        pub(crate) input_field: Option<(&'a str, &'a str)>,
-        pub(crate) status: Option<&'a str>,
-        pub(crate) response: Option<Value>,
-    }
-
-    pub(crate) fn assert_tool_event_contract(
-        before: &EventMeta,
-        after: Option<&EventMeta>,
-        expected: ToolContractExpectation<'_>,
-    ) {
-        assert_eq!(before.extra["tool_name"], expected.name);
-        if let Some(id) = expected.id {
-            assert_eq!(before.extra["tool_id"], id);
-        }
-        if let Some((field, value)) = expected.input_field {
-            assert_eq!(before.extra["tool_input"][field], value);
-        }
-
-        let Some(after) = after else {
-            return;
-        };
-
-        assert_eq!(after.extra["tool_name"], expected.name);
-        if let Some(id) = expected.id {
-            assert_eq!(after.extra["tool_id"], id);
-        }
-        if let Some((field, value)) = expected.input_field {
-            assert_eq!(after.extra["tool_input"][field], value);
-        }
-        if let Some(status) = expected.status {
-            assert_eq!(after.extra["status"], status);
-        }
-        if let Some(response) = expected.response {
-            assert_eq!(after.extra["tool_response"], response);
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
-    use parser::NullSink;
 
     #[test]
     fn stream_protocol_serde_round_trip() {
@@ -291,23 +182,6 @@ mod tests {
             assert_eq!(&json, expected_json);
             let restored: StreamProtocol = serde_json::from_str(&json).unwrap();
             assert_eq!(proto, &restored);
-        }
-    }
-
-    #[test]
-    fn create_parser_returns_correct_provider() {
-        let providers = [
-            Provider::Claude,
-            Provider::Codex,
-            Provider::Gemini,
-            Provider::KimiCode,
-            Provider::OpenCode,
-            Provider::QwenCode,
-        ];
-        for provider in &providers {
-            let parser = create_parser(*provider, NullSink, ParserConfig::default());
-            let summary = parser.finish(0);
-            assert_eq!(summary.provider, *provider);
         }
     }
 
@@ -332,13 +206,12 @@ mod tests {
         assert_eq!(stream_protocol_for(Provider::Goose), None);
     }
 
-    mod semantic_adapter {
+    mod semantic_parser {
         use std::sync::{Arc, Mutex};
 
         use super::super::{create_semantic_parser, ParserConfig, SemanticEvent, SemanticEventSink};
         use crate::events::Provider;
 
-        /// Recording sink that collects every semantic event it receives.
         struct RecordingSemanticSink {
             events: Arc<Mutex<Vec<SemanticEvent>>>,
         }
@@ -354,7 +227,7 @@ mod tests {
         }
 
         #[test]
-        fn claude_via_adapter_emits_semantic_events() {
+        fn claude_parser_emits_semantic_events() {
             let events = Arc::new(Mutex::new(Vec::new()));
             let sink = RecordingSemanticSink {
                 events: events.clone(),
@@ -397,7 +270,6 @@ mod tests {
             let mut parser =
                 create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
 
-            // Adapter must convert MalformedLine into Warning + Ok(()).
             let result = parser.feed_line("not json {{{");
             assert!(result.is_ok());
 

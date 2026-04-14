@@ -14,9 +14,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
-
-use super::parser::EventMeta;
 use super::semantic::SemanticEvent;
 use super::token_usage::NormalizedTokenUsage;
 
@@ -229,53 +226,6 @@ impl LiveMetricsState {
     }
 }
 
-/// Build the `Status::ToolUse` description for a tool-start event.
-pub fn describe_tool_start(meta: &EventMeta) -> Option<String> {
-    let name = str_from_extra(&meta.extra, &["tool_name", "name"]);
-    let input_summary = value_from_extra(
-        &meta.extra,
-        &["tool_input", "parameters", "input", "arguments"],
-    )
-    .as_ref()
-    .and_then(summarize_input);
-
-    match (name, input_summary) {
-        (Some(name), Some(summary)) => Some(format!("{name} \u{00b7} {summary}")),
-        (Some(name), None) => Some(name),
-        (None, Some(summary)) => Some(summary),
-        (None, None) => None,
-    }
-}
-
-/// Build the `Status::ToolUse` description for a tool-end event.
-///
-/// `duration` is an optional wall-clock duration for the completed tool call;
-/// callers can fill it from `LiveMetrics::record_tool_end`.
-pub fn describe_tool_end(meta: &EventMeta, duration: Option<Duration>) -> Option<String> {
-    let name = str_from_extra(&meta.extra, &["tool_name", "name"]);
-    let status = str_from_extra(&meta.extra, &["status"]);
-    let error = str_from_extra(&meta.extra, &["error_message", "message"]);
-
-    let mut parts = Vec::new();
-    if let Some(n) = name {
-        parts.push(n);
-    }
-    if let Some(d) = duration {
-        parts.push(format_duration(d));
-    }
-    if let Some(err) = error {
-        parts.push(format!("error: {}", truncate(&err, 80)));
-    } else if let Some(s) = status {
-        parts.push(s);
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" \u{00b7} "))
-    }
-}
-
 /// Build the `Status::Info` description for a heartbeat tick.
 ///
 /// Returns `None` when the caller should suppress the tick because the stream
@@ -364,40 +314,6 @@ pub fn describe_heartbeat(
     Some(parts.join(" \u{00b7} "))
 }
 
-fn summarize_input(value: &Value) -> Option<String> {
-    // Prefer the single most useful scalar field; fall back to compact JSON.
-    if let Some(s) = value.as_str() {
-        return Some(truncate(s, 60));
-    }
-    if let Some(obj) = value.as_object() {
-        for key in ["command", "path", "file_path", "pattern", "query", "url"] {
-            if let Some(Value::String(s)) = obj.get(key) {
-                return Some(truncate(s, 60));
-            }
-        }
-    }
-    let rendered = serde_json::to_string(value).ok()?;
-    Some(truncate(&rendered, 60))
-}
-
-fn str_from_extra(extra: &HashMap<String, Value>, keys: &[&str]) -> Option<String> {
-    keys.iter()
-        .find_map(|key| extra.get(*key).and_then(|v| v.as_str().map(ToOwned::to_owned)))
-}
-
-fn value_from_extra(extra: &HashMap<String, Value>, keys: &[&str]) -> Option<Value> {
-    keys.iter().find_map(|key| extra.get(*key).cloned())
-}
-
-fn truncate(s: &str, max_chars: usize) -> String {
-    let count = s.chars().count();
-    if count <= max_chars {
-        return s.to_string();
-    }
-    let prefix: String = s.chars().take(max_chars.saturating_sub(1)).collect();
-    format!("{prefix}\u{2026}")
-}
-
 fn format_duration(d: Duration) -> String {
     let secs = d.as_secs_f64();
     if secs < 10.0 {
@@ -428,69 +344,6 @@ fn format_cost(cost: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-
-    fn meta(extra: serde_json::Value) -> EventMeta {
-        let mut m = EventMeta::default();
-        if let Value::Object(map) = extra {
-            for (k, v) in map {
-                m.extra.insert(k, v);
-            }
-        }
-        m
-    }
-
-    #[test]
-    fn describes_tool_start_with_command_input() {
-        let m = meta(json!({
-            "tool_name": "Bash",
-            "tool_input": { "command": "git status" }
-        }));
-        assert_eq!(describe_tool_start(&m), Some("Bash · git status".into()));
-    }
-
-    #[test]
-    fn describes_tool_start_without_input() {
-        let m = meta(json!({ "tool_name": "Read" }));
-        assert_eq!(describe_tool_start(&m), Some("Read".into()));
-    }
-
-    #[test]
-    fn describes_tool_start_truncates_long_input() {
-        let long = "x".repeat(200);
-        let m = meta(json!({
-            "tool_name": "Grep",
-            "tool_input": { "pattern": long }
-        }));
-        let rendered = describe_tool_start(&m).unwrap();
-        assert!(rendered.contains("Grep"));
-        assert!(rendered.ends_with('\u{2026}'));
-    }
-
-    #[test]
-    fn describes_tool_end_with_duration_and_status() {
-        let m = meta(json!({ "tool_name": "Bash", "status": "success" }));
-        let desc = describe_tool_end(&m, Some(Duration::from_millis(1234))).unwrap();
-        assert!(desc.contains("Bash"));
-        assert!(desc.contains("1s") || desc.contains("1.2s"));
-        assert!(desc.contains("success"));
-    }
-
-    #[test]
-    fn describes_tool_end_with_error() {
-        let m = meta(json!({
-            "tool_name": "Bash",
-            "error_message": "permission denied"
-        }));
-        let desc = describe_tool_end(&m, None).unwrap();
-        assert!(desc.contains("error: permission denied"));
-    }
-
-    #[test]
-    fn describes_tool_end_returns_none_when_empty() {
-        let m = meta(json!({}));
-        assert!(describe_tool_end(&m, None).is_none());
-    }
 
     #[test]
     fn records_and_completes_tool_lifecycle() {
