@@ -454,6 +454,11 @@ impl LiveSemanticSink {
                 kind,
                 payload,
             } => {
+                if is_silent_extension_kind(*provider, kind) {
+                    // Suppress stderr rendering; the event still flows
+                    // through dispatch and the JSONL log.
+                    return;
+                }
                 self.render_status(
                     StatusState::Info,
                     Self::provider_extension_description(*provider, kind, payload),
@@ -549,26 +554,151 @@ fn summarize_input(value: &Value) -> Option<String> {
         return Some(truncate(s, 60));
     }
     if let Some(obj) = value.as_object() {
-        for key in ["command", "path", "file_path", "pattern", "query", "url"] {
+        // Well-known keys first (highest signal for the common tool set).
+        for key in [
+            "command",
+            "path",
+            "file_path",
+            "dir_path",
+            "pattern",
+            "query",
+            "url",
+        ] {
             if let Some(Value::String(s)) = obj.get(key) {
                 return Some(truncate(s, 60));
             }
         }
+        // Last resort: first non-empty string value. Avoids raw-JSON dumps
+        // for novel tool shapes while still surfacing a readable preview.
+        for (_, v) in obj.iter() {
+            if let Some(s) = v.as_str().filter(|s| !s.is_empty()) {
+                return Some(truncate(s, 60));
+            }
+        }
     }
-    let rendered = serde_json::to_string(value).ok()?;
-    Some(truncate(&rendered, 60))
+    None
 }
 
+/// Produce a terse one-line human summary of a [`SemanticEvent::ProviderExtension`]
+/// payload.
+///
+/// Returns `None` when no summary can be derived from known nested shapes —
+/// callers must render `provider/kind` WITHOUT a trailing ` · <payload>` in
+/// that case rather than falling back to raw JSON. This is a deliberate UX
+/// trade-off: a bare `provider/kind` is less informative but still readable,
+/// whereas a truncated raw JSON blob is actively harmful noise on stderr.
 fn summarize_provider_payload(payload: &Value) -> Option<String> {
+    // Known single-string text locations, in descending specificity. Each
+    // entry is a path of object keys from the root of the payload.
+    let known_paths: &[&[&str]] = &[
+        &["message"],
+        &["status"],
+        &["name"],
+        &["path"],
+        &["text"],
+        &["content"],
+        &["error", "message"],
+        &["error_message"],
+        &["title"],
+        &["description"],
+    ];
+
+    payload.as_object()?;
+
+    for path in known_paths {
+        let mut cursor: &Value = payload;
+        let mut ok = true;
+        for segment in path.iter() {
+            match cursor.get(*segment) {
+                Some(next) => cursor = next,
+                None => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok
+            && let Some(s) = cursor.as_str().filter(|s| !s.is_empty())
+        {
+            return Some(truncate(s, 80));
+        }
+    }
+
+    // Nested content arrays: message.content[*].text, item.content.parts[*].text, etc.
+    let nested_array_paths: &[&[&str]] = &[
+        &["message", "content"],
+        &["item", "content", "parts"],
+        &["content", "parts"],
+        &["parts"],
+    ];
+    for nested_path in nested_array_paths {
+        let mut cursor: &Value = payload;
+        let mut ok = true;
+        for seg in nested_path.iter() {
+            match cursor.get(*seg) {
+                Some(next) => cursor = next,
+                None => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if !ok {
+            continue;
+        }
+        if let Some(array) = cursor.as_array() {
+            for elem in array {
+                if let Some(text) = elem
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                {
+                    return Some(truncate(text, 80));
+                }
+                if let Some(text) = elem
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                {
+                    return Some(truncate(text, 80));
+                }
+            }
+        }
+    }
+
+    // Last resort: the first non-empty top-level string value. This recovers
+    // summary text for shapes we haven't explicitly enumerated while still
+    // avoiding a raw-JSON dump.
     if let Some(obj) = payload.as_object() {
-        for key in ["message", "status", "name", "path"] {
-            if let Some(Value::String(s)) = obj.get(key) {
+        for (_, v) in obj.iter() {
+            if let Some(s) = v.as_str().filter(|s| !s.is_empty()) {
                 return Some(truncate(s, 80));
             }
         }
     }
-    let rendered = serde_json::to_string(payload).ok()?;
-    Some(truncate(&rendered, 80))
+
+    None
+}
+
+/// Kinds that are known to be high-volume or entirely redundant on stderr.
+/// Listed explicitly rather than relying on summary heuristics so the
+/// suppression is visible, reviewable, and reversible. Events in this set
+/// still flow through dispatch and the JSONL log; only the stderr status
+/// line is suppressed.
+const SILENT_PROVIDER_EXTENSION_KINDS: &[(Provider, &str)] = &[
+    // Claude: partial assistant token deltas — redundant with OutputText.
+    (Provider::Claude, "stream_event"),
+    // Claude: hook lifecycle is already surfaced via dedicated Info /
+    // semantic events in the Plan 2 parser work.
+    (Provider::Claude, "hook_started"),
+    (Provider::Claude, "hook_response"),
+    (Provider::Claude, "hook_progress"),
+];
+
+fn is_silent_extension_kind(provider: Provider, kind: &str) -> bool {
+    SILENT_PROVIDER_EXTENSION_KINDS
+        .iter()
+        .any(|(p, k)| *p == provider && *k == kind)
 }
 
 fn truncate(s: &str, max_chars: usize) -> String {
@@ -939,11 +1069,140 @@ mod tests {
         assert_eq!(state.in_flight.len(), 1);
     }
 
+    #[test]
+    fn provider_extension_with_only_nested_text_renders_summary_not_raw_json() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+
+        // Payload has no top-level message/status/name/path, but nested text.
+        sink.on_semantic_event(SemanticEvent::ProviderExtension {
+            provider: Provider::Codex,
+            kind: "future.unknown".into(),
+            payload: json!({
+                "item": {
+                    "content": { "parts": [ { "text": "meaningful text here" } ] }
+                }
+            }),
+        });
+
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            rendered.contains("meaningful text here"),
+            "expected nested text preview in stderr: {rendered}"
+        );
+        assert!(
+            !rendered.contains(r#"{"item":"#),
+            "raw JSON must not appear in stderr: {rendered}"
+        );
+    }
+
+    #[test]
+    fn provider_extension_unresolvable_drops_payload_tail_entirely() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+
+        sink.on_semantic_event(SemanticEvent::ProviderExtension {
+            provider: Provider::Codex,
+            kind: "opaque.event".into(),
+            payload: json!({
+                "some_numeric_field": 42,
+                "another": [1, 2, 3]
+            }),
+        });
+
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            rendered.contains("codex/opaque.event"),
+            "provider/kind label must still appear: {rendered}"
+        );
+        assert!(
+            !rendered.contains(r#"{"some_numeric_field":"#) && !rendered.contains("42"),
+            "raw payload must not appear when no human-readable summary is available: {rendered}"
+        );
+        assert!(
+            !rendered.contains(" \u{00b7} {"),
+            "must not render the summary separator followed by raw JSON: {rendered}"
+        );
+    }
+
+    #[test]
+    fn provider_extension_respects_silent_kind_allowlist() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+
+        // Kinds in the silent allowlist must produce NO stderr line at all
+        // (they still get dispatched and logged, just not rendered).
+        sink.on_semantic_event(SemanticEvent::ProviderExtension {
+            provider: Provider::Claude,
+            kind: "stream_event".into(),
+            payload: json!({ "delta": "chunk" }),
+        });
+
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            !rendered.contains("claude/stream_event"),
+            "silent-kind allowlist must suppress the status line entirely: {rendered}"
+        );
+    }
+
+    #[test]
+    fn no_captured_fixture_ever_renders_raw_json_on_stderr() {
+        use std::path::Path as StdPath;
+
+        let fixtures_dir = StdPath::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("lib")
+            .join("tests")
+            .join("fixtures")
+            .join("providers");
+
+        assert!(
+            fixtures_dir.exists(),
+            "fixtures dir must exist: {fixtures_dir:?}"
+        );
+
+        for provider_slug in &["claude", "codex", "gemini", "opencode"] {
+            let fixture = fixtures_dir.join(format!("{provider_slug}.ndjson"));
+            if !fixture.exists() {
+                continue; // optional fixtures
+            }
+            let provider = match *provider_slug {
+                "claude" => Provider::Claude,
+                "codex" => Provider::Codex,
+                "gemini" => Provider::Gemini,
+                "opencode" => Provider::OpenCode,
+                _ => unreachable!(),
+            };
+            let fixture_lines: Vec<String> = std::fs::read_to_string(&fixture)
+                .expect("read fixture")
+                .lines()
+                .map(String::from)
+                .collect();
+
+            let lines_ref: Vec<&str> = fixture_lines.iter().map(String::as_str).collect();
+            let stderr_lines =
+                golden_stderr::replay_to_stderr(provider, &lines_ref, None);
+
+            for line in &stderr_lines {
+                // Heuristic: a line is "raw JSON" if it contains both `{`
+                // and a JSON-shaped key-value opener like `":`.
+                let has_json_obj_opener = line.contains('{') && line.contains("\":");
+                assert!(
+                    !has_json_obj_opener,
+                    "provider={provider_slug}: stderr line contains raw JSON: {line:?}"
+                );
+            }
+        }
+    }
+
     mod golden_stderr {
         use super::*;
         use claudine::stream::{create_semantic_parser, ParserConfig};
 
-        fn replay_to_stderr(
+        pub(super) fn replay_to_stderr(
             provider: Provider,
             fixture: &[&str],
             model: Option<String>,

@@ -91,15 +91,13 @@ impl<S: SemanticEventSink> GeminiSemanticStreamParser<S> {
         });
     }
 
-    fn handle_message(&mut self, msg: GeminiMessage, raw_kind: &str, raw: Value) {
+    fn handle_message(&mut self, msg: GeminiMessage, raw_kind: &str, _raw: Value) {
         if msg.role.as_deref() != Some("assistant") {
-            // Non-assistant messages (user, system) are preserved but do not
-            // flow through OutputText.
-            self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-                provider: Provider::Gemini,
-                kind: "message.non_assistant".into(),
-                payload: raw,
-            });
+            // Gemini replays the operator's own prompt (role=user) and
+            // occasional system messages back into the stream. These are
+            // always noise on stderr, so drop silently here. Fidelity is
+            // preserved via the raw JSONL log path, which writes each raw
+            // line independently of the semantic event surface.
             return;
         }
         let Some(text) = msg.resolved_text() else {
@@ -424,16 +422,42 @@ mod tests {
     }
 
     #[test]
-    fn user_message_becomes_provider_extension() {
+    fn gemini_non_assistant_message_emits_no_provider_extension() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(r#"{"type":"message","role":"user","content":"question"}"#)
+            .feed_line(
+                r#"{"type":"message","content":"Hi how are you?","role":"user","timestamp":"2026-04-14T00:00:00Z"}"#,
+            )
             .unwrap();
-        let collected = events.lock().unwrap().clone();
-        assert!(matches!(
-            collected[0],
-            SemanticEvent::ProviderExtension { ref kind, .. } if kind == "message.non_assistant"
-        ));
+
+        let captured = events.lock().unwrap().clone();
+        assert!(
+            !captured.iter().any(|e| matches!(
+                e,
+                SemanticEvent::ProviderExtension { kind, .. } if kind == "message.non_assistant"
+            )),
+            "non-assistant messages must be dropped silently, got {captured:?}"
+        );
+        assert!(
+            captured.is_empty(),
+            "no semantic events should be emitted for user-role messages, got {captured:?}"
+        );
+    }
+
+    #[test]
+    fn gemini_assistant_message_still_routes_to_output_text() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"message","content":"response text","role":"assistant"}"#)
+            .unwrap();
+
+        let captured = events.lock().unwrap().clone();
+        assert!(
+            captured
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::OutputText { .. })),
+            "assistant message must still route to OutputText"
+        );
     }
 
     #[test]

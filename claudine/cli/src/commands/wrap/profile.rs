@@ -1536,9 +1536,26 @@ impl WrapperProfile for OpencodeWrapper {
         args.push("json".to_string());
     }
 
+    fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
+        opencode_default_tui_noise_prefixes()
+    }
+
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
         PromptArgConventions::positional_after("run")
     }
+}
+
+/// The default-mode TUI formatter lines that OpenCode keeps emitting to
+/// stderr even when `--format json` is set. Suppressed when wrapping
+/// OpenCode so the NDJSON stream on stdout is the only visible output
+/// surface.
+pub(crate) fn opencode_default_tui_noise_prefixes() -> &'static [&'static str] {
+    &[
+        "\u{2731} ",                          // ✱  — bullet used for Glob/Grep/Read status lines
+        "$ ",                                 // bare shell command echo lines
+        "> build ",                           // session banner
+        "\u{2588}\u{2588}\u{2588}\u{2588} ", // ████  — subheader marker
+    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -1972,6 +1989,37 @@ mod tests {
         let error = p.reject_direct_yolo(&args).unwrap_err();
         assert!(error.to_string().contains("do not pass"));
         assert!(error.to_string().contains("--approval-mode yolo"));
+    }
+
+    #[test]
+    fn opencode_noise_prefixes_cover_captured_symptoms() {
+        let noise = opencode_default_tui_noise_prefixes();
+
+        // Representative lines taken verbatim from
+        // claudine/claudine-output/opencode.err (2026-04-14 capture).
+        let symptoms = [
+            r#"✱ Glob "**/claudine/**/improved-sequences/**" 2 matches"#,
+            r#"$ cd /tmp && git log --all --oneline"#,
+            r#"> build · MiniMax-M2.7-highspeed"#,
+            r#"████ Subprocess hygiene"#,
+        ];
+
+        for line in symptoms {
+            assert!(
+                noise.iter().any(|p| line.starts_with(p)),
+                "noise prefixes must match representative line: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn opencode_profile_advertises_default_tui_noise_prefixes() {
+        let profile = profile(Provider::OpenCode);
+        let prefixes: &[&str] = profile.stderr_noise_prefixes();
+        assert!(
+            prefixes.contains(&"\u{2731} "),
+            "OpenCode profile must expose the default TUI noise prefixes; got {prefixes:?}"
+        );
     }
 
     #[test]
