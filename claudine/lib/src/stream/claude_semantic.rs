@@ -1,9 +1,7 @@
 //! Native [`SemanticStreamParser`] implementation for Claude Code's
 //! `stream-json` format.
 //!
-//! Unlike the legacy [`super::claude::ClaudeStreamParser`], which funnels
-//! events through the [`super::parser::StreamEventSink`] callback matrix,
-//! this parser emits typed [`SemanticEvent`]s directly:
+//! This parser emits typed [`SemanticEvent`]s directly:
 //!
 //! - Assistant text deltas → [`SemanticEvent::OutputText`].
 //! - Thinking deltas → [`SemanticEvent::Reasoning`].

@@ -974,7 +974,7 @@ pub(crate) type SemanticParserBuilder = Box<
 ///
 /// This is the Phase 3.4 replacement for [`run_child_stream`]. The
 /// difference is the stdout loop: instead of switching on a returned
-/// `StreamChunk`, the parser drives a [`SemanticEventSink`] that the
+/// [`SemanticEvent`]s, the parser drives a [`SemanticEventSink`] that the
 /// caller has already wired up for status rendering, dispatch, metrics,
 /// and JSONL logging. This function's only rendering responsibility is
 /// wiring the terminal-local `StreamTextRenderer` /

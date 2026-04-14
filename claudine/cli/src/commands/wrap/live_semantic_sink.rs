@@ -13,9 +13,7 @@
 //!    hooks.
 //! 4. The `StructuredSummaryDetails` tool-name rollup.
 //!
-//! This sink is the forward-looking replacement for
-//! [`super::LiveStreamSink`]. Its behavior on the wire mirrors the legacy
-//! sink for tool-call / tool-result / session-start, but it adds:
+//! This sink is the primary CLI-side consumer of semantic events. It adds:
 //!
 //! - Arrow prefixes: `→ <tool>` for start, `← <tool>` for completion; same
 //!   for subagents using [`StatusState::Subagent`].
@@ -26,10 +24,8 @@
 //!   callback hook so tests can verify ordering without pulling in the full
 //!   [`StreamOutput`](super::stream_io::StreamOutput) surface).
 //!
-//! Wiring this sink into `exec.rs`, `composition.rs`, and `sequence.rs` is
-//! intentionally deferred to the Phase 3.4–3.6 migration steps. The sink
-//! itself (Phase 3.3) is landable stand-alone and covered by its own unit
-//! tests.
+//! This sink is wired into `exec.rs`, `composition.rs`, and `sequence.rs`
+//! as the primary stream event consumer.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -137,7 +133,7 @@ impl LiveSemanticSink {
         }
     }
 
-    /// Convenience constructor that mirrors `LiveStreamSink::new` for the
+    /// Convenience constructor for the wrapped-provider call sites
     /// wrapped-provider call sites in `wrap/mod.rs`. Builds a Tokio-based
     /// dispatch closure, an emit_stderr closure backed by
     /// [`StreamOutput::emit_stderr_line`], and a best-effort JSONL logger
@@ -322,7 +318,7 @@ impl LiveSemanticSink {
     /// Emit the agent's session ID to stderr unconditionally (unless already
     /// emitted). This is operational tracking info that must always be
     /// visible regardless of --quiet or --silent, matching the legacy
-    /// `LiveStreamSink` contract.
+        /// contract.
     fn emit_agent_session_id(&mut self) {
         if self.start_emitted {
             return;
@@ -909,5 +905,186 @@ mod tests {
         });
         let state = metrics.lock().unwrap();
         assert_eq!(state.in_flight.len(), 1);
+    }
+
+    mod golden_stderr {
+        use super::*;
+        use claudine::stream::{create_semantic_parser, ParserConfig};
+
+        fn replay_to_stderr(
+            provider: Provider,
+            fixture: &[&str],
+            model: Option<String>,
+        ) -> Vec<String> {
+            let captured: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+            let dispatched: Arc<StdMutex<Vec<(AgenticEvent, String)>>> =
+                Arc::new(StdMutex::new(Vec::new()));
+
+            let dispatch = {
+                let cap = dispatched.clone();
+                Box::new(move |ev: AgenticEvent, _meta: DispatchEventMeta| {
+                    cap.lock().unwrap().push((ev, String::new()));
+                }) as Box<dyn Fn(AgenticEvent, DispatchEventMeta) + Send + Sync + 'static>
+            };
+            let emit = {
+                let cap = captured.clone();
+                Box::new(move |line: &str| {
+                    cap.lock().unwrap().push(line.to_string());
+                }) as Box<dyn Fn(&str) + Send + Sync + 'static>
+            };
+
+            let mut sink = LiveSemanticSink::new(
+                provider,
+                EnvironmentContext::default(),
+                Path::new("/tmp"),
+                Verbosity::Normal,
+                Arc::new(Mutex::new(StructuredSummaryDetails::default())),
+                dispatch,
+                emit,
+            );
+
+            struct Rec {
+                events: Arc<StdMutex<Vec<SemanticEvent>>>,
+            }
+            impl SemanticEventSink for Rec {
+                fn on_semantic_event(&mut self, event: SemanticEvent) {
+                    self.events.lock().unwrap().push(event);
+                }
+            }
+
+            let inner = Arc::new(StdMutex::new(Vec::new()));
+            let parser_sink = Rec {
+                events: inner.clone(),
+            };
+            let config = ParserConfig { model };
+            let mut parser = create_semantic_parser(provider, parser_sink, config);
+            for line in fixture {
+                parser.feed_line(line).unwrap();
+            }
+            drop(parser);
+
+            let events = inner.lock().unwrap().clone();
+            for event in events {
+                sink.on_semantic_event(event);
+            }
+
+            captured.lock().unwrap().clone()
+        }
+
+        #[test]
+        fn claude_stderr_snapshot() {
+            let lines = replay_to_stderr(Provider::Claude, &[
+                r#"{"type":"init","session_id":"s1","model":"claude-sonnet-4"}"#,
+                r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls -la"}}"#,
+                r#"{"type":"tool_result","tool_use_id":"t1","content":"file.txt"}"#,
+                r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#,
+                r#"{"type":"task_progress","message":"working"}"#,
+                r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#,
+                r#"{"type":"rate_limit_event","is_throttled":true,"retry_after_ms":5000,"message":"Rate limited"}"#,
+                r#"{"type":"some_future_event","x":1}"#,
+            ], None);
+            assert!(!lines.is_empty());
+            let joined = lines.join("\n");
+            assert!(joined.contains('\u{2192}'), "expected → arrow: {joined:?}");
+            assert!(joined.contains('\u{2190}'), "expected ← arrow: {joined:?}");
+            assert!(joined.contains("bash"));
+            assert!(joined.contains("researcher"));
+            assert!(joined.contains("Rate limited"));
+            assert!(joined.contains("claude/some_future_event"));
+        }
+
+        #[test]
+        fn codex_stderr_snapshot() {
+            let lines = replay_to_stderr(Provider::Codex, &[
+                r#"{"type":"thread.started","thread_id":"th-1"}"#,
+                r#"{"type":"item.started","item":{"id":"cmd1","type":"command_exec","tool_name":"bash","input":{"command":"ls"}}}"#,
+                r#"{"type":"item.completed","item":{"id":"cmd1","type":"command_exec","status":"success","exit_code":0,"output":"file.txt"}}"#,
+                r#"{"type":"item.completed","item":{"id":"f1","type":"file_change","path":"src/lib.rs","change_kind":"modified"}}"#,
+                r#"{"type":"item.completed","item":{"id":"p1","type":"plan_update","message":"Step 2"}}"#,
+                r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
+                r#"{"type":"future.unknown","payload":{"k":1}}"#,
+            ], Some("codex-mini".into()));
+            assert!(!lines.is_empty());
+            let joined = lines.join("\n");
+            assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
+            assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
+            assert!(joined.contains("bash"));
+            assert!(joined.contains("modified src/lib.rs"));
+            assert!(joined.contains("Step 2"));
+            assert!(joined.contains("Too many requests"));
+            assert!(joined.contains("codex/future.unknown"));
+        }
+
+        #[test]
+        fn gemini_stderr_snapshot() {
+            let lines = replay_to_stderr(Provider::Gemini, &[
+                r#"{"type":"init","session_id":"g1","model":"gemini-2.5-pro"}"#,
+                r#"{"type":"tool_use","tool_id":"t1","tool_name":"search","parameters":{"q":"rust"}}"#,
+                r#"{"type":"tool_result","tool_id":"t1","status":"success","output":{"hits":3}}"#,
+                r#"{"type":"error","severity":"warning","message":"Loop detected"}"#,
+                r#"{"type":"some_unknown","data":"x"}"#,
+            ], None);
+            assert!(!lines.is_empty());
+            let joined = lines.join("\n");
+            assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
+            assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
+            assert!(joined.contains("search"));
+            assert!(joined.contains("Loop detected"));
+            assert!(joined.contains("gemini/some_unknown"));
+        }
+
+        #[test]
+        fn kimi_stderr_snapshot() {
+            let lines = replay_to_stderr(Provider::KimiCode, &[
+                r#"{"type":"init","session_id":"k1","model":"kimi-coder"}"#,
+                r#"{"type":"tool_use","id":"k1","name":"bash","input":{"cmd":"ls"}}"#,
+                r#"{"type":"tool_result","tool_use_id":"k1","status":"success","content":"ok"}"#,
+                r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#,
+                r#"{"type":"future.unknown"}"#,
+            ], None);
+            assert!(!lines.is_empty());
+            let joined = lines.join("\n");
+            assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
+            assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
+            assert!(joined.contains("bash"));
+            assert!(joined.contains("slow down"));
+            assert!(joined.contains("kimi/future.unknown"));
+        }
+
+        #[test]
+        fn opencode_stderr_snapshot() {
+            let lines = replay_to_stderr(Provider::OpenCode, &[
+                r#"{"type":"step_start","sessionID":"ses_1"}"#,
+                r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"cmd":"ls"}}}"#,
+                r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
+                r#"{"type":"error","error_message":"API timeout"}"#,
+                r#"{"type":"some_future_event","x":1}"#,
+            ], Some("gpt-4o".into()));
+            assert!(!lines.is_empty());
+            let joined = lines.join("\n");
+            assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
+            assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
+            assert!(joined.contains("bash"));
+            assert!(joined.contains("API timeout"));
+            assert!(joined.contains("opencode/some_future_event"));
+        }
+
+        #[test]
+        fn qwen_stderr_snapshot() {
+            let lines = replay_to_stderr(Provider::QwenCode, &[
+                r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#,
+                r#"{"type":"tool_call","id":"q1","name":"bash","input":{"command":"git status"}}"#,
+                r#"{"type":"tool_response","tool_use_id":"q1","status":"success","content":"clean"}"#,
+                r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#,
+                r#"{"type":"something.new"}"#,
+            ], None);
+            assert!(!lines.is_empty());
+            let joined = lines.join("\n");
+            assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
+            assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
+            assert!(joined.contains("bash"));
+            assert!(joined.contains("slow down"));
+            assert!(joined.contains("qwen/something.new"));
+        }
     }
 }
