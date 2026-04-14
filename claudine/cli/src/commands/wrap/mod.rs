@@ -2640,6 +2640,10 @@ pub(crate) fn run_harness_loop(
         let outcome = outcome?;
 
         if outcome.termination == claudine::harness::ProcessTermination::Interrupted {
+            // Surface the interrupt to the user before we let the guard
+            // close: without this the wrapper would silently return 130
+            // and the operator has no feedback that Claudine noticed.
+            eprintln!("{}", crate::output::format_user_interrupt_status());
             guard.emit_terminal(LifecycleSignal::Failure);
             return Ok(outcome.exit_code);
         }
