@@ -686,11 +686,12 @@ fn summarize_provider_payload(payload: &Value) -> Option<String> {
 const SILENT_PROVIDER_EXTENSION_KINDS: &[(Provider, &str)] = &[
     // Claude: partial assistant token deltas — redundant with OutputText.
     (Provider::Claude, "stream_event"),
-    // Claude: hook lifecycle is already surfaced via dedicated Info /
-    // semantic events in the Plan 2 parser work.
-    (Provider::Claude, "hook_started"),
-    (Provider::Claude, "hook_response"),
-    (Provider::Claude, "hook_progress"),
+    // Claude: hook lifecycle events. Claude parser (Task 2a.2) emits
+    // these as ProviderExtension with kind `system/<subtype>` after
+    // buffering them to trail SessionStart.
+    (Provider::Claude, "system/hook_started"),
+    (Provider::Claude, "system/hook_response"),
+    (Provider::Claude, "system/hook_progress"),
 ];
 
 fn is_silent_extension_kind(provider: Provider, kind: &str) -> bool {
@@ -1200,6 +1201,28 @@ mod tests {
             !rendered.contains("claude/stream_event"),
             "silent-kind allowlist must suppress the status line entirely: {rendered}"
         );
+    }
+
+    #[test]
+    fn provider_extension_claude_system_hook_kinds_are_silent() {
+        // Task 2a.2 parser emits hook events with kinds `system/hook_started`,
+        // `system/hook_response`, `system/hook_progress`. The sink allowlist
+        // must suppress all three so subscription users don't see hook noise.
+        for kind in ["system/hook_started", "system/hook_response", "system/hook_progress"] {
+            let lines = Arc::new(StdMutex::new(Vec::new()));
+            let dispatched = Arc::new(StdMutex::new(Vec::new()));
+            let mut sink = make_sink(lines.clone(), dispatched.clone());
+            sink.on_semantic_event(SemanticEvent::ProviderExtension {
+                provider: Provider::Claude,
+                kind: kind.into(),
+                payload: json!({"hook_name": "SessionStart:startup"}),
+            });
+            let rendered = lines.lock().unwrap().join("\n");
+            assert!(
+                !rendered.contains(&format!("claude/{kind}")),
+                "kind {kind:?} must be suppressed: {rendered}"
+            );
+        }
     }
 
     #[test]
