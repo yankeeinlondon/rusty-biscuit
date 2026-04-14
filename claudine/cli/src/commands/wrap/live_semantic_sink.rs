@@ -281,9 +281,13 @@ impl LiveSemanticSink {
         name: &Option<String>,
         status: &Option<String>,
         exit_code: Option<i32>,
+        input: Option<&Value>,
     ) -> String {
         let name_part = name.as_deref().unwrap_or("(tool)");
         let mut parts = vec![format!("\u{2190} {name_part}")];
+        if let Some(summary) = input.and_then(summarize_input) {
+            parts.push(summary);
+        }
         if let Some(code) = exit_code {
             parts.push(format!("exit {code}"));
         } else if let Some(s) = status {
@@ -396,11 +400,13 @@ impl LiveSemanticSink {
                 name,
                 status,
                 exit_code,
+                extra,
                 ..
             } => {
+                let input = extra.get("input");
                 self.render_status(
                     StatusState::ToolUse,
-                    Self::tool_result_description(name, status, *exit_code),
+                    Self::tool_result_description(name, status, *exit_code, input),
                 );
             }
             SemanticEvent::SubagentStart { name, .. } => {
@@ -644,6 +650,32 @@ mod tests {
         assert!(rendered.contains('\u{2190}'));
         assert!(rendered.contains("bash"));
         assert!(rendered.contains("exit 1"));
+    }
+
+    #[test]
+    fn tool_result_renders_input_summary_when_extra_input_present() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("bash".into()),
+            id: Some("t1".into()),
+            status: Some("completed".into()),
+            exit_code: None,
+            output: None,
+            extra: json!({ "input": { "command": "ls -la" } }),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(rendered.contains('\u{2190}'), "expected ← arrow");
+        assert!(rendered.contains("bash"), "expected tool name");
+        assert!(
+            rendered.contains("ls -la"),
+            "expected input preview on the completion line: {rendered:?}"
+        );
+        assert!(
+            rendered.contains("completed"),
+            "expected status label: {rendered:?}"
+        );
     }
 
     #[test]
