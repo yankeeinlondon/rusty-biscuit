@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::stream::semantic::SemanticEvent;
+
 /// Direction of a tool event from the assistant's perspective.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -236,5 +238,124 @@ mod summary_tests {
     fn returns_none_for_object_with_no_strings() {
         let input = json!({"a": 1, "b": [1,2]});
         assert!(extract_tool_summary("custom_unknown", &input).is_none());
+    }
+}
+
+impl ToolCallDisplay {
+    /// Build an outgoing display from a `SemanticEvent::ToolCall`. Returns
+    /// `None` for non-matching variants.
+    pub fn from_call(event: &SemanticEvent) -> Option<Self> {
+        let SemanticEvent::ToolCall { name, input, .. } = event else {
+            return None;
+        };
+        let raw_name = name.as_deref().unwrap_or("");
+        let display_name = if raw_name.is_empty() {
+            "(tool)".into()
+        } else {
+            humanize_tool_name(raw_name)
+        };
+        let summary = input
+            .as_ref()
+            .and_then(|v| extract_tool_summary(raw_name, v));
+        Some(Self {
+            direction: ToolDirection::Outgoing,
+            display_name,
+            summary,
+            status: None,
+        })
+    }
+
+    /// Build an incoming display from a `SemanticEvent::ToolResult`. Per
+    /// spec: status always wins over summary in the dim slot when present;
+    /// summary is consulted as a fallback only when status is absent.
+    pub fn from_result(event: &SemanticEvent) -> Option<Self> {
+        let SemanticEvent::ToolResult {
+            name,
+            status,
+            output,
+            extra,
+            ..
+        } = event
+        else {
+            return None;
+        };
+        let raw_name = name.as_deref().unwrap_or("");
+        let display_name = if raw_name.is_empty() {
+            "(tool)".into()
+        } else {
+            humanize_tool_name(raw_name)
+        };
+        let parsed_status = status.as_deref().and_then(|s| match s {
+            "success" | "completed" | "ok" => Some(ToolStatus::Success),
+            "error" | "failure" | "failed" => Some(ToolStatus::Error),
+            "pending" | "running" | "in_progress" => Some(ToolStatus::Pending),
+            _ => None,
+        });
+        let summary = if parsed_status.is_some() {
+            None
+        } else {
+            // Status absent: fall back to a derived output summary.
+            output
+                .as_ref()
+                .or_else(|| extra.get("input"))
+                .and_then(|v| extract_tool_summary(raw_name, v))
+        };
+        Some(Self {
+            direction: ToolDirection::Incoming,
+            display_name,
+            summary,
+            status: parsed_status,
+        })
+    }
+}
+
+#[cfg(test)]
+mod from_event_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn from_call_humanizes_and_extracts_query() {
+        let event = SemanticEvent::ToolCall {
+            name: Some("firecrawl_firecrawl_search".into()),
+            id: None,
+            input: Some(json!({"query": "NFL"})),
+            extra: json!({}),
+        };
+        let display = ToolCallDisplay::from_call(&event).unwrap();
+        assert_eq!(display.direction, ToolDirection::Outgoing);
+        assert_eq!(display.display_name, "Firecrawl Search");
+        assert_eq!(display.summary.as_deref(), Some("NFL"));
+        assert!(display.status.is_none());
+    }
+
+    #[test]
+    fn from_result_uses_status_and_drops_summary_when_status_present() {
+        let event = SemanticEvent::ToolResult {
+            name: Some("Bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: None,
+            output: Some(json!({"stdout": "ok"})),
+            extra: json!({}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        assert_eq!(display.status, Some(ToolStatus::Success));
+        assert!(display.summary.is_none(), "status wins over summary");
+    }
+
+    #[test]
+    fn from_result_falls_back_to_summary_when_status_absent() {
+        let event = SemanticEvent::ToolResult {
+            name: Some("Bash".into()),
+            id: None,
+            status: None,
+            exit_code: None,
+            output: Some(json!({"command": "ls"})),
+            extra: json!({}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        assert!(display.status.is_none());
+        assert_eq!(display.summary.as_deref(), Some("ls"));
     }
 }
