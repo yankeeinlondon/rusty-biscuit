@@ -722,4 +722,40 @@ mod tests {
         assert_eq!(name.as_deref(), Some("bash"));
         assert_eq!(status.as_deref(), Some("completed"));
     }
+
+    #[test]
+    fn assistant_text_in_part_text_shape_emits_output_text() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/providers/opencode-assistant-text.ndjson");
+        let raw = std::fs::read_to_string(&path).expect("fixture exists");
+        let (events, mut parser) = new_parser();
+        for line in raw.lines() {
+            parser.feed_line(line).unwrap();
+        }
+        let has_non_empty_output_text = events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, SemanticEvent::OutputText { text, .. } if !text.is_empty()));
+        assert!(
+            has_non_empty_output_text,
+            "fixture must cause at least one non-empty OutputText emission"
+        );
+
+        // Also assert that the assistant_text field was accumulated by
+        // the parser (so the summary reflects it).
+        let summary_text: String = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                SemanticEvent::OutputText { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !summary_text.is_empty(),
+            "concatenated OutputText must be non-empty"
+        );
+    }
 }
