@@ -1,8 +1,8 @@
-// This module is the forward-looking CLI sink. Its call-site wiring (in
-// `exec.rs`, `composition.rs`, `sequence.rs`) is deferred to the Phase 3.3
-// migration step; until then the binary doesn't construct it, so the
-// per-item dead-code lints would be noisy. Tests still exercise every
-// public surface.
+// This module is the forward-looking CLI sink. Phase 3.3 builds the sink
+// itself (covered by unit tests); call-site wiring in `exec.rs`,
+// `composition.rs`, and `sequence.rs` lands in Phase 3.4–3.5. Until then
+// the binary doesn't construct it, so the per-item dead-code lints would
+// be noisy.
 #![allow(dead_code)]
 
 //! [`LiveSemanticSink`] — a CLI-side sink that consumes [`SemanticEvent`]s
@@ -30,8 +30,9 @@
 //!   [`StreamOutput`](super::stream_io::StreamOutput) surface).
 //!
 //! Wiring this sink into `exec.rs`, `composition.rs`, and `sequence.rs` is
-//! intentionally deferred to the Phase 3.3–3.6 migration step. The module is
-//! landable stand-alone and covered by its own unit tests.
+//! intentionally deferred to the Phase 3.4–3.6 migration steps. The sink
+//! itself (Phase 3.3) is landable stand-alone and covered by its own unit
+//! tests.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -49,6 +50,7 @@ use claudine::stream::stderr::Verbosity;
 use serde_json::Value;
 
 use super::StructuredSummaryDetails;
+use super::stream_io::StreamOutput;
 
 /// Borrow-friendly terminal used for status rendering. Mirrors the helper in
 /// `wrap/mod.rs` so both sinks render against the same capabilities.
@@ -75,6 +77,20 @@ pub(crate) type OutputTextFn = Box<dyn FnMut(&str) + Send + 'static>;
 /// stderr renderer (dimmed + italic).
 pub(crate) type ReasoningFn = Box<dyn FnMut(&str) + Send + 'static>;
 
+/// Function type for recording a semantic event to the JSONL stream log.
+///
+/// The sink constructs a [`DispatchEventMeta`] via
+/// [`claudine::stream::reporting::semantic_event_to_event_meta`] and passes it
+/// to the logger alongside the original semantic event so writers can choose
+/// between the flattened `EventMeta` shape (the default JSONL format) and the
+/// raw semantic-event JSON embedded under `extra["semantic_event"]`.
+///
+/// Wiring (in Phase 3.4) typically points this at
+/// [`claudine::stream::reporting::write_summary_event`] as a best-effort
+/// append-only writer.
+pub(crate) type SemanticEventLoggerFn =
+    Box<dyn Fn(&SemanticEvent, &DispatchEventMeta) + Send + Sync + 'static>;
+
 pub(crate) struct LiveSemanticSink {
     provider: Provider,
     env: EnvironmentContext,
@@ -82,13 +98,16 @@ pub(crate) struct LiveSemanticSink {
     verbosity: Verbosity,
     session_id: Option<String>,
     model: Option<String>,
+    start_emitted: bool,
     summary_details: Arc<Mutex<StructuredSummaryDetails>>,
     context_extra: HashMap<String, Value>,
     dispatch: SemanticDispatchFn,
     emit_stderr: StderrEmitFn,
     emit_output_text: Option<OutputTextFn>,
     emit_reasoning: Option<ReasoningFn>,
+    emit_event_log: Option<SemanticEventLoggerFn>,
     live_metrics: LiveMetrics,
+    stream_output: Arc<StreamOutput>,
 }
 
 impl LiveSemanticSink {
@@ -108,14 +127,98 @@ impl LiveSemanticSink {
             verbosity,
             session_id: None,
             model: None,
+            start_emitted: false,
             summary_details,
             context_extra: HashMap::new(),
             dispatch,
             emit_stderr,
             emit_output_text: None,
             emit_reasoning: None,
+            emit_event_log: None,
             live_metrics: progress::new_live_metrics(),
+            stream_output: StreamOutput::new(),
         }
+    }
+
+    /// Convenience constructor that mirrors `LiveStreamSink::new` for the
+    /// wrapped-provider call sites in `wrap/mod.rs`. Builds a Tokio-based
+    /// dispatch closure, an emit_stderr closure backed by
+    /// [`StreamOutput::emit_stderr_line`], and a best-effort JSONL logger
+    /// pointing at [`claudine::stream::reporting::write_summary_event`].
+    pub(crate) fn with_default_wiring(
+        provider: Provider,
+        env: EnvironmentContext,
+        cwd: &Path,
+        verbosity: Verbosity,
+        summary_details: Arc<Mutex<StructuredSummaryDetails>>,
+    ) -> Self {
+        let handle = tokio::runtime::Handle::try_current().ok();
+        let runtime_context = match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                tracing::warn!(%provider, "failed to preload wrapper runtime config: {error}");
+                claudine::dispatch::DispatchRuntimeContext::default()
+            }
+        };
+        let stream_output = StreamOutput::new();
+
+        let dispatch: SemanticDispatchFn = {
+            let runtime_context = runtime_context;
+            Box::new(move |event, meta| {
+                if let Some(handle) = handle.as_ref()
+                    && let Err(error) = handle.block_on(
+                        claudine::dispatch::dispatch_event_meta_with_runtime(
+                            provider,
+                            event,
+                            meta,
+                            &runtime_context,
+                        ),
+                    )
+                {
+                    tracing::warn!(%provider, %event, "live semantic dispatch failed: {error}");
+                }
+            })
+        };
+
+        let emit_stderr: StderrEmitFn = {
+            let output = stream_output.clone();
+            Box::new(move |line: &str| {
+                output.emit_stderr_line(line);
+            })
+        };
+
+        let event_logger: SemanticEventLoggerFn = Box::new(
+            move |_event: &SemanticEvent, meta: &DispatchEventMeta| {
+                if let Err(error) = claudine::stream::reporting::write_summary_event(meta) {
+                    tracing::debug!(%provider, "semantic event log write failed: {error}");
+                }
+            },
+        );
+
+        Self {
+            provider,
+            env,
+            cwd: cwd.to_path_buf(),
+            verbosity,
+            session_id: None,
+            model: None,
+            start_emitted: false,
+            summary_details,
+            context_extra: HashMap::new(),
+            dispatch,
+            emit_stderr,
+            emit_output_text: None,
+            emit_reasoning: None,
+            emit_event_log: Some(event_logger),
+            live_metrics: progress::new_live_metrics(),
+            stream_output,
+        }
+    }
+
+    /// Clone the shared stream-output coordinator so callers can share it
+    /// with the heartbeat thread and stdout renderer in `exec.rs`.
+    pub(crate) fn stream_output(&self) -> Arc<StreamOutput> {
+        self.stream_output.clone()
     }
 
     pub(crate) fn with_context_extra(
@@ -139,6 +242,17 @@ impl LiveSemanticSink {
     /// [`SemanticEvent::Reasoning`].
     pub(crate) fn with_reasoning_sink(mut self, emit: ReasoningFn) -> Self {
         self.emit_reasoning = Some(emit);
+        self
+    }
+
+    /// Wire a JSONL logger invoked for every [`SemanticEvent`] the sink
+    /// receives. Typical wiring points this at
+    /// [`claudine::stream::reporting::write_summary_event`] with best-effort
+    /// error swallowing; the callback receives both the raw semantic event
+    /// and the derived [`DispatchEventMeta`] so richer writers can pick the
+    /// shape that best suits their storage.
+    pub(crate) fn with_event_logger(mut self, emit: SemanticEventLoggerFn) -> Self {
+        self.emit_event_log = Some(emit);
         self
     }
 
@@ -205,6 +319,28 @@ impl LiveSemanticSink {
         if let Some(m) = model {
             self.model = Some(m.clone());
         }
+        self.emit_agent_session_id();
+    }
+
+    /// Emit the agent's session ID to stderr unconditionally (unless already
+    /// emitted). This is operational tracking info that must always be
+    /// visible regardless of --quiet or --silent, matching the legacy
+    /// `LiveStreamSink` contract.
+    fn emit_agent_session_id(&mut self) {
+        if self.start_emitted {
+            return;
+        }
+        let Some(session_id) = self.session_id.as_deref() else {
+            return;
+        };
+        let line = crate::output::format_session_start(
+            self.provider,
+            session_id,
+            self.model.as_deref(),
+        );
+        self.stream_output.emit_stderr_line(&line);
+        self.stream_output.emit_stderr_line("");
+        self.start_emitted = true;
     }
 
     /// Map a [`SemanticEvent`] to the higher-level [`AgenticEvent`] used by
@@ -302,7 +438,14 @@ impl LiveSemanticSink {
                 self.render_status(StatusState::Info, message.clone());
             }
             SemanticEvent::Warning { message, .. } => {
-                self.render_status(StatusState::Warning, message.clone());
+                // Suppress noisy malformed-line warnings on stderr — these
+                // are common when providers mix non-JSON output into the
+                // stream (Gemini hook logs, stack traces, etc.) and the
+                // semantic parser surfaces them as Warning events per the
+                // Phase 2 policy. Still dispatched and logged.
+                if !message.starts_with("Malformed JSON on line ") {
+                    self.render_status(StatusState::Warning, message.clone());
+                }
             }
             SemanticEvent::Error { message, .. } => {
                 self.render_status(StatusState::Failure, message.clone());
@@ -372,9 +515,19 @@ impl SemanticEventSink for LiveSemanticSink {
         // 5. Render status line to STDERR.
         self.render_event(&event);
 
-        // 6. Dispatch to agentic hooks when applicable.
-        if let Some(agentic) = Self::to_agentic(&event) {
-            let meta = self.dispatch_meta(&event, agentic);
+        // 6. Dispatch to agentic hooks when applicable, and log the
+        //    resulting `DispatchEventMeta` to JSONL when a logger is wired.
+        //    The logger always sees every event (even Output/Reasoning which
+        //    have no agentic mapping); we build a Notification-shaped meta
+        //    for those so the JSONL row still carries the full serialized
+        //    semantic event under `extra["semantic_event"]`.
+        let agentic = Self::to_agentic(&event);
+        let log_agentic = agentic.unwrap_or(AgenticEvent::Notification);
+        let meta = self.dispatch_meta(&event, log_agentic);
+        if let Some(emit_log) = self.emit_event_log.as_ref() {
+            emit_log(&event, &meta);
+        }
+        if let Some(agentic) = agentic {
             (self.dispatch)(agentic, meta);
         }
     }
@@ -688,6 +841,61 @@ mod tests {
         // No status line should be emitted for OutputText, and no hook dispatch.
         assert!(lines.lock().unwrap().is_empty());
         assert!(dispatched.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn event_logger_records_every_event_with_full_payload() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let logged: Arc<StdMutex<Vec<(String, DispatchEventMeta)>>> =
+            Arc::new(StdMutex::new(Vec::new()));
+
+        let logger = {
+            let captured = logged.clone();
+            Box::new(move |event: &SemanticEvent, meta: &DispatchEventMeta| {
+                captured
+                    .lock()
+                    .unwrap()
+                    .push((event.kind_str().into(), meta.clone()));
+            })
+        };
+
+        let mut sink = make_sink(lines, dispatched).with_event_logger(logger);
+
+        // OutputText has no agentic mapping but should still be logged.
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "hello".into(),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("bash".into()),
+            id: Some("t1".into()),
+            input: Some(json!({"command": "ls"})),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::ProviderExtension {
+            provider: Provider::Codex,
+            kind: "item.updated".into(),
+            payload: json!({"message": "still working"}),
+        });
+
+        let collected = logged.lock().unwrap().clone();
+        let kinds: Vec<&str> = collected.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(kinds, vec!["output_text", "tool_call", "provider_extension"]);
+
+        // Every row must carry the full serialized semantic event under
+        // extra["semantic_event"] so JSONL readers can replay fidelity.
+        for (kind, meta) in &collected {
+            let sem = meta
+                .extra
+                .get("semantic_event")
+                .expect("semantic_event payload missing");
+            assert_eq!(sem["type"], *kind);
+            assert_eq!(
+                meta.extra.get("synthetic_kind"),
+                Some(&Value::String("stream_semantic_event".into()))
+            );
+        }
     }
 
     #[test]

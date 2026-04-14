@@ -11,8 +11,10 @@ use std::time::{Duration, Instant};
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
-use claudine::stream::parser::{StreamChunk, StreamParseError, StreamParser};
-use claudine::stream::progress::{self, LiveMetrics};
+use claudine::stream::parser::{
+    SemanticStreamParser, StreamChunk, StreamParseError, StreamParser,
+};
+use claudine::stream::progress::{self, HeartbeatPolicy, LiveMetrics};
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 use tracing::{Span, info_span};
@@ -901,6 +903,7 @@ pub(crate) fn run_child_stream(
         started_at,
         heartbeat_metrics,
         heartbeat_output,
+        HeartbeatPolicy::default(),
     );
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
@@ -1053,6 +1056,7 @@ fn spawn_progress_heartbeat(
     started_at: Instant,
     live_metrics: Option<LiveMetrics>,
     stream_output: Arc<StreamOutput>,
+    policy: HeartbeatPolicy,
 ) -> Option<(Arc<AtomicBool>, thread::JoinHandle<()>)> {
     if !enabled {
         return None;
@@ -1061,8 +1065,7 @@ fn spawn_progress_heartbeat(
     let done = Arc::new(AtomicBool::new(false));
     let done_flag = Arc::clone(&done);
     let handle = thread::spawn(move || {
-        let interval = Duration::from_secs(30);
-        let mut next_tick = started_at + interval;
+        let mut next_tick = started_at + policy.interval;
         let term = crate::log::terminal();
 
         while !done_flag.load(Ordering::Relaxed) {
@@ -1071,11 +1074,11 @@ fn spawn_progress_heartbeat(
                 emit_progress_heartbeat(
                     started_at,
                     live_metrics.as_ref(),
-                    interval,
+                    policy,
                     &term,
                     &stream_output,
                 );
-                next_tick += interval;
+                next_tick += policy.interval;
                 continue;
             }
 
@@ -1092,23 +1095,25 @@ fn spawn_progress_heartbeat(
 fn emit_progress_heartbeat(
     started_at: Instant,
     live_metrics: Option<&LiveMetrics>,
-    quiet_window: Duration,
+    policy: HeartbeatPolicy,
     term: &Terminal,
     stream_output: &StreamOutput,
 ) {
     let elapsed = started_at.elapsed();
     let now = Instant::now();
-    // After this much time since the last heartbeat, surface a tick regardless
-    // of ongoing tool/text activity. Keeps long-running busy streams visible.
-    let force_window = Duration::from_secs(120);
 
     let description = match live_metrics {
         Some(metrics) => {
             let Ok(mut state) = metrics.lock() else {
                 return;
             };
-            let desc =
-                progress::describe_heartbeat(&state, elapsed, now, quiet_window, force_window);
+            let desc = progress::describe_heartbeat(
+                &state,
+                elapsed,
+                now,
+                policy.silence_window,
+                policy.force_window,
+            );
             if desc.is_some() {
                 state.last_heartbeat_at = Some(now);
             }
@@ -1118,8 +1123,8 @@ fn emit_progress_heartbeat(
             &claudine::stream::progress::LiveMetricsState::default(),
             elapsed,
             now,
-            quiet_window,
-            force_window,
+            policy.silence_window,
+            policy.force_window,
         ),
     };
 
@@ -1292,6 +1297,273 @@ impl StreamParser for ErrorParser {
             ..Default::default()
         }
     }
+}
+
+impl SemanticStreamParser for ErrorParser {
+    fn feed_line(&mut self, _line: &str) -> std::result::Result<(), StreamParseError> {
+        Ok(())
+    }
+
+    fn finish(self: Box<Self>, _exit_code: i32) -> StreamExecutionSummary {
+        StreamExecutionSummary {
+            is_error: true,
+            error_kind: Some("parse_failure".into()),
+            error_message: Some("Stream parser thread panicked".into()),
+            exit_code: self.exit_code,
+            ..Default::default()
+        }
+    }
+}
+
+/// Callback type used by [`run_child_stream_semantic`] for assistant text.
+pub(crate) type OutputTextCallback = Box<dyn FnMut(&str) + Send + 'static>;
+
+/// Callback type used by [`run_child_stream_semantic`] for reasoning text.
+pub(crate) type ReasoningCallback = Box<dyn FnMut(&str) + Send + 'static>;
+
+/// Factory signature used by [`run_child_stream_semantic`] to construct the
+/// parser inside the stdout reader thread.
+///
+/// The caller receives two callbacks tied to terminal-thread-local renderers
+/// (stdout markdown for [`SemanticEvent::OutputText`] and dimmed stderr for
+/// [`SemanticEvent::Reasoning`]) and returns a fully-wired parser. The
+/// expected pattern is to attach the callbacks to a [`LiveSemanticSink`] via
+/// its `with_output_text_sink` / `with_reasoning_sink` builders, then call
+/// [`claudine::stream::create_semantic_parser`].
+///
+/// [`SemanticEvent::OutputText`]: claudine::stream::semantic::SemanticEvent::OutputText
+/// [`SemanticEvent::Reasoning`]: claudine::stream::semantic::SemanticEvent::Reasoning
+/// [`LiveSemanticSink`]: super::live_semantic_sink::LiveSemanticSink
+pub(crate) type SemanticParserBuilder = Box<
+    dyn FnOnce(OutputTextCallback, ReasoningCallback) -> Box<dyn SemanticStreamParser>
+        + Send
+        + 'static,
+>;
+
+/// Spawn a provider child process with structured semantic stream parsing.
+///
+/// This is the Phase 3.4 replacement for [`run_child_stream`]. The
+/// difference is the stdout loop: instead of switching on a returned
+/// `StreamChunk`, the parser drives a [`SemanticEventSink`] that the
+/// caller has already wired up for status rendering, dispatch, metrics,
+/// and JSONL logging. This function's only rendering responsibility is
+/// wiring the terminal-local `StreamTextRenderer` /
+/// `StreamThinkingRenderer` instances to the sink through the builder
+/// callback so they can run inside the parser thread.
+///
+/// [`SemanticEventSink`]: claudine::stream::semantic::SemanticEventSink
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_child_stream_semantic(
+    binary: &Path,
+    args: &[String],
+    env: &HashMap<OsString, OsString>,
+    cwd: &Path,
+    timeout: Option<u64>,
+    stderr_noise_prefixes: &[&str],
+    suppress_stderr_on_success: bool,
+    show_progress_heartbeat: bool,
+    stdin_seed: Option<&str>,
+    build_parser: SemanticParserBuilder,
+    child_spawned: &mut bool,
+    live_metrics: LiveMetrics,
+    stream_output: Arc<StreamOutput>,
+    heartbeat_policy: HeartbeatPolicy,
+) -> Result<ProcessResult<StreamExecutionSummary>> {
+    debug_assert!(env.contains_key(&OsString::from("PATH")));
+    debug_assert!(env.contains_key(&OsString::from("HOME")));
+
+    let needs_stdin_pipe = stdin_seed.is_some();
+    let started_at = Instant::now();
+
+    let mut command = Command::new(binary);
+    command
+        .args(args)
+        .env_clear()
+        .envs(env)
+        .current_dir(cwd)
+        .stdin(if needs_stdin_pipe {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+
+    let mut child = command.spawn()?;
+    *child_spawned = true;
+    Span::current().record("child_pid", tracing::field::display(child.id()));
+
+    let heartbeat_output = stream_output.clone();
+    let stdout_output = stream_output.clone();
+    let heartbeat = spawn_progress_heartbeat(
+        show_progress_heartbeat,
+        started_at,
+        Some(live_metrics),
+        heartbeat_output,
+        heartbeat_policy,
+    );
+
+    // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
+    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stream_span = Span::current();
+    let stdout_handle = thread::spawn(move || {
+        let _stream_guard = stream_span.enter();
+        let _parse_span = info_span!("stream_parse").entered();
+        let reader = BufReader::new(stdout_pipe);
+        let mut out = stdout_output.stdout_writer();
+
+        // Terminal-local renderers for OutputText (stdout markdown) and
+        // Reasoning (dimmed stderr). Wrapped in Arc<Mutex<_>> so the builder
+        // closures can retain independent handles without untangling lifetimes
+        // across the FnMut boundary of the sink's callback storage.
+        let text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
+            Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
+        let thinking_renderer: Arc<std::sync::Mutex<StreamThinkingRenderer>> =
+            Arc::new(std::sync::Mutex::new(StreamThinkingRenderer::new()));
+
+        let output_cb: OutputTextCallback = {
+            let text = text_renderer.clone();
+            let thinking = thinking_renderer.clone();
+            let mut writer = stdout_output.stdout_writer();
+            Box::new(move |chunk: &str| {
+                if let Ok(mut tr) = thinking.lock() {
+                    tr.flush_if_active();
+                }
+                if let Ok(mut r) = text.lock() {
+                    r.push(&mut writer, chunk);
+                }
+            })
+        };
+        let reasoning_cb: ReasoningCallback = {
+            let thinking = thinking_renderer.clone();
+            Box::new(move |chunk: &str| {
+                if let Ok(mut tr) = thinking.lock() {
+                    tr.push(chunk);
+                }
+            })
+        };
+
+        let mut parser: Box<dyn SemanticStreamParser> = build_parser(output_cb, reasoning_cb);
+        let mut fallback_mode = false;
+
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+
+            if fallback_mode {
+                let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
+                continue;
+            }
+
+            match parser.feed_line(&line) {
+                Ok(()) => {}
+                Err(StreamParseError::MalformedLine { .. }) => {
+                    // Semantic parsers emit Warning events instead of
+                    // returning MalformedLine, but guard the variant here
+                    // in case a legacy adapter still surfaces it.
+                    tracing::debug!("skipping malformed stream line: {line}");
+                }
+                Err(StreamParseError::Fatal(_)) => {
+                    if let Ok(mut tr) = thinking_renderer.lock() {
+                        tr.flush_if_active();
+                    }
+                    if let Ok(mut r) = text_renderer.lock() {
+                        r.flush_remaining(&mut out);
+                    }
+                    fallback_mode = true;
+                    let _ = writeln!(out, "{}", crate::log::maybe_strip(&line));
+                }
+            }
+        }
+
+        if let Ok(mut tr) = thinking_renderer.lock() {
+            tr.flush_if_active();
+        }
+        if let Ok(mut r) = text_renderer.lock() {
+            r.flush_remaining(&mut out);
+        }
+        parser
+    });
+
+    let pipe = child.stderr.take().expect("stderr was set to piped");
+    let prefixes: Vec<String> = stderr_noise_prefixes
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let plain = crate::log::is_plain();
+    let stderr_term = crate::log::terminal();
+    let stderr_span = Span::current();
+    let stderr_handle = thread::spawn(move || {
+        let _stderr_guard = stderr_span.enter();
+        let reader = BufReader::new(pipe);
+        let mut captured = String::new();
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
+                continue;
+            }
+            let formatted = crate::output::try_format_api_error(&line, &stderr_term);
+            let output_line = formatted.as_deref().unwrap_or(&line);
+            let output_line = if plain {
+                biscuit_terminal::prelude::strip_escape_codes(output_line)
+            } else {
+                output_line.to_string()
+            };
+
+            if suppress_stderr_on_success {
+                if !captured.is_empty() {
+                    captured.push('\n');
+                }
+                captured.push_str(&output_line);
+            } else {
+                let mut err = std::io::stderr().lock();
+                let _ = writeln!(err, "{output_line}");
+            }
+        }
+        captured
+    });
+
+    if let Some(seed) = stdin_seed
+        && let Some(mut stdin_pipe) = child.stdin.take()
+    {
+        stdin_pipe.write_all(seed.as_bytes())?;
+    }
+
+    let (exit_code, termination) = if let Some(seconds) = timeout {
+        wait_with_timeout(&mut child, seconds)?
+    } else {
+        wait_with_signal_handling(&mut child, true)?
+    };
+
+    kill_process_group(&mut child);
+    stop_progress_heartbeat(heartbeat);
+
+    let thread_join_timeout = Duration::from_secs(5);
+    let parser: Box<dyn SemanticStreamParser> = join_with_timeout_or(
+        stdout_handle,
+        thread_join_timeout,
+        Box::new(ErrorParser { exit_code }),
+    );
+
+    let captured = join_with_timeout_or(stderr_handle, thread_join_timeout, String::new());
+    if suppress_stderr_on_success && exit_code != 0 && !captured.is_empty() {
+        eprintln!("{captured}");
+    }
+
+    let mut summary = parser.finish(exit_code);
+    if summary.duration_ms.is_none() {
+        summary.duration_ms = Some(started_at.elapsed().as_millis() as u64);
+    }
+
+    Ok(ProcessResult {
+        data: summary,
+        termination,
+    })
 }
 
 fn exit_code_from_status(status: ExitStatus) -> i32 {

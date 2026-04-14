@@ -1647,7 +1647,7 @@ fn run_provider_wrapper_inner(
             let parser_config = claudine::stream::ParserConfig {
                 model: args.model.clone(),
             };
-            let sink = LiveStreamSink::new(
+            let sink = live_semantic_sink::LiveSemanticSink::with_default_wiring(
                 provider,
                 env_context.clone(),
                 child_cwd,
@@ -1657,9 +1657,16 @@ fn run_provider_wrapper_inner(
             .with_context_extra(dispatch_context.clone());
             let live_metrics = sink.live_metrics();
             let stream_output = sink.stream_output();
-            let parser = claudine::stream::create_parser(provider, sink, parser_config);
+            let build_parser: exec::SemanticParserBuilder = Box::new(
+                move |output_cb, reasoning_cb| {
+                    let sink = sink
+                        .with_output_text_sink(output_cb)
+                        .with_reasoning_sink(reasoning_cb);
+                    claudine::stream::create_semantic_parser(provider, sink, parser_config)
+                },
+            );
             let mut _spawned = false;
-            let stream_result = exec::run_child_stream(
+            let stream_result = exec::run_child_stream_semantic(
                 binary_path.as_path(),
                 &child_args,
                 &env_plan.env,
@@ -1669,10 +1676,11 @@ fn run_provider_wrapper_inner(
                 profile.suppress_structured_stderr_on_success(),
                 stream_verbosity != Verbosity::Silent,
                 stdin_seed.as_deref(),
-                parser,
+                build_parser,
                 &mut _spawned,
-                Some(live_metrics),
-                Some(stream_output),
+                live_metrics,
+                stream_output,
+                claudine::stream::progress::HeartbeatPolicy::default(),
             )?;
             let mut summary = stream_result.data;
             if let Some(codex_output) = structured_codex_output.as_ref() {
@@ -2071,7 +2079,7 @@ fn execute_harness_attempt(
     let (exit_code, termination, session_id, final_response, stderr_text) = if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig::default();
-        let sink = LiveStreamSink::new(
+        let sink = live_semantic_sink::LiveSemanticSink::with_default_wiring(
             provider,
             env_context.clone(),
             child_cwd,
@@ -2081,8 +2089,15 @@ fn execute_harness_attempt(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
-        let parser = claudine::stream::create_parser(provider, sink, parser_config);
-        let stream_result = exec::run_child_stream(
+        let build_parser: exec::SemanticParserBuilder = Box::new(
+            move |output_cb, reasoning_cb| {
+                let sink = sink
+                    .with_output_text_sink(output_cb)
+                    .with_reasoning_sink(reasoning_cb);
+                claudine::stream::create_semantic_parser(provider, sink, parser_config)
+            },
+        );
+        let stream_result = exec::run_child_stream_semantic(
             binary_path,
             &launch.args,
             &launch.env,
@@ -2092,10 +2107,11 @@ fn execute_harness_attempt(
             suppress_stderr_on_success,
             stream_verbosity != Verbosity::Silent,
             launch.stdin_seed.as_deref(),
-            parser,
+            build_parser,
             child_spawned,
-            Some(live_metrics),
-            Some(stream_output),
+            live_metrics,
+            stream_output,
+            claudine::stream::progress::HeartbeatPolicy::default(),
         )?;
         let termination = stream_result.termination;
         let mut summary = stream_result.data;
