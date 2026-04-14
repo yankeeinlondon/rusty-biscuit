@@ -7,6 +7,9 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::status::{Status, StatusState};
+use biscuit_terminal::terminal::Terminal;
 use messenger::provider::{
     Messenger,
     discord::{DiscordConfig, DiscordProvider},
@@ -84,12 +87,7 @@ pub fn execute_message(
     // Spawn async task for fire-and-forget sending
     tokio::spawn(async move {
         if let Err(e) = send_payload(&route, payload).await {
-            warn!(
-                route = route.name,
-                provider = provider_kind_label_from_config(&route.config),
-                error = %e,
-                "Failed to send message"
-            );
+            report_send_failure(&route, &e, "message");
         }
     });
 }
@@ -132,14 +130,73 @@ pub fn execute_resolved_message(
 
     tokio::spawn(async move {
         if let Err(e) = send_payload(&route, payload).await {
-            warn!(
-                route = route.name,
-                provider = provider_kind_label_from_config(&route.config),
-                error = %e,
-                "Failed to send lifecycle message"
-            );
+            report_send_failure(&route, &e, "lifecycle message");
         }
     });
+}
+
+/// Render a user-facing Status Warning describing a messaging send failure
+/// and also log the raw error at debug level for anyone tailing traces.
+///
+/// The async send path has no `Terminal` handle in scope, so we build a
+/// default terminal here — good enough for rendering an ANSI-colored
+/// `Status::Warning` line. We deliberately avoid the tracing WARN layer
+/// because this is operational feedback the user needs to see, not noise
+/// for log aggregators.
+fn report_send_failure(route: &ResolvedMessagingRoute, error: &str, kind: &str) {
+    let provider = provider_kind_label_from_config(&route.config);
+    let hint = failure_hint(error);
+    let route_name = prose_escape(&route.name);
+    let error_text = prose_escape(error);
+
+    let mut body = format!(
+        "Failed to send {kind} via <b>{provider}</b> route \
+         <blue-500>{route_name}</blue-500>: {error_text}"
+    );
+    if let Some(hint) = hint {
+        body.push_str(&format!("\n  <dim>\u{2192} {hint}</dim>"));
+    }
+
+    let rendered = Status::from_prose(body)
+        .state(StatusState::Warning)
+        .render(&Terminal::default());
+    eprintln!("{rendered}");
+
+    // Keep a machine-readable breadcrumb for log collectors without the
+    // user-facing WARN noise.
+    debug!(
+        route = route.name,
+        provider,
+        kind,
+        error,
+        "messaging send failed"
+    );
+}
+
+/// Produce a short actionable hint based on common error signatures so the
+/// warning suggests a concrete next step rather than just surfacing the
+/// underlying send error.
+fn failure_hint(error: &str) -> Option<&'static str> {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("env var") || lower.contains("environment variable") {
+        Some("Set the referenced environment variable or supply the secret inline.")
+    } else if lower.contains("unauthorized") || lower.contains("401") || lower.contains("invalid_auth") {
+        Some("Check the route's credentials — the provider rejected the token.")
+    } else if lower.contains("forbidden") || lower.contains("403") {
+        Some("Confirm the bot has permission to post to the configured channel/recipient.")
+    } else if lower.contains("not found") || lower.contains("channel_not_found") || lower.contains("404") {
+        Some("Verify the channel, recipient, or group id in your messaging config.")
+    } else if lower.contains("dns") || lower.contains("connect") || lower.contains("timed out") {
+        Some("Check network connectivity to the messaging provider.")
+    } else {
+        None
+    }
+}
+
+/// Escape angle brackets so arbitrary error text can't be interpreted as
+/// Prose markup when embedded in a `Status::from_prose` body.
+fn prose_escape(text: &str) -> String {
+    text.replace('<', "\\<").replace('>', "\\>")
 }
 
 /// Internal payload structure for the async send task.
@@ -462,5 +519,46 @@ mod tests {
             repo: None,
         };
         execute_resolved_message("  ", None, None, None, &messaging);
+    }
+
+    #[test]
+    fn failure_hint_recognizes_auth_failures() {
+        assert_eq!(
+            failure_hint("Send failed: 401 Unauthorized"),
+            Some("Check the route's credentials — the provider rejected the token.")
+        );
+        assert_eq!(
+            failure_hint("Slack API error: invalid_auth"),
+            Some("Check the route's credentials — the provider rejected the token.")
+        );
+    }
+
+    #[test]
+    fn failure_hint_recognizes_missing_env_var() {
+        assert_eq!(
+            failure_hint("Discord: env var DISCORD_BOT_TOKEN is not set"),
+            Some("Set the referenced environment variable or supply the secret inline.")
+        );
+    }
+
+    #[test]
+    fn failure_hint_recognizes_channel_not_found() {
+        assert_eq!(
+            failure_hint("Slack API error: channel_not_found"),
+            Some("Verify the channel, recipient, or group id in your messaging config.")
+        );
+    }
+
+    #[test]
+    fn failure_hint_returns_none_for_unknown_errors() {
+        assert!(failure_hint("something weird happened").is_none());
+    }
+
+    #[test]
+    fn prose_escape_neutralizes_angle_brackets() {
+        assert_eq!(
+            prose_escape("<script>alert('x')</script>"),
+            "\\<script\\>alert('x')\\</script\\>"
+        );
     }
 }
