@@ -83,6 +83,8 @@
 //!     match source {
 //!         ExecutableSource::Path => println!("Found in PATH: {}", path.display()),
 //!         ExecutableSource::MacOsAppBundle => println!("Found as macOS app: {}", path.display()),
+//!         ExecutableSource::WindowsAppPaths => println!("Found via App Paths: {}", path.display()),
+//!         ExecutableSource::WindowsInstallRoot => println!("Found under install root: {}", path.display()),
 //!     }
 //! }
 //! ```

@@ -59,6 +59,9 @@ pub(crate) fn handle_recent_commits_command(
         }
         PeriodSpecifier::Date(date) => sniff::filesystem::get_recent_commits_by_date(dir, *date)?,
         PeriodSpecifier::Hash(hash) => sniff::filesystem::get_recent_commits_by_hash(dir, hash)?,
+        PeriodSpecifier::Count(count) => {
+            sniff::filesystem::get_recent_commits_by_count(dir, *count)?
+        }
     };
 
     if let Some(ref pkg) = package {

@@ -500,7 +500,7 @@ pub enum Commands {
     },
 
     /// Show only headless audio players
-    Audio {
+    AudioPlayers {
         #[command(subcommand)]
         action: Option<AudioAction>,
     },
@@ -715,7 +715,7 @@ pub enum RepoSubcommand {
     /// Show recent commits for a period
     #[command(name = "recent-commits")]
     RecentCommits {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
         /// Filter to conventional commit actions; repeat to OR multiple actions together
         #[arg(long = "action", value_enum, value_name = "ACTION")]
@@ -736,7 +736,7 @@ pub enum RepoSubcommand {
     /// Show source code changes for a period
     #[command(name = "source-code-changes")]
     SourceCodeChanges {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
         /// Filter to conventional commit actions; repeat to OR multiple actions together
         #[arg(long = "action", value_enum, value_name = "ACTION")]
@@ -757,7 +757,7 @@ pub enum RepoSubcommand {
     /// Show documentation changes for a period
     #[command(name = "documentation-changes")]
     DocumentationChanges {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
         /// Filter to conventional commit actions; repeat to OR multiple actions together
         #[arg(long = "action", value_enum, value_name = "ACTION")]
@@ -802,7 +802,7 @@ impl Commands {
             Commands::OsPackageManagers { .. } => OutputFilter::OsPackageManagers,
             Commands::TtsClients { .. } => OutputFilter::TtsClients,
             Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
-            Commands::Audio { .. } => OutputFilter::HeadlessAudio,
+            Commands::AudioPlayers { .. } => OutputFilter::HeadlessAudio,
             Commands::Agents { .. } => OutputFilter::AiClients,
             Commands::Services { .. } => OutputFilter::Services,
             Commands::BlastRadius { .. } => OutputFilter::BlastRadius,
@@ -821,7 +821,7 @@ impl Commands {
                 | Commands::OsPackageManagers { .. }
                 | Commands::TtsClients { .. }
                 | Commands::TerminalApps { .. }
-                | Commands::Audio { .. }
+                | Commands::AudioPlayers { .. }
                 | Commands::Agents { .. }
         )
     }
@@ -896,10 +896,10 @@ impl Commands {
             TerminalApps {
                 action: Some(TerminalAppAction::InstallPlan(args)),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            Audio {
+            AudioPlayers {
                 action: Some(AudioAction::Install(args)),
             } => Some((InstallCommandKind::Install, args)),
-            Audio {
+            AudioPlayers {
                 action: Some(AudioAction::InstallPlan(args)),
             } => Some((InstallCommandKind::InstallPlan, args)),
             Agents {
@@ -1356,6 +1356,7 @@ Git:
 Recent Commits:
   sniff repo recent-commits           Show commits from last 3 days
   sniff repo recent-commits 1w        Show commits from last week
+  sniff repo recent-commits 10        Show the last 10 commits
   sniff repo source-code-changes 1w   Source code changes in last week
   sniff repo documentation-changes 1w Documentation changes in last week
 

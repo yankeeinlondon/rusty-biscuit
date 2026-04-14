@@ -10,5 +10,5 @@ expression: "normalize_topics_table(&run_stdout(&[\"topics\"]))"
 | storage |  | os-package-managers |
 | audio-devices |  | tts-clients |
 |  |  | terminal-apps |
-|  |  | audio |
+|  |  | audio-players |
 |  |  | agents |

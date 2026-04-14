@@ -18,7 +18,7 @@ const TOPIC_COLUMNS: &[(&str, &[&str])] = &[
             "os-package-managers",
             "tts-clients",
             "terminal-apps",
-            "audio",
+            "audio-players",
             "agents",
         ],
     ),
