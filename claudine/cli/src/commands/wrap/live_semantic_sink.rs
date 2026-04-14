@@ -276,7 +276,7 @@ impl LiveSemanticSink {
         self.emit_line(&rendered);
     }
 
-    fn render_tool_display(display: ToolCallDisplay) -> String {
+    fn render_tool_display(display: ToolCallDisplay) -> (String, bool) {
         let arrow = match display.direction {
             ToolDirection::Outgoing => '\u{2192}',
             ToolDirection::Incoming => '\u{2190}',
@@ -290,16 +290,27 @@ impl LiveSemanticSink {
         };
         match slot {
             Some((text, is_error)) => {
-                // Error styling: wrap in red + bold. biscuit-terminal prose
-                // markup handles the ANSI styling.
-                let styled = if is_error {
-                    format!("<red><b>{text}</b></red>")
+                if is_error {
+                    // Error styling: wrap in red + bold via biscuit-terminal
+                    // prose markup. Only this branch goes through
+                    // `Status::from_prose`; every other tool render stays on
+                    // `Status::new` so user-controlled content (commands,
+                    // URLs, paths) is never interpreted as markup.
+                    (
+                        format!(
+                            "{arrow} {} \u{00b7} <red><b>{text}</b></red>",
+                            display.display_name
+                        ),
+                        true,
+                    )
                 } else {
-                    text
-                };
-                format!("{arrow} {} \u{00b7} {styled}", display.display_name)
+                    (
+                        format!("{arrow} {} \u{00b7} {text}", display.display_name),
+                        false,
+                    )
+                }
             }
-            None => format!("{arrow} {}", display.display_name),
+            None => (format!("{arrow} {}", display.display_name), false),
         }
     }
 
@@ -402,14 +413,22 @@ impl LiveSemanticSink {
         match event {
             SemanticEvent::ToolCall { .. } => {
                 if let Some(display) = ToolCallDisplay::from_call(event) {
-                    let desc = Self::render_tool_display(display);
-                    self.render_status_prose(StatusState::ToolUse, desc);
+                    let (desc, wants_prose) = Self::render_tool_display(display);
+                    if wants_prose {
+                        self.render_status_prose(StatusState::ToolUse, desc);
+                    } else {
+                        self.render_status(StatusState::ToolUse, desc);
+                    }
                 }
             }
             SemanticEvent::ToolResult { .. } => {
                 if let Some(display) = ToolCallDisplay::from_result(event) {
-                    let desc = Self::render_tool_display(display);
-                    self.render_status_prose(StatusState::ToolUse, desc);
+                    let (desc, wants_prose) = Self::render_tool_display(display);
+                    if wants_prose {
+                        self.render_status_prose(StatusState::ToolUse, desc);
+                    } else {
+                        self.render_status(StatusState::ToolUse, desc);
+                    }
                 }
             }
             SemanticEvent::SubagentStart { name, .. } => {
@@ -803,8 +822,32 @@ mod tests {
             "prose markup must be interpreted, not leaked as literal text: {rendered:?}"
         );
         assert!(
+            rendered.contains("\u{1b}[31m"),
+            "error-path rendering must emit red ANSI escape: {rendered:?}"
+        );
+        assert!(
             !rendered.contains("exit 1"),
             "exit_code must not render when status is present; status wins: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn tool_call_with_markup_looking_summary_is_not_interpreted() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("Bash".into()),
+            id: None,
+            input: Some(json!({"command": "echo '<b>hi</b>'"})),
+            extra: json!({}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        // User input containing markup must appear verbatim — Status::new
+        // does NOT interpret prose markup on the summary path.
+        assert!(
+            rendered.contains("<b>hi</b>"),
+            "user input with prose tokens must render literally: {rendered:?}"
         );
     }
 
