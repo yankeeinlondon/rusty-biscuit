@@ -36,6 +36,8 @@ pub enum ClaudeEvent {
     ToolUse(ClaudeToolUse),
     #[serde(rename = "tool_result")]
     ToolResult(ClaudeToolResult),
+    #[serde(rename = "user")]
+    User(ClaudeUser),
 }
 
 /// Session metadata emitted by Claude Code's `init` and `system` events.
@@ -60,6 +62,32 @@ pub struct ClaudeAssistant {
     pub message: Option<ClaudeAssistantMessage>,
     #[serde(default)]
     pub content: Option<Vec<ClaudeContentPart>>,
+    /// Newer Claude Code releases attach a top-level `error` discriminator to
+    /// `assistant` envelopes when the model's reply is a synthetic failure
+    /// (e.g. `"billing_error"`). The nested `message.content[0].text` then
+    /// carries the human-readable message.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// `user` event carrying a replay of the user's previous turn or a nested
+/// `tool_result` block. The parser extracts tool_result blocks into
+/// [`SemanticEvent::ToolResult`]; text blocks are silently dropped because
+/// they only echo input.
+#[derive(Debug, Default, Deserialize)]
+pub struct ClaudeUser {
+    #[serde(default)]
+    pub message: Option<ClaudeUserMessage>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub parent_tool_use_id: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ClaudeUserMessage {
+    #[serde(default)]
+    pub content: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -164,6 +192,8 @@ pub struct ClaudeErrorDetail {
 #[derive(Debug, Default, Deserialize)]
 pub struct ClaudeResult {
     #[serde(default)]
+    pub subtype: Option<String>,
+    #[serde(default)]
     pub duration_ms: Option<u64>,
     #[serde(default)]
     pub duration_api_ms: Option<u64>,
@@ -179,6 +209,26 @@ pub struct ClaudeResult {
     pub cost_usd: Option<f64>,
     #[serde(default)]
     pub usage: Option<ClaudeUsage>,
+    /// Newer `result` envelopes flag overall failure independent of
+    /// `stop_reason` (e.g. `is_error=true` with `stop_reason="stop_sequence"`).
+    #[serde(default)]
+    pub is_error: Option<bool>,
+    /// Human-readable result text — carries the error message when
+    /// `is_error=true`.
+    #[serde(default)]
+    pub result: Option<String>,
+    /// List of permission-denial records; shape varies by provider release.
+    #[serde(default)]
+    pub permission_denials: Option<Vec<Value>>,
+    /// Terminal lifecycle reason (e.g. `"completed"`, `"cancelled"`).
+    #[serde(default)]
+    pub terminal_reason: Option<String>,
+    /// Presence of fast-mode state in the terminal envelope.
+    #[serde(default)]
+    pub fast_mode_state: Option<String>,
+    /// Per-model usage map; shape is provider-defined.
+    #[serde(default, rename = "modelUsage")]
+    pub model_usage: Option<Value>,
 }
 
 impl ClaudeResult {
@@ -490,5 +540,45 @@ mod tests {
     fn claude_missing_type_fails_typed_deserialization() {
         let err = serde_json::from_str::<ClaudeEvent>(r#"{"session_id":"sess"}"#);
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn claude_user_event_deserializes_with_tool_result_content() {
+        let line = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"hello","is_error":false}]},"session_id":"s1"}"#;
+        let event: ClaudeEvent = serde_json::from_str(line).expect("valid event");
+        let ClaudeEvent::User(user) = event else {
+            panic!("expected ClaudeEvent::User, got {event:?}");
+        };
+        let content = user.message.and_then(|m| m.content).expect("content");
+        assert!(content.iter().any(|c: &Value| c.get("type").and_then(Value::as_str) == Some("tool_result")));
+    }
+
+    #[test]
+    fn claude_system_hook_subtypes_deserialize() {
+        for subtype in ["hook_started", "hook_response"] {
+            let line = format!(
+                r#"{{"type":"system","subtype":"{subtype}","session_id":"s1","hook_name":"SessionStart"}}"#
+            );
+            let event: ClaudeEvent = serde_json::from_str(&line).expect("valid event");
+            assert!(matches!(event, ClaudeEvent::System(_)),
+                "subtype {subtype} must parse as System event");
+        }
+    }
+
+    #[test]
+    fn claude_assistant_error_field_preserved() {
+        let line = r#"{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Credit balance is too low"}]},"session_id":"s1","error":"billing_error"}"#;
+        let event: ClaudeEvent = serde_json::from_str(line).expect("valid event");
+        let ClaudeEvent::Assistant(a) = event else { panic!("expected Assistant") };
+        assert_eq!(a.error.as_deref(), Some("billing_error"));
+    }
+
+    #[test]
+    fn claude_result_fields_billing_error_surface() {
+        let line = r#"{"type":"result","subtype":"success","is_error":true,"result":"Credit balance is too low","session_id":"s1","permission_denials":[],"terminal_reason":"completed","fast_mode_state":"off","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"service_tier":"standard"},"modelUsage":{}}"#;
+        let event: ClaudeEvent = serde_json::from_str(line).expect("valid event");
+        let ClaudeEvent::Result(r) = event else { panic!("expected Result") };
+        assert_eq!(r.is_error, Some(true));
+        assert_eq!(r.result.as_deref(), Some("Credit balance is too low"));
     }
 }
