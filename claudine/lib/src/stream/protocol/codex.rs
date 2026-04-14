@@ -176,6 +176,7 @@ pub enum CodexItem {
     ToolCall(CodexToolItemFields),
     McpToolCall(CodexToolItemFields),
     WebSearch(CodexToolItemFields),
+    #[serde(alias = "command_execution")]
     CommandExec(CodexToolItemFields),
     PatchApply(CodexToolItemFields),
     ImageGeneration(CodexToolItemFields),
@@ -466,29 +467,64 @@ pub struct CodexToolItemFields {
     /// Process exit code for shell-tool completions.
     #[serde(default)]
     pub exit_code: Option<i32>,
+    /// Raw shell command string emitted by Codex's `command_execution` items
+    /// (both `item.started` and `item.completed`). Exposed as a synthesized
+    /// `{"command": ...}` fallback via [`resolved_input`].
+    ///
+    /// [`resolved_input`]: CodexToolItemFields::resolved_input
+    #[serde(default)]
+    pub command: Option<String>,
+    /// Aggregated stdout+stderr buffer emitted by Codex's `command_execution`
+    /// items on completion. Exposed as a string fallback via
+    /// [`resolved_output`].
+    ///
+    /// [`resolved_output`]: CodexToolItemFields::resolved_output
+    #[serde(default)]
+    pub aggregated_output: Option<String>,
 }
 
 impl CodexToolItemFields {
     pub fn resolved_tool_name(&self) -> Option<&str> {
-        self.tool_name.as_deref().or(self.name.as_deref())
+        self.tool_name
+            .as_deref()
+            .or(self.name.as_deref())
+            .or_else(|| self.command.as_ref().map(|_| "shell"))
     }
 
     pub fn resolved_tool_id(&self) -> Option<&str> {
         self.id.as_deref()
     }
 
-    pub fn resolved_input(&self) -> Option<&Value> {
-        self.input
-            .as_ref()
-            .or(self.arguments.as_ref())
-            .or(self.parameters.as_ref())
+    pub fn resolved_input(&self) -> Option<Value> {
+        if let Some(v) = self.input.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(v) = self.arguments.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(v) = self.parameters.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(cmd) = self.command.as_ref() {
+            return Some(serde_json::json!({ "command": cmd }));
+        }
+        None
     }
 
-    pub fn resolved_output(&self) -> Option<&Value> {
-        self.output
-            .as_ref()
-            .or(self.result.as_ref())
-            .or(self.content.as_ref())
+    pub fn resolved_output(&self) -> Option<Value> {
+        if let Some(v) = self.output.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(v) = self.result.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(v) = self.content.as_ref() {
+            return Some(v.clone());
+        }
+        if let Some(agg) = self.aggregated_output.as_ref() {
+            return Some(Value::String(agg.clone()));
+        }
+        None
     }
 
     /// Fold a previously-seen `item.started` snapshot into this completed
@@ -521,6 +557,12 @@ impl CodexToolItemFields {
         }
         if self.content.is_none() {
             self.content = started.content;
+        }
+        if self.command.is_none() {
+            self.command = started.command;
+        }
+        if self.aggregated_output.is_none() {
+            self.aggregated_output = started.aggregated_output;
         }
     }
 }
@@ -624,14 +666,16 @@ mod tests {
         assert!(item.is_tool_item());
         let fields = item.as_tool_fields().expect("tool fields");
         assert_eq!(fields.resolved_tool_name(), Some("bash"));
+        let input = fields.resolved_input();
         assert_eq!(
-            fields
-                .resolved_input()
+            input
+                .as_ref()
                 .and_then(|v| v.get("command"))
                 .and_then(Value::as_str),
             Some("ls")
         );
-        assert_eq!(fields.resolved_output().and_then(Value::as_str), Some("ok"));
+        let output = fields.resolved_output();
+        assert_eq!(output.as_ref().and_then(Value::as_str), Some("ok"));
     }
 
     #[test]
@@ -708,22 +752,77 @@ mod tests {
         let merged = completed.merge_started(started);
         let fields = merged.as_tool_fields().expect("tool fields");
         assert_eq!(fields.name.as_deref(), Some("bash"));
+        let input = fields.resolved_input();
         assert_eq!(
-            fields
-                .resolved_input()
+            input
+                .as_ref()
                 .and_then(|v| v.get("command"))
                 .and_then(Value::as_str),
             Some("ls")
         );
-        assert_eq!(
-            fields.resolved_output().and_then(Value::as_str),
-            Some("clean")
-        );
+        let output = fields.resolved_output();
+        assert_eq!(output.as_ref().and_then(Value::as_str), Some("clean"));
     }
 
     #[test]
     fn codex_unknown_event_type_fails_typed() {
         let err = serde_json::from_str::<CodexEvent>(r#"{"type":"session.not_a_real_event"}"#);
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn codex_command_execution_started_deserializes() {
+        let line = r#"{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'ls'","aggregated_output":""}}"#;
+        let event: CodexEvent = serde_json::from_str(line).expect("valid event");
+        let CodexEvent::ItemStarted(env) = event else {
+            panic!("expected ItemStarted");
+        };
+        let item = env.item.expect("item");
+        assert!(
+            matches!(item, CodexItem::CommandExec(_)),
+            "expected CommandExec variant (with command_execution alias), got {item:?}"
+        );
+        let fields = item.as_tool_fields().expect("tool fields");
+        let input = fields.resolved_input();
+        let extracted = input
+            .as_ref()
+            .and_then(|v| v.as_str().map(String::from))
+            .or_else(|| {
+                input
+                    .as_ref()
+                    .and_then(|v| v.get("command"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            });
+        assert_eq!(
+            extracted.as_deref(),
+            Some("/bin/zsh -lc 'ls'"),
+            "command must be exposed via resolved_input (either as string value or nested command key): fields = {fields:?}"
+        );
+    }
+
+    #[test]
+    fn codex_command_execution_completed_exposes_output_and_status() {
+        let line = r#"{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"ls","aggregated_output":"file.txt\n","exit_code":0,"status":"success"}}"#;
+        let event: CodexEvent = serde_json::from_str(line).expect("valid event");
+        let CodexEvent::ItemCompleted(env) = event else {
+            panic!("expected ItemCompleted");
+        };
+        let item = env.item.expect("item");
+        let fields = item.as_tool_fields().expect("tool fields");
+        assert_eq!(fields.exit_code, Some(0));
+        assert_eq!(fields.status.as_deref(), Some("success"));
+        let output = fields.resolved_output().expect("output");
+        let s = output.as_str().map(String::from).or_else(|| {
+            output
+                .get("aggregated_output")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        });
+        assert_eq!(
+            s.as_deref(),
+            Some("file.txt\n"),
+            "aggregated_output must be exposed via resolved_output"
+        );
     }
 }

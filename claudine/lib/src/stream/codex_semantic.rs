@@ -269,7 +269,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         SemanticEvent::ToolCall {
             name: fields.resolved_tool_name().map(String::from),
             id: fields.resolved_tool_id().map(String::from),
-            input: fields.resolved_input().cloned(),
+            input: fields.resolved_input(),
             extra: Value::Object(extra),
         }
     }
@@ -293,7 +293,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
             id: fields.resolved_tool_id().map(String::from),
             status: fields.status.clone(),
             exit_code: fields.exit_code,
-            output: fields.resolved_output().cloned(),
+            output: fields.resolved_output(),
             extra: Value::Object(extra),
         }
     }
