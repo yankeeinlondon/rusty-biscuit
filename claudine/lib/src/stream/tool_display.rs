@@ -81,9 +81,7 @@ pub fn humanize_tool_name(raw: &str) -> String {
 fn humanize_known(raw: &str) -> Option<String> {
     // MCP-shape: mcp__<server>__<tool>
     if let Some(rest) = raw.strip_prefix("mcp__") {
-        let mut parts = rest.splitn(2, "__");
-        let server = parts.next()?;
-        let tool = parts.next()?;
+        let (server, tool) = rest.split_once("__")?;
         return Some(format!(
             "{} {}",
             title_case_segments(server),
