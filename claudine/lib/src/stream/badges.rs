@@ -468,6 +468,29 @@ mod tests {
     }
 
     #[test]
+    fn billing_error_does_not_produce_rate_limit_badge() {
+        let summary =
+            summary_with_kind(Provider::Claude, "billing_error", "Credit balance is too low");
+        let badges = derive_badges(&summary, Provider::Claude);
+        let rate_limit_count = badges
+            .iter()
+            .filter(|b| b.category == BadgeCategory::RateLimit)
+            .count();
+        let billing_count = badges
+            .iter()
+            .filter(|b| b.category == BadgeCategory::Billing)
+            .count();
+        assert_eq!(
+            rate_limit_count, 0,
+            "billing_error must not yield a RateLimit badge"
+        );
+        assert_eq!(
+            billing_count, 1,
+            "billing_error must yield exactly one Billing badge"
+        );
+    }
+
+    #[test]
     fn context_usage_at_exact_threshold_yields_badge() {
         use crate::stream::summary::ContextUsage;
         let summary = StreamExecutionSummary {

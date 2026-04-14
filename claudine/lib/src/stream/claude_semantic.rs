@@ -17,6 +17,7 @@ use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::claude::{
     ClaudeAssistant, ClaudeContentBlockDelta, ClaudeContentBlockStart, ClaudeErrorEvent,
     ClaudeEvent, ClaudeInit, ClaudeRateLimit, ClaudeResult, ClaudeToolResult, ClaudeToolUse,
+    ClaudeUser,
 };
 use super::semantic::{SemanticEvent, SemanticEventSink};
 use super::summary::{RateLimitInfo, StreamExecutionSummary};
@@ -57,6 +58,10 @@ pub struct ClaudeSemanticStreamParser<S: SemanticEventSink> {
     error_message: Option<String>,
     rate_limit: Option<RateLimitInfo>,
     raw_summary: Option<Value>,
+    /// Tracks whether a terminal `SemanticEvent::Error` has already been
+    /// emitted so that an `assistant.error` followed by a
+    /// `result.is_error=true` pair does not double-emit.
+    terminal_error_emitted: bool,
 }
 
 impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
@@ -79,6 +84,7 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             error_message: None,
             rate_limit: None,
             raw_summary: None,
+            terminal_error_emitted: false,
         }
     }
 
@@ -95,7 +101,40 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         Value::Object(m)
     }
 
-    fn handle_init(&mut self, init: ClaudeInit, raw_kind: &str) {
+    fn handle_init(&mut self, init: ClaudeInit, raw_kind: &str, raw: &Value) {
+        // `system` events carry a `subtype` discriminator. Only `init` (and
+        // `null`/missing — legacy `init` envelopes) establish session state
+        // and emit a `SessionStart`. Everything else (notably `hook_started`
+        // and `hook_response`) is surfaced as a low-priority `Info` so session
+        // state is not overwritten by hook traffic.
+        let subtype = init.subtype.as_deref();
+        let is_session_init =
+            raw_kind == "init" || matches!(subtype, None | Some("init") | Some(""));
+        if !is_session_init {
+            let subtype_str = subtype.unwrap_or("").to_string();
+            let hook_name = raw
+                .get("hook_name")
+                .and_then(Value::as_str)
+                .map(String::from);
+            let message = match hook_name.as_deref() {
+                Some(name) if !name.is_empty() => {
+                    format!("Claude system event: {subtype_str} ({name})")
+                }
+                _ if !subtype_str.is_empty() => format!("Claude system event: {subtype_str}"),
+                _ => "Claude system event".to_string(),
+            };
+            let mut extra = self.base_extra();
+            extra.insert("raw_kind".into(), Value::from(raw_kind));
+            extra.insert("subtype".into(), Value::from(subtype_str));
+            if let Some(name) = hook_name {
+                extra.insert("hook_name".into(), Value::from(name));
+            }
+            self.sink.on_semantic_event(SemanticEvent::Info {
+                message,
+                extra: Value::Object(extra),
+            });
+            return;
+        }
         self.session_id = init.session_id;
         self.model = init.model;
         super::trace_session_metadata(
@@ -111,6 +150,11 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
     }
 
     fn handle_assistant_message(&mut self, event: ClaudeAssistant, raw_kind: &str) {
+        // Newer Claude Code releases surface synthetic failure turns as an
+        // `assistant` envelope with a top-level `error` discriminator. Treat
+        // these as terminal errors and do not mingle their synthetic text
+        // with real assistant output.
+        let error_kind = event.error.clone();
         // Claude Code wraps content as {"message":{"content":[...]}} while the
         // simplified test format uses {"content":[...]} at the top level.
         let Some(content) = event.message.and_then(|m| m.content).or(event.content) else {
@@ -124,6 +168,31 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                 text_parts.push_str(&text);
             }
         }
+
+        if let Some(kind) = error_kind {
+            self.is_error = true;
+            self.error_kind = Some(kind.clone());
+            let message = if !text_parts.is_empty() {
+                text_parts
+            } else {
+                format!("Claude reported {kind}")
+            };
+            self.error_message = Some(message.clone());
+
+            if !self.terminal_error_emitted {
+                let mut extra = self.base_extra();
+                extra.insert("raw_kind".into(), Value::from(raw_kind));
+                extra.insert("error_kind".into(), Value::from(kind.as_str()));
+                self.sink.on_semantic_event(SemanticEvent::Error {
+                    message,
+                    terminal: true,
+                    extra: Value::Object(extra),
+                });
+                self.terminal_error_emitted = true;
+            }
+            return;
+        }
+
         if text_parts.is_empty() {
             return;
         }
@@ -209,6 +278,7 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             terminal: true,
             extra: Value::Object(extra),
         });
+        self.terminal_error_emitted = true;
     }
 
     fn handle_result(&mut self, result: ClaudeResult, raw: Value, raw_kind: &str) {
@@ -217,6 +287,38 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         self.num_turns = result.num_turns.map(|v| v as u32);
         self.provider_status = result.stop_reason.clone();
         self.cost_usd = result.effective_cost_usd();
+
+        // Surface a terminal `result.is_error=true` as a typed semantic
+        // Error when no upstream failure (assistant.error / error event) has
+        // already emitted one. Without this, a session that fails only at
+        // the terminal envelope appears successful until callers inspect the
+        // summary's `is_error` flag.
+        if result.is_error.unwrap_or(false) {
+            self.is_error = true;
+            let result_text = result.result.clone();
+            if self.error_message.is_none() {
+                self.error_message = result_text.clone();
+            }
+            if !self.terminal_error_emitted {
+                let message = result_text
+                    .or_else(|| self.error_message.clone())
+                    .unwrap_or_else(|| "Claude session reported failure".to_string());
+                let mut extra = self.base_extra();
+                extra.insert("raw_kind".into(), Value::from(raw_kind));
+                if let Some(kind) = self.error_kind.as_deref() {
+                    extra.insert("error_kind".into(), Value::from(kind));
+                }
+                if let Some(reason) = result.terminal_reason.as_deref() {
+                    extra.insert("terminal_reason".into(), Value::from(reason));
+                }
+                self.sink.on_semantic_event(SemanticEvent::Error {
+                    message,
+                    terminal: true,
+                    extra: Value::Object(extra),
+                });
+                self.terminal_error_emitted = true;
+            }
+        }
 
         if let Some(usage) = &result.usage {
             let input = usage.input_tokens;
@@ -331,6 +433,75 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             output,
             extra: Value::Object(extra),
         });
+    }
+
+    fn handle_user(&mut self, user: ClaudeUser, raw_kind: &str) {
+        let Some(content) = user.message.and_then(|m| m.content) else {
+            return;
+        };
+        for block in content {
+            let block_kind = block
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            match block_kind.as_str() {
+                "tool_result" => {
+                    let tool_id = block
+                        .get("tool_use_id")
+                        .and_then(Value::as_str)
+                        .or_else(|| block.get("id").and_then(Value::as_str))
+                        .map(String::from);
+                    let output = block
+                        .get("content")
+                        .cloned()
+                        .or_else(|| block.get("output").cloned())
+                        .or_else(|| block.get("result").cloned());
+                    let is_error = block
+                        .get("is_error")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let status = if is_error {
+                        Some("error".to_string())
+                    } else {
+                        Some("success".to_string())
+                    };
+
+                    let mut extra = self.base_extra();
+                    extra.insert("raw_kind".into(), Value::from(raw_kind));
+                    extra.insert("source".into(), Value::from("user.tool_result"));
+                    if let Some(id) = &tool_id {
+                        extra.insert("tool_id".into(), Value::from(id.as_str()));
+                    }
+
+                    self.sink.on_semantic_event(SemanticEvent::ToolResult {
+                        name: None,
+                        id: tool_id,
+                        status,
+                        exit_code: None,
+                        output,
+                        extra: Value::Object(extra),
+                    });
+                }
+                "text" => {
+                    // User turn replay text — intentionally dropped; it only
+                    // echoes the prompt back and would pollute assistant
+                    // output.
+                }
+                other => {
+                    let kind_label = if other.is_empty() {
+                        "user.unknown".to_string()
+                    } else {
+                        format!("user.{other}")
+                    };
+                    self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
+                        provider: Provider::Claude,
+                        kind: kind_label,
+                        payload: block,
+                    });
+                }
+            }
+        }
     }
 
     fn handle_unknown_known_kind(&mut self, kind: &str, raw: Value) {
@@ -459,10 +630,13 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
         // fall through to allowlist / ProviderExtension below.
         match serde_json::from_value::<ClaudeEvent>(raw.clone()) {
             Ok(ClaudeEvent::Init(init) | ClaudeEvent::System(init)) => {
-                self.handle_init(init, &raw_kind);
+                self.handle_init(init, &raw_kind, &raw);
             }
             Ok(ClaudeEvent::Assistant(assistant)) => {
                 self.handle_assistant_message(assistant, &raw_kind);
+            }
+            Ok(ClaudeEvent::User(user)) => {
+                self.handle_user(user, &raw_kind);
             }
             Ok(ClaudeEvent::ContentBlockStart(cbs)) => {
                 self.handle_content_block_start(cbs, &raw_kind);
@@ -889,6 +1063,106 @@ mod tests {
         assert_eq!(
             summary.badges[0].category,
             crate::stream::badges::BadgeCategory::Billing
+        );
+    }
+
+    #[test]
+    fn user_event_routes_tool_result_to_semantic_tool_result() {
+        let (sink, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"hello","is_error":false}]},"session_id":"s1"}"#)
+            .unwrap();
+        let kinds = sink.kinds();
+        assert!(
+            kinds.contains(&"tool_result"),
+            "expected tool_result; got {kinds:?}"
+        );
+        assert!(
+            !kinds.contains(&"provider_extension"),
+            "user event must not leak as ProviderExtension"
+        );
+    }
+
+    #[test]
+    fn billing_error_on_assistant_surfaces_terminal_error_not_rate_limit() {
+        let (sink, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Credit balance is too low"}]},"session_id":"s1","error":"billing_error"}"#)
+            .unwrap();
+        let events = sink.snapshot();
+        let terminal_errors: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, SemanticEvent::Error { terminal: true, .. }))
+            .collect();
+        assert_eq!(terminal_errors.len(), 1, "expected exactly one terminal Error; got {terminal_errors:?}");
+        if let SemanticEvent::Error { message, extra, .. } = terminal_errors[0] {
+            let lower = message.to_lowercase();
+            assert!(
+                lower.contains("billing") || lower.contains("credit"),
+                "billing error message must mention billing/credit: {message:?}"
+            );
+            assert_eq!(
+                extra.get("error_kind").and_then(|v| v.as_str()),
+                Some("billing_error")
+            );
+        }
+        let summary = parser.finish(1);
+        assert_eq!(summary.error_kind.as_deref(), Some("billing_error"));
+        let billing = summary.badges.iter().find(|b| b.category == crate::stream::badges::BadgeCategory::Billing);
+        assert!(billing.is_some(), "summary must carry a Billing badge, not a RateLimit one; got {:?}", summary.badges);
+        assert!(
+            !summary.badges.iter().any(|b| b.category == crate::stream::badges::BadgeCategory::RateLimit),
+            "billing_error must NOT produce a RateLimit badge; got {:?}", summary.badges
+        );
+    }
+
+    #[test]
+    fn hook_events_route_to_info_not_session_start() {
+        let (sink, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup","session_id":"s1"}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"system","subtype":"hook_response","hook_id":"x","output":"ok","exit_code":0,"session_id":"s1"}"#)
+            .unwrap();
+        let kinds = sink.kinds();
+        // Hook events must NOT be treated as session starts.
+        assert!(
+            !kinds.contains(&"session_start"),
+            "hook_* subtypes must not emit SessionStart; got {kinds:?}"
+        );
+        // And they should at least be visible as Info or similar — not ProviderExtension.
+        assert!(
+            !kinds.contains(&"provider_extension"),
+            "hook_* subtypes must not leak as ProviderExtension; got {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn claude_fixture_full_replay_produces_no_provider_extensions() {
+        let fixture = std::fs::read_to_string(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/providers/claude.ndjson"),
+        )
+        .expect("claude.ndjson must exist");
+
+        let (sink, mut parser) = new_parser();
+        for (i, line) in fixture.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() { continue; }
+            parser
+                .feed_line(line)
+                .unwrap_or_else(|e| panic!("line {}: {:?}", i + 1, e));
+        }
+        let events = sink.snapshot();
+        let ext: Vec<&SemanticEvent> = events
+            .iter()
+            .filter(|e| e.kind_str() == "provider_extension")
+            .collect();
+        assert!(
+            ext.is_empty(),
+            "captured Claude fixture must produce zero ProviderExtension events; found {}: {:#?}",
+            ext.len(),
+            ext.iter().take(3).collect::<Vec<_>>()
         );
     }
 
