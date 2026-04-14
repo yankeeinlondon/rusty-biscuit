@@ -59,22 +59,64 @@ missing on the completion path.
 
 Ran `cargo run -q -p claudine-cli -- opencode --model
 opencode/claude-haiku-4-5 -- "what is 2+2?"` and observed exit=0 and
-empty stdout (matching the spec's original symptom). But the stderr
-trail shows OpenCode itself failing with
-`ProviderModelNotFoundError: openrouter/qwen3-coder`, meaning Claudine
-is passing the `--model` arg correctly but OpenCode's resolved model is
-overridden by the `OPENCODE_CONFIG_CONTENT` temp-file injection done by
-`apply_system_prompt` at `profile.rs:1376-1408` (that temp config
-re-opens the default model, which in this environment points at
-`openrouter/qwen3-coder`). Because OpenCode errors out before reaching
-the text-producing model call, it emits NO `type: "text"` event in the
-wrap run — so in this environment the empty stdout is "no event
-produced," not "text event dropped in the pipeline."
+empty stdout (matching the spec's original symptom). The stderr trail
+shows OpenCode itself failing with `ProviderModelNotFoundError:
+openrouter/qwen3-coder` — so OpenCode emits NO `type: "text"` event in
+this run. In this environment the empty stdout is "no event produced,"
+not "text event dropped in the pipeline."
 
 A direct `opencode run --format json --model opencode/claude-haiku-4-5
 "what is 2+2?"` succeeds and produces a proper NDJSON text event with
 `part.text`, confirming native OpenCode is healthy and this is
 specifically a wrap-time interaction.
+
+### Model-override source (partially pinned)
+
+An earlier revision of this write-up asserted the override came from
+`OPENCODE_CONFIG_CONTENT` injected by `apply_system_prompt`
+(`profile.rs:1376-1408`). That claim is wrong: that injection only
+emits `{"instructions": [<tmp path>]}` — there is **no** `model` key in
+the temp config. The wrap pipeline also:
+
+- builds argv in the correct order — `run`, then `--model …`, then
+  `--format json`, then `--`-separated positional prompt
+  (`composition.rs:362-388, 483-507`), and
+- launches with `Command::env_clear().envs(env)` using an explicitly
+  built env map (`exec.rs:335-340, 738, 1011`), so no `OPENCODE_*`
+  variable from the parent shell can leak through.
+
+Diagnostic probes against this environment identified **one confirmed
+contributor** and **two candidates still unverified**:
+
+1. **Confirmed — on-disk OpenCode config.** `~/.config/opencode/`
+   resolves (via symlink) to `~/config/opencode/`, whose `config.json`
+   contains `"model": "openrouter/qwen3-coder"`. That exact string
+   matches the `ProviderModelNotFoundError` payload byte-for-byte, so
+   the *source* of the offending model string is the on-disk config,
+   **not** Claudine's `OPENCODE_CONFIG_CONTENT` injection.
+2. **Unverified — why `--model` does not override on-disk config.**
+   Claudine does pass `--model opencode/claude-haiku-4-5` in argv
+   (verified above), yet OpenCode resolves `openrouter/qwen3-coder`.
+   Possible mechanisms, none yet proven:
+   - `OPENCODE_CONFIG_CONTENT` is treated as a *complete replacement*
+     for on-disk config inside OpenCode, and the merge strategy between
+     that env-supplied config and the `--model` CLI flag has a
+     precedence bug or a stale cache.
+   - The `opencode/claude-haiku-4-5` namespace is rejected by the
+     installed `opencode-gemini-auth` plugin registered in the on-disk
+     `config.json`, causing OpenCode to silently fall back to the
+     config's default `model` value instead of erroring on the CLI
+     flag.
+3. **Unverified — argv reordering.** `apply_entrypoint` inserts `run`
+   at index 0 (`profile.rs:1410-1418`) and the harness re-assembles
+   argv before `prompt_delivery` (`composition.rs:503-507`). Static
+   reading shows `--model` lands before `--`, but this has not been
+   captured from a live `strace`/`ps` of the spawned child.
+
+**Root cause for the model override is not pinned in this pass.** The
+confirmed finding is only that the offending string lives in the
+user's on-disk config; the mechanism by which it wins over the
+explicit CLI flag is still open.
 
 ### Decision
 
@@ -87,22 +129,30 @@ regression captured in `opencode-*.jsonl` predates recent commits
 resolved_* helpers` and `c5e2e17f refactor(claudine): suppress stderr
 noise from provider extensions`).
 
-**Chosen fix (Task 2c.1):** Add a fixture-driven regression test that
-feeds `opencode-yolo.jsonl` (de-pretty-printed to NDJSON) through the
-OpenCode parser and asserts at least one `SemanticEvent::OutputText`
-carrying the expected `part.text` is emitted. Additionally, resolve
-the `OPENCODE_CONFIG_CONTENT` model override interaction so that wrap
-runs do not silently lose the user's `--model` arg — this is the
-most likely root cause of the user-visible "no text on stdout" symptom
-in the field even when the parser works.
+**Scope of Task 2c.1 (explicit):**
+
+- **In scope:** Add a fixture-driven regression test that feeds
+  `opencode-yolo.jsonl` (converted to NDJSON) through the OpenCode
+  parser and asserts at least one `SemanticEvent::OutputText` carrying
+  the expected `part.text` is emitted. The captured fixtures are
+  pretty-printed for readability; Task 2c.1 will re-emit them as
+  NDJSON via `jq -c . < opencode-yolo.jsonl` (or a serde round-trip)
+  before using them in tests.
+- **NOT in scope for 2c.1 — deferred to Task 2c.1b (to be filed):**
+  Root-causing and fixing the `--model` / on-disk-config / 
+  `OPENCODE_CONFIG_CONTENT` interaction that produces the empty-stdout
+  symptom in the field. Task 2c.1 must root-cause the model-override
+  path before any fix ships, and that isolation work is a separate
+  engineering pass from the regression-test task.
 
 This is nearest to the "Sink wiring fix" bucket in the spec — the
 pipeline works end-to-end on synthetic input; the live drop is a
-configuration-path regression upstream of the parser rather than a
+configuration-path issue upstream of the parser rather than a
 `with_output_text_sink` wiring miss. Record as **Sink wiring fix**
-(adjusted scope: the wiring is already correct; the fix is the
-fixture-locked regression test plus restoring the model/config path
-so the text event is actually produced).
+(adjusted scope: the wiring is already correct; the deliverable is
+the fixture-locked regression test). The separate model-override
+investigation is tracked out of this task so 2c.1's deliverable does
+not silently double in scope.
 
 ### Files referenced
 
