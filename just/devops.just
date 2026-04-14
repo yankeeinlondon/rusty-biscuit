@@ -6,6 +6,7 @@ italic := '\033[3m'
 red := '\033[31m'
 green := '\033[32m'
 yellow := '\033[33m'
+blue := '\033[34m'
 
 dim := '\033[2m'
 
@@ -37,10 +38,10 @@ _install path pkg_name *args="":
 # commits all the staged changes with OpenCode (model is MODEL or COMMIT_MODEL)
 commit *args="":
     @echo ""
-    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{reset}} monorepo to git"
-    @echo -e "{{dim}}{{ITALIC}}- using the {{reset}}{{ITALIC}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{dim}}model{{reset}}"
+    @echo -e "Committing staged changes in the {{bold}}Rusty Biscuit{{reset}} monorepo to git"
+    @echo -e "{{dim}}{{italic}}- using the {{reset}}{{italic}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{dim}}model{{reset}}"
     @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Staged Files:{{reset}}"
+    @echo -e "{{bold}}{{blue}}Staged Files:{{reset}}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
     @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y {{args}}
     @just _speak "git commits completed in rusty-biscuit monorepo"
@@ -79,8 +80,27 @@ deps:
     echo
     sniff repo deps "$(sniff repo package-area)"
 
+# Run tests with `cargo test` or `cargo nextest run`
+_test pkg *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    echo -e "Testing {{bold}}{{pkg}}{{reset}} package"
+    echo
+    if cargo nextest --version >/dev/null 2>&1; then
+        echo -e "ℹ️ using {{green}}cargo nextest run{{reset}}"
+        cargo nextest run -p {{pkg}} {{args}} || ( just _speak "There are failing tests in the {{pkg}} package!" && echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing tests!" && exit 1 )
+    else
+        echo -e "ℹ️ using {{green}}cargo test{{reset}}"
+        cargo test -p {{pkg}} {{args}} || ( just _speak "There are failing tests in the {{pkg}} package!" && echo -e "\n❌ The {{bold}}{{red}}{{pkg}}{{reset}} has failing tests!" && exit 1 )
+    fi
+    echo
+    echo -e "✅ {{green}} all tests passing in {{bold}}{{pkg}}{{reset}}{{green}} package{{reset}}"
+    echo
+
 
 # Show all README.md files in the package
 _readme_files:
-    @sniff docs --readme --json "$(sniff repo package-area)"'
+    @sniff docs --readme --json "$(sniff repo package-area)"
 

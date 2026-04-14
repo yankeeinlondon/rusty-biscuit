@@ -1,34 +1,21 @@
-TODAY := `date +%F`
+# TODAY := `date +%F`
+set allow-duplicate-variables
+set allow-duplicate-recipes
+
+import "./util.just"
+
+bold := '\033[1m'
+dim := '\033[2m'
+italic := '\033[3m'
+reset := '\033[0m'
+red := '\033[31m'
+green := '\033[32m'
+yellow := '\033[33m'
+blue := '\033[34m'
+magenta := '\033[35m'
+cyan := '\033[36m'
 
 
-# Emit an OSC8 hyperlink: `$(just _link "text" "https://example.com")`
-# Uses %b for display so embedded `\033[..m` SGR codes are interpreted.
-# Uses BEL (\a) as the OSC string terminator instead of ESC+backslash so the
-# captured output can be safely interpolated into later `echo -e` calls —
-# a trailing backslash would otherwise merge with a following `\033...` and
-# be consumed by echo's backslash interpretation.
-_link display url:
-    @printf '\033]8;;%s\a%b\033]8;;\a' '{{url}}' '{{display}}'
-
-# Resolve a path to an absolute path; works for non-existent paths.
-# `$(just _abs_path ./foo)`
-_abs_path rel_path:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    path="{{rel_path}}"
-    if [[ "${path}" = /* ]]; then
-        printf '%s\n' "${path}"
-    else
-        printf '%s/%s\n' "$(pwd)" "${path#./}"
-    fi
-
-
-_title_case str:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    s="{{str}}"
-    s="${s//-/ }"
-    echo "${s}" | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1'
 
 # chooses a spec or design file to identify the feature
 _choose_feature feat="":
@@ -37,6 +24,30 @@ _choose_feature feat="":
     file="$(fd -g '*{spec,design}\.md' features/ | {{ if feat == ""  { "cat" } else { "rg " + feat } }} |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
     echo "${file}"
 
+# ask user to choose a spec file
+_choose_spec filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "{{filter}}" ]]; then
+        file="$(fd -g '*spec*\.md' features/ |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
+    else
+        file="$(fd -g '*spec*\.md' features/ | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the spec file')"
+    fi
+    echo "${file}"
+
+_get_design_doc dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    mapfile -t files < <(fd -g '*design*.md' "{{dir}}")
+    if [[ ${#files[@]} -eq 1 ]]; then
+        design="${files[0]}"
+    elif [[ ${#files[@]} -eq 0 ]]; then
+        design=""
+    else
+        design="$( ( echo "NONE"; fd -g '*design*.md' "{{dir}}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
+        [[ "${design}" == "NONE" ]] && design=""
+    fi
 
 # Specify a feature with a spec file, a design file, or both which has now been implemented
 # and you want to run a review on.
@@ -71,15 +82,15 @@ review-feature feat="":
     feature="$(basename "${dir}")"
     feature="$(just _title_case ${feature#????-??-??-})"
 
-    echo -e "🏃‍♂️ Starting review for the {{BOLD}}{{YELLOW}}${feature}{{RESET}} feature"
+    echo -e "🏃‍♂️ Starting review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
     echo
-    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{DIM}}$(basename ${spec}){{RESET}}"
-    [[ -n "${design}" ]] && echo -e "    - Design File: {{DIM}}$(basename ${design}){{RESET}}"
-    echo -e "    - Feature Directory: {{DIM}}${dir}{{RESET}}"
+    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename ${spec}){{reset}}"
+    [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
+    echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
 
     claudine compose "@prompts/review-feature.md" -y --set "{ dir: \"${dir}\", spec: \"$(basename ${spec})\", design: \"$(basename ${design})\" }"
     echo
-    echo "🎉 review for {{BOLD}}{{YELLOW}}${feature}{{RESET}} has completed"
+    echo "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
     echo
 
 
@@ -116,16 +127,101 @@ implement-review-suggestions feat="" iteration="1":
 
     review="review-{{iteration}}.md"
 
-    echo -e "🏃‍♂️ Starting the {{ITALIC}}implementation{{RESET}} of the review suggestions on the {{BOLD}}{{YELLOW}}${feature}{{RESET}} feature ({{DIM}}{{BLUE}}${review}{{RESET}})"
+    echo -e "🏃‍♂️ Starting the {{italic}}implementation{{reset}} of the review suggestions on the {{bold}}{{yellow}}${feature}{{reset}} feature ({{dim}}{{blue}}${review}{{reset}})"
     echo
-    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{DIM}}$(basename ${spec}){{RESET}}"
-    [[ -n "${design}" ]] && echo -e "    - Design File: {{DIM}}$(basename ${design}){{RESET}}"
-    echo -e "    - Design File: {{DIM}}$(basename ${review}){{RESET}}"
-    echo -e "    - Feature Directory: {{DIM}}${dir}{{RESET}}"
+    [[ -n "${spec}" ]] && echo -e "    - Specification File: {{dim}}$(basename ${spec}){{reset}}"
+    [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
+    echo -e "    - Design File: {{dim}}$(basename ${review}){{reset}}"
+    echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
 
     claudine compose "@prompts/implement-review-suggestions.md" -y --set "{ dir: \"${dir}\", spec: \"$(basename ${spec})\", design: \"$(basename ${design})\" }"
     echo
-    echo "🎉 the {{ITALIC}}implementation{{RESET}} of the review ({{DIM}}{{BLUE}}${review}{{RESET}}) for {{BOLD}}{{YELLOW}}${feature}{{RESET}} has completed"
+    echo "🎉 the {{italic}}implementation{{reset}} of the review ({{dim}}{{blue}}${review}{{reset}}) for {{bold}}{{yellow}}${feature}{{reset}} has completed"
+    echo
+
+# adds a complimentary tech design to the specification file
+design-feature spec="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ -z "{{spec}}" ]]; then
+        file="$(just _choose_spec)"
+    else
+        file="$(just _choose_spec "{{spec}}")"
+    fi
+
+    dir="$(dirname ${file})"
+    echo
+    echo -e "Designing the feature from the spec file: {{blue}}${file}{{reset}}"
+    claudine compose @prompts/design.md --codex -y --set "{ spec: \"${file}\", dir: \"${dir}\"  }"
+    echo
+    echo -e "We now have a **technical design** document for this specification"
+    if [[ "$(just _confirm "Are you ready to create a plan for this feature?")" == "y" ]]; then
+        plan-feature "${file}" "${dir}/tech-design.md"
+    fi
+
+
+# Helps to fill in the details of your specification so that it fully articulates your requirements
+clarify-spec spec="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ -z "{{spec}}" ]]; then
+        file="$(just _choose_spec)"
+    else
+        file="$(just _choose_spec "{{spec}}")"
+    fi
+
+    filename="$(basename "${file}")"
+    abs_filename="$(just _abs_path "${file}")"
+    link="$(just _link "${filename}" "${abs_filename}")"
+    echo
+    echo -e "🏃‍♂️ clarifying the requirements in the spec file {{blue}}${link}{{reset}} ..."
+    if claudine compose "@prompts/clarify.md" --claude -y -i --set "{ spec: \"{{spec}}\"  }"; then
+        echo
+        echo -e "We have completed the {{italic}}clarification{{reset}} work on the specification file ({{blue}}${link}{{reset}})"
+        echo
+        echo -e "With the specification file now clarified, it might be a good time to create a complimentary tech-design document."
+        if [[ "$(just _confirm "Start the technical design?")" == "y" ]]; then
+            just design-feature "${file}"
+        else
+            echo
+            echo -e "Ok, run {{green}}just design-feature {{dim}}[spec]{{reset}} when you're ready."
+            echo
+            exit 0
+        fi
+    else
+        echo "there were problems that occurred during the clarification process"
+    fi
+
+plan-feature spec:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ -z "{{spec}}" ]]; then
+        spec_file="$(just _choose_spec)"
+    else
+        if [[ "{{spec}}" =~ *".md" ]];
+            spec_file="{{spec}}"
+        else
+            spec_file=""
+        fi
+
+    fi
+    dir="$(dirname "${spec_file}")"
+    design="$(just _get_design_doc "${dir}")"
+    if [[ -z "${design}" ]]; then
+        design_info=""
+    else
+        link_design="$(just _link "$(basename design)" "")"
+        design_info=" {{italic}}and the{{reset}} {{blue}}${link_design}{{reset}}"
+    fi
+
+    spec_filename="$(basename "${spec_file}")"
+    abs_spec_filename="$(just _abs_path "${spec_file}")"
+    link_spec="$(just _link "${spec_filename}" "${abs_spec_filename}")"
+    echo
+    echo -e "🏃‍♂️ creating a detailed plan from the {{blue}}${link_spec}{{reset}}${design-info}"
     echo
 
 
@@ -133,16 +229,71 @@ implement-review-suggestions feat="" iteration="1":
 feature feat:
     #!/usr/bin/env bash
     set -euo pipefail
+
     file="features/_unscheduled/{{feat}}/spec.md"
-    file_link="$(just _link "{{BLUE}}{{feat}}{{RESET}}" "$(just _abs_path "{{feat}}")")"
+    file_link="$(just _link "{{blue}}{{feat}}{{reset}}" "$(just _abs_path "{{feat}}")")"
+
     if [[ -f "${file}" ]]; then
-        echo -e "The feature {{BLUE}}${file_link}{{RESET}} already exists inside the {{ITALIC}}_unscheduled{{RESET}} folder"
+        echo
+        echo -e "A {{italic}}spec{{reset}} file for the feature {{blue}}${file_link}{{reset}} already exists inside the {{italic}}_unscheduled{{reset}} folder"
+        echo
+        eza -lhga --git --hyperlink --group "${file}" 2>/dev/null
+        echo
+
+        if just _file_has_content "${file}" 2>/dev/null; then
+            if [[ "$(just _confirm "Would you like to have us to {{bold}}{{italic}}clarify{{reset}} the requirements in this spec file?")" == y ]]; then
+                just clarify-spec "${file}"
+            else
+                if [[ "$(just _confirm "Do you want to create a {{bold}}{{italic}}technical design{{reset}} now from the specification file?")" == y ]]; then
+                    just design-feature "${file}"
+                else
+                    echo "Ok. Bye."
+                    exit 0
+                fi
+            fi
+        else
+            if [[ "$(just _confirm "The spec file is {{italic}}empty{{reset}}; do you want to edit the specification now?")" == y ]]; then
+                if md edit "${file}" 2>/dev/null; then
+                    echo
+                    echo "Now that the spec file has content, do you want to run a {{bold}}{{italic}}clarifying{{reset}} agent to"
+                    if [[ "$(just _confirm "make the specification clearer before building a technical design?")" == y ]]; then
+                        just clarify-spec "${file}"
+                    else
+                        if [[ "$(just _confirm "Do you want to create a {{bold}}{{italic}}technical design{{reset}} now from the specification file?")" == y ]]; then
+                            just design-feature "${file}"
+                        else
+                            echo "Ok. Bye."
+                            exit 0
+                        fi
+                    fi
+                fi
+
+            else
+                echo "Ok. Empty spec file left in place."
+                exit 0
+            fi
+        fi
         exit 0
     fi
     if md edit "${file}"; then
-        echo -e "The spec file has been created at {{BLUE}}${file}{{RESET}}"
+        echo -e "The spec file has been created at {{blue}}${file}{{reset}}"
+
+        if [[ "$(just _confirm "make the specification clearer before building a technical design?")" == y ]]; then
+            just clarify-spec "${file}"
+        else
+            if [[ "$(just _confirm "Do you want to create a {{bold}}{{italic}}technical design{{reset}} now from the specification file?")" == y ]]; then
+                just design-feature "${file}"
+            else
+                echo "Ok. Bye."
+                exit 0
+            fi
+        fi
     else
         rm -f "${file}"
         echo -e "the feature had no content so was removed"
     fi
 
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{bold}} {{italic}} {{reset}} {{red}} {{green}} {{yellow}} {{blue}} {{magenta}} {{cyan}} {{dim}}  >/dev/null || true
