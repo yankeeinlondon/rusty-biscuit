@@ -1365,6 +1365,32 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
+    fn claude_rate_limit_warning_suppression_preserves_jsonl_log() {
+        // Definition of Done: "underlying event still in JSONL for
+        // subscription users". Explicit assertion that the event-log
+        // closure fires even when the stderr render is suppressed.
+        let _guard = TestEnvGuard::remove("ANTHROPIC_API_KEY");
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let logged: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let logger = {
+            let captured = logged.clone();
+            Box::new(move |event: &SemanticEvent, _meta: &DispatchEventMeta| {
+                captured.lock().unwrap().push(event.kind_str().into());
+            })
+        };
+        let mut sink = make_sink(lines.clone(), dispatched.clone()).with_event_logger(logger);
+        sink.on_semantic_event(SemanticEvent::Warning {
+            message: "rate limit".into(),
+            extra: json!({"raw_kind": "rate_limit_event"}),
+        });
+        assert!(lines.lock().unwrap().is_empty(), "stderr must be suppressed");
+        let kinds = logged.lock().unwrap().clone();
+        assert_eq!(kinds, vec!["warning".to_string()], "JSONL log must still receive the Warning event");
+    }
+
+    #[test]
+    #[serial_test::serial]
     fn claude_rate_limit_warning_renders_when_anthropic_api_key_set() {
         let _guard = TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
         let lines = Arc::new(StdMutex::new(Vec::new()));
