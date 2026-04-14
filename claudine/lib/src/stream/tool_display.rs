@@ -161,3 +161,81 @@ mod humanize_tests {
         assert_eq!(humanize_tool_name(""), "");
     }
 }
+
+use serde_json::Value;
+
+/// Extract the meaningful slice of a tool's input arguments for display in
+/// the dim-italic slot. Best-effort — falls back to the first non-empty
+/// string value, then to a compact JSON one-liner. Width handling is the
+/// caller's responsibility.
+pub fn extract_tool_summary(tool_name: &str, input: &Value) -> Option<String> {
+    if let Some(s) = input.as_str() {
+        return Some(s.to_string());
+    }
+    let obj = input.as_object()?;
+    // Per-tool hooks first.
+    let preferred_key = match tool_name {
+        n if n.contains("search") || n == "WebSearch" || n == "WebFetch" || n == "google_web_search" => Some("query"),
+        "Bash" => Some("command"),
+        "Read" | "Write" | "Edit" => Some("file_path"),
+        "Glob" | "Grep" => Some("pattern"),
+        _ => None,
+    };
+    if let Some(key) = preferred_key
+        && let Some(Value::String(s)) = obj.get(key)
+    {
+        return Some(s.clone());
+    }
+    // Generic well-known keys.
+    for key in ["command", "path", "file_path", "dir_path", "pattern", "query", "url", "message"] {
+        if let Some(Value::String(s)) = obj.get(key) {
+            return Some(s.clone());
+        }
+    }
+    // First non-empty string value.
+    for (_, v) in obj.iter() {
+        if let Some(s) = v.as_str().filter(|s| !s.is_empty()) {
+            return Some(s.to_string());
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn web_search_extracts_query() {
+        let input = json!({"query": "NFL draft 2026 date", "limit": 5});
+        assert_eq!(
+            extract_tool_summary("firecrawl_firecrawl_search", &input).as_deref(),
+            Some("NFL draft 2026 date")
+        );
+    }
+
+    #[test]
+    fn bash_extracts_command() {
+        let input = json!({"command": "ls -la"});
+        assert_eq!(extract_tool_summary("Bash", &input).as_deref(), Some("ls -la"));
+    }
+
+    #[test]
+    fn read_extracts_file_path() {
+        let input = json!({"file_path": "/etc/hosts"});
+        assert_eq!(extract_tool_summary("Read", &input).as_deref(), Some("/etc/hosts"));
+    }
+
+    #[test]
+    fn unknown_tool_falls_back_to_first_string() {
+        let input = json!({"weirdo": "interesting", "n": 5});
+        assert_eq!(extract_tool_summary("custom_unknown", &input).as_deref(), Some("interesting"));
+    }
+
+    #[test]
+    fn returns_none_for_object_with_no_strings() {
+        let input = json!({"a": 1, "b": [1,2]});
+        assert!(extract_tool_summary("custom_unknown", &input).is_none());
+    }
+}
