@@ -171,7 +171,174 @@ not silently double in scope.
 
 ## 0b — OpenCode Mis-Routed Render (`⚙ firecrawl_firecrawl_search {…JSON…}`)
 
-_Reproduce per Phase 0b; record the actual render path._
+### Finding: the `⚙` line is not rendered by Claudine at all
+
+The mis-routed stderr line is **OpenCode's own default-mode TUI formatter
+output**, written by the `opencode` binary directly to stderr. Claudine's
+sink never emits it, so there is no mis-route inside the parser/sink
+pipeline. The reason the line reaches the user is that Claudine's
+stderr noise-prefix filter for OpenCode does not cover the `⚙ `
+(U+2699 + space) prefix, so the line passes through the stderr
+passthrough layer unfiltered.
+
+### Byte-level reproduction (direct, without Claudine)
+
+Running OpenCode natively against a Firecrawl MCP prompt, default
+format:
+
+```
+opencode run --model opencode/claude-haiku-4-5 \
+  "search the web using firecrawl for: NFL draft 2026 date" \
+  2>/tmp/oc-firecrawl-stderr.log 1>/tmp/oc-firecrawl-stdout.log
+```
+
+stderr contains (hex-dump of the relevant line):
+
+```
+1b 5b 30 6d                                          # ESC[0m
+e2 9a 99                                             # ⚙ (U+2699)
+20 1b 5b 30 6d                                       # " " ESC[0m
+firecrawl_firecrawl_search {"query":"NFL draft 2026 date",
+"limit":5,"sources":[{"type":"web"}]}\n
+```
+
+That matches the spec's captured line byte-for-byte (same tool name,
+same raw JSON arguments including `"limit":5` which is absent from the
+`opencode-yolo.jsonl` fixture — the spec capture was from a *default*-
+mode run, not a `--format json` run). The `⚙` glyph is U+2699 rendered
+literally by OpenCode's formatter; it is **not** the nerd-font Info
+icon (`\u{f449}` a.k.a. `NERD_CIRCULAR_INFO` in
+`biscuit-terminal/lib/src/components/status.rs:20`).
+
+### Live Claudine reproduction is blocked by the Task 2c.1b model-override issue
+
+```
+RUST_LOG=claudine=trace cargo run -q -p claudine-cli -- \
+  opencode --model opencode/claude-haiku-4-5 --use firecrawl -- \
+  "search the web for: NFL draft 2026" \
+  2>/tmp/opencode-mcp-trace.log 1>/tmp/oc-wrap-stdout.log
+```
+
+exits 0 with OpenCode erroring out with
+`ProviderModelNotFoundError: openrouter/qwen3-coder` (the same
+symptom documented under § 0a, Task 2c.1b). In this environment
+OpenCode never actually executes the firecrawl tool under Claudine
+wrap, so `/tmp/opencode-mcp-trace.log` contains no `⚙` line and no
+`firecrawl_firecrawl_search` trace event. The live reproduction
+through Claudine is therefore **blocked by 2c.1b** and must be
+re-run after that is fixed. The direct reproduction above is
+sufficient to pin the render path, however, because the line is
+emitted by OpenCode itself — Claudine's role is only
+passthrough/filter.
+
+### Code-reading audit of every `⚙`-adjacent sink path (no match)
+
+The grep for `⚙ | \u{2699} | StatusState::Info` across the sink and
+`biscuit-terminal` returns zero direct `⚙` emitters in Claudine's
+rendering code:
+
+- `biscuit-terminal/lib/src/components/status.rs:20,47,53` — the
+  `StatusState::Info` mapping uses `NERD_CIRCULAR_INFO = "\u{f449}"`
+  (a nerd-font codepoint) with fallback `FB_INFO = "\u{2139}"` (ℹ).
+  **Neither is `\u{2699}`.**
+- `claudine/cli/src/commands/wrap/live_semantic_sink.rs:271-278`
+  (`tool_call_description`) — always prefixes with `\u{2192}` (→) and
+  uses `\u{00b7}` (·) as separator between tool name and summary. Raw
+  JSON is never appended: `summarize_input` at `live_semantic_sink.rs:
+  552-580` prefers well-known keys (`query` is on the list) and falls
+  back to the first non-empty string value, so with input
+  `{"query":"NFL draft 2026 date", …}` it would produce `→
+  firecrawl_firecrawl_search · NFL draft 2026 date`, not `⚙ … {raw
+  JSON}`.
+- `claudine/cli/src/commands/wrap/live_semantic_sink.rs:304-310`
+  (`provider_extension_description`) — format is
+  `<provider>/<kind>[ · <summary>]`; never includes a bare `⚙`, never
+  dumps raw JSON (see `summarize_provider_payload` at
+  `live_semantic_sink.rs:590-681`, which has a final "first non-empty
+  string" fallback).
+- `claudine/cli/src/commands/wrap/live_semantic_sink.rs:396-466`
+  (`render_event` dispatch) — the only arms that use
+  `StatusState::Info` are `FileChange`, `PlanUpdate`, `Info`, and
+  `ProviderExtension`. None of those would produce the literal
+  `<tool_name> <raw JSON>` shape, and they would all use the
+  nerd-font Info icon `\u{f449}` (rendered by a Nerd Font as a
+  different glyph than ⚙), not U+2699.
+
+Every emission from Claudine's sink goes through `Status::new(desc).
+state(state).render(&wrap_terminal())` at `live_semantic_sink.rs:
+264-269`, which always renders the configured Info icon (`\u{f449}` or
+`\u{2139}`) — never `\u{2699}`.
+
+### Where the line actually comes from
+
+`claudine/cli/src/commands/wrap/profile.rs:1552-1559` — the noise
+filter for OpenCode's default-mode stderr formatter:
+
+```rust
+pub(crate) fn opencode_default_tui_noise_prefixes() -> &'static [&'static str] {
+    &[
+        "\u{2731} ",                          // ✱  — bullet used for Glob/Grep/Read status lines
+        "$ ",                                 // bare shell command echo lines
+        "> build ",                           // session banner
+        "\u{2588}\u{2588}\u{2588}\u{2588} ", // ████  — subheader marker
+    ]
+}
+```
+
+This list is missing `"\u{2699} "` (⚙ + space), the prefix OpenCode
+uses for MCP tool-invocation lines in default-format mode. Because the
+passthrough filter at `exec.rs:402,787,1124` is a strict prefix match,
+the `⚙ firecrawl_firecrawl_search {…}` line is forwarded verbatim from
+the child's stderr to the user's stderr. That is the sole "mis-route"
+— there is no code path inside Claudine's semantic pipeline that
+produces this line.
+
+### Secondary observation: why it shows up at all when `--format json`
+
+When Claudine wraps OpenCode it passes `--format json`
+(`profile.rs:1534-1537`). In the `--format json` code path OpenCode
+still briefly writes some default-formatter lines to stderr before the
+JSON stream on stdout kicks in — the existing noise-prefix list
+confirms this is expected behaviour. The existing list suppresses
+`✱ `, `$ `, `> build `, and `████ ` lines, which is exactly the shape
+of the stderr we captured above aside from the `⚙ ` tool-call line. So
+the fix is additive, not a rewrite: add one more prefix.
+
+### What Phase 2c.4 needs to change
+
+Add `"\u{2699} "` (⚙ + space) to
+`opencode_default_tui_noise_prefixes()` at
+`claudine/cli/src/commands/wrap/profile.rs:1552-1559`, and extend
+`opencode_noise_prefixes_cover_captured_symptoms` at
+`profile.rs:1995` with the captured `⚙ firecrawl_firecrawl_search {…}`
+line so this stays locked. The pipeline-level assertion sketched in
+the plan (`assert!(!rendered.contains('\u{2699}'))` on every rendered
+sink line) is a useful additional guard but does **not** fix the
+passthrough; the prefix-list entry is the load-bearing change.
+
+### Files referenced
+
+- `claudine/cli/src/commands/wrap/profile.rs:1552-1559`
+  (`opencode_default_tui_noise_prefixes`),
+  `profile.rs:1995-2018`
+  (`opencode_noise_prefixes_cover_captured_symptoms`,
+  `opencode_profile_advertises_default_tui_noise_prefixes`),
+  `profile.rs:1539-1541`
+  (OpenCode's `stderr_noise_prefixes` wiring).
+- `claudine/cli/src/commands/wrap/live_semantic_sink.rs:264-310,
+  391-478, 552-580, 590-681` — audited; none of these emit `\u{2699}`.
+- `biscuit-terminal/lib/src/components/status.rs:13-55` — Info icon
+  is `\u{f449}` / `\u{2139}`, not `\u{2699}`.
+- `claudine/cli/src/commands/wrap/exec.rs:402, 787, 1124` — stderr
+  prefix-filter passthrough.
+- Live captures:
+  - `/tmp/oc-firecrawl-stderr.log` — direct `opencode run` default
+    format, contains the exact `⚙ firecrawl_firecrawl_search {…}`
+    line (hex bytes `e2 9a 99`).
+  - `/tmp/oc-firecrawl-stdout.log` — direct run stdout (assistant
+    text).
+  - `/tmp/opencode-mcp-trace.log` — Claudine wrap trace; blocked by
+    `ProviderModelNotFoundError` per § 0a / Task 2c.1b.
 
 ## 0c — Gemini Markdown List Truncation
 
