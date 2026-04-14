@@ -40,6 +40,7 @@ use claudine::events::{
 use claudine::stream::progress::{self, LiveMetrics};
 use claudine::stream::semantic::{SemanticEvent, SemanticEventSink};
 use claudine::stream::stderr::Verbosity;
+use claudine::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus};
 use serde_json::Value;
 
 use super::StructuredSummaryDetails;
@@ -268,32 +269,31 @@ impl LiveSemanticSink {
         self.emit_line(&rendered);
     }
 
-    fn tool_call_description(name: &Option<String>, input: &Option<Value>) -> String {
-        let name_part = name.as_deref().unwrap_or("(tool)");
-        let summary = input.as_ref().and_then(summarize_input);
-        match summary {
-            Some(s) => format!("\u{2192} {name_part} \u{00b7} {s}"),
-            None => format!("\u{2192} {name_part}"),
+    fn render_tool_display(&self, display: ToolCallDisplay) -> String {
+        let arrow = match display.direction {
+            ToolDirection::Outgoing => '\u{2192}',
+            ToolDirection::Incoming => '\u{2190}',
+        };
+        let slot = match (display.status, display.summary) {
+            (Some(ToolStatus::Success), _) => Some(("success".to_string(), false)),
+            (Some(ToolStatus::Error), _) => Some(("error".to_string(), true)),
+            (Some(ToolStatus::Pending), _) => Some(("pending".to_string(), false)),
+            (None, Some(summary)) => Some((summary, false)),
+            (None, None) => None,
+        };
+        match slot {
+            Some((text, is_error)) => {
+                // Error styling: wrap in red + bold. biscuit-terminal prose
+                // markup handles the ANSI styling.
+                let styled = if is_error {
+                    format!("<red><b>{text}</b></red>")
+                } else {
+                    text
+                };
+                format!("{arrow} {} \u{00b7} {styled}", display.display_name)
+            }
+            None => format!("{arrow} {}", display.display_name),
         }
-    }
-
-    fn tool_result_description(
-        name: &Option<String>,
-        status: &Option<String>,
-        exit_code: Option<i32>,
-        input: Option<&Value>,
-    ) -> String {
-        let name_part = name.as_deref().unwrap_or("(tool)");
-        let mut parts = vec![format!("\u{2190} {name_part}")];
-        if let Some(summary) = input.and_then(summarize_input) {
-            parts.push(summary);
-        }
-        if let Some(code) = exit_code {
-            parts.push(format!("exit {code}"));
-        } else if let Some(s) = status {
-            parts.push(s.clone());
-        }
-        parts.join(" \u{00b7} ")
     }
 
     fn subagent_description(arrow: char, name: &Option<String>) -> String {
@@ -393,21 +393,17 @@ impl LiveSemanticSink {
             return;
         }
         match event {
-            SemanticEvent::ToolCall { name, input, .. } => {
-                self.render_status(StatusState::ToolUse, Self::tool_call_description(name, input));
+            SemanticEvent::ToolCall { .. } => {
+                if let Some(display) = ToolCallDisplay::from_call(event) {
+                    let desc = self.render_tool_display(display);
+                    self.render_status(StatusState::ToolUse, desc);
+                }
             }
-            SemanticEvent::ToolResult {
-                name,
-                status,
-                exit_code,
-                extra,
-                ..
-            } => {
-                let input = extra.get("input");
-                self.render_status(
-                    StatusState::ToolUse,
-                    Self::tool_result_description(name, status, *exit_code, input),
-                );
+            SemanticEvent::ToolResult { .. } => {
+                if let Some(display) = ToolCallDisplay::from_result(event) {
+                    let desc = self.render_tool_display(display);
+                    self.render_status(StatusState::ToolUse, desc);
+                }
             }
             SemanticEvent::SubagentStart { name, .. } => {
                 self.render_status(
@@ -759,12 +755,12 @@ mod tests {
         });
         let rendered = lines.lock().unwrap().join("\n");
         assert!(rendered.contains('\u{2192}'), "expected → in {rendered:?}");
-        assert!(rendered.contains("bash"));
+        assert!(rendered.contains("Bash"));
         assert!(rendered.contains("ls"));
     }
 
     #[test]
-    fn tool_result_renders_arrow_left_prefix_with_exit_code() {
+    fn tool_result_renders_arrow_left_prefix_with_error_status() {
         let lines = Arc::new(StdMutex::new(Vec::new()));
         let dispatched = Arc::new(StdMutex::new(Vec::new()));
         let mut sink = make_sink(lines.clone(), dispatched.clone());
@@ -778,12 +774,17 @@ mod tests {
         });
         let rendered = lines.lock().unwrap().join("\n");
         assert!(rendered.contains('\u{2190}'));
-        assert!(rendered.contains("bash"));
-        assert!(rendered.contains("exit 1"));
+        assert!(rendered.contains("Bash"));
+        // Status wins over summary/exit code; "failure" maps to ToolStatus::Error
+        // which renders as "error" in the dim slot.
+        assert!(
+            rendered.contains("error"),
+            "expected error status word: {rendered:?}"
+        );
     }
 
     #[test]
-    fn tool_result_renders_input_summary_when_extra_input_present() {
+    fn tool_result_status_wins_over_input_summary() {
         let lines = Arc::new(StdMutex::new(Vec::new()));
         let dispatched = Arc::new(StdMutex::new(Vec::new()));
         let mut sink = make_sink(lines.clone(), dispatched.clone());
@@ -797,14 +798,18 @@ mod tests {
         });
         let rendered = lines.lock().unwrap().join("\n");
         assert!(rendered.contains('\u{2190}'), "expected ← arrow");
-        assert!(rendered.contains("bash"), "expected tool name");
+        assert!(rendered.contains("Bash"), "expected humanized tool name");
+        // Per Task 1.4's "status wins over summary" rule, the input summary
+        // "ls -la" must NOT appear when status is present — status text only.
         assert!(
-            rendered.contains("ls -la"),
-            "expected input preview on the completion line: {rendered:?}"
+            !rendered.contains("ls -la"),
+            "input summary must not appear when status is present: {rendered:?}"
         );
+        // "completed" is a success-ish status; from_result maps it to
+        // ToolStatus::Success, which renders as "success".
         assert!(
-            rendered.contains("completed"),
-            "expected status label: {rendered:?}"
+            rendered.contains("success"),
+            "expected mapped status word 'success': {rendered:?}"
         );
     }
 
@@ -1149,6 +1154,48 @@ mod tests {
     }
 
     #[test]
+    fn tool_call_renders_canonical_format_with_humanized_name_and_query_summary() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("firecrawl_firecrawl_search".into()),
+            id: None,
+            input: Some(json!({"query": "NFL draft 2026 date"})),
+            extra: json!({}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            rendered.contains("Firecrawl Search"),
+            "expected humanized name in {rendered:?}"
+        );
+        assert!(
+            rendered.contains("NFL draft 2026 date"),
+            "expected query summary in {rendered:?}"
+        );
+        assert!(rendered.contains('\u{2192}'), "expected → arrow");
+    }
+
+    #[test]
+    fn tool_result_renders_status_word_when_status_present() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("firecrawl_firecrawl_search".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: None,
+            output: None,
+            extra: json!({}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(rendered.contains("Firecrawl Search"));
+        assert!(rendered.contains("success"));
+        assert!(rendered.contains('\u{2190}'));
+    }
+
+    #[test]
     fn no_captured_fixture_ever_renders_raw_json_on_stderr() {
         use std::path::Path as StdPath;
 
@@ -1278,7 +1325,7 @@ mod tests {
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected → arrow: {joined:?}");
             assert!(joined.contains('\u{2190}'), "expected ← arrow: {joined:?}");
-            assert!(joined.contains("bash"));
+            assert!(joined.contains("Bash"));
             assert!(joined.contains("researcher"));
             assert!(joined.contains("Rate limited"));
             assert!(joined.contains("claude/some_future_event"));
@@ -1299,7 +1346,7 @@ mod tests {
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
             assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
-            assert!(joined.contains("bash"));
+            assert!(joined.contains("Bash"));
             assert!(joined.contains("modified src/lib.rs"));
             assert!(joined.contains("Step 2"));
             assert!(joined.contains("Too many requests"));
@@ -1319,7 +1366,7 @@ mod tests {
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
             assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
-            assert!(joined.contains("search"));
+            assert!(joined.contains("Search"));
             assert!(joined.contains("Loop detected"));
             assert!(joined.contains("gemini/some_unknown"));
         }
@@ -1337,7 +1384,7 @@ mod tests {
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
             assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
-            assert!(joined.contains("bash"));
+            assert!(joined.contains("Bash"));
             assert!(joined.contains("slow down"));
             assert!(joined.contains("kimi/future.unknown"));
         }
@@ -1355,7 +1402,7 @@ mod tests {
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
             assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
-            assert!(joined.contains("bash"));
+            assert!(joined.contains("Bash"));
             assert!(joined.contains("API timeout"));
             assert!(joined.contains("opencode/some_future_event"));
         }
@@ -1372,7 +1419,7 @@ mod tests {
                 joined.contains('\u{2192}') && joined.contains('\u{2190}'),
                 "expected both → and ← arrows in {joined:?}"
             );
-            assert!(joined.contains("bash"));
+            assert!(joined.contains("Bash"));
             assert!(
                 joined.contains("ls -la"),
                 "expected input preview on the tool line: {joined:?}"
@@ -1392,7 +1439,7 @@ mod tests {
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
             assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
-            assert!(joined.contains("bash"));
+            assert!(joined.contains("Bash"));
             assert!(joined.contains("slow down"));
             assert!(joined.contains("qwen/something.new"));
         }
