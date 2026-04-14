@@ -64,6 +64,17 @@ pub(crate) type SemanticDispatchFn =
 /// capture output without going through the real `StreamOutput`.
 pub(crate) type StderrEmitFn = Box<dyn Fn(&str) + Send + Sync + 'static>;
 
+/// Function type for forwarding assistant text to an external
+/// [`super::exec::StreamTextRenderer`]-style renderer on stdout. This keeps
+/// the sink decoupled from the rendering machinery that lives inside
+/// `exec.rs` while still letting `OutputText` events flow through the
+/// standard semantic pipeline.
+pub(crate) type OutputTextFn = Box<dyn FnMut(&str) + Send + 'static>;
+
+/// Function type for forwarding reasoning / thinking text to an external
+/// stderr renderer (dimmed + italic).
+pub(crate) type ReasoningFn = Box<dyn FnMut(&str) + Send + 'static>;
+
 pub(crate) struct LiveSemanticSink {
     provider: Provider,
     env: EnvironmentContext,
@@ -75,6 +86,8 @@ pub(crate) struct LiveSemanticSink {
     context_extra: HashMap<String, Value>,
     dispatch: SemanticDispatchFn,
     emit_stderr: StderrEmitFn,
+    emit_output_text: Option<OutputTextFn>,
+    emit_reasoning: Option<ReasoningFn>,
     live_metrics: LiveMetrics,
 }
 
@@ -99,6 +112,8 @@ impl LiveSemanticSink {
             context_extra: HashMap::new(),
             dispatch,
             emit_stderr,
+            emit_output_text: None,
+            emit_reasoning: None,
             live_metrics: progress::new_live_metrics(),
         }
     }
@@ -108,6 +123,22 @@ impl LiveSemanticSink {
         context_extra: HashMap<String, Value>,
     ) -> Self {
         self.context_extra = context_extra;
+        self
+    }
+
+    /// Wire a stdout-rendering callback that receives every
+    /// [`SemanticEvent::OutputText`]. Typically this forwards into an
+    /// `exec.rs`-owned `StreamTextRenderer` so the markdown-boundary logic
+    /// stays in one place.
+    pub(crate) fn with_output_text_sink(mut self, emit: OutputTextFn) -> Self {
+        self.emit_output_text = Some(emit);
+        self
+    }
+
+    /// Wire a stderr-dimmed rendering callback for
+    /// [`SemanticEvent::Reasoning`].
+    pub(crate) fn with_reasoning_sink(mut self, emit: ReasoningFn) -> Self {
+        self.emit_reasoning = Some(emit);
         self
     }
 
@@ -322,10 +353,26 @@ impl SemanticEventSink for LiveSemanticSink {
             details.record_tool_name(n);
         }
 
-        // 4. Render to STDERR.
+        // 4. Forward text/reasoning to their dedicated renderers before the
+        //    status-line rendering so stdout writes happen in stream order.
+        match &event {
+            SemanticEvent::OutputText { text, .. } => {
+                if let Some(emit) = self.emit_output_text.as_mut() {
+                    emit(text);
+                }
+            }
+            SemanticEvent::Reasoning { text, .. } => {
+                if let Some(emit) = self.emit_reasoning.as_mut() {
+                    emit(text);
+                }
+            }
+            _ => {}
+        }
+
+        // 5. Render status line to STDERR.
         self.render_event(&event);
 
-        // 5. Dispatch to agentic hooks when applicable.
+        // 6. Dispatch to agentic hooks when applicable.
         if let Some(agentic) = Self::to_agentic(&event) {
             let meta = self.dispatch_meta(&event, agentic);
             (self.dispatch)(agentic, meta);
@@ -586,6 +633,61 @@ mod tests {
         });
         let names = details.lock().unwrap().tool_names.clone();
         assert_eq!(names, vec!["bash".to_string()]);
+    }
+
+    #[test]
+    fn output_text_flows_through_external_renderer() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let rendered_text = Arc::new(StdMutex::new(String::new()));
+        let rendered_thinking = Arc::new(StdMutex::new(String::new()));
+
+        let output_cb = {
+            let buf = rendered_text.clone();
+            Box::new(move |text: &str| {
+                buf.lock().unwrap().push_str(text);
+            })
+        };
+        let reasoning_cb = {
+            let buf = rendered_thinking.clone();
+            Box::new(move |text: &str| {
+                buf.lock().unwrap().push_str(text);
+            })
+        };
+
+        let mut sink = make_sink(lines, dispatched)
+            .with_output_text_sink(output_cb)
+            .with_reasoning_sink(reasoning_cb);
+
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "hello ".into(),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::Reasoning {
+            text: "pondering".into(),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "world".into(),
+            extra: json!({}),
+        });
+
+        assert_eq!(*rendered_text.lock().unwrap(), "hello world");
+        assert_eq!(*rendered_thinking.lock().unwrap(), "pondering");
+    }
+
+    #[test]
+    fn output_text_without_callback_is_dropped_not_rendered_as_status() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "hello".into(),
+            extra: json!({}),
+        });
+        // No status line should be emitted for OutputText, and no hook dispatch.
+        assert!(lines.lock().unwrap().is_empty());
+        assert!(dispatched.lock().unwrap().is_empty());
     }
 
     #[test]
