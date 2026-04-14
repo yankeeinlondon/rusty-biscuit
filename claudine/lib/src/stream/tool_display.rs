@@ -2,6 +2,7 @@
 //! (request or response) in a single, provider-agnostic way.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Direction of a tool event from the assistant's perspective.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,12 +163,10 @@ mod humanize_tests {
     }
 }
 
-use serde_json::Value;
-
 /// Extract the meaningful slice of a tool's input arguments for display in
 /// the dim-italic slot. Best-effort — falls back to the first non-empty
-/// string value, then to a compact JSON one-liner. Width handling is the
-/// caller's responsibility.
+/// string value; returns `None` if no string can be extracted. Width
+/// handling is the caller's responsibility.
 pub fn extract_tool_summary(tool_name: &str, input: &Value) -> Option<String> {
     if let Some(s) = input.as_str() {
         return Some(s.to_string());
