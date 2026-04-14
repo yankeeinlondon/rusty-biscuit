@@ -1,5 +1,6 @@
 pub(crate) mod env;
 pub(crate) mod exec;
+pub(crate) mod live_semantic_sink;
 pub(crate) mod profile;
 pub(crate) mod repo_home;
 pub(crate) mod stream_io;
