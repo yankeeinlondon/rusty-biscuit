@@ -1070,6 +1070,25 @@ mod tests {
         }
 
         #[test]
+        fn opencode_tool_use_completion_shows_both_arrows() {
+            let lines = replay_to_stderr(Provider::OpenCode, &[
+                r#"{"type":"step_start","sessionID":"ses_1"}"#,
+                r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
+                     "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
+            ], Some("gpt-4o".into()));
+            let joined = lines.join("\n");
+            assert!(
+                joined.contains('\u{2192}') && joined.contains('\u{2190}'),
+                "expected both → and ← arrows in {joined:?}"
+            );
+            assert!(joined.contains("bash"));
+            assert!(
+                joined.contains("ls -la"),
+                "expected input preview on the tool line: {joined:?}"
+            );
+        }
+
+        #[test]
         fn qwen_stderr_snapshot() {
             let lines = replay_to_stderr(Provider::QwenCode, &[
                 r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#,
