@@ -571,42 +571,6 @@ fn provider_short(p: Provider) -> &'static str {
     }
 }
 
-// Retained for Task 1.6 to remove the hardcoded 60-char cap; ToolCallDisplay
-// already handles summary extraction for ToolCall/ToolResult. This helper
-// currently has no live callers (ProviderExtension uses
-// summarize_provider_payload) but surviving Task 1.6 will either delete it
-// or update it to match ToolCallDisplay's extraction.
-#[allow(dead_code)]
-fn summarize_input(value: &Value) -> Option<String> {
-    if let Some(s) = value.as_str() {
-        return Some(truncate(s, 60));
-    }
-    if let Some(obj) = value.as_object() {
-        // Well-known keys first (highest signal for the common tool set).
-        for key in [
-            "command",
-            "path",
-            "file_path",
-            "dir_path",
-            "pattern",
-            "query",
-            "url",
-        ] {
-            if let Some(Value::String(s)) = obj.get(key) {
-                return Some(truncate(s, 60));
-            }
-        }
-        // Last resort: first non-empty string value. Avoids raw-JSON dumps
-        // for novel tool shapes while still surfacing a readable preview.
-        for (_, v) in obj.iter() {
-            if let Some(s) = v.as_str().filter(|s| !s.is_empty()) {
-                return Some(truncate(s, 60));
-            }
-        }
-    }
-    None
-}
-
 /// Produce a terse one-line human summary of a [`SemanticEvent::ProviderExtension`]
 /// payload.
 ///
@@ -648,7 +612,7 @@ fn summarize_provider_payload(payload: &Value) -> Option<String> {
         if ok
             && let Some(s) = cursor.as_str().filter(|s| !s.is_empty())
         {
-            return Some(truncate(s, 80));
+            return Some(s.to_string());
         }
     }
 
@@ -681,14 +645,14 @@ fn summarize_provider_payload(payload: &Value) -> Option<String> {
                     .and_then(Value::as_str)
                     .filter(|s| !s.is_empty())
                 {
-                    return Some(truncate(text, 80));
+                    return Some(text.to_string());
                 }
                 if let Some(text) = elem
                     .get("content")
                     .and_then(Value::as_str)
                     .filter(|s| !s.is_empty())
                 {
-                    return Some(truncate(text, 80));
+                    return Some(text.to_string());
                 }
             }
         }
@@ -700,7 +664,7 @@ fn summarize_provider_payload(payload: &Value) -> Option<String> {
     if let Some(obj) = payload.as_object() {
         for (_, v) in obj.iter() {
             if let Some(s) = v.as_str().filter(|s| !s.is_empty()) {
-                return Some(truncate(s, 80));
+                return Some(s.to_string());
             }
         }
     }
@@ -729,14 +693,6 @@ fn is_silent_extension_kind(provider: Provider, kind: &str) -> bool {
         .any(|(p, k)| *p == provider && *k == kind)
 }
 
-fn truncate(s: &str, max_chars: usize) -> String {
-    let count = s.chars().count();
-    if count <= max_chars {
-        return s.to_string();
-    }
-    let prefix: String = s.chars().take(max_chars.saturating_sub(1)).collect();
-    format!("{prefix}\u{2026}")
-}
 
 #[cfg(test)]
 mod tests {
@@ -1311,6 +1267,54 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Strip biscuit-terminal Layout soft-wrap continuations ("-\n  " or
+    /// "\n  ") so assertions can check the pre-wrap content regardless of
+    /// the terminal-aware column budget applied by `Status` + `Layout`.
+    fn strip_layout_wraps(rendered: &str) -> String {
+        rendered.replace("-\n  ", "").replace("\n  ", "")
+    }
+
+    #[test]
+    fn long_summary_is_not_truncated_to_60_or_80_chars() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        let long = "a".repeat(200);
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("Bash".into()),
+            id: None,
+            input: Some(json!({"command": long.clone()})),
+            extra: json!({}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        let unwrapped = strip_layout_wraps(&rendered);
+        assert!(
+            unwrapped.contains(&long),
+            "long command must not be truncated; got {rendered:?}"
+        );
+        assert!(!rendered.contains('\u{2026}'), "no ellipsis expected");
+    }
+
+    #[test]
+    fn long_provider_extension_payload_is_not_capped_at_80() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        let long = "x".repeat(300);
+        sink.on_semantic_event(SemanticEvent::ProviderExtension {
+            provider: Provider::Codex,
+            kind: "custom.kind".into(),
+            payload: json!({"message": long.clone()}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        let unwrapped = strip_layout_wraps(&rendered);
+        assert!(
+            unwrapped.contains(&long),
+            "long provider-extension message must not be truncated; got {rendered:?}"
+        );
+        assert!(!rendered.contains('\u{2026}'), "no ellipsis expected");
     }
 
     mod golden_stderr {
