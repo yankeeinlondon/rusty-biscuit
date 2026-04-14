@@ -287,7 +287,9 @@ impl ToolCallDisplay {
         };
         let parsed_status = status.as_deref().and_then(|s| match s {
             "success" | "completed" | "ok" => Some(ToolStatus::Success),
-            "error" | "failure" | "failed" => Some(ToolStatus::Error),
+            "error" | "failure" | "failed" | "timeout" | "cancelled" | "aborted" => {
+                Some(ToolStatus::Error)
+            }
             "pending" | "running" | "in_progress" => Some(ToolStatus::Pending),
             _ => None,
         });
@@ -357,5 +359,54 @@ mod from_event_tests {
         let display = ToolCallDisplay::from_result(&event).unwrap();
         assert!(display.status.is_none());
         assert_eq!(display.summary.as_deref(), Some("ls"));
+    }
+
+    #[test]
+    fn from_result_maps_timeout_and_cancelled_to_error() {
+        for raw in ["timeout", "cancelled", "aborted"] {
+            let event = SemanticEvent::ToolResult {
+                name: Some("Bash".into()),
+                id: None,
+                status: Some(raw.into()),
+                exit_code: None,
+                output: None,
+                extra: json!({}),
+            };
+            let display = ToolCallDisplay::from_result(&event).unwrap();
+            assert_eq!(
+                display.status,
+                Some(ToolStatus::Error),
+                "raw status {raw:?} should map to Error"
+            );
+        }
+    }
+
+    #[test]
+    fn from_result_unknown_status_falls_through_to_summary() {
+        let event = SemanticEvent::ToolResult {
+            name: Some("Bash".into()),
+            id: None,
+            status: Some("xyz".into()),
+            exit_code: None,
+            output: Some(json!({"command": "ls"})),
+            extra: json!({}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        assert!(display.status.is_none());
+        assert_eq!(display.summary.as_deref(), Some("ls"));
+    }
+
+    #[test]
+    fn from_result_uses_extra_input_when_output_absent() {
+        let event = SemanticEvent::ToolResult {
+            name: Some("Bash".into()),
+            id: None,
+            status: None,
+            exit_code: None,
+            output: None,
+            extra: json!({"input": {"command": "ls -la"}}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        assert_eq!(display.summary.as_deref(), Some("ls -la"));
     }
 }
