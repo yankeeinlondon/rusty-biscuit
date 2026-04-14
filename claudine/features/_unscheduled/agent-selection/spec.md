@@ -87,6 +87,13 @@ Model resolution follows a single parallel chain that is independent of TTY/non-
 - The interactive picker must **never** hang in non-TTY contexts. The runtime detects TTY up front and either resolves via the non-TTY chain above or fails with the structured hard error.
 - This TTY-awareness applies equally to `compose`, `inline-compose`, and `sequence`.
 
+### Host Detection
+
+Throughout this spec, "installed on host" has a single concrete meaning: `InstalledAiClients::is_installed(provider.sniff_ai_cli())` from the `sniff` crate (`sniff::programs::InstalledAiClients`) returns `true` for the provider in question.
+
+- This is the same detection mechanism Claudine already uses elsewhere — `claudine init`, `claudine hooks`, and the provider wrappers (see `claudine/cli/src/commands/hooks.rs`, `claudine/cli/src/commands/wrap/composition.rs`, and `claudine/cli/src/commands/wrap/mod.rs`). No new detection code is introduced by this feature.
+- Detection is performed **once at command start**, not re-queried per signal during resolution. All "installed?" checks within a single invocation of `compose`, `inline-compose`, or `sequence` observe the same snapshot, so repeated references to "installed" remain consistent even if the host state changed to change mid-run.
+
 ## Frontmatter Influence
 
 ### The `agent` property
@@ -111,8 +118,43 @@ The `model` frontmatter property feeds step 4 of the model resolution chain.
 - It accepts either a singular string value or a list of string values.
 - If a suggested model is a match for a valid model of the resolved `agent`, it is used.
 - Invalid models for the chosen `agent` are ignored/skipped and do not create an error condition.
-    - This does mean we need an enumerated list of valid models per provider.
+    - This does mean we need an enumerated list of valid models per provider. See "Model Enumeration" below for how that list is sourced and extended.
 - Stronger signals earlier in the chain (CLI `--model`, provider-specific ENV var, `MODEL` ENV var) always override frontmatter suggestions.
+
+## Model Enumeration
+
+The "enumerated list of valid models per provider" referenced above is its own sub-feature. It is **dynamically fetched**, with a **user override** layer in Claudine config. This section specifies _what_ the enumeration is and _where_ it comes from; implementation details (cache location, refresh cadence, storage format) are intentionally left open.
+
+### Sourcing strategy
+
+Model lists are sourced dynamically per provider rather than hardcoded:
+
+- **Codex** and **Claude** — sourced from the `unchained-ai-gen` package, which already maintains provider model catalogs for the monorepo.
+- **OpenCode** — sourced by shelling out to `opencode models`. This is viable because, in any context where OpenCode is a resolved provider, the OpenCode CLI is guaranteed to be installed on the host (per the "Host Detection" rule above).
+- **Qwen** — sourced from `opencode models` filtered to Qwen entries (e.g., `opencode models | rg qwen`), with per-provider normalization. This is a **pragmatic starting point**, not a permanent contract; a dedicated source may replace it later.
+- **Kimi** and **Gemini** — **TBD**. Research still needed. The same "dynamic fetch via best-available source" pattern applies once a source is identified. The OpenRouter model endpoint (accessed via `unchained-ai-gen`) is a candidate, but is not committed to here.
+- **Goose** and **Roo** — **TBD**. Not yet researched; same note applies.
+
+### Caching
+
+Fetched model lists are **cached**. The cache is **refreshable**. Where the cache lives, how it is keyed, and when it auto-refreshes are implementation details and are not pinned by this spec.
+
+### User override
+
+Users can extend or replace the enumerated cache through the Claudine configuration. Concretely, a config section (e.g., `models.codex: [...]`) exposes per-provider entries:
+
+- **Additive form (default)** — user-supplied entries are added to the fetched list, producing a combined enumeration. This handles drift when new models are released before a cache refresh, and also covers user-specific custom endpoints that a remote catalog would never know about.
+- **Replace/override form** — a separate shape is available for users who want their list to fully replace the fetched list for that provider.
+
+The exact config keys and shape are implementation details; the requirement here is that both modes exist.
+
+### Use in validation
+
+The model enumeration is what powers the "invalid models are skipped, not errored" behavior described under the `model` frontmatter property. For a given resolved agent:
+
+- A model is **valid** if it appears in the **combined enumeration** (fetched list plus user override, per the additive/replace semantics above) for that agent's provider.
+- Frontmatter `model` entries that are not valid for the resolved agent are skipped silently; the resolver continues through the list.
+- This section fulfils the "enumerated list of valid models per provider" requirement flagged under the `model` property.
 
 ## Sequence UX
 
