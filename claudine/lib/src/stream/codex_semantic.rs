@@ -17,8 +17,10 @@
 //! `--output-last-message` temp file read in `cli/commands/wrap/exec.rs`; this
 //! parser therefore accumulates `agent_message` text into the summary but does
 //! NOT emit [`SemanticEvent::OutputText`] for it (doing so would double-emit
-//! to stdout). The full event still appears in the semantic log as a
-//! `ProviderExtension` so fidelity is preserved.
+//! to stdout). It also does NOT leak the event as a `ProviderExtension` —
+//! the text is preserved in the summary's `assistant_text` field and any
+//! consumer that needs the raw event can inspect the captured JSONL log
+//! directly.
 
 use std::collections::HashMap;
 
@@ -184,22 +186,16 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         });
     }
 
-    fn handle_agent_message_item(&mut self, msg: &CodexAgentMessage, raw_kind: &str) {
+    fn handle_agent_message_item(&mut self, msg: &CodexAgentMessage, _raw_kind: &str) {
         // Accumulate text for the summary's assistant_text (used as a fallback
         // when --output-last-message is unavailable). Do not emit OutputText
-        // to avoid double-rendering with the file-based text source.
+        // to avoid double-rendering with the file-based text source, and do
+        // not leak to ProviderExtension — the event is preserved in the raw
+        // JSONL log, and ProviderExtension should be reserved for events the
+        // semantic layer genuinely does not understand.
         if let Some(text) = msg.collected_text() {
             self.assistant_text.push_str(&text);
         }
-        // Preserve the event for the semantic log via ProviderExtension.
-        let mut payload = self.base_extra(raw_kind);
-        if let Some(id) = &msg.id {
-            payload.insert("id".into(), Value::from(id.as_str()));
-        }
-        if let Some(text) = msg.collected_text() {
-            payload.insert("text".into(), Value::from(text));
-        }
-        self.emit_provider_extension("item.agent_message", Value::Object(payload));
     }
 
     fn handle_reasoning_item(&mut self, r: &CodexReasoning, raw_kind: &str) {
@@ -809,9 +805,10 @@ mod tests {
             )
             .unwrap();
         let ks = kinds(&events.lock().unwrap());
-        // No OutputText; preserved as ProviderExtension for semantic log only.
+        // No OutputText (file-based text source owns that), and no
+        // ProviderExtension leak — the raw JSONL log preserves the event.
         assert!(!ks.contains(&"output_text"));
-        assert!(ks.contains(&"provider_extension"));
+        assert!(!ks.contains(&"provider_extension"));
         let summary = parser.finish(0);
         assert_eq!(summary.assistant_text, "hello from stream");
     }
@@ -901,6 +898,81 @@ mod tests {
             let v2 = serde_json::to_value(&decoded).unwrap();
             assert_eq!(v, v2, "round-trip lost fidelity for {}", event.kind_str());
         }
+    }
+
+    #[test]
+    fn codex_fixture_command_execution_routes_to_tool_pair() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","command":"ls","aggregated_output":""}}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"item.completed","item":{"id":"cmd1","type":"command_execution","command":"ls","aggregated_output":"file.txt\n","exit_code":0,"status":"success"}}"#)
+            .unwrap();
+
+        let captured = events.lock().unwrap().clone();
+        let ks = kinds(&captured);
+        assert_eq!(
+            ks, vec!["tool_call", "tool_result"],
+            "command_execution must route to paired ToolCall + ToolResult, got {ks:?}"
+        );
+
+        let SemanticEvent::ToolResult { status, exit_code, output, .. } = &captured[1] else {
+            panic!("expected ToolResult as second event, got {:?}", captured[1]);
+        };
+        assert_eq!(status.as_deref(), Some("success"));
+        assert_eq!(*exit_code, Some(0));
+        let output = output.as_ref().expect("output");
+        assert_eq!(
+            output.as_str(),
+            Some("file.txt\n"),
+            "aggregated_output must be preserved as the ToolResult output"
+        );
+    }
+
+    #[test]
+    fn codex_fixture_agent_message_does_not_leak_as_provider_extension() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Looking at the repo..."}}"#)
+            .unwrap();
+
+        let captured = events.lock().unwrap().clone();
+        let ks = kinds(&captured);
+        assert!(
+            !ks.iter().any(|k| *k == "provider_extension"),
+            "agent_message must not leak to ProviderExtension; got {ks:?}"
+        );
+    }
+
+    #[test]
+    fn codex_fixture_full_replay_produces_no_provider_extensions() {
+        let fixture = std::fs::read_to_string(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/providers/codex.ndjson"),
+        )
+        .expect("codex.ndjson must exist — Task 1 should have created it");
+
+        let (events, mut parser) = new_parser();
+        for (i, line) in fixture.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() { continue; }
+            parser
+                .feed_line(line)
+                .unwrap_or_else(|e| panic!("line {}: {:?}", i + 1, e));
+        }
+
+        let captured = events.lock().unwrap().clone();
+        let ext: Vec<&SemanticEvent> = captured
+            .iter()
+            .filter(|e| e.kind_str() == "provider_extension")
+            .collect();
+        assert!(
+            ext.is_empty(),
+            "captured fixture must not produce ProviderExtension events; found {} out of {}: {:#?}",
+            ext.len(),
+            captured.len(),
+            ext.iter().take(3).collect::<Vec<_>>()
+        );
     }
 
     #[test]
