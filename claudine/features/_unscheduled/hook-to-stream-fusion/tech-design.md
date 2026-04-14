@@ -19,8 +19,8 @@ This design introduces **Stream Fusion**: an IPC bridge between `claudine handle
 ### 2. Event Fusing & Deduplication
 
 The wrapper's execution loop (`run_child_stream`) will be extended to consume events from two concurrent sources:
-1.  **Stdout Stream:** Parsed by the provider-specific `StreamParser`.
-2.  **IPC Hooks:** Received via the UDS listener.
+1. **Stdout Stream:** Parsed by the provider-specific `StreamParser`.
+2. **IPC Hooks:** Received via the UDS listener.
 
 Both sources feed into a **Deduplicating Sink**.
 
