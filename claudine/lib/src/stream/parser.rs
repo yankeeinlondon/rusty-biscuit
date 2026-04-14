@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
+use super::semantic::{SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 
 /// Metadata accompanying coarse events discovered during stream parsing.
@@ -140,4 +142,246 @@ pub enum StreamParseError {
     MalformedLine { line_num: usize, message: String },
     #[error("Stream unusable: {0}")]
     Fatal(String),
+}
+
+/// Line-by-line structured stream parser built around [`SemanticEvent`].
+///
+/// Unlike [`StreamParser`], each successfully-parsed line yields zero or more
+/// semantic events delivered through the sink instead of a returned
+/// `Option<StreamChunk>`. Malformed JSON lines emit
+/// [`SemanticEvent::Warning`] and return `Ok(())` rather than propagating an
+/// error.
+///
+/// During the migration from the legacy callback-based parsers, non-migrated
+/// providers are exposed through [`LegacySemanticParser`] — a bridge that
+/// wraps a [`StreamParser`] and translates its output into semantic events.
+pub trait SemanticStreamParser: Send {
+    /// Process one line of provider output, emitting zero or more
+    /// [`SemanticEvent`]s via the parser's owned sink.
+    fn feed_line(&mut self, line: &str) -> Result<(), StreamParseError>;
+
+    /// Finalize parsing and return the accumulated summary.
+    fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary;
+}
+
+/// Adapter: wraps a legacy [`StreamEventSink`]-based parser and presents it as
+/// a [`SemanticStreamParser`] that emits [`SemanticEvent`]s to a
+/// [`SemanticEventSink`].
+///
+/// Construction requires the caller to have built the wrapped parser with a
+/// [`LegacyCallbackBridge`] that shares its queue with this adapter. Each
+/// `feed_line` call drains the bridge's queued callback events and forwards
+/// them to the semantic sink, in addition to translating `StreamChunk`
+/// return values into [`SemanticEvent::OutputText`] / [`SemanticEvent::Reasoning`]
+/// and malformed lines into [`SemanticEvent::Warning`].
+///
+/// This adapter is intentionally transitional. Providers migrated to native
+/// [`SemanticStreamParser`] implementations (e.g. in Phase 2 of the
+/// more-meta-response feature) bypass it entirely.
+pub struct LegacySemanticParser<S: SemanticEventSink> {
+    inner: Box<dyn StreamParser>,
+    queue: Arc<Mutex<Vec<SemanticEvent>>>,
+    sink: S,
+}
+
+impl<S: SemanticEventSink> LegacySemanticParser<S> {
+    /// Create the adapter from a legacy parser and the queue it shares with
+    /// its [`LegacyCallbackBridge`].
+    pub fn new(inner: Box<dyn StreamParser>, queue: Arc<Mutex<Vec<SemanticEvent>>>, sink: S) -> Self {
+        Self { inner, queue, sink }
+    }
+}
+
+impl<S: SemanticEventSink> SemanticStreamParser for LegacySemanticParser<S> {
+    fn feed_line(&mut self, line: &str) -> Result<(), StreamParseError> {
+        let chunk_result = self.inner.feed_line(line);
+
+        let drained: Vec<SemanticEvent> = {
+            let mut queue = self.queue.lock().unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut *queue)
+        };
+        for event in drained {
+            self.sink.on_semantic_event(event);
+        }
+
+        match chunk_result {
+            Ok(Some(StreamChunk::Text(text))) => {
+                self.sink.on_semantic_event(SemanticEvent::OutputText {
+                    text,
+                    extra: Value::Object(Map::new()),
+                });
+                Ok(())
+            }
+            Ok(Some(StreamChunk::Thinking(text))) => {
+                self.sink.on_semantic_event(SemanticEvent::Reasoning {
+                    text,
+                    extra: Value::Object(Map::new()),
+                });
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(StreamParseError::MalformedLine { line_num, message }) => {
+                let mut extra = Map::new();
+                extra.insert("line_num".into(), Value::from(line_num));
+                self.sink.on_semantic_event(SemanticEvent::Warning {
+                    message: format!("Malformed JSON on line {line_num}: {message}"),
+                    extra: Value::Object(extra),
+                });
+                Ok(())
+            }
+            Err(e @ StreamParseError::Fatal(_)) => Err(e),
+        }
+    }
+
+    fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
+        self.inner.finish(exit_code)
+    }
+}
+
+/// Bridge: adapts the legacy [`StreamEventSink`] callback interface into
+/// queued [`SemanticEvent`]s.
+///
+/// Instances are owned by a non-migrated legacy parser as its sink; the queue
+/// is shared with a surrounding [`LegacySemanticParser`] adapter that drains
+/// events after each `feed_line` call.
+///
+/// The translation from legacy callbacks to semantic events is conservative:
+/// every callback becomes the closest-matching typed `SemanticEvent`, with
+/// provider-specific metadata preserved under `extra`. This bridge is
+/// transitional — native `SemanticStreamParser` implementations should emit
+/// events directly without routing through it.
+pub struct LegacyCallbackBridge {
+    queue: Arc<Mutex<Vec<SemanticEvent>>>,
+}
+
+impl LegacyCallbackBridge {
+    /// Create a new bridge that pushes translated events into `queue`.
+    pub fn new(queue: Arc<Mutex<Vec<SemanticEvent>>>) -> Self {
+        Self { queue }
+    }
+
+    fn push(&mut self, event: SemanticEvent) {
+        let mut queue = self.queue.lock().unwrap_or_else(|e| e.into_inner());
+        queue.push(event);
+    }
+
+    fn extra_from_meta(meta: &EventMeta) -> Value {
+        let obj: Map<String, Value> = meta.extra.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        Value::Object(obj)
+    }
+
+    fn string_field(meta: &EventMeta, key: &str) -> Option<String> {
+        meta.extra.get(key).and_then(|v| v.as_str()).map(String::from)
+    }
+}
+
+impl StreamEventSink for LegacyCallbackBridge {
+    fn on_session_start(&mut self, meta: &EventMeta) {
+        self.push(SemanticEvent::SessionStart {
+            session_id: Self::string_field(meta, "session_id"),
+            model: Self::string_field(meta, "model"),
+            extra: Self::extra_from_meta(meta),
+        });
+    }
+
+    fn on_turn_start(&mut self, meta: &EventMeta) {
+        self.push(SemanticEvent::TurnStart {
+            extra: Self::extra_from_meta(meta),
+        });
+    }
+
+    fn on_step_start(&mut self, meta: &EventMeta) {
+        let mut extra = Self::extra_from_meta(meta);
+        if let Some(obj) = extra.as_object_mut() {
+            obj.insert("step_phase".into(), Value::from("start"));
+        }
+        self.push(SemanticEvent::Info {
+            message: "step_start".into(),
+            extra,
+        });
+    }
+
+    fn on_step_finish(&mut self, meta: &EventMeta) {
+        let mut extra = Self::extra_from_meta(meta);
+        if let Some(obj) = extra.as_object_mut() {
+            obj.insert("step_phase".into(), Value::from("finish"));
+        }
+        self.push(SemanticEvent::Info {
+            message: "step_finish".into(),
+            extra,
+        });
+    }
+
+    fn on_turn_complete(&mut self, meta: &EventMeta) {
+        self.push(SemanticEvent::TurnComplete {
+            provider_status: Self::string_field(meta, "provider_status"),
+            token_usage: None,
+            cost_usd: meta.extra.get("cost_usd").and_then(|v| v.as_f64()),
+            duration_ms: meta.extra.get("duration_ms").and_then(|v| v.as_u64()),
+            extra: Self::extra_from_meta(meta),
+        });
+    }
+
+    fn on_turn_error(&mut self, meta: &EventMeta) {
+        let message = Self::string_field(meta, "error_message")
+            .or_else(|| Self::string_field(meta, "message"))
+            .unwrap_or_default();
+        self.push(SemanticEvent::Error {
+            message,
+            terminal: true,
+            extra: Self::extra_from_meta(meta),
+        });
+    }
+
+    fn on_before_tool(&mut self, meta: &EventMeta) {
+        self.push(SemanticEvent::ToolCall {
+            name: Self::string_field(meta, "tool_name"),
+            id: Self::string_field(meta, "tool_id"),
+            input: meta.extra.get("tool_input").cloned(),
+            extra: Self::extra_from_meta(meta),
+        });
+    }
+
+    fn on_after_tool(&mut self, meta: &EventMeta) {
+        self.push(SemanticEvent::ToolResult {
+            name: Self::string_field(meta, "tool_name"),
+            id: Self::string_field(meta, "tool_id"),
+            status: Self::string_field(meta, "status"),
+            exit_code: meta.extra.get("exit_code").and_then(|v| v.as_i64()).map(|v| v as i32),
+            output: meta.extra.get("tool_response").cloned(),
+            extra: Self::extra_from_meta(meta),
+        });
+    }
+
+    fn on_permission_request(&mut self, meta: &EventMeta) {
+        self.push(SemanticEvent::PermissionRequest {
+            kind: Self::string_field(meta, "kind"),
+            tool_name: Self::string_field(meta, "tool_name"),
+            extra: Self::extra_from_meta(meta),
+        });
+    }
+
+    fn on_subagent_start(&mut self, meta: &EventMeta) {
+        self.push(SemanticEvent::SubagentStart {
+            name: Self::string_field(meta, "name"),
+            id: Self::string_field(meta, "id"),
+            extra: Self::extra_from_meta(meta),
+        });
+    }
+
+    fn on_subagent_stop(&mut self, meta: &EventMeta) {
+        self.push(SemanticEvent::SubagentStop {
+            name: Self::string_field(meta, "name"),
+            id: Self::string_field(meta, "id"),
+            status: Self::string_field(meta, "status"),
+            extra: Self::extra_from_meta(meta),
+        });
+    }
+
+    fn on_warning(&mut self, message: &str) {
+        self.push(SemanticEvent::Warning {
+            message: message.to_string(),
+            extra: Value::Object(Map::new()),
+        });
+    }
 }

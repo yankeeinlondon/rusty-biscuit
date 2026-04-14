@@ -17,8 +17,12 @@ pub mod token_usage;
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
+use std::sync::{Arc, Mutex};
+
 use crate::events::Provider;
-use parser::{StreamEventSink, StreamParser};
+use parser::{
+    LegacyCallbackBridge, LegacySemanticParser, SemanticStreamParser, StreamEventSink, StreamParser,
+};
 
 pub use semantic::{NullSemanticSink, SemanticEvent, SemanticEventSink};
 
@@ -68,6 +72,36 @@ pub fn create_parser(
         Provider::QwenCode => Box::new(qwen::QwenStreamParser::new(sink)),
         _ => Box::new(claude::ClaudeStreamParser::new(sink)),
     }
+}
+
+/// Create a semantic-event parser for a provider.
+///
+/// This is the forward-looking parser factory for the `SemanticEvent` pipeline.
+/// Non-migrated providers are wrapped in [`LegacySemanticParser`], which
+/// translates legacy callbacks and `StreamChunk` returns into
+/// [`SemanticEvent`]s. Providers that have native
+/// [`SemanticStreamParser`] implementations can be added here as they are
+/// migrated, bypassing the adapter entirely.
+pub fn create_semantic_parser<S: SemanticEventSink + 'static>(
+    provider: Provider,
+    sink: S,
+    config: ParserConfig,
+) -> Box<dyn SemanticStreamParser> {
+    let queue: Arc<Mutex<Vec<SemanticEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let bridge = LegacyCallbackBridge::new(queue.clone());
+    let legacy_parser: Box<dyn StreamParser> = match provider {
+        Provider::Claude => Box::new(claude::ClaudeStreamParser::new(bridge)),
+        Provider::Codex => Box::new(codex::CodexStreamParser::new(bridge, config.model.clone())),
+        Provider::Gemini => Box::new(gemini::GeminiStreamParser::new(bridge)),
+        Provider::KimiCode => Box::new(kimi::KimiStreamParser::new(bridge)),
+        Provider::OpenCode => Box::new(opencode::OpenCodeStreamParser::new(
+            bridge,
+            config.model.clone(),
+        )),
+        Provider::QwenCode => Box::new(qwen::QwenStreamParser::new(bridge)),
+        _ => Box::new(claude::ClaudeStreamParser::new(bridge)),
+    };
+    Box::new(LegacySemanticParser::new(legacy_parser, queue, sink))
 }
 
 /// Return the stream protocol used by a provider, if supported.
@@ -258,5 +292,127 @@ mod tests {
     #[test]
     fn stream_protocol_for_unsupported_providers() {
         assert_eq!(stream_protocol_for(Provider::Goose), None);
+    }
+
+    mod semantic_adapter {
+        use std::sync::{Arc, Mutex};
+
+        use super::super::{create_semantic_parser, ParserConfig, SemanticEvent, SemanticEventSink};
+        use crate::events::Provider;
+
+        /// Recording sink that collects every semantic event it receives.
+        struct RecordingSemanticSink {
+            events: Arc<Mutex<Vec<SemanticEvent>>>,
+        }
+
+        impl SemanticEventSink for RecordingSemanticSink {
+            fn on_semantic_event(&mut self, event: SemanticEvent) {
+                self.events.lock().unwrap().push(event);
+            }
+        }
+
+        fn kinds_of(events: &[SemanticEvent]) -> Vec<&'static str> {
+            events.iter().map(|e| e.kind_str()).collect()
+        }
+
+        #[test]
+        fn claude_via_adapter_emits_semantic_events() {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let sink = RecordingSemanticSink {
+                events: events.clone(),
+            };
+            let mut parser =
+                create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
+
+            parser
+                .feed_line(r#"{"type":"init","session_id":"s1","model":"claude"}"#)
+                .unwrap();
+            parser
+                .feed_line(
+                    r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#,
+                )
+                .unwrap();
+            parser
+                .feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#)
+                .unwrap();
+            parser
+                .feed_line(r#"{"type":"tool_result","tool_use_id":"t1","content":"ok"}"#)
+                .unwrap();
+
+            let collected = events.lock().unwrap().clone();
+            let kinds = kinds_of(&collected);
+            assert!(kinds.contains(&"session_start"), "kinds = {kinds:?}");
+            assert!(kinds.contains(&"output_text"), "kinds = {kinds:?}");
+            assert!(kinds.contains(&"tool_call"), "kinds = {kinds:?}");
+            assert!(kinds.contains(&"tool_result"), "kinds = {kinds:?}");
+
+            let summary = parser.finish(0);
+            assert_eq!(summary.provider, Provider::Claude);
+        }
+
+        #[test]
+        fn malformed_json_emits_warning_instead_of_error() {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let sink = RecordingSemanticSink {
+                events: events.clone(),
+            };
+            let mut parser =
+                create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
+
+            // Adapter must convert MalformedLine into Warning + Ok(()).
+            let result = parser.feed_line("not json {{{");
+            assert!(result.is_ok());
+
+            let collected = events.lock().unwrap().clone();
+            assert!(
+                collected
+                    .iter()
+                    .any(|e| matches!(e, SemanticEvent::Warning { .. })),
+                "expected a Warning event, got {:?}",
+                kinds_of(&collected)
+            );
+        }
+
+        #[test]
+        fn thinking_delta_becomes_reasoning_event() {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let sink = RecordingSemanticSink {
+                events: events.clone(),
+            };
+            let mut parser =
+                create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
+
+            parser
+                .feed_line(
+                    r#"{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"pondering"}}"#,
+                )
+                .unwrap();
+
+            let collected = events.lock().unwrap().clone();
+            assert!(collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Reasoning { text, .. } if text == "pondering")));
+        }
+
+        #[test]
+        fn rate_limit_becomes_warning_event() {
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let sink = RecordingSemanticSink {
+                events: events.clone(),
+            };
+            let mut parser =
+                create_semantic_parser(Provider::Claude, sink, ParserConfig::default());
+
+            parser
+                .feed_line(
+                    r#"{"type":"rate_limit_event","is_throttled":true,"retry_after_ms":5000,"message":"Rate limit"}"#,
+                )
+                .unwrap();
+
+            let collected = events.lock().unwrap().clone();
+            assert!(collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::Warning { message, .. } if message == "Rate limit")));
+        }
     }
 }
