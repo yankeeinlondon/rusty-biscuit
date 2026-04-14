@@ -24,6 +24,12 @@ use super::summary::{RateLimitInfo, StreamExecutionSummary};
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
 
+/// Max number of hook events to buffer before `SessionStart` is emitted.
+/// If the buffer grows past this, we flush early so live streaming wins
+/// over cosmetic ordering (spec: "preserving streaming wins over
+/// cosmetic ordering").
+const MAX_PRE_INIT_HOOK_EVENTS: usize = 32;
+
 /// Known raw event `type` strings that are NOT modeled by [`ClaudeEvent`] but
 /// should still map to specific semantic events rather than
 /// [`SemanticEvent::ProviderExtension`]. Kept alongside the parser so the
@@ -62,6 +68,12 @@ pub struct ClaudeSemanticStreamParser<S: SemanticEventSink> {
     /// emitted so that an `assistant.error` followed by a
     /// `result.is_error=true` pair does not double-emit.
     terminal_error_emitted: bool,
+    /// Set once `SessionStart` has been emitted. Hook events that arrive
+    /// before this flips are buffered so they trail the session-ID marker.
+    session_started: bool,
+    /// Buffered hook events (raw kind + raw value) that arrived prior to
+    /// `SessionStart`. Drained in FIFO order once session_start is emitted.
+    pre_init_hook_buffer: Vec<(String, Value)>,
 }
 
 impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
@@ -85,6 +97,8 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             rate_limit: None,
             raw_summary: None,
             terminal_error_emitted: false,
+            session_started: false,
+            pre_init_hook_buffer: Vec::new(),
         }
     }
 
@@ -105,34 +119,26 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         // `system` events carry a `subtype` discriminator. Only `init` (and
         // `null`/missing — legacy `init` envelopes) establish session state
         // and emit a `SessionStart`. Everything else (notably `hook_started`
-        // and `hook_response`) is surfaced as a low-priority `Info` so session
-        // state is not overwritten by hook traffic.
+        // and `hook_response`) is surfaced as a `ProviderExtension`. Hook
+        // events that arrive BEFORE `SessionStart` are buffered so the
+        // session-ID marker renders first (per the response-refinement
+        // spec). If the buffer saturates we flush inline to preserve live
+        // streaming.
         let subtype = init.subtype.as_deref();
         let is_session_init =
             raw_kind == "init" || matches!(subtype, None | Some("init") | Some(""));
         if !is_session_init {
-            let subtype_str = subtype.unwrap_or("").to_string();
-            let hook_name = raw
-                .get("hook_name")
-                .and_then(Value::as_str)
-                .map(String::from);
-            let message = match hook_name.as_deref() {
-                Some(name) if !name.is_empty() => {
-                    format!("Claude system event: {subtype_str} ({name})")
-                }
-                _ if !subtype_str.is_empty() => format!("Claude system event: {subtype_str}"),
-                _ => "Claude system event".to_string(),
+            let ext_kind = match subtype {
+                Some(s) if !s.is_empty() => format!("system/{s}"),
+                _ => "system".to_string(),
             };
-            let mut extra = self.base_extra();
-            extra.insert("raw_kind".into(), Value::from(raw_kind));
-            extra.insert("subtype".into(), Value::from(subtype_str));
-            if let Some(name) = hook_name {
-                extra.insert("hook_name".into(), Value::from(name));
+            if !self.session_started
+                && self.pre_init_hook_buffer.len() < MAX_PRE_INIT_HOOK_EVENTS
+            {
+                self.pre_init_hook_buffer.push((ext_kind, raw.clone()));
+            } else {
+                self.emit_provider_extension(&ext_kind, raw.clone());
             }
-            self.sink.on_semantic_event(SemanticEvent::Info {
-                message,
-                extra: Value::Object(extra),
-            });
             return;
         }
         self.session_id = init.session_id;
@@ -147,6 +153,13 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             model: self.model.clone(),
             extra: self.extra_with(raw_kind),
         });
+        self.session_started = true;
+        // Drain any hook events that arrived before the session-ID marker so
+        // they render after it.
+        let drained: Vec<(String, Value)> = std::mem::take(&mut self.pre_init_hook_buffer);
+        for (ext_kind, payload) in drained {
+            self.emit_provider_extension(&ext_kind, payload);
+        }
     }
 
     fn handle_assistant_message(&mut self, event: ClaudeAssistant, raw_kind: &str) {
@@ -1117,7 +1130,11 @@ mod tests {
     }
 
     #[test]
-    fn hook_events_route_to_info_not_session_start() {
+    fn hook_events_without_init_do_not_fabricate_session_start() {
+        // Without an `init` event, hook_* system subtypes must NOT be
+        // promoted to a `SessionStart`. They stay buffered until a real
+        // init arrives (or flush inline once the buffer saturates). In
+        // either case, nothing should synthesize a session_start.
         let (sink, mut parser) = new_parser();
         parser
             .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup","session_id":"s1"}"#)
@@ -1126,15 +1143,75 @@ mod tests {
             .feed_line(r#"{"type":"system","subtype":"hook_response","hook_id":"x","output":"ok","exit_code":0,"session_id":"s1"}"#)
             .unwrap();
         let kinds = sink.kinds();
-        // Hook events must NOT be treated as session starts.
         assert!(
             !kinds.contains(&"session_start"),
             "hook_* subtypes must not emit SessionStart; got {kinds:?}"
         );
-        // And they should at least be visible as Info or similar — not ProviderExtension.
+    }
+
+    #[test]
+    fn hook_events_emitted_after_session_start() {
+        let (sink, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"SessionStart:startup","session_id":"s1"}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"system","subtype":"hook_response","hook_id":"x","output":"ok","exit_code":0,"session_id":"s1"}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"init","session_id":"s1","model":"claude-opus-4-6"}"#)
+            .unwrap();
+        let kinds: Vec<&'static str> = sink.kinds();
+        let session_idx = kinds
+            .iter()
+            .position(|k| *k == "session_start")
+            .expect("session_start emitted");
+        let provider_ext_indices: Vec<usize> = kinds
+            .iter()
+            .enumerate()
+            .filter(|(_, k)| **k == "provider_extension")
+            .map(|(i, _)| i)
+            .collect();
+        for idx in provider_ext_indices {
+            assert!(
+                idx > session_idx,
+                "provider_extension hook event at {idx} must follow session_start at {session_idx}; got {kinds:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hook_events_after_session_start_emit_inline() {
+        // Hooks that arrive AFTER SessionStart must NOT be buffered — they
+        // pass through inline to preserve live streaming semantics.
+        let (sink, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"init","session_id":"s1","model":"claude-opus-4-6"}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"PreToolUse","session_id":"s1"}"#)
+            .unwrap();
+        let kinds: Vec<&'static str> = sink.kinds();
+        // Order: session_start, then immediately provider_extension.
+        assert_eq!(kinds.first(), Some(&"session_start"));
+        assert_eq!(kinds.get(1), Some(&"provider_extension"));
+    }
+
+    #[test]
+    fn pre_init_hook_buffer_flushes_when_oversized() {
+        // If enough hooks arrive before init that the buffer saturates,
+        // flush early so streaming wins over cosmetic ordering.
+        let (sink, mut parser) = new_parser();
+        for _ in 0..40 {
+            parser
+                .feed_line(r#"{"type":"system","subtype":"hook_started","hook_name":"X","session_id":"s1"}"#)
+                .unwrap();
+        }
+        let kinds: Vec<&'static str> = sink.kinds();
+        let provider_ext_count = kinds.iter().filter(|k| **k == "provider_extension").count();
         assert!(
-            !kinds.contains(&"provider_extension"),
-            "hook_* subtypes must not leak as ProviderExtension; got {kinds:?}"
+            provider_ext_count > 0,
+            "hooks past the buffer cap must flush inline; got {kinds:?}"
         );
     }
 
@@ -1154,13 +1231,20 @@ mod tests {
                 .unwrap_or_else(|e| panic!("line {}: {:?}", i + 1, e));
         }
         let events = sink.snapshot();
+        // Hook events (`system/hook_started`, `system/hook_response`, etc.)
+        // are intentionally surfaced as `ProviderExtension` so the sink can
+        // render them after the session-ID marker. They are excluded from
+        // the "no unrouted provider extensions" guarantee.
         let ext: Vec<&SemanticEvent> = events
             .iter()
-            .filter(|e| e.kind_str() == "provider_extension")
+            .filter(|e| match e {
+                SemanticEvent::ProviderExtension { kind, .. } => !kind.starts_with("system/"),
+                _ => false,
+            })
             .collect();
         assert!(
             ext.is_empty(),
-            "captured Claude fixture must produce zero ProviderExtension events; found {}: {:#?}",
+            "captured Claude fixture must produce zero non-hook ProviderExtension events; found {}: {:#?}",
             ext.len(),
             ext.iter().take(3).collect::<Vec<_>>()
         );
