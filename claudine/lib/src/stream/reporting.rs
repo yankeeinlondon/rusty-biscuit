@@ -5,6 +5,7 @@ use chrono::Utc;
 use serde_json::Value;
 
 use super::StreamProtocol;
+use super::semantic::SemanticEvent;
 use super::summary::StreamExecutionSummary;
 use crate::events::{AgenticEvent, EnvironmentContext, EventMeta};
 use crate::reporting::paths;
@@ -156,6 +157,212 @@ pub fn summary_to_event_meta_with_context(
         notification_message: None,
         extra,
         env: env.clone(),
+    }
+}
+
+/// Convert a [`SemanticEvent`] into an [`EventMeta`] suitable for JSONL logging.
+///
+/// The resulting `EventMeta`:
+///
+/// - Uses [`AgenticEvent::Notification`] as the envelope event so the row
+///   doesn't collide with the canonical `SessionEnd` summary row.
+/// - Uses `provider` for the [`EventMeta::provider`] slot (semantic typed
+///   variants don't carry the provider inline; callers already know which
+///   provider's stream they're reading).
+/// - Stores the full serialized semantic event under `extra["semantic_event"]`,
+///   preserving [`SemanticEvent::ProviderExtension::payload`] untouched for
+///   downstream fidelity.
+/// - Marks the row with `extra.synthetic = true`,
+///   `extra.synthetic_kind = "stream_semantic_event"`, and
+///   `extra.semantic_kind = <kind_str>`.
+/// - Populates one-to-one `EventMeta` slots where they fit
+///   (`tool_name`, `tool_input`, `tool_response`, `session_id`, `error`,
+///   `notification_type`, `notification_message`) so existing JSONL/SQLite
+///   ingest columns stay queryable.
+/// - Merges `context_extra` (composition metadata, etc.) into `extra` the
+///   same way [`summary_to_event_meta_with_context`] does.
+pub fn semantic_event_to_event_meta(
+    event: &SemanticEvent,
+    provider: crate::events::Provider,
+    env: &EnvironmentContext,
+    context_extra: Option<&HashMap<String, Value>>,
+) -> EventMeta {
+    let mut extra: HashMap<String, Value> = HashMap::new();
+
+    if let Some(ctx) = context_extra {
+        for (key, value) in ctx {
+            extra.insert(key.clone(), value.clone());
+        }
+    }
+
+    extra.insert("synthetic".into(), Value::Bool(true));
+    extra.insert(
+        "synthetic_kind".into(),
+        Value::String("stream_semantic_event".into()),
+    );
+    extra.insert(
+        "semantic_kind".into(),
+        Value::String(event.kind_str().into()),
+    );
+
+    let serialized = serde_json::to_value(event).unwrap_or(Value::Null);
+    extra.insert("semantic_event".into(), serialized);
+
+    let parts = destructure_semantic(event);
+
+    // ProviderExtension carries its own provider; prefer that over the caller-
+    // supplied value when present. All other variants use the caller's provider.
+    let resolved_provider = match event {
+        SemanticEvent::ProviderExtension { provider: p, .. } => *p,
+        _ => provider,
+    };
+
+    EventMeta {
+        provider: resolved_provider,
+        event: parts.event,
+        timestamp: Utc::now(),
+        session_id: parts.session_id,
+        cwd: None,
+        tool_name: parts.tool_name,
+        tool_input: parts.tool_input,
+        tool_response: parts.tool_response,
+        error: parts.error,
+        prompt: None,
+        agent_type: None,
+        notification_type: parts.notification_type,
+        notification_message: parts.notification_message,
+        extra,
+        env: env.clone(),
+    }
+}
+
+/// Slotted projection of a [`SemanticEvent`] onto the [`EventMeta`] columns.
+struct EventMetaSlots {
+    event: AgenticEvent,
+    session_id: Option<String>,
+    tool_name: Option<String>,
+    tool_input: Option<Value>,
+    tool_response: Option<Value>,
+    error: Option<String>,
+    notification_type: Option<String>,
+    notification_message: Option<String>,
+}
+
+impl EventMetaSlots {
+    fn simple(event: AgenticEvent) -> Self {
+        Self {
+            event,
+            session_id: None,
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            notification_type: None,
+            notification_message: None,
+        }
+    }
+}
+
+fn destructure_semantic(event: &SemanticEvent) -> EventMetaSlots {
+    match event {
+        SemanticEvent::SessionStart {
+            session_id, model, ..
+        } => EventMetaSlots {
+            event: AgenticEvent::SessionStart,
+            session_id: session_id.clone(),
+            notification_type: Some("session_start".into()),
+            notification_message: model.clone(),
+            ..EventMetaSlots::simple(AgenticEvent::SessionStart)
+        },
+        SemanticEvent::TurnStart { .. } => EventMetaSlots::simple(AgenticEvent::BeforePrompt),
+        SemanticEvent::TurnComplete { .. } => EventMetaSlots::simple(AgenticEvent::TurnComplete),
+        SemanticEvent::OutputText { .. } | SemanticEvent::Reasoning { .. } => {
+            EventMetaSlots::simple(AgenticEvent::Notification)
+        }
+        SemanticEvent::ToolCall {
+            id, name, input, ..
+        } => EventMetaSlots {
+            event: AgenticEvent::BeforeTool,
+            session_id: id.clone(),
+            tool_name: name.clone(),
+            tool_input: input.clone(),
+            ..EventMetaSlots::simple(AgenticEvent::BeforeTool)
+        },
+        SemanticEvent::ToolResult {
+            id, name, output, ..
+        } => EventMetaSlots {
+            event: AgenticEvent::AfterTool,
+            session_id: id.clone(),
+            tool_name: name.clone(),
+            tool_response: output.clone(),
+            ..EventMetaSlots::simple(AgenticEvent::AfterTool)
+        },
+        SemanticEvent::PermissionRequest {
+            kind, tool_name, ..
+        } => EventMetaSlots {
+            event: AgenticEvent::PermissionRequest,
+            tool_name: tool_name.clone(),
+            notification_type: kind.clone(),
+            ..EventMetaSlots::simple(AgenticEvent::PermissionRequest)
+        },
+        SemanticEvent::SubagentStart { id, name, .. } => EventMetaSlots {
+            event: AgenticEvent::SubagentStart,
+            session_id: id.clone(),
+            tool_name: name.clone(),
+            ..EventMetaSlots::simple(AgenticEvent::SubagentStart)
+        },
+        SemanticEvent::SubagentStop { id, name, .. } => EventMetaSlots {
+            event: AgenticEvent::SubagentStop,
+            session_id: id.clone(),
+            tool_name: name.clone(),
+            ..EventMetaSlots::simple(AgenticEvent::SubagentStop)
+        },
+        SemanticEvent::FileChange { path, .. } => EventMetaSlots {
+            event: AgenticEvent::Notification,
+            notification_type: Some("file_change".into()),
+            notification_message: path.clone(),
+            ..EventMetaSlots::simple(AgenticEvent::Notification)
+        },
+        SemanticEvent::PlanUpdate { message, .. } => EventMetaSlots {
+            event: AgenticEvent::Notification,
+            notification_type: Some("plan_update".into()),
+            notification_message: message.clone(),
+            ..EventMetaSlots::simple(AgenticEvent::Notification)
+        },
+        SemanticEvent::Info { message, .. } => EventMetaSlots {
+            event: AgenticEvent::Notification,
+            notification_type: Some("info".into()),
+            notification_message: Some(message.clone()),
+            ..EventMetaSlots::simple(AgenticEvent::Notification)
+        },
+        SemanticEvent::Warning { message, .. } => EventMetaSlots {
+            event: AgenticEvent::Notification,
+            error: Some(message.clone()),
+            notification_type: Some("warning".into()),
+            notification_message: Some(message.clone()),
+            ..EventMetaSlots::simple(AgenticEvent::Notification)
+        },
+        SemanticEvent::Error {
+            message, terminal, ..
+        } => {
+            let agentic = if *terminal {
+                AgenticEvent::TurnError
+            } else {
+                AgenticEvent::Notification
+            };
+            EventMetaSlots {
+                event: agentic,
+                error: Some(message.clone()),
+                notification_type: Some("error".into()),
+                notification_message: Some(message.clone()),
+                ..EventMetaSlots::simple(agentic)
+            }
+        }
+        SemanticEvent::ProviderExtension { kind, .. } => EventMetaSlots {
+            event: AgenticEvent::Notification,
+            notification_type: Some(format!("provider_extension:{kind}")),
+            ..EventMetaSlots::simple(AgenticEvent::Notification)
+        },
     }
 }
 
@@ -456,5 +663,166 @@ mod tests {
         let meta = summary_to_event_meta(&summary, StreamProtocol::Jsonl, &env);
         assert!(!meta.extra.contains_key("permission_prompts"));
         assert!(!meta.extra.contains_key("user_input_prompts"));
+    }
+
+    mod semantic_event_to_event_meta_tests {
+        use super::*;
+        use serde_json::json;
+
+        fn env() -> EnvironmentContext {
+            EnvironmentContext::default()
+        }
+
+        #[test]
+        fn tool_call_maps_to_before_tool_and_carries_name_input() {
+            let event = SemanticEvent::ToolCall {
+                name: Some("bash".into()),
+                id: Some("t1".into()),
+                input: Some(json!({"cmd": "ls"})),
+                extra: json!({"provider": "claude"}),
+            };
+            let meta = semantic_event_to_event_meta(&event, Provider::Claude, &env(), None);
+            assert_eq!(meta.event, AgenticEvent::BeforeTool);
+            assert_eq!(meta.tool_name.as_deref(), Some("bash"));
+            assert_eq!(meta.session_id.as_deref(), Some("t1"));
+            assert_eq!(meta.tool_input, Some(json!({"cmd": "ls"})));
+            assert_eq!(meta.extra["synthetic"], Value::Bool(true));
+            assert_eq!(
+                meta.extra["synthetic_kind"],
+                Value::String("stream_semantic_event".into())
+            );
+            assert_eq!(
+                meta.extra["semantic_kind"],
+                Value::String("tool_call".into())
+            );
+            assert!(meta.extra.contains_key("semantic_event"));
+        }
+
+        #[test]
+        fn tool_result_maps_to_after_tool_with_output() {
+            let event = SemanticEvent::ToolResult {
+                name: Some("bash".into()),
+                id: Some("t1".into()),
+                status: Some("success".into()),
+                exit_code: Some(0),
+                output: Some(json!("done")),
+                extra: json!({}),
+            };
+            let meta = semantic_event_to_event_meta(&event, Provider::Claude, &env(), None);
+            assert_eq!(meta.event, AgenticEvent::AfterTool);
+            assert_eq!(meta.tool_response, Some(json!("done")));
+        }
+
+        #[test]
+        fn provider_extension_preserves_payload_and_uses_inline_provider() {
+            let payload = json!({"deep": {"nested": [1, 2, 3]}});
+            let event = SemanticEvent::ProviderExtension {
+                provider: Provider::Codex,
+                kind: "item.updated".into(),
+                payload: payload.clone(),
+            };
+            // Caller passes Claude, but ProviderExtension carries Codex.
+            let meta = semantic_event_to_event_meta(&event, Provider::Claude, &env(), None);
+            assert_eq!(meta.provider, Provider::Codex);
+            let roundtrip = meta.extra["semantic_event"].clone();
+            // Full semantic event is preserved.
+            let decoded: SemanticEvent = serde_json::from_value(roundtrip).unwrap();
+            match decoded {
+                SemanticEvent::ProviderExtension {
+                    payload: decoded_payload,
+                    ..
+                } => assert_eq!(decoded_payload, payload),
+                other => panic!("expected ProviderExtension, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn error_terminal_maps_to_turn_error() {
+            let event = SemanticEvent::Error {
+                message: "billing failed".into(),
+                terminal: true,
+                extra: json!({}),
+            };
+            let meta = semantic_event_to_event_meta(&event, Provider::Claude, &env(), None);
+            assert_eq!(meta.event, AgenticEvent::TurnError);
+            assert_eq!(meta.error.as_deref(), Some("billing failed"));
+        }
+
+        #[test]
+        fn warning_maps_to_notification_with_error_field() {
+            let event = SemanticEvent::Warning {
+                message: "rate limited".into(),
+                extra: json!({}),
+            };
+            let meta = semantic_event_to_event_meta(&event, Provider::Claude, &env(), None);
+            assert_eq!(meta.event, AgenticEvent::Notification);
+            assert_eq!(meta.error.as_deref(), Some("rate limited"));
+            assert_eq!(meta.notification_type.as_deref(), Some("warning"));
+        }
+
+        #[test]
+        fn subagent_events_map_correctly() {
+            let start = SemanticEvent::SubagentStart {
+                name: Some("researcher".into()),
+                id: Some("sa1".into()),
+                extra: json!({}),
+            };
+            let stop = SemanticEvent::SubagentStop {
+                name: Some("researcher".into()),
+                id: Some("sa1".into()),
+                status: Some("success".into()),
+                extra: json!({}),
+            };
+            let m1 = semantic_event_to_event_meta(&start, Provider::Claude, &env(), None);
+            let m2 = semantic_event_to_event_meta(&stop, Provider::Claude, &env(), None);
+            assert_eq!(m1.event, AgenticEvent::SubagentStart);
+            assert_eq!(m2.event, AgenticEvent::SubagentStop);
+            assert_eq!(m1.tool_name.as_deref(), Some("researcher"));
+        }
+
+        #[test]
+        fn context_extra_merges() {
+            let event = SemanticEvent::Info {
+                message: "x".into(),
+                extra: json!({}),
+            };
+            let mut ctx: HashMap<String, Value> = HashMap::new();
+            ctx.insert(
+                "composition_file_ref".into(),
+                Value::String("notes.md".into()),
+            );
+            let meta = semantic_event_to_event_meta(&event, Provider::Claude, &env(), Some(&ctx));
+            assert_eq!(
+                meta.extra["composition_file_ref"],
+                Value::String("notes.md".into())
+            );
+        }
+
+        #[test]
+        fn round_trip_fidelity_via_semantic_event_slot() {
+            for event in [
+                SemanticEvent::OutputText {
+                    text: "hi".into(),
+                    extra: json!({"k": "v"}),
+                },
+                SemanticEvent::FileChange {
+                    path: Some("a.rs".into()),
+                    change_kind: Some("modified".into()),
+                    extra: json!({}),
+                },
+                SemanticEvent::PlanUpdate {
+                    message: Some("step 1".into()),
+                    extra: json!({}),
+                },
+            ] {
+                let meta = semantic_event_to_event_meta(&event, Provider::Claude, &env(), None);
+                let roundtrip = meta.extra["semantic_event"].clone();
+                let decoded: SemanticEvent = serde_json::from_value(roundtrip.clone()).unwrap();
+                assert_eq!(
+                    serde_json::to_value(&decoded).unwrap(),
+                    serde_json::to_value(&event).unwrap()
+                );
+            }
+        }
     }
 }

@@ -17,7 +17,43 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use super::parser::EventMeta;
+use super::semantic::SemanticEvent;
 use super::token_usage::NormalizedTokenUsage;
+
+/// Named constants for the heartbeat-emission policy.
+///
+/// - `interval`: granularity at which the heartbeat thread wakes up.
+/// - `silence_window`: time of stream inactivity required before a heartbeat
+///   tick is allowed to emit.
+/// - `force_window`: hard cadence that overrides `silence_window` — once this
+///   much time has passed since the last heartbeat, the next tick fires even
+///   if the stream is busy, so long-running subagents still surface progress.
+///
+/// Moving the timing into a named struct keeps the exec-loop policy explicit
+/// and testable, and establishes a single place to tune behavior across every
+/// provider.
+#[derive(Debug, Clone, Copy)]
+pub struct HeartbeatPolicy {
+    pub interval: Duration,
+    pub silence_window: Duration,
+    pub force_window: Duration,
+}
+
+impl HeartbeatPolicy {
+    pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(30);
+    pub const DEFAULT_SILENCE_WINDOW: Duration = Duration::from_secs(30);
+    pub const DEFAULT_FORCE_WINDOW: Duration = Duration::from_secs(120);
+}
+
+impl Default for HeartbeatPolicy {
+    fn default() -> Self {
+        Self {
+            interval: Self::DEFAULT_INTERVAL,
+            silence_window: Self::DEFAULT_SILENCE_WINDOW,
+            force_window: Self::DEFAULT_FORCE_WINDOW,
+        }
+    }
+}
 
 /// Shared, thread-safe handle to the live metrics snapshot.
 pub type LiveMetrics = Arc<Mutex<LiveMetricsState>>;
@@ -34,14 +70,26 @@ pub struct InFlightTool {
     pub started_at: Instant,
 }
 
+/// A subagent invocation the parser has started but not yet seen a stop for.
+#[derive(Debug, Clone)]
+pub struct InFlightSubagent {
+    pub name: Option<String>,
+    pub started_at: Instant,
+}
+
 /// Mutable state the announcer and the heartbeat share.
 #[derive(Debug, Default, Clone)]
 pub struct LiveMetricsState {
     /// Tool calls that have started but have not reported a result. Keyed by
     /// the provider-assigned tool id (or a synthetic name-based fallback).
     pub in_flight: HashMap<String, InFlightTool>,
+    /// Subagents that have started but have not reported a stop. Keyed by
+    /// the provider-assigned subagent id (or name-based fallback).
+    pub in_flight_subagents: HashMap<String, InFlightSubagent>,
     /// Cumulative count of tools that have completed.
     pub done_count: u32,
+    /// Cumulative count of subagents that have stopped.
+    pub subagent_done_count: u32,
     /// Latest known token usage (overwritten on each delta).
     pub token_usage: Option<NormalizedTokenUsage>,
     /// Latest known cost-in-USD for the session.
@@ -89,6 +137,95 @@ impl LiveMetricsState {
 
     pub fn update_cost(&mut self, cost_usd: f64) {
         self.cost_usd = Some(cost_usd);
+    }
+
+    pub fn record_subagent_start(&mut self, id: String, name: Option<String>, now: Instant) {
+        self.in_flight_subagents.insert(
+            id,
+            InFlightSubagent {
+                name,
+                started_at: now,
+            },
+        );
+        self.last_event_at = Some(now);
+    }
+
+    pub fn record_subagent_stop(
+        &mut self,
+        id: Option<&str>,
+        now: Instant,
+    ) -> Option<InFlightSubagent> {
+        let removed = id.and_then(|id| self.in_flight_subagents.remove(id));
+        self.subagent_done_count += 1;
+        self.last_event_at = Some(now);
+        removed
+    }
+
+    /// Fold a [`SemanticEvent`] into live-metrics state.
+    ///
+    /// This is the forward-looking entry point used by
+    /// `LiveSemanticSink`: it replaces the scattered `record_tool_start`
+    /// / `record_tool_end` / `record_activity` / `update_token_usage`
+    /// calls. Every event that passes [`SemanticEvent::is_activity`]
+    /// refreshes `last_event_at`, keeping the heartbeat silence-suppression
+    /// honest.
+    pub fn observe_event(&mut self, event: &SemanticEvent, now: Instant) {
+        if event.is_activity() {
+            self.last_event_at = Some(now);
+        }
+        match event {
+            SemanticEvent::ToolCall { id, name, .. } => {
+                let key = id
+                    .clone()
+                    .or_else(|| name.clone())
+                    .unwrap_or_else(|| format!("tool-{}-{:?}", self.done_count, now));
+                self.in_flight.insert(
+                    key,
+                    InFlightTool {
+                        name: name.clone(),
+                        started_at: now,
+                    },
+                );
+            }
+            SemanticEvent::ToolResult { id, .. } => {
+                if let Some(id) = id {
+                    self.in_flight.remove(id.as_str());
+                }
+                self.done_count += 1;
+            }
+            SemanticEvent::SubagentStart { id, name, .. } => {
+                let key = id
+                    .clone()
+                    .or_else(|| name.clone())
+                    .unwrap_or_else(|| format!("subagent-{}-{:?}", self.subagent_done_count, now));
+                self.in_flight_subagents.insert(
+                    key,
+                    InFlightSubagent {
+                        name: name.clone(),
+                        started_at: now,
+                    },
+                );
+            }
+            SemanticEvent::SubagentStop { id, .. } => {
+                if let Some(id) = id {
+                    self.in_flight_subagents.remove(id.as_str());
+                }
+                self.subagent_done_count += 1;
+            }
+            SemanticEvent::TurnComplete {
+                token_usage,
+                cost_usd,
+                ..
+            } => {
+                if let Some(usage) = token_usage {
+                    self.token_usage = Some(usage.clone());
+                }
+                if let Some(cost) = cost_usd {
+                    self.cost_usd = Some(*cost);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -182,6 +319,22 @@ pub fn describe_heartbeat(
             format!("{running} running")
         } else {
             format!("{running} running ({})", names.join(", "))
+        };
+        parts.push(label);
+    }
+
+    if !state.in_flight_subagents.is_empty() {
+        let mut names: Vec<&str> = state
+            .in_flight_subagents
+            .values()
+            .filter_map(|s| s.name.as_deref())
+            .collect();
+        names.sort_unstable();
+        let count = state.in_flight_subagents.len();
+        let label = if names.is_empty() {
+            format!("{count} subagent(s)")
+        } else {
+            format!("{count} subagent(s) ({})", names.join(", "))
         };
         parts.push(label);
     }
@@ -473,5 +626,151 @@ mod tests {
         let now = Instant::now();
         state.record_activity(now);
         assert_eq!(state.last_event_at, Some(now));
+    }
+
+    mod observe_event_tests {
+        use super::*;
+        use crate::stream::semantic::SemanticEvent;
+
+        #[test]
+        fn heartbeat_policy_defaults_match_contract() {
+            let p = HeartbeatPolicy::default();
+            assert_eq!(p.interval, Duration::from_secs(30));
+            assert_eq!(p.silence_window, Duration::from_secs(30));
+            assert_eq!(p.force_window, Duration::from_secs(120));
+        }
+
+        #[test]
+        fn activity_event_refreshes_last_event_at() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::OutputText {
+                    text: "x".into(),
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert_eq!(state.last_event_at, Some(now));
+        }
+
+        #[test]
+        fn envelope_event_does_not_refresh_last_event_at() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::SessionStart {
+                    session_id: None,
+                    model: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert_eq!(state.last_event_at, None);
+        }
+
+        #[test]
+        fn tool_call_and_result_track_in_flight() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::ToolCall {
+                    name: Some("bash".into()),
+                    id: Some("t1".into()),
+                    input: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert_eq!(state.in_flight.len(), 1);
+            state.observe_event(
+                &SemanticEvent::ToolResult {
+                    name: None,
+                    id: Some("t1".into()),
+                    status: None,
+                    exit_code: None,
+                    output: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert!(state.in_flight.is_empty());
+            assert_eq!(state.done_count, 1);
+        }
+
+        #[test]
+        fn subagent_start_stop_tracked() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::SubagentStart {
+                    name: Some("researcher".into()),
+                    id: Some("sa1".into()),
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert_eq!(state.in_flight_subagents.len(), 1);
+            state.observe_event(
+                &SemanticEvent::SubagentStop {
+                    name: None,
+                    id: Some("sa1".into()),
+                    status: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert!(state.in_flight_subagents.is_empty());
+            assert_eq!(state.subagent_done_count, 1);
+        }
+
+        #[test]
+        fn turn_complete_updates_token_usage_and_cost() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::TurnComplete {
+                    provider_status: None,
+                    token_usage: Some(NormalizedTokenUsage {
+                        input: Some(100),
+                        output: Some(50),
+                        total: Some(150),
+                        cache_read: None,
+                    }),
+                    cost_usd: Some(0.01),
+                    duration_ms: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert_eq!(state.cost_usd, Some(0.01));
+            let tu = state.token_usage.unwrap();
+            assert_eq!(tu.input, Some(100));
+        }
+
+        #[test]
+        fn heartbeat_lists_in_flight_subagents() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now() - Duration::from_secs(60);
+            state.observe_event(
+                &SemanticEvent::SubagentStart {
+                    name: Some("researcher".into()),
+                    id: Some("sa1".into()),
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            let later = Instant::now();
+            let desc = describe_heartbeat(
+                &state,
+                Duration::from_secs(120),
+                later,
+                Duration::from_secs(30),
+                Duration::from_secs(120),
+            )
+            .unwrap();
+            assert!(desc.contains("1 subagent"));
+            assert!(desc.contains("researcher"));
+        }
     }
 }
