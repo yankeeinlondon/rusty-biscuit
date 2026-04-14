@@ -255,6 +255,63 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         });
     }
 
+    /// Handle OpenCode's `tool_use` event, which per the run.ts contract is
+    /// only emitted *after* a tool reaches `completed` or `error`. We emit a
+    /// ToolCall so the live sink counts the invocation and renders the input
+    /// preview, then immediately emit a matching ToolResult so the sink's
+    /// in-flight accounting doesn't leak (it used to grow forever because
+    /// nothing removed the entry — surfaced to the user as "N running" for
+    /// long-finished tools).
+    fn handle_tool_use_completed(&mut self, tool: OpenCodeTool, raw_kind: &str) {
+        self.tool_calls += 1;
+        let resolved = tool.resolve();
+        super::trace_tool_event(
+            Provider::OpenCode,
+            self.tool_calls,
+            resolved.name.as_deref(),
+        );
+
+        let mut call_extra = self.base_extra(raw_kind);
+        if let Some(id) = &resolved.id {
+            call_extra.insert("tool_id".into(), Value::from(id.as_str()));
+        }
+        if let Some(name) = &resolved.name {
+            call_extra.insert("tool_name".into(), Value::from(name.as_str()));
+        }
+        self.sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: resolved.name.clone(),
+            id: resolved.id.clone(),
+            input: resolved.input.clone(),
+            extra: Value::Object(call_extra),
+        });
+
+        let mut result_extra = self.base_extra(raw_kind);
+        if let Some(id) = &resolved.id {
+            result_extra.insert("tool_id".into(), Value::from(id.as_str()));
+        }
+        if let Some(name) = &resolved.name {
+            result_extra.insert("tool_name".into(), Value::from(name.as_str()));
+        }
+        if let Some(status) = &resolved.status {
+            result_extra.insert("status".into(), Value::from(status.as_str()));
+        }
+        if let Some(err) = &resolved.error {
+            result_extra.insert("error".into(), err.clone());
+        }
+        if let Some(input) = &resolved.input {
+            result_extra.insert("input".into(), input.clone());
+        }
+
+        self.sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: resolved.name,
+            id: resolved.id,
+            status: resolved.status,
+            exit_code: None,
+            output: resolved.output,
+            extra: Value::Object(result_extra),
+        });
+    }
+
     fn handle_tool_result(&mut self, tool: OpenCodeTool, raw_kind: &str) {
         let resolved = tool.resolve();
         let (cached_name, _cached_input) = resolved
@@ -351,7 +408,10 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
             Ok(OpenCodeEvent::Error(err) | OpenCodeEvent::StepError(err)) => {
                 self.handle_error(err, &raw_kind);
             }
-            Ok(OpenCodeEvent::ToolUse(tool) | OpenCodeEvent::ToolStart(tool)) => {
+            Ok(OpenCodeEvent::ToolUse(tool)) => {
+                self.handle_tool_use_completed(tool, &raw_kind);
+            }
+            Ok(OpenCodeEvent::ToolStart(tool)) => {
                 self.handle_tool_use(tool, &raw_kind);
             }
             Ok(OpenCodeEvent::ToolResult(tool) | OpenCodeEvent::ToolEnd(tool)) => {
@@ -605,5 +665,57 @@ mod tests {
             let decoded: SemanticEvent = serde_json::from_value(v.clone()).unwrap();
             assert_eq!(v, serde_json::to_value(&decoded).unwrap());
         }
+    }
+
+    #[test]
+    fn opencode_tool_use_emits_paired_call_and_result() {
+        use super::super::parser::SemanticStreamParser;
+        use super::super::semantic::{SemanticEvent, SemanticEventSink};
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default)]
+        struct Capture(Arc<Mutex<Vec<SemanticEvent>>>);
+        impl SemanticEventSink for Capture {
+            fn on_semantic_event(&mut self, event: SemanticEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sink = Capture(events.clone());
+        let mut parser = OpenCodeSemanticStreamParser::new(sink, Some("gpt-4o".into()));
+
+        parser
+            .feed_line(
+                r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
+                 "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
+            )
+            .unwrap();
+
+        let captured = events.lock().unwrap().clone();
+        let kinds: Vec<&str> = captured.iter().map(|e| e.kind_str()).collect();
+        assert_eq!(
+            kinds,
+            vec!["tool_call", "tool_result"],
+            "tool_use must emit a paired ToolCall followed by ToolResult"
+        );
+
+        let SemanticEvent::ToolCall { name, input, .. } = &captured[0] else {
+            panic!("expected ToolCall first");
+        };
+        assert_eq!(name.as_deref(), Some("bash"));
+        assert_eq!(
+            input
+                .as_ref()
+                .and_then(|v| v.get("command"))
+                .and_then(|v| v.as_str()),
+            Some("ls -la")
+        );
+
+        let SemanticEvent::ToolResult { name, status, .. } = &captured[1] else {
+            panic!("expected ToolResult second");
+        };
+        assert_eq!(name.as_deref(), Some("bash"));
+        assert_eq!(status.as_deref(), Some("completed"));
     }
 }

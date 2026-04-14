@@ -272,14 +272,27 @@ impl OpenCodeToolFields {
 }
 
 /// `tool_use` / `tool_start` / `tool_result` / `tool_end` event. Fields may
-/// appear at the top level or nested under `part`. Use [`OpenCodeTool::resolve`]
-/// to collapse both locations into a single resolved view.
+/// appear at the top level, nested under `part`, or (for the current OpenCode
+/// `run.ts` format) nested under `part.state` — the ToolPart `state` carries
+/// `status`, `input`, `output`, and `error`. Use [`OpenCodeTool::resolve`] to
+/// collapse all three locations into a single resolved view.
 #[derive(Debug, Default, Deserialize)]
 pub struct OpenCodeTool {
     #[serde(flatten)]
     pub top: OpenCodeToolFields,
     #[serde(default)]
-    pub part: Option<OpenCodeToolFields>,
+    pub part: Option<OpenCodeToolPart>,
+}
+
+/// `ToolPart` body: mirrors `OpenCodeToolFields` but also carries the
+/// OpenCode-specific `state` sub-object where recent CLI releases place
+/// `status` / `input` / `output` / `error`.
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeToolPart {
+    #[serde(flatten)]
+    pub fields: OpenCodeToolFields,
+    #[serde(default)]
+    pub state: Option<OpenCodeToolFields>,
 }
 
 /// Resolved tool view with top-level fields taking priority over nested
@@ -305,7 +318,11 @@ impl OpenCodeTool {
             status: top.status.take(),
             error: top.error.take(),
         };
-        if let Some(mut part) = part {
+        if let Some(OpenCodeToolPart {
+            fields: mut part,
+            state,
+        }) = part
+        {
             if resolved.id.is_none() {
                 resolved.id = part.resolved_tool_id().map(ToOwned::to_owned);
             }
@@ -323,6 +340,26 @@ impl OpenCodeTool {
             }
             if resolved.error.is_none() {
                 resolved.error = part.error.take();
+            }
+            if let Some(mut state) = state {
+                if resolved.id.is_none() {
+                    resolved.id = state.resolved_tool_id().map(ToOwned::to_owned);
+                }
+                if resolved.name.is_none() {
+                    resolved.name = state.resolved_tool_name().map(ToOwned::to_owned);
+                }
+                if resolved.input.is_none() {
+                    resolved.input = state.take_input();
+                }
+                if resolved.output.is_none() {
+                    resolved.output = state.take_output();
+                }
+                if resolved.status.is_none() {
+                    resolved.status = state.status.take();
+                }
+                if resolved.error.is_none() {
+                    resolved.error = state.error.take();
+                }
             }
         }
         resolved
