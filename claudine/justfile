@@ -40,7 +40,7 @@ build *args="":
 
 # Install the CLI
 install *args="":
-    @just _build biscuit-terminal "biscuit-file Library" {{args}}
+    @just _build biscuit-terminal "biscuit-terminal Library" {{args}}
     @just _build darkmatter "Darkmatter Library" {{args}}
     @just build
     @just _install "./cli" "Claudine" "{{args}}"
