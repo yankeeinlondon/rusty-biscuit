@@ -9,6 +9,7 @@ pub mod progress;
 pub mod protocol;
 pub mod qwen;
 pub mod reporting;
+pub mod semantic;
 pub mod stderr;
 pub mod summary;
 pub mod token_usage;
@@ -18,6 +19,8 @@ use tracing::trace;
 
 use crate::events::Provider;
 use parser::{StreamEventSink, StreamParser};
+
+pub use semantic::{NullSemanticSink, SemanticEvent, SemanticEventSink};
 
 /// Ensure text from a full assistant message ends with a newline.
 ///
