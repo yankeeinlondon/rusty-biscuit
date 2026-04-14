@@ -1435,8 +1435,7 @@ printf '%s\n' '{"type":"result","duration_ms":4600,"total_cost_usd":0.02,"usage"
 // ===========================================================================
 
 #[test]
-fn compose_requires_file_argument() {
-    // When no file is provided, clap shows usage which includes the expected flags
+fn compose_requires_positional_arg() {
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .args(["compose"])
@@ -1445,11 +1444,11 @@ fn compose_requires_file_argument() {
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
-    assert!(plain.contains("FILE"), "usage should show FILE argument");
+    assert!(plain.contains("ARG"), "usage should show ARG positional");
 }
 
 #[test]
-fn inline_compose_requires_file_argument() {
+fn inline_compose_requires_positional_arg() {
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .args(["inline-compose"])
@@ -1458,7 +1457,58 @@ fn inline_compose_requires_file_argument() {
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
-    assert!(plain.contains("FILE"), "usage should show FILE argument");
+    assert!(plain.contains("ARG"), "usage should show ARG positional");
+}
+
+#[test]
+fn compose_missing_file_with_setter_only() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", "key=val"])
+        .assert()
+        .code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("missing file reference"),
+        "expected missing-file error, got: {plain}"
+    );
+}
+
+#[test]
+fn compose_empty_key_setter_errors() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", "=foo"])
+        .assert()
+        .code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("setter key must not be empty"),
+        "expected empty-key setter error, got: {plain}"
+    );
+}
+
+#[test]
+fn compose_multiple_file_candidates_errors() {
+    let workspace = tempdir().unwrap();
+    let a = workspace.path().join("a.md");
+    let b = workspace.path().join("b.md");
+    fs::write(&a, "---\n---\nbody\n").unwrap();
+    fs::write(&b, "---\n---\nbody\n").unwrap();
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", a.to_str().unwrap(), b.to_str().unwrap()])
+        .assert()
+        .code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("multiple"),
+        "expected multiple-file error, got: {plain}"
+    );
 }
 
 #[test]

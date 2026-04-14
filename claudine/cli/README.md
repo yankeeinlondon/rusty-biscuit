@@ -164,9 +164,19 @@ Wrapper behavior:
 
 Composition turns a Markdown document with frontmatter into a provider session, optionally merging the result back into the source file or running a sequence of steps. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, handler-driven recovery).
 
-- **`claudine compose <file-ref> [flags]`** — compose a Markdown file (Darkmatter transclusion/interpolation/conditionals/`::shell`) and send the result as a prompt. No file mutation.
-- **`claudine inline-compose <file-ref> [flags]`** — compose the frontmatter `prompt` property and replace the document body with the provider's response. Original frontmatter is preserved byte-for-byte; `last_updated` is set to today's date; new frontmatter keys added by the provider are merged in.
-- **`claudine sequence <file-ref> [flags]`** — run a serial sequence of composition steps declared in a single document, with a shared approval cache across steps and `FAIL_FAST` propagation on failure.
+- **`claudine compose [flags] <arg>...`** — compose a Markdown file (Darkmatter transclusion/interpolation/conditionals/`::shell`) and send the result as a prompt. No file mutation.
+- **`claudine inline-compose [flags] <arg>...`** — compose the frontmatter `prompt` property and replace the document body with the provider's response. Original frontmatter is preserved byte-for-byte; `last_updated` is set to today's date; new frontmatter keys added by the provider are merged in.
+- **`claudine sequence [flags] <arg>...`** — run a serial sequence of composition steps declared in a single document, with a shared approval cache across steps and `FAIL_FAST` propagation on failure.
+
+Positional `<arg>...` is exactly one file reference plus zero or more `key=value` setters in any order:
+
+```sh
+claudine compose @prompts/review.md review=review.md
+claudine inline-compose draft=false @notes/update.md
+claudine sequence @research.md topic="async traits" retries=3
+```
+
+Setter values are parsed as JSON5 first and fall back to strings. Inline setters override `--set` on overlapping keys; `sequence` reserved overlay keys still win over both.
 
 Shared composition flags include provider selectors (`--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`), `--exclude <provider>`, `-i` / `--interactive`, `-m` / `--model`, `-s` / `--system-prompt`, `-t` / `--timeout`, `--dry-run`, `-q` / `--quiet`, and `--silent`. The file reference supports `@` magic paths, repo-relative, monorepo-package-relative, and absolute paths via `biscuit-file::FileReference`.
 

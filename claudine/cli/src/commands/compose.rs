@@ -172,25 +172,31 @@ impl SharedComposeArgs {
 }
 
 /// Compose a Markdown document through an agentic CLI.
+///
+/// Positional tokens are one file reference plus optional `key=value` setters
+/// in any order. Inline setters override `--set` on overlapping keys.
 #[derive(Debug, Clone, Args)]
 pub struct ComposeArgs {
     #[command(flatten)]
     pub shared: SharedComposeArgs,
 
-    /// File reference to compose.
-    #[arg(value_name = "FILE")]
-    pub file: String,
+    /// File reference and/or `key=value` setters.
+    #[arg(value_name = "ARG", num_args = 1.., required = true)]
+    pub args: Vec<String>,
 }
 
 /// Inline composition: use frontmatter `prompt`, replace body with output.
+///
+/// Positional tokens are one file reference plus optional `key=value` setters
+/// in any order. Inline setters override `--set` on overlapping keys.
 #[derive(Debug, Clone, Args)]
 pub struct InlineComposeArgs {
     #[command(flatten)]
     pub shared: SharedComposeArgs,
 
-    /// File reference to compose.
-    #[arg(value_name = "FILE")]
-    pub file: String,
+    /// File reference and/or `key=value` setters.
+    #[arg(value_name = "ARG", num_args = 1.., required = true)]
+    pub args: Vec<String>,
 }
 
 /// Entry point for `claudine compose`.
@@ -222,8 +228,12 @@ pub fn run_inline_compose(args: InlineComposeArgs, verbose: u8) -> Result<()> {
 }
 
 fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
-    let ComposeArgs { shared, file } = args;
-    let set_overrides = parse_set_json(shared.set.as_deref())?;
+    let ComposeArgs { shared, args } = args;
+    let parsed = parse_composition_positionals(&args)?;
+    let file = parsed.file_ref.ok_or_else(|| {
+        eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
+    })?;
+    let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
 
     let source = composition::resolve_composition_source(&file).map_err(|e| eyre!("{e}"))?;
@@ -296,8 +306,12 @@ fn run_compose_inner(args: ComposeArgs, verbose: u8) -> Result<i32> {
 }
 
 fn run_inline_compose_inner(args: InlineComposeArgs, verbose: u8) -> Result<i32> {
-    let InlineComposeArgs { shared, file } = args;
-    let set_overrides = parse_set_json(shared.set.as_deref())?;
+    let InlineComposeArgs { shared, args } = args;
+    let parsed = parse_composition_positionals(&args)?;
+    let file = parsed.file_ref.ok_or_else(|| {
+        eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
+    })?;
+    let set_overrides = merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
     let system_prompt_args = shared.system_prompt_args();
     let show_checks = !shared.silent;
     let term = if show_checks {
@@ -422,4 +436,351 @@ pub(crate) fn parse_set_json(raw: Option<&str>) -> Result<Option<serde_json::Val
         ));
     }
     Ok(Some(value))
+}
+
+/// Parse an inline shorthand setter value: JSON5 first, string fallback.
+pub(crate) fn parse_shorthand_value(raw: &str) -> serde_json::Value {
+    if raw.is_empty() {
+        return serde_json::Value::String(String::new());
+    }
+    match biscuit_file::Json5::from_str(raw) {
+        Ok(parsed) => parsed.value().clone(),
+        Err(_) => serde_json::Value::String(raw.to_string()),
+    }
+}
+
+/// Classify a positional token as a shorthand setter.
+///
+/// ## Returns
+/// - `None` — token is not a setter (pass through as file candidate)
+/// - `Some(Err)` — setter syntax recognized but invalid (empty key)
+/// - `Some(Ok((key, value)))` — valid setter
+pub(crate) fn parse_compose_setter(
+    token: &str,
+) -> Option<std::result::Result<(String, serde_json::Value), String>> {
+    let eq_pos = token.find('=')?;
+    let key = &token[..eq_pos];
+    let raw_value = &token[eq_pos + 1..];
+
+    if key.is_empty() {
+        return Some(Err("setter key must not be empty".to_string()));
+    }
+
+    let mut chars = key.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return None;
+    }
+
+    for ch in chars {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            continue;
+        }
+        return None;
+    }
+
+    let value = parse_shorthand_value(raw_value);
+    Some(Ok((key.to_string(), value)))
+}
+
+/// Result of classifying composition positional tokens.
+#[derive(Debug, Default)]
+pub(crate) struct ParsedCompositionPositionals {
+    pub file_ref: Option<String>,
+    pub shorthand_setters: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Classify positional tokens into an optional file reference and setter map.
+///
+/// ## Errors
+/// - empty-key setter (`=foo`)
+/// - multiple non-setter tokens (more than one file-ref candidate)
+pub(crate) fn parse_composition_positionals(
+    args: &[String],
+) -> Result<ParsedCompositionPositionals> {
+    let mut file_ref: Option<String> = None;
+    let mut shorthand_setters = serde_json::Map::new();
+
+    for token in args {
+        match parse_compose_setter(token) {
+            Some(Ok((key, value))) => {
+                shorthand_setters.insert(key, value);
+            }
+            Some(Err(e)) => {
+                return Err(eyre!("Invalid setter '{}': {}", token, e));
+            }
+            None => {
+                if file_ref.is_some() {
+                    let candidates: Vec<&str> = args
+                        .iter()
+                        .filter(|t| parse_compose_setter(t).is_none())
+                        .map(|t| t.as_str())
+                        .collect();
+                    return Err(eyre!(
+                        "expected at most one file reference, but got multiple: {}",
+                        candidates.join(", ")
+                    ));
+                }
+                file_ref = Some(token.clone());
+            }
+        }
+    }
+
+    Ok(ParsedCompositionPositionals {
+        file_ref,
+        shorthand_setters,
+    })
+}
+
+/// Merge `--set` JSON with shorthand setters. Shorthand wins on overlapping keys.
+///
+/// ## Returns
+/// - `Ok(None)` when both sources are empty
+/// - `Ok(Some(Value::Object(...)))` otherwise
+pub(crate) fn merge_set_overrides(
+    raw_set: Option<&str>,
+    shorthand: serde_json::Map<String, serde_json::Value>,
+) -> Result<Option<serde_json::Value>> {
+    let base = parse_set_json(raw_set)?;
+    let mut map = match base {
+        Some(serde_json::Value::Object(m)) => m,
+        Some(_) => unreachable!("parse_set_json enforces object shape"),
+        None => serde_json::Map::new(),
+    };
+    for (key, value) in shorthand {
+        map.insert(key, value);
+    }
+    if map.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(serde_json::Value::Object(map)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    fn s(values: &[&str]) -> Vec<String> {
+        values.iter().map(|v| v.to_string()).collect()
+    }
+
+    // ── parse_shorthand_value ────────────────────────────────────────
+
+    #[test]
+    fn shorthand_value_empty_string() {
+        assert_eq!(parse_shorthand_value(""), Value::String(String::new()));
+    }
+
+    #[test]
+    fn shorthand_value_number() {
+        assert_eq!(parse_shorthand_value("3"), json!(3));
+    }
+
+    #[test]
+    fn shorthand_value_boolean() {
+        assert_eq!(parse_shorthand_value("true"), json!(true));
+    }
+
+    #[test]
+    fn shorthand_value_array() {
+        assert_eq!(parse_shorthand_value(r#"["a","b"]"#), json!(["a", "b"]));
+    }
+
+    #[test]
+    fn shorthand_value_object_json5() {
+        assert_eq!(
+            parse_shorthand_value(r#"{mode:"fast"}"#),
+            json!({"mode": "fast"})
+        );
+    }
+
+    #[test]
+    fn shorthand_value_plain_string_fallback() {
+        assert_eq!(
+            parse_shorthand_value("review.md"),
+            Value::String("review.md".into())
+        );
+    }
+
+    #[test]
+    fn shorthand_value_url_fallback() {
+        assert_eq!(
+            parse_shorthand_value("https://x/?a=b"),
+            Value::String("https://x/?a=b".into())
+        );
+    }
+
+    // ── parse_compose_setter ─────────────────────────────────────────
+
+    #[test]
+    fn setter_valid_string() {
+        let res = parse_compose_setter("review=review.md").unwrap().unwrap();
+        assert_eq!(res, ("review".into(), Value::String("review.md".into())));
+    }
+
+    #[test]
+    fn setter_underscore_key() {
+        let res = parse_compose_setter("_private=true").unwrap().unwrap();
+        assert_eq!(res, ("_private".into(), json!(true)));
+    }
+
+    #[test]
+    fn setter_hyphen_key() {
+        let res = parse_compose_setter("my-key=value").unwrap().unwrap();
+        assert_eq!(res, ("my-key".into(), Value::String("value".into())));
+    }
+
+    #[test]
+    fn setter_empty_value() {
+        let res = parse_compose_setter("key=").unwrap().unwrap();
+        assert_eq!(res, ("key".into(), Value::String("".into())));
+    }
+
+    #[test]
+    fn setter_first_eq_split() {
+        let res = parse_compose_setter("url=https://x/?a=b").unwrap().unwrap();
+        assert_eq!(res, ("url".into(), Value::String("https://x/?a=b".into())));
+    }
+
+    #[test]
+    fn setter_empty_key_errors() {
+        let res = parse_compose_setter("=foo").unwrap();
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn setter_digit_start_rejected() {
+        assert!(parse_compose_setter("9key=value").is_none());
+    }
+
+    #[test]
+    fn setter_dot_path_rejected() {
+        assert!(parse_compose_setter("foo.bar=baz").is_none());
+    }
+
+    #[test]
+    fn setter_slash_key_rejected() {
+        assert!(parse_compose_setter("/path=val").is_none());
+    }
+
+    #[test]
+    fn setter_no_equals_rejected() {
+        assert!(parse_compose_setter("file.md").is_none());
+    }
+
+    // ── parse_composition_positionals ────────────────────────────────
+
+    #[test]
+    fn positionals_file_only() {
+        let parsed = parse_composition_positionals(&s(&["file.md"])).unwrap();
+        assert_eq!(parsed.file_ref.as_deref(), Some("file.md"));
+        assert!(parsed.shorthand_setters.is_empty());
+    }
+
+    #[test]
+    fn positionals_setter_only() {
+        let parsed = parse_composition_positionals(&s(&["key=val"])).unwrap();
+        assert!(parsed.file_ref.is_none());
+        assert_eq!(
+            parsed.shorthand_setters.get("key"),
+            Some(&Value::String("val".into()))
+        );
+    }
+
+    #[test]
+    fn positionals_file_then_setter() {
+        let parsed = parse_composition_positionals(&s(&["file.md", "key=val"])).unwrap();
+        assert_eq!(parsed.file_ref.as_deref(), Some("file.md"));
+        assert_eq!(
+            parsed.shorthand_setters.get("key"),
+            Some(&Value::String("val".into()))
+        );
+    }
+
+    #[test]
+    fn positionals_setter_then_file() {
+        let parsed = parse_composition_positionals(&s(&["key=val", "file.md"])).unwrap();
+        assert_eq!(parsed.file_ref.as_deref(), Some("file.md"));
+        assert_eq!(
+            parsed.shorthand_setters.get("key"),
+            Some(&Value::String("val".into()))
+        );
+    }
+
+    #[test]
+    fn positionals_multiple_setters_around_file() {
+        let parsed =
+            parse_composition_positionals(&s(&["a=1", "file.md", "b=2"])).unwrap();
+        assert_eq!(parsed.file_ref.as_deref(), Some("file.md"));
+        assert_eq!(parsed.shorthand_setters.get("a"), Some(&json!(1)));
+        assert_eq!(parsed.shorthand_setters.get("b"), Some(&json!(2)));
+    }
+
+    #[test]
+    fn positionals_duplicate_setter_last_wins() {
+        let parsed = parse_composition_positionals(&s(&["k=old", "k=new"])).unwrap();
+        assert_eq!(
+            parsed.shorthand_setters.get("k"),
+            Some(&Value::String("new".into()))
+        );
+    }
+
+    #[test]
+    fn positionals_two_files_errors() {
+        let err = parse_composition_positionals(&s(&["a.md", "b.md"])).unwrap_err();
+        assert!(err.to_string().contains("multiple"));
+    }
+
+    #[test]
+    fn positionals_empty_key_errors() {
+        let err = parse_composition_positionals(&s(&["=foo"])).unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn positionals_dot_path_is_file_candidate() {
+        let parsed = parse_composition_positionals(&s(&["foo.bar=baz"])).unwrap();
+        assert_eq!(parsed.file_ref.as_deref(), Some("foo.bar=baz"));
+        assert!(parsed.shorthand_setters.is_empty());
+    }
+
+    // ── merge_set_overrides ──────────────────────────────────────────
+
+    #[test]
+    fn merge_both_empty() {
+        let result = merge_set_overrides(None, serde_json::Map::new()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn merge_set_only() {
+        let result = merge_set_overrides(Some(r#"{"a":"b"}"#), serde_json::Map::new()).unwrap();
+        assert_eq!(result, Some(json!({"a": "b"})));
+    }
+
+    #[test]
+    fn merge_shorthand_only() {
+        let mut short = serde_json::Map::new();
+        short.insert("k".into(), Value::String("v".into()));
+        let result = merge_set_overrides(None, short).unwrap();
+        assert_eq!(result, Some(json!({"k": "v"})));
+    }
+
+    #[test]
+    fn merge_shorthand_wins() {
+        let mut short = serde_json::Map::new();
+        short.insert("k".into(), Value::String("new".into()));
+        let result = merge_set_overrides(Some(r#"{"k":"old"}"#), short).unwrap();
+        assert_eq!(result, Some(json!({"k": "new"})));
+    }
+
+    #[test]
+    fn merge_disjoint() {
+        let mut short = serde_json::Map::new();
+        short.insert("b".into(), json!(2));
+        let result = merge_set_overrides(Some(r#"{"a":"1"}"#), short).unwrap();
+        assert_eq!(result, Some(json!({"a": "1", "b": 2})));
+    }
 }

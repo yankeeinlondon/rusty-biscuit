@@ -4,10 +4,33 @@ Claudine supports the ability to _compose_ content by leveraging the Darkmatter 
 
 Two canonical commands:
 
-- **`claudine compose <file-ref>`** — direct (chained) composition
-- **`claudine inline-compose <file-ref>`** — inline composition
+- **`claudine compose [flags] <arg>...`** — direct (chained) composition
+- **`claudine inline-compose [flags] <arg>...`** — inline composition
 
 Both commands share the same five-stage pipeline and inherit full wrapper-grade behavior: environment setup, harness detection, structured streaming, and handler-driven recovery.
+
+### Positional Arguments
+
+Each command accepts exactly one file reference plus zero or more `key=value`
+setters, in any order:
+
+```sh
+claudine compose @prompts/review.md review=review.md
+claudine compose review=review.md @prompts/review.md
+claudine inline-compose draft=false @notes/update.md
+```
+
+A token is a setter when it contains `=` and its key starts with an ASCII
+letter or `_` and contains only letters, digits, `_`, or `-`. Dot-paths and
+path-like tokens (for example `foo.bar=baz`) are not setters and are treated
+as file-reference candidates.
+
+Setter values are parsed as JSON5 first and fall back to strings when JSON5
+parsing fails, so `count=3`, `enabled=true`, `tags=["a","b"]`, and
+`review=review.md` all resolve to their natural types.
+
+Inline setters override matching keys from `--set`. For `sequence`, reserved
+per-step overlay keys still win over both `--set` and shorthand setters.
 
 ## Direct Composition
 

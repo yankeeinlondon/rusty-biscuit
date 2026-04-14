@@ -16,7 +16,7 @@ use common::{augmented_path, strip_ansi, write_executable};
 // ============================================================================
 
 #[test]
-fn sequence_requires_file_argument() {
+fn sequence_requires_positional_arg() {
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .args(["sequence"])
@@ -25,7 +25,22 @@ fn sequence_requires_file_argument() {
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
-    assert!(plain.contains("FILE"), "usage should show FILE argument");
+    assert!(plain.contains("ARG"), "usage should show ARG positional");
+}
+
+#[test]
+fn sequence_missing_file_with_setter_only() {
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["sequence", "topic=async"])
+        .assert()
+        .code(1);
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("missing file reference"),
+        "expected missing-file error, got: {plain}"
+    );
 }
 
 #[test]
@@ -380,6 +395,121 @@ exit 0
     assert!(
         child_prompt.contains("STATE=only"),
         "composed prompt should interpolate {{{{state}}}} per step; stdin was: {child_prompt}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn sequence_shorthand_override_reaches_prompt() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let prompt_path = workspace.path().join("child-stdin.txt");
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+sequence:
+  - only
+---
+TOPIC={{topic}} STATE={{state}}
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-t" ]; then
+    printf '%s' "$arg" > "$CLAUDINE_STDIN_FILE"
+  fi
+  prev="$arg"
+done
+exit 0
+"#,
+    );
+
+    // Setter placed BEFORE the file reference to exercise the positional parser.
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_STDIN_FILE", &prompt_path)
+        .current_dir(workspace.path())
+        .args([
+            "sequence",
+            "--goose",
+            "topic=async-traits",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let child_prompt = fs::read_to_string(&prompt_path).unwrap();
+    assert!(
+        child_prompt.contains("TOPIC=async-traits"),
+        "composed prompt should interpolate the shorthand `topic` override; stdin was: {child_prompt}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn sequence_shorthand_wins_over_set_flag() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let prompt_path = workspace.path().join("child-stdin.txt");
+
+    let md_file = workspace.path().join("seq.md");
+    fs::write(
+        &md_file,
+        r#"---
+sequence:
+  - only
+---
+MODE={{mode}}
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-t" ]; then
+    printf '%s' "$arg" > "$CLAUDINE_STDIN_FILE"
+  fi
+  prev="$arg"
+done
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .env("CLAUDINE_STDIN_FILE", &prompt_path)
+        .current_dir(workspace.path())
+        .args([
+            "sequence",
+            "--goose",
+            "--set",
+            r#"{"mode":"slow"}"#,
+            "mode=fast",
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let child_prompt = fs::read_to_string(&prompt_path).unwrap();
+    assert!(
+        child_prompt.contains("MODE=fast"),
+        "shorthand setter should beat --set on overlapping keys; stdin was: {child_prompt}"
     );
 }
 
