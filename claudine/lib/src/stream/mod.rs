@@ -13,6 +13,7 @@ pub mod semantic;
 pub mod stderr;
 pub mod summary;
 pub mod token_usage;
+pub mod tool_display;
 
 use serde::{Deserialize, Serialize};
 use tracing::trace;
