@@ -458,13 +458,19 @@ impl LiveSemanticSink {
             SemanticEvent::Info { message, .. } => {
                 self.render_status(StatusState::Info, message.clone());
             }
-            SemanticEvent::Warning { message, .. } => {
+            SemanticEvent::Warning { message, extra } => {
                 // Suppress noisy malformed-line warnings on stderr — these
                 // are common when providers mix non-JSON output into the
                 // stream (Gemini hook logs, stack traces, etc.) and the
                 // semantic parser surfaces them as Warning events per the
                 // Phase 2 policy. Still dispatched and logged.
-                if !message.starts_with("Malformed JSON on line ") {
+                //
+                // Also suppress the Claude rate-limit Warning when the user
+                // is on a Subscription (no `ANTHROPIC_API_KEY` set); the
+                // dispatch and JSONL log still fire.
+                if !message.starts_with("Malformed JSON on line ")
+                    && !is_suppressed_claude_rate_limit(self.provider, extra)
+                {
                     self.render_status(StatusState::Warning, message.clone());
                 }
             }
@@ -691,6 +697,25 @@ fn is_silent_extension_kind(provider: Provider, kind: &str) -> bool {
     SILENT_PROVIDER_EXTENSION_KINDS
         .iter()
         .any(|(p, k)| *p == provider && *k == kind)
+}
+
+/// Suppress the Claude rate-limit Warning on stderr when the user is on a
+/// Subscription (no `ANTHROPIC_API_KEY` set). The dispatch and JSONL log
+/// continue to fire — only the stderr render is gated.
+fn is_suppressed_claude_rate_limit(provider: Provider, extra: &Value) -> bool {
+    if provider != Provider::Claude {
+        return false;
+    }
+    let raw_kind = extra
+        .get("raw_kind")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if raw_kind != "rate_limit_event" {
+        return false;
+    }
+    std::env::var("ANTHROPIC_API_KEY")
+        .map(|v| v.trim().is_empty())
+        .unwrap_or(true)
 }
 
 
@@ -1317,6 +1342,81 @@ mod tests {
         assert!(!rendered.contains('\u{2026}'), "no ellipsis expected");
     }
 
+    #[test]
+    #[serial_test::serial]
+    fn claude_rate_limit_warning_suppressed_when_anthropic_api_key_unset() {
+        let _guard = TestEnvGuard::remove("ANTHROPIC_API_KEY");
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::Warning {
+            message: "rate limit".into(),
+            extra: json!({"raw_kind": "rate_limit_event"}),
+        });
+        assert!(
+            lines.lock().unwrap().is_empty(),
+            "rate-limit Warning must not render to stderr without ANTHROPIC_API_KEY"
+        );
+        assert!(
+            !dispatched.lock().unwrap().is_empty(),
+            "underlying dispatch must still fire so JSONL log retains the event"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn claude_rate_limit_warning_renders_when_anthropic_api_key_set() {
+        let _guard = TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::Warning {
+            message: "rate limit".into(),
+            extra: json!({"raw_kind": "rate_limit_event"}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            rendered.contains("rate limit"),
+            "rate-limit Warning must render with API key set: {rendered:?}"
+        );
+    }
+
+    /// RAII wrapper that restores the prior env var value on drop. Tests
+    /// using this guard must be annotated `#[serial_test::serial]` because
+    /// env vars are process-wide.
+    struct TestEnvGuard {
+        key: &'static str,
+        prior: Option<String>,
+    }
+    impl TestEnvGuard {
+        fn remove(key: &'static str) -> Self {
+            let prior = std::env::var(key).ok();
+            // SAFETY: tests are serialized via serial_test; no other thread
+            // races on env vars while the guard exists.
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, prior }
+        }
+        fn set(key: &'static str, value: &str) -> Self {
+            let prior = std::env::var(key).ok();
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prior }
+        }
+    }
+    impl Drop for TestEnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     mod golden_stderr {
         use super::*;
         use claudine::stream::{create_semantic_parser, ParserConfig};
@@ -1382,7 +1482,12 @@ mod tests {
         }
 
         #[test]
+        #[serial_test::serial]
         fn claude_stderr_snapshot() {
+            // Set ANTHROPIC_API_KEY so the rate-limit Warning renders on
+            // stderr; the Subscription-mode suppression is covered by
+            // `claude_rate_limit_warning_suppressed_when_anthropic_api_key_unset`.
+            let _guard = super::TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
             let lines = replay_to_stderr(Provider::Claude, &[
                 r#"{"type":"init","session_id":"s1","model":"claude-sonnet-4"}"#,
                 r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls -la"}}"#,
