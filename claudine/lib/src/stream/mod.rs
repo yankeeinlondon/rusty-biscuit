@@ -1,13 +1,19 @@
 pub mod badges;
 pub mod claude;
+pub mod claude_semantic;
 pub mod codex;
+pub mod codex_semantic;
 pub mod gemini;
+pub mod gemini_semantic;
 pub mod kimi;
+pub mod kimi_semantic;
 pub mod opencode;
+pub mod opencode_semantic;
 pub mod parser;
 pub mod progress;
 pub mod protocol;
 pub mod qwen;
+pub mod qwen_semantic;
 pub mod reporting;
 pub mod semantic;
 pub mod stderr;
@@ -87,10 +93,42 @@ pub fn create_semantic_parser<S: SemanticEventSink + 'static>(
     sink: S,
     config: ParserConfig,
 ) -> Box<dyn SemanticStreamParser> {
+    // Providers with native `SemanticStreamParser` implementations bypass the
+    // legacy-callback adapter so they can emit the full suite of typed
+    // semantic events (including `ProviderExtension` for unknown kinds).
+    match provider {
+        Provider::Claude => {
+            return Box::new(claude_semantic::ClaudeSemanticStreamParser::new(sink));
+        }
+        Provider::Codex => {
+            return Box::new(codex_semantic::CodexSemanticStreamParser::new(
+                sink,
+                config.model.clone(),
+            ));
+        }
+        Provider::Gemini => {
+            return Box::new(gemini_semantic::GeminiSemanticStreamParser::new(sink));
+        }
+        Provider::OpenCode => {
+            return Box::new(opencode_semantic::OpenCodeSemanticStreamParser::new(
+                sink,
+                config.model.clone(),
+            ));
+        }
+        Provider::KimiCode => {
+            return Box::new(kimi_semantic::KimiSemanticStreamParser::new(sink));
+        }
+        Provider::QwenCode => {
+            return Box::new(qwen_semantic::QwenSemanticStreamParser::new(sink));
+        }
+        _ => {}
+    }
+
+    // Other providers still go through the legacy-callback adapter until
+    // their Phase 2 native migrations land.
     let queue: Arc<Mutex<Vec<SemanticEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let bridge = LegacyCallbackBridge::new(queue.clone());
     let legacy_parser: Box<dyn StreamParser> = match provider {
-        Provider::Claude => Box::new(claude::ClaudeStreamParser::new(bridge)),
         Provider::Codex => Box::new(codex::CodexStreamParser::new(bridge, config.model.clone())),
         Provider::Gemini => Box::new(gemini::GeminiStreamParser::new(bridge)),
         Provider::KimiCode => Box::new(kimi::KimiStreamParser::new(bridge)),

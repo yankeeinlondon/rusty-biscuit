@@ -338,6 +338,11 @@ impl<S: StreamEventSink + Send> StreamParser for CodexStreamParser<S> {
                 self.sink.on_after_tool(&meta);
                 Ok(None)
             }
+            Ok(CodexEvent::ItemUpdated(_)) => {
+                // Legacy parser ignores item.updated; the native semantic
+                // parser surfaces these as Info events.
+                Ok(None)
+            }
             Err(_) => {
                 // Codex stream is control-plane oriented; unknown events are
                 // silently skipped, matching the prior behavior.

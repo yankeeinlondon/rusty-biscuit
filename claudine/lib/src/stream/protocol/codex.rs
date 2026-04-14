@@ -39,6 +39,8 @@ pub enum CodexEvent {
     ItemStarted(CodexItemEnvelope),
     #[serde(rename = "item.completed")]
     ItemCompleted(CodexItemEnvelope),
+    #[serde(rename = "item.updated")]
+    ItemUpdated(CodexItemEnvelope),
     #[serde(rename = "item.tool_use")]
     ItemToolUse(CodexToolItemFields),
     #[serde(rename = "tool_use")]
@@ -182,8 +184,68 @@ pub enum CodexItem {
     ApprovalRequest(CodexPermissionItem),
     UserInputRequest(CodexPermissionItem),
     Reasoning(CodexReasoning),
+    FileChange(CodexFileChange),
+    PlanUpdate(CodexPlanUpdate),
+    TodoList(CodexPlanUpdate),
     #[serde(other)]
     Unknown,
+}
+
+/// Typed `file_change` item emitted by Codex when a command or patch modifies
+/// files on disk. Shape is intentionally tolerant of field drift — real Codex
+/// builds have used both `path` and `file_path`, and `kind` variously named
+/// `change_kind` or `operation`.
+#[derive(Debug, Default, Deserialize)]
+pub struct CodexFileChange {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub file_path: Option<String>,
+    #[serde(default)]
+    pub change_kind: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub operation: Option<String>,
+}
+
+impl CodexFileChange {
+    pub fn resolved_path(&self) -> Option<&str> {
+        self.path.as_deref().or(self.file_path.as_deref())
+    }
+
+    pub fn resolved_kind(&self) -> Option<&str> {
+        self.change_kind
+            .as_deref()
+            .or(self.kind.as_deref())
+            .or(self.operation.as_deref())
+    }
+}
+
+/// Typed `plan_update` / `todo_list` item. Codex emits plan-tracking data under
+/// various shapes; this struct accepts the common fields and lets anything else
+/// survive through `extra` on the resulting [`super::super::semantic::SemanticEvent::PlanUpdate`].
+#[derive(Debug, Default, Deserialize)]
+pub struct CodexPlanUpdate {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+impl CodexPlanUpdate {
+    pub fn resolved_message(&self) -> Option<String> {
+        self.message
+            .clone()
+            .or_else(|| self.summary.clone())
+            .or_else(|| self.title.clone())
+    }
 }
 
 impl CodexItem {
@@ -397,6 +459,13 @@ pub struct CodexToolItemFields {
     pub result: Option<Value>,
     #[serde(default)]
     pub content: Option<Value>,
+    /// Command-execution status reported on `command_execution` completions
+    /// (e.g. "success", "failure", "timeout").
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Process exit code for shell-tool completions.
+    #[serde(default)]
+    pub exit_code: Option<i32>,
 }
 
 impl CodexToolItemFields {
