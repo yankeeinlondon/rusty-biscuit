@@ -8,34 +8,64 @@ blast_radius:
 
 # The `sniff repo recent-commits` Subcommand
 
-Shows commits within a time period, grouped by date. Each commit displays its short hash, changed files, and a structured description parsed from the commit message.
+Shows commits within a time period, one block per commit. Each block displays a one-line header (short hash, conventional-commit prefix, local time with relative-day label, and commit summary) followed by an optional **Description** sub-block (bullet points parsed from the commit message) and a **Files Impacted** sub-block listing every file the commit changed along with how it changed (`added`, `modified`, `deleted`, `renamed`, `copied`).
 
 ## Default Behavior
 
 When no period is specified, defaults to `3d` (last 3 days). Output is rendered as Markdown passed through a terminal renderer:
 
 ```
-## 2026-04-09 at 14:32
+- [f89f844] refactor(sniff) at 1:01pm Today: improve Option chaining and narrow cfg guards
 
-- Commit: 34b6d18a
-- Files:
-    - sniff/lib/src/filesystem/git/recent_commits.rs
-    - sniff/cli/src/output/recent_commits.rs
-- Description: refactor(sniff): use let-chains and simplify parse_commit_message
-    - Replaced nested if/match blocks with let-chains
-    - Simplified scope extraction logic
+    **Description:**
 
-## 2026-04-08 at 09:15
+    - Use and_then() instead of map().flatten() for more idiomatic Option chaining
+    - Remove unnecessary as i32 cast on header.rtm_addrs (already the correct type)
+    - Narrow parse_bsd_default_route_interface cfg from multi-platform to test-only
 
-- Commit: 43b3be02
-- Files:
-    - sniff/lib/src/filesystem/git/range_walker.rs
-- Description: fix(sniff): preserve empty commits and use time-monotonic sort
-    - Empty commits are no longer dropped during range walking
-    - Commits are sorted by timestamp instead of topological order
+    **Files Impacted:**
+
+    - modified: sniff/lib/src/filesystem/mod.rs
+    - modified: sniff/lib/src/network/mod.rs
+
+- [c8df5b9] test(sniff) at 12:32pm Today: apply cargo fmt to benchmarks and tests
+
+    **Description:**
+
+    - Reformat import ordering and line wrapping in benchmark cases
+    - Add uv_with_install_plan integration test for UvWithInstall auto-append flow
+    - Standardize assertion formatting across test files
+
+    **Files Impacted:**
+
+    - modified: sniff/lib/tests/bench_ids_sync.rs
+    - added: sniff/lib/tests/uv_with_install_plan.rs
+    - modified: sniff/lib/tests/windows_app_paths_orphan.rs
 ```
 
-File paths are rendered as clickable OSC8 hyperlinks (pointing to `file://` URIs) in terminals that support them.
+Notes:
+
+- The header uses the viewer's local timezone so `Today`/`Yesterday` labels match what the reader expects.
+- Commits older than yesterday are labelled with an absolute date (`2026-04-01 at 9:30am`).
+- File paths are rendered as clickable OSC8 hyperlinks (pointing to `file://` URIs) in terminals that support them.
+- The **Description** sub-block is omitted entirely when the commit body has no bullet points.
+
+### Styled terminal output
+
+When rendered to a terminal (anything other than `--plain` or `--json`), the header line uses the following visual treatment so the most important parts of each commit pop without forcing the reader to look up the hash or rewrite the sentence in their head:
+
+| Part of the header | Style |
+|--------------------|-------|
+| `[hash]` — short commit SHA | **bold** (brackets stay unstyled) |
+| Conventional-commit action (e.g. `refactor`) | blue |
+| Scope inside the parens (e.g. `sniff`) | blue **and** dim |
+| The parens `(` / `)` around the scope | blue (not dim) |
+| The literal word `at` before the time | *italic* |
+| Time + relative day label (e.g. `1:01pm Today`) | **bold** |
+| `**Description:**` / `**Files Impacted:**` labels | **bold** |
+| File paths | OSC8 hyperlink to the `file://` URI |
+
+`--plain` keeps the same semantic markdown but strips every ANSI escape so the output is usable in logs, pipes, and PR bodies.
 
 ## Period Argument
 
@@ -52,6 +82,9 @@ The optional `PERIOD` argument accepts several formats:
 | Named | `yesterday` | Midnight-to-midnight UTC yesterday |
 | Date | `2026-04-01` | All commits on that date (YYYY-MM-DD) |
 | Hash | `a1b2c3d` | All commits from that hash to HEAD |
+| Count | `10`, `25` | The last N commits reachable from HEAD (bare positive integer) |
+
+Detection is ordered: `today`/`yesterday` → ISO date → bare number (count) → duration → hash. An all-digit argument is always treated as a count, so a SHA that happens to be entirely numeric must be disambiguated by supplying more of the hash (e.g. include a non-digit hex char) or by lengthening the input past the numeric portion.
 
 ### Duration Units
 
@@ -109,6 +142,7 @@ sniff repo recent-commits today              # Since midnight
 sniff repo recent-commits yesterday          # Yesterday only
 sniff repo recent-commits 2026-04-01         # Specific date
 sniff repo recent-commits a1b2c3d            # From hash to HEAD
+sniff repo recent-commits 10                 # The last 10 commits
 sniff repo recent-commits --action fix       # Only conventional fix commits
 sniff repo recent-commits --action feat --action refactor
 sniff repo recent-commits 2w --package sniff # Last 2 weeks, sniff package only
@@ -131,8 +165,8 @@ Returns a `CommitDescSet` object:
       "packages": ["sniff", "sniff-cli"],
       "package_areas": ["sniff"],
       "files": [
-        "sniff/lib/src/filesystem/git/recent_commits.rs",
-        "sniff/cli/src/output/recent_commits.rs"
+        { "path": "sniff/lib/src/filesystem/git/recent_commits.rs", "kind": "modified" },
+        { "path": "sniff/cli/src/output/recent_commits.rs",        "kind": "modified" }
       ],
       "description": "refactor(sniff): use let-chains and simplify parse_commit_message",
       "bullet_points": [
@@ -154,9 +188,16 @@ Returns a `CommitDescSet` object:
 | `datetime` | string | ISO 8601 timestamp |
 | `packages` | array\|null | Package names touched by this commit |
 | `package_areas` | array\|null | Package area names touched by this commit |
-| `files` | array | Repo-relative file paths changed |
+| `files` | array | Per-file change records (see below) |
 | `description` | string | Commit summary line |
 | `bullet_points` | array | Parsed bullet points from commit body |
+
+### `files` items
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `path` | string | Repo-relative path of the changed file |
+| `kind` | string | One of `added`, `modified`, `deleted`, `renamed`, `copied` |
 
 ### Top-level fields
 

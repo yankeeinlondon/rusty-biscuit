@@ -1,6 +1,7 @@
 //! Serial sequence orchestrator.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use biscuit_terminal::components::renderable::Renderable;
@@ -16,6 +17,10 @@ use color_eyre::eyre::{Result, eyre};
 
 use crate::commands::compose::SharedComposeArgs;
 use crate::log;
+
+/// Exit code emitted when Ctrl+C is observed during a sequence run.
+/// Matches the standard `128 + SIGINT(2)` convention used by shells.
+const SEQUENCE_INTERRUPT_EXIT_CODE: i32 = 130;
 
 /// Context data for a single step in the sequence.
 ///
@@ -60,6 +65,35 @@ pub(crate) fn execute_sequence(
         steps: Vec::with_capacity(total_steps),
     };
 
+    // Persistent SIGINT tracker for the duration of the sequence run.
+    //
+    // The provider children installed by `wait_with_signal_handling` have
+    // their own SIGINT handler scoped to each invocation; once a child
+    // exits, that handler no longer updates any flag the sequence can
+    // observe. We also need to catch Ctrl+C that arrives outside a child
+    // (Phase 1 prep, between steps, or while finalizing summaries). This
+    // flag flips on the first SIGINT and is checked before each step and
+    // after each step completes so the loop aborts promptly.
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let interrupted_handler = interrupted.clone();
+    let _sigint_guard = {
+        #[cfg(unix)]
+        {
+            unsafe {
+                signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+                    interrupted_handler.store(true, Ordering::SeqCst);
+                })
+            }
+            .ok()
+        }
+        #[cfg(not(unix))]
+        {
+            // No-op on non-Unix; sequence is Unix-only in practice.
+            let _ = interrupted_handler;
+            Option::<()>::None
+        }
+    };
+
     let mut cumulative_approved: HashSet<String> = HashSet::new();
 
     // Shared approval cache lives for the whole sequence run so that
@@ -79,6 +113,9 @@ pub(crate) fn execute_sequence(
     // (both template and harness) once and then walks away.
     let mut step_contexts: Vec<StepContext> = Vec::with_capacity(total_steps);
     for step_index in 0..total_steps {
+        if interrupted.load(Ordering::SeqCst) {
+            return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
+        }
         let overlay = build_step_overlay(&plan, step_index);
         let step_set_overrides = overlay.as_set_overrides(user_set_overrides.clone());
 
@@ -165,7 +202,12 @@ pub(crate) fn execute_sequence(
     }
 
     // ── Phase 2: execute each step ─────────────────────────────────────
+    let mut interrupt_observed = false;
     for (step_index, step_ctx) in step_contexts.iter().enumerate() {
+        if interrupted.load(Ordering::SeqCst) {
+            interrupt_observed = true;
+            break;
+        }
         let step = &plan.steps[step_index];
 
         if !silent {
@@ -241,6 +283,35 @@ pub(crate) fn execute_sequence(
                     log::message(&status.render(&log::terminal()));
                 }
             }
+            Ok(outcome)
+                if outcome.exit_code == SEQUENCE_INTERRUPT_EXIT_CODE
+                    || interrupted.load(Ordering::SeqCst) =>
+            {
+                // Ctrl+C was observed either by the in-child signal handler
+                // (exit 130) or by our persistent process-level handler.
+                // Record the failure, stop the loop unconditionally, and
+                // propagate the interrupt exit code to the caller regardless
+                // of `fail_fast`.
+                summary.failed += 1;
+                summary.steps.push(SequenceStepResult {
+                    step: step_index + 1,
+                    name: step.name.clone(),
+                    success: false,
+                    error: Some("interrupted by SIGINT".into()),
+                    duration,
+                });
+                if !silent {
+                    let status = Status::from_prose(format!(
+                        "step <b><yellow>{}/{}</yellow></b> interrupted by Ctrl+C",
+                        step_index + 1,
+                        total_steps,
+                    ))
+                    .state(StatusState::Failure);
+                    log::message(&status.render(&log::terminal()));
+                }
+                interrupt_observed = true;
+                break;
+            }
             Ok(outcome) => {
                 let error_msg = format!(
                     "provider {} exited with code {}",
@@ -315,5 +386,8 @@ pub(crate) fn execute_sequence(
         }
     }
 
+    if interrupt_observed || interrupted.load(Ordering::SeqCst) {
+        return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
+    }
     if summary.failed > 0 { Ok(1) } else { Ok(0) }
 }

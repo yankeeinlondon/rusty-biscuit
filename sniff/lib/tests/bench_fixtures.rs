@@ -19,7 +19,8 @@ use tempfile::TempDir;
 use builder::{
     LARGE_MONOREPO_CHURN_COMMITS, LARGE_MONOREPO_DIRTY_FILES, LARGE_MONOREPO_JS_PKGS,
     LARGE_MONOREPO_RUST_PKGS, LARGE_MONOREPO_TOTAL_COMMITS, SMALL_GIT_REPO_COMMITS,
-    SMALL_GIT_REPO_DIRTY_FILES, build_language_mix_tree, build_large_monorepo, build_small_git_repo,
+    SMALL_GIT_REPO_DIRTY_FILES, build_language_mix_tree, build_large_monorepo,
+    build_small_git_repo,
 };
 
 fn count_commits(repo: &Repository) -> u32 {
@@ -108,10 +109,7 @@ fn large_monorepo_has_expected_shape() {
     let cargo = fs::read_to_string(dir.path().join("Cargo.toml")).expect("read Cargo.toml");
     for i in 0..LARGE_MONOREPO_RUST_PKGS {
         let entry = format!("\"crates/pkg{i:02}\"");
-        assert!(
-            cargo.contains(&entry),
-            "workspace manifest missing {entry}"
-        );
+        assert!(cargo.contains(&entry), "workspace manifest missing {entry}");
     }
 
     // Every rust package has its manifest and lib.rs.
@@ -161,8 +159,8 @@ fn large_monorepo_dirty_files_are_rust_and_js() {
         "crates/pkg00/src/lib.rs should carry the dirty marker 999"
     );
 
-    let js_dirty = fs::read_to_string(dir.path().join("apps/app00/src/index.ts"))
-        .expect("read dirty js file");
+    let js_dirty =
+        fs::read_to_string(dir.path().join("apps/app00/src/index.ts")).expect("read dirty js file");
     assert!(
         js_dirty.contains("dirty"),
         "apps/app00/src/index.ts should carry the dirty marker 'dirty'"
@@ -239,10 +237,7 @@ fn count_rust_packages(root: &Path) -> usize {
         .expect("read crates/")
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
-            entry
-                .file_type()
-                .map(|ft| ft.is_dir())
-                .unwrap_or(false)
+            entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false)
                 && entry.path().join("Cargo.toml").is_file()
         })
         .count()

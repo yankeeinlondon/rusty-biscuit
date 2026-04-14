@@ -1149,6 +1149,7 @@ fn resolve_base_branch(repo: &Repository) -> (String, Option<git2::Oid>) {
 
 /// Kind of change a file underwent in a commit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DeltaKind {
     /// File was added.
     Added,

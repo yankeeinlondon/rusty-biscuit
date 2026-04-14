@@ -52,10 +52,10 @@ gem *args="":
 
 # test library and CLI
 test *args="":
-    @echo "Testing {{BOLD}}biscuit-location{{RESET}} library"
+    @echo -e "Testing {{BOLD}}biscuit-location{{RESET}} library"
     @cargo test -p biscuit-location --all-features -- {{args}}
     @echo ""
-    @echo "Testing {{BOLD}}biscuit-location-cli{{RESET}}"
+    @echo -e "Testing {{BOLD}}biscuit-location-cli{{RESET}}"
     @cargo test -p biscuit-location-cli -- {{args}}
 
 # lint with clippy
@@ -64,7 +64,11 @@ lint *args="":
 
 # install CLI binary
 install *args="":
+    @echo
+    @echo -e "Installing {{BOLD}}biscuit-location's CLI{{RESET}}({{DIM}}geo{{RESET}})"
+    @echo
     @cargo install --path cli {{args}}
+    @echo -e "✅ Installed {{BOLD}}biscuit-location's CLI{{RESET}}({{DIM}}geo{{RESET}})"
 
 # build and show the docs for the library code
 docs:

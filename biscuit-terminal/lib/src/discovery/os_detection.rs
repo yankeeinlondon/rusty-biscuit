@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
 
 /// The detected operating system type.
 ///
@@ -561,6 +562,47 @@ pub fn infer_linux_family(id: &str) -> LinuxFamily {
     LinuxFamily::Unknown
 }
 
+/// Check if the process is running inside WSL 1 (Windows Subsystem for Linux, version 1).
+///
+/// WSL 1 exposes the Linux termios API but the underlying Windows console does not honor
+/// canonical-mode / `VMIN` / `VTIME` flags. Programs that issue terminal probes (OSC 10/11/12,
+/// DSR cursor position, CSI 14 t window size) will block on `read()` until the user presses
+/// Enter, because `tcsetattr` silently fails to leave cooked mode. WSL 2 uses a real Linux
+/// kernel and does not have this problem.
+///
+/// Detection reads `/proc/sys/kernel/osrelease`:
+///
+/// - Contains `Microsoft` (capital M) → WSL 1
+/// - Contains `microsoft-standard-WSL2` or `microsoft` (lowercase) → WSL 2
+/// - Neither → native Linux
+///
+/// The result is cached per-process via `OnceLock`.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::os_detection::is_wsl1;
+///
+/// if is_wsl1() {
+///     println!("WSL 1 detected — skipping terminal probes");
+/// }
+/// ```
+pub fn is_wsl1() -> bool {
+    static CACHED: OnceLock<bool> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        // Fast path: non-Linux platforms are never WSL.
+        if detect_os_type() != OsType::Linux {
+            return false;
+        }
+        let Ok(osrelease) = fs::read_to_string("/proc/sys/kernel/osrelease") else {
+            return false;
+        };
+        // WSL 2 kernel strings include the lowercase `microsoft-standard-WSL2` marker.
+        // WSL 1 kernel strings include a capital-M `Microsoft` marker and no `WSL2`.
+        osrelease.contains("Microsoft") && !osrelease.contains("WSL2")
+    })
+}
+
 /// Check if the process is running in a CI environment.
 ///
 /// Detects common CI/CD platforms by checking their environment variables.
@@ -761,6 +803,21 @@ mod tests {
     fn test_is_ci_returns_bool() {
         // Just verify it returns a bool without panicking
         let _ = is_ci();
+    }
+
+    #[test]
+    fn test_is_wsl1_does_not_panic_and_is_cached() {
+        // On non-WSL hosts this must be `false`; on WSL 2 hosts this must also be
+        // `false`. On WSL 1 hosts it must be `true`. We cannot know which host the
+        // test is running on, so we assert only that the call completes, returns
+        // the same value when called twice (OnceLock cache), and is `false` on
+        // non-Linux platforms.
+        let first = is_wsl1();
+        let second = is_wsl1();
+        assert_eq!(first, second, "is_wsl1 result should be cached");
+
+        #[cfg(not(target_os = "linux"))]
+        assert!(!first, "is_wsl1 must be false on non-Linux platforms");
     }
 
     #[test]

@@ -27,10 +27,7 @@ pub struct ConfigArgs {}
 
 pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
     let config_path = claudine::dispatch::loader::user_config_path();
-    if !config_path.exists() {
-        return super::init_wizard::run_initialization().await;
-    }
-
+    // Init check is now centralized in main.rs — config is guaranteed to exist here.
     let config = claudine::dispatch::loader::load_claudine_config(Some(&config_path), None)?;
     let cwd = std::env::current_dir()?;
     let git_info = sniff::filesystem::git::detect_git(&cwd, false, 1)
@@ -134,6 +131,16 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
             );
         }
         eprintln!();
+    }
+    if app.repo_dirty
+        && let Some(ref path) = app.repo_config_path
+        && let Some(ref repo_cfg) = app.repo_config
+    {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
+        eprintln!("Repo configuration saved to {}", path.display());
     }
 
     Ok(())

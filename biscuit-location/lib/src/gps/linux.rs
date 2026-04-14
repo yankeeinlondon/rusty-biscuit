@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use zbus::{proxy, Connection};
+use zbus::{Connection, proxy};
 
 use crate::types::Location;
 

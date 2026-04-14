@@ -207,10 +207,7 @@ mod tests {
     #[test]
     fn location_input_ip() {
         let input: LocationInput = "ip:8.8.8.8".parse().unwrap();
-        assert_eq!(
-            input,
-            LocationInput::Ip("8.8.8.8".parse().unwrap())
-        );
+        assert_eq!(input, LocationInput::Ip("8.8.8.8".parse().unwrap()));
     }
 
     #[test]

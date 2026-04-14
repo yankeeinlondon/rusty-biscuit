@@ -1,4 +1,4 @@
-//! Output rendering for the `where` CLI.
+//! Output rendering for the `geo` CLI.
 //!
 //! Provides three modes:
 //! - **text** (default): human-readable, optionally ANSI-styled
@@ -157,11 +157,7 @@ pub struct ErrorResponse<'a> {
 // ---------------------------------------------------------------------------
 
 /// Render a location for the given output mode.
-pub fn render_location(
-    location: &Location,
-    maps_url: Option<String>,
-    mode: OutputMode,
-) -> String {
+pub fn render_location(location: &Location, maps_url: Option<String>, mode: OutputMode) -> String {
     match mode {
         OutputMode::Json => {
             let response = LocationResponse::from_location(location, maps_url);
@@ -212,6 +208,23 @@ pub fn render_error(message: &str, mode: OutputMode) -> String {
         }
         OutputMode::Plain => format!("Error: {message}"),
         OutputMode::Text => format!("{BOLD}{RED}Error:{RESET} {message}"),
+    }
+}
+
+/// Render an informational message for the given output mode.
+pub fn render_info(message: &str, mode: OutputMode) -> String {
+    match mode {
+        OutputMode::Json => {
+            #[derive(Debug, Serialize)]
+            struct InfoResponse<'a> {
+                ok: bool,
+                message: &'a str,
+            }
+            let response = InfoResponse { ok: true, message };
+            serde_json::to_string(&response).unwrap_or_else(|_| "{\"ok\":true}".into())
+        }
+        OutputMode::Plain => message.to_string(),
+        OutputMode::Text => format!("{BOLD}✓{RESET} {message}"),
     }
 }
 
@@ -337,8 +350,11 @@ mod tests {
     #[test]
     fn text_mode_includes_maps_url_when_present() {
         let loc = sample_location();
-        let out =
-            render_location(&loc, Some("https://maps.google.com/x".into()), OutputMode::Plain);
+        let out = render_location(
+            &loc,
+            Some("https://maps.google.com/x".into()),
+            OutputMode::Plain,
+        );
         assert!(out.contains("Maps: https://maps.google.com/x"));
     }
 

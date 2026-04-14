@@ -459,27 +459,120 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
         });
     }
 
-    devices
+    merge_split_io_devices(devices)
 }
 
-/// Detects audio devices on Linux by parsing `/proc/asound/cards`.
+/// Strip a trailing `:\d+` from a UID, returning the prefix that remains.
 ///
-/// Each card entry has two lines:
-/// ```text
-///  0 [PCH            ]: HDA-Intel - HDA Intel PCH
-///                       HDA Intel PCH at 0xf7d34000 irq 34
-/// ```
-///
-/// The device kind is inferred from the card name (HDMI, USB, Bluetooth).
-/// Channel counts and sample rates are not available from this source.
-#[cfg(target_os = "linux")]
-pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
-    let contents = match std::fs::read_to_string("/proc/asound/cards") {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
+/// CoreAudio exposes some devices (notably LG UltraFine displays) as two
+/// separate `AudioObjectID`s with the same display name but distinct UIDs
+/// that differ only in a trailing scope tag (`:1` for input, `:2` for output).
+/// This function returns the shared prefix so such pairs can be matched.
+#[cfg(any(target_os = "macos", test))]
+fn uid_pair_key(uid: &str) -> &str {
+    let Some(colon_pos) = uid.rfind(':') else {
+        return uid;
     };
+    let tail = &uid[colon_pos + 1..];
+    if !tail.is_empty() && tail.bytes().all(|b| b.is_ascii_digit()) {
+        &uid[..colon_pos]
+    } else {
+        uid
+    }
+}
 
-    let mut devices = Vec::new();
+/// Merge pairs of input-only and output-only devices that share a name and a
+/// UID prefix (see [`uid_pair_key`]) into a single [`AudioDirection::InputOutput`]
+/// entry. Devices that don't match a pair pass through unchanged.
+#[cfg(any(target_os = "macos", test))]
+fn merge_split_io_devices(devices: Vec<AudioDeviceInfo>) -> Vec<AudioDeviceInfo> {
+    use std::collections::HashMap;
+
+    // Index devices by (name, uid_pair_key) and collect slot indices per key.
+    let mut buckets: HashMap<(String, String), Vec<usize>> = HashMap::new();
+    for (idx, dev) in devices.iter().enumerate() {
+        let key = (dev.name.clone(), uid_pair_key(&dev.uid).to_string());
+        buckets.entry(key).or_default().push(idx);
+    }
+
+    let mut drop_mask = vec![false; devices.len()];
+    let mut merged: Vec<(usize, AudioDeviceInfo)> = Vec::new();
+
+    for (_key, indices) in buckets {
+        if indices.len() != 2 {
+            continue;
+        }
+        let (a, b) = (indices[0], indices[1]);
+        let da = &devices[a];
+        let db = &devices[b];
+
+        let (input_dev, output_dev) = match (da.direction, db.direction) {
+            (AudioDirection::Input, AudioDirection::Output) => (da, db),
+            (AudioDirection::Output, AudioDirection::Input) => (db, da),
+            _ => continue,
+        };
+
+        // Union available sample rates (sorted, deduped).
+        let mut rates: Vec<f64> = input_dev
+            .available_sample_rates
+            .iter()
+            .chain(output_dev.available_sample_rates.iter())
+            .copied()
+            .collect();
+        rates.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+        rates.dedup_by(|x, y| (*x - *y).abs() < 0.01);
+
+        // Prefer the output device's current sample rate, else the input's.
+        let sample_rate = if output_dev.sample_rate > 0.0 {
+            output_dev.sample_rate
+        } else {
+            input_dev.sample_rate
+        };
+
+        // Anchor the merged entry at the earlier slot for stable ordering.
+        let anchor = a.min(b);
+        let merged_uid = uid_pair_key(&input_dev.uid).to_string();
+
+        merged.push((
+            anchor,
+            AudioDeviceInfo {
+                name: input_dev.name.clone(),
+                uid: merged_uid,
+                kind: input_dev.kind,
+                direction: AudioDirection::InputOutput,
+                is_default_input: input_dev.is_default_input,
+                is_default_output: output_dev.is_default_output,
+                sample_rate,
+                available_sample_rates: rates,
+                input_channels: input_dev.input_channels,
+                output_channels: output_dev.output_channels,
+            },
+        ));
+        drop_mask[a] = true;
+        drop_mask[b] = true;
+    }
+
+    let mut result: Vec<(usize, AudioDeviceInfo)> = devices
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| !drop_mask[*i])
+        .collect();
+    result.extend(merged);
+    result.sort_by_key(|(i, _)| *i);
+    result.into_iter().map(|(_, d)| d).collect()
+}
+
+/// Parsed ALSA card header from `/proc/asound/cards`.
+#[cfg(target_os = "linux")]
+struct AlsaCard {
+    id: u32,
+    name: String,
+}
+
+/// Parses `/proc/asound/cards` contents into `(card_id, long_name)` entries.
+#[cfg(target_os = "linux")]
+fn parse_alsa_cards(contents: &str) -> Vec<AlsaCard> {
+    let mut cards = Vec::new();
     for line in contents.lines() {
         // Card lines start with a number: " 0 [PCH  ]: HDA-Intel - HDA Intel PCH"
         let trimmed = line.trim();
@@ -487,28 +580,127 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
             continue;
         }
 
-        // Extract the long name after " - "
-        let name = trimmed.split(" - ").nth(1).unwrap_or(trimmed).to_string();
-
-        let name_upper = name.to_uppercase();
-        let kind = if name_upper.contains("HDMI") {
-            AudioDeviceKind::Hdmi
-        } else if name_upper.contains("USB") {
-            AudioDeviceKind::Usb
-        } else if name_upper.contains("BLUETOOTH") || name_upper.contains("BT") {
-            AudioDeviceKind::Bluetooth
-        } else {
-            AudioDeviceKind::BuiltIn
+        let Some(id_str) = trimmed.split_whitespace().next() else {
+            continue;
+        };
+        let Ok(id) = id_str.parse::<u32>() else {
+            continue;
         };
 
-        // Extract card index for a stable UID
-        let uid = trimmed.split_whitespace().next().unwrap_or("0").to_string();
+        let name = trimmed.split(" - ").nth(1).unwrap_or(trimmed).to_string();
+        cards.push(AlsaCard { id, name });
+    }
+    cards
+}
+
+/// Parsed direction flags for an ALSA card from `/proc/asound/pcm`.
+#[cfg(target_os = "linux")]
+#[derive(Default, Clone, Copy)]
+struct AlsaCardDirections {
+    has_playback: bool,
+    has_capture: bool,
+}
+
+/// Parses `/proc/asound/pcm` contents into per-card direction flags.
+///
+/// Each line looks like:
+/// ```text
+/// 00-00: ALC257 Analog : ALC257 Analog : playback 1 : capture 1
+/// 01-03: HDMI 0 : HDA Intel HDMI : playback 1
+/// ```
+#[cfg(target_os = "linux")]
+fn parse_alsa_pcm(contents: &str) -> std::collections::HashMap<u32, AlsaCardDirections> {
+    use std::collections::HashMap;
+
+    let mut map: HashMap<u32, AlsaCardDirections> = HashMap::new();
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // First token: "CC-DD:" where CC is the card id.
+        let Some(head) = trimmed.split(':').next() else {
+            continue;
+        };
+        let Some(card_str) = head.split('-').next() else {
+            continue;
+        };
+        let Ok(card_id) = card_str.trim().parse::<u32>() else {
+            continue;
+        };
+
+        let entry = map.entry(card_id).or_default();
+        for field in trimmed.split(':').map(str::trim) {
+            if field.starts_with("playback ") {
+                entry.has_playback = true;
+            } else if field.starts_with("capture ") {
+                entry.has_capture = true;
+            }
+        }
+    }
+    map
+}
+
+/// Classifies an ALSA card name into an [`AudioDeviceKind`].
+#[cfg(target_os = "linux")]
+fn classify_alsa_kind(name: &str) -> AudioDeviceKind {
+    let upper = name.to_uppercase();
+    if upper.contains("HDMI") {
+        AudioDeviceKind::Hdmi
+    } else if upper.contains("USB") {
+        AudioDeviceKind::Usb
+    } else if upper.contains("BLUETOOTH") || upper.contains("BT") {
+        AudioDeviceKind::Bluetooth
+    } else {
+        AudioDeviceKind::BuiltIn
+    }
+}
+
+/// Detects audio devices on Linux by parsing ALSA procfs.
+///
+/// Reads `/proc/asound/cards` to enumerate sound cards with their names and
+/// `/proc/asound/pcm` to determine which cards expose playback (output) or
+/// capture (input) streams. If `/proc/asound/pcm` is unavailable, all cards
+/// default to output-only.
+///
+/// The device kind is inferred from the card name (HDMI, USB, Bluetooth).
+/// Channel counts, sample rates, and system default status are not available
+/// from this source.
+#[cfg(target_os = "linux")]
+pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
+    let cards_raw = match std::fs::read_to_string("/proc/asound/cards") {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let cards = parse_alsa_cards(&cards_raw);
+    let directions = std::fs::read_to_string("/proc/asound/pcm")
+        .map(|s| parse_alsa_pcm(&s))
+        .unwrap_or_default();
+
+    let mut devices = Vec::with_capacity(cards.len());
+    for card in cards {
+        let dirs = directions
+            .get(&card.id)
+            .copied()
+            .unwrap_or(AlsaCardDirections {
+                has_playback: true,
+                has_capture: false,
+            });
+
+        let direction = match (dirs.has_capture, dirs.has_playback) {
+            (true, true) => AudioDirection::InputOutput,
+            (true, false) => AudioDirection::Input,
+            (false, true) => AudioDirection::Output,
+            (false, false) => continue,
+        };
 
         devices.push(AudioDeviceInfo {
-            name,
-            uid: format!("card{uid}"),
-            kind,
-            direction: AudioDirection::Output,
+            name: card.name.clone(),
+            uid: format!("card{}", card.id),
+            kind: classify_alsa_kind(&card.name),
+            direction,
             ..Default::default()
         });
     }
@@ -689,6 +881,198 @@ mod tests {
         assert!(
             has_default_output,
             "Expected a default output device on macOS"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn alsa_cards_parses_card_entries() {
+        let sample = "\
+ 0 [PCH            ]: HDA-Intel - HDA Intel PCH
+                      HDA Intel PCH at 0xf7d34000 irq 34
+ 1 [NVidia         ]: HDA-Intel - HDA NVidia
+                      HDA NVidia at 0xf7d80000 irq 17
+";
+        let cards = parse_alsa_cards(sample);
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].id, 0);
+        assert_eq!(cards[0].name, "HDA Intel PCH");
+        assert_eq!(cards[1].id, 1);
+        assert_eq!(cards[1].name, "HDA NVidia");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn alsa_pcm_detects_playback_and_capture() {
+        let sample = "\
+00-00: ALC257 Analog : ALC257 Analog : playback 1 : capture 1
+00-02: ALC257 Alt Analog : ALC257 Alt Analog : capture 1
+01-03: HDMI 0 : HDA Intel HDMI : playback 1
+01-07: HDMI 1 : HDA Intel HDMI : playback 1
+";
+        let map = parse_alsa_pcm(sample);
+        let card0 = map.get(&0).copied().unwrap_or_default();
+        assert!(card0.has_playback);
+        assert!(card0.has_capture);
+
+        let card1 = map.get(&1).copied().unwrap_or_default();
+        assert!(card1.has_playback);
+        assert!(!card1.has_capture);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn alsa_pcm_capture_only_card() {
+        let sample = "02-00: USB Mic : USB Audio : capture 1\n";
+        let map = parse_alsa_pcm(sample);
+        let card = map.get(&2).copied().unwrap_or_default();
+        assert!(!card.has_playback);
+        assert!(card.has_capture);
+    }
+
+    #[test]
+    fn uid_pair_key_strips_trailing_numeric_segment() {
+        assert_eq!(
+            uid_pair_key("AppleUSBAudioEngine:LG:USB Audio:20141000:1"),
+            "AppleUSBAudioEngine:LG:USB Audio:20141000"
+        );
+        assert_eq!(
+            uid_pair_key("AppleUSBAudioEngine:LG:USB Audio:20141000:2"),
+            "AppleUSBAudioEngine:LG:USB Audio:20141000"
+        );
+    }
+
+    #[test]
+    fn uid_pair_key_preserves_non_numeric_tail() {
+        assert_eq!(uid_pair_key("BuiltInSpeakerDevice"), "BuiltInSpeakerDevice");
+        assert_eq!(uid_pair_key("foo:bar"), "foo:bar");
+        assert_eq!(uid_pair_key(""), "");
+    }
+
+    #[test]
+    fn merge_pairs_input_only_and_output_only_with_shared_prefix() {
+        let devices = vec![
+            AudioDeviceInfo {
+                name: "LG UltraFine Display Audio".into(),
+                uid: "AppleUSBAudioEngine:LG:20141000:1".into(),
+                kind: AudioDeviceKind::Usb,
+                direction: AudioDirection::Input,
+                input_channels: 1,
+                output_channels: 0,
+                sample_rate: 48000.0,
+                available_sample_rates: vec![48000.0],
+                ..Default::default()
+            },
+            AudioDeviceInfo {
+                name: "LG UltraFine Display Audio".into(),
+                uid: "AppleUSBAudioEngine:LG:20141000:2".into(),
+                kind: AudioDeviceKind::Usb,
+                direction: AudioDirection::Output,
+                input_channels: 0,
+                output_channels: 2,
+                sample_rate: 48000.0,
+                available_sample_rates: vec![44100.0, 48000.0],
+                is_default_output: true,
+                ..Default::default()
+            },
+        ];
+        let merged = merge_split_io_devices(devices);
+        assert_eq!(merged.len(), 1);
+        let d = &merged[0];
+        assert_eq!(d.name, "LG UltraFine Display Audio");
+        assert_eq!(d.uid, "AppleUSBAudioEngine:LG:20141000");
+        assert_eq!(d.direction, AudioDirection::InputOutput);
+        assert_eq!(d.input_channels, 1);
+        assert_eq!(d.output_channels, 2);
+        assert_eq!(d.available_sample_rates, vec![44100.0, 48000.0]);
+        assert!(d.is_default_output);
+    }
+
+    #[test]
+    fn merge_pairs_two_physical_devices_independently() {
+        let mk = |uid: &str, dir: AudioDirection, ic, oc| AudioDeviceInfo {
+            name: "LG UltraFine Display Audio".into(),
+            uid: uid.into(),
+            kind: AudioDeviceKind::Usb,
+            direction: dir,
+            input_channels: ic,
+            output_channels: oc,
+            ..Default::default()
+        };
+        let devices = vec![
+            mk("Engine:20141000:1", AudioDirection::Input, 1, 0),
+            mk("Engine:20141000:2", AudioDirection::Output, 0, 2),
+            mk("Engine:21141000:1", AudioDirection::Input, 1, 0),
+            mk("Engine:21141000:2", AudioDirection::Output, 0, 2),
+        ];
+        let merged = merge_split_io_devices(devices);
+        assert_eq!(merged.len(), 2);
+        assert!(
+            merged
+                .iter()
+                .all(|d| d.direction == AudioDirection::InputOutput)
+        );
+        let keys: Vec<&str> = merged.iter().map(|d| d.uid.as_str()).collect();
+        assert!(keys.contains(&"Engine:20141000"));
+        assert!(keys.contains(&"Engine:21141000"));
+    }
+
+    #[test]
+    fn merge_leaves_unpaired_devices_untouched() {
+        let devices = vec![
+            AudioDeviceInfo {
+                name: "MacBook Pro Speakers".into(),
+                uid: "BuiltInSpeaker".into(),
+                direction: AudioDirection::Output,
+                output_channels: 2,
+                ..Default::default()
+            },
+            AudioDeviceInfo {
+                name: "MacBook Pro Microphone".into(),
+                uid: "BuiltInMic".into(),
+                direction: AudioDirection::Input,
+                input_channels: 1,
+                ..Default::default()
+            },
+        ];
+        let merged = merge_split_io_devices(devices.clone());
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].name, devices[0].name);
+        assert_eq!(merged[1].name, devices[1].name);
+    }
+
+    #[test]
+    fn merge_does_not_collapse_two_input_only_same_name() {
+        let mk = |uid: &str| AudioDeviceInfo {
+            name: "Clone".into(),
+            uid: uid.into(),
+            direction: AudioDirection::Input,
+            input_channels: 1,
+            ..Default::default()
+        };
+        // Same pair_key but both are input-only — not a valid merge.
+        let merged = merge_split_io_devices(vec![mk("prefix:1"), mk("prefix:2")]);
+        // pair_keys differ here ("prefix" after stripping both), so they'd group,
+        // but directions are both Input — merge is skipped.
+        assert_eq!(merged.len(), 2);
+        assert!(merged.iter().all(|d| d.direction == AudioDirection::Input));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn classify_alsa_kind_matches_expected_categories() {
+        assert_eq!(
+            classify_alsa_kind("HDA Intel PCH"),
+            AudioDeviceKind::BuiltIn
+        );
+        assert_eq!(classify_alsa_kind("HDA Intel HDMI"), AudioDeviceKind::Hdmi);
+        assert_eq!(
+            classify_alsa_kind("Blue Yeti USB Microphone"),
+            AudioDeviceKind::Usb
+        );
+        assert_eq!(
+            classify_alsa_kind("Sony WH-1000XM5 (Bluetooth)"),
+            AudioDeviceKind::Bluetooth
         );
     }
 }

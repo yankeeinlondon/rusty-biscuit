@@ -145,6 +145,7 @@ sniff repo has-merge-conflict        # Check for merge conflicts
 sniff repo recent-commits             # Commits from last 3 days (default)
 sniff repo recent-commits 1w          # Commits from last week
 sniff repo recent-commits today       # Today's commits
+sniff repo recent-commits 10          # The last 10 commits
 sniff repo source-code-changes 1w     # Source code changes in last week
 sniff repo documentation-changes 1w   # Documentation changes in last week
 # Filter by scope:

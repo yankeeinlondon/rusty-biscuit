@@ -1109,18 +1109,17 @@ fn run_structured_inline(
 ) -> Result<InlineRunResult> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig::default();
-    let parser = claudine::stream::create_parser(
+    let sink = LiveStreamSink::new(
         provider,
-        LiveStreamSink::new(
-            provider,
-            env_context.clone(),
-            child_cwd,
-            stream_verbosity,
-            summary_details.clone(),
-        )
-        .with_context_extra(dispatch_context.clone()),
-        parser_config,
-    );
+        env_context.clone(),
+        child_cwd,
+        stream_verbosity,
+        summary_details.clone(),
+    )
+    .with_context_extra(dispatch_context.clone());
+    let live_metrics = sink.live_metrics();
+    let stream_output = sink.stream_output();
+    let parser = claudine::stream::create_parser(provider, sink, parser_config);
     let stream_result = exec::run_child_stream(
         binary_path,
         child_args,
@@ -1133,6 +1132,8 @@ fn run_structured_inline(
         stdin_seed,
         parser,
         child_spawned,
+        Some(live_metrics),
+        Some(stream_output),
     )?;
     let termination = stream_result.termination;
     let mut summary = stream_result.data;
@@ -1368,18 +1369,17 @@ fn execute_direct_without_harness(
     if use_structured {
         let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
         let parser_config = claudine::stream::ParserConfig::default();
-        let parser = claudine::stream::create_parser(
+        let sink = LiveStreamSink::new(
             provider,
-            LiveStreamSink::new(
-                provider,
-                env_context.clone(),
-                child_cwd,
-                stream_verbosity,
-                summary_details.clone(),
-            )
-            .with_context_extra(dispatch_context.clone()),
-            parser_config,
-        );
+            env_context.clone(),
+            child_cwd,
+            stream_verbosity,
+            summary_details.clone(),
+        )
+        .with_context_extra(dispatch_context.clone());
+        let live_metrics = sink.live_metrics();
+        let stream_output = sink.stream_output();
+        let parser = claudine::stream::create_parser(provider, sink, parser_config);
         let stream_result = exec::run_child_stream(
             binary_path,
             child_args,
@@ -1392,6 +1392,8 @@ fn execute_direct_without_harness(
             stdin_seed,
             parser,
             child_spawned,
+            Some(live_metrics),
+            Some(stream_output),
         )?;
         let mut summary = stream_result.data;
         if let Some(codex_output) = structured_codex_output {

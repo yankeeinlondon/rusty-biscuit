@@ -438,16 +438,16 @@ pub(crate) fn play_default_sound_for_event(
 ///   not used here — it is for callers that build `sh -c` strings.
 fn execute_bash(command: &str, params: &str, meta: &EventMeta) {
     let cmd = interpolate(command, meta);
-    let rendered_params = interpolate(params, meta);
 
-    // Validate the command before execution
     let validated = match bash_executor::validate_command(&cmd) {
         Ok(v) => v,
         Err(error) => {
-            warn!(%cmd, %error, "Bash action command validation failed");
+            warn!(%cmd, %error, "Bash action blocked by validation");
             return;
         }
     };
+
+    let rendered_params = interpolate(params, meta);
 
     // Parse rendered_params using shell-words to correctly handle quoted arguments
     // and interpolated values containing spaces (e.g., `--message 'hello world'`).
@@ -1205,5 +1205,37 @@ mod tests {
             shell_words::split(raw).unwrap()
         };
         assert!(args.is_empty());
+    }
+
+    // =========================================================================
+    // Bash execution security tests
+    // =========================================================================
+
+    #[test]
+    fn validate_command_blocks_rm() {
+        assert!(bash_executor::validate_command("rm").is_err());
+    }
+
+    #[test]
+    fn validate_command_allows_echo() {
+        assert!(bash_executor::validate_command("echo").is_ok());
+    }
+
+    #[test]
+    fn shell_escape_neutralizes_injection() {
+        let escaped = bash_executor::shell_escape("$(rm -rf /)");
+        assert_eq!(escaped, "'$(rm -rf /)'");
+    }
+
+    #[test]
+    fn shell_escape_handles_semicolon_injection() {
+        let escaped = bash_executor::shell_escape("; rm -rf /");
+        assert_eq!(escaped, "'; rm -rf /'");
+    }
+
+    #[test]
+    fn shell_escape_handles_backtick_injection() {
+        let escaped = bash_executor::shell_escape("`rm -rf /`");
+        assert_eq!(escaped, "'`rm -rf /`'");
     }
 }

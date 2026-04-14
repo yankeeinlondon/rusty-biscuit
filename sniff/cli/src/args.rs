@@ -86,6 +86,7 @@ pub enum RepoAction {
     },
     SourceCodeChanges {
         period: Option<String>,
+        actions: Vec<RecentCommitActionArg>,
         package: Option<String>,
         package_area: Option<String>,
         no_error: bool,
@@ -93,6 +94,7 @@ pub enum RepoAction {
     },
     DocumentationChanges {
         period: Option<String>,
+        actions: Vec<RecentCommitActionArg>,
         package: Option<String>,
         package_area: Option<String>,
         no_error: bool,
@@ -498,7 +500,7 @@ pub enum Commands {
     },
 
     /// Show only headless audio players
-    Audio {
+    AudioPlayers {
         #[command(subcommand)]
         action: Option<AudioAction>,
     },
@@ -713,7 +715,7 @@ pub enum RepoSubcommand {
     /// Show recent commits for a period
     #[command(name = "recent-commits")]
     RecentCommits {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
         /// Filter to conventional commit actions; repeat to OR multiple actions together
         #[arg(long = "action", value_enum, value_name = "ACTION")]
@@ -734,8 +736,11 @@ pub enum RepoSubcommand {
     /// Show source code changes for a period
     #[command(name = "source-code-changes")]
     SourceCodeChanges {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
+        /// Filter to conventional commit actions; repeat to OR multiple actions together
+        #[arg(long = "action", value_enum, value_name = "ACTION")]
+        actions: Vec<RecentCommitActionArg>,
         /// Scope to a specific package
         #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
@@ -752,8 +757,11 @@ pub enum RepoSubcommand {
     /// Show documentation changes for a period
     #[command(name = "documentation-changes")]
     DocumentationChanges {
-        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, 'today', 'yesterday'
+        /// Period: duration (3d, 1w), date (YYYY-MM-DD), hash, count (10), 'today', 'yesterday'
         period: Option<String>,
+        /// Filter to conventional commit actions; repeat to OR multiple actions together
+        #[arg(long = "action", value_enum, value_name = "ACTION")]
+        actions: Vec<RecentCommitActionArg>,
         /// Scope to a specific package
         #[arg(long, value_name = "PKG", add = clap_complete::engine::ArgValueCandidates::new(repo_package_candidates))]
         package: Option<String>,
@@ -794,7 +802,7 @@ impl Commands {
             Commands::OsPackageManagers { .. } => OutputFilter::OsPackageManagers,
             Commands::TtsClients { .. } => OutputFilter::TtsClients,
             Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
-            Commands::Audio { .. } => OutputFilter::HeadlessAudio,
+            Commands::AudioPlayers { .. } => OutputFilter::HeadlessAudio,
             Commands::Agents { .. } => OutputFilter::AiClients,
             Commands::Services { .. } => OutputFilter::Services,
             Commands::BlastRadius { .. } => OutputFilter::BlastRadius,
@@ -813,7 +821,7 @@ impl Commands {
                 | Commands::OsPackageManagers { .. }
                 | Commands::TtsClients { .. }
                 | Commands::TerminalApps { .. }
-                | Commands::Audio { .. }
+                | Commands::AudioPlayers { .. }
                 | Commands::Agents { .. }
         )
     }
@@ -888,10 +896,10 @@ impl Commands {
             TerminalApps {
                 action: Some(TerminalAppAction::InstallPlan(args)),
             } => Some((InstallCommandKind::InstallPlan, args)),
-            Audio {
+            AudioPlayers {
                 action: Some(AudioAction::Install(args)),
             } => Some((InstallCommandKind::Install, args)),
-            Audio {
+            AudioPlayers {
                 action: Some(AudioAction::InstallPlan(args)),
             } => Some((InstallCommandKind::InstallPlan, args)),
             Agents {
@@ -1145,12 +1153,14 @@ impl Commands {
                 },
                 Some(RepoSubcommand::SourceCodeChanges {
                     period,
+                    actions,
                     package,
                     package_area,
                     no_error,
                     on_error,
                 }) => RepoAction::SourceCodeChanges {
                     period: period.clone(),
+                    actions: actions.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                     no_error: *no_error,
@@ -1158,12 +1168,14 @@ impl Commands {
                 },
                 Some(RepoSubcommand::DocumentationChanges {
                     period,
+                    actions,
                     package,
                     package_area,
                     no_error,
                     on_error,
                 }) => RepoAction::DocumentationChanges {
                     period: period.clone(),
+                    actions: actions.clone(),
                     package: package.clone(),
                     package_area: package_area.clone(),
                     no_error: *no_error,
@@ -1344,6 +1356,7 @@ Git:
 Recent Commits:
   sniff repo recent-commits           Show commits from last 3 days
   sniff repo recent-commits 1w        Show commits from last week
+  sniff repo recent-commits 10        Show the last 10 commits
   sniff repo source-code-changes 1w   Source code changes in last week
   sniff repo documentation-changes 1w Documentation changes in last week
 
@@ -1620,6 +1633,42 @@ mod tests {
                     repo_subcommand: Some(RepoSubcommand::RecentCommits { actions, .. }),
                     ..
                 }) if actions == vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix]
+            ));
+        }
+
+        #[test]
+        fn repo_source_code_changes_actions_parse() {
+            let cli = parse_args(&[
+                "repo",
+                "source-code-changes",
+                "--action",
+                "feat",
+                "--action",
+                "fix",
+            ])
+            .unwrap();
+
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand:
+                        Some(RepoSubcommand::SourceCodeChanges { actions, .. }),
+                    ..
+                }) if actions == vec![RecentCommitActionArg::Feat, RecentCommitActionArg::Fix]
+            ));
+        }
+
+        #[test]
+        fn repo_documentation_changes_actions_parse() {
+            let cli = parse_args(&["repo", "documentation-changes", "--action", "chore"]).unwrap();
+
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    repo_subcommand:
+                        Some(RepoSubcommand::DocumentationChanges { actions, .. }),
+                    ..
+                }) if actions == vec![RecentCommitActionArg::Chore]
             ));
         }
 

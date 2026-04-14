@@ -1,11 +1,11 @@
+use biscuit_terminal::terminal::Terminal;
 use chrono::Utc;
-use darkmatter::markdown::Markdown;
-use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
 use sniff::filesystem::git::{PeriodSpecifier, parse_period};
 
 use crate::args::{RecentCommitActionArg, RepoAction};
 use crate::commands::handle_no_results;
+use crate::output::commit_blocks::{CommitCentricFilter, render_commit_set_styled};
 use crate::output::emit_text;
 
 pub(crate) fn handle_recent_commits_command(
@@ -59,6 +59,9 @@ pub(crate) fn handle_recent_commits_command(
         }
         PeriodSpecifier::Date(date) => sniff::filesystem::get_recent_commits_by_date(dir, *date)?,
         PeriodSpecifier::Hash(hash) => sniff::filesystem::get_recent_commits_by_hash(dir, hash)?,
+        PeriodSpecifier::Count(count) => {
+            sniff::filesystem::get_recent_commits_by_count(dir, *count)?
+        }
     };
 
     if let Some(ref pkg) = package {
@@ -81,27 +84,40 @@ pub(crate) fn handle_recent_commits_command(
         return Ok(());
     }
 
-    let markdown = match mode {
-        RecentCommitsMode::RecentCommits => commit_set.describe(plain),
-        RecentCommitsMode::SourceCodeChanges => commit_set.source_code_changes(plain),
-        RecentCommitsMode::DocumentationChanges => commit_set.documentation_changes(plain),
-    };
+    if plain {
+        // Plain mode delegates to the library's markdown emitter so the
+        // `--plain` output stays faithful to what would land in a file.
+        let markdown = match mode {
+            RecentCommitsMode::RecentCommits => commit_set.describe(true),
+            RecentCommitsMode::SourceCodeChanges => commit_set.source_code_changes(true),
+            RecentCommitsMode::DocumentationChanges => commit_set.documentation_changes(true),
+        };
 
-    if markdown.is_empty() {
+        if markdown.is_empty() {
+            let msg = on_error.clone().unwrap_or_else(|| "none found".to_string());
+            return handle_no_results(no_error, &Some(msg), plain);
+        }
+        emit_text(&markdown, true);
+        return Ok(());
+    }
+
+    // Styled terminal mode — render directly from the commit data so we
+    // can apply fine-grained Prose-based formatting (colored conventional
+    // commit prefix, bold hash, italic `at`, bold time, OSC8 file links).
+    let filter = match mode {
+        RecentCommitsMode::RecentCommits => CommitCentricFilter::All,
+        RecentCommitsMode::SourceCodeChanges => CommitCentricFilter::SourceCode,
+        RecentCommitsMode::DocumentationChanges => CommitCentricFilter::Documentation,
+    };
+    let terminal = Terminal::default();
+    let rendered = render_commit_set_styled(&commit_set, filter, &terminal);
+
+    if rendered.is_empty() {
         let msg = on_error.clone().unwrap_or_else(|| "none found".to_string());
         return handle_no_results(no_error, &Some(msg), plain);
     }
 
-    if plain {
-        emit_text(&markdown, true);
-    } else {
-        let md = Markdown::from(markdown.as_str());
-        match for_terminal(&md, TerminalOptions::default()) {
-            Ok(rendered) => emit_text(&rendered, false),
-            Err(_) => emit_text(&markdown, true),
-        }
-    }
-
+    emit_text(&rendered, false);
     Ok(())
 }
 
@@ -142,13 +158,14 @@ fn extract_action_params(action: &RepoAction) -> RecentCommitsParams {
         },
         RepoAction::SourceCodeChanges {
             period,
+            actions,
             package,
             package_area,
             no_error,
             on_error,
         } => RecentCommitsParams {
             period: period.clone(),
-            actions: Vec::new(),
+            actions: actions.clone(),
             package: package.clone(),
             package_area: package_area.clone(),
             no_error: *no_error,
@@ -157,13 +174,14 @@ fn extract_action_params(action: &RepoAction) -> RecentCommitsParams {
         },
         RepoAction::DocumentationChanges {
             period,
+            actions,
             package,
             package_area,
             no_error,
             on_error,
         } => RecentCommitsParams {
             period: period.clone(),
-            actions: Vec::new(),
+            actions: actions.clone(),
             package: package.clone(),
             package_area: package_area.clone(),
             no_error: *no_error,

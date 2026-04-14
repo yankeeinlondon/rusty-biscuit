@@ -41,7 +41,7 @@ impl Default for ReverseGeocodeConfig {
     fn default() -> Self {
         Self {
             endpoint: Url::parse("https://nominatim.openstreetmap.org/").unwrap(),
-            user_agent: format!("where/{}", env!("CARGO_PKG_VERSION")),
+            user_agent: format!("geo/{}", env!("CARGO_PKG_VERSION")),
             timeout: Duration::from_secs(10),
             min_interval: Duration::from_secs(1),
         }
@@ -88,10 +88,7 @@ mod tests {
         let prev = std::env::var(MAXMIND_ENV_VAR).ok();
         unsafe { std::env::set_var(MAXMIND_ENV_VAR, "/from/env/GeoLite2-City.mmdb") };
         let result = resolve_maxmind_path(None);
-        assert_eq!(
-            result,
-            Some(PathBuf::from("/from/env/GeoLite2-City.mmdb"))
-        );
+        assert_eq!(result, Some(PathBuf::from("/from/env/GeoLite2-City.mmdb")));
         match prev {
             Some(v) => unsafe { std::env::set_var(MAXMIND_ENV_VAR, v) },
             None => unsafe { std::env::remove_var(MAXMIND_ENV_VAR) },
