@@ -48,6 +48,7 @@ _get_design_doc dir:
         design="$( ( echo "NONE"; fd -g '*design*.md' "{{dir}}" ) | fzf --height=5 --border --border-label 'Choose matching design (or NONE to skip)' )"
         [[ "${design}" == "NONE" ]] && design=""
     fi
+    echo "${design}"
 
 # Specify a feature with a spec file, a design file, or both which has now been implemented
 # and you want to run a review on.
@@ -194,26 +195,31 @@ clarify-spec spec="":
         echo "there were problems that occurred during the clarification process"
     fi
 
-plan-feature spec:
+plan-feature spec="" design="":
     #!/usr/bin/env bash
     set -euo pipefail
 
     if [[ -z "{{spec}}" ]]; then
         spec_file="$(just _choose_spec)"
     else
-        if [[ "{{spec}}" =~ *".md" ]];
+        if [[ "{{spec}}" == *.md ]]; then
             spec_file="{{spec}}"
         else
             spec_file=""
         fi
-
     fi
     dir="$(dirname "${spec_file}")"
-    design="$(just _get_design_doc "${dir}")"
-    if [[ -z "${design}" ]]; then
+    if [[ -z "{{design}}" ]]; then
+        design_file="$(just _get_design_doc "${dir}")"
+    else
+        design_file="{{design}}"
+    fi
+
+    if [[ -z "${design_file}" ]]; then
         design_info=""
     else
-        link_design="$(just _link "$(basename design)" "")"
+        abs_design_filename="$(just _abs_path "${design_file}")"
+        link_design="$(just _link "$(basename "${design_file}")" "${abs_design_filename}")"
         design_info=" {{italic}}and the{{reset}} {{blue}}${link_design}{{reset}}"
     fi
 
@@ -221,9 +227,44 @@ plan-feature spec:
     abs_spec_filename="$(just _abs_path "${spec_file}")"
     link_spec="$(just _link "${spec_filename}" "${abs_spec_filename}")"
     echo
-    echo -e "🏃‍♂️ creating a detailed plan from the {{blue}}${link_spec}{{reset}}${design-info}"
+    echo -e "🏃‍♂️ creating a detailed {{bold}}plan{{reset}} from the {{blue}}${link_spec}{{reset}}${design_info}"
     echo
+    claudine compose @prompts/plan.md -y --claude --set "{ spec: \"${spec_file}\", design: \"${design_file}\" }"
+    echo
+    echo -e "🎉 planning is complete!"
 
+
+# moves features/_unscheduled/<feat> to features/YYYY-MM-DD-<feat>
+schedule-feature feat="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    src="features/_unscheduled/{{feat}}"
+    if [[ ! -d "${src}" || -z "{{feat}}" ]]; then
+        echo -e "{{red}}No unscheduled feature found at{{reset}} {{blue}}${src}{{reset}}"
+        src="$( ( echo "None"; fd --type d --max-depth 1 . features/_unscheduled ) | fzf --height=15 --border --border-label 'Choose an unscheduled feature (or None to abort)' )"
+        if [[ "$src" == "None" ]]; then
+            echo "No planning can happen without a valid feature directory!"
+            exit 1
+        fi
+    fi
+
+    today="$(date +%F)"
+    name="$(basename "${src}")"
+    dest="features/${today}-${name}"
+
+    if [[ -e "${dest}" ]]; then
+        echo -e "{{red}}Destination already exists:{{reset}} {{blue}}${dest}{{reset}}"
+        exit 1
+    fi
+
+    mv "${src}" "${dest}"
+    abs_dest="$(just _abs_path "${dest}")"
+    link_dest="$(just _link "${dest}" "${abs_dest}")"
+    echo
+    echo -e "📅 scheduled {{bold}}{{yellow}}${name}{{reset}} for {{green}}${today}{{reset}}"
+    echo -e "    {{dim}}→{{reset}} {{blue}}${link_dest}{{reset}}"
+    echo
 
 # creates a new feature and then prompts for next steps
 feature feat:
