@@ -29,21 +29,12 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
     let config_path = claudine::dispatch::loader::user_config_path();
     // Init check is now centralized in main.rs — config is guaranteed to exist here.
     let config = claudine::dispatch::loader::load_claudine_config(Some(&config_path), None)?;
-<<<<<<< Updated upstream
     let cwd = std::env::current_dir()?;
     let git_info = sniff::filesystem::git::detect_git(&cwd, false, 1)
         .ok()
         .flatten();
     let is_in_repo = git_info.is_some();
-||||||| Stash base
-    let is_in_repo = sniff::filesystem::git::detect_git(&std::env::current_dir()?, false, 1)
-        .ok()
-        .flatten()
-        .is_some();
-=======
->>>>>>> Stashed changes
 
-<<<<<<< Updated upstream
     let (repo_config, repo_config_path) = if let Some(ref git) = git_info {
         let repo_root = &git.repo_root;
         let repo_cfg_path = repo_root.join(".claudine").join("config.json");
@@ -65,28 +56,6 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
         repo_name,
         branch_name,
     );
-||||||| Stash base
-    let mut app = App::new(config, is_in_repo);
-=======
-    let cwd = std::env::current_dir()?;
-    let git_info = sniff::filesystem::git::detect_git(&cwd, false, 1).ok().flatten();
-    let is_in_repo = git_info.is_some();
-
-    let (repo_config, repo_config_path) = if let Some(ref git) = git_info {
-        let repo_root = &git.repo_root;
-        let repo_cfg_path = repo_root.join(".claudine").join("config.json");
-        let repo_cfg = if repo_cfg_path.exists() {
-            claudine::dispatch::loader::load_claudine_config(Some(&repo_cfg_path), None).ok()
-        } else {
-            None
-        };
-        (repo_cfg, Some(repo_cfg_path))
-    } else {
-        (None, None)
-    };
-
-    let mut app = App::new(config, repo_config, repo_config_path.clone(), is_in_repo);
->>>>>>> Stashed changes
 
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
@@ -163,16 +132,15 @@ pub async fn run(_args: ConfigArgs) -> color_eyre::Result<()> {
         }
         eprintln!();
     }
-    if app.repo_dirty {
-        if let Some(ref path) = app.repo_config_path {
-            if let Some(ref repo_cfg) = app.repo_config {
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                claudine::dispatch::loader::save_claudine_config(repo_cfg, path)?;
-                eprintln!("Repo configuration saved to {}", path.display());
-            }
+    if app.repo_dirty
+        && let Some(ref path) = app.repo_config_path
+        && let Some(ref repo_cfg) = app.repo_config
+    {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
         }
+        claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
+        eprintln!("Repo configuration saved to {}", path.display());
     }
 
     Ok(())

@@ -52,7 +52,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     ]);
     frame.render_widget(Paragraph::new(select_line), chunks[0]);
 
-<<<<<<< Updated upstream
     // Repo override line (only when in a repo)
     if app.is_in_repo {
         let repo_override_text = match app
@@ -69,37 +68,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Color::DarkGray),
         ));
         frame.render_widget(repo_line, chunks[1]);
-||||||| Stash base
-    let count = app
-        .config
-        .messenger
-        .as_ref()
-        .map(|m| m.configurations.len())
-        .unwrap_or(0);
-    let detail = Paragraph::new(format!("{count} messenger configuration(s)"))
-        .style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(detail, chunks[2]);
-
-    if is_detail && app.modal.is_none() {
-        let help = Paragraph::new(" s: select active | a: add new")
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(help, chunks[2]);
-=======
-    let count = app
-        .config
-        .messenger
-        .as_ref()
-        .map(|m| m.configurations.len())
-        .unwrap_or(0);
-    let detail = Paragraph::new(format!("{count} messenger configuration(s)"))
-        .style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(detail, chunks[2]);
-
-    if is_detail && app.modal.is_none() {
-        let help = Paragraph::new(" s: select active | a: add new | e: edit active")
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(help, chunks[2]);
->>>>>>> Stashed changes
     }
 
     // Configurations heading
@@ -195,7 +163,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             *highlighted,
         );
     }
-<<<<<<< Updated upstream
 
     if let Some(ModalState::MessengerInput {
         provider,
@@ -249,50 +216,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             frame.render_widget(hotkey_widget, chunks[3]);
         });
     }
-||||||| Stash base
-=======
-
-    if let Some(ModalState::MessengerEdit {
-        config_name,
-        field_index,
-    }) = &app.modal
-    {
-        if let Some(fields) = get_config_fields(app, config_name) {
-            let items: Vec<String> = fields
-                .iter()
-                .map(|(name, value)| format!("{name}: {value}"))
-                .collect();
-            super::super::widgets::modal::render_list_modal(
-                frame,
-                area,
-                &format!("Edit: {config_name}"),
-                &items,
-                *field_index,
-            );
-        }
-    }
-
-    if let Some(ModalState::MessengerFieldInput {
-        field_name, input, ..
-    }) = &app.modal
-    {
-        super::super::widgets::modal::render_modal(
-            frame,
-            area,
-            field_name,
-            50,
-            5,
-            |frame, inner| {
-                let text = Paragraph::new(Line::from(vec![
-                    Span::styled("> ", Style::default().fg(Color::Cyan)),
-                    Span::raw(input.as_str()),
-                    Span::styled("_", Style::default().fg(Color::Yellow)),
-                ]));
-                frame.render_widget(text, inner);
-            },
-        );
-    }
->>>>>>> Stashed changes
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
@@ -306,7 +229,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('a') | KeyCode::Char('A') => {
             app.modal = Some(ModalState::MessengerAdd { highlighted: 0 });
         }
-<<<<<<< Updated upstream
         KeyCode::Char('s') | KeyCode::Char('S') => {
             open_messenger_select_modal(app);
         }
@@ -340,22 +262,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             }
             _ => {}
         },
-||||||| Stash base
-=======
-        KeyCode::Char('e') | KeyCode::Char('E') => {
-            if let Some(name) = app
-                .config
-                .messenger
-                .as_ref()
-                .and_then(|m| m.active_config.clone())
-            {
-                app.modal = Some(ModalState::MessengerEdit {
-                    config_name: name,
-                    field_index: 0,
-                });
-            }
-        }
->>>>>>> Stashed changes
         _ => {}
     }
 }
@@ -734,7 +640,6 @@ fn ensure_messenger_config(app: &mut App) {
         });
     }
 }
-<<<<<<< Updated upstream
 
 #[cfg(test)]
 mod tests {
@@ -805,297 +710,3 @@ mod tests {
         ));
     }
 }
-||||||| Stash base
-=======
-
-fn get_config_fields(app: &App, config_name: &str) -> Option<Vec<(String, String)>> {
-    let config = app
-        .config
-        .messenger
-        .as_ref()?
-        .configurations
-        .get(config_name)?;
-    Some(match config {
-        MessengerProviderConfig::Discord {
-            channel_id,
-            bot_token_env,
-        } => vec![
-            ("channel_id".to_string(), channel_id.clone()),
-            ("bot_token_env".to_string(), bot_token_env.clone()),
-        ],
-        MessengerProviderConfig::Slack {
-            channel_id,
-            bot_token_env,
-        } => vec![
-            ("channel_id".to_string(), channel_id.clone()),
-            ("bot_token_env".to_string(), bot_token_env.clone()),
-        ],
-        MessengerProviderConfig::Signal {
-            recipient,
-            rpc_url_env,
-            account_env,
-        } => vec![
-            ("recipient".to_string(), recipient.clone()),
-            ("rpc_url_env".to_string(), rpc_url_env.clone()),
-            ("account_env".to_string(), account_env.clone()),
-        ],
-        MessengerProviderConfig::Whatsapp {
-            recipient,
-            access_token_env,
-            phone_number_id_env,
-        } => vec![
-            ("recipient".to_string(), recipient.clone()),
-            ("access_token_env".to_string(), access_token_env.clone()),
-            (
-                "phone_number_id_env".to_string(),
-                phone_number_id_env.clone(),
-            ),
-        ],
-    })
-}
-
-fn set_config_field(app: &mut App, config_name: &str, field_name: &str, value: String) {
-    let Some(messenger) = &mut app.config.messenger else {
-        return;
-    };
-    let Some(config) = messenger.configurations.get_mut(config_name) else {
-        return;
-    };
-    match config {
-        MessengerProviderConfig::Discord {
-            channel_id,
-            bot_token_env,
-        } => match field_name {
-            "channel_id" => *channel_id = value,
-            "bot_token_env" => *bot_token_env = value,
-            _ => {}
-        },
-        MessengerProviderConfig::Slack {
-            channel_id,
-            bot_token_env,
-        } => match field_name {
-            "channel_id" => *channel_id = value,
-            "bot_token_env" => *bot_token_env = value,
-            _ => {}
-        },
-        MessengerProviderConfig::Signal {
-            recipient,
-            rpc_url_env,
-            account_env,
-        } => match field_name {
-            "recipient" => *recipient = value,
-            "rpc_url_env" => *rpc_url_env = value,
-            "account_env" => *account_env = value,
-            _ => {}
-        },
-        MessengerProviderConfig::Whatsapp {
-            recipient,
-            access_token_env,
-            phone_number_id_env,
-        } => match field_name {
-            "recipient" => *recipient = value,
-            "access_token_env" => *access_token_env = value,
-            "phone_number_id_env" => *phone_number_id_env = value,
-            _ => {}
-        },
-    }
-}
-
-pub fn handle_messenger_edit_modal(app: &mut App, key: KeyEvent) {
-    let (config_name, field_index) = match &app.modal {
-        Some(ModalState::MessengerEdit {
-            config_name,
-            field_index,
-        }) => (config_name.clone(), *field_index),
-        _ => return,
-    };
-    let fields = match get_config_fields(app, &config_name) {
-        Some(f) => f,
-        None => {
-            app.modal = None;
-            return;
-        }
-    };
-    let count = fields.len();
-
-    match key.code {
-        KeyCode::Up => {
-            if field_index > 0 {
-                app.set_modal_highlighted(field_index - 1);
-            }
-        }
-        KeyCode::Down => {
-            if field_index + 1 < count {
-                app.set_modal_highlighted(field_index + 1);
-            }
-        }
-        KeyCode::Enter => {
-            if let Some((name, value)) = fields.get(field_index) {
-                app.modal = Some(ModalState::MessengerFieldInput {
-                    config_name,
-                    field_name: name.clone(),
-                    input: value.clone(),
-                    cursor: value.len(),
-                });
-            }
-        }
-        KeyCode::Esc => {
-            app.modal = None;
-        }
-        _ => {}
-    }
-}
-
-pub fn handle_messenger_field_input(app: &mut App, key: KeyEvent) {
-    let (config_name, field_name, input, cursor) = match &mut app.modal {
-        Some(ModalState::MessengerFieldInput {
-            config_name,
-            field_name,
-            input,
-            cursor,
-        }) => (
-            config_name.clone(),
-            field_name.clone(),
-            input,
-            cursor,
-        ),
-        _ => return,
-    };
-
-    match key.code {
-        KeyCode::Char(c) => {
-            input.insert(*cursor, c);
-            *cursor += 1;
-        }
-        KeyCode::Backspace => {
-            if *cursor > 0 {
-                *cursor -= 1;
-                input.remove(*cursor);
-            }
-        }
-        KeyCode::Left => {
-            if *cursor > 0 {
-                *cursor -= 1;
-            }
-        }
-        KeyCode::Right => {
-            if *cursor < input.len() {
-                *cursor += 1;
-            }
-        }
-        KeyCode::Enter => {
-            let value = input.clone();
-            set_config_field(app, &config_name, &field_name, value);
-            app.dirty = true;
-            // Return to the edit modal
-            app.modal = Some(ModalState::MessengerEdit {
-                config_name,
-                field_index: 0,
-            });
-        }
-        KeyCode::Esc => {
-            // Return to the edit modal without saving
-            app.modal = Some(ModalState::MessengerEdit {
-                config_name,
-                field_index: 0,
-            });
-        }
-        _ => {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use claudine::config::claudine_config::ClaudineConfig;
-    use crossterm::event::KeyEvent;
-
-    fn key(code: KeyCode) -> KeyEvent {
-        KeyEvent::from(code)
-    }
-
-    fn test_app() -> App {
-        let mut app = App::new(ClaudineConfig::default(), None, None, false);
-        app.mode = AppMode::Detail;
-        app
-    }
-
-    #[test]
-    fn add_discord_inserts_config() {
-        let mut app = test_app();
-        app.modal = Some(ModalState::MessengerAdd { highlighted: 0 }); // discord
-        handle_messenger_add_modal(&mut app, key(KeyCode::Enter));
-        assert!(app.dirty);
-        let messenger = app.config.messenger.as_ref().unwrap();
-        assert!(messenger.configurations.contains_key("discord"));
-        assert_eq!(messenger.active_config.as_deref(), Some("discord"));
-    }
-
-    #[test]
-    fn select_none_clears_active() {
-        let mut app = test_app();
-        ensure_messenger_config(&mut app);
-        app.config.messenger.as_mut().unwrap().active_config = Some("discord".to_string());
-        app.modal = Some(ModalState::MessengerSelect { highlighted: 0 }); // (none)
-        handle_messenger_select_modal(&mut app, key(KeyCode::Enter));
-        assert!(app.config.messenger.as_ref().unwrap().active_config.is_none());
-    }
-
-    #[test]
-    fn edit_field_updates_config_value() {
-        let mut app = test_app();
-        // Add a discord config first
-        app.modal = Some(ModalState::MessengerAdd { highlighted: 0 });
-        handle_messenger_add_modal(&mut app, key(KeyCode::Enter));
-
-        // Set up the field input modal to change channel_id
-        app.modal = Some(ModalState::MessengerFieldInput {
-            config_name: "discord".to_string(),
-            field_name: "channel_id".to_string(),
-            input: "123456".to_string(),
-            cursor: 6,
-        });
-        handle_messenger_field_input(&mut app, key(KeyCode::Enter));
-
-        let config = app
-            .config
-            .messenger
-            .as_ref()
-            .unwrap()
-            .configurations
-            .get("discord")
-            .unwrap();
-        match config {
-            MessengerProviderConfig::Discord { channel_id, .. } => {
-                assert_eq!(channel_id, "123456");
-            }
-            _ => panic!("expected Discord config"),
-        }
-    }
-
-    #[test]
-    fn get_config_fields_returns_discord_fields() {
-        let mut app = test_app();
-        app.modal = Some(ModalState::MessengerAdd { highlighted: 0 }); // discord
-        handle_messenger_add_modal(&mut app, key(KeyCode::Enter));
-
-        let fields = get_config_fields(&app, "discord").unwrap();
-        assert_eq!(fields.len(), 2);
-        assert_eq!(fields[0].0, "channel_id");
-        assert_eq!(fields[1].0, "bot_token_env");
-    }
-
-    #[test]
-    fn get_config_fields_returns_signal_fields() {
-        let mut app = test_app();
-        app.modal = Some(ModalState::MessengerAdd { highlighted: 2 }); // signal
-        handle_messenger_add_modal(&mut app, key(KeyCode::Enter));
-
-        let fields = get_config_fields(&app, "signal").unwrap();
-        assert_eq!(fields.len(), 3);
-        assert_eq!(fields[0].0, "recipient");
-        assert_eq!(fields[1].0, "rpc_url_env");
-        assert_eq!(fields[2].0, "account_env");
-    }
-}
->>>>>>> Stashed changes
