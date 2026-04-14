@@ -579,4 +579,185 @@ Task 1.6 ("Remove the hardcoded truncation cap") must remove both the `summarize
 
 ## 0e — Codex Tool-Event Field Extraction
 
-_Audit `codex_semantic.rs`; list which tool fields are dropped today._
+### Live trace captured
+
+Ran native `codex exec --json "list files in the current directory, briefly"`
+> `/tmp/codex-raw.ndjson` (7 lines) and wrapped
+`cargo run -q -p claudine-cli -- codex -- "list files in this directory"`
+> `/tmp/codex-stdout.log` / `/tmp/codex-trace.log`. The native capture
+contains the three Codex tool/message shapes actually emitted by the
+live binary in a plain tool-using session:
+
+- `agent_message` (twice — pre- and post-tool narration)
+- `command_execution` (`item.started` + `item.completed`)
+- `turn.completed` usage
+
+No `tool_use` / `tool_call` / `mcp_tool_call` / `web_search` /
+`patch_apply` / `image_generation` / `view_image` items fired in this
+session, so the audit for those variants is code-reading-only. The
+live capture confirms one important thing: real Codex
+`command_execution` items **do** populate `command`, `aggregated_output`,
+`exit_code`, and `status` on both `item.started` and `item.completed`
+envelopes, exactly as the existing fixture tests
+(`command_execution_status_and_exit_code_preserved`,
+`codex_fixture_command_execution_routes_to_tool_pair`) assert.
+
+### Item-type inventory and field gaps
+
+The typed protocol (`claudine/lib/src/stream/protocol/codex.rs:171-193`)
+enumerates eight tool-bearing `CodexItem` variants that all share
+`CodexToolItemFields` (`codex.rs:443-484`):
+
+```
+ToolUse | ToolCall | McpToolCall | WebSearch | CommandExec
+  | PatchApply | ImageGeneration | ViewImage
+```
+
+plus four non-tool item types the sink dispatches separately
+(`PermissionRequest`, `ApprovalRequest`, `UserInputRequest`,
+`Reasoning`, `FileChange`, `PlanUpdate`, `TodoList`, `AgentMessage`,
+`Unknown`). Only the eight tool-bearing variants route through
+`handle_item_started` / `handle_item_completed` into
+`SemanticEvent::ToolCall` / `SemanticEvent::ToolResult` via
+`tool_call_from_fields` (`codex_semantic.rs:257-271`) and
+`tool_result_from_fields` (`codex_semantic.rs:273-295`).
+
+`CodexToolItemFields` carries 13 optional fields:
+
+```
+id, name, tool_name, input, arguments, parameters,
+output, result, content, status, exit_code, command, aggregated_output
+```
+
+with three accessors that fold several of those into a canonical form:
+
+- `resolved_tool_name()` → `tool_name` | `name` | `"shell"` (if
+  `command` is set) (`codex.rs:487-492`)
+- `resolved_input()` → `input` | `arguments` | `parameters` |
+  `{"command": command}` (`codex.rs:498-512`)
+- `resolved_output()` → `output` | `result` | `content` |
+  `Value::String(aggregated_output)` (`codex.rs:514-528`)
+
+#### Per-variant table (`item.started` → `ToolCall`, `item.completed` → `ToolResult`)
+
+All eight tool variants share one code path, so the field-level
+analysis is identical across them. The meaningful axis is whether the
+variant's payload tends to populate `input`/`arguments`/`parameters`
+(the generic tool shape) or `command`/`aggregated_output` (the shell
+shape).
+
+| `item.type`        | Raw Codex fields observed (from code + live trace) | Fields populated on `ToolCall` | Fields populated on `ToolResult` | Gaps vs. raw |
+| ------------------ | --- | --- | --- | --- |
+| `tool_use`         | `id`, `name`/`tool_name`, `input`/`arguments`/`parameters`, `output`/`result`/`content` | `name`, `id`, `input`, `extra.tool_id`, `extra.tool_name`, `extra.raw_kind`, `extra.semantic_kind`, `extra.session_id` | `name`, `id`, `status` (nil here), `exit_code` (nil here), `output`, `extra.{tool_id,tool_name,status,exit_code,raw_kind,…}` | None at the `SemanticEvent` field level for this shape — the accessors cover every raw field. |
+| `tool_call`        | same as `tool_use` | same | same | same |
+| `mcp_tool_call`    | same as `tool_use` plus MCP-specific nested server/tool metadata that Codex currently folds into `input` | same | same | MCP server name (if Codex ever emits a separate `server_name` / `server.name` alongside `tool_name`) would be dropped — **no such field exists on `CodexToolItemFields` today**. Recommend: once 2d.1 is reviewing this variant, add `server_name: Option<String>` and re-emit under `extra.mcp_server` if and only if a real Codex build is seen emitting it; do not speculate-add. |
+| `web_search`       | `id`, `name`=`"web_search"`, `input={query: …}`, `output` | same | same | None at the field level. |
+| `command_execution` / `command_exec` | `id`, `command`, `aggregated_output`, `exit_code`, `status` (live trace: `status="in_progress"` on started, `status="completed"` on completed) | `name="shell"` (synthesized), `id`, `input={"command": …}`, `extra.tool_name="shell"`, `extra.tool_id` | `name="shell"`, `id`, `status`, `exit_code`, `output=Value::String(aggregated_output)`, `extra.status`, `extra.exit_code` | **One gap:** the live trace's `item.started` carries `status="in_progress"` but `tool_call_from_fields` does NOT copy `status` into `extra` (only `tool_result_from_fields` does, at `codex_semantic.rs:281-283`). A "started" `ToolCall` therefore loses the transient `status="in_progress"` signal. Recommend: add `if let Some(status) = &fields.status { extra.insert("status".into(), Value::from(status.as_str())); }` to `tool_call_from_fields` symmetrically with the result side, so consumers can distinguish a started-but-unfinished tool call from a finalised one using only extras. Low priority — the paired `ToolResult` always arrives before rendering completes. |
+| `patch_apply`      | `id`, `name`=`"apply_patch"` / `"patch"` (build-dependent), `input` carrying the patch body, `output`/`result`, plus (per Codex source) optional `status` / `exit_code` | same as `tool_use` | same | Same as `command_execution`: the `status` field on the started side is not mirrored into `ToolCall.extra`. Additionally, no dedicated `patch`/`diff` fields exist in `CodexToolItemFields` — if a future Codex build splits the patch payload out of `input` into a top-level `patch` / `diff`, it will be silently dropped. Recommend: keep the generic fallthrough for now; revisit only if a real trace shows the split. |
+| `image_generation` | `id`, `name`=`"image_generation"`, `input={prompt: …, size: …}`, `output` (url or base64) | same as `tool_use` | same | None at the field level. The `size` / `quality` sub-fields of `input` survive inside `resolved_input()` as a `Value::Object` and the renderer is free to dig into them. |
+| `view_image`       | `id`, `name`=`"view_image"`, `input={path: …}` or `{url: …}`, `output` | same as `tool_use` | same | None at the field level. |
+
+#### Gaps that cross all variants
+
+Three field classes are dropped unconditionally by the semantic layer,
+regardless of which tool variant fired:
+
+1. **`arguments` vs. `parameters` vs. `input` provenance is
+   flattened.** `resolved_input` returns only the first non-empty value
+   in that precedence chain (`codex.rs:498-512`); callers cannot tell
+   which of the three keys Codex used. Impact on 2d.1 is nil (the
+   renderer only needs a `Value`), but note it here so future
+   fidelity work does not re-audit this — add a breadcrumb in
+   `extra.input_field = "input" | "arguments" | "parameters" | "command"`
+   only if a downstream requirement emerges.
+
+2. **`output` / `result` / `content` provenance is flattened** in
+   exactly the same way (`codex.rs:514-528`). Same note applies:
+   low-priority, leave alone until 2d.1 surfaces a concrete need.
+
+3. **The raw `status` string on `item.started` tool calls is
+   dropped.** `tool_call_from_fields` (`codex_semantic.rs:257-271`)
+   copies `tool_id`, `tool_name` into `extra` but never `status`. The
+   corresponding `tool_result_from_fields` DOES copy it
+   (`codex_semantic.rs:281-283`). Recommend 2d.1 make these two
+   symmetric:
+
+   ```rust
+   // in tool_call_from_fields, right after the tool_name insert:
+   if let Some(status) = &fields.status {
+       extra.insert("status".into(), Value::from(status.as_str()));
+   }
+   ```
+
+   Rationale: the live trace shows `command_execution` started with
+   `status="in_progress"` — a useful signal for the `ToolCallDisplay`
+   to style an in-flight call differently from a finalised one once
+   Task 1.4 lands. This is the single concrete, low-risk field fix
+   the audit surfaces.
+
+#### Why the user still sees `→ (tool)` / `← (tool)`
+
+The spec symptom is `→ (tool)` / `← (tool)` — i.e. `name_part` falling
+back to the `"(tool)"` literal in `tool_call_description`
+(`claudine/cli/src/commands/wrap/live_semantic_sink.rs:271-278, 280-297`).
+That only fires when `SemanticEvent::ToolCall.name` is `None`, which
+in turn requires `resolved_tool_name()` to return `None` — only
+possible when all three of `tool_name`, `name`, and `command` are
+absent on the merged (started + completed) `CodexToolItemFields`.
+
+**This audit did not reproduce that symptom from a live Codex session.**
+The captured `command_execution` items all carry `command`, so
+`resolved_tool_name()` returns `Some("shell")` and the renderer would
+have shown `→ shell · /bin/zsh -lc 'ls -1A'`. The observed
+`→ (tool)` rendering in the spec therefore corresponds to one of:
+
+- A Codex item variant (most likely `patch_apply` or `image_generation`)
+  where a specific build omitted the `name` / `tool_name` fields and
+  did not provide a `command` fallback. No fixture for that case
+  exists in the repo today.
+- A hypothetical built-in tool variant that the typed enum currently
+  routes to `Unknown` (provider-extension path), which would not
+  render as `→ (tool)` at all — it would render as
+  `codex/item.{started,completed}` via
+  `provider_extension_description`.
+
+Recommend that Phase 2d.1 additionally:
+
+- **Widen the live-signal coverage before fixing.** Capture a live
+  Codex trace that exercises `patch_apply` (e.g. "write a one-line
+  patch to `README.md`") and re-audit the merged field shape against
+  this table. If `name`/`tool_name` really are empty on some variant,
+  add a per-variant default in `resolved_tool_name` (e.g.
+  `CodexItem::PatchApply` → `"apply_patch"`) instead of letting the
+  renderer fall back to the bare `"(tool)"` literal.
+- **Make `tool_call_from_fields` / `tool_result_from_fields`
+  symmetric on `status`** as above.
+- **Leave `resolved_input` / `resolved_output` alone.** The accessors
+  already cover every field on `CodexToolItemFields` and the live
+  trace confirms the shape is sound.
+
+### Files referenced
+
+- `claudine/lib/src/stream/protocol/codex.rs:150-193, 443-555`
+  (`CodexItem` enum, `CodexToolItemFields`, `resolved_*`,
+  `merge_started`).
+- `claudine/lib/src/stream/codex_semantic.rs:252-406`
+  (`handle_permission_item`, `tool_call_from_fields`,
+  `tool_result_from_fields`, `handle_item_started`,
+  `handle_item_completed`, `handle_item_updated`).
+- `claudine/lib/src/stream/codex_semantic.rs:880-931`
+  (`round_trip_fidelity_mixed_fixture`,
+  `codex_fixture_command_execution_routes_to_tool_pair`) — existing
+  evidence of what the parser preserves today.
+- `claudine/lib/src/stream/semantic.rs:55-68` (`SemanticEvent::ToolCall`
+  and `SemanticEvent::ToolResult` shapes — bound the field surface).
+- `claudine/cli/src/commands/wrap/live_semantic_sink.rs:271-297`
+  (`tool_call_description` / `tool_result_description` — source of
+  the `→ (tool)` / `← (tool)` fallback string).
+- Live captures:
+  - `/tmp/codex-raw.ndjson` — 7-line native `codex exec --json` trace
+    (thread/turn/agent_message/command_execution pair/turn.completed).
+  - `/tmp/codex-trace.log` — wrapped-session stderr (Claudine status
+    lines, not raw NDJSON).
+  - `/tmp/codex-stdout.log` — wrapped-session stdout (rendered
+    assistant markdown).
