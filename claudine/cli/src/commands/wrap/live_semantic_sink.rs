@@ -269,7 +269,14 @@ impl LiveSemanticSink {
         self.emit_line(&rendered);
     }
 
-    fn render_tool_display(&self, display: ToolCallDisplay) -> String {
+    fn render_status_prose(&self, state: StatusState, description: String) {
+        let rendered = Status::from_prose(description)
+            .state(state)
+            .render(&wrap_terminal());
+        self.emit_line(&rendered);
+    }
+
+    fn render_tool_display(display: ToolCallDisplay) -> String {
         let arrow = match display.direction {
             ToolDirection::Outgoing => '\u{2192}',
             ToolDirection::Incoming => '\u{2190}',
@@ -395,14 +402,14 @@ impl LiveSemanticSink {
         match event {
             SemanticEvent::ToolCall { .. } => {
                 if let Some(display) = ToolCallDisplay::from_call(event) {
-                    let desc = self.render_tool_display(display);
-                    self.render_status(StatusState::ToolUse, desc);
+                    let desc = Self::render_tool_display(display);
+                    self.render_status_prose(StatusState::ToolUse, desc);
                 }
             }
             SemanticEvent::ToolResult { .. } => {
                 if let Some(display) = ToolCallDisplay::from_result(event) {
-                    let desc = self.render_tool_display(display);
-                    self.render_status(StatusState::ToolUse, desc);
+                    let desc = Self::render_tool_display(display);
+                    self.render_status_prose(StatusState::ToolUse, desc);
                 }
             }
             SemanticEvent::SubagentStart { name, .. } => {
@@ -545,6 +552,12 @@ fn provider_short(p: Provider) -> &'static str {
     }
 }
 
+// Retained for Task 1.6 to remove the hardcoded 60-char cap; ToolCallDisplay
+// already handles summary extraction for ToolCall/ToolResult. This helper
+// currently has no live callers (ProviderExtension uses
+// summarize_provider_payload) but surviving Task 1.6 will either delete it
+// or update it to match ToolCallDisplay's extraction.
+#[allow(dead_code)]
 fn summarize_input(value: &Value) -> Option<String> {
     if let Some(s) = value.as_str() {
         return Some(truncate(s, 60));
@@ -768,7 +781,7 @@ mod tests {
             name: Some("bash".into()),
             id: Some("t1".into()),
             status: Some("failure".into()),
-            exit_code: Some(1),
+            exit_code: None,
             output: None,
             extra: json!({}),
         });
@@ -780,6 +793,18 @@ mod tests {
         assert!(
             rendered.contains("error"),
             "expected error status word: {rendered:?}"
+        );
+        assert!(
+            !rendered.contains("<red>"),
+            "prose markup must be interpreted, not leaked as literal text: {rendered:?}"
+        );
+        assert!(
+            !rendered.contains("<b>"),
+            "prose markup must be interpreted, not leaked as literal text: {rendered:?}"
+        );
+        assert!(
+            !rendered.contains("exit 1"),
+            "exit_code must not render when status is present; status wins: {rendered:?}"
         );
     }
 
