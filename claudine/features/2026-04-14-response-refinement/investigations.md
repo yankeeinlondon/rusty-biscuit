@@ -342,6 +342,18 @@ passthrough; the prefix-list entry is the load-bearing change.
 
 ## 0c — Gemini Markdown List Truncation
 
+### Repro command
+
+```
+cargo run -q -p claudine-cli -- gemini -- \
+  "list the four NFL conferences in markdown bullet form" \
+  > /tmp/gemini-stdout.txt
+# Native NDJSON (source of the fixture slice):
+gemini --output-format stream-json -p \
+  "list the four NFL conferences in markdown bullet form" \
+  > /tmp/gemini-raw.ndjson
+```
+
 ### Live reproduction (confirmed)
 
 Ran
@@ -447,10 +459,11 @@ Justification:
   called).
 - Buffering inside `handle_message` keeps the streaming contract at
   the parser boundary — by the time `SemanticEvent::OutputText` is
-  emitted, the text slice ends at a logical break (blank line, end of
-  list item, end of fenced code block, or turn end). The renderer
-  then sees the same shape it already gets from Claude/Codex/OpenCode,
-  and `flush_block` / `is_stream_safe_list_item` work correctly.
+  emitted, the text slice ends at a logical break (blank line or turn
+  end; see flush rules and code-fence note below for why those two
+  suffice). The renderer then sees the same shape it already gets
+  from Claude/Codex/OpenCode, and `flush_block` /
+  `is_stream_safe_list_item` work correctly.
 - The `delta: true` flag on Gemini's streaming chunks is already
   captured in `GeminiMessage::delta`
   (`claudine/lib/src/stream/protocol/gemini.rs:41-49`), so the parser
@@ -460,14 +473,50 @@ Justification:
 
 Flush rules Task 2b.1 should implement (spec-level, not code):
 
-1. Append `content` to an internal `pending_text` buffer.
-2. Find the last index where a logical break ends — newline followed
-   by `\n` (blank line), newline at end of a fenced code block, or
-   the very end if the chunk itself ended with `\n` and is not
-   mid-bullet. Emit `pending_text[..flush_idx]` as OutputText and
-   retain the tail.
+1. **Streaming (`delta: true`) only** — append `content` to an internal
+   `pending_text` buffer.
+2. Find the last index of a **blank-line** break (`"\n\n"`) in
+   `pending_text`. Emit `pending_text[..=flush_idx]` as OutputText and
+   retain the tail. (Code-fence integrity is intentionally **not**
+   tracked at the parser — see note below.)
 3. On `result` (turn end) or `error`, flush any remaining
-   `pending_text` verbatim before emitting the terminal event.
+   `pending_text` verbatim as a final OutputText before emitting the
+   terminal event.
+
+**Non-delta (single-shot) messages bypass the buffer entirely.** When
+`handle_message` is called with `delta: false` (or the flag absent),
+emit `SemanticEvent::OutputText` for that message's content
+immediately and do not touch `pending_text` — those messages already
+arrive as whole logical blocks and must not be held back waiting for
+a blank-line break that may never come.
+
+These flush rules **supersede** the `"\n\n"`-only sketch in
+plan.md:1263; Task 2b.1 should implement the rules in this section
+(blank-line break for deltas, immediate emit for non-deltas, flush
+on terminal event) rather than plan.md's shorter sketch.
+
+**Code-fence handling — deferred to the renderer.** An earlier draft of
+this section also listed "newline at end of a fenced code block" as a
+flush trigger. That rule would require the parser to track fence state
+(count of unclosed ```` ``` ```` runs across buffered chunks), which
+today lives only in `StreamTextRenderer`. Duplicating that state in
+the parser is more complex and more failure-prone than letting the
+renderer continue to own fence integrity. Task 2b.1 therefore keeps
+the parser's flush condition to blank-line-or-terminal-event only
+(rule 2 above), and relies on `StreamTextRenderer` to handle code
+fences as it already does. If a future Gemini regression proves the
+renderer cannot reconstruct fences from blank-line-delimited
+OutputText chunks, revisit this decision in a follow-up.
+
+**Note on `partial_line_committed`.** `StreamTextRenderer::push`
+(`exec.rs:108-113`) sets `partial_line_committed = true` whenever it
+writes a no-newline tail to stdout. That flag is useful progress
+feedback for other providers (Claude, Codex, OpenCode) whose chunks
+are already whole lines and where an intra-line pause is meaningful.
+Task 2b.1 must **not** disable it globally. The parser-level buffering
+introduced here only reduces how often Gemini triggers the partial
+branch (because most chunks will already end at `"\n\n"` by the time
+they reach the renderer); other providers' behaviour is unchanged.
 
 ### Files referenced
 
