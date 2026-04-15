@@ -753,6 +753,65 @@ mod tests {
     }
 
     #[test]
+    fn codex_command_execution_populates_tool_call_and_result_fields() {
+        // Phase 2d.1 canonical assertion: name + input populated on ToolCall,
+        // name + status + exit_code + output populated on ToolResult (not
+        // just inside `extra`). Locks the contract for every tool-item type.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"thread.started","thread_id":"th-1"}"#)
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","tool_name":"bash","input":{"command":"ls"}}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"item.completed","item":{"id":"cmd1","type":"command_execution","tool_name":"bash","status":"success","exit_code":0,"output":"file.txt"}}"#,
+            )
+            .unwrap();
+
+        let evs = events.lock().unwrap().clone();
+
+        let (call_name, call_input) = evs
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::ToolCall { name, input, .. } => {
+                    Some((name.clone(), input.clone()))
+                }
+                _ => None,
+            })
+            .expect("ToolCall emitted");
+        assert_eq!(call_name.as_deref(), Some("bash"));
+        assert_eq!(
+            call_input
+                .as_ref()
+                .and_then(|v| v.get("command"))
+                .and_then(Value::as_str),
+            Some("ls"),
+        );
+
+        let (r_name, r_status, r_exit, r_output) = evs
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::ToolResult {
+                    name,
+                    status,
+                    exit_code,
+                    output,
+                    ..
+                } => Some((name.clone(), status.clone(), *exit_code, output.clone())),
+                _ => None,
+            })
+            .expect("ToolResult emitted");
+        assert_eq!(r_name.as_deref(), Some("bash"));
+        assert_eq!(r_status.as_deref(), Some("success"));
+        assert_eq!(r_exit, Some(0));
+        assert!(r_output.is_some(), "output must be populated on ToolResult");
+    }
+
+    #[test]
     fn permission_request_emits_permission_request_event() {
         let (events, mut parser) = new_parser();
         parser

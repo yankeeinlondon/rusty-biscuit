@@ -1603,7 +1603,7 @@ git commit -m "fix(claudine): eliminate opencode firecrawl mis-routed Info rende
 - Modify: `claudine/lib/src/stream/codex_semantic.rs:handle_item_started`, `handle_item_completed` (around lines 252–290 and 354+)
 - Test: same file
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -1634,28 +1634,25 @@ fn codex_command_execution_populates_tool_call_and_result_fields() {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p claudine codex_command_execution_populates_tool_call_and_result_fields`
 Expected: FAIL — current handler does not include all of name+input on call and name+status+exit_code+output on result. (Adjust the assertion specifics based on the Phase 0e audit.)
 
-- [ ] **Step 3: Update both handlers**
+Observed: PASSES against current HEAD — the field-population fix had already landed in `835f7e33` / `ce79628b` / `e46e9e0f`. The test is added to lock the contract in place.
 
-In `codex_semantic.rs::handle_item_started` for tool item types: ensure the emitted `SemanticEvent::ToolCall` has `name = fields.resolved_tool_name().map(String::from)` AND `input = fields.input.clone()` (and not just stuffed into `extra`).
+- [x] **Step 3: Update both handlers**
 
-In `handle_item_completed`: emit `SemanticEvent::ToolResult` with `name`, `status`, `exit_code`, `output` populated (mirror what `command_execution` already exposes for the legacy alias `command_exec`). Apply the same to other tool item types listed in the Phase 0e audit.
+Already landed. `handle_item_started` / `handle_item_completed` route through `tool_call_from_fields` / `tool_result_from_fields` (`claudine/lib/src/stream/codex_semantic.rs:257-297`) which populate top-level `name`, `input`, `output`, `status`, `exit_code`.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cargo test -p claudine codex_semantic`
-Expected: PASS.
+Result: 22 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
-```bash
-git add claudine/lib/src/stream/codex_semantic.rs
-git commit -m "fix(claudine): populate full tool fields on codex semantic events"
-```
+Landed as a locking regression test on top of the prior handler work.
 
 ---
 
@@ -1670,7 +1667,7 @@ This phase ships LAST per spec. It depends on every parser change in Phase 2 and
 - Modify: `claudine/cli/src/commands/wrap/mod.rs` (add `mod section;`)
 - Test: new file
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `claudine/cli/src/commands/wrap/section.rs`:
 
@@ -1837,12 +1834,12 @@ impl StreamOutput {
 
 (Adapt to the actual `StreamOutput` constructor signature; add a `#[cfg(test)] test_recorder: Option<...>` field and a guard at the top of each `emit_*_line` method.)
 
-- [ ] **Step 2: Run to verify pass**
+- [x] **Step 2: Run to verify pass**
 
 Run: `cargo test -p claudine-cli section::tests`
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add claudine/cli/src/commands/wrap/section.rs claudine/cli/src/commands/wrap/mod.rs claudine/cli/src/commands/wrap/stream_io.rs
@@ -1855,7 +1852,7 @@ git commit -m "feat(claudine): add Section enum and SectionStream writer"
 - Modify: `claudine/cli/src/commands/wrap/live_semantic_sink.rs`
 - Test: same file
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -1893,12 +1890,12 @@ fn full_run_has_no_two_consecutive_blank_lines() {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure** (or pass — depending on legacy state)
+- [x] **Step 2: Run to verify failure** (or pass — depending on legacy state)
 
 Run: `cargo test -p claudine-cli full_run_has_no_two_consecutive_blank_lines`
 Expected: most likely FAIL pre-change.
 
-- [ ] **Step 3: Replace `emit_line` / `render_status` to route through `SectionStream`**
+- [x] **Step 3: Replace `emit_line` / `render_status` to route through `SectionStream`**
 
 In `LiveSemanticSink`:
 
@@ -1921,12 +1918,12 @@ Update `render_event` arms to tag each emit:
 
 Remove the `emit_line` / `(self.emit_stderr)(line)` direct-write path; route everything through `section_stream`.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cargo test -p claudine-cli`
 Expected: PASS for the new test and all pre-existing tests (some pre-existing tests may now require updating to reflect the section-tagged emit; fix as you find them).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add claudine/cli/src/commands/wrap/live_semantic_sink.rs
@@ -1941,7 +1938,7 @@ git commit -m "feat(claudine): route sink output through SectionStream"
 - Modify: `claudine/cli/src/commands/wrap/live_semantic_sink.rs` (route `Reasoning` through it)
 - Test: new file + sink
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `claudine/lib/src/stream/thinking.rs`:
 
@@ -1988,21 +1985,21 @@ In `claudine/lib/src/stream/mod.rs`:
 pub mod thinking;
 ```
 
-- [ ] **Step 2: Run to verify pass on the helper**
+- [x] **Step 2: Run to verify pass on the helper**
 
 Run: `cargo test -p claudine stream::thinking::tests`
 Expected: PASS.
 
-- [ ] **Step 3: Wire it into the sink**
+- [x] **Step 3: Wire it into the sink**
 
 In `live_semantic_sink.rs`, replace the `Reasoning` callback path to render through `render_thinking_block` and emit via `section_stream.emit_stderr(Section::Thinking, &block)` line-by-line. Remove direct delegation to `emit_reasoning` for stderr writes (the JSONL log still receives the raw event).
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cargo test -p claudine-cli`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add claudine/lib/src/stream/thinking.rs claudine/lib/src/stream/mod.rs claudine/cli/src/commands/wrap/live_semantic_sink.rs
@@ -2014,7 +2011,7 @@ git commit -m "feat(claudine): render thinking prose as BlockQuote on stderr"
 **Files:**
 - Modify: `claudine/cli/src/commands/wrap/live_semantic_sink.rs::tests::golden_stderr` (extend the existing `no_captured_fixture_ever_renders_raw_json_on_stderr` style)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -2047,12 +2044,12 @@ fn captured_fixtures_have_no_two_consecutive_blank_lines_per_provider() {
 }
 ```
 
-- [ ] **Step 2: Run to verify pass**
+- [x] **Step 2: Run to verify pass**
 
 Run: `cargo test -p claudine-cli captured_fixtures_have_no_two_consecutive_blank_lines_per_provider`
 Expected: PASS (this is the verification of Phases 3.1–3.3).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add claudine/cli/src/commands/wrap/live_semantic_sink.rs
@@ -2063,7 +2060,7 @@ git commit -m "test(claudine): assert spacing rule across captured provider fixt
 
 **Files:** workspace
 
-- [ ] **Step 1: Run lint and full tests**
+- [x] **Step 1: Run lint and full tests**
 
 Run:
 ```bash
@@ -2092,15 +2089,15 @@ git commit -m "chore(claudine): final integration cleanup for response-refinemen
 
 ## Definition of Done (mirrors spec)
 
-- [ ] Child 1 (`ToolCallDisplay`) shipped; every per-provider render flows through the single formatter (Tasks 1.1–1.6).
-- [ ] Each Observed Symptom in the spec has a corresponding test asserting fixed behavior (Tasks 2a.1, 2a.2, 2b.1, 2c.1, 2c.2, 2c.3, 2c.4, 2d.1, 3.4).
-- [ ] OpenCode assistant response text reaches stdout for non-interactive runs (Task 2c.1, manual smoke 3.5).
-- [ ] OpenCode `--yolo` forwards `--dangerously-skip-permissions` non-interactive with no spurious warning (Task 2c.3).
-- [ ] No `󰀨 rate limit` noise on stderr for subscription users; underlying event still in JSONL (Task 2a.1).
-- [ ] No raw JSON payload rendered to the terminal for tools with a registered per-tool hook; unknown tools fall back to word-wrapped raw text (Tasks 1.5, 1.6, 2c.4).
-- [ ] Section-model spacing rule holds for all four providers against fixtures (Tasks 3.1–3.4).
-- [ ] Thinking prose (section 6) renders as `BlockQuote` on stderr for every provider that exposes reasoning (Task 3.3).
-- [ ] Codex tool-call events render at parity with other providers (Task 2d.1 + Phase 1 formatter).
+- [x] Child 1 (`ToolCallDisplay`) shipped; every per-provider render flows through the single formatter (Tasks 1.1–1.6).
+- [x] Each Observed Symptom in the spec has a corresponding test asserting fixed behavior (Tasks 2a.1, 2a.2, 2b.1, 2c.1, 2c.2, 2c.3, 2c.4, 2d.1, 3.4).
+- [x] OpenCode assistant response text reaches stdout for non-interactive runs (Task 2c.1, manual smoke 3.5).
+- [x] OpenCode `--yolo` forwards `--dangerously-skip-permissions` non-interactive with no spurious warning (Task 2c.3).
+- [x] No `󰀨 rate limit` noise on stderr for subscription users; underlying event still in JSONL (Task 2a.1).
+- [x] No raw JSON payload rendered to the terminal for tools with a registered per-tool hook; unknown tools fall back to word-wrapped raw text (Tasks 1.5, 1.6, 2c.4).
+- [x] Section-model spacing rule holds for all four providers against fixtures (Tasks 3.1–3.4).
+- [x] Thinking prose (section 6) renders as `BlockQuote` on stderr for every provider that exposes reasoning (Task 3.3).
+- [x] Codex tool-call events render at parity with other providers (Task 2d.1 + Phase 1 formatter).
 
 ## Out of Scope (spec)
 
