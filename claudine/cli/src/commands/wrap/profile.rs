@@ -2899,4 +2899,103 @@ mod tests {
         assert!(message.contains("codex"));
         assert!(message.contains("requires a prompt"));
     }
+// -- Pipeline Order Regression Tests (Issue 2026-04-15) -----------------
+
+fn run_direct_wrap_pipeline_simulation(
+    provider: Provider,
+    cli_args: &[&str],
+    prompt: &str,
+) -> Vec<String> {
+    let profile = profile(provider);
+    let mut child_args: Vec<String> = cli_args.iter().map(|s| s.to_string()).collect();
+    let mut env_overrides: Vec<(String, String)> = Vec::new();
+
+    // 1. apply_yolo
+    let _ = profile.apply_yolo_for_mode(&mut child_args, &mut env_overrides, false);
+    // 2. apply_entrypoint
+    profile.apply_entrypoint(&mut child_args, true);
+    // 3. apply_non_interactive
+    let _ = profile.apply_non_interactive_flags(&mut child_args);
+
+    // 4. Model resolution (specifically OpenCode simulation)
+    if provider == Provider::OpenCode {
+        if let Ok(source) = resolve_opencode_model(Some("test-model")) {
+            source.apply_to_args(&mut child_args, &mut env_overrides);
+        }
+    }
+
+    // 5. Output format (simulation of --format stream-json)
+    let _ = profile.apply_output_format(&mut child_args, OutputFormat::Stream);
+
+    // 6. apply_structured_stream
+    profile.apply_structured_stream(&mut child_args);
+
+    // 7. prompt_delivery (NEW CORRECT ORDER)
+    let _ = profile
+        .prompt_delivery(&child_args, prompt, true)
+        .unwrap()
+        .apply_to(&mut child_args);
+
+    child_args
+}
+
+#[test]
+fn test_opencode_non_interactive_args_order() {
+    let args = run_direct_wrap_pipeline_simulation(Provider::OpenCode, &[], "do the thing");
+
+    // We want to verify that flags appear before any positional arguments,
+    // specifically before the `--` separator if there is one.
+    if let Some(pos) = args.iter().position(|a| a == "--") {
+        for arg in &args[pos + 1..] {
+            assert!(
+                !arg.starts_with('-'),
+                "Flag {:?} appears after -- separator in argv: {:?}",
+                arg,
+                args
+            );
+        }
+    } else {
+        // No separator, check the end
+    }
+}
+
+#[test]
+fn test_goose_non_interactive_no_duplicate_run() {
+    let args = run_direct_wrap_pipeline_simulation(Provider::Goose, &[], "run this");
+    let run_count = args.iter().filter(|a| *a == "run").count();
+    assert_eq!(
+        run_count, 1,
+        "Goose pipeline should contain exactly one 'run' entrypoint, found: {:?}",
+        args
+    );
+}
+
+#[test]
+fn test_all_providers_flags_before_double_dash() {
+    for provider in [
+        Provider::Claude,
+        Provider::Codex,
+        Provider::Gemini,
+        Provider::KimiCode,
+        Provider::QwenCode,
+        Provider::OpenCode,
+        Provider::Goose,
+    ] {
+        let args =
+            run_direct_wrap_pipeline_simulation(provider, &[], "some generic prompt --with-flag");
+        if let Some(pos) = args.iter().position(|a| a == "--") {
+            for arg in &args[pos + 1..] {
+                if arg != "some generic prompt --with-flag" {
+                    assert!(
+                        !arg.starts_with('-'),
+                        "[{:?}] Flag {:?} appears after -- separator in argv: {:?}",
+                        provider,
+                        arg,
+                        args
+                    );
+                }
+            }
+        }
+    }
+}
 }

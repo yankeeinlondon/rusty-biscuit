@@ -730,20 +730,8 @@ fn run_provider_wrapper_inner(
         ));
     }
 
-    // Prompt delivery: re-insert the inline prompt into child argv (or set
-    // stdin_seed for providers that consume it from stdin). This happens
-    // before apply_yolo so that the prompt occupies its natural position in
-    // the arg list — consistent with the ordering the old pipeline produced.
+    // The effective interactivity state is determined solely by the explicit flag.
     let effective_non_interactive = non_interactive_requested;
-    let stdin_seed: Option<String> = if let Some(prompt) = prompt_source.as_inline() {
-        profile
-            .prompt_delivery(&child_args, prompt, effective_non_interactive)?
-            .apply_to(&mut child_args)
-    } else {
-        None
-    };
-
-    profile::require_prompt_present(profile.binary(), effective_non_interactive, &prompt_source)?;
 
     profile.reject_direct_yolo(&child_args)?;
     reject_retired_composition_flags(&child_args)?;
@@ -1201,6 +1189,16 @@ fn run_provider_wrapper_inner(
     } else {
         None
     };
+
+    let stdin_seed: Option<String> = if let Some(prompt) = prompt_source.as_inline() {
+        profile
+            .prompt_delivery(&child_args, prompt, effective_non_interactive)?
+            .apply_to(&mut child_args)
+    } else {
+        None
+    };
+
+    profile::require_prompt_present(profile.binary(), effective_non_interactive, &prompt_source)?;
 
     let wrapper_harness = {
         let base_prompt = prompt_source
