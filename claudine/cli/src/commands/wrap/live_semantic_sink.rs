@@ -1226,6 +1226,61 @@ mod tests {
     }
 
     #[test]
+    fn opencode_firecrawl_tool_use_does_not_render_via_info_glyph() {
+        // Task 2c.4 regression: the ⚙ firecrawl line was OpenCode's own
+        // TUI output (suppressed via noise-prefix list in profile.rs);
+        // the sink's own rendering of a firecrawl ToolResult must use
+        // the ← arrow via ToolCallDisplay, NOT the ⚙ Info glyph.
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let dispatch = {
+            let captured = dispatched.clone();
+            Box::new(move |event: AgenticEvent, meta: DispatchEventMeta| {
+                captured
+                    .lock()
+                    .unwrap()
+                    .push((event, meta.tool_name.unwrap_or_default()));
+            })
+        };
+        let emit = {
+            let lines = lines.clone();
+            Box::new(move |line: &str| {
+                lines.lock().unwrap().push(line.to_string());
+            })
+        };
+        let mut sink = LiveSemanticSink::new(
+            Provider::OpenCode,
+            EnvironmentContext::default(),
+            Path::new("/tmp"),
+            Verbosity::Normal,
+            Arc::new(Mutex::new(StructuredSummaryDetails::default())),
+            dispatch,
+            emit,
+        );
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("firecrawl_firecrawl_search".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: None,
+            output: None,
+            extra: json!({"input": {"query": "NFL draft 2026 date"}}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            !rendered.contains('\u{2699}'),
+            "must not use the ⚙ Info glyph for tool events: {rendered:?}"
+        );
+        assert!(
+            rendered.contains("Firecrawl Search"),
+            "humanized tool name must appear: {rendered:?}"
+        );
+        assert!(
+            rendered.contains('\u{2190}'),
+            "incoming ← arrow must render: {rendered:?}"
+        );
+    }
+
+    #[test]
     fn tool_call_renders_canonical_format_with_humanized_name_and_query_summary() {
         let lines = Arc::new(StdMutex::new(Vec::new()));
         let dispatched = Arc::new(StdMutex::new(Vec::new()));

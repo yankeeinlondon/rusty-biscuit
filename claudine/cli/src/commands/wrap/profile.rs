@@ -1590,6 +1590,7 @@ pub(crate) fn opencode_default_tui_noise_prefixes() -> &'static [&'static str] {
         "$ ",                                 // bare shell command echo lines
         "> build ",                           // session banner
         "\u{2588}\u{2588}\u{2588}\u{2588} ", // ████  — subheader marker
+        "\u{2699} ",                          // ⚙  — MCP tool-invocation prefix (see investigations.md §0b)
     ]
 }
 
@@ -2037,6 +2038,7 @@ mod tests {
             r#"$ cd /tmp && git log --all --oneline"#,
             r#"> build · MiniMax-M2.7-highspeed"#,
             r#"████ Subprocess hygiene"#,
+            "\u{2699} firecrawl_firecrawl_search {\"query\":\"NFL draft 2026 date\",\"limit\":5}",
         ];
 
         for line in symptoms {
