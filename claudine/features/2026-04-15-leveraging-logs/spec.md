@@ -7,5 +7,3 @@ Review some example information I found when running `opencode run "hi" --model 
 - STDERR results are in [log](./example-of-usage-limit.txt)
 - This stream of text includes a clear message about the fact that I'm being limited and what time the limit cap will be reset.
 - By comparison, if we had not asked for logs we would have gotten absolutely nothing streamed to us, just a hanging connection.
-
-

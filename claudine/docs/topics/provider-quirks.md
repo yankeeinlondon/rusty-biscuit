@@ -6,6 +6,7 @@
     - Note: in interactive sessions the "default model" is the last model you used
     - If the `~/.config/opencode/config.json` file defines a "model" property, this model will become the default model for opencode 
     - The model in `~/.config/opencode/config.json` can be overriden by the CLI using `--model <model>`
+- if OPENCODE_CONFIG_DIR is set then OpenCode will also search that custom directory for agents, commands, modes, and plugins.
 
 ## Kimi Code
 

@@ -154,6 +154,8 @@ the fixture-locked regression test). The separate model-override
 investigation is tracked out of this task so 2c.1's deliverable does
 not silently double in scope.
 
+**Status update (2026-04-15):** The parser-level regression test is in place. The model-override root cause (Task 2c.1b) remains open — the empty-stdout symptom is a configuration-path issue (on-disk OpenCode config overriding `--model`), not a stream-pipeline bug. This investigation trail should be considered **partially closed**: the stream pipeline is verified correct; the remaining fix belongs to the OpenCode model-selection work, not the response-refinement feature.
+
 ### Files referenced
 
 - `claudine/lib/src/stream/protocol/opencode.rs:81-103, 395-420`
