@@ -44,6 +44,7 @@ use claudine::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus}
 use serde_json::Value;
 
 use super::StructuredSummaryDetails;
+use super::section::Section;
 use super::stream_io::StreamOutput;
 
 /// Borrow-friendly terminal used for status rendering. Mirrors the helper in
@@ -102,6 +103,13 @@ pub(crate) struct LiveSemanticSink {
     emit_event_log: Option<SemanticEventLoggerFn>,
     live_metrics: LiveMetrics,
     stream_output: Arc<StreamOutput>,
+    /// Tracks the last section emitted through [`emit_section_line`] so
+    /// consecutive blanks can be deduped and section transitions can be
+    /// separated by exactly one blank line.
+    last_section: Option<Section>,
+    /// Whether the most recent line emitted through [`emit_section_line`]
+    /// was blank. Used by the same dedup logic as `last_section`.
+    last_line_was_blank: bool,
 }
 
 impl LiveSemanticSink {
@@ -131,6 +139,8 @@ impl LiveSemanticSink {
             emit_event_log: None,
             live_metrics: progress::new_live_metrics(),
             stream_output: StreamOutput::new(),
+            last_section: None,
+            last_line_was_blank: false,
         }
     }
 
@@ -206,6 +216,8 @@ impl LiveSemanticSink {
             emit_event_log: Some(event_logger),
             live_metrics: progress::new_live_metrics(),
             stream_output,
+            last_section: None,
+            last_line_was_blank: false,
         }
     }
 
@@ -262,18 +274,50 @@ impl LiveSemanticSink {
         (self.emit_stderr)(line);
     }
 
-    fn render_status(&self, state: StatusState, description: String) {
+    /// Section-aware stderr emit used by every status render path.
+    ///
+    /// Mirrors the dedup logic in
+    /// [`super::section::SectionStream::emit`] but writes through the
+    /// configurable `emit_stderr` closure so tests capturing that closure
+    /// see the same dedup'd output the real stderr would see.
+    ///
+    /// ## Rules
+    /// - Section transitions are separated by exactly one blank line.
+    /// - Consecutive blank lines inside a section collapse to one.
+    /// - No leading blank line is emitted before the first rendered line.
+    fn emit_section_line(&mut self, section: Section, line: &str) {
+        let is_blank = line.trim().is_empty();
+        let section_changed = self.last_section.is_some_and(|s| s != section);
+        if section_changed && !self.last_line_was_blank {
+            (self.emit_stderr)("");
+            self.last_line_was_blank = true;
+        }
+        if is_blank && self.last_line_was_blank {
+            self.last_section = Some(section);
+            return;
+        }
+        (self.emit_stderr)(line);
+        self.last_section = Some(section);
+        self.last_line_was_blank = is_blank;
+    }
+
+    fn render_status(&mut self, section: Section, state: StatusState, description: String) {
         let rendered = Status::new(description)
             .state(state)
             .render(&wrap_terminal());
-        self.emit_line(&rendered);
+        self.emit_section_line(section, &rendered);
     }
 
-    fn render_status_prose(&self, state: StatusState, description: String) {
+    fn render_status_prose(
+        &mut self,
+        section: Section,
+        state: StatusState,
+        description: String,
+    ) {
         let rendered = Status::from_prose(description)
             .state(state)
             .render(&wrap_terminal());
-        self.emit_line(&rendered);
+        self.emit_section_line(section, &rendered);
     }
 
     fn render_tool_display(display: ToolCallDisplay) -> (String, bool) {
@@ -353,8 +397,13 @@ impl LiveSemanticSink {
             session_id,
             self.model.as_deref(),
         );
-        self.stream_output.emit_stderr_line(&line);
-        self.stream_output.emit_stderr_line("");
+        // Route through the section-aware emitter so tests that capture
+        // the `emit_stderr` closure see this line, and so subsequent
+        // section transitions get exactly one blank separator (the dedup
+        // absorbs the trailing blank below when the next event is in a
+        // different section).
+        self.emit_section_line(Section::SessionAndModel, &line);
+        self.emit_section_line(Section::SessionAndModel, "");
         self.start_emitted = true;
     }
 
@@ -410,14 +459,19 @@ impl LiveSemanticSink {
         if !self.should_render() {
             return;
         }
+        // Every event variant handled in this match renders into the
+        // ToolUseAndEvents section. SessionAndModel is handled separately
+        // via `emit_agent_session_id`; Thinking / FinalStdout / trailer
+        // metadata are wired by later tasks.
+        let section = Section::ToolUseAndEvents;
         match event {
             SemanticEvent::ToolCall { .. } => {
                 if let Some(display) = ToolCallDisplay::from_call(event) {
                     let (desc, wants_prose) = Self::render_tool_display(display);
                     if wants_prose {
-                        self.render_status_prose(StatusState::ToolUse, desc);
+                        self.render_status_prose(section, StatusState::ToolUse, desc);
                     } else {
-                        self.render_status(StatusState::ToolUse, desc);
+                        self.render_status(section, StatusState::ToolUse, desc);
                     }
                 }
             }
@@ -425,20 +479,22 @@ impl LiveSemanticSink {
                 if let Some(display) = ToolCallDisplay::from_result(event) {
                     let (desc, wants_prose) = Self::render_tool_display(display);
                     if wants_prose {
-                        self.render_status_prose(StatusState::ToolUse, desc);
+                        self.render_status_prose(section, StatusState::ToolUse, desc);
                     } else {
-                        self.render_status(StatusState::ToolUse, desc);
+                        self.render_status(section, StatusState::ToolUse, desc);
                     }
                 }
             }
             SemanticEvent::SubagentStart { name, .. } => {
                 self.render_status(
+                    section,
                     StatusState::Subagent,
                     Self::subagent_description('\u{2192}', name),
                 );
             }
             SemanticEvent::SubagentStop { name, .. } => {
                 self.render_status(
+                    section,
                     StatusState::Subagent,
                     Self::subagent_description('\u{2190}', name),
                 );
@@ -448,15 +504,15 @@ impl LiveSemanticSink {
             } => {
                 let kind = change_kind.as_deref().unwrap_or("change");
                 let path = path.as_deref().unwrap_or("");
-                self.render_status(StatusState::Info, format!("{kind} {path}"));
+                self.render_status(section, StatusState::Info, format!("{kind} {path}"));
             }
             SemanticEvent::PlanUpdate { message, .. } => {
                 if let Some(msg) = message {
-                    self.render_status(StatusState::Info, msg.clone());
+                    self.render_status(section, StatusState::Info, msg.clone());
                 }
             }
             SemanticEvent::Info { message, .. } => {
-                self.render_status(StatusState::Info, message.clone());
+                self.render_status(section, StatusState::Info, message.clone());
             }
             SemanticEvent::Warning { message, extra } => {
                 // Suppress noisy malformed-line warnings on stderr — these
@@ -471,11 +527,11 @@ impl LiveSemanticSink {
                 if !message.starts_with("Malformed JSON on line ")
                     && !is_suppressed_claude_rate_limit(self.provider, extra)
                 {
-                    self.render_status(StatusState::Warning, message.clone());
+                    self.render_status(section, StatusState::Warning, message.clone());
                 }
             }
             SemanticEvent::Error { message, .. } => {
-                self.render_status(StatusState::Failure, message.clone());
+                self.render_status(section, StatusState::Failure, message.clone());
             }
             SemanticEvent::ProviderExtension {
                 provider,
@@ -488,6 +544,7 @@ impl LiveSemanticSink {
                     return;
                 }
                 self.render_status(
+                    section,
                     StatusState::Info,
                     Self::provider_extension_description(*provider, kind, payload),
                 );
@@ -943,7 +1000,7 @@ mod tests {
     }
 
     #[test]
-    fn session_start_updates_cached_state_without_rendering() {
+    fn session_start_updates_cached_state_and_emits_session_header() {
         let lines = Arc::new(StdMutex::new(Vec::new()));
         let dispatched = Arc::new(StdMutex::new(Vec::new()));
         let mut sink = make_sink(lines.clone(), dispatched.clone());
@@ -954,10 +1011,50 @@ mod tests {
         });
         assert_eq!(sink.session_id.as_deref(), Some("s1"));
         assert_eq!(sink.model.as_deref(), Some("claude"));
-        // SessionStart does not render through Status.
-        assert!(lines.lock().unwrap().is_empty());
+        // Task 3.2 routes the session header through the section-aware
+        // emit path so the `emit_stderr` closure captures it. The header
+        // line must appear; a trailing blank is allowed but not required.
+        let collected = lines.lock().unwrap().clone();
+        assert!(
+            collected.iter().any(|l| l.contains("s1")),
+            "session id must appear in stderr capture: {collected:?}"
+        );
         let dispatches = dispatched.lock().unwrap().clone();
         assert_eq!(dispatches[0].0, AgenticEvent::SessionStart);
+    }
+
+    #[test]
+    fn full_run_has_no_two_consecutive_blank_lines() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        // Synthetic sequence representing every section transition.
+        sink.on_semantic_event(SemanticEvent::SessionStart {
+            session_id: Some("s1".into()),
+            model: Some("claude-opus-4-6".into()),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::Reasoning { text: "thinking…".into(), extra: json!({}) });
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("Bash".into()), id: None, input: Some(json!({"command": "ls"})), extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("Bash".into()), id: None, status: Some("success".into()), exit_code: Some(0), output: None, extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::OutputText { text: "answer".into(), extra: json!({}) });
+        sink.on_semantic_event(SemanticEvent::TurnComplete {
+            provider_status: Some("ok".into()),
+            token_usage: None, cost_usd: None, duration_ms: Some(100), extra: json!({}),
+        });
+        let collected = lines.lock().unwrap().clone();
+        let mut prev_blank = false;
+        for line in &collected {
+            let is_blank = line.trim().is_empty();
+            if is_blank && prev_blank {
+                panic!("two consecutive blank lines in {collected:?}");
+            }
+            prev_blank = is_blank;
+        }
     }
 
     #[test]
