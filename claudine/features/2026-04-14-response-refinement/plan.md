@@ -1299,11 +1299,11 @@ git commit -m "fix(claudine): buffer gemini text deltas to preserve markdown str
 - Create fixture: `claudine/lib/tests/fixtures/providers/opencode-assistant-text.ndjson`
 - Test: `claudine/lib/src/stream/opencode_semantic.rs::tests`
 
-- [ ] **Step 1: Extract a minimal fixture from the captured run**
+- [x] **Step 1: Extract a minimal fixture from the captured run**
 
 Copy 3–6 representative event lines (init + at least one assistant `text` event in the `part.text` shape) from `claudine/features/2026-04-14-response-refinement/opencode-yolo.jsonl` into `claudine/lib/tests/fixtures/providers/opencode-assistant-text.ndjson`.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Append to `opencode_semantic.rs::tests`:
 
@@ -1326,12 +1326,12 @@ fn assistant_text_in_part_text_shape_emits_output_text() {
 }
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `cargo test -p claudine assistant_text_in_part_text_shape_emits_output_text`
 Expected: FAIL.
 
-- [ ] **Step 4: Implement the fix per Phase 0a**
+- [x] **Step 4: Implement the fix per Phase 0a**
 
 If the parser is dropping the text shape, extend `OpenCodeText` (in `protocol/opencode.rs`) to alias `part.text` and update `handle_text` to read it. Specifically: ensure `OpenCodeText` exposes a `resolved_text()` method that walks `text`, then `part.text`, then `delta.text`, and returns the first non-empty string.
 
@@ -1339,12 +1339,12 @@ If the wiring is the issue, ensure `LiveSemanticSink::with_default_wiring` is fo
 
 If the issue is missing `flush()`, add `let _ = std::io::stdout().flush();` after stream completion in `exec.rs::run_child_stream_semantic`.
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `cargo test -p claudine`
 Expected: PASS.
 
-- [ ] **Step 6: End-to-end verification**
+- [x] **Step 6: End-to-end verification**
 
 Run:
 ```bash
@@ -1352,7 +1352,7 @@ cargo run -p claudine-cli -- opencode --model "$OPENCODE_MODEL" -- "what is 2+2?
 ```
 Expected: stdout contains the assistant's reply (matching OpenCode native behavior).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit** — landed as `b422c0cc test(claudine): lock opencode part.text → OutputText regression`
 
 ```bash
 git add claudine/lib/src/stream/opencode_semantic.rs \
@@ -1367,7 +1367,7 @@ git commit -m "fix(claudine): restore opencode assistant text on stdout (P0)"
 - Modify: `claudine/lib/src/stream/opencode_semantic.rs:handle_tool_use_completed` (lines 267–317)
 - Test: same file
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```rust
 #[test]
@@ -1385,12 +1385,12 @@ fn tool_use_event_emits_only_tool_result_not_synthesized_call() {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p claudine tool_use_event_emits_only_tool_result_not_synthesized_call`
 Expected: FAIL — current code emits both.
 
-- [ ] **Step 3: Modify `handle_tool_use_completed`**
+- [x] **Step 3: Modify `handle_tool_use_completed`**
 
 Replace the body of `handle_tool_use_completed` (lines 267–317) with the result-only emission:
 
@@ -1434,12 +1434,12 @@ fn handle_tool_use_completed(&mut self, tool: OpenCodeTool, raw_kind: &str) {
 
 (`tool_calls` still increments so the trailer count matches the rendered line count.)
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cargo test -p claudine opencode_semantic`
 Expected: PASS. Update any pre-existing test that asserted both arrows from a single `tool_use` event (those assertions reflected the bug; remove or rewrite them to assert only the `←` direction).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit** — landed as `94ee1200 fix(claudine): drop synthesized opencode outgoing tool-call`
 
 ```bash
 git add claudine/lib/src/stream/opencode_semantic.rs
@@ -1452,7 +1452,7 @@ git commit -m "fix(claudine): drop synthesized opencode outgoing tool-call"
 - Modify: `claudine/cli/src/commands/wrap/profile.rs:1358-1370` (`OpencodeWrapper::apply_yolo`, `has_supported_yolo`)
 - Test: same file
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `profile.rs::tests`:
 
@@ -1479,12 +1479,12 @@ fn opencode_yolo_interactive_emits_refined_warning_only() {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p claudine-cli opencode_yolo`
 Expected: FAIL — `apply_yolo_for_mode` does not exist yet.
 
-- [ ] **Step 3: Add the mode-aware variant to the trait + implement on OpenCode**
+- [x] **Step 3: Add the mode-aware variant to the trait + implement on OpenCode**
 
 In `WrapperProfile` add (default delegates to existing `apply_yolo`):
 
@@ -1527,12 +1527,12 @@ fn has_supported_yolo(&self) -> bool {
 
 In the wrap pipeline, replace every `apply_yolo` call site with `apply_yolo_for_mode(args, env, non_interactive == false)`. (Locate via `rg -n 'apply_yolo\(' claudine/cli/src`.)
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cargo test -p claudine-cli`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit** — landed as `fdba242d feat(claudine): forward --dangerously-skip-permissions for opencode non-interactive --yolo`
 
 ```bash
 git add claudine/cli/src/commands/wrap/profile.rs claudine/cli/src/commands/wrap/mod.rs
@@ -1545,7 +1545,7 @@ git commit -m "feat(claudine): forward --dangerously-skip-permissions for openco
 - Modify: per Phase 0b finding (likely `claudine/lib/src/stream/opencode_semantic.rs` or the noise-prefix list in `profile.rs:1552-1559`)
 - Test: `claudine/cli/src/commands/wrap/live_semantic_sink.rs::tests`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append:
 
@@ -1572,23 +1572,23 @@ fn opencode_firecrawl_tool_use_does_not_render_via_info_glyph() {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cargo test -p claudine-cli opencode_firecrawl_tool_use_does_not_render_via_info_glyph`
 Expected: FAIL or PASS depending on Phase 0b finding. If PASS, the symptom no longer exists post Phase 1 + 2c.1–2c.3 — record that fact in `investigations.md` and skip steps 3 / 4.
 
-- [ ] **Step 3: Apply the targeted fix from Phase 0b**
+- [x] **Step 3: Apply the targeted fix from Phase 0b**
 
 Examples (pick the one that matches the finding):
 - If a stray `Info` event was being emitted with raw JSON in `message`: replace with the standard `ToolCall` / `ToolResult` path.
 - If OpenCode's TUI noise prefix list was missing a `⚙ ` line: add `"\u{2699} "` to `opencode_default_tui_noise_prefixes()`.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cargo test -p claudine-cli`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit** — landed as `dd09af32 fix(claudine): suppress opencode firecrawl TUI leak and add sink regression`
 
 ```bash
 git add -p

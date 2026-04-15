@@ -9,6 +9,3 @@ Review some example information I found when running `opencode run "hi" --model 
 - By comparison, if we had not asked for logs we would have gotten absolutely nothing streamed to us, just a hanging connection.
 
 
-
-
-
