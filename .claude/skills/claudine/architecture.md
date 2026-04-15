@@ -314,6 +314,21 @@ Unknown placeholders are left as-is. `None` values render as empty strings.
 
 Provider-native structured stream parsing for wrapped non-interactive sessions. Each provider's structured output (stream-json, JSONL, or NDJSON) is parsed live, extracting clean assistant text for stdout and metadata for stderr summaries and JSONL reporting.
 
+### Section Model
+
+All non-interactive runs follow a **9-section model** for rendered output, ensuring consistent spacing and structure across providers:
+1. **Execution line** — header line withbadges. _stderr._
+2. **ENV variables** — sanitized environment details. _stderr._
+3. **System Prompt** — effective system prompt. _stderr._
+4. **Agent Prompt** — user's startup prompt. _stderr._
+5. **Session ID / Model** — provider-specific session metadata. _stderr._
+6. **Thinking Prose** — dim-italic `BlockQuote` for reasoning feedback. _stderr._
+7. **Tool / Info Events** — canonical `ToolCallDisplay` and status lines. _stderr._
+8. **Final STDOUT** — reconstructed assistant response text. _stdout._
+9. **Final Metadata** — timing, usage, cost, and summary line. _stderr._
+
+Spacing is enforced at the sink level, with at most one blank line between any two sections.
+
 ### Provider Parsers (6)
 
 | Parser | Format | Summary source |
@@ -401,6 +416,7 @@ Note: OpenCode also reads `.claude/skills/` directly
 
 ## Key Lessons
 
+- **Hook handlers must respond fast**: `claudine handle` enforces a hard **5-second execution deadline** (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`) to prevent blocking the parent agent session. When exceeded, the handler aborts and exits 124. Bash and messenger actions also have tighter 3s timeouts when running inside a hook handler. Phase-level tracing spans ensure any hang is diagnostic.
 - **All 8 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, Qwen, and Roo parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose and Roo are observation-only.
 - **Sound effects are fire-and-forget**: TTS and sound playback spawn tokio tasks to avoid blocking the event pipeline. Log and report actions run inline because they're fast.
 - **Atomic writes prevent config corruption**: all config file mutations go through `config::atomic` to handle concurrent hook firings safely.

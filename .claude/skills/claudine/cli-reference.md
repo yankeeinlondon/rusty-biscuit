@@ -220,6 +220,8 @@ Process an incoming event from a provider hook. Reads JSON payload from stdin, a
 claudine handle <EVENT> [OPTIONS]
 ```
 
+**Execution Deadline.** To prevent hook handlers from blocking the parent agent session, `claudine handle` enforces a hard **5-second deadline** by default (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`). When exceeded, the handler aborts with a diagnostic message to stderr and exits 124. Individual bash and messenger actions also have tighter 3s timeouts when running inside a hook handler.
+
 | Option | Description |
 |--------|-------------|
 | `--provider <name>` | Provider hint (auto-detected from payload) |
@@ -228,13 +230,55 @@ claudine handle <EVENT> [OPTIONS]
 
 **Output:** JSON response to stdout (if provider expects it)
 
-**Exit codes:** `0` = success, `2` = block (if supported)
+**Exit codes:** `0` = success, `2` = block (if supported), `124` = deadline exceeded
 
 **Stdin auto-detection**: provider is detected from JSON payload structure (`hook_event_name` → Claude, `type` + `thread_id` → Codex, etc.) so hooks don't need to pass `--provider` explicitly.
 
 ```bash
 echo '{"hook_event_name": "PreToolUse", "tool_name": "Bash"}' | claudine handle before_tool
 ```
+
+---
+
+## Composition Commands
+
+Markdown frontmatter-based composition pipelines for delivering prompts to provider sessions. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, handler-driven recovery).
+
+### `claudine compose <file-ref> [key=value ...]`
+
+Compose a Markdown file and send the result as a prompt. No file mutation.
+
+```bash
+claudine compose @prompts/review.md review=review.md
+```
+
+### `claudine inline-compose <file-ref> [key=value ...]`
+
+Use frontmatter `prompt` to generate content and replace the document body. Preserves frontmatter, updates `last_updated`.
+
+```bash
+claudine inline-compose @notes/update.md draft=false
+```
+
+### `claudine sequence <file-ref> [key=value ...]`
+
+Run a serial sequence of composition steps declared in a single document. Shared shell approval cache across steps.
+
+```bash
+claudine sequence @research.md topic="async traits"
+```
+
+**Positional Arguments:**
+- Exactly one file reference (supports `@` magic paths)
+- Zero or more `key=value` setters (overrides frontmatter)
+
+**Common Flags:**
+- `--claude`, `--codex`, `--gemini`, `--opencode`, etc.
+- `-i, --interactive`
+- `-m, --model <MODEL>`
+- `-s, --system-prompt <PROMPT|FILE>`
+- `-t, --timeout <SECONDS>`
+- `--dry-run`, `-q, --quiet`, `--silent`
 
 ---
 
