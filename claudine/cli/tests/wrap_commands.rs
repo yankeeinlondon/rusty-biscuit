@@ -480,15 +480,14 @@ exit 0
 
     cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["opencode", "summarize"])
         .assert()
         .failure()
-        .stderr(contains(
-            "OpenCode cannot use its configured default model in non-interactive mode",
-        ))
+        .stderr(contains("No model specified!"))
         .stderr(contains("OPENCODE_MODEL"));
 
     assert!(
@@ -651,9 +650,9 @@ exit 0
     // Prose `<i>` tags render as ANSI italics which NO_COLOR strips, leaving
     // the word without markup in the plain-text output.
     let warning_needle = "--yolo mode is not supported in OpenCode interactive sessions";
-    let warning_index = plain.find(warning_needle).unwrap_or_else(|| {
-        panic!("expected refined interactive warning in stderr; got:\n{plain}")
-    });
+    let warning_index = plain
+        .find(warning_needle)
+        .unwrap_or_else(|| panic!("expected refined interactive warning in stderr; got:\n{plain}"));
 
     assert!(warning_index > summary_index);
     // In interactive mode YOLO stays marked unsupported for OpenCode, so the

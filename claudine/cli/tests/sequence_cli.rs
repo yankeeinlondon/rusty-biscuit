@@ -245,7 +245,7 @@ exit 0
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let plain = strip_ansi(&stderr);
     assert!(
-        plain.contains("OpenCode cannot use its configured default model"),
+        plain.contains("No model specified!"),
         "stderr should explain the missing non-interactive OpenCode model; stderr: {plain}"
     );
     assert!(
