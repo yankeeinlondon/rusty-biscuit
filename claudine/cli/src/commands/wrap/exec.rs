@@ -928,7 +928,6 @@ struct ErrorParser {
     exit_code: i32,
 }
 
-
 impl SemanticStreamParser for ErrorParser {
     fn feed_line(&mut self, _line: &str) -> std::result::Result<(), StreamParseError> {
         Ok(())
@@ -1311,5 +1310,4 @@ mod tests {
         assert!(renderer.block_buffer.is_empty());
         assert!(renderer.line_buffer.is_empty());
     }
-
 }

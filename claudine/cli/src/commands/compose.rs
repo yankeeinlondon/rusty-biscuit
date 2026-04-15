@@ -711,8 +711,7 @@ mod tests {
 
     #[test]
     fn positionals_multiple_setters_around_file() {
-        let parsed =
-            parse_composition_positionals(&s(&["a=1", "file.md", "b=2"])).unwrap();
+        let parsed = parse_composition_positionals(&s(&["a=1", "file.md", "b=2"])).unwrap();
         assert_eq!(parsed.file_ref.as_deref(), Some("file.md"));
         assert_eq!(parsed.shorthand_setters.get("a"), Some(&json!(1)));
         assert_eq!(parsed.shorthand_setters.get("b"), Some(&json!(2)));

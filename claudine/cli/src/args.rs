@@ -105,4 +105,3 @@ pub(crate) enum Commands {
     /// Run a serial sequence of composition steps from a single document.
     Sequence(commands::sequence::SequenceArgs),
 }
-

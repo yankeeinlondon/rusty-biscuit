@@ -1643,11 +1643,11 @@ impl WrapperProfile for OpencodeWrapper {
 /// surface.
 pub(crate) fn opencode_default_tui_noise_prefixes() -> &'static [&'static str] {
     &[
-        "\u{2731} ",                          // ✱  — bullet used for Glob/Grep/Read status lines
-        "$ ",                                 // bare shell command echo lines
-        "> build ",                           // session banner
+        "\u{2731} ",                         // ✱  — bullet used for Glob/Grep/Read status lines
+        "$ ",                                // bare shell command echo lines
+        "> build ",                          // session banner
         "\u{2588}\u{2588}\u{2588}\u{2588} ", // ████  — subheader marker
-        "\u{2699} ",                          // ⚙  — MCP tool-invocation prefix (see investigations.md §0b)
+        "\u{2699} ", // ⚙  — MCP tool-invocation prefix (see investigations.md §0b)
     ]
 }
 
@@ -2212,7 +2212,10 @@ mod tests {
                 "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
             ),
         );
-        assert!(args.is_empty(), "no args should be added in interactive mode");
+        assert!(
+            args.is_empty(),
+            "no args should be added in interactive mode"
+        );
     }
 
     #[test]
@@ -2235,7 +2238,10 @@ mod tests {
         let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
 
         let source = resolve_opencode_model(Some("cli-model")).unwrap();
-        assert_eq!(source, OpenCodeModelSource::CliSwitch("cli-model".to_string()));
+        assert_eq!(
+            source,
+            OpenCodeModelSource::CliSwitch("cli-model".to_string())
+        );
     }
 
     #[test]
