@@ -40,6 +40,7 @@ use claudine::events::{
 use claudine::stream::progress::{self, LiveMetrics};
 use claudine::stream::semantic::{SemanticEvent, SemanticEventSink};
 use claudine::stream::stderr::Verbosity;
+use claudine::stream::thinking::render_thinking_block;
 use claudine::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus};
 use serde_json::Value;
 
@@ -594,6 +595,16 @@ impl SemanticEventSink for LiveSemanticSink {
                 }
             }
             SemanticEvent::Reasoning { text, .. } => {
+                let block = render_thinking_block(text, &wrap_terminal());
+                if !block.is_empty() {
+                    // Split the multi-line block render into lines so the
+                    // dedup works per-line; section transitions only
+                    // insert blanks between sections, not between lines of
+                    // a single block.
+                    for line in block.lines() {
+                        self.emit_section_line(Section::Thinking, line);
+                    }
+                }
                 if let Some(emit) = self.emit_reasoning.as_mut() {
                     emit(text);
                 }
@@ -1580,6 +1591,49 @@ mod tests {
             rendered.contains("rate limit"),
             "rate-limit Warning must render with API key set: {rendered:?}"
         );
+    }
+
+    #[test]
+    fn reasoning_emits_block_quote_to_stderr_in_thinking_section() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::Reasoning {
+            text: "considering the options".into(),
+            extra: json!({}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            rendered.contains("considering the options"),
+            "reasoning text must appear in stderr: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn reasoning_then_tool_call_transitions_with_single_blank() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::Reasoning {
+            text: "planning".into(),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("Bash".into()),
+            id: None,
+            input: Some(json!({"command": "ls"})),
+            extra: json!({}),
+        });
+        let collected = lines.lock().unwrap().clone();
+        let mut prev_blank = false;
+        for line in &collected {
+            let is_blank = line.trim().is_empty();
+            assert!(
+                !(is_blank && prev_blank),
+                "two consecutive blank lines in reasoning→tool transition: {collected:?}"
+            );
+            prev_blank = is_blank;
+        }
     }
 
     /// RAII wrapper that restores the prior env var value on drop. Tests
