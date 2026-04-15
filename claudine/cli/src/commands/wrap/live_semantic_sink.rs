@@ -171,14 +171,13 @@ impl LiveSemanticSink {
             let runtime_context = runtime_context;
             Box::new(move |event, meta| {
                 if let Some(handle) = handle.as_ref()
-                    && let Err(error) = handle.block_on(
-                        claudine::dispatch::dispatch_event_meta_with_runtime(
+                    && let Err(error) =
+                        handle.block_on(claudine::dispatch::dispatch_event_meta_with_runtime(
                             provider,
                             event,
                             meta,
                             &runtime_context,
-                        ),
-                    )
+                        ))
                 {
                     tracing::warn!(%provider, %event, "live semantic dispatch failed: {error}");
                 }
@@ -192,13 +191,12 @@ impl LiveSemanticSink {
             })
         };
 
-        let event_logger: SemanticEventLoggerFn = Box::new(
-            move |_event: &SemanticEvent, meta: &DispatchEventMeta| {
+        let event_logger: SemanticEventLoggerFn =
+            Box::new(move |_event: &SemanticEvent, meta: &DispatchEventMeta| {
                 if let Err(error) = claudine::stream::reporting::write_summary_event(meta) {
                     tracing::debug!(%provider, "semantic event log write failed: {error}");
                 }
-            },
-        );
+            });
 
         Self {
             provider,
@@ -228,10 +226,7 @@ impl LiveSemanticSink {
         self.stream_output.clone()
     }
 
-    pub(crate) fn with_context_extra(
-        mut self,
-        context_extra: HashMap<String, Value>,
-    ) -> Self {
+    pub(crate) fn with_context_extra(mut self, context_extra: HashMap<String, Value>) -> Self {
         self.context_extra = context_extra;
         self
     }
@@ -309,12 +304,7 @@ impl LiveSemanticSink {
         self.emit_section_line(section, &rendered);
     }
 
-    fn render_status_prose(
-        &mut self,
-        section: Section,
-        state: StatusState,
-        description: String,
-    ) {
+    fn render_status_prose(&mut self, section: Section, state: StatusState, description: String) {
         let rendered = Status::from_prose(description)
             .state(state)
             .render(&wrap_terminal());
@@ -385,7 +375,7 @@ impl LiveSemanticSink {
     /// Emit the agent's session ID to stderr unconditionally (unless already
     /// emitted). This is operational tracking info that must always be
     /// visible regardless of --quiet or --silent, matching the legacy
-        /// contract.
+    /// contract.
     fn emit_agent_session_id(&mut self) {
         if self.start_emitted {
             return;
@@ -393,11 +383,8 @@ impl LiveSemanticSink {
         let Some(session_id) = self.session_id.as_deref() else {
             return;
         };
-        let line = crate::output::format_session_start(
-            self.provider,
-            session_id,
-            self.model.as_deref(),
-        );
+        let line =
+            crate::output::format_session_start(self.provider, session_id, self.model.as_deref());
         // Route through the section-aware emitter so tests that capture
         // the `emit_stderr` closure see this line, and so subsequent
         // section transitions get exactly one blank separator (the dedup
@@ -423,12 +410,12 @@ impl LiveSemanticSink {
             SemanticEvent::PermissionRequest { .. } => AgenticEvent::PermissionRequest,
             SemanticEvent::SubagentStart { .. } => AgenticEvent::SubagentStart,
             SemanticEvent::SubagentStop { .. } => AgenticEvent::SubagentStop,
-            SemanticEvent::Error {
-                terminal: true, ..
-            } => AgenticEvent::TurnError,
+            SemanticEvent::Error { terminal: true, .. } => AgenticEvent::TurnError,
             SemanticEvent::Info { .. }
             | SemanticEvent::Warning { .. }
-            | SemanticEvent::Error { terminal: false, .. }
+            | SemanticEvent::Error {
+                terminal: false, ..
+            }
             | SemanticEvent::FileChange { .. }
             | SemanticEvent::PlanUpdate { .. }
             | SemanticEvent::ProviderExtension { .. } => AgenticEvent::Notification,
@@ -683,9 +670,7 @@ fn summarize_provider_payload(payload: &Value) -> Option<String> {
                 }
             }
         }
-        if ok
-            && let Some(s) = cursor.as_str().filter(|s| !s.is_empty())
-        {
+        if ok && let Some(s) = cursor.as_str().filter(|s| !s.is_empty()) {
             return Some(s.to_string());
         }
     }
@@ -775,10 +760,7 @@ fn is_suppressed_claude_rate_limit(provider: Provider, extra: &Value) -> bool {
     if provider != Provider::Claude {
         return false;
     }
-    let raw_kind = extra
-        .get("raw_kind")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let raw_kind = extra.get("raw_kind").and_then(Value::as_str).unwrap_or("");
     if raw_kind != "rate_limit_event" {
         return false;
     }
@@ -786,7 +768,6 @@ fn is_suppressed_claude_rate_limit(provider: Provider, extra: &Value) -> bool {
         .map(|v| v.trim().is_empty())
         .unwrap_or(true)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1045,17 +1026,34 @@ mod tests {
             model: Some("claude-opus-4-6".into()),
             extra: json!({}),
         });
-        sink.on_semantic_event(SemanticEvent::Reasoning { text: "thinking…".into(), extra: json!({}) });
+        sink.on_semantic_event(SemanticEvent::Reasoning {
+            text: "thinking…".into(),
+            extra: json!({}),
+        });
         sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("Bash".into()), id: None, input: Some(json!({"command": "ls"})), extra: json!({}),
+            name: Some("Bash".into()),
+            id: None,
+            input: Some(json!({"command": "ls"})),
+            extra: json!({}),
         });
         sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("Bash".into()), id: None, status: Some("success".into()), exit_code: Some(0), output: None, extra: json!({}),
+            name: Some("Bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: None,
+            extra: json!({}),
         });
-        sink.on_semantic_event(SemanticEvent::OutputText { text: "answer".into(), extra: json!({}) });
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "answer".into(),
+            extra: json!({}),
+        });
         sink.on_semantic_event(SemanticEvent::TurnComplete {
             provider_status: Some("ok".into()),
-            token_usage: None, cost_usd: None, duration_ms: Some(100), extra: json!({}),
+            token_usage: None,
+            cost_usd: None,
+            duration_ms: Some(100),
+            extra: json!({}),
         });
         let collected = lines.lock().unwrap().clone();
         let mut prev_blank = false;
@@ -1199,7 +1197,10 @@ mod tests {
 
         let collected = logged.lock().unwrap().clone();
         let kinds: Vec<&str> = collected.iter().map(|(k, _)| k.as_str()).collect();
-        assert_eq!(kinds, vec!["output_text", "tool_call", "provider_extension"]);
+        assert_eq!(
+            kinds,
+            vec!["output_text", "tool_call", "provider_extension"]
+        );
 
         // Every row must carry the full serialized semantic event under
         // extra["semantic_event"] so JSONL readers can replay fidelity.
@@ -1316,7 +1317,11 @@ mod tests {
         // Task 2a.2 parser emits hook events with kinds `system/hook_started`,
         // `system/hook_response`, `system/hook_progress`. The sink allowlist
         // must suppress all three so subscription users don't see hook noise.
-        for kind in ["system/hook_started", "system/hook_response", "system/hook_progress"] {
+        for kind in [
+            "system/hook_started",
+            "system/hook_response",
+            "system/hook_progress",
+        ] {
             let lines = Arc::new(StdMutex::new(Vec::new()));
             let dispatched = Arc::new(StdMutex::new(Vec::new()));
             let mut sink = make_sink(lines.clone(), dispatched.clone());
@@ -1465,8 +1470,7 @@ mod tests {
                 .collect();
 
             let lines_ref: Vec<&str> = fixture_lines.iter().map(String::as_str).collect();
-            let stderr_lines =
-                golden_stderr::replay_to_stderr(provider, &lines_ref, None);
+            let stderr_lines = golden_stderr::replay_to_stderr(provider, &lines_ref, None);
 
             for line in &stderr_lines {
                 // Heuristic: a line is "raw JSON" if it contains both `{`
@@ -1570,9 +1574,16 @@ mod tests {
             message: "rate limit".into(),
             extra: json!({"raw_kind": "rate_limit_event"}),
         });
-        assert!(lines.lock().unwrap().is_empty(), "stderr must be suppressed");
+        assert!(
+            lines.lock().unwrap().is_empty(),
+            "stderr must be suppressed"
+        );
         let kinds = logged.lock().unwrap().clone();
-        assert_eq!(kinds, vec!["warning".to_string()], "JSONL log must still receive the Warning event");
+        assert_eq!(
+            kinds,
+            vec!["warning".to_string()],
+            "JSONL log must still receive the Warning event"
+        );
     }
 
     #[test]
@@ -1674,7 +1685,7 @@ mod tests {
 
     mod golden_stderr {
         use super::*;
-        use claudine::stream::{create_semantic_parser, ParserConfig};
+        use claudine::stream::{ParserConfig, create_semantic_parser};
 
         pub(super) fn replay_to_stderr(
             provider: Provider,
@@ -1689,7 +1700,8 @@ mod tests {
                 let cap = dispatched.clone();
                 Box::new(move |ev: AgenticEvent, _meta: DispatchEventMeta| {
                     cap.lock().unwrap().push((ev, String::new()));
-                }) as Box<dyn Fn(AgenticEvent, DispatchEventMeta) + Send + Sync + 'static>
+                })
+                    as Box<dyn Fn(AgenticEvent, DispatchEventMeta) + Send + Sync + 'static>
             };
             let emit = {
                 let cap = captured.clone();
@@ -1743,16 +1755,20 @@ mod tests {
             // stderr; the Subscription-mode suppression is covered by
             // `claude_rate_limit_warning_suppressed_when_anthropic_api_key_unset`.
             let _guard = super::TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
-            let lines = replay_to_stderr(Provider::Claude, &[
-                r#"{"type":"init","session_id":"s1","model":"claude-sonnet-4"}"#,
-                r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls -la"}}"#,
-                r#"{"type":"tool_result","tool_use_id":"t1","content":"file.txt"}"#,
-                r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#,
-                r#"{"type":"task_progress","message":"working"}"#,
-                r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#,
-                r#"{"type":"rate_limit_event","is_throttled":true,"retry_after_ms":5000,"message":"Rate limited"}"#,
-                r#"{"type":"some_future_event","x":1}"#,
-            ], None);
+            let lines = replay_to_stderr(
+                Provider::Claude,
+                &[
+                    r#"{"type":"init","session_id":"s1","model":"claude-sonnet-4"}"#,
+                    r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls -la"}}"#,
+                    r#"{"type":"tool_result","tool_use_id":"t1","content":"file.txt"}"#,
+                    r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#,
+                    r#"{"type":"task_progress","message":"working"}"#,
+                    r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#,
+                    r#"{"type":"rate_limit_event","is_throttled":true,"retry_after_ms":5000,"message":"Rate limited"}"#,
+                    r#"{"type":"some_future_event","x":1}"#,
+                ],
+                None,
+            );
             assert!(!lines.is_empty());
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected → arrow: {joined:?}");
@@ -1765,15 +1781,19 @@ mod tests {
 
         #[test]
         fn codex_stderr_snapshot() {
-            let lines = replay_to_stderr(Provider::Codex, &[
-                r#"{"type":"thread.started","thread_id":"th-1"}"#,
-                r#"{"type":"item.started","item":{"id":"cmd1","type":"command_exec","tool_name":"bash","input":{"command":"ls"}}}"#,
-                r#"{"type":"item.completed","item":{"id":"cmd1","type":"command_exec","status":"success","exit_code":0,"output":"file.txt"}}"#,
-                r#"{"type":"item.completed","item":{"id":"f1","type":"file_change","path":"src/lib.rs","change_kind":"modified"}}"#,
-                r#"{"type":"item.completed","item":{"id":"p1","type":"plan_update","message":"Step 2"}}"#,
-                r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
-                r#"{"type":"future.unknown","payload":{"k":1}}"#,
-            ], Some("codex-mini".into()));
+            let lines = replay_to_stderr(
+                Provider::Codex,
+                &[
+                    r#"{"type":"thread.started","thread_id":"th-1"}"#,
+                    r#"{"type":"item.started","item":{"id":"cmd1","type":"command_exec","tool_name":"bash","input":{"command":"ls"}}}"#,
+                    r#"{"type":"item.completed","item":{"id":"cmd1","type":"command_exec","status":"success","exit_code":0,"output":"file.txt"}}"#,
+                    r#"{"type":"item.completed","item":{"id":"f1","type":"file_change","path":"src/lib.rs","change_kind":"modified"}}"#,
+                    r#"{"type":"item.completed","item":{"id":"p1","type":"plan_update","message":"Step 2"}}"#,
+                    r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
+                    r#"{"type":"future.unknown","payload":{"k":1}}"#,
+                ],
+                Some("codex-mini".into()),
+            );
             assert!(!lines.is_empty());
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
@@ -1787,13 +1807,17 @@ mod tests {
 
         #[test]
         fn gemini_stderr_snapshot() {
-            let lines = replay_to_stderr(Provider::Gemini, &[
-                r#"{"type":"init","session_id":"g1","model":"gemini-2.5-pro"}"#,
-                r#"{"type":"tool_use","tool_id":"t1","tool_name":"search","parameters":{"q":"rust"}}"#,
-                r#"{"type":"tool_result","tool_id":"t1","status":"success","output":{"hits":3}}"#,
-                r#"{"type":"error","severity":"warning","message":"Loop detected"}"#,
-                r#"{"type":"some_unknown","data":"x"}"#,
-            ], None);
+            let lines = replay_to_stderr(
+                Provider::Gemini,
+                &[
+                    r#"{"type":"init","session_id":"g1","model":"gemini-2.5-pro"}"#,
+                    r#"{"type":"tool_use","tool_id":"t1","tool_name":"search","parameters":{"q":"rust"}}"#,
+                    r#"{"type":"tool_result","tool_id":"t1","status":"success","output":{"hits":3}}"#,
+                    r#"{"type":"error","severity":"warning","message":"Loop detected"}"#,
+                    r#"{"type":"some_unknown","data":"x"}"#,
+                ],
+                None,
+            );
             assert!(!lines.is_empty());
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
@@ -1805,13 +1829,17 @@ mod tests {
 
         #[test]
         fn kimi_stderr_snapshot() {
-            let lines = replay_to_stderr(Provider::KimiCode, &[
-                r#"{"type":"init","session_id":"k1","model":"kimi-coder"}"#,
-                r#"{"type":"tool_use","id":"k1","name":"bash","input":{"cmd":"ls"}}"#,
-                r#"{"type":"tool_result","tool_use_id":"k1","status":"success","content":"ok"}"#,
-                r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#,
-                r#"{"type":"future.unknown"}"#,
-            ], None);
+            let lines = replay_to_stderr(
+                Provider::KimiCode,
+                &[
+                    r#"{"type":"init","session_id":"k1","model":"kimi-coder"}"#,
+                    r#"{"type":"tool_use","id":"k1","name":"bash","input":{"cmd":"ls"}}"#,
+                    r#"{"type":"tool_result","tool_use_id":"k1","status":"success","content":"ok"}"#,
+                    r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#,
+                    r#"{"type":"future.unknown"}"#,
+                ],
+                None,
+            );
             assert!(!lines.is_empty());
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
@@ -1823,13 +1851,17 @@ mod tests {
 
         #[test]
         fn opencode_stderr_snapshot() {
-            let lines = replay_to_stderr(Provider::OpenCode, &[
-                r#"{"type":"step_start","sessionID":"ses_1"}"#,
-                r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"cmd":"ls"}}}"#,
-                r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
-                r#"{"type":"error","error_message":"API timeout"}"#,
-                r#"{"type":"some_future_event","x":1}"#,
-            ], Some("gpt-4o".into()));
+            let lines = replay_to_stderr(
+                Provider::OpenCode,
+                &[
+                    r#"{"type":"step_start","sessionID":"ses_1"}"#,
+                    r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"cmd":"ls"}}}"#,
+                    r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
+                    r#"{"type":"error","error_message":"API timeout"}"#,
+                    r#"{"type":"some_future_event","x":1}"#,
+                ],
+                Some("gpt-4o".into()),
+            );
             assert!(!lines.is_empty());
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
@@ -1841,11 +1873,15 @@ mod tests {
 
         #[test]
         fn opencode_tool_use_completion_shows_incoming_arrow_only() {
-            let lines = replay_to_stderr(Provider::OpenCode, &[
-                r#"{"type":"step_start","sessionID":"ses_1"}"#,
-                r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
+            let lines = replay_to_stderr(
+                Provider::OpenCode,
+                &[
+                    r#"{"type":"step_start","sessionID":"ses_1"}"#,
+                    r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
                      "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
-            ], Some("gpt-4o".into()));
+                ],
+                Some("gpt-4o".into()),
+            );
             let joined = lines.join("\n");
             assert!(
                 joined.contains('\u{2190}'),
@@ -1863,13 +1899,17 @@ mod tests {
 
         #[test]
         fn qwen_stderr_snapshot() {
-            let lines = replay_to_stderr(Provider::QwenCode, &[
-                r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#,
-                r#"{"type":"tool_call","id":"q1","name":"bash","input":{"command":"git status"}}"#,
-                r#"{"type":"tool_response","tool_use_id":"q1","status":"success","content":"clean"}"#,
-                r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#,
-                r#"{"type":"something.new"}"#,
-            ], None);
+            let lines = replay_to_stderr(
+                Provider::QwenCode,
+                &[
+                    r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#,
+                    r#"{"type":"tool_call","id":"q1","name":"bash","input":{"command":"git status"}}"#,
+                    r#"{"type":"tool_response","tool_use_id":"q1","status":"success","content":"clean"}"#,
+                    r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#,
+                    r#"{"type":"something.new"}"#,
+                ],
+                None,
+            );
             assert!(!lines.is_empty());
             let joined = lines.join("\n");
             assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
