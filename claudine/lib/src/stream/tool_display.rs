@@ -186,13 +186,15 @@ pub fn extract_tool_summary(tool_name: &str, input: &Value) -> Option<String> {
             n if n.contains("search")
                 || n == "WebSearch"
                 || n == "WebFetch"
-                || n == "google_web_search" =>
+                || n == "google_web_search"
+                || n == "search_file" =>
             {
                 Some("query")
             }
-            "Bash" => Some("command"),
-            "Read" | "Write" | "Edit" => Some("file_path"),
-            "Glob" | "Grep" => Some("pattern"),
+            "Bash" | "bash" | "run_command" => Some("command"),
+            "Read" | "Write" | "Edit"
+            | "read_file" | "write_file" | "replace_file_content" => Some("file_path"),
+            "Glob" | "Grep" | "list_directory" => Some("pattern"),
             _ => None,
         };
         if let Some(key) = preferred_key
