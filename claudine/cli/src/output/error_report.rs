@@ -67,7 +67,8 @@ impl AgentErrorReport {
                  You can override/set the default model with any of the following methods:\n\n\
                  \x20\x20• set OPENCODE_MODEL to a valid model name\n\
                  \x20\x20• use the CLI switch --model <model>\n\n\
-                 Running `opencode models` will give you a list of all valid models."
+                 Running `opencode models` will give you a list of all valid models.\n\
+                 Model names follow the format [provider]/[model] for direct providers."
             ),
             detail: None,
             hint: None,
@@ -88,7 +89,8 @@ impl AgentErrorReport {
             category: AgentErrorCategory::AgentNative,
             summary: format!(
                 "Invalid model specified in {location}! Running `opencode models` will give you\n\
-                 a list of all valid models."
+                 a list of all valid models. Model names follow the format [provider]/[model]\n\
+                 for direct providers."
             ),
             detail: None,
             hint: None,
@@ -236,7 +238,8 @@ fn classify_native_cli_error(
                 AgentErrorCategory::AgentNative,
                 format!(
                     "Invalid model specified in {loc}! Running `opencode models` will give you\n\
-                     a list of all valid models."
+                     a list of all valid models. Model names follow the format [provider]/[model]\n\
+                     for direct providers."
                 ),
                 None,
                 None,
@@ -355,5 +358,9 @@ fn parse_model_suggestions(stderr: &str) -> Option<Vec<String>> {
         }
     }
 
-    if items.is_empty() { None } else { Some(items) }
+    if items.is_empty() {
+        None
+    } else {
+        Some(items)
+    }
 }
