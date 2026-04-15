@@ -241,12 +241,12 @@ The source of truth is the directory listing under `.claude/skills/`.
 - Adding an H1 usually duplicates visual hierarchy.
 - Use `## Heading` (H2) for primary sections.
 - Common sections:
-  - `## Examples`
-  - `## Returns`
-  - `## Errors`
-  - `## Panics`
-  - `## Safety`
-  - `## Notes`
+    - `## Examples`
+    - `## Returns`
+    - `## Errors`
+    - `## Panics`
+    - `## Safety`
+    - `## Notes`
 - Use `### Heading` (H3) only for subsections.
 
 Recommended section order:
