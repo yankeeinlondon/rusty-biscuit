@@ -775,23 +775,9 @@ fn run_provider_wrapper_inner(
     // validate_non_interactive_requirements).
     let opencode_model_source: Option<profile::OpenCodeModelSource> =
         if provider == Provider::OpenCode && non_interactive_requested {
-            let cli_model = args.model.as_deref();
-            match profile::resolve_opencode_model(cli_model) {
+            match profile::resolve_opencode_model(args.model.as_deref()) {
                 Ok(source) => {
-                    let model = source.model().to_string();
-                    match &source {
-                        profile::OpenCodeModelSource::CliSwitch(_)
-                        | profile::OpenCodeModelSource::OpenCodeModelEnv(_) => {
-                            if !has_flag(&child_args, "--model") && !has_flag(&child_args, "-m") {
-                                child_args.push("--model".to_string());
-                                child_args.push(model.clone());
-                            }
-                            env_overrides.push(("MODEL".to_string(), model));
-                        }
-                        profile::OpenCodeModelSource::ConfigDefault(_) => {
-                            env_overrides.push(("MODEL".to_string(), model));
-                        }
-                    }
+                    source.apply_to_args(&mut child_args, &mut env_overrides);
                     Some(source)
                 }
                 Err(profile::NoModelProvided) => None,

@@ -46,6 +46,26 @@ impl OpenCodeModelSource {
             Self::ConfigDefault(_) => "the config file ~/.config/opencode/config.json",
         }
     }
+
+    pub(crate) fn apply_to_args(
+        &self,
+        child_args: &mut Vec<String>,
+        env_overrides: &mut Vec<(String, String)>,
+    ) {
+        let model = self.model().to_string();
+        match self {
+            Self::CliSwitch(_) | Self::OpenCodeModelEnv(_) => {
+                if !has_flag(child_args, "--model") && !has_flag(child_args, "-m") {
+                    child_args.push("--model".to_string());
+                    child_args.push(model.clone());
+                }
+                env_overrides.push(("MODEL".to_string(), model));
+            }
+            Self::ConfigDefault(_) => {
+                env_overrides.push(("MODEL".to_string(), model));
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2399,6 +2419,48 @@ mod tests {
     #[test]
     fn opencode_no_model_provided_display() {
         assert_eq!(NoModelProvided.to_string(), "no model provided");
+    }
+
+    #[test]
+    fn opencode_apply_to_args_cli_switch_pushes_model_flag_and_env() {
+        let source = OpenCodeModelSource::CliSwitch("gpt-4o".to_string());
+        let mut args = vec!["run".to_string()];
+        let mut env = Vec::new();
+        source.apply_to_args(&mut args, &mut env);
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"gpt-4o".to_string()));
+        assert!(env.contains(&("MODEL".to_string(), "gpt-4o".to_string())));
+    }
+
+    #[test]
+    fn opencode_apply_to_args_env_var_pushes_model_flag_and_env() {
+        let source = OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string());
+        let mut args = vec!["run".to_string()];
+        let mut env = Vec::new();
+        source.apply_to_args(&mut args, &mut env);
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"env-model".to_string()));
+        assert!(env.contains(&("MODEL".to_string(), "env-model".to_string())));
+    }
+
+    #[test]
+    fn opencode_apply_to_args_config_default_pushes_env_only() {
+        let source = OpenCodeModelSource::ConfigDefault("config-model".to_string());
+        let mut args = vec!["run".to_string()];
+        let mut env = Vec::new();
+        source.apply_to_args(&mut args, &mut env);
+        assert!(!args.contains(&"--model".to_string()));
+        assert!(env.contains(&("MODEL".to_string(), "config-model".to_string())));
+    }
+
+    #[test]
+    fn opencode_apply_to_args_does_not_duplicate_existing_model_flag() {
+        let source = OpenCodeModelSource::CliSwitch("existing".to_string());
+        let mut args = vec!["run".to_string(), "--model".to_string(), "existing".to_string()];
+        let mut env = Vec::new();
+        source.apply_to_args(&mut args, &mut env);
+        let count = args.iter().filter(|a| *a == "--model").count();
+        assert_eq!(count, 1, "should not duplicate --model flag");
     }
 
     #[test]

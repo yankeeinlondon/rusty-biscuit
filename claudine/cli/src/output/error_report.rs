@@ -65,16 +65,20 @@ impl AgentErrorReport {
             category: AgentErrorCategory::Configuration,
             summary: format!(
                 "No model specified! {provider_name} by default does not specify a model but you can\n\
-                 change this behavior by adding a model property to ~/.config/opencode/config.json.\n\
-                 You can override/set the default model with any of the following methods:\n\n\
-                 \x20\x20• set OPENCODE_MODEL to a valid model name\n\
-                 \x20\x20• use the CLI switch --model <model>\n\n\
-                 Running `opencode models` will give you a list of all valid models.\n\
-                 Model names follow the format [provider]/[model] for direct providers."
+                 change this behavior by adding a <yellow>model</yellow> property to the <blue>~/.config/opencode/config.json</blue> file.\n\
+                 You can override/set the default model with any of the following methods:"
             ),
-            detail: None,
+            detail: Some(format!(
+                "Running <yellow>opencode models</yellow> will give you a list of all valid models.\n\
+                 Model names follow the format <dim>[provider]</dim>/<dim>[model]</dim> for direct providers\n\
+                 like Google or Anthropic but take the form <dim>[aggregator]</dim>/<dim>[provider]</dim>/<dim>[model]</dim>\n\
+                 for aggregators like OpenRouter."
+            )),
             hint: None,
-            suggestions: None,
+            suggestions: Some(vec![
+                "set <yellow>OPENCODE_MODEL</yellow> to a valid model name".to_string(),
+                "use the CLI switch <yellow>--model <model></yellow>".to_string(),
+            ]),
             location: None,
         }
     }
@@ -91,9 +95,10 @@ impl AgentErrorReport {
             exit_code,
             category: AgentErrorCategory::AgentNative,
             summary: format!(
-                "Invalid model specified in {location}! Running `opencode models` will give you\n\
-                 a list of all valid models. Model names follow the format [provider]/[model]\n\
-                 for direct providers."
+                "Invalid model specified in {location}! Running <yellow>opencode models</yellow> will give you\n\
+                 a list of all valid models. Model names follow the format <dim>[provider]</dim>/<dim>[model]</dim>\n\
+                 for direct providers like Google or Anthropic but take the form\n\
+                 <dim>[aggregator]</dim>/<dim>[provider]</dim>/<dim>[model]</dim> for aggregators like OpenRouter."
             ),
             detail: None,
             hint: None,
@@ -132,6 +137,19 @@ impl AgentErrorReport {
             parts.push(format!("<blue>{hint}</blue>"));
         }
 
+        if let Some(ref suggestions) = self.suggestions
+            && !suggestions.is_empty()
+        {
+            let suggestion_items: Vec<String> = suggestions
+                .iter()
+                .map(|s| format!("<yellow>{s}</yellow>"))
+                .collect();
+            let list = UnorderedList::new(suggestion_items);
+            let header = Status::from_prose("Did you mean:".to_string()).state(StatusState::Warning);
+            parts.push(header.render(term));
+            parts.push(list.render(term));
+        }
+
         let content = parts.join("\n");
         let rendered = Prose::new(content).render(term);
 
@@ -143,21 +161,6 @@ impl AgentErrorReport {
 
         log::message("");
         log::message(&block.render(term));
-
-        if let Some(ref suggestions) = self.suggestions
-            && !suggestions.is_empty()
-        {
-            let suggestion_items: Vec<String> = suggestions
-                .iter()
-                .map(|s| format!("<yellow>{s}</yellow>"))
-                .collect();
-            let list = UnorderedList::new(suggestion_items);
-            let header =
-                Status::from_prose("Did you mean:".to_string()).state(StatusState::Warning);
-            log::message(&header.render(term));
-            log::message(&list.render(term));
-        }
-
         log::message("");
     }
 }
@@ -242,9 +245,10 @@ fn classify_native_cli_error(
             return Some((
                 AgentErrorCategory::AgentNative,
                 format!(
-                    "Invalid model specified in {loc}! Running `opencode models` will give you\n\
-                     a list of all valid models. Model names follow the format [provider]/[model]\n\
-                     for direct providers."
+                    "Invalid model specified in {loc}! Running <yellow>opencode models</yellow> will give you\n\
+                     a list of all valid models. Model names follow the format <dim>[provider]</dim>/<dim>[model]</dim>\n\
+                     for direct providers like Google or Anthropic but take the form\n\
+                     <dim>[aggregator]</dim>/<dim>[provider]</dim>/<dim>[model]</dim> for aggregators like OpenRouter."
                 ),
                 None,
                 None,
@@ -463,10 +467,17 @@ mod tests {
         assert_eq!(report.exit_code, 1);
         assert_eq!(report.category, AgentErrorCategory::Configuration);
         assert!(report.summary.contains("No model specified"));
-        assert!(report.summary.contains("OPENCODE_MODEL"));
-        assert!(report.summary.contains("--model"));
-        assert!(report.summary.contains("opencode models"));
-        assert!(report.suggestions.is_none());
+        assert!(report.summary.contains("<yellow>model</yellow>"));
+        assert!(report.summary.contains("<blue>~/.config/opencode/config.json</blue>"));
+        assert!(report.detail.is_some());
+        let detail = report.detail.as_ref().unwrap();
+        assert!(detail.contains("<yellow>opencode models</yellow>"));
+        assert!(detail.contains("<dim>[provider]</dim>"));
+        assert!(detail.contains("<dim>[aggregator]</dim>"));
+        assert!(report.suggestions.is_some());
+        let suggestions = report.suggestions.as_ref().unwrap();
+        assert!(suggestions.iter().any(|s| s.contains("OPENCODE_MODEL")));
+        assert!(suggestions.iter().any(|s| s.contains("--model")));
         assert!(report.location.is_none());
     }
 
@@ -483,6 +494,9 @@ mod tests {
         assert!(report
             .summary
             .contains("Invalid model specified in the --model CLI switch"));
+        assert!(report.summary.contains("<yellow>opencode models</yellow>"));
+        assert!(report.summary.contains("<dim>[provider]</dim>"));
+        assert!(report.summary.contains("<dim>[aggregator]</dim>"));
         assert_eq!(report.suggestions.as_ref().unwrap().len(), 2);
         assert_eq!(report.location.as_deref(), Some("the --model CLI switch"));
     }
