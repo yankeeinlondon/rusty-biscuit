@@ -166,40 +166,68 @@ mod humanize_tests {
 }
 
 /// Extract the meaningful slice of a tool's input arguments for display in
-/// the dim-italic slot. Best-effort — falls back to the first non-empty
-/// string value; returns `None` if no string can be extracted. Width
-/// handling is the caller's responsibility.
+/// the dim-italic slot. Best-effort with a "never lose information"
+/// invariant: per the spec, unknown tool shapes fall back to compact raw
+/// JSON rather than being hidden. Returns `None` only when the input is
+/// null / an empty object.
 pub fn extract_tool_summary(tool_name: &str, input: &Value) -> Option<String> {
+    if input.is_null() {
+        return None;
+    }
     if let Some(s) = input.as_str() {
         return Some(s.to_string());
     }
-    let obj = input.as_object()?;
-    // Per-tool hooks first.
-    let preferred_key = match tool_name {
-        n if n.contains("search") || n == "WebSearch" || n == "WebFetch" || n == "google_web_search" => Some("query"),
-        "Bash" => Some("command"),
-        "Read" | "Write" | "Edit" => Some("file_path"),
-        "Glob" | "Grep" => Some("pattern"),
-        _ => None,
-    };
-    if let Some(key) = preferred_key
-        && let Some(Value::String(s)) = obj.get(key)
-    {
-        return Some(s.clone());
-    }
-    // Generic well-known keys.
-    for key in ["command", "path", "file_path", "dir_path", "pattern", "query", "url", "message"] {
-        if let Some(Value::String(s)) = obj.get(key) {
+    if let Some(obj) = input.as_object() {
+        if obj.is_empty() {
+            return None;
+        }
+        // Per-tool hooks first.
+        let preferred_key = match tool_name {
+            n if n.contains("search")
+                || n == "WebSearch"
+                || n == "WebFetch"
+                || n == "google_web_search" =>
+            {
+                Some("query")
+            }
+            "Bash" => Some("command"),
+            "Read" | "Write" | "Edit" => Some("file_path"),
+            "Glob" | "Grep" => Some("pattern"),
+            _ => None,
+        };
+        if let Some(key) = preferred_key
+            && let Some(Value::String(s)) = obj.get(key)
+        {
             return Some(s.clone());
         }
-    }
-    // First non-empty string value.
-    for (_, v) in obj.iter() {
-        if let Some(s) = v.as_str().filter(|s| !s.is_empty()) {
-            return Some(s.to_string());
+        // Generic well-known keys.
+        for key in [
+            "command",
+            "path",
+            "file_path",
+            "dir_path",
+            "pattern",
+            "query",
+            "url",
+            "message",
+        ] {
+            if let Some(Value::String(s)) = obj.get(key) {
+                return Some(s.clone());
+            }
+        }
+        // First non-empty top-level string value. Preferred over raw JSON
+        // when present because a meaningful single-string parameter reads
+        // better than a bag of keys.
+        for (_, v) in obj.iter() {
+            if let Some(s) = v.as_str().filter(|s| !s.is_empty()) {
+                return Some(s.to_string());
+            }
         }
     }
-    None
+    // Last resort: compact raw JSON. Per spec, never hide the tool arguments
+    // entirely — render them verbatim and let the sink's width/wrapping
+    // rules handle long values.
+    serde_json::to_string(input).ok()
 }
 
 #[cfg(test)]
@@ -235,9 +263,26 @@ mod summary_tests {
     }
 
     #[test]
-    fn returns_none_for_object_with_no_strings() {
-        let input = json!({"a": 1, "b": [1,2]});
-        assert!(extract_tool_summary("custom_unknown", &input).is_none());
+    fn falls_back_to_raw_json_for_object_with_no_strings() {
+        let input = json!({"a": 1, "b": [1, 2]});
+        let rendered = extract_tool_summary("custom_unknown", &input).expect("raw JSON fallback");
+        // Parse both ends and compare semantically so we don't depend on
+        // serde_json's key-ordering behavior.
+        let roundtrip: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+        assert_eq!(roundtrip, input);
+    }
+
+    #[test]
+    fn returns_none_for_null_or_empty_object() {
+        assert!(extract_tool_summary("custom_unknown", &json!(null)).is_none());
+        assert!(extract_tool_summary("custom_unknown", &json!({})).is_none());
+    }
+
+    #[test]
+    fn falls_back_to_raw_json_for_array_input() {
+        let input = json!([1, 2, 3]);
+        let rendered = extract_tool_summary("custom_unknown", &input).unwrap();
+        assert_eq!(rendered, "[1,2,3]");
     }
 }
 
