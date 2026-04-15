@@ -16,6 +16,13 @@ use std::sync::{Arc, Mutex};
 
 pub(crate) struct StreamOutput {
     inner: Mutex<StreamOutputInner>,
+    /// Test-only recording buffer. When `Some`, `emit_stdout_line` and
+    /// `emit_stderr_line` push `(is_stdout, line)` tuples into the shared
+    /// buffer and skip writing to real stdout/stderr. This lets unit tests
+    /// for higher-level writers (e.g. `SectionStream`) observe emitted
+    /// lines without touching the process's real streams.
+    #[cfg(test)]
+    test_recorder: Option<Arc<Mutex<Vec<(bool, String)>>>>,
 }
 
 struct StreamOutputInner {
@@ -31,7 +38,41 @@ impl StreamOutput {
             inner: Mutex::new(StreamOutputInner {
                 last_stdout_newline: true,
             }),
+            #[cfg(test)]
+            test_recorder: None,
         })
+    }
+
+    /// Construct a test-only coordinator that captures emissions into the
+    /// provided buffer instead of writing to real stdout/stderr.
+    #[cfg(test)]
+    pub(crate) fn test_recorder(buf: Arc<Mutex<Vec<(bool, String)>>>) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(StreamOutputInner {
+                last_stdout_newline: true,
+            }),
+            test_recorder: Some(buf),
+        })
+    }
+
+    /// Emit a line to stdout followed by a newline. In test-recorder mode,
+    /// appends `(true, line)` to the buffer and returns without touching
+    /// real stdout.
+    #[allow(dead_code)] // wired into SectionStream in Task 3.2
+    pub(crate) fn emit_stdout_line(&self, line: &str) {
+        #[cfg(test)]
+        if let Some(buf) = &self.test_recorder {
+            buf.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((true, line.to_string()));
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner.last_stdout_newline = true;
+            return;
+        }
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut stdout = io::stdout().lock();
+        let _ = writeln!(stdout, "{line}");
+        inner.last_stdout_newline = true;
     }
 
     /// Obtain a `Write` adapter that routes stdout bytes through this
@@ -50,6 +91,13 @@ impl StreamOutput {
     /// writes the caller-supplied line (without any additional prefix) to
     /// stderr followed by a newline.
     pub(crate) fn emit_stderr_line(&self, line: &str) {
+        #[cfg(test)]
+        if let Some(buf) = &self.test_recorder {
+            buf.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((false, line.to_string()));
+            return;
+        }
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if !inner.last_stdout_newline {
             let mut stdout = io::stdout().lock();
