@@ -83,6 +83,9 @@ Move `prompt_delivery` to after all `apply_*` methods have completed. This makes
 
 This requires `prompt_delivery` implementations to account for a populated arg list (which they already do — `InsertArgs` scans for entrypoint position, `AppendArgs` appends to end).
 
+
+- **DECISION:** use Option A
+
 **Option B: Insert flags before `--` in each provider.**
 
 Each provider with a `--` boundary would need to scan for the `--` and insert before it. This is fragile and per-provider.
