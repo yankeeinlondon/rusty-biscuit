@@ -1878,5 +1878,45 @@ mod tests {
             assert!(joined.contains("slow down"));
             assert!(joined.contains("qwen/something.new"));
         }
+
+        #[test]
+        #[serial_test::serial]
+        fn captured_fixtures_have_no_two_consecutive_blank_lines_per_provider() {
+            // Some replays (notably Claude rate-limit events) consult
+            // ANTHROPIC_API_KEY; set it so any warnings render normally and
+            // serialize with other env-touching tests.
+            let _guard = super::TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
+
+            let fixtures: &[(Provider, &str, Option<&str>)] = &[
+                (Provider::Claude, "claude.ndjson", None),
+                (Provider::Codex, "codex.ndjson", Some("codex-mini")),
+                (Provider::Gemini, "gemini.ndjson", None),
+                (Provider::OpenCode, "opencode.ndjson", Some("gpt-4o")),
+            ];
+            for (provider, fname, model) in fixtures {
+                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("..")
+                    .join("lib")
+                    .join("tests/fixtures/providers")
+                    .join(fname);
+                if !path.exists() {
+                    eprintln!("skip: fixture not found at {path:?}");
+                    continue;
+                }
+                let raw = std::fs::read_to_string(&path).expect("read fixture");
+                let fixture_lines: Vec<&str> = raw.lines().collect();
+                let stderr_lines =
+                    replay_to_stderr(*provider, &fixture_lines, model.map(String::from));
+                let mut prev_blank = false;
+                for line in &stderr_lines {
+                    let is_blank = line.trim().is_empty();
+                    assert!(
+                        !(is_blank && prev_blank),
+                        "provider={provider:?} ({fname}): two consecutive blank lines in rendered output:\n{stderr_lines:#?}"
+                    );
+                    prev_blank = is_blank;
+                }
+            }
+        }
     }
 }
