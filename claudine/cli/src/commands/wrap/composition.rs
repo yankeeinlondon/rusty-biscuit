@@ -432,7 +432,9 @@ pub(crate) fn execute_composition_request_inner(
     if provider == Provider::OpenCode && effective_non_interactive {
         let has_model_arg =
             super::has_flag(&child_args, "--model") || super::has_flag(&child_args, "-m");
-        let has_model_env = env_plan.env.contains_key(&std::ffi::OsString::from("MODEL"));
+        let has_model_env = env_plan
+            .env
+            .contains_key(&std::ffi::OsString::from("MODEL"));
         if !has_model_arg && !has_model_env && _opencode_model_source.is_none() {
             return Err(color_eyre::eyre::eyre!(
                 "No model specified! OpenCode by default does not specify a model but you can\n\
@@ -1171,14 +1173,12 @@ fn run_structured_inline(
     .with_context_extra(dispatch_context.clone());
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
-    let build_parser: exec::SemanticParserBuilder = Box::new(
-        move |output_cb, reasoning_cb| {
-            let sink = sink
-                .with_output_text_sink(output_cb)
-                .with_reasoning_sink(reasoning_cb);
-            claudine::stream::create_semantic_parser(provider, sink, parser_config)
-        },
-    );
+    let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, reasoning_cb| {
+        let sink = sink
+            .with_output_text_sink(output_cb)
+            .with_reasoning_sink(reasoning_cb);
+        claudine::stream::create_semantic_parser(provider, sink, parser_config)
+    });
     let stream_result = exec::run_child_stream_semantic(
         binary_path,
         child_args,
@@ -1439,14 +1439,12 @@ fn execute_direct_without_harness(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
-        let build_parser: exec::SemanticParserBuilder = Box::new(
-            move |output_cb, reasoning_cb| {
-                let sink = sink
-                    .with_output_text_sink(output_cb)
-                    .with_reasoning_sink(reasoning_cb);
-                claudine::stream::create_semantic_parser(provider, sink, parser_config)
-            },
-        );
+        let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, reasoning_cb| {
+            let sink = sink
+                .with_output_text_sink(output_cb)
+                .with_reasoning_sink(reasoning_cb);
+            claudine::stream::create_semantic_parser(provider, sink, parser_config)
+        });
         let stream_result = exec::run_child_stream_semantic(
             binary_path,
             child_args,

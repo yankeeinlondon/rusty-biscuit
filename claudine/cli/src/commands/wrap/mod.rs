@@ -358,8 +358,6 @@ impl CachedHarnessLoopContext {
     }
 }
 
-
-
 pub(crate) fn structured_verbosity(silent: bool, quiet: bool) -> Verbosity {
     if silent {
         Verbosity::Silent
@@ -814,8 +812,7 @@ fn run_provider_wrapper_inner(
     // the user passed --model explicitly but we already handled it above).
     if provider != Provider::OpenCode {
         if let Some(ref model) = args.model
-            && let Some(warn) =
-                profile.apply_model(&mut child_args, &mut env_overrides, model)
+            && let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
         {
             deferred_warnings.push(warn);
         }
@@ -823,29 +820,20 @@ fn run_provider_wrapper_inner(
         && !non_interactive_requested
     {
         // Interactive OpenCode with --model: use the standard apply_model path.
-        if let Some(warn) =
-            profile.apply_model(&mut child_args, &mut env_overrides, model)
-        {
+        if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model) {
             deferred_warnings.push(warn);
         }
     }
 
     // OpenCode: validate that a model was resolved for non-interactive.
     if provider == Provider::OpenCode && non_interactive_requested {
-        let has_model_arg =
-            has_flag(&child_args, "--model") || has_flag(&child_args, "-m");
-        let has_model_env = env_overrides
-            .iter()
-            .any(|(k, _)| k == "MODEL");
+        let has_model_arg = has_flag(&child_args, "--model") || has_flag(&child_args, "-m");
+        let has_model_env = env_overrides.iter().any(|(k, _)| k == "MODEL");
         if !has_model_arg && !has_model_env && opencode_model_source.is_none() {
-            return Err(eyre!(
-                "No model specified! OpenCode by default does not specify a model but you can\n\
-                 change this behavior by adding a model property to ~/.config/opencode/config.json.\n\
-                 You can override/set the default model with any of the following methods:\n\n\
-                 \x20\x20• set OPENCODE_MODEL to a valid model name\n\
-                 \x20\x20• use the CLI switch --model <model>\n\n\
-                 Running `opencode models` will give you a list of all valid models."
-            ));
+            let term = wrap_terminal();
+            let report = crate::output::error_report::AgentErrorReport::no_model_provided(provider);
+            report.render(&term);
+            std::process::exit(1);
         }
     }
 
@@ -1111,7 +1099,7 @@ fn run_provider_wrapper_inner(
             &term,
             sp_display_lines.as_deref(),
         );
-        return Ok((0, None));
+        return Ok((0, None, None));
     }
 
     switch_process_cwd(child_cwd)?;
@@ -1357,14 +1345,13 @@ fn run_provider_wrapper_inner(
             .with_context_extra(dispatch_context.clone());
             let live_metrics = sink.live_metrics();
             let stream_output = sink.stream_output();
-            let build_parser: exec::SemanticParserBuilder = Box::new(
-                move |output_cb, reasoning_cb| {
+            let build_parser: exec::SemanticParserBuilder =
+                Box::new(move |output_cb, reasoning_cb| {
                     let sink = sink
                         .with_output_text_sink(output_cb)
                         .with_reasoning_sink(reasoning_cb);
                     claudine::stream::create_semantic_parser(provider, sink, parser_config)
-                },
-            );
+                });
             let mut _spawned = false;
             let stream_result = exec::run_child_stream_semantic(
                 binary_path.as_path(),
@@ -1440,7 +1427,7 @@ fn run_provider_wrapper_inner(
         tracing::warn!("MCP injector cleanup failed: {e}");
     }
 
-    Ok((exit_code, stderr_capture))
+    Ok((exit_code, stderr_capture, opencode_model_source))
 }
 
 fn merge_frontmatter_overlay(
@@ -1789,14 +1776,12 @@ fn execute_harness_attempt(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
-        let build_parser: exec::SemanticParserBuilder = Box::new(
-            move |output_cb, reasoning_cb| {
-                let sink = sink
-                    .with_output_text_sink(output_cb)
-                    .with_reasoning_sink(reasoning_cb);
-                claudine::stream::create_semantic_parser(provider, sink, parser_config)
-            },
-        );
+        let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, reasoning_cb| {
+            let sink = sink
+                .with_output_text_sink(output_cb)
+                .with_reasoning_sink(reasoning_cb);
+            claudine::stream::create_semantic_parser(provider, sink, parser_config)
+        });
         let stream_result = exec::run_child_stream_semantic(
             binary_path,
             &launch.args,
