@@ -2233,9 +2233,39 @@ mod tests {
         assert_eq!(count, 1, "flag must not be duplicated");
     }
 
+    // -- resolve_opencode_model tests ----------------------------------------
+
+    struct IsolatedHome {
+        _temp: tempfile::TempDir,
+        _guard: TestEnvGuard,
+    }
+
+    impl IsolatedHome {
+        fn path(&self) -> &Path {
+            self._temp.path()
+        }
+    }
+
+    fn setup_isolated_home() -> IsolatedHome {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join(".config/opencode")).unwrap();
+        let guard = TestEnvGuard::set_env("HOME", &temp.path().display().to_string());
+        IsolatedHome {
+            _temp: temp,
+            _guard: guard,
+        }
+    }
+
+    fn write_opencode_config(home: &Path, json: &str) {
+        let config_path = home.join(".config/opencode/config.json");
+        std::fs::write(&config_path, json).unwrap();
+    }
+
     #[test]
-    fn opencode_resolve_prefers_cli_switch_over_env() {
-        let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
+    #[serial_test::serial]
+    fn opencode_resolve_cli_switch_when_model_provided() {
+        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
+        let _home = setup_isolated_home();
 
         let source = resolve_opencode_model(Some("cli-model")).unwrap();
         assert_eq!(
@@ -2245,8 +2275,10 @@ mod tests {
     }
 
     #[test]
-    fn opencode_resolve_uses_opencode_model_env() {
+    #[serial_test::serial]
+    fn opencode_resolve_env_var_when_no_cli_switch() {
         let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
+        let _home = setup_isolated_home();
 
         let source = resolve_opencode_model(None).unwrap();
         assert_eq!(
@@ -2256,24 +2288,139 @@ mod tests {
     }
 
     #[test]
-    fn opencode_resolve_returns_no_model_when_none_available() {
-        let _guard_env = TestEnvGuard::remove_env("OPENCODE_MODEL");
-        // This test depends on there being no config file or one without a
-        // model. Since we can't control the local filesystem in unit tests,
-        // we just verify the error type is correct when the resolver fails.
-        // If a config model IS found, the test verifies the ConfigDefault path.
+    #[serial_test::serial]
+    fn opencode_resolve_config_default_when_json_has_model() {
+        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
+        let home = setup_isolated_home();
+        write_opencode_config(home.path(), r#"{"model":"config-model"}"#);
+
+        let source = resolve_opencode_model(None).unwrap();
+        assert_eq!(
+            source,
+            OpenCodeModelSource::ConfigDefault("config-model".to_string())
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_resolve_err_no_model_provided_when_none_available() {
+        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
+        let _home = setup_isolated_home();
+
         let result = resolve_opencode_model(None);
-        match result {
-            Err(NoModelProvided) => {} // expected: no model anywhere
-            Ok(OpenCodeModelSource::ConfigDefault(_)) => {} // config file on this machine
-            other => panic!("unexpected result: {other:?}"),
-        }
+        assert_eq!(result, Err(NoModelProvided));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_resolve_precedence_cli_over_env() {
+        let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
+        let home = setup_isolated_home();
+        write_opencode_config(home.path(), r#"{"model":"config-model"}"#);
+
+        let source = resolve_opencode_model(Some("cli-model")).unwrap();
+        assert_eq!(
+            source,
+            OpenCodeModelSource::CliSwitch("cli-model".to_string())
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_resolve_precedence_env_over_config() {
+        let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
+        let home = setup_isolated_home();
+        write_opencode_config(home.path(), r#"{"model":"config-model"}"#);
+
+        let source = resolve_opencode_model(None).unwrap();
+        assert_eq!(
+            source,
+            OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string())
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_resolve_model_env_var_ignored_entirely() {
+        let _guard_oc = TestEnvGuard::remove_env("OPENCODE_MODEL");
+        let _guard_m = TestEnvGuard::set_env("MODEL", "ignored-model");
+        let _home = setup_isolated_home();
+
+        let result = resolve_opencode_model(None);
+        assert_eq!(result, Err(NoModelProvided));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_resolve_malformed_config_json_yields_no_model() {
+        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
+        let home = setup_isolated_home();
+        write_opencode_config(home.path(), r#"this is not json"#);
+
+        let result = resolve_opencode_model(None);
+        assert_eq!(result, Err(NoModelProvided));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_resolve_missing_config_file_yields_no_model() {
+        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
+        let _home = setup_isolated_home();
+
+        let result = resolve_opencode_model(None);
+        assert_eq!(result, Err(NoModelProvided));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_resolve_empty_string_model_yields_no_model() {
+        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
+        let home = setup_isolated_home();
+        write_opencode_config(home.path(), r#"{"model":""}"#);
+
+        let result = resolve_opencode_model(None);
+        assert_eq!(result, Err(NoModelProvided));
     }
 
     #[test]
     fn opencode_resolve_model_method_returns_inner_string() {
-        let source = OpenCodeModelSource::CliSwitch("gpt-4o".to_string());
-        assert_eq!(source.model(), "gpt-4o");
+        assert_eq!(OpenCodeModelSource::CliSwitch("gpt-4o".to_string()).model(), "gpt-4o");
+        assert_eq!(OpenCodeModelSource::OpenCodeModelEnv("gpt-4o".to_string()).model(), "gpt-4o");
+        assert_eq!(OpenCodeModelSource::ConfigDefault("gpt-4o".to_string()).model(), "gpt-4o");
+    }
+
+    #[test]
+    fn opencode_model_source_location_strings() {
+        assert_eq!(OpenCodeModelSource::CliSwitch(String::new()).location_string(), "the --model CLI switch");
+        assert_eq!(OpenCodeModelSource::OpenCodeModelEnv(String::new()).location_string(), "the OPENCODE_MODEL environment variable");
+        assert_eq!(OpenCodeModelSource::ConfigDefault(String::new()).location_string(), "the config file ~/.config/opencode/config.json");
+    }
+
+    #[test]
+    fn opencode_no_model_provided_display() {
+        assert_eq!(NoModelProvided.to_string(), "no model provided");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_resolve_config_missing_model_field_yields_no_model() {
+        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
+        let home = setup_isolated_home();
+        write_opencode_config(home.path(), r#"{"other":"value"}"#);
+
+        let result = resolve_opencode_model(None);
+        assert_eq!(result, Err(NoModelProvided));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn opencode_resolve_config_non_string_model_yields_no_model() {
+        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
+        let home = setup_isolated_home();
+        write_opencode_config(home.path(), r#"{"model":42}"#);
+
+        let result = resolve_opencode_model(None);
+        assert_eq!(result, Err(NoModelProvided));
     }
 
     #[test]

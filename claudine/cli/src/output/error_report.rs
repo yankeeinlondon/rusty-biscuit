@@ -364,3 +364,144 @@ fn parse_model_suggestions(stderr: &str) -> Option<Vec<String>> {
         Some(items)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::wrap::profile::OpenCodeModelSource;
+
+    fn opencode_report(
+        exit_code: i32,
+        stderr: &str,
+        model_source: Option<&OpenCodeModelSource>,
+    ) -> AgentErrorReport {
+        AgentErrorReport::from_exit_code_with_source(
+            Provider::OpenCode,
+            exit_code,
+            Some(stderr),
+            model_source,
+        )
+    }
+
+    #[test]
+    fn classify_provider_model_not_found_error() {
+        let stderr = "Error: ProviderModelNotFoundError: model xyz not found\nsuggestions: [\"abc/one\", \"abc/two\"]";
+        let source = OpenCodeModelSource::CliSwitch("xyz".to_string());
+        let report = opencode_report(1, stderr, Some(&source));
+        assert_eq!(report.category, AgentErrorCategory::AgentNative);
+        assert!(report
+            .summary
+            .contains("Invalid model specified in the --model CLI switch"));
+        assert!(report.suggestions.is_some());
+        assert_eq!(report.suggestions.as_ref().unwrap().len(), 2);
+        assert_eq!(report.suggestions.as_ref().unwrap()[0], "abc/one");
+        assert_eq!(report.suggestions.as_ref().unwrap()[1], "abc/two");
+        assert_eq!(report.location.as_deref(), Some("the --model CLI switch"));
+    }
+
+    #[test]
+    fn classify_model_not_found_lowercased() {
+        let stderr = "model not found: invalid model name";
+        let source = OpenCodeModelSource::OpenCodeModelEnv("bad".to_string());
+        let report = opencode_report(1, stderr, Some(&source));
+        assert_eq!(report.category, AgentErrorCategory::AgentNative);
+        assert!(report
+            .summary
+            .contains("the OPENCODE_MODEL environment variable"));
+        assert_eq!(
+            report.location.as_deref(),
+            Some("the OPENCODE_MODEL environment variable")
+        );
+    }
+
+    #[test]
+    fn classify_invalid_model_text() {
+        let stderr = "invalid model specified";
+        let source = OpenCodeModelSource::ConfigDefault("bad".to_string());
+        let report = opencode_report(1, stderr, Some(&source));
+        assert_eq!(report.category, AgentErrorCategory::AgentNative);
+        assert!(report.summary.contains("the config file"));
+        assert_eq!(
+            report.location.as_deref(),
+            Some("the config file ~/.config/opencode/config.json")
+        );
+    }
+
+    #[test]
+    fn suggestions_parsed_from_stderr_payload() {
+        let result = parse_model_suggestions(
+            "some output\nSuggestions: [\"provider/a\", \"provider/b\", \"provider/c\"]\nmore",
+        );
+        assert_eq!(
+            result,
+            Some(vec![
+                "provider/a".to_string(),
+                "provider/b".to_string(),
+                "provider/c".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn suggestions_none_when_absent() {
+        assert_eq!(parse_model_suggestions("no suggestions here"), None);
+    }
+
+    #[test]
+    fn suggestions_none_when_empty_array() {
+        assert_eq!(parse_model_suggestions("suggestions: []"), None);
+    }
+
+    #[test]
+    fn no_model_provided_report_has_expected_content() {
+        let report = AgentErrorReport::no_model_provided(Provider::OpenCode);
+        assert_eq!(report.exit_code, 1);
+        assert_eq!(report.category, AgentErrorCategory::Configuration);
+        assert!(report.summary.contains("No model specified"));
+        assert!(report.summary.contains("OPENCODE_MODEL"));
+        assert!(report.summary.contains("--model"));
+        assert!(report.summary.contains("opencode models"));
+        assert!(report.suggestions.is_none());
+        assert!(report.location.is_none());
+    }
+
+    #[test]
+    fn invalid_model_report_has_suggestions_and_location() {
+        let report = AgentErrorReport::invalid_model(
+            Provider::OpenCode,
+            1,
+            "the --model CLI switch".to_string(),
+            vec!["suggestion/a".to_string(), "suggestion/b".to_string()],
+        );
+        assert_eq!(report.exit_code, 1);
+        assert_eq!(report.category, AgentErrorCategory::AgentNative);
+        assert!(report
+            .summary
+            .contains("Invalid model specified in the --model CLI switch"));
+        assert_eq!(report.suggestions.as_ref().unwrap().len(), 2);
+        assert_eq!(report.location.as_deref(), Some("the --model CLI switch"));
+    }
+
+    #[test]
+    fn interrupted_exit_code_classified_correctly() {
+        let report = AgentErrorReport::from_exit_code(Provider::OpenCode, 130, None);
+        assert_eq!(report.category, AgentErrorCategory::Interrupted);
+    }
+
+    #[test]
+    fn unknown_flag_classified_correctly() {
+        let stderr = "error: unexpected argument '--foo' found";
+        let report = AgentErrorReport::from_exit_code(Provider::Claude, 1, Some(stderr));
+        assert_eq!(report.category, AgentErrorCategory::AgentNative);
+        assert!(report.summary.contains("did not recognize a flag"));
+    }
+
+    #[test]
+    fn model_not_found_without_source_uses_default_location() {
+        let stderr = "ProviderModelNotFoundError: nope\nsuggestions: [\"a\"]";
+        let report = AgentErrorReport::from_exit_code(Provider::OpenCode, 1, Some(stderr));
+        assert_eq!(report.category, AgentErrorCategory::AgentNative);
+        assert!(report.summary.contains("the command line"));
+        assert_eq!(report.suggestions.as_ref().unwrap()[0], "a");
+    }
+}

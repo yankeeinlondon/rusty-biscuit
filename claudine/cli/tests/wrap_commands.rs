@@ -3424,3 +3424,163 @@ fn sequence_composition_dry_run_for_every_provider() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// OpenCode model resolution (Phase 7 integration tests)
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+mod opencode_model_integration {
+    use super::*;
+
+    #[test]
+    fn no_model_provided_renders_blockquote_without_text_above() {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+
+        write_executable(
+            &path_dir.join("opencode"),
+            r#"#!/bin/sh
+exit 0
+"#,
+        );
+
+        let assert = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", &path_dir)
+            .args(["opencode", "summarize"])
+            .assert()
+            .code(1);
+
+        let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+        let plain = strip_ansi(&stderr);
+
+        assert!(plain.contains("No model specified!"));
+        assert!(plain.contains("OPENCODE_MODEL"));
+        assert!(plain.contains("--model"));
+        assert!(plain.contains("opencode models"));
+
+        let block_quote_start = plain.find("▌").unwrap();
+        let before_block = &plain[..block_quote_start];
+        let trimmed_before = before_block.trim();
+        assert!(
+            trimmed_before.is_empty(),
+            "no text should appear above the BlockQuote; got: '{trimmed_before}'"
+        );
+    }
+
+    #[test]
+    fn cli_model_proceeds_past_resolver() {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        let args_path = workspace.path().join("args.txt");
+
+        write_executable(
+            &path_dir.join("opencode"),
+            r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+        );
+
+        cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("PATH", &path_dir)
+            .env("CLAUDINE_ARGS_FILE", &args_path)
+            .args(["opencode", "--model", "test-model", "summarize"])
+            .assert()
+            .success();
+
+        let args = fs::read_to_string(&args_path).unwrap();
+        assert!(args.lines().any(|line| line == "test-model"));
+    }
+
+    #[test]
+    fn invalid_model_error_shows_suggestions() {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+
+        write_executable(
+            &path_dir.join("opencode"),
+            r#"#!/bin/sh
+printf 'Error: ProviderModelNotFoundError: model bad-model not found\nsuggestions: ["provider/a", "provider/b"]\n' >&2
+exit 1
+"#,
+        );
+
+        let assert = cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", &path_dir)
+            .env("OPENCODE_MODEL", "bad-model")
+            .args(["opencode", "summarize"])
+            .assert()
+            .code(1);
+
+        let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+        let plain = strip_ansi(&stderr);
+
+        assert!(
+            plain.contains("Invalid model specified")
+                || plain.contains("ProviderModelNotFoundError"),
+            "expected model-not-found error in stderr; got:\n{plain}"
+        );
+        assert!(
+            plain.contains("provider/a"),
+            "expected suggestion 'provider/a' in stderr; got:\n{plain}"
+        );
+        assert!(
+            plain.contains("provider/b"),
+            "expected suggestion 'provider/b' in stderr; got:\n{plain}"
+        );
+    }
+
+    #[test]
+    fn config_file_model_resolves_successfully() {
+        let workspace = tempdir().unwrap();
+        let path_dir = workspace.path().join("bin");
+        fs::create_dir_all(&path_dir).unwrap();
+        let args_path = workspace.path().join("args.txt");
+        let env_path = workspace.path().join("env.txt");
+
+        let config_dir = workspace.path().join(".config/opencode");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("config.json"),
+            r#"{"model":"config-default-model"}"#,
+        )
+        .unwrap();
+
+        write_executable(
+            &path_dir.join("opencode"),
+            r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+printf 'MODEL=%s\n' "$MODEL" > "$CLAUDINE_ENV_FILE"
+exit 0
+"#,
+        );
+
+        cargo_bin_cmd!("claudine")
+            .env("NO_COLOR", "1")
+            .env("HOME", workspace.path())
+            .env("PATH", &path_dir)
+            .env("CLAUDINE_ARGS_FILE", &args_path)
+            .env("CLAUDINE_ENV_FILE", &env_path)
+            .args(["opencode", "summarize"])
+            .assert()
+            .success();
+
+        let env_lines = fs::read_to_string(&env_path).unwrap();
+        assert!(env_lines.contains("MODEL=config-default-model"));
+
+        let args = fs::read_to_string(&args_path).unwrap();
+        assert!(
+            !args.lines().any(|line| line == "--model"),
+            "ConfigDefault should NOT push --model to child args"
+        );
+    }
+}
