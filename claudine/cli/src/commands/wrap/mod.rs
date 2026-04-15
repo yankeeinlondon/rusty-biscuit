@@ -770,6 +770,7 @@ fn run_provider_wrapper_inner(
                 has_model,
                 args.model.as_deref(),
                 non_interactive_requested,
+                &profile::OpenCodeEnvSnapshot::from_system(),
             ) {
                 Ok(source) => source,
                 Err(_) => {

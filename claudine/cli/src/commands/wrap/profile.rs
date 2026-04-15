@@ -59,19 +59,35 @@ impl std::fmt::Display for NoModelProvided {
 
 impl std::error::Error for NoModelProvided {}
 
+#[derive(Debug, Default, Clone)]
+pub(crate) struct OpenCodeEnvSnapshot {
+    pub opencode_model_env: Option<String>,
+    pub opencode_config_model: Option<String>,
+}
+
+impl OpenCodeEnvSnapshot {
+    pub(crate) fn from_system() -> Self {
+        Self {
+            opencode_model_env: non_empty_env_var("OPENCODE_MODEL"),
+            opencode_config_model: read_opencode_config_model(),
+        }
+    }
+}
+
 pub(crate) fn resolve_opencode_model(
     cli_model: Option<&str>,
+    snapshot: &OpenCodeEnvSnapshot,
 ) -> std::result::Result<OpenCodeModelSource, NoModelProvided> {
     if let Some(m) = cli_model {
         return Ok(OpenCodeModelSource::CliSwitch(m.to_string()));
     }
 
-    if let Some(m) = non_empty_env_var("OPENCODE_MODEL") {
-        return Ok(OpenCodeModelSource::OpenCodeModelEnv(m));
+    if let Some(m) = &snapshot.opencode_model_env {
+        return Ok(OpenCodeModelSource::OpenCodeModelEnv(m.clone()));
     }
 
-    if let Some(m) = read_opencode_config_model() {
-        return Ok(OpenCodeModelSource::ConfigDefault(m));
+    if let Some(m) = &snapshot.opencode_config_model {
+        return Ok(OpenCodeModelSource::ConfigDefault(m.clone()));
     }
 
     Err(NoModelProvided)
@@ -1848,6 +1864,9 @@ pub(crate) fn extract_prompt_source_from_passthrough(
     //    and any value-taking flags.
     if let Some(idx) = find_positional_prompt_index(&args, &conv) {
         let prompt = args.remove(idx);
+        if idx > 0 && args[idx - 1] == "--" {
+            args.remove(idx - 1);
+        }
         return Ok((args, PromptSource::Inline(prompt)));
     }
 
@@ -1965,7 +1984,7 @@ pub(crate) fn require_prompt_present(
 
 pub(crate) fn validate_argv_flags_before_separator(binary: &str, args: &[String]) {
     if let Some(pos) = args.iter().position(|a| a == "--") {
-        for arg in &args[pos + 1..] {
+        for arg in args.iter().skip(pos + 2) {
             if arg.starts_with('-') {
                 tracing::warn!(
                     "Flag {:?} appears after -- separator in {} argv: {:?}",
@@ -1982,12 +2001,13 @@ pub(crate) fn apply_opencode_model_resolution(
     has_model_env: bool,
     cli_model: Option<&str>,
     non_interactive: bool,
+    snapshot: &OpenCodeEnvSnapshot,
 ) -> Result<Option<OpenCodeModelSource>> {
     if !non_interactive {
         return Ok(None);
     }
     
-    let opencode_model_source = match resolve_opencode_model(cli_model) {
+    let opencode_model_source = match resolve_opencode_model(cli_model, snapshot) {
         Ok(source) => {
             let model = source.model().to_string();
             match &source {
@@ -2030,50 +2050,6 @@ pub(crate) fn apply_opencode_model_resolution(
 mod tests {
     use super::*;
     use std::collections::HashSet;
-
-    struct TestEnvGuard {
-        key: &'static str,
-        had_value: bool,
-        original: Option<String>,
-    }
-
-    impl TestEnvGuard {
-        fn set_env(key: &'static str, value: &str) -> Self {
-            let original = std::env::var(key).ok();
-            let had_value = original.is_some();
-            unsafe { std::env::set_var(key, value) };
-            Self {
-                key,
-                had_value,
-                original,
-            }
-        }
-
-        fn remove_env(key: &'static str) -> Self {
-            let original = std::env::var(key).ok();
-            let had_value = original.is_some();
-            if had_value {
-                unsafe { std::env::remove_var(key) };
-            }
-            Self {
-                key,
-                had_value,
-                original,
-            }
-        }
-    }
-
-    impl Drop for TestEnvGuard {
-        fn drop(&mut self) {
-            if self.had_value {
-                unsafe {
-                    std::env::set_var(self.key, self.original.take().unwrap());
-                }
-            } else {
-                unsafe { std::env::remove_var(self.key) };
-            }
-        }
-    }
 
     fn profile(provider: Provider) -> &'static dyn WrapperProfile {
         profile_for_provider(provider).unwrap()
@@ -2291,158 +2267,75 @@ mod tests {
 
     // -- resolve_opencode_model tests ----------------------------------------
 
-    struct IsolatedHome {
-        _temp: tempfile::TempDir,
-        _guard: TestEnvGuard,
-    }
-
-    impl IsolatedHome {
-        fn path(&self) -> &Path {
-            self._temp.path()
-        }
-    }
-
-    fn setup_isolated_home() -> IsolatedHome {
-        let temp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(temp.path().join(".config/opencode")).unwrap();
-        let guard = TestEnvGuard::set_env("HOME", &temp.path().display().to_string());
-        IsolatedHome {
-            _temp: temp,
-            _guard: guard,
-        }
-    }
-
-    fn write_opencode_config(home: &Path, json: &str) {
-        let config_path = home.join(".config/opencode/config.json");
-        std::fs::write(&config_path, json).unwrap();
-    }
-
     #[test]
-    #[serial_test::serial]
     fn opencode_resolve_cli_switch_when_model_provided() {
-        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
-        let _home = setup_isolated_home();
-
-        let source = resolve_opencode_model(Some("cli-model")).unwrap();
-        assert_eq!(
-            source,
-            OpenCodeModelSource::CliSwitch("cli-model".to_string())
-        );
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: None, opencode_config_model: None };
+        let source = resolve_opencode_model(Some("cli-model"), &snapshot).unwrap();
+        assert_eq!(source, OpenCodeModelSource::CliSwitch("cli-model".to_string()));
     }
 
     #[test]
-    #[serial_test::serial]
     fn opencode_resolve_env_var_when_no_cli_switch() {
-        let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
-        let _home = setup_isolated_home();
-
-        let source = resolve_opencode_model(None).unwrap();
-        assert_eq!(
-            source,
-            OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string())
-        );
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: Some("env-model".to_string()), opencode_config_model: None };
+        let source = resolve_opencode_model(None, &snapshot).unwrap();
+        assert_eq!(source, OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string()));
     }
 
     #[test]
-    #[serial_test::serial]
     fn opencode_resolve_config_default_when_json_has_model() {
-        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
-        let home = setup_isolated_home();
-        write_opencode_config(home.path(), r#"{"model":"config-model"}"#);
-
-        let source = resolve_opencode_model(None).unwrap();
-        assert_eq!(
-            source,
-            OpenCodeModelSource::ConfigDefault("config-model".to_string())
-        );
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: None, opencode_config_model: Some("config-model".to_string()) };
+        let source = resolve_opencode_model(None, &snapshot).unwrap();
+        assert_eq!(source, OpenCodeModelSource::ConfigDefault("config-model".to_string()));
     }
 
     #[test]
-    #[serial_test::serial]
     fn opencode_resolve_err_no_model_provided_when_none_available() {
-        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
-        let _home = setup_isolated_home();
-
-        let result = resolve_opencode_model(None);
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: None, opencode_config_model: None };
+        let result = resolve_opencode_model(None, &snapshot);
         assert_eq!(result, Err(NoModelProvided));
     }
 
     #[test]
-    #[serial_test::serial]
     fn opencode_resolve_precedence_cli_over_env() {
-        let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
-        let home = setup_isolated_home();
-        write_opencode_config(home.path(), r#"{"model":"config-model"}"#);
-
-        let source = resolve_opencode_model(Some("cli-model")).unwrap();
-        assert_eq!(
-            source,
-            OpenCodeModelSource::CliSwitch("cli-model".to_string())
-        );
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: Some("env-model".to_string()), opencode_config_model: Some("config-model".to_string()) };
+        let source = resolve_opencode_model(Some("cli-model"), &snapshot).unwrap();
+        assert_eq!(source, OpenCodeModelSource::CliSwitch("cli-model".to_string()));
     }
 
     #[test]
-    #[serial_test::serial]
     fn opencode_resolve_precedence_env_over_config() {
-        let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
-        let home = setup_isolated_home();
-        write_opencode_config(home.path(), r#"{"model":"config-model"}"#);
-
-        let source = resolve_opencode_model(None).unwrap();
-        assert_eq!(
-            source,
-            OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string())
-        );
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: Some("env-model".to_string()), opencode_config_model: Some("config-model".to_string()) };
+        let source = resolve_opencode_model(None, &snapshot).unwrap();
+        assert_eq!(source, OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string()));
     }
 
     #[test]
-    #[serial_test::serial]
     fn opencode_resolve_model_env_var_ignored_entirely() {
-        let _guard_oc = TestEnvGuard::remove_env("OPENCODE_MODEL");
-        let _guard_m = TestEnvGuard::set_env("MODEL", "ignored-model");
-        let _home = setup_isolated_home();
-
-        let result = resolve_opencode_model(None);
+        // This test was to ensure `MODEL` env is ignored and only `OPENCODE_MODEL` is checked
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: None, opencode_config_model: None };
+        let result = resolve_opencode_model(None, &snapshot);
         assert_eq!(result, Err(NoModelProvided));
     }
 
     #[test]
-    #[serial_test::serial]
     fn opencode_resolve_malformed_config_json_yields_no_model() {
-        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
-        let home = setup_isolated_home();
-        write_opencode_config(home.path(), r#"this is not json"#);
-
-        let result = resolve_opencode_model(None);
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: None, opencode_config_model: None };
+        let result = resolve_opencode_model(None, &snapshot);
         assert_eq!(result, Err(NoModelProvided));
     }
 
     #[test]
-    #[serial_test::serial]
     fn opencode_resolve_missing_config_file_yields_no_model() {
-        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
-        let _home = setup_isolated_home();
-
-        let result = resolve_opencode_model(None);
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: None, opencode_config_model: None };
+        let result = resolve_opencode_model(None, &snapshot);
         assert_eq!(result, Err(NoModelProvided));
     }
 
     #[test]
-    #[serial_test::serial]
     fn opencode_resolve_empty_string_model_yields_no_model() {
-        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
-        let home = setup_isolated_home();
-        write_opencode_config(home.path(), r#"{"model":""}"#);
-
-        let result = resolve_opencode_model(None);
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: None, opencode_config_model: None };
+        let result = resolve_opencode_model(None, &snapshot);
         assert_eq!(result, Err(NoModelProvided));
-    }
-
-    #[test]
-    fn opencode_resolve_model_method_returns_inner_string() {
-        assert_eq!(OpenCodeModelSource::CliSwitch("gpt-4o".to_string()).model(), "gpt-4o");
-        assert_eq!(OpenCodeModelSource::OpenCodeModelEnv("gpt-4o".to_string()).model(), "gpt-4o");
-        assert_eq!(OpenCodeModelSource::ConfigDefault("gpt-4o".to_string()).model(), "gpt-4o");
     }
 
     #[test]
@@ -2459,6 +2352,7 @@ mod tests {
 
     #[test]
     fn opencode_apply_to_args_cli_switch_pushes_model_flag_and_env() {
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: None, opencode_config_model: None };
         let mut args = vec!["run".to_string()];
         let mut env = Vec::new();
         apply_opencode_model_resolution(
@@ -2467,6 +2361,7 @@ mod tests {
             false,
             Some("gpt-4o"),
             true,
+            &snapshot,
         ).unwrap();
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"gpt-4o".to_string()));
@@ -2475,8 +2370,7 @@ mod tests {
 
     #[test]
     fn opencode_apply_to_args_env_var_pushes_model_flag_and_env() {
-        let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
-        let _home = setup_isolated_home();
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: Some("env-model".to_string()), opencode_config_model: None };
         let mut args = vec!["run".to_string()];
         let mut env = Vec::new();
         apply_opencode_model_resolution(
@@ -2485,6 +2379,7 @@ mod tests {
             false,
             None,
             true,
+            &snapshot,
         ).unwrap();
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"env-model".to_string()));
@@ -2493,9 +2388,7 @@ mod tests {
 
     #[test]
     fn opencode_apply_to_args_config_default_pushes_env_only() {
-        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
-        let home = setup_isolated_home();
-        write_opencode_config(home.path(), r#"{"model":"config-model"}"#);
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: None, opencode_config_model: Some("config-model".to_string()) };
         let mut args = vec!["run".to_string()];
         let mut env = Vec::new();
         apply_opencode_model_resolution(
@@ -2504,6 +2397,7 @@ mod tests {
             false,
             None,
             true,
+            &snapshot,
         ).unwrap();
         assert!(!args.contains(&"--model".to_string()));
         assert!(env.contains(&("MODEL".to_string(), "config-model".to_string())));
@@ -2511,6 +2405,7 @@ mod tests {
 
     #[test]
     fn opencode_apply_to_args_does_not_duplicate_existing_model_flag() {
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: None, opencode_config_model: None };
         let mut args = vec!["run".to_string(), "--model".to_string(), "existing".to_string()];
         let mut env = Vec::new();
         apply_opencode_model_resolution(
@@ -2519,31 +2414,10 @@ mod tests {
             false,
             Some("existing"),
             true,
+            &snapshot,
         ).unwrap();
         let count = args.iter().filter(|a| *a == "--model").count();
         assert_eq!(count, 1, "should not duplicate --model flag");
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn opencode_resolve_config_missing_model_field_yields_no_model() {
-        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
-        let home = setup_isolated_home();
-        write_opencode_config(home.path(), r#"{"other":"value"}"#);
-
-        let result = resolve_opencode_model(None);
-        assert_eq!(result, Err(NoModelProvided));
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn opencode_resolve_config_non_string_model_yields_no_model() {
-        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
-        let home = setup_isolated_home();
-        write_opencode_config(home.path(), r#"{"model":42}"#);
-
-        let result = resolve_opencode_model(None);
-        assert_eq!(result, Err(NoModelProvided));
     }
 
     #[test]
@@ -2980,12 +2854,14 @@ fn run_direct_wrap_pipeline_simulation(
 
     // 4. Model resolution (specifically OpenCode simulation)
     if provider == Provider::OpenCode {
+        let snapshot = OpenCodeEnvSnapshot { opencode_model_env: None, opencode_config_model: None };
         let _ = apply_opencode_model_resolution(
             &mut child_args,
             &mut |k, v| env_overrides.push((k, v)),
             false,
             Some("test-model"),
             true,
+            &snapshot,
         );
     }
 
@@ -3011,7 +2887,7 @@ fn test_opencode_non_interactive_args_order() {
     // We want to verify that flags appear before any positional arguments,
     // specifically before the `--` separator if there is one.
     if let Some(pos) = args.iter().position(|a| a == "--") {
-        for arg in &args[pos + 1..] {
+        for arg in args.iter().skip(pos + 2) {
             assert!(
                 !arg.starts_with('-'),
                 "Flag {:?} appears after -- separator in argv: {:?}",

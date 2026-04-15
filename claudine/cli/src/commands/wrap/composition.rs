@@ -379,6 +379,7 @@ pub(crate) fn execute_composition_request_inner(
                 has_model,
                 request.model.as_deref(),
                 effective_non_interactive,
+                &super::profile::OpenCodeEnvSnapshot::from_system(),
             )?
         } else {
             None
