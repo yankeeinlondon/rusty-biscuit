@@ -57,6 +57,8 @@ Re-apply hook registrations to match the current config.
 
 Process an incoming event from a provider hook (hidden from help). Reads JSON payload from stdin, auto-detects the provider from payload structure (or accepts `--provider` override), resolves environment context, and dispatches through the event pipeline.
 
+**Execution Deadline.** To prevent hook handlers from blocking the parent agent session, `claudine handle` enforces a hard **5-second deadline** by default (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`). When exceeded, the handler aborts with a diagnostic message to stderr and exits 124. Individual bash and messenger actions also have tighter 3s timeouts when running inside a hook handler.
+
 ### `claudine actions`
 
 Show which actions are configured and for which events across the user and repo configs.
@@ -143,9 +145,9 @@ Wrapper behavior:
 
 - **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt.
 - **Execution line**: displays `Claudine ▸ {provider} {badges} {prompt}` — only the user's prompt text is shown (provider-specific switches are not leaked). Truncated to one terminal line.
-- **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON) as the internal control plane. Claudine deserializes each line into a strongly typed `*Event` enum from `claudine::stream::protocol` (one module per provider), reconstructs clean assistant text for stdout, and emits metadata summaries to stderr. Unknown event types fall through to a silent skip so provider format drift never turns into a hard failure.
-- **Stderr summaries**: session-start info (session ID, model), completion summary (duration, tokens, cost, tool calls), and verbose details (tools used, turns, stop reason).
-- **Stderr status lines**: `LiveSemanticSink` renders tool/subagent/info/warning/error status lines and `ProviderExtension` fall-throughs. Summaries always prefer a human-readable preview (nested-text walker: `message`, `status`, `content.parts[*].text`, ...) and never fall back to truncated raw JSON — when nothing readable is available the line collapses to `provider/kind` with no payload tail. A small silent-kind allowlist (Claude `stream_event`, `hook_started`, `hook_response`, `hook_progress`) suppresses the status line entirely for redundant extension events; dispatch and JSONL logging still happen. The OpenCode wrapper additionally suppresses OpenCode's default-mode TUI formatter output on stderr (lines starting with `✱ `, `$ `, `> build `, `████ `). See [Non-Interactive Sessions](../docs/topics/non-interactive-sessions.md) for the full rules.
+- **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON) as the internal control plane. Claudine deserializes each line into a strongly typed `*Event` enum from `claudine::stream::protocol` (one module per provider), reconstructs clean assistant text for stdout, and emits metadata summaries to stderr. Every run follows a **9-section model** (execution line, env, system prompt, agent prompt, session ID, thinking prose, tool/info events, final STDOUT, and metadata) with strictly enforced spacing (at most one blank line between sections).
+- **Thinking prose**: reasoning and thinking content from providers (Claude, Codex, etc.) is rendered on stderr as a `BlockQuote` with a grey vertical line and dim-italic text, ensuring continuous feedback during long turns.
+- **Stderr status lines**: `LiveSemanticSink` renders tool/subagent/info/warning/error status lines. Tool calls use a canonical humanized contract (`🔧 →` for outgoing, `🔧 ←` for incoming) with summarized arguments and status. Unknown event types fall through to a silent skip so provider format drift never turns into a hard failure. Raw JSON is never dumped to the terminal for known tools.
 - **Verbosity**: `--quiet` shows only a compact completion line; `--silent` suppresses all Claudine output; `-v` adds detailed human-facing metadata on the second summary line.
 - **Diagnostics**: `--debug <level>` controls Claudine tracing (`trace`, `debug`, `info`, `warn`, `error`). `RUST_LOG` takes precedence and supports per-module targeting such as `RUST_LOG=claudine::dispatch=trace,claudine::stream=debug`.
 - Validates provider binary availability before spawn (with provider docs URL in errors).
@@ -165,11 +167,11 @@ Wrapper behavior:
 
 Composition turns a Markdown document with frontmatter into a provider session, optionally merging the result back into the source file or running a sequence of steps. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, handler-driven recovery).
 
-- **`claudine compose [flags] <arg>...`** — compose a Markdown file (Darkmatter transclusion/interpolation/conditionals/`::shell`) and send the result as a prompt. No file mutation.
-- **`claudine inline-compose [flags] <arg>...`** — compose the frontmatter `prompt` property and replace the document body with the provider's response. Original frontmatter is preserved byte-for-byte; `last_updated` is set to today's date; new frontmatter keys added by the provider are merged in.
-- **`claudine sequence [flags] <arg>...`** — run a serial sequence of composition steps declared in a single document, with a shared approval cache across steps and `FAIL_FAST` propagation on failure.
+- **`claudine compose [flags] <file-ref> [key=value ...]`** — compose a Markdown file (Darkmatter transclusion/interpolation/conditionals/`::shell`) and send the result as a prompt. No file mutation.
+- **`claudine inline-compose [flags] <file-ref> [key=value ...]`** — compose the frontmatter `prompt` property and replace the document body with the provider's response. Original frontmatter is preserved byte-for-byte; `last_updated` is set to today's date; new frontmatter keys added by the provider are merged in.
+- **`claudine sequence [flags] <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in a single document, with a shared approval cache across steps and `FAIL_FAST` propagation on failure.
 
-Positional `<arg>...` is exactly one file reference plus zero or more `key=value` setters in any order:
+Positional arguments include exactly one file reference plus zero or more `key=value` setters in any order:
 
 ```sh
 claudine compose @prompts/review.md review=review.md
