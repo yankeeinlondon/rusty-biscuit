@@ -45,7 +45,7 @@ use claudine::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus}
 use serde_json::Value;
 
 use super::StructuredSummaryDetails;
-use super::section::{Section, SectionTracker};
+use super::section::{Section, SectionStream, SectionTracker};
 use super::stream_io::StreamOutput;
 
 /// Borrow-friendly terminal used for status rendering. Mirrors the helper in
@@ -99,10 +99,16 @@ pub(crate) struct LiveSemanticSink {
     emit_event_log: Option<SemanticEventLoggerFn>,
     live_metrics: LiveMetrics,
     stream_output: Arc<StreamOutput>,
-    /// Section-spacing state machine shared with [`super::section::SectionStream`].
-    /// Encapsulates the dedup and section-transition logic so both the
-    /// reference implementation and this runtime sink stay in sync.
-    section_tracker: SectionTracker,
+    /// Cached `Terminal` used for every status / thinking render. Building
+    /// a `Terminal` runs capability detection, so hoisting the instance out
+    /// of the per-event render path avoids unnecessary work for long
+    /// structured sessions.
+    terminal: Terminal,
+    /// Section-spacing state machine shared with [`super::section::SectionStream`]
+    /// and any post-stream trailer emitter obtained via [`Self::section_stream`].
+    /// Encapsulates the dedup and section-transition logic so every writer
+    /// against this sink sees the same running state.
+    section_tracker: Arc<Mutex<SectionTracker>>,
 }
 
 impl LiveSemanticSink {
@@ -131,7 +137,8 @@ impl LiveSemanticSink {
             emit_event_log: None,
             live_metrics: progress::new_live_metrics(),
             stream_output: StreamOutput::new(),
-            section_tracker: SectionTracker::new(),
+            terminal: wrap_terminal(),
+            section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
         }
     }
 
@@ -204,7 +211,8 @@ impl LiveSemanticSink {
             emit_event_log: Some(event_logger),
             live_metrics: progress::new_live_metrics(),
             stream_output,
-            section_tracker: SectionTracker::new(),
+            terminal: wrap_terminal(),
+            section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
         }
     }
 
@@ -212,6 +220,14 @@ impl LiveSemanticSink {
     /// with the heartbeat thread and stdout renderer in `exec.rs`.
     pub(crate) fn stream_output(&self) -> Arc<StreamOutput> {
         self.stream_output.clone()
+    }
+
+    /// Return a [`SectionStream`] that shares this sink's
+    /// [`SectionTracker`] and [`StreamOutput`]. Callers use it to emit
+    /// post-stream sections (final stdout trailer separator, trailer
+    /// metadata) with the same spacing invariants as the live sink path.
+    pub(crate) fn section_stream(&self) -> SectionStream {
+        SectionStream::with_tracker(self.stream_output.clone(), self.section_tracker.clone())
     }
 
     pub(crate) fn with_context_extra(mut self, context_extra: HashMap<String, Value>) -> Self {
@@ -262,14 +278,18 @@ impl LiveSemanticSink {
     /// - Consecutive blank lines inside a section collapse to one.
     /// - No leading blank line is emitted before the first rendered line.
     fn emit_section_line(&mut self, section: Section, line: &str) {
-        match self.section_tracker.classify(section, line) {
-            None => {}
-            Some((needs_separator, _)) => {
-                if needs_separator {
-                    (self.emit_stderr)("");
-                }
-                (self.emit_stderr)(line);
+        let result = {
+            let mut tracker = self
+                .section_tracker
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            tracker.classify(section, line)
+        };
+        if let Some((needs_separator, _)) = result {
+            if needs_separator {
+                (self.emit_stderr)("");
             }
+            (self.emit_stderr)(line);
         }
     }
 
@@ -278,67 +298,50 @@ impl LiveSemanticSink {
     /// lines that belong in the trailer section (cost, duration, tool
     /// rollup).
     pub(crate) fn emit_trailer_line(&mut self, line: &str) {
-        let section = Section::TrailerMetadata;
-        match self.section_tracker.classify(section, line) {
-            None => {}
-            Some((needs_separator, _)) => {
-                if needs_separator {
-                    (self.emit_stderr)("");
-                }
-                (self.emit_stderr)(line);
-            }
-        }
+        self.emit_section_line(Section::TrailerMetadata, line);
     }
 
     fn render_status(&mut self, section: Section, state: StatusState, description: String) {
         let rendered = Status::new(description)
             .state(state)
-            .render(&wrap_terminal());
+            .render(&self.terminal);
         self.emit_section_line(section, &rendered);
     }
 
     fn render_status_prose(&mut self, section: Section, state: StatusState, description: String) {
         let rendered = Status::from_prose(description)
             .state(state)
-            .render(&wrap_terminal());
+            .render(&self.terminal);
         self.emit_section_line(section, &rendered);
     }
 
-    fn render_tool_display(display: ToolCallDisplay) -> (String, bool) {
+    /// Render a `ToolCallDisplay` into prose-markup for
+    /// [`Status::from_prose`]. Per spec:
+    ///
+    /// - Outgoing summary / incoming success / incoming pending render the
+    ///   slot as dim-italic (`<dim><i>…</i></dim>`).
+    /// - Incoming error renders the word `error` as red + bold.
+    /// - User-controlled content (commands, URLs, paths, raw JSON
+    ///   fallbacks) is passed through [`escape_prose`] so stray `<`, `>`,
+    ///   `{`, or `\` cannot be interpreted as prose markup.
+    fn render_tool_display(display: ToolCallDisplay) -> String {
         let arrow = match display.direction {
             ToolDirection::Outgoing => '\u{2192}',
             ToolDirection::Incoming => '\u{2190}',
         };
+        let name = escape_prose(&display.display_name);
         let slot = match (display.status, display.summary) {
-            (Some(ToolStatus::Success), _) => Some(("successful".to_string(), false)),
-            (Some(ToolStatus::Error), _) => Some(("error".to_string(), true)),
-            (Some(ToolStatus::Pending), _) => Some(("pending".to_string(), false)),
-            (None, Some(summary)) => Some((summary, false)),
+            (Some(ToolStatus::Success), _) => Some("<dim><i>successful</i></dim>".to_string()),
+            (Some(ToolStatus::Error), _) => Some("<red><b>error</b></red>".to_string()),
+            (Some(ToolStatus::Pending), _) => Some("<dim><i>pending</i></dim>".to_string()),
+            (None, Some(summary)) => {
+                Some(format!("<dim><i>{}</i></dim>", escape_prose(&summary)))
+            }
             (None, None) => None,
         };
         match slot {
-            Some((text, is_error)) => {
-                if is_error {
-                    // Error styling: wrap in red + bold via biscuit-terminal
-                    // prose markup. Only this branch goes through
-                    // `Status::from_prose`; every other tool render stays on
-                    // `Status::new` so user-controlled content (commands,
-                    // URLs, paths) is never interpreted as markup.
-                    (
-                        format!(
-                            "{arrow} {} \u{00b7} <red><b>{text}</b></red>",
-                            display.display_name
-                        ),
-                        true,
-                    )
-                } else {
-                    (
-                        format!("{arrow} {} \u{00b7} {text}", display.display_name),
-                        false,
-                    )
-                }
-            }
-            None => (format!("{arrow} {}", display.display_name), false),
+            Some(text) => format!("{arrow} {name} \u{00b7} {text}"),
+            None => format!("{arrow} {name}"),
         }
     }
 
@@ -442,28 +445,24 @@ impl LiveSemanticSink {
         }
         // Every event variant handled in this match renders into the
         // ToolUseAndEvents section. SessionAndModel is handled separately
-        // via `emit_agent_session_id`; Thinking / FinalStdout / trailer
-        // metadata are wired by later tasks.
+        // via `emit_agent_session_id`; Thinking is handled via the
+        // `Reasoning` branch of [`SemanticEventSink::on_semantic_event`];
+        // FinalStdout is entered via `enter_final_stdout` in the
+        // `OutputText` branch of that same method; TrailerMetadata is
+        // emitted post-stream through [`Self::section_stream`] by callers
+        // in `wrap/mod.rs` and `wrap/composition.rs`.
         let section = Section::ToolUseAndEvents;
         match event {
             SemanticEvent::ToolCall { .. } => {
                 if let Some(display) = ToolCallDisplay::from_call(event) {
-                    let (desc, wants_prose) = Self::render_tool_display(display);
-                    if wants_prose {
-                        self.render_status_prose(section, StatusState::ToolUse, desc);
-                    } else {
-                        self.render_status(section, StatusState::ToolUse, desc);
-                    }
+                    let desc = Self::render_tool_display(display);
+                    self.render_status_prose(section, StatusState::ToolUse, desc);
                 }
             }
             SemanticEvent::ToolResult { .. } => {
                 if let Some(display) = ToolCallDisplay::from_result(event) {
-                    let (desc, wants_prose) = Self::render_tool_display(display);
-                    if wants_prose {
-                        self.render_status_prose(section, StatusState::ToolUse, desc);
-                    } else {
-                        self.render_status(section, StatusState::ToolUse, desc);
-                    }
+                    let desc = Self::render_tool_display(display);
+                    self.render_status_prose(section, StatusState::ToolUse, desc);
                 }
             }
             SemanticEvent::SubagentStart { name, .. } => {
@@ -571,11 +570,30 @@ impl SemanticEventSink for LiveSemanticSink {
         match &event {
             SemanticEvent::OutputText { text, .. } => {
                 if let Some(emit) = self.emit_output_text.as_mut() {
+                    // Route the transition into the FinalStdout section
+                    // through the shared section tracker so the separator
+                    // blank (between stderr events and final stdout) is
+                    // emitted exactly once. The raw text bytes continue to
+                    // flow directly to the caller's renderer.
+                    {
+                        let mut tracker = self
+                            .section_tracker
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
+                        if let Some((needs_separator, _)) =
+                            tracker.classify(Section::FinalStdout, "x")
+                        {
+                            drop(tracker);
+                            if needs_separator {
+                                (self.emit_stderr)("");
+                            }
+                        }
+                    }
                     emit(text);
                 }
             }
             SemanticEvent::Reasoning { text, .. } => {
-                let block = render_thinking_block(text, &wrap_terminal());
+                let block = render_thinking_block(text, &self.terminal);
                 if !block.is_empty() {
                     // Split the multi-line block render into lines so the
                     // dedup works per-line; section transitions only
@@ -608,6 +626,27 @@ impl SemanticEventSink for LiveSemanticSink {
             (self.dispatch)(agentic, meta);
         }
     }
+}
+
+/// Escape user-controlled text so it can be safely interpolated into
+/// biscuit-terminal prose markup without being parsed as tags / tokens.
+///
+/// Biscuit-terminal's `Prose` parser recognises backslash escapes for `<`,
+/// `>`, `{`, and `\`; escaping those four characters is sufficient to
+/// prevent arbitrary user strings (commands, paths, URLs, raw JSON) from
+/// being interpreted as markup.
+fn escape_prose(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\\' | '<' | '>' | '{' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn provider_short(p: Provider) -> &'static str {
@@ -1202,6 +1241,107 @@ mod tests {
     }
 
     #[test]
+    fn first_output_text_inserts_section_separator_between_tool_and_final_stdout() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let rendered_text = Arc::new(StdMutex::new(String::new()));
+
+        let output_cb = {
+            let buf = rendered_text.clone();
+            Box::new(move |text: &str| {
+                buf.lock().unwrap().push_str(text);
+            })
+        };
+
+        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
+
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: None,
+            output: None,
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "chunk-a ".into(),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "chunk-b".into(),
+            extra: json!({}),
+        });
+
+        let captured = lines.lock().unwrap();
+        // Exactly one blank separator between the tool render (stderr)
+        // and the stdout-bound assistant text.
+        let blanks = captured.iter().filter(|l| l.is_empty()).count();
+        assert_eq!(
+            blanks, 1,
+            "expected exactly one section-separator blank: {captured:?}"
+        );
+        // The last stderr line is that separator (the OutputText payload
+        // does not go through `emit_stderr`).
+        assert!(captured.last().is_some_and(|l| l.is_empty()));
+        // And both OutputText chunks still reach the external renderer.
+        assert_eq!(*rendered_text.lock().unwrap(), "chunk-a chunk-b");
+    }
+
+    #[test]
+    fn emit_trailer_line_inserts_single_separator_after_final_stdout() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+
+        let output_cb = Box::new(move |_text: &str| {
+            // The renderer would normally write to stdout; we do not need
+            // to capture it for this assertion. The section tracker is
+            // what matters.
+        });
+
+        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
+
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("bash".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: None,
+            output: None,
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "result".into(),
+            extra: json!({}),
+        });
+
+        sink.emit_trailer_line("✓ 5s");
+        sink.emit_trailer_line("  secondary");
+
+        let captured = lines.lock().unwrap().clone();
+        // Captured stderr lines should be, in order:
+        //   <tool line>, "" (tool→final separator), "" (final→trailer
+        //   separator), "✓ 5s", "  secondary"
+        // The two separators are tagged to different sections so the
+        // dedup does NOT collapse them; every section transition emits a
+        // separator.
+        assert!(!captured.is_empty());
+        let blanks_then: Vec<_> = captured
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.is_empty())
+            .map(|(idx, _)| idx)
+            .collect();
+        assert_eq!(
+            blanks_then.len(),
+            2,
+            "one separator into FinalStdout and one into TrailerMetadata: {captured:?}"
+        );
+        assert!(
+            captured.iter().any(|l| l.contains("✓ 5s")),
+            "trailer line must be present: {captured:?}"
+        );
+    }
+
+    #[test]
     fn output_text_without_callback_is_dropped_not_rendered_as_status() {
         let lines = Arc::new(StdMutex::new(Vec::new()));
         let dispatched = Arc::new(StdMutex::new(Vec::new()));
@@ -1748,7 +1888,28 @@ mod tests {
             fixture: &[&str],
             model: Option<String>,
         ) -> Vec<String> {
-            let captured: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+            replay_to_combined(provider, fixture, model)
+                .into_iter()
+                .filter_map(|(is_stdout, line)| (!is_stdout).then_some(line))
+                .collect()
+        }
+
+        /// Replay fixture lines through the parser + [`LiveSemanticSink`]
+        /// and capture every emission — both stderr status lines and
+        /// stdout `OutputText` bytes — in the order they were written. The
+        /// boolean is `true` when the emission was destined for stdout.
+        ///
+        /// This is the authoritative view of the sink's rendered output
+        /// because the spec's spacing invariant is defined against the
+        /// combined stream: "there are no two consecutive blank lines"
+        /// across the whole rendered surface, not just stderr.
+        pub(super) fn replay_to_combined(
+            provider: Provider,
+            fixture: &[&str],
+            model: Option<String>,
+        ) -> Vec<(bool, String)> {
+            let captured: Arc<StdMutex<Vec<(bool, String)>>> =
+                Arc::new(StdMutex::new(Vec::new()));
             let dispatched: Arc<StdMutex<Vec<(AgenticEvent, String)>>> =
                 Arc::new(StdMutex::new(Vec::new()));
 
@@ -1759,11 +1920,28 @@ mod tests {
                 })
                     as Box<dyn Fn(AgenticEvent, DispatchEventMeta) + Send + Sync + 'static>
             };
-            let emit = {
+            let emit_stderr = {
                 let cap = captured.clone();
                 Box::new(move |line: &str| {
-                    cap.lock().unwrap().push(line.to_string());
+                    cap.lock().unwrap().push((false, line.to_string()));
                 }) as Box<dyn Fn(&str) + Send + Sync + 'static>
+            };
+            let output_cb: OutputTextFn = {
+                let cap = captured.clone();
+                Box::new(move |text: &str| {
+                    // Emit every embedded line separately so the combined
+                    // view sees each stdout line as its own entry. Using
+                    // `str::lines` drops the spurious trailing empty that
+                    // `split('\n')` produces for newline-terminated text —
+                    // that trailing empty is a chunk artifact, not a real
+                    // blank line in the rendered output. Internal blank
+                    // lines (`"a\n\nb"`) are preserved so the combined
+                    // blank-line assertion can still catch real content
+                    // problems that straddle the stdout surface.
+                    for line in text.lines() {
+                        cap.lock().unwrap().push((true, line.to_string()));
+                    }
+                })
             };
 
             let mut sink = LiveSemanticSink::new(
@@ -1773,8 +1951,9 @@ mod tests {
                 Verbosity::Normal,
                 Arc::new(Mutex::new(StructuredSummaryDetails::default())),
                 dispatch,
-                emit,
-            );
+                emit_stderr,
+            )
+            .with_output_text_sink(output_cb);
 
             struct Rec {
                 events: Arc<StdMutex<Vec<SemanticEvent>>>,
@@ -2001,14 +2180,19 @@ mod tests {
                 }
                 let raw = std::fs::read_to_string(&path).expect("read fixture");
                 let fixture_lines: Vec<&str> = raw.lines().collect();
-                let stderr_lines =
-                    replay_to_stderr(*provider, &fixture_lines, model.map(String::from));
+                // Assert against the COMBINED stdout+stderr emission
+                // stream — per spec, the spacing invariant is defined
+                // over all rendered output in emission order, not just
+                // stderr. A stderr-only assertion would miss consecutive
+                // blanks that straddle the FinalStdout section boundary.
+                let combined =
+                    replay_to_combined(*provider, &fixture_lines, model.map(String::from));
                 let mut prev_blank = false;
-                for line in &stderr_lines {
+                for (is_stdout, line) in &combined {
                     let is_blank = line.trim().is_empty();
                     assert!(
                         !(is_blank && prev_blank),
-                        "provider={provider:?} ({fname}): two consecutive blank lines in rendered output:\n{stderr_lines:#?}"
+                        "provider={provider:?} ({fname}): two consecutive blank lines in combined rendered output (is_stdout={is_stdout}):\n{combined:#?}"
                     );
                     prev_blank = is_blank;
                 }

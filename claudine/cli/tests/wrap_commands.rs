@@ -3584,3 +3584,123 @@ exit 0
         );
     }
 }
+
+/// End-to-end regression test for the OpenCode structured wrap pipeline.
+///
+/// Motivated by review-2 finding #4: the OpenCode assistant-text bug that
+/// inspired this feature was in the wrapped pipeline, not just the parser.
+/// This test mirrors the Codex/Gemini `*_structured_*` coverage so the
+/// end-to-end OpenCode path has the same regression surface.
+///
+/// Asserts that a real child process, stream parser, and live sink
+/// cooperate to produce:
+///
+/// 1. The assistant text reaches stdout (regression guard for the missing-
+///    assistant-text bug).
+/// 2. The tool completion renders as a canonical incoming `←` line with
+///    a humanized tool name — NOT a synthesized outgoing `→` line and
+///    NOT via the `⚙` Info glyph.
+/// 3. No two consecutive blank lines appear in the combined stdout +
+///    stderr rendered output (Child 3 section-spacing contract).
+/// 4. The session-id marker and the trailer render on stderr.
+#[cfg(unix)]
+#[test]
+fn opencode_structured_e2e_stdout_and_section_spacing() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let fake_home = workspace.path().join("home");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::create_dir_all(&fake_home).unwrap();
+
+    // Minimal OpenCode fake binary. Uses the simple parser-compatible
+    // event shapes (matching the `step_start` / `text` / `tool_end` /
+    // `step_complete` parser unit tests in opencode_semantic.rs) rather
+    // than the full nested `.part` payload, which keeps the test
+    // resilient to stream-protocol evolution while still exercising the
+    // sink end-to-end.
+    let args_path = workspace.path().join("args.txt");
+    write_executable(
+        &path_dir.join("opencode"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+printf '%s\n' '{"type":"step_start","sessionID":"ses_oc_e2e"}'
+printf '%s\n' '{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok","tool_name":"bash"}}'
+printf '%s\n' '{"type":"text","text":"The answer is 42."}'
+printf '%s\n' '{"type":"step_complete","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"cost_usd":0.001,"duration_ms":1500}'
+"#,
+    );
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("HOME", &fake_home)
+        .env("PATH", &path_dir)
+        .env("OPENCODE_MODEL", "test-model")
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        // NOTE: intentionally do NOT pass `--format json` here — claudine
+        // treats an explicit native output request as a signal to skip
+        // structured streaming and forward raw bytes, which would bypass
+        // every behavior this test is guarding.
+        .args(["opencode", "what is the answer"])
+        .assert()
+        .success();
+
+    let args_captured = fs::read_to_string(&args_path).unwrap_or_default();
+    assert!(
+        !args_captured.is_empty(),
+        "fake opencode should have been invoked (CLAUDINE_ARGS_FILE empty)"
+    );
+
+    let out = assert.get_output();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr_raw = String::from_utf8_lossy(&out.stderr);
+    let stderr = strip_ansi(&stderr_raw);
+
+    // 1. Assistant text reaches stdout.
+    assert!(
+        stdout.contains("The answer is 42."),
+        "expected assistant text on stdout; stdout={stdout:?}"
+    );
+
+    // 2. Incoming `←` line exists; no synthesized outgoing `→` line; no
+    //    `⚙` Info glyph routing.
+    assert!(
+        stderr.contains('\u{2190}'),
+        "expected incoming ← arrow for tool completion; stderr={stderr}"
+    );
+    assert!(
+        !stderr.contains('\u{2192}'),
+        "OpenCode must NOT synthesize an outgoing → line; stderr={stderr}"
+    );
+    assert!(
+        !stderr.contains('\u{2699}'),
+        "tool result must NOT be rendered via the ⚙ Info glyph; stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("Bash"),
+        "humanized tool name must render; stderr={stderr}"
+    );
+
+    // 3. Session ID + trailer render on stderr.
+    assert!(
+        stderr.contains("session ID") && stderr.contains("ses_oc_e2e"),
+        "expected session ID marker; stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("1.5s") || stderr.contains("1.500s") || stderr.contains("1,500ms"),
+        "expected trailer duration (1.5s); stderr={stderr}"
+    );
+
+    // 4. No two consecutive blank lines in combined stdout+stderr. The
+    //    stderr side is line-structured already; the stdout side is a
+    //    single chunk so we just concat and split on '\n'.
+    let combined = format!("{stdout}{stderr}");
+    let mut prev_blank = false;
+    for line in combined.lines() {
+        let is_blank = line.trim().is_empty();
+        assert!(
+            !(is_blank && prev_blank),
+            "two consecutive blank lines in combined rendered output:\n---\n{combined}\n---"
+        );
+        prev_blank = is_blank;
+    }
+}

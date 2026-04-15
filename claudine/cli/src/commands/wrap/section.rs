@@ -78,23 +78,29 @@ impl SectionTracker {
 /// - dedupes consecutive blank emissions,
 /// - guarantees at most one blank between adjacent sections.
 ///
-/// Reference implementation of the section-spacing invariants. Uses
-/// [`SectionTracker`] internally so the logic stays in sync with
-/// `LiveSemanticSink`.
-#[allow(dead_code)] // reference implementation; see LiveSemanticSink for runtime path
+/// Every `SectionStream` cloned from a given sink shares a single
+/// [`SectionTracker`] so post-stream trailer emitters see the state left
+/// behind by the live sink and vice-versa.
 #[derive(Clone)]
 pub struct SectionStream {
     inner: Arc<StreamOutput>,
     state: Arc<Mutex<SectionTracker>>,
 }
 
-#[allow(dead_code)] // reference impl; exercised by unit tests below
 impl SectionStream {
+    /// Build a section stream with a fresh, unshared tracker. Used by the
+    /// reference-implementation unit tests below.
+    #[allow(dead_code)]
     pub fn new(inner: Arc<StreamOutput>) -> Self {
-        Self {
-            inner,
-            state: Arc::new(Mutex::new(SectionTracker::new())),
-        }
+        Self::with_tracker(inner, Arc::new(Mutex::new(SectionTracker::new())))
+    }
+
+    /// Build a section stream that shares an existing tracker with another
+    /// writer (typically the live semantic sink). This is how trailer
+    /// emitters inherit the running section state after the live stream
+    /// ends.
+    pub fn with_tracker(inner: Arc<StreamOutput>, state: Arc<Mutex<SectionTracker>>) -> Self {
+        Self { inner, state }
     }
 
     pub fn emit_stderr(&self, section: Section, line: &str) {
@@ -105,15 +111,37 @@ impl SectionStream {
         self.emit(section, line, /* to_stdout = */ false);
     }
 
+    #[allow(dead_code)] // retained for the reference impl path
     pub fn emit_stdout(&self, line: &str) {
         self.emit(Section::FinalStdout, line, /* to_stdout = */ true);
     }
 
+    /// Classify a synthetic transition into [`Section::FinalStdout`]
+    /// without writing any payload yet. Emits the section separator blank
+    /// (on stderr) when needed and leaves the tracker parked in
+    /// `FinalStdout` so subsequent raw stdout writes belong to that
+    /// section. Idempotent: once the tracker is already in `FinalStdout`,
+    /// further calls are no-ops.
+    pub fn enter_final_stdout(&self) {
+        let mut tracker = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        // Use a non-blank placeholder so the tracker records that content
+        // was emitted in `FinalStdout`. The caller writes the actual
+        // stdout bytes directly through `StdoutWriter`.
+        let Some((needs_separator, _)) = tracker.classify(Section::FinalStdout, "x") else {
+            return;
+        };
+        drop(tracker);
+        if needs_separator {
+            self.inner.emit_stderr_line("");
+        }
+    }
+
     fn emit(&self, section: Section, line: &str, to_stdout: bool) {
-        let mut tracker = self.state.lock().unwrap();
+        let mut tracker = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let Some((needs_separator, _)) = tracker.classify(section, line) else {
             return;
         };
+        drop(tracker);
         if needs_separator {
             // Section separator always goes to stderr.
             self.inner.emit_stderr_line("");

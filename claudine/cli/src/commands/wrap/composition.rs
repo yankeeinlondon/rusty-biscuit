@@ -1409,6 +1409,7 @@ fn execute_direct_without_harness(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
+        let section_stream = sink.section_stream();
         let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb| {
             let sink = sink.with_output_text_sink(output_cb);
             claudine::stream::create_semantic_parser(provider, sink, parser_config)
@@ -1436,6 +1437,7 @@ fn execute_direct_without_harness(
 
         // Codex doesn't stream text; render its captured response
         if provider == Provider::Codex && !summary.assistant_text.is_empty() {
+            section_stream.enter_final_stdout();
             let text = &summary.assistant_text;
             let term = wrap_terminal();
             if std::io::stdout().is_terminal() {
@@ -1453,7 +1455,6 @@ fn execute_direct_without_harness(
             std::io::stdout().flush()?;
         }
 
-        // TODO: Route through sink.emit_trailer_line() for section-aware spacing
         emit_stream_summary_with_context(
             &summary,
             profile,
@@ -1462,6 +1463,7 @@ fn execute_direct_without_harness(
             detail_requested,
             &summary_details.lock().unwrap().clone(),
             dispatch_context,
+            Some(&section_stream),
         );
 
         Ok(summary.exit_code)

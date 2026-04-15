@@ -1323,6 +1323,11 @@ fn run_provider_wrapper_inner(
             .with_context_extra(dispatch_context.clone());
             let live_metrics = sink.live_metrics();
             let stream_output = sink.stream_output();
+            // Snapshot the sink's section-stream handle before the sink is
+            // moved into the parser closure. Post-stream trailer and
+            // Codex-final-stdout emission uses this handle so every section
+            // transition shares the same tracker state.
+            let section_stream = sink.section_stream();
             let build_parser: exec::SemanticParserBuilder =
                 Box::new(move |output_cb, _reasoning_cb| {
                     let sink = sink.with_output_text_sink(output_cb);
@@ -1350,6 +1355,7 @@ fn run_provider_wrapper_inner(
                 codex_output.apply_to_summary(&mut summary);
             }
             if provider == Provider::Codex && !summary.assistant_text.is_empty() {
+                section_stream.enter_final_stdout();
                 let text = &summary.assistant_text;
                 if std::io::stdout().is_terminal() {
                     let rendered = crate::output::render_assistant_markdown(text, &term);
@@ -1366,7 +1372,6 @@ fn run_provider_wrapper_inner(
                 std::io::stdout().flush()?;
             }
 
-            // TODO: Route through sink.emit_trailer_line() for section-aware spacing
             emit_stream_summary(
                 &summary,
                 profile,
@@ -1374,6 +1379,7 @@ fn run_provider_wrapper_inner(
                 stream_verbosity,
                 detail_requested,
                 &summary_details.lock().unwrap().clone(),
+                Some(&section_stream),
             );
 
             let stderr_text = summary.stderr_text.clone();
@@ -1753,6 +1759,7 @@ fn execute_harness_attempt(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
+        let section_stream = sink.section_stream();
         let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb| {
             let sink = sink.with_output_text_sink(output_cb);
             claudine::stream::create_semantic_parser(provider, sink, parser_config)
@@ -1779,6 +1786,7 @@ fn execute_harness_attempt(
             codex_output.apply_to_summary(&mut summary);
         }
         if provider == Provider::Codex && !summary.assistant_text.is_empty() {
+            section_stream.enter_final_stdout();
             let text = &summary.assistant_text;
             if std::io::stdout().is_terminal() {
                 let rendered = crate::output::render_assistant_markdown(text, term);
@@ -1795,7 +1803,6 @@ fn execute_harness_attempt(
             std::io::stdout().flush()?;
         }
 
-        // TODO: Route through sink.emit_trailer_line() for section-aware spacing
         emit_stream_summary(
             &summary,
             profile,
@@ -1803,6 +1810,7 @@ fn execute_harness_attempt(
             stream_verbosity,
             detail_requested,
             &summary_details.lock().unwrap().clone(),
+            Some(&section_stream),
         );
 
         (
@@ -2901,6 +2909,14 @@ fn model_value_from_args(args: &[String]) -> Option<String> {
 }
 
 /// Emit stderr summaries and write synthetic JSONL event after a structured stream session.
+///
+/// When a [`SectionStream`](live_semantic_sink::SectionStream) handle is
+/// supplied, every trailer line is routed through it as
+/// [`Section::TrailerMetadata`] so the section-separator blank between the
+/// final stdout and the trailer is inserted exactly once (and only when
+/// the prior section actually emitted non-blank content). When the handle
+/// is absent (legacy / test call sites), emission falls back to plain
+/// `eprintln!`.
 pub(crate) fn emit_stream_summary(
     summary: &claudine::stream::summary::StreamExecutionSummary,
     profile: &dyn WrapperProfile,
@@ -2908,6 +2924,7 @@ pub(crate) fn emit_stream_summary(
     verbosity: Verbosity,
     verbose: bool,
     details: &StructuredSummaryDetails,
+    section_stream: Option<&super::wrap::section::SectionStream>,
 ) {
     emit_stream_summary_inner(
         summary,
@@ -2917,6 +2934,7 @@ pub(crate) fn emit_stream_summary(
         verbose,
         details,
         None,
+        section_stream,
     );
 }
 
@@ -2928,6 +2946,7 @@ pub(crate) fn emit_stream_summary_with_context(
     verbose: bool,
     details: &StructuredSummaryDetails,
     context_extra: &HashMap<String, serde_json::Value>,
+    section_stream: Option<&super::wrap::section::SectionStream>,
 ) {
     emit_stream_summary_inner(
         summary,
@@ -2937,6 +2956,7 @@ pub(crate) fn emit_stream_summary_with_context(
         verbose,
         details,
         Some(context_extra),
+        section_stream,
     );
 }
 
@@ -2948,6 +2968,7 @@ fn emit_stream_summary_inner(
     verbose: bool,
     details: &StructuredSummaryDetails,
     context_extra: Option<&HashMap<String, serde_json::Value>>,
+    section_stream: Option<&super::wrap::section::SectionStream>,
 ) {
     let primary_markup = if verbosity == Verbosity::Silent {
         None
@@ -2962,28 +2983,43 @@ fn emit_stream_summary_inner(
     if primary_markup.is_some() || secondary_markup.is_some() {
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable;
+        use super::wrap::section::Section;
 
-        // Ensure exactly one blank line between streamed output and the
-        // summary metadata, regardless of how many trailing newlines the
-        // assistant text already has.
-        if !summary.assistant_text.is_empty() {
-            if summary.assistant_text.ends_with("\n\n") {
-                // Already has a trailing blank line — no separator needed
-            } else if summary.assistant_text.ends_with('\n') {
-                eprintln!();
-            } else {
-                eprint!("\n\n");
+        let term = crate::log::terminal();
+        if let Some(section_stream) = section_stream {
+            // Route every trailer line through the shared section tracker.
+            // The tracker inserts the section-separator blank exactly once
+            // when transitioning into `TrailerMetadata`, so callers do not
+            // need any ad-hoc newline bookkeeping.
+            if let Some(markup) = primary_markup {
+                let rendered = Prose::new(markup).render(&term);
+                section_stream.emit_stderr(Section::TrailerMetadata, &rendered);
             }
-        }
-        if let Some(markup) = primary_markup {
-            let term = crate::log::terminal();
-            let rendered = Prose::new(markup).render(&term);
-            eprintln!("{rendered}");
-        }
-        if let Some(markup) = secondary_markup {
-            let term = crate::log::terminal();
-            let rendered = Prose::new(markup).render(&term);
-            eprintln!("  {rendered}");
+            if let Some(markup) = secondary_markup {
+                let rendered = Prose::new(markup).render(&term);
+                section_stream.emit_stderr(Section::TrailerMetadata, &format!("  {rendered}"));
+            }
+        } else {
+            // Legacy / test fallback: keep the original spacing heuristic
+            // so callers that do not own a section stream still emit a
+            // reasonable separator between stdout text and the trailer.
+            if !summary.assistant_text.is_empty() {
+                if summary.assistant_text.ends_with("\n\n") {
+                    // Already has a trailing blank line — no separator needed.
+                } else if summary.assistant_text.ends_with('\n') {
+                    eprintln!();
+                } else {
+                    eprint!("\n\n");
+                }
+            }
+            if let Some(markup) = primary_markup {
+                let rendered = Prose::new(markup).render(&term);
+                eprintln!("{rendered}");
+            }
+            if let Some(markup) = secondary_markup {
+                let rendered = Prose::new(markup).render(&term);
+                eprintln!("  {rendered}");
+            }
         }
     }
 
