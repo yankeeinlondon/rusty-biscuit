@@ -262,6 +262,9 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         if let Some(name) = fields.resolved_tool_name() {
             extra.insert("tool_name".into(), Value::from(name));
         }
+        if let Some(status) = &fields.status {
+            extra.insert("status".into(), Value::from(status.as_str()));
+        }
         SemanticEvent::ToolCall {
             name: fields.resolved_tool_name().map(String::from),
             id: fields.resolved_tool_id().map(String::from),
@@ -988,6 +991,35 @@ mod tests {
         assert_eq!(
             summary.badges[0].category,
             crate::stream::badges::BadgeCategory::RateLimit
+        );
+    }
+
+    #[test]
+    fn tool_call_extra_includes_status_when_present_on_started() {
+        // Task 2d.1 regression: Codex emits `status="in_progress"` on
+        // `item.started` for tool items. Previously the started-path
+        // helper dropped it; the completed-path did not. This test locks
+        // the symmetric behavior.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"thread.started","thread_id":"th-1"}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","tool_name":"bash","status":"in_progress","input":{"command":"ls"}}}"#)
+            .unwrap();
+        let call = events
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|e| match e {
+                SemanticEvent::ToolCall { extra, .. } => Some(extra.clone()),
+                _ => None,
+            })
+            .expect("ToolCall emitted");
+        assert_eq!(
+            call.get("status").and_then(|v| v.as_str()),
+            Some("in_progress"),
+            "status from item.started must be copied to ToolCall.extra: got {call:?}"
         );
     }
 }
