@@ -60,7 +60,7 @@ impl SectionTracker {
         let is_blank = line.trim().is_empty();
         let section_changed = self.last_section.is_some_and(|s| s != section);
 
-        let needs_separator = section_changed && !self.last_was_blank;
+        let needs_separator = section_changed && !self.last_was_blank && !is_blank;
 
         if is_blank && self.last_was_blank {
             self.last_section = Some(section);
@@ -213,5 +213,24 @@ mod tests {
         let (s, buf) = recorder_pair();
         s.emit_stderr(Section::ExecutionLine, "header");
         assert_eq!(lines(&buf), vec!["header"]);
+    }
+
+    #[test]
+    fn section_change_with_blank_start_does_not_double_blank() {
+        let (s, buf) = recorder_pair();
+        s.emit_stderr(Section::SessionAndModel, "- Session id …");
+        s.emit_stderr(Section::ToolUseAndEvents, "");
+        s.emit_stderr(Section::ToolUseAndEvents, "→ Bash");
+        assert_eq!(lines(&buf), vec!["- Session id …", "", "→ Bash"]);
+    }
+
+    #[test]
+    fn section_change_with_double_blank_boundary_does_not_triple_blank() {
+        let (s, buf) = recorder_pair();
+        s.emit_stderr(Section::SessionAndModel, "- Session id …");
+        s.emit_stderr(Section::SessionAndModel, "");
+        s.emit_stderr(Section::ToolUseAndEvents, "");
+        s.emit_stderr(Section::ToolUseAndEvents, "→ Bash");
+        assert_eq!(lines(&buf), vec!["- Session id …", "", "→ Bash"]);
     }
 }
