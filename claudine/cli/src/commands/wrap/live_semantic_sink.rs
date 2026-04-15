@@ -45,7 +45,7 @@ use claudine::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus}
 use serde_json::Value;
 
 use super::StructuredSummaryDetails;
-use super::section::Section;
+use super::section::{Section, SectionTracker};
 use super::stream_io::StreamOutput;
 
 /// Borrow-friendly terminal used for status rendering. Mirrors the helper in
@@ -68,10 +68,6 @@ pub(crate) type StderrEmitFn = Box<dyn Fn(&str) + Send + Sync + 'static>;
 /// `exec.rs` while still letting `OutputText` events flow through the
 /// standard semantic pipeline.
 pub(crate) type OutputTextFn = Box<dyn FnMut(&str) + Send + 'static>;
-
-/// Function type for forwarding reasoning / thinking text to an external
-/// stderr renderer (dimmed + italic).
-pub(crate) type ReasoningFn = Box<dyn FnMut(&str) + Send + 'static>;
 
 /// Function type for recording a semantic event to the JSONL stream log.
 ///
@@ -100,17 +96,13 @@ pub(crate) struct LiveSemanticSink {
     dispatch: SemanticDispatchFn,
     emit_stderr: StderrEmitFn,
     emit_output_text: Option<OutputTextFn>,
-    emit_reasoning: Option<ReasoningFn>,
     emit_event_log: Option<SemanticEventLoggerFn>,
     live_metrics: LiveMetrics,
     stream_output: Arc<StreamOutput>,
-    /// Tracks the last section emitted through [`emit_section_line`] so
-    /// consecutive blanks can be deduped and section transitions can be
-    /// separated by exactly one blank line.
-    last_section: Option<Section>,
-    /// Whether the most recent line emitted through [`emit_section_line`]
-    /// was blank. Used by the same dedup logic as `last_section`.
-    last_line_was_blank: bool,
+    /// Section-spacing state machine shared with [`super::section::SectionStream`].
+    /// Encapsulates the dedup and section-transition logic so both the
+    /// reference implementation and this runtime sink stay in sync.
+    section_tracker: SectionTracker,
 }
 
 impl LiveSemanticSink {
@@ -136,12 +128,10 @@ impl LiveSemanticSink {
             dispatch,
             emit_stderr,
             emit_output_text: None,
-            emit_reasoning: None,
             emit_event_log: None,
             live_metrics: progress::new_live_metrics(),
             stream_output: StreamOutput::new(),
-            last_section: None,
-            last_line_was_blank: false,
+            section_tracker: SectionTracker::new(),
         }
     }
 
@@ -211,12 +201,10 @@ impl LiveSemanticSink {
             dispatch,
             emit_stderr,
             emit_output_text: None,
-            emit_reasoning: None,
             emit_event_log: Some(event_logger),
             live_metrics: progress::new_live_metrics(),
             stream_output,
-            last_section: None,
-            last_line_was_blank: false,
+            section_tracker: SectionTracker::new(),
         }
     }
 
@@ -237,13 +225,6 @@ impl LiveSemanticSink {
     /// stays in one place.
     pub(crate) fn with_output_text_sink(mut self, emit: OutputTextFn) -> Self {
         self.emit_output_text = Some(emit);
-        self
-    }
-
-    /// Wire a stderr-dimmed rendering callback for
-    /// [`SemanticEvent::Reasoning`].
-    pub(crate) fn with_reasoning_sink(mut self, emit: ReasoningFn) -> Self {
-        self.emit_reasoning = Some(emit);
         self
     }
 
@@ -272,29 +253,41 @@ impl LiveSemanticSink {
 
     /// Section-aware stderr emit used by every status render path.
     ///
-    /// Mirrors the dedup logic in
-    /// [`super::section::SectionStream::emit`] but writes through the
-    /// configurable `emit_stderr` closure so tests capturing that closure
-    /// see the same dedup'd output the real stderr would see.
+    /// Delegates to [`SectionTracker::classify`] for the dedup and
+    /// section-transition logic so this sink stays in sync with the
+    /// [`super::section::SectionStream`] reference implementation.
     ///
     /// ## Rules
     /// - Section transitions are separated by exactly one blank line.
     /// - Consecutive blank lines inside a section collapse to one.
     /// - No leading blank line is emitted before the first rendered line.
     fn emit_section_line(&mut self, section: Section, line: &str) {
-        let is_blank = line.trim().is_empty();
-        let section_changed = self.last_section.is_some_and(|s| s != section);
-        if section_changed && !self.last_line_was_blank {
-            (self.emit_stderr)("");
-            self.last_line_was_blank = true;
+        match self.section_tracker.classify(section, line) {
+            None => {}
+            Some((needs_separator, _)) => {
+                if needs_separator {
+                    (self.emit_stderr)("");
+                }
+                (self.emit_stderr)(line);
+            }
         }
-        if is_blank && self.last_line_was_blank {
-            self.last_section = Some(section);
-            return;
+    }
+
+    /// Emit a line tagged as [`Section::TrailerMetadata`], using the
+    /// section tracker for spacing. Intended for post-execution summary
+    /// lines that belong in the trailer section (cost, duration, tool
+    /// rollup).
+    pub(crate) fn emit_trailer_line(&mut self, line: &str) {
+        let section = Section::TrailerMetadata;
+        match self.section_tracker.classify(section, line) {
+            None => {}
+            Some((needs_separator, _)) => {
+                if needs_separator {
+                    (self.emit_stderr)("");
+                }
+                (self.emit_stderr)(line);
+            }
         }
-        (self.emit_stderr)(line);
-        self.last_section = Some(section);
-        self.last_line_was_blank = is_blank;
     }
 
     fn render_status(&mut self, section: Section, state: StatusState, description: String) {
@@ -317,7 +310,7 @@ impl LiveSemanticSink {
             ToolDirection::Incoming => '\u{2190}',
         };
         let slot = match (display.status, display.summary) {
-            (Some(ToolStatus::Success), _) => Some(("success".to_string(), false)),
+            (Some(ToolStatus::Success), _) => Some(("successful".to_string(), false)),
             (Some(ToolStatus::Error), _) => Some(("error".to_string(), true)),
             (Some(ToolStatus::Pending), _) => Some(("pending".to_string(), false)),
             (None, Some(summary)) => Some((summary, false)),
@@ -591,9 +584,6 @@ impl SemanticEventSink for LiveSemanticSink {
                     for line in block.lines() {
                         self.emit_section_line(Section::Thinking, line);
                     }
-                }
-                if let Some(emit) = self.emit_reasoning.as_mut() {
-                    emit(text);
                 }
             }
             _ => {}
@@ -905,10 +895,10 @@ mod tests {
             "input summary must not appear when status is present: {rendered:?}"
         );
         // "completed" is a success-ish status; from_result maps it to
-        // ToolStatus::Success, which renders as "success".
+        // ToolStatus::Success, which renders as "successful".
         assert!(
-            rendered.contains("success"),
-            "expected mapped status word 'success': {rendered:?}"
+            rendered.contains("successful"),
+            "expected mapped status word 'successful': {rendered:?}"
         );
     }
 
@@ -1066,6 +1056,73 @@ mod tests {
         }
     }
 
+    /// Combined section golden test: feed every section transition through
+    /// the sink and verify no two consecutive blank lines exist in the
+    /// combined stderr output.
+    #[test]
+    fn combined_sections_have_no_consecutive_blanks() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+
+        // SessionStart -> SessionAndModel section
+        sink.on_semantic_event(SemanticEvent::SessionStart {
+            session_id: Some("s-combined".into()),
+            model: Some("test-model".into()),
+            extra: json!({}),
+        });
+        // Reasoning -> Thinking section
+        sink.on_semantic_event(SemanticEvent::Reasoning {
+            text: "pondering deeply".into(),
+            extra: json!({}),
+        });
+        // ToolCall -> ToolUseAndEvents section
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("Bash".into()),
+            id: Some("t1".into()),
+            input: Some(json!({"command": "echo hello"})),
+            extra: json!({}),
+        });
+        // ToolResult -> stays in ToolUseAndEvents
+        sink.on_semantic_event(SemanticEvent::ToolResult {
+            name: Some("Bash".into()),
+            id: Some("t1".into()),
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: None,
+            extra: json!({}),
+        });
+        // OutputText -> does not emit to stderr (goes to stdout callback)
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "the answer".into(),
+            extra: json!({}),
+        });
+        // TurnComplete -> envelope-only, no section emission
+        sink.on_semantic_event(SemanticEvent::TurnComplete {
+            provider_status: Some("ok".into()),
+            token_usage: None,
+            cost_usd: None,
+            duration_ms: Some(500),
+            extra: json!({}),
+        });
+
+        let collected = lines.lock().unwrap().clone();
+        // Basic sanity: the sink must have emitted something.
+        assert!(!collected.is_empty(), "sink must emit lines: {collected:?}");
+
+        // Core invariant: no two consecutive blank lines.
+        let mut prev_blank = false;
+        for line in &collected {
+            let is_blank = line.trim().is_empty();
+            if is_blank && prev_blank {
+                panic!(
+                    "two consecutive blank lines in combined section output:\n{collected:#?}"
+                );
+            }
+            prev_blank = is_blank;
+        }
+    }
+
     #[test]
     fn tool_call_records_tool_name_in_summary_details() {
         let lines = Arc::new(StdMutex::new(Vec::new()));
@@ -1109,7 +1166,6 @@ mod tests {
         let lines = Arc::new(StdMutex::new(Vec::new()));
         let dispatched = Arc::new(StdMutex::new(Vec::new()));
         let rendered_text = Arc::new(StdMutex::new(String::new()));
-        let rendered_thinking = Arc::new(StdMutex::new(String::new()));
 
         let output_cb = {
             let buf = rendered_text.clone();
@@ -1117,16 +1173,9 @@ mod tests {
                 buf.lock().unwrap().push_str(text);
             })
         };
-        let reasoning_cb = {
-            let buf = rendered_thinking.clone();
-            Box::new(move |text: &str| {
-                buf.lock().unwrap().push_str(text);
-            })
-        };
 
-        let mut sink = make_sink(lines, dispatched)
-            .with_output_text_sink(output_cb)
-            .with_reasoning_sink(reasoning_cb);
+        let mut sink = make_sink(lines.clone(), dispatched)
+            .with_output_text_sink(output_cb);
 
         sink.on_semantic_event(SemanticEvent::OutputText {
             text: "hello ".into(),
@@ -1142,7 +1191,14 @@ mod tests {
         });
 
         assert_eq!(*rendered_text.lock().unwrap(), "hello world");
-        assert_eq!(*rendered_thinking.lock().unwrap(), "pondering");
+        // Reasoning is now rendered directly by LiveSemanticSink via
+        // render_thinking_block into the stderr lines (not through an
+        // external callback).
+        let captured = lines.lock().unwrap().join("\n");
+        assert!(
+            captured.contains("pondering"),
+            "reasoning text must appear in stderr: {captured:?}"
+        );
     }
 
     #[test]
@@ -1431,7 +1487,7 @@ mod tests {
         });
         let rendered = lines.lock().unwrap().join("\n");
         assert!(rendered.contains("Firecrawl Search"));
-        assert!(rendered.contains("success"));
+        assert!(rendered.contains("successful"));
         assert!(rendered.contains('\u{2190}'));
     }
 
@@ -1957,6 +2013,82 @@ mod tests {
                     prev_blank = is_blank;
                 }
             }
+        }
+
+        /// Regression test for the duplicate-reasoning fix.
+        ///
+        /// Before the fix, reasoning was rendered twice on the structured-
+        /// stream path:
+        /// 1. `LiveSemanticSink` rendered it as a BlockQuote via
+        ///    `render_thinking_block`.
+        /// 2. `StreamThinkingRenderer` in `exec.rs` ALSO rendered it via
+        ///    the `reasoning_cb` callback (emitting a dim "Thinking..."
+        ///    header plus dimmed lines).
+        ///
+        /// After the fix, `LiveSemanticSink` owns reasoning rendering
+        /// end-to-end. The `reasoning_cb` is a no-op. This test verifies:
+        /// - Reasoning text appears in stderr exactly once.
+        /// - The old "Thinking..." header from `StreamThinkingRenderer`
+        ///   does NOT appear.
+        #[test]
+        fn reasoning_appears_exactly_once_in_stderr() {
+            let lines: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+            let dispatched: Arc<StdMutex<Vec<(AgenticEvent, String)>>> =
+                Arc::new(StdMutex::new(Vec::new()));
+
+            let dispatch = {
+                let cap = dispatched.clone();
+                Box::new(move |ev: AgenticEvent, _meta: DispatchEventMeta| {
+                    cap.lock().unwrap().push((ev, String::new()));
+                })
+                    as Box<dyn Fn(AgenticEvent, DispatchEventMeta) + Send + Sync + 'static>
+            };
+            let emit = {
+                let cap = lines.clone();
+                Box::new(move |line: &str| {
+                    cap.lock().unwrap().push(line.to_string());
+                }) as Box<dyn Fn(&str) + Send + Sync + 'static>
+            };
+
+            let mut sink = LiveSemanticSink::new(
+                Provider::Claude,
+                EnvironmentContext::default(),
+                Path::new("/tmp"),
+                Verbosity::Normal,
+                Arc::new(Mutex::new(StructuredSummaryDetails::default())),
+                dispatch,
+                emit,
+            );
+
+            // Feed a reasoning event directly (simulating what the parser
+            // would emit after parsing a thinking content block).
+            sink.on_semantic_event(SemanticEvent::Reasoning {
+                text: "Let me analyze this step by step.".into(),
+                extra: json!({}),
+            });
+
+            let captured = lines.lock().unwrap().join("\n");
+
+            // Reasoning text must appear in stderr.
+            assert!(
+                captured.contains("analyze this step by step"),
+                "reasoning text must appear in stderr: {captured:?}"
+            );
+
+            // The old StreamThinkingRenderer "Thinking..." header must NOT
+            // appear — that was the duplicate-rendering artifact.
+            assert!(
+                !captured.contains("Thinking..."),
+                "old StreamThinkingRenderer header must not appear: {captured:?}"
+            );
+
+            // Count occurrences of the reasoning text to verify it appears
+            // exactly once (not duplicated).
+            let count = captured.matches("analyze this step by step").count();
+            assert_eq!(
+                count, 1,
+                "reasoning text must appear exactly once, found {count} times: {captured:?}"
+            );
         }
     }
 }

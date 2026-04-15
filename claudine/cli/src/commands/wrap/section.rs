@@ -14,9 +14,9 @@ use super::stream_io::StreamOutput;
 /// to stdout; the other eight route to stderr.
 ///
 /// Used directly by `LiveSemanticSink::emit_section_line` to tag lines for
-/// inter-section spacing. The `FinalStdout` variant is reserved for the
-/// `SectionStream` reference implementation below and is not used on the
-/// runtime path today.
+/// inter-section spacing. The `FinalStdout` variant is used by
+/// `SectionStream` for stdout routing and is being wired into the runtime
+/// path incrementally.
 #[allow(dead_code)] // FinalStdout reserved for SectionStream
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
@@ -31,25 +31,61 @@ pub enum Section {
     TrailerMetadata,
 }
 
+/// Shared state machine for section-spacing logic.
+///
+/// Encapsulates the dedup rules used by both [`SectionStream`] (the
+/// reference implementation) and [`super::live_semantic_sink::LiveSemanticSink`]
+/// (the runtime path). Keeping the logic in one place prevents drift.
+///
+/// ## Rules
+/// - Section transitions are separated by exactly one blank line.
+/// - Consecutive blank lines inside a section collapse to one.
+/// - No leading blank line is emitted before the first rendered line.
+#[derive(Default)]
+pub struct SectionTracker {
+    last_section: Option<Section>,
+    last_was_blank: bool,
+}
+
+impl SectionTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Classifies a line for section-spacing purposes.
+    ///
+    /// Returns `None` if the line should be suppressed (consecutive blank
+    /// dedup). Returns `Some((needs_section_separator, is_blank))` otherwise.
+    pub fn classify(&mut self, section: Section, line: &str) -> Option<(bool, bool)> {
+        let is_blank = line.trim().is_empty();
+        let section_changed = self.last_section.is_some_and(|s| s != section);
+
+        let needs_separator = section_changed && !self.last_was_blank;
+
+        if is_blank && self.last_was_blank {
+            self.last_section = Some(section);
+            return None;
+        }
+
+        self.last_section = Some(section);
+        self.last_was_blank = is_blank;
+        Some((needs_separator, is_blank))
+    }
+}
+
 /// Thin wrapper around `StreamOutput` that:
 /// - tags each emit with its `Section`,
 /// - dedupes consecutive blank emissions,
 /// - guarantees at most one blank between adjacent sections.
 ///
-/// Reference implementation of the section-spacing invariants. The runtime
-/// path inlines equivalent logic in `LiveSemanticSink`; this type is kept
-/// as a standalone, test-covered specification of the invariant.
+/// Reference implementation of the section-spacing invariants. Uses
+/// [`SectionTracker`] internally so the logic stays in sync with
+/// `LiveSemanticSink`.
 #[allow(dead_code)] // reference implementation; see LiveSemanticSink for runtime path
 #[derive(Clone)]
 pub struct SectionStream {
     inner: Arc<StreamOutput>,
-    state: Arc<Mutex<SectionState>>,
-}
-
-#[derive(Default)]
-struct SectionState {
-    last_section: Option<Section>,
-    last_was_blank: bool,
+    state: Arc<Mutex<SectionTracker>>,
 }
 
 #[allow(dead_code)] // reference impl; exercised by unit tests below
@@ -57,7 +93,7 @@ impl SectionStream {
     pub fn new(inner: Arc<StreamOutput>) -> Self {
         Self {
             inner,
-            state: Arc::new(Mutex::new(SectionState::default())),
+            state: Arc::new(Mutex::new(SectionTracker::new())),
         }
     }
 
@@ -74,27 +110,19 @@ impl SectionStream {
     }
 
     fn emit(&self, section: Section, line: &str, to_stdout: bool) {
-        let mut state = self.state.lock().unwrap();
-        let is_blank = line.trim().is_empty();
-        let section_changed = state.last_section.is_some_and(|s| s != section);
-        // Section transition: ensure exactly one blank line between sections.
-        if section_changed && !state.last_was_blank {
+        let mut tracker = self.state.lock().unwrap();
+        let Some((needs_separator, _)) = tracker.classify(section, line) else {
+            return;
+        };
+        if needs_separator {
             // Section separator always goes to stderr.
             self.inner.emit_stderr_line("");
-            state.last_was_blank = true;
-        }
-        // Dedup consecutive blanks.
-        if is_blank && state.last_was_blank {
-            state.last_section = Some(section);
-            return;
         }
         if to_stdout {
             self.inner.emit_stdout_line(line);
         } else {
             self.inner.emit_stderr_line(line);
         }
-        state.last_section = Some(section);
-        state.last_was_blank = is_blank;
     }
 }
 

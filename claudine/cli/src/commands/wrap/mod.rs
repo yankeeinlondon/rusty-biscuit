@@ -1324,10 +1324,8 @@ fn run_provider_wrapper_inner(
             let live_metrics = sink.live_metrics();
             let stream_output = sink.stream_output();
             let build_parser: exec::SemanticParserBuilder =
-                Box::new(move |output_cb, reasoning_cb| {
-                    let sink = sink
-                        .with_output_text_sink(output_cb)
-                        .with_reasoning_sink(reasoning_cb);
+                Box::new(move |output_cb, _reasoning_cb| {
+                    let sink = sink.with_output_text_sink(output_cb);
                     claudine::stream::create_semantic_parser(provider, sink, parser_config)
                 });
             let mut _spawned = false;
@@ -1368,6 +1366,7 @@ fn run_provider_wrapper_inner(
                 std::io::stdout().flush()?;
             }
 
+            // TODO: Route through sink.emit_trailer_line() for section-aware spacing
             emit_stream_summary(
                 &summary,
                 profile,
@@ -1754,10 +1753,8 @@ fn execute_harness_attempt(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
-        let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, reasoning_cb| {
-            let sink = sink
-                .with_output_text_sink(output_cb)
-                .with_reasoning_sink(reasoning_cb);
+        let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb| {
+            let sink = sink.with_output_text_sink(output_cb);
             claudine::stream::create_semantic_parser(provider, sink, parser_config)
         });
         let stream_result = exec::run_child_stream_semantic(
@@ -1798,6 +1795,7 @@ fn execute_harness_attempt(
             std::io::stdout().flush()?;
         }
 
+        // TODO: Route through sink.emit_trailer_line() for section-aware spacing
         emit_stream_summary(
             &summary,
             profile,

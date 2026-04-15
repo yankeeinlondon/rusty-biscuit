@@ -212,12 +212,22 @@ fn is_stream_safe_list_item(line: &str) -> bool {
 ///
 /// Writes to stderr using short-lived locks to avoid blocking the separate
 /// stderr processing thread.
+///
+/// ## Note
+///
+/// This renderer is **no longer wired** into the structured-stream path.
+/// `LiveSemanticSink` now owns reasoning rendering end-to-end via
+/// [`render_thinking_block`], emitting a BlockQuote through the section-aware
+/// stderr emitter. The struct and its methods are retained for potential
+/// future use outside the structured path.
+#[allow(dead_code)]
 struct StreamThinkingRenderer {
     buffer: String,
     active: bool,
 }
 
 impl StreamThinkingRenderer {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self {
             buffer: String::new(),
@@ -225,6 +235,7 @@ impl StreamThinkingRenderer {
         }
     }
 
+    #[allow(dead_code)]
     fn push(&mut self, text: &str) {
         if !self.active {
             // Emit a dim+italic "Thinking..." header on first thinking chunk
@@ -245,6 +256,7 @@ impl StreamThinkingRenderer {
 
     /// Flush remaining thinking text and reset state when switching to
     /// assistant text or finishing the stream.
+    #[allow(dead_code)]
     fn flush_if_active(&mut self) {
         if !self.active {
             return;
@@ -259,6 +271,7 @@ impl StreamThinkingRenderer {
         self.active = false;
     }
 
+    #[allow(dead_code)]
     fn render_dim(text: &str) -> String {
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable;
@@ -266,6 +279,7 @@ impl StreamThinkingRenderer {
         Prose::new(format!("<dim>{safe}</dim>")).render(&crate::log::terminal())
     }
 
+    #[allow(dead_code)]
     fn render_dim_italic(text: &str) -> String {
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable;
@@ -953,12 +967,12 @@ pub(crate) type ReasoningCallback = Box<dyn FnMut(&str) + Send + 'static>;
 /// Factory signature used by [`run_child_stream_semantic`] to construct the
 /// parser inside the stdout reader thread.
 ///
-/// The caller receives two callbacks tied to terminal-thread-local renderers
-/// (stdout markdown for [`SemanticEvent::OutputText`] and dimmed stderr for
-/// [`SemanticEvent::Reasoning`]) and returns a fully-wired parser. The
-/// expected pattern is to attach the callbacks to a [`LiveSemanticSink`] via
-/// its `with_output_text_sink` / `with_reasoning_sink` builders, then call
-/// [`claudine::stream::create_semantic_parser`].
+/// The caller receives two callbacks: one for stdout markdown
+/// ([`SemanticEvent::OutputText`]) and one for reasoning text
+/// ([`SemanticEvent::Reasoning`]). The reasoning callback is currently a
+/// no-op in the structured-stream path because `LiveSemanticSink` renders
+/// reasoning directly through its section-aware stderr emitter. The second
+/// parameter is retained for signature compatibility.
 ///
 /// [`SemanticEvent::OutputText`]: claudine::stream::semantic::SemanticEvent::OutputText
 /// [`SemanticEvent::Reasoning`]: claudine::stream::semantic::SemanticEvent::Reasoning
@@ -976,9 +990,9 @@ pub(crate) type SemanticParserBuilder = Box<
 /// [`SemanticEvent`]s, the parser drives a [`SemanticEventSink`] that the
 /// caller has already wired up for status rendering, dispatch, metrics,
 /// and JSONL logging. This function's only rendering responsibility is
-/// wiring the terminal-local `StreamTextRenderer` /
-/// `StreamThinkingRenderer` instances to the sink through the builder
-/// callback so they can run inside the parser thread.
+/// wiring the terminal-local `StreamTextRenderer` instance to the sink
+/// through the builder callback so it can run inside the parser thread.
+/// Reasoning rendering is owned entirely by `LiveSemanticSink`.
 ///
 /// [`SemanticEventSink`]: claudine::stream::semantic::SemanticEventSink
 #[allow(clippy::too_many_arguments)]
@@ -1047,36 +1061,28 @@ pub(crate) fn run_child_stream_semantic(
         let reader = BufReader::new(stdout_pipe);
         let mut out = stdout_output.stdout_writer();
 
-        // Terminal-local renderers for OutputText (stdout markdown) and
-        // Reasoning (dimmed stderr). Wrapped in Arc<Mutex<_>> so the builder
-        // closures can retain independent handles without untangling lifetimes
-        // across the FnMut boundary of the sink's callback storage.
+        // Terminal-local renderer for OutputText (stdout markdown). Wrapped
+        // in Arc<Mutex<_>> so the builder closures can retain independent
+        // handles without untangling lifetimes across the FnMut boundary of
+        // the sink's callback storage.
+        //
+        // Note: reasoning rendering is owned entirely by LiveSemanticSink,
+        // which emits BlockQuote-formatted thinking text through the
+        // section-aware stderr emitter. The reasoning_cb passed to the
+        // parser builder is a no-op.
         let text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
             Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
-        let thinking_renderer: Arc<std::sync::Mutex<StreamThinkingRenderer>> =
-            Arc::new(std::sync::Mutex::new(StreamThinkingRenderer::new()));
 
         let output_cb: OutputTextCallback = {
             let text = text_renderer.clone();
-            let thinking = thinking_renderer.clone();
             let mut writer = stdout_output.stdout_writer();
             Box::new(move |chunk: &str| {
-                if let Ok(mut tr) = thinking.lock() {
-                    tr.flush_if_active();
-                }
                 if let Ok(mut r) = text.lock() {
                     r.push(&mut writer, chunk);
                 }
             })
         };
-        let reasoning_cb: ReasoningCallback = {
-            let thinking = thinking_renderer.clone();
-            Box::new(move |chunk: &str| {
-                if let Ok(mut tr) = thinking.lock() {
-                    tr.push(chunk);
-                }
-            })
-        };
+        let reasoning_cb: ReasoningCallback = Box::new(|_chunk: &str| {});
 
         let mut parser: Box<dyn SemanticStreamParser> = build_parser(output_cb, reasoning_cb);
         let mut fallback_mode = false;
@@ -1098,9 +1104,6 @@ pub(crate) fn run_child_stream_semantic(
                     tracing::debug!("skipping malformed stream line: {line}");
                 }
                 Err(StreamParseError::Fatal(_)) => {
-                    if let Ok(mut tr) = thinking_renderer.lock() {
-                        tr.flush_if_active();
-                    }
                     if let Ok(mut r) = text_renderer.lock() {
                         r.flush_remaining(&mut out);
                     }
@@ -1110,9 +1113,6 @@ pub(crate) fn run_child_stream_semantic(
             }
         }
 
-        if let Ok(mut tr) = thinking_renderer.lock() {
-            tr.flush_if_active();
-        }
         if let Ok(mut r) = text_renderer.lock() {
             r.flush_remaining(&mut out);
         }

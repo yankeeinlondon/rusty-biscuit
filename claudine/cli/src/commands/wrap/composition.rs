@@ -1086,6 +1086,7 @@ fn execute_inline_without_harness(
         if stream_verbosity != Verbosity::Silent {
             eprintln!();
         }
+        // TODO: Route through sink.emit_trailer_line() for section-aware spacing
         emit_stream_summary_no_separator_with_context(
             &summary,
             profile,
@@ -1144,10 +1145,8 @@ fn run_structured_inline(
     .with_context_extra(dispatch_context.clone());
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
-    let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, reasoning_cb| {
-        let sink = sink
-            .with_output_text_sink(output_cb)
-            .with_reasoning_sink(reasoning_cb);
+    let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb| {
+        let sink = sink.with_output_text_sink(output_cb);
         claudine::stream::create_semantic_parser(provider, sink, parser_config)
     });
     let stream_result = exec::run_child_stream_semantic(
@@ -1410,10 +1409,8 @@ fn execute_direct_without_harness(
         .with_context_extra(dispatch_context.clone());
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
-        let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, reasoning_cb| {
-            let sink = sink
-                .with_output_text_sink(output_cb)
-                .with_reasoning_sink(reasoning_cb);
+        let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb| {
+            let sink = sink.with_output_text_sink(output_cb);
             claudine::stream::create_semantic_parser(provider, sink, parser_config)
         });
         let stream_result = exec::run_child_stream_semantic(
@@ -1456,6 +1453,7 @@ fn execute_direct_without_harness(
             std::io::stdout().flush()?;
         }
 
+        // TODO: Route through sink.emit_trailer_line() for section-aware spacing
         emit_stream_summary_with_context(
             &summary,
             profile,
