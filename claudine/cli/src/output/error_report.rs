@@ -27,10 +27,12 @@ pub(crate) struct AgentErrorReport {
     pub(crate) detail: Option<String>,
     pub(crate) hint: Option<String>,
     pub(crate) suggestions: Option<Vec<String>>,
+    #[allow(dead_code)]
     pub(crate) location: Option<String>,
 }
 
 impl AgentErrorReport {
+    #[allow(dead_code)]
     pub(crate) fn from_exit_code(provider: Provider, exit_code: i32, stderr: Option<&str>) -> Self {
         Self::from_exit_code_with_source(provider, exit_code, stderr, None)
     }
@@ -77,6 +79,7 @@ impl AgentErrorReport {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn invalid_model(
         provider: Provider,
         exit_code: i32,
@@ -141,24 +144,25 @@ impl AgentErrorReport {
         log::message("");
         log::message(&block.render(term));
 
-        if let Some(ref suggestions) = self.suggestions {
-            if !suggestions.is_empty() {
-                let suggestion_items: Vec<String> = suggestions
-                    .iter()
-                    .map(|s| format!("<yellow>{s}</yellow>"))
-                    .collect();
-                let list = UnorderedList::new(suggestion_items);
-                let header =
-                    Status::from_prose("Did you mean:".to_string()).state(StatusState::Warning);
-                log::message(&header.render(term));
-                log::message(&list.render(term));
-            }
+        if let Some(ref suggestions) = self.suggestions
+            && !suggestions.is_empty()
+        {
+            let suggestion_items: Vec<String> = suggestions
+                .iter()
+                .map(|s| format!("<yellow>{s}</yellow>"))
+                .collect();
+            let list = UnorderedList::new(suggestion_items);
+            let header =
+                Status::from_prose("Did you mean:".to_string()).state(StatusState::Warning);
+            log::message(&header.render(term));
+            log::message(&list.render(term));
         }
 
         log::message("");
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn classify_exit(
     provider: Provider,
     exit_code: i32,
@@ -212,6 +216,7 @@ fn classify_exit(
     )
 }
 
+#[allow(clippy::type_complexity)]
 fn classify_native_cli_error(
     exit_code: i32,
     stderr: &str,
