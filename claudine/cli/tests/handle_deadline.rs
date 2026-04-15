@@ -2,6 +2,7 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin_cmd;
+use serial_test::serial;
 
 mod common;
 use common::TestWorkspace;
@@ -10,6 +11,7 @@ use common::TestWorkspace;
 /// and a representative Gemini payload must complete in well under the 15s
 /// default deadline. This locks in the 2026-04-14 fix for the 30s hook hang.
 #[test]
+#[serial]
 fn handle_turn_complete_fast_path_completes_under_3s() {
     let workspace = TestWorkspace::named("claudine-handle-deadline-it");
     let home_dir = workspace.path().join("home");
@@ -50,6 +52,7 @@ fn handle_turn_complete_fast_path_completes_under_3s() {
 /// with a stderr diagnostic. Uses a shorter deadline than the 15s default
 /// so the test stays fast.
 #[test]
+#[serial]
 fn handle_exits_on_deadline() {
     use std::process::{Command, Stdio};
 

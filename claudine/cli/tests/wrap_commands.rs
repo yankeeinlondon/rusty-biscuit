@@ -2069,6 +2069,7 @@ fn inline_compose_preserves_frontmatter() {
 
 #[cfg(unix)]
 #[test]
+#[serial_test::serial]
 fn inline_compose_file_changed_post_check_sees_closure_artifact() {
     // Verifies that file-state post_checks like `file_changed` evaluate
     // AFTER inline closure has rewritten the document, not before.
@@ -2712,6 +2713,7 @@ fn retired_prompt_file_flag_rejected_in_wrapper() {
 
 #[cfg(unix)]
 #[test]
+#[serial_test::serial]
 fn repo_scoped_config_favorite_selects_provider() {
     // Verifies that a repo-level .claudine/config.json with a linking
     // preference is consulted during composition selection so the
@@ -3605,6 +3607,7 @@ exit 0
 /// 4. The session-id marker and the trailer render on stderr.
 #[cfg(unix)]
 #[test]
+#[serial_test::serial]
 fn opencode_structured_e2e_stdout_and_section_spacing() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
