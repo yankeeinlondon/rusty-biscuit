@@ -77,8 +77,8 @@ Walks the precedence list and returns the first hit. Reading the OpenCode config
 - Delete `apply_non_interactive_defaults` (lines 1455–1464)
 - Replace `validate_non_interactive_requirements` (lines 1466–1476) with a call to the resolver
 - New branch in the OpenCode launch path:
-  - `CliSwitch(m)` / `OpenCodeModelEnv(m)` → push `--model m` onto args, `MODEL=m` onto env (existing write, unchanged)
-  - `ConfigDefault(m)` → **do not** push `--model` (let OpenCode read its own config), but still push `MODEL=m` onto env for log consistency
+    - `CliSwitch(m)` / `OpenCodeModelEnv(m)` → push `--model m` onto args, `MODEL=m` onto env (existing write, unchanged)
+    - `ConfigDefault(m)` → **do not** push `--model` (let OpenCode read its own config), but still push `MODEL=m` onto env for log consistency
 - The resolved `OpenCodeModelSource` is stored on the run context so post-exit classification can read it
 
 ### Status log
@@ -137,8 +137,8 @@ The classifier also takes the `OpenCodeModelSource` (threaded through from the l
   > No model specified! OpenCode by default does not specify a model but you can change this behavior by adding a `<yellow>model</yellow>` property to the `<blue>~/.config/opencode/config.json</blue>` file. You can override/set the default model with any of the following methods:
 
 - UnorderedList:
-  - `set <yellow>OPENCODE_MODEL</yellow> to a valid model name`
-  - `use the CLI switch <yellow>--model <model></yellow>`
+    - `set <yellow>OPENCODE_MODEL</yellow> to a valid model name`
+    - `use the CLI switch <yellow>--model <model></yellow>`
 
 - Blank line
 
@@ -156,9 +156,9 @@ No text is rendered above the BlockQuote. Claudine exits with code 1 without spa
   > Invalid model specified in `{location}`! Running `<yellow>opencode models</yellow>` will give you a list of all valid models. Model names follow the format `<dim>[provider]</dim>/<dim>[model]</dim>` for direct providers like Google or Anthropic but take the form `<dim>[aggregator]</dim>/<dim>[provider]</dim>/<dim>[model]</dim>` for aggregators like OpenRouter.
 
 - If OpenCode returned suggestions:
-  - Blank line
-  - `Did you mean:`
-  - UnorderedList of `<yellow>{suggestion}</yellow>` items
+    - Blank line
+    - `Did you mean:`
+    - UnorderedList of `<yellow>{suggestion}</yellow>` items
 
 No text above the BlockQuote. No redundant `OpenCode exited with error code N` line.
 
@@ -191,17 +191,17 @@ launch non-interactive OpenCode
 ### Unit tests
 
 - `resolve_opencode_model`:
-  - Returns `CliSwitch` when cli_model is Some
-  - Returns `OpenCodeModelEnv` when OPENCODE_MODEL is set and cli_model is None
-  - Returns `ConfigDefault` when config.json has a valid `model`
-  - Returns `Err(NoModelProvided)` when none of the above
-  - CLI beats `OPENCODE_MODEL` when both are set (precedence)
-  - CLI beats config-file default when both are set (precedence)
-  - `OPENCODE_MODEL` beats config-file default when both are set (precedence)
-  - `MODEL` env variable is ignored entirely (set only MODEL, assert `NoModelProvided`)
-  - Malformed config.json → `NoModelProvided`
-  - Missing config.json → `NoModelProvided`
-  - Empty-string `model` → `NoModelProvided`
+    - Returns `CliSwitch` when cli_model is Some
+    - Returns `OpenCodeModelEnv` when OPENCODE_MODEL is set and cli_model is None
+    - Returns `ConfigDefault` when config.json has a valid `model`
+    - Returns `Err(NoModelProvided)` when none of the above
+    - CLI beats `OPENCODE_MODEL` when both are set (precedence)
+    - CLI beats config-file default when both are set (precedence)
+    - `OPENCODE_MODEL` beats config-file default when both are set (precedence)
+    - `MODEL` env variable is ignored entirely (set only MODEL, assert `NoModelProvided`)
+    - Malformed config.json → `NoModelProvided`
+    - Missing config.json → `NoModelProvided`
+    - Empty-string `model` → `NoModelProvided`
 - Use `serial_test` for env-var tests, `tempfile` + HOME override for config-file tests
 
 ### Classifier tests

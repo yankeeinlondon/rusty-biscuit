@@ -707,11 +707,7 @@ impl WrapperProfile for ClaudeWrapper {
         prompt: &str,
         non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        if non_interactive {
-            Ok(PromptDelivery::Stdin(prompt.to_string()))
-        } else {
-            Ok(PromptDelivery::AppendArgs(vec![prompt.to_string()]))
-        }
+        Ok(prompt_delivery_stdin_or_append(prompt, non_interactive, &[]))
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
@@ -736,10 +732,7 @@ impl WrapperProfile for ClaudeWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        args.push("--print".to_string());
-        args.push("--verbose".to_string());
-        args.push("--output-format".to_string());
-        args.push("stream-json".to_string());
+        push_stream_json_flags(args, &["--print", "--verbose"]);
     }
 }
 
@@ -1113,14 +1106,7 @@ impl WrapperProfile for GeminiWrapper {
         prompt: &str,
         non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        Ok(PromptDelivery::AppendArgs(vec![
-            if non_interactive {
-                "--prompt".to_string()
-            } else {
-                "--prompt-interactive".to_string()
-            },
-            prompt.to_string(),
-        ]))
+        Ok(prompt_delivery_append_flags(prompt, non_interactive, "--prompt", "--prompt-interactive"))
     }
 
     fn supports_structured_stream(&self) -> bool {
@@ -1132,8 +1118,7 @@ impl WrapperProfile for GeminiWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        args.push("--output-format".to_string());
-        args.push("stream-json".to_string());
+        push_stream_json_flags(args, &[]);
     }
 
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
@@ -1237,14 +1222,7 @@ impl WrapperProfile for KimiWrapper {
         prompt: &str,
         non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        if non_interactive {
-            Ok(PromptDelivery::Stdin(prompt.to_string()))
-        } else {
-            Ok(PromptDelivery::AppendArgs(vec![
-                "--prompt".to_string(),
-                prompt.to_string(),
-            ]))
-        }
+        Ok(prompt_delivery_stdin_or_append(prompt, non_interactive, &["--prompt"]))
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
@@ -1269,9 +1247,7 @@ impl WrapperProfile for KimiWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        args.push("--print".to_string());
-        args.push("--output-format".to_string());
-        args.push("stream-json".to_string());
+        push_stream_json_flags(args, &["--print"]);
     }
 
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
@@ -1392,14 +1368,7 @@ impl WrapperProfile for QwenWrapper {
         prompt: &str,
         non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        Ok(PromptDelivery::AppendArgs(vec![
-            if non_interactive {
-                "--prompt".to_string()
-            } else {
-                "--prompt-interactive".to_string()
-            },
-            prompt.to_string(),
-        ]))
+        Ok(prompt_delivery_append_flags(prompt, non_interactive, "--prompt", "--prompt-interactive"))
     }
 
     fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
@@ -1423,8 +1392,7 @@ impl WrapperProfile for QwenWrapper {
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        args.push("--output-format".to_string());
-        args.push("stream-json".to_string());
+        push_stream_json_flags(args, &[]);
     }
 
     fn prompt_arg_conventions(&self) -> PromptArgConventions {
@@ -1792,6 +1760,35 @@ fn option_value(args: &[String], option: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn push_stream_json_flags(args: &mut Vec<String>, extra: &[&str]) {
+    for flag in extra {
+        args.push((*flag).to_string());
+    }
+    args.push("--output-format".to_string());
+    args.push("stream-json".to_string());
+}
+
+fn prompt_delivery_stdin_or_append(prompt: &str, non_interactive: bool, interactive_flags: &[&str]) -> PromptDelivery {
+    if non_interactive {
+        PromptDelivery::Stdin(prompt.to_string())
+    } else {
+        let mut args = interactive_flags.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        args.push(prompt.to_string());
+        PromptDelivery::AppendArgs(args)
+    }
+}
+
+fn prompt_delivery_append_flags(prompt: &str, non_interactive: bool, non_interactive_flag: &str, interactive_flag: &str) -> PromptDelivery {
+    PromptDelivery::AppendArgs(vec![
+        if non_interactive {
+            non_interactive_flag.to_string()
+        } else {
+            interactive_flag.to_string()
+        },
+        prompt.to_string(),
+    ])
 }
 
 // ---------------------------------------------------------------------------
