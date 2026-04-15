@@ -1,10 +1,96 @@
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use claudine::events::Provider;
 use claudine::stream::StreamProtocol;
 use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail, eyre};
+
+// ---------------------------------------------------------------------------
+// OpenCode model resolution (Phase 1)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OpenCodeModelSource {
+    CliSwitch(String),
+    OpenCodeModelEnv(String),
+    ConfigDefault(String),
+}
+
+impl OpenCodeModelSource {
+    pub(crate) fn model(&self) -> &str {
+        match self {
+            Self::CliSwitch(m) | Self::OpenCodeModelEnv(m) | Self::ConfigDefault(m) => m,
+        }
+    }
+
+    pub(crate) fn status_markup(&self) -> String {
+        let model = self.model();
+        match self {
+            Self::CliSwitch(_) => format!(
+                "<dim><i>using the </i><yellow>{model}</yellow><i> based on the CLI switch override used by caller</i></dim>"
+            ),
+            Self::OpenCodeModelEnv(_) => format!(
+                "<dim><i>using the </i><yellow>{model}</yellow><i> based on the OPENCODE_MODEL environment variable</i></dim>"
+            ),
+            Self::ConfigDefault(_) => format!(
+                "<dim><i>using the </i><b>{model}</b><i> because this is the default configured in <blue>~/.config/opencode/config.json</blue></i></dim>"
+            ),
+        }
+    }
+
+    pub(crate) fn location_string(&self) -> &'static str {
+        match self {
+            Self::CliSwitch(_) => "the --model CLI switch",
+            Self::OpenCodeModelEnv(_) => "the OPENCODE_MODEL environment variable",
+            Self::ConfigDefault(_) => "the config file ~/.config/opencode/config.json",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NoModelProvided;
+
+impl std::fmt::Display for NoModelProvided {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "no model provided")
+    }
+}
+
+impl std::error::Error for NoModelProvided {}
+
+pub(crate) fn resolve_opencode_model(
+    cli_model: Option<&str>,
+) -> std::result::Result<OpenCodeModelSource, NoModelProvided> {
+    if let Some(m) = cli_model {
+        return Ok(OpenCodeModelSource::CliSwitch(m.to_string()));
+    }
+
+    if let Some(m) = non_empty_env_var("OPENCODE_MODEL") {
+        return Ok(OpenCodeModelSource::OpenCodeModelEnv(m));
+    }
+
+    if let Some(m) = read_opencode_config_model() {
+        return Ok(OpenCodeModelSource::ConfigDefault(m));
+    }
+
+    Err(NoModelProvided)
+}
+
+fn opencode_config_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".config/opencode/config.json"))
+}
+
+fn read_opencode_config_model() -> Option<String> {
+    let path = opencode_config_path()?;
+    let content = std::fs::read_to_string(&path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let model = value.get("model")?.as_str()?;
+    if model.is_empty() {
+        return None;
+    }
+    Some(model.to_string())
+}
 
 // ---------------------------------------------------------------------------
 // Output format enum (universal --output flag)
@@ -260,12 +346,6 @@ pub(crate) trait WrapperProfile: Send + Sync {
         Ok(())
     }
 
-    /// Apply provider-specific defaults for non-interactive mode (e.g.
-    /// OpenCode's default model injection). Default: no-op.
-    fn apply_non_interactive_defaults(&self, _args: &mut Vec<String>) {}
-
-    /// Validate any provider-specific non-interactive requirements after
-    /// defaults and explicit model flags have been applied.
     fn validate_non_interactive_requirements(&self, _args: &[String]) -> Result<()> {
         Ok(())
     }
@@ -1452,29 +1532,6 @@ impl WrapperProfile for OpencodeWrapper {
         }
     }
 
-    fn apply_non_interactive_defaults(&self, args: &mut Vec<String>) {
-        if has_flag(args, "--model") || has_flag(args, "-m") {
-            return;
-        }
-        let Some(model) = non_empty_env_var("OPENCODE_MODEL") else {
-            return;
-        };
-        args.push("--model".to_string());
-        args.push(model);
-    }
-
-    fn validate_non_interactive_requirements(&self, args: &[String]) -> Result<()> {
-        if has_flag(args, "--model") || has_flag(args, "-m") {
-            return Ok(());
-        }
-        bail!(
-            "OpenCode cannot use its configured default model in non-interactive mode.\n\
-             Pass `--model MODEL` to Claudine, or set `OPENCODE_MODEL` in the environment \
-             before launching.\n\
-             Interactive OpenCode sessions can continue using OpenCode's default model."
-        )
-    }
-
     fn apply_model(
         &self,
         args: &mut Vec<String>,
@@ -1918,6 +1975,50 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    struct TestEnvGuard {
+        key: &'static str,
+        had_value: bool,
+        original: Option<String>,
+    }
+
+    impl TestEnvGuard {
+        fn set_env(key: &'static str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            let had_value = original.is_some();
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key,
+                had_value,
+                original,
+            }
+        }
+
+        fn remove_env(key: &'static str) -> Self {
+            let original = std::env::var(key).ok();
+            let had_value = original.is_some();
+            if had_value {
+                unsafe { std::env::remove_var(key) };
+            }
+            Self {
+                key,
+                had_value,
+                original,
+            }
+        }
+    }
+
+    impl Drop for TestEnvGuard {
+        fn drop(&mut self) {
+            if self.had_value {
+                unsafe {
+                    std::env::set_var(self.key, self.original.take().unwrap());
+                }
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
+        }
+    }
+
     fn profile(provider: Provider) -> &'static dyn WrapperProfile {
         profile_for_provider(provider).unwrap()
     }
@@ -2130,43 +2231,43 @@ mod tests {
     }
 
     #[test]
-    fn opencode_non_interactive_defaults_do_not_inject_a_hard_coded_model() {
-        let p = profile(Provider::OpenCode);
-        let mut args = vec!["run".to_string(), "status".to_string()];
+    fn opencode_resolve_prefers_cli_switch_over_env() {
+        let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
 
-        p.apply_non_interactive_defaults(&mut args);
-
-        assert_eq!(args, vec!["run", "status"]);
+        let source = resolve_opencode_model(Some("cli-model")).unwrap();
+        assert_eq!(source, OpenCodeModelSource::CliSwitch("cli-model".to_string()));
     }
 
     #[test]
-    fn opencode_non_interactive_defaults_respect_existing_model_flag() {
-        let p = profile(Provider::OpenCode);
-        let mut args = vec![
-            "run".to_string(),
-            "--model".to_string(),
-            "user-choice".to_string(),
-        ];
+    fn opencode_resolve_uses_opencode_model_env() {
+        let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
 
-        p.apply_non_interactive_defaults(&mut args);
-
-        let model_flags = args.iter().filter(|a| a.as_str() == "--model").count();
-        assert_eq!(model_flags, 1);
-        assert!(args.contains(&"user-choice".to_string()));
-    }
-
-    #[test]
-    fn opencode_non_interactive_validation_requires_a_model() {
-        let p = profile(Provider::OpenCode);
-        let args = vec!["run".to_string(), "status".to_string()];
-
-        let error = p.validate_non_interactive_requirements(&args).unwrap_err();
-        assert!(
-            error.to_string().contains(
-                "OpenCode cannot use its configured default model in non-interactive mode"
-            )
+        let source = resolve_opencode_model(None).unwrap();
+        assert_eq!(
+            source,
+            OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string())
         );
-        assert!(error.to_string().contains("OPENCODE_MODEL"));
+    }
+
+    #[test]
+    fn opencode_resolve_returns_no_model_when_none_available() {
+        let _guard_env = TestEnvGuard::remove_env("OPENCODE_MODEL");
+        // This test depends on there being no config file or one without a
+        // model. Since we can't control the local filesystem in unit tests,
+        // we just verify the error type is correct when the resolver fails.
+        // If a config model IS found, the test verifies the ConfigDefault path.
+        let result = resolve_opencode_model(None);
+        match result {
+            Err(NoModelProvided) => {} // expected: no model anywhere
+            Ok(OpenCodeModelSource::ConfigDefault(_)) => {} // config file on this machine
+            other => panic!("unexpected result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn opencode_resolve_model_method_returns_inner_string() {
+        let source = OpenCodeModelSource::CliSwitch("gpt-4o".to_string());
+        assert_eq!(source.model(), "gpt-4o");
     }
 
     #[test]

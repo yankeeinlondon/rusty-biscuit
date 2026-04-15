@@ -614,22 +614,24 @@ pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs, verbose: u8) 
         return Ok(());
     }
 
-    let (code, stderr_capture) = match run_provider_wrapper_inner(provider, args, verbose) {
-        Ok((code, stderr)) => (code, stderr),
-        Err(error) => {
-            if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
-                log::error(&error.to_string());
+    let (code, stderr_capture, model_source) =
+        match run_provider_wrapper_inner(provider, args, verbose) {
+            Ok((code, stderr, source)) => (code, stderr, source),
+            Err(error) => {
+                if !crate::output::shell_expansion_error::is_pre_rendered(&error) {
+                    log::error(&error.to_string());
+                }
+                (1, None, None)
             }
-            (1, None)
-        }
-    };
+        };
 
     if code != 0 {
         let term = wrap_terminal();
-        let report = crate::output::error_report::AgentErrorReport::from_exit_code(
+        let report = crate::output::error_report::AgentErrorReport::from_exit_code_with_source(
             provider,
             code,
             stderr_capture.as_deref(),
+            model_source.as_ref(),
         );
         report.render(&term);
     }
@@ -641,7 +643,7 @@ fn run_provider_wrapper_inner(
     provider: Provider,
     args: WrapperArgs,
     verbose: u8,
-) -> Result<(i32, Option<String>)> {
+) -> Result<(i32, Option<String>, Option<profile::OpenCodeModelSource>)> {
     let profile = profile::profile_for_provider(provider).ok_or_else(|| {
         eyre!(
             "'{}' cannot be wrapped (it is a VS Code extension)",
@@ -769,30 +771,86 @@ fn run_provider_wrapper_inner(
 
     if non_interactive_requested {
         profile.apply_non_interactive_flags(&mut child_args)?;
-        // Only apply default model if the user didn't pass --model explicitly
-        // (apply_model handles it below when args.model is Some).
-        if args.model.is_none() {
-            profile.apply_non_interactive_defaults(&mut child_args);
+    }
+
+    // OpenCode model resolution (replaces apply_non_interactive_defaults +
+    // validate_non_interactive_requirements).
+    let opencode_model_source: Option<profile::OpenCodeModelSource> =
+        if provider == Provider::OpenCode && non_interactive_requested {
+            let cli_model = args.model.as_deref();
+            match profile::resolve_opencode_model(cli_model) {
+                Ok(source) => {
+                    let model = source.model().to_string();
+                    match &source {
+                        profile::OpenCodeModelSource::CliSwitch(_)
+                        | profile::OpenCodeModelSource::OpenCodeModelEnv(_) => {
+                            if !has_flag(&child_args, "--model") && !has_flag(&child_args, "-m") {
+                                child_args.push("--model".to_string());
+                                child_args.push(model.clone());
+                            }
+                            env_overrides.push(("MODEL".to_string(), model));
+                        }
+                        profile::OpenCodeModelSource::ConfigDefault(_) => {
+                            env_overrides.push(("MODEL".to_string(), model));
+                        }
+                    }
+                    Some(source)
+                }
+                Err(profile::NoModelProvided) => None,
+            }
+        } else {
+            None
+        };
+
+    if provider == Provider::OpenCode
+        && non_interactive_requested
+        && opencode_model_source.is_none()
+        && args.model.is_some()
+    {
+        // CliSwitch already resolved above; nothing more to do.
+    }
+
+    // Universal --model flag (non-OpenCode providers, and OpenCode when
+    // the user passed --model explicitly but we already handled it above).
+    if provider != Provider::OpenCode {
+        if let Some(ref model) = args.model
+            && let Some(warn) =
+                profile.apply_model(&mut child_args, &mut env_overrides, model)
+        {
+            deferred_warnings.push(warn);
+        }
+    } else if let Some(ref model) = args.model
+        && !non_interactive_requested
+    {
+        // Interactive OpenCode with --model: use the standard apply_model path.
+        if let Some(warn) =
+            profile.apply_model(&mut child_args, &mut env_overrides, model)
+        {
+            deferred_warnings.push(warn);
         }
     }
 
-    // Universal --model flag
-    if let Some(ref model) = args.model
-        && let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model)
-    {
-        deferred_warnings.push(warn);
+    // OpenCode: validate that a model was resolved for non-interactive.
+    if provider == Provider::OpenCode && non_interactive_requested {
+        let has_model_arg =
+            has_flag(&child_args, "--model") || has_flag(&child_args, "-m");
+        let has_model_env = env_overrides
+            .iter()
+            .any(|(k, _)| k == "MODEL");
+        if !has_model_arg && !has_model_env && opencode_model_source.is_none() {
+            return Err(eyre!(
+                "No model specified! OpenCode by default does not specify a model but you can\n\
+                 change this behavior by adding a model property to ~/.config/opencode/config.json.\n\
+                 You can override/set the default model with any of the following methods:\n\n\
+                 \x20\x20• set OPENCODE_MODEL to a valid model name\n\
+                 \x20\x20• use the CLI switch --model <model>\n\n\
+                 Running `opencode models` will give you a list of all valid models."
+            ));
+        }
     }
 
-    // OpenCode non-interactive MODEL env var (from passthrough --model)
-    if provider == Provider::OpenCode
-        && non_interactive_requested
-        && args.model.is_none()
-        && let Some(model) = model_value_from_args(&child_args)
-    {
-        env_overrides.push(("MODEL".to_string(), model));
-    }
-
-    if non_interactive_requested {
+    // Non-OpenCode providers still use the trait-based validation.
+    if provider != Provider::OpenCode && non_interactive_requested {
         profile.validate_non_interactive_requirements(&child_args)?;
     }
 
@@ -1106,6 +1164,13 @@ fn run_provider_wrapper_inner(
             }
             for message in &deferred_messages {
                 log::message(&crate::output::post_env_message(message, &term));
+            }
+
+            if let Some(ref source) = opencode_model_source {
+                use biscuit_terminal::components::status::Status;
+                use biscuit_terminal::prelude::Renderable as _;
+                let status = Status::from_prose(source.status_markup());
+                log::message(&status.render(&term));
             }
         }
 
@@ -2858,6 +2923,7 @@ fn binary_missing_error(profile: &dyn WrapperProfile) -> color_eyre::eyre::Error
     )
 }
 
+#[allow(dead_code)]
 fn model_value_from_args(args: &[String]) -> Option<String> {
     for (index, arg) in args.iter().enumerate() {
         if arg == "--model" || arg == "-m" {
