@@ -135,10 +135,45 @@ sequence:
     - use `prompt` property to make a file reference to a prompt document
     - or we use `shell` to call one or more shell commands
 - we also define a `dir` property which will be the same across all steps/states
-    - in the **headed** section we mentioned that _template_ key/values typically would leverage _interpolation_ with other state properties
-    - you can, however, define templates without _interpolation_ and then these variables will act as a constant throughout the sequence
 
-### Parameters
+
+### Prompt References
+
+- When a sequence defines a `prompt` property  the value must be a valid filepath (at the time of composition)
+- When a step which has a Prompt Reference in it becomes active, Claudine will:
+    - resolve the filepath reference
+    - _compose_ the referenced document
+    - provide an Agent the composed content as a prompt
+
+### Shell Command Blocks
+
+A step in a sequence that defines the `shell` property can either:
+
+- take a single string value that represents the shell command
+- take a list of strings with _each_ representing a shell command
+
+```sh
+sequence:
+    - name: JustOne
+      # run one command
+      shell: "just test"
+    - name: Multiple
+      # run multiple
+      shell:
+          - "just test"
+          - "just lint"
+```
+
+A step defined by a shell command block successfully passes when:
+
+- all of the shell commands provided return a 0 exit code
+- each command is allowed 30 seconds to complete execution before they are _timed out_
+    - to override this default timeout window you can set a property `timeout` inside the step definition to a numeric value (representing seconds)
+    - this will change the timeout window for each of the commands in that step (but not outside it)
+- all shell commands in a **sequence** are included in Claudine's [preflight checks](../pre-flight-checks.md) and if any of the commands are not already whitelisted then Claudine will bring up the interactive dialog for approval immediately upon execution (versus later when that step's command may be run).
+
+
+## Parameters
 
 We are all familiar with the idea/concept of **parameters** in programming and Claudine embraces a formalism around parameter definition that offers a simple format to define a schema for what you expect your callers to provide to you.
 
@@ -151,7 +186,7 @@ In the following example, our headless sequence definition will define:
 
 ```yaml
 parameters:
-    dir: filepath
+    dir: Filepath
     spec_file: Option<Filepath>
 template:
     - spec: "{{dir}}/{{spec_file || "spec.md"}}"
@@ -177,7 +212,7 @@ Every step's `state` in the sequence will have all the properties from `paramete
 
 ```yaml
 parameters:
-    dir: filepath
+    dir: Filepath
     spec_file: Option<Filepath>
 template:
     - spec: "{{dir}}/{{spec_file || "spec.md"}}"
@@ -199,24 +234,18 @@ sequence:
 ```
 
 
-### Prompt References
+## Groups
 
-As we've already seen in the examples above, the `prompt` property has special meaning for a step in a _headless_ sequence:
+Groups allow a set of **Prompt References** and/or **Shell Command Blocks** be grouped together and named.
 
-- the value of `prompt` property must be a filepath reference
+- having a group allows for additional reuse patterns, _as well as_
+- allowing for _cycling_ patterns to be better defined
 
-    > **Note:** the `FileReference` struct from **biscuit-file** is used to resolve all filepath references. This is consistent with all other file references in Claudine.
+A group is always defined in a YAML file, either the same YAML file as a sequence is defined or separate from it. The groups definition is defined under the `groups` property as a list of group definitions:
 
-- when a **step** is executed by Claudine, it will resolve the file path in `prompt` and _compose_ this document into an Agent prompt
-    - however, before we _compose_ it we will set the `state` in the prompt file's Frontmatter
-    - this allows the prompt document to use and work off of this state 
-    - when you control the prompt file you can make the `state` shape work for any prompt file
-    - this is fine, but often a prompt file will have many primitives which call into it and rather then trying to adapt to each callers internal state the prompt will instead define it's own parameters
-- any Markdown document which wants to be called as a prompt but needs some initial state
-- we always pass in the `state` object and in prompts which we control, it's not that hard to have `state` and it's key/values 
+- groups must define both the `name` and `members` properties
 
----
-
+Here's a simple example:
 
 ```yaml
 groups:
@@ -228,10 +257,52 @@ groups:
           command: "just commit"
         - name: Review
           prompt: "@prompt/review.md"
-      until:
-        
-sequence:
-    - name: Design
-      prompt: "@prompt/design.md"
-    - name: "group::ICR"
 ```
+
+To add this group
+
+
+A group _can not_ be executed by itself but rather must be executed as a part of a **sequence**:
+
+- a single group, however, can be run more than once in a sequence
+- a single group can also be shared across multiple sequences
+- sequences have no visibility into a groups individual members but instead interact with the group at the group level
+- like sequences, a group can define parameters
+
+```yaml
+groups:
+    - name: ICR
+      variables:
+        dir: String
+        iteration: [Number, 1]
+      template:
+        log: "{{dir}}/log.md"
+      members:
+        - name: Implement
+          prompt: "@prompt/implement.md"
+        - name: Commit
+          command: "just commit"
+        - name: Review
+          prompt: "@prompt/review.md"
+          params:
+            review: "{{log}}"
+      until:
+        fm: ["{{log}}", "done"]
+```
+
+### Group Cycling
+
+- `until`
+- `while`
+
+Conditions:
+
+- `frontmatter`
+- 
+
+
+## Operations
+
+Claudine has had a CLI switch `--operation <op>` available for a long time. Using the CLI switch sets the OPERATION environment variable and this ENV variable is logged to Claudine's logs making it a dimension which you can report off of.
+
+Any step in a sequence -- headless or headed -- is allowed to define a property `operation` and the value at this key will be assigned to the OPERATION environment variable.
