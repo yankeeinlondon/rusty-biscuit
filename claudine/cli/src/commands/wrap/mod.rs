@@ -2917,6 +2917,16 @@ fn model_value_from_args(args: &[String]) -> Option<String> {
 /// the prior section actually emitted non-blank content). When the handle
 /// is absent (legacy / test call sites), emission falls back to plain
 /// `eprintln!`.
+pub(crate) struct StreamSummaryContext<'a> {
+    summary: &'a claudine::stream::summary::StreamExecutionSummary,
+    profile: &'a dyn WrapperProfile,
+    env_context: &'a EnvironmentContext,
+    verbosity: Verbosity,
+    verbose: bool,
+    details: &'a StructuredSummaryDetails,
+    section_stream: Option<&'a super::wrap::section::SectionStream>,
+}
+
 pub(crate) fn emit_stream_summary(
     summary: &claudine::stream::summary::StreamExecutionSummary,
     profile: &dyn WrapperProfile,
@@ -2927,49 +2937,39 @@ pub(crate) fn emit_stream_summary(
     section_stream: Option<&super::wrap::section::SectionStream>,
 ) {
     emit_stream_summary_inner(
-        summary,
-        profile,
-        env_context,
-        verbosity,
-        verbose,
-        details,
+        StreamSummaryContext {
+            summary,
+            profile,
+            env_context,
+            verbosity,
+            verbose,
+            details,
+            section_stream,
+        },
         None,
-        section_stream,
     );
 }
 
 pub(crate) fn emit_stream_summary_with_context(
-    summary: &claudine::stream::summary::StreamExecutionSummary,
-    profile: &dyn WrapperProfile,
-    env_context: &EnvironmentContext,
-    verbosity: Verbosity,
-    verbose: bool,
-    details: &StructuredSummaryDetails,
+    ctx: StreamSummaryContext<'_>,
     context_extra: &HashMap<String, serde_json::Value>,
-    section_stream: Option<&super::wrap::section::SectionStream>,
 ) {
-    emit_stream_summary_inner(
+    emit_stream_summary_inner(ctx, Some(context_extra));
+}
+
+fn emit_stream_summary_inner(
+    ctx: StreamSummaryContext<'_>,
+    context_extra: Option<&HashMap<String, serde_json::Value>>,
+) {
+    let StreamSummaryContext {
         summary,
         profile,
         env_context,
         verbosity,
         verbose,
         details,
-        Some(context_extra),
         section_stream,
-    );
-}
-
-fn emit_stream_summary_inner(
-    summary: &claudine::stream::summary::StreamExecutionSummary,
-    profile: &dyn WrapperProfile,
-    env_context: &EnvironmentContext,
-    verbosity: Verbosity,
-    verbose: bool,
-    details: &StructuredSummaryDetails,
-    context_extra: Option<&HashMap<String, serde_json::Value>>,
-    section_stream: Option<&super::wrap::section::SectionStream>,
-) {
+    } = ctx;
     let primary_markup = if verbosity == Verbosity::Silent {
         None
     } else {

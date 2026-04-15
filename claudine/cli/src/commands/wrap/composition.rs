@@ -38,6 +38,7 @@ use super::{
     emit_stream_summary_no_separator_with_context, emit_stream_summary_with_context,
     materialized_harness_prompt_from_prepared, resolve_binary_path, run_harness_loop,
     structured_verbosity, switch_process_cwd, wrap_terminal,
+    StreamSummaryContext,
 };
 use crate::log;
 
@@ -1456,14 +1457,16 @@ fn execute_direct_without_harness(
         }
 
         emit_stream_summary_with_context(
-            &summary,
-            profile,
-            env_context,
-            stream_verbosity,
-            detail_requested,
-            &summary_details.lock().unwrap().clone(),
+            StreamSummaryContext {
+                summary: &summary,
+                profile,
+                env_context,
+                verbosity: stream_verbosity,
+                verbose: detail_requested,
+                details: &summary_details.lock().unwrap().clone(),
+                section_stream: Some(&section_stream),
+            },
             dispatch_context,
-            Some(&section_stream),
         );
 
         Ok(summary.exit_code)
