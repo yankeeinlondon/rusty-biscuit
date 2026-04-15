@@ -12,7 +12,12 @@ use super::stream_io::StreamOutput;
 
 /// The nine ordered sections of rendered output. Only `FinalStdout` routes
 /// to stdout; the other eight route to stderr.
-#[allow(dead_code)] // variants wired in Task 3.2
+///
+/// Used directly by `LiveSemanticSink::emit_section_line` to tag lines for
+/// inter-section spacing. The `FinalStdout` variant is reserved for the
+/// `SectionStream` reference implementation below and is not used on the
+/// runtime path today.
+#[allow(dead_code)] // FinalStdout reserved for SectionStream
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     ExecutionLine,
@@ -30,7 +35,11 @@ pub enum Section {
 /// - tags each emit with its `Section`,
 /// - dedupes consecutive blank emissions,
 /// - guarantees at most one blank between adjacent sections.
-#[allow(dead_code)] // wired into LiveSemanticSink in Task 3.2
+///
+/// Reference implementation of the section-spacing invariants. The runtime
+/// path inlines equivalent logic in `LiveSemanticSink`; this type is kept
+/// as a standalone, test-covered specification of the invariant.
+#[allow(dead_code)] // reference implementation; see LiveSemanticSink for runtime path
 #[derive(Clone)]
 pub struct SectionStream {
     inner: Arc<StreamOutput>,
@@ -43,7 +52,7 @@ struct SectionState {
     last_was_blank: bool,
 }
 
-#[allow(dead_code)] // methods wired in Task 3.2
+#[allow(dead_code)] // reference impl; exercised by unit tests below
 impl SectionStream {
     pub fn new(inner: Arc<StreamOutput>) -> Self {
         Self {

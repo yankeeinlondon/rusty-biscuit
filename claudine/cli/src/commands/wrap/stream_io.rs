@@ -58,7 +58,7 @@ impl StreamOutput {
     /// Emit a line to stdout followed by a newline. In test-recorder mode,
     /// appends `(true, line)` to the buffer and returns without touching
     /// real stdout.
-    #[allow(dead_code)] // wired into SectionStream in Task 3.2
+    #[allow(dead_code)] // used by SectionStream reference impl and its tests
     pub(crate) fn emit_stdout_line(&self, line: &str) {
         #[cfg(test)]
         if let Some(buf) = &self.test_recorder {
