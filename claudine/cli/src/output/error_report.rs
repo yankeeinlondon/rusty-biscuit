@@ -1,4 +1,5 @@
 use biscuit_terminal::components::block_quote::BlockQuote;
+use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
@@ -18,15 +19,24 @@ pub(crate) enum AgentErrorCategory {
     Interrupted,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SuggestionStyle {
+    BareList,
+    DidYouMean,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct AgentErrorReport {
     pub(crate) provider: Provider,
     pub(crate) exit_code: i32,
     pub(crate) category: AgentErrorCategory,
     pub(crate) summary: String,
+    pub(crate) body_list: Option<Vec<String>>,
+    pub(crate) footer: Option<String>,
     pub(crate) detail: Option<String>,
     pub(crate) hint: Option<String>,
     pub(crate) suggestions: Option<Vec<String>>,
+    pub(crate) suggestion_style: SuggestionStyle,
     #[allow(dead_code)]
     pub(crate) location: Option<String>,
 }
@@ -50,9 +60,12 @@ impl AgentErrorReport {
             exit_code,
             category,
             summary,
+            body_list: None,
+            footer: None,
             detail,
             hint,
             suggestions,
+            suggestion_style: SuggestionStyle::DidYouMean,
             location,
         }
     }
@@ -68,17 +81,21 @@ impl AgentErrorReport {
                  change this behavior by adding a <yellow>model</yellow> property to the <blue>~/.config/opencode/config.json</blue> file.\n\
                  You can override/set the default model with any of the following methods:"
             ),
-            detail: Some(format!(
+            body_list: Some(vec![
+                "set <yellow>OPENCODE_MODEL</yellow> to a valid model name".to_string(),
+                "use the CLI switch <yellow>--model <model></yellow>".to_string(),
+            ]),
+            footer: Some(
                 "Running <yellow>opencode models</yellow> will give you a list of all valid models.\n\
                  Model names follow the format <dim>[provider]</dim>/<dim>[model]</dim> for direct providers\n\
                  like Google or Anthropic but take the form <dim>[aggregator]</dim>/<dim>[provider]</dim>/<dim>[model]</dim>\n\
                  for aggregators like OpenRouter."
-            )),
+                    .to_string(),
+            ),
+            detail: None,
             hint: None,
-            suggestions: Some(vec![
-                "set <yellow>OPENCODE_MODEL</yellow> to a valid model name".to_string(),
-                "use the CLI switch <yellow>--model <model></yellow>".to_string(),
-            ]),
+            suggestions: None,
+            suggestion_style: SuggestionStyle::BareList,
             location: None,
         }
     }
@@ -100,9 +117,12 @@ impl AgentErrorReport {
                  for direct providers like Google or Anthropic but take the form\n\
                  <dim>[aggregator]</dim>/<dim>[provider]</dim>/<dim>[model]</dim> for aggregators like OpenRouter."
             ),
+            body_list: None,
+            footer: None,
             detail: None,
             hint: None,
             suggestions: Some(suggestions),
+            suggestion_style: SuggestionStyle::DidYouMean,
             location: Some(location),
         }
     }
@@ -124,17 +144,27 @@ impl AgentErrorReport {
 
         let provider_name = crate::output::capitalize_provider(self.provider);
 
-        let mut parts = vec![format!(
-            "<red><bold>{label}</bold></red> <dim>({provider_name}, exit {})</dim>",
-            self.exit_code
-        )];
-        parts.push(self.summary.clone());
+        let mut compose = Compose::default();
+
+        compose.add_prose(Prose::new(format!(
+            "<red><bold>{label}</bold></red> <dim>({provider_name}, exit {})</dim>\n{}",
+            self.exit_code, self.summary,
+        )));
+
+        if let Some(ref items) = self.body_list {
+            compose.add_unordered_list(UnorderedList::new(items.clone()));
+        }
+
+        if let Some(ref footer) = self.footer {
+            compose.add_prose(Prose::new(format!("\n{footer}")));
+        }
 
         if let Some(ref detail) = self.detail {
-            parts.push(format!("<dim>{detail}</dim>"));
+            compose.add_prose(Prose::new(format!("\n<dim>{detail}</dim>")));
         }
+
         if let Some(ref hint) = self.hint {
-            parts.push(format!("<blue>{hint}</blue>"));
+            compose.add_prose(Prose::new(format!("\n<blue>{hint}</blue>")));
         }
 
         if let Some(ref suggestions) = self.suggestions
@@ -145,15 +175,22 @@ impl AgentErrorReport {
                 .map(|s| format!("<yellow>{s}</yellow>"))
                 .collect();
             let list = UnorderedList::new(suggestion_items);
-            let header = Status::from_prose("Did you mean:".to_string()).state(StatusState::Warning);
-            parts.push(header.render(term));
-            parts.push(list.render(term));
+            match self.suggestion_style {
+                SuggestionStyle::DidYouMean => {
+                    let header =
+                        Status::from_prose("Did you mean:".to_string()).state(StatusState::Warning);
+                    compose.add_text("\n");
+                    compose.add_prose(Prose::new(header.render(term)));
+                    compose.add_unordered_list(list);
+                }
+                SuggestionStyle::BareList => {
+                    compose.add_text("\n");
+                    compose.add_unordered_list(list);
+                }
+            }
         }
 
-        let content = parts.join("\n");
-        let rendered = Prose::new(content).render(term);
-
-        let mut block = BlockQuote::new(RenderableContent::from(rendered), None::<&str>)
+        let mut block = BlockQuote::new(RenderableContent::from(compose), None::<&str>)
             .with_left_block_color(border_color)
             .with_border("▌ ");
         block.layout_mut().left_margin = biscuit_terminal::utils::layout::Margin::Chars(2);
@@ -240,22 +277,20 @@ fn classify_native_cli_error(
     {
         let suggestions = parse_model_suggestions(stderr);
         let location = model_source.map(|s| s.location_string().to_string());
-        if suggestions.is_some() || location.is_some() {
-            let loc = location.as_deref().unwrap_or("the command line");
-            return Some((
-                AgentErrorCategory::AgentNative,
-                format!(
-                    "Invalid model specified in {loc}! Running <yellow>opencode models</yellow> will give you\n\
-                     a list of all valid models. Model names follow the format <dim>[provider]</dim>/<dim>[model]</dim>\n\
-                     for direct providers like Google or Anthropic but take the form\n\
-                     <dim>[aggregator]</dim>/<dim>[provider]</dim>/<dim>[model]</dim> for aggregators like OpenRouter."
-                ),
-                None,
-                None,
-                suggestions,
-                location,
-            ));
-        }
+        let loc = location.as_deref().unwrap_or("the command line");
+        return Some((
+            AgentErrorCategory::AgentNative,
+            format!(
+                "Invalid model specified in {loc}! Running <yellow>opencode models</yellow> will give you\n\
+                 a list of all valid models. Model names follow the format <dim>[provider]</dim>/<dim>[model]</dim>\n\
+                 for direct providers like Google or Anthropic but take the form\n\
+                 <dim>[aggregator]</dim>/<dim>[provider]</dim>/<dim>[model]</dim> for aggregators like OpenRouter."
+            ),
+            None,
+            None,
+            suggestions,
+            location,
+        ));
     }
 
     if lower.contains("unrecognized argument")
@@ -469,15 +504,17 @@ mod tests {
         assert!(report.summary.contains("No model specified"));
         assert!(report.summary.contains("<yellow>model</yellow>"));
         assert!(report.summary.contains("<blue>~/.config/opencode/config.json</blue>"));
-        assert!(report.detail.is_some());
-        let detail = report.detail.as_ref().unwrap();
-        assert!(detail.contains("<yellow>opencode models</yellow>"));
-        assert!(detail.contains("<dim>[provider]</dim>"));
-        assert!(detail.contains("<dim>[aggregator]</dim>"));
-        assert!(report.suggestions.is_some());
-        let suggestions = report.suggestions.as_ref().unwrap();
-        assert!(suggestions.iter().any(|s| s.contains("OPENCODE_MODEL")));
-        assert!(suggestions.iter().any(|s| s.contains("--model")));
+        assert!(report.body_list.is_some());
+        let body_list = report.body_list.as_ref().unwrap();
+        assert!(body_list.iter().any(|s| s.contains("OPENCODE_MODEL")));
+        assert!(body_list.iter().any(|s| s.contains("--model")));
+        assert!(report.footer.is_some());
+        let footer = report.footer.as_ref().unwrap();
+        assert!(footer.contains("<yellow>opencode models</yellow>"));
+        assert!(footer.contains("<dim>[provider]</dim>"));
+        assert!(footer.contains("<dim>[aggregator]</dim>"));
+        assert!(report.suggestions.is_none());
+        assert_eq!(report.suggestion_style, SuggestionStyle::BareList);
         assert!(report.location.is_none());
     }
 
@@ -522,5 +559,15 @@ mod tests {
         assert_eq!(report.category, AgentErrorCategory::AgentNative);
         assert!(report.summary.contains("the command line"));
         assert_eq!(report.suggestions.as_ref().unwrap()[0], "a");
+    }
+
+    #[test]
+    fn model_not_found_without_source_or_suggestions_still_classifies() {
+        let stderr = "ProviderModelNotFoundError: model xyz not found";
+        let report = AgentErrorReport::from_exit_code(Provider::OpenCode, 1, Some(stderr));
+        assert_eq!(report.category, AgentErrorCategory::AgentNative);
+        assert!(report.summary.contains("Invalid model specified in the command line"));
+        assert!(report.suggestions.is_none());
+        assert_eq!(report.location, None);
     }
 }
