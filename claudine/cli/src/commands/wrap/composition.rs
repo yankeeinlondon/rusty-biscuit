@@ -347,8 +347,11 @@ pub(crate) fn execute_composition_request_inner(
 
     if request.yolo {
         let mut env_overrides = Vec::new();
-        if let Some(warn) = profile.apply_yolo(&mut child_args, &mut env_overrides)?
-            && !silent
+        if let Some(warn) = profile.apply_yolo_for_mode(
+            &mut child_args,
+            &mut env_overrides,
+            !effective_non_interactive,
+        )? && !silent
             && !quiet
         {
             log::warn(&warn);

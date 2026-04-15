@@ -747,8 +747,18 @@ fn run_provider_wrapper_inner(
     profile.reject_direct_yolo(&child_args)?;
     reject_retired_composition_flags(&child_args)?;
 
-    if yolo_requested && let Some(warn) = profile.apply_yolo(&mut child_args, &mut env_overrides)? {
+    if yolo_requested
+        && let Some(warn) = profile.apply_yolo_for_mode(
+            &mut child_args,
+            &mut env_overrides,
+            !non_interactive_requested,
+        )?
+    {
         deferred_warnings.push(warn);
+        // A returned warning means yolo was NOT actually applied for this
+        // invocation (e.g. OpenCode interactive mode), so the summary and
+        // header badge should reflect the disabled state.
+        yolo_enabled = false;
     }
     if yolo_requested && !profile.has_supported_yolo() {
         yolo_enabled = false;

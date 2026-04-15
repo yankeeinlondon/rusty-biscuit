@@ -211,6 +211,22 @@ pub(crate) trait WrapperProfile: Send + Sync {
         env_overrides: &mut Vec<(String, String)>,
     ) -> Result<Option<String>>;
 
+    /// Apply YOLO handling with awareness of interactive vs non-interactive
+    /// mode. Default delegates to the mode-unaware [`apply_yolo`]; overriders
+    /// can produce different behavior when `interactive` matters (e.g.
+    /// OpenCode forwards `--dangerously-skip-permissions` only in
+    /// non-interactive mode).
+    ///
+    /// [`apply_yolo`]: WrapperProfile::apply_yolo
+    fn apply_yolo_for_mode(
+        &self,
+        args: &mut Vec<String>,
+        env_overrides: &mut Vec<(String, String)>,
+        _interactive: bool,
+    ) -> Result<Option<String>> {
+        self.apply_yolo(args, env_overrides)
+    }
+
     /// Whether this provider supports YOLO mode at all.
     fn has_supported_yolo(&self) -> bool;
 
@@ -1357,16 +1373,35 @@ impl WrapperProfile for OpencodeWrapper {
 
     fn apply_yolo(
         &self,
-        _args: &mut Vec<String>,
-        _env_overrides: &mut Vec<(String, String)>,
+        args: &mut Vec<String>,
+        env_overrides: &mut Vec<(String, String)>,
     ) -> Result<Option<String>> {
-        Ok(Some(
-            "--yolo is not supported for 'opencode' and was ignored".to_string(),
-        ))
+        // Delegate to the mode-aware variant with `interactive = false` so
+        // the non-interactive forwarding path is used when callers have not
+        // yet migrated to [`apply_yolo_for_mode`].
+        self.apply_yolo_for_mode(args, env_overrides, false)
+    }
+
+    fn apply_yolo_for_mode(
+        &self,
+        args: &mut Vec<String>,
+        _env_overrides: &mut Vec<(String, String)>,
+        interactive: bool,
+    ) -> Result<Option<String>> {
+        if interactive {
+            return Ok(Some(
+                "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
+                    .to_string(),
+            ));
+        }
+        if !args.iter().any(|a| a == "--dangerously-skip-permissions") {
+            args.push("--dangerously-skip-permissions".to_string());
+        }
+        Ok(None)
     }
 
     fn has_supported_yolo(&self) -> bool {
-        false
+        true
     }
 
     fn reject_direct_yolo(&self, _args: &[String]) -> Result<()> {
@@ -2023,14 +2058,73 @@ mod tests {
     }
 
     #[test]
-    fn opencode_yolo_warns_without_mutating_args() {
+    fn opencode_yolo_interactive_warns_without_mutating_args() {
+        // The mode-aware variant in interactive mode must emit the refined
+        // warning copy and MUST NOT mutate argv.
         let p = profile(Provider::OpenCode);
         let mut args = vec!["run".to_string(), "status".to_string()];
         let mut env_overrides = Vec::new();
 
-        let warning = p.apply_yolo(&mut args, &mut env_overrides).unwrap();
-        assert!(warning.unwrap().contains("ignored"));
+        let warning = p
+            .apply_yolo_for_mode(&mut args, &mut env_overrides, /* interactive = */ true)
+            .unwrap();
+        assert_eq!(
+            warning.as_deref(),
+            Some(
+                "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
+            ),
+        );
         assert_eq!(args, vec!["run", "status"]);
+    }
+
+    #[test]
+    fn opencode_yolo_non_interactive_forwards_dangerously_skip_permissions() {
+        let mut args: Vec<String> = vec!["run".to_string()];
+        let mut env = Vec::new();
+        let wrapper = OpencodeWrapper;
+        let warning = wrapper
+            .apply_yolo_for_mode(&mut args, &mut env, /* interactive = */ false)
+            .unwrap();
+        assert!(
+            args.iter().any(|a| a == "--dangerously-skip-permissions"),
+            "flag must be forwarded in non-interactive mode; args={args:?}"
+        );
+        assert!(
+            warning.is_none(),
+            "no warning expected in non-interactive: got {warning:?}"
+        );
+    }
+
+    #[test]
+    fn opencode_yolo_interactive_emits_refined_warning_only() {
+        let mut args: Vec<String> = vec![];
+        let mut env = Vec::new();
+        let wrapper = OpencodeWrapper;
+        let warning = wrapper
+            .apply_yolo_for_mode(&mut args, &mut env, /* interactive = */ true)
+            .unwrap();
+        assert_eq!(
+            warning.as_deref(),
+            Some(
+                "--yolo mode is not supported in OpenCode <i>interactive</i> sessions and was ignored"
+            ),
+        );
+        assert!(args.is_empty(), "no args should be added in interactive mode");
+    }
+
+    #[test]
+    fn opencode_yolo_non_interactive_idempotent() {
+        let mut args: Vec<String> = vec!["--dangerously-skip-permissions".to_string()];
+        let mut env = Vec::new();
+        let wrapper = OpencodeWrapper;
+        wrapper
+            .apply_yolo_for_mode(&mut args, &mut env, false)
+            .unwrap();
+        let count = args
+            .iter()
+            .filter(|a| *a == "--dangerously-skip-permissions")
+            .count();
+        assert_eq!(count, 1, "flag must not be duplicated");
     }
 
     #[test]

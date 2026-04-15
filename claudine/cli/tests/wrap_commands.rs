@@ -632,11 +632,14 @@ exit 0
 "#,
     );
 
+    // Interactive mode (-i) still warns that OpenCode doesn't support --yolo
+    // in interactive sessions (refined copy). This keeps the deferred-warning
+    // ordering test meaningful after non-interactive forwards the flag.
     let assert = cargo_bin_cmd!("claudine")
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("OPENCODE_MODEL", "test-model")
-        .args(["opencode", "-y", "hi"])
+        .args(["opencode", "-i", "-y"])
         .assert()
         .success();
 
@@ -645,11 +648,16 @@ exit 0
     assert!(plain.starts_with('\n'));
     assert!(plain.contains("\nClaudine"));
     let summary_index = plain.find("Environment Variables:").unwrap();
-    let warning_index = plain
-        .find("- Warning: --yolo is not supported for 'opencode' and was ignored")
-        .unwrap();
+    // Prose `<i>` tags render as ANSI italics which NO_COLOR strips, leaving
+    // the word without markup in the plain-text output.
+    let warning_needle = "--yolo mode is not supported in OpenCode interactive sessions";
+    let warning_index = plain.find(warning_needle).unwrap_or_else(|| {
+        panic!("expected refined interactive warning in stderr; got:\n{plain}")
+    });
 
     assert!(warning_index > summary_index);
+    // In interactive mode YOLO stays marked unsupported for OpenCode, so the
+    // header should not advertise a YOLO badge.
     let header_line = plain
         .lines()
         .find(|line| line.contains("Claudine"))
