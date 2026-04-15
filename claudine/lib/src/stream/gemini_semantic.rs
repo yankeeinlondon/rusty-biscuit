@@ -112,12 +112,18 @@ impl<S: SemanticEventSink> GeminiSemanticStreamParser<S> {
 
         if is_delta {
             // Streaming delta: append to the pending buffer and flush on
-            // paragraph boundaries. Per Task 0c, code-fence handling is
-            // deferred to the renderer; this parser only splits on "\n\n".
+            // paragraph boundaries or list-item boundaries. Per Task 0c,
+            // code-fence handling is deferred to the renderer.
             self.pending_text.push_str(&text);
             while let Some(idx) = self.pending_text.find("\n\n") {
                 let flush_upto = idx + 2;
                 let chunk: String = self.pending_text.drain(..flush_upto).collect();
+                self.emit_output_text_chunk(chunk, raw_kind);
+            }
+            // Flush on list-item boundaries to improve perceived
+            // responsiveness during long lists (e.g. "- Item 1\n- Item 2").
+            if let Some(pos) = find_list_flush_position(&self.pending_text) {
+                let chunk: String = self.pending_text.drain(..pos).collect();
                 self.emit_output_text_chunk(chunk, raw_kind);
             }
         } else {
@@ -304,11 +310,12 @@ impl<S: SemanticEventSink> GeminiSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::Gemini,
-            kind: kind.to_string(),
-            payload,
-        });
+        self.sink
+            .on_semantic_event(SemanticEvent::ProviderExtension {
+                provider: Provider::Gemini,
+                kind: kind.to_string(),
+                payload,
+            });
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
@@ -418,6 +425,38 @@ impl<S: SemanticEventSink> SemanticStreamParser for GeminiSemanticStreamParser<S
         summary.badges = crate::stream::badges::derive_badges(&summary, Provider::Gemini);
         summary
     }
+}
+
+/// Finds the flush position for list-item boundaries in streaming text.
+///
+/// Scans for newlines followed by Markdown list markers (`- `, `* `, `+ `,
+/// or numbered like `1. `) and returns the byte offset just after the last
+/// such newline. This allows the caller to drain completed list lines while
+/// keeping the newest (potentially incomplete) list item buffered.
+fn find_list_flush_position(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut last_boundary = None;
+
+    for i in 1..bytes.len() {
+        if bytes[i - 1] != b'\n' {
+            continue;
+        }
+        let rest = &text[i..];
+        if rest.starts_with("- ")
+            || rest.starts_with("* ")
+            || rest.starts_with("+ ")
+            || is_numbered_list_start(rest)
+        {
+            last_boundary = Some(i);
+        }
+    }
+
+    last_boundary
+}
+
+fn is_numbered_list_start(s: &str) -> bool {
+    let digits = s.bytes().take_while(|b| b.is_ascii_digit()).count();
+    digits > 0 && s[digits..].starts_with(". ")
 }
 
 #[cfg(test)]
@@ -535,7 +574,13 @@ mod tests {
         let collected = events.lock().unwrap().clone();
         assert_eq!(kinds(&collected), vec!["tool_call", "tool_result"]);
         match &collected[1] {
-            SemanticEvent::ToolResult { name, id, status, output, .. } => {
+            SemanticEvent::ToolResult {
+                name,
+                id,
+                status,
+                output,
+                ..
+            } => {
                 assert_eq!(name.as_deref(), Some("search"));
                 assert_eq!(id.as_deref(), Some("t1"));
                 assert_eq!(status.as_deref(), Some("success"));
@@ -612,7 +657,10 @@ mod tests {
             )
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(matches!(collected[0], SemanticEvent::Error { terminal: true, .. }));
+        assert!(matches!(
+            collected[0],
+            SemanticEvent::Error { terminal: true, .. }
+        ));
         let summary = parser.finish(1);
         assert!(summary.is_error);
         assert_eq!(summary.error_kind.as_deref(), Some("FatalTurnLimited"));
@@ -665,7 +713,10 @@ mod tests {
             .lines()
             .filter(|l| l.trim_start().starts_with("- ") || l.trim_start().starts_with("* "))
             .collect();
-        assert!(!bullet_lines.is_empty(), "fixture must include bullet items");
+        assert!(
+            !bullet_lines.is_empty(),
+            "fixture must include bullet items"
+        );
         for line in &bullet_lines {
             assert!(
                 line.len() > 5,
@@ -674,7 +725,10 @@ mod tests {
         }
         // No three-or-more consecutive newlines (would indicate stray blank
         // lines from per-chunk emission).
-        assert!(!text.contains("\n\n\n"), "unexpected triple-newline in:\n{text}");
+        assert!(
+            !text.contains("\n\n\n"),
+            "unexpected triple-newline in:\n{text}"
+        );
     }
 
     #[test]
