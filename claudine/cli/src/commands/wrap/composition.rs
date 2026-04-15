@@ -371,30 +371,15 @@ pub(crate) fn execute_composition_request_inner(
     // OpenCode model resolution (replaces apply_non_interactive_defaults +
     // validate_non_interactive_requirements).
     let _opencode_model_source: Option<super::profile::OpenCodeModelSource> =
-        if provider == Provider::OpenCode && effective_non_interactive {
-            let cli_model = request.model.as_deref();
-            match super::profile::resolve_opencode_model(cli_model) {
-                Ok(source) => {
-                    let model = source.model().to_string();
-                    match &source {
-                        super::profile::OpenCodeModelSource::CliSwitch(_)
-                        | super::profile::OpenCodeModelSource::OpenCodeModelEnv(_) => {
-                            if !super::has_flag(&child_args, "--model")
-                                && !super::has_flag(&child_args, "-m")
-                            {
-                                child_args.push("--model".to_string());
-                                child_args.push(model.clone());
-                            }
-                            env_plan.env.insert("MODEL".into(), model.into());
-                        }
-                        super::profile::OpenCodeModelSource::ConfigDefault(_) => {
-                            env_plan.env.insert("MODEL".into(), model.into());
-                        }
-                    }
-                    Some(source)
-                }
-                Err(super::profile::NoModelProvided) => None,
-            }
+        if provider == Provider::OpenCode {
+            let has_model = env_plan.env.contains_key(&std::ffi::OsString::from("MODEL"));
+            super::profile::apply_opencode_model_resolution(
+                &mut child_args,
+                &mut |k, v| { env_plan.env.insert(k.into(), v.into()); },
+                has_model,
+                request.model.as_deref(),
+                effective_non_interactive,
+            )?
         } else {
             None
         };
@@ -425,25 +410,6 @@ pub(crate) fn execute_composition_request_inner(
         }
         for (key, value) in env_overrides {
             env_plan.env.insert(key.into(), value.into());
-        }
-    }
-
-    // OpenCode: validate that a model was resolved for non-interactive.
-    if provider == Provider::OpenCode && effective_non_interactive {
-        let has_model_arg =
-            super::has_flag(&child_args, "--model") || super::has_flag(&child_args, "-m");
-        let has_model_env = env_plan
-            .env
-            .contains_key(&std::ffi::OsString::from("MODEL"));
-        if !has_model_arg && !has_model_env && _opencode_model_source.is_none() {
-            return Err(color_eyre::eyre::eyre!(
-                "No model specified! OpenCode by default does not specify a model but you can\n\
-                 change this behavior by adding a model property to ~/.config/opencode/config.json.\n\
-                 You can override/set the default model with any of the following methods:\n\n\
-                 \x20\x20• set OPENCODE_MODEL to a valid model name\n\
-                 \x20\x20• use the CLI switch --model <model>\n\n\
-                 Running `opencode models` will give you a list of all valid models."
-            ));
         }
     }
 
@@ -567,6 +533,10 @@ pub(crate) fn execute_composition_request_inner(
         effective_non_interactive,
         &prompt_source,
     )?;
+
+    if tracing::enabled!(tracing::Level::WARN) {
+        super::profile::validate_argv_flags_before_separator(profile.binary(), &child_args);
+    }
 
     let sp_display_lines = super::system_prompt::describe_effective(&effective_sp);
 

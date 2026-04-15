@@ -762,25 +762,26 @@ fn run_provider_wrapper_inner(
     // OpenCode model resolution (replaces apply_non_interactive_defaults +
     // validate_non_interactive_requirements).
     let opencode_model_source: Option<profile::OpenCodeModelSource> =
-        if provider == Provider::OpenCode && non_interactive_requested {
-            match profile::resolve_opencode_model(args.model.as_deref()) {
-                Ok(source) => {
-                    source.apply_to_args(&mut child_args, &mut env_overrides);
-                    Some(source)
+        if provider == Provider::OpenCode {
+            let has_model = env_overrides.iter().any(|(k, _)| k == "MODEL");
+            match profile::apply_opencode_model_resolution(
+                &mut child_args,
+                &mut |k, v| env_overrides.push((k, v)),
+                has_model,
+                args.model.as_deref(),
+                non_interactive_requested,
+            ) {
+                Ok(source) => source,
+                Err(_) => {
+                    let term = wrap_terminal();
+                    let report = crate::output::error_report::AgentErrorReport::no_model_provided(provider);
+                    report.render(&term);
+                    std::process::exit(1);
                 }
-                Err(profile::NoModelProvided) => None,
             }
         } else {
             None
         };
-
-    if provider == Provider::OpenCode
-        && non_interactive_requested
-        && opencode_model_source.is_none()
-        && args.model.is_some()
-    {
-        // CliSwitch already resolved above; nothing more to do.
-    }
 
     // Universal --model flag (non-OpenCode providers, and OpenCode when
     // the user passed --model explicitly but we already handled it above).
@@ -796,18 +797,6 @@ fn run_provider_wrapper_inner(
         // Interactive OpenCode with --model: use the standard apply_model path.
         if let Some(warn) = profile.apply_model(&mut child_args, &mut env_overrides, model) {
             deferred_warnings.push(warn);
-        }
-    }
-
-    // OpenCode: validate that a model was resolved for non-interactive.
-    if provider == Provider::OpenCode && non_interactive_requested {
-        let has_model_arg = has_flag(&child_args, "--model") || has_flag(&child_args, "-m");
-        let has_model_env = env_overrides.iter().any(|(k, _)| k == "MODEL");
-        if !has_model_arg && !has_model_env && opencode_model_source.is_none() {
-            let term = wrap_terminal();
-            let report = crate::output::error_report::AgentErrorReport::no_model_provided(provider);
-            report.render(&term);
-            std::process::exit(1);
         }
     }
 
@@ -1199,6 +1188,10 @@ fn run_provider_wrapper_inner(
     };
 
     profile::require_prompt_present(profile.binary(), effective_non_interactive, &prompt_source)?;
+
+    if tracing::enabled!(tracing::Level::WARN) {
+        profile::validate_argv_flags_before_separator(profile.binary(), &child_args);
+    }
 
     let wrapper_harness = {
         let base_prompt = prompt_source

@@ -46,26 +46,6 @@ impl OpenCodeModelSource {
             Self::ConfigDefault(_) => "the config file ~/.config/opencode/config.json",
         }
     }
-
-    pub(crate) fn apply_to_args(
-        &self,
-        child_args: &mut Vec<String>,
-        env_overrides: &mut Vec<(String, String)>,
-    ) {
-        let model = self.model().to_string();
-        match self {
-            Self::CliSwitch(_) | Self::OpenCodeModelEnv(_) => {
-                if !has_flag(child_args, "--model") && !has_flag(child_args, "-m") {
-                    child_args.push("--model".to_string());
-                    child_args.push(model.clone());
-                }
-                env_overrides.push(("MODEL".to_string(), model));
-            }
-            Self::ConfigDefault(_) => {
-                env_overrides.push(("MODEL".to_string(), model));
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1986,6 +1966,65 @@ pub(crate) fn require_prompt_present(
     );
 }
 
+pub(crate) fn validate_argv_flags_before_separator(binary: &str, args: &[String]) {
+    if let Some(pos) = args.iter().position(|a| a == "--") {
+        for arg in &args[pos + 1..] {
+            if arg.starts_with('-') {
+                tracing::warn!(
+                    "Flag {:?} appears after -- separator in {} argv: {:?}",
+                    arg, binary, args
+                );
+            }
+        }
+    }
+}
+
+pub(crate) fn apply_opencode_model_resolution(
+    child_args: &mut Vec<String>,
+    env_setter: &mut dyn FnMut(String, String),
+    has_model_env: bool,
+    cli_model: Option<&str>,
+    non_interactive: bool,
+) -> Result<Option<OpenCodeModelSource>> {
+    if !non_interactive {
+        return Ok(None);
+    }
+    
+    let opencode_model_source = match resolve_opencode_model(cli_model) {
+        Ok(source) => {
+            let model = source.model().to_string();
+            match &source {
+                OpenCodeModelSource::CliSwitch(_) | OpenCodeModelSource::OpenCodeModelEnv(_) => {
+                    if !has_flag(child_args, "--model") && !has_flag(child_args, "-m") {
+                        child_args.push("--model".to_string());
+                        child_args.push(model.clone());
+                    }
+                    env_setter("MODEL".to_string(), model);
+                }
+                OpenCodeModelSource::ConfigDefault(_) => {
+                    env_setter("MODEL".to_string(), model);
+                }
+            }
+            Some(source)
+        }
+        Err(NoModelProvided) => None,
+    };
+    
+    let has_model_arg = has_flag(child_args, "--model") || has_flag(child_args, "-m");
+    if !has_model_arg && !has_model_env && opencode_model_source.is_none() {
+        return Err(eyre!(
+            "No model specified! OpenCode by default does not specify a model but you can\n\
+             change this behavior by adding a model property to ~/.config/opencode/config.json.\n\
+             You can override/set the default model with any of the following methods:\n\n\
+             \x20\x20• set OPENCODE_MODEL to a valid model name\n\
+             \x20\x20• use the CLI switch --model <model>\n\n\
+             Running `opencode models` will give you a list of all valid models."
+        ));
+    }
+    
+    Ok(opencode_model_source)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -2423,10 +2462,15 @@ mod tests {
 
     #[test]
     fn opencode_apply_to_args_cli_switch_pushes_model_flag_and_env() {
-        let source = OpenCodeModelSource::CliSwitch("gpt-4o".to_string());
         let mut args = vec!["run".to_string()];
         let mut env = Vec::new();
-        source.apply_to_args(&mut args, &mut env);
+        apply_opencode_model_resolution(
+            &mut args,
+            &mut |k, v| env.push((k, v)),
+            false,
+            Some("gpt-4o"),
+            true,
+        ).unwrap();
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"gpt-4o".to_string()));
         assert!(env.contains(&("MODEL".to_string(), "gpt-4o".to_string())));
@@ -2434,10 +2478,17 @@ mod tests {
 
     #[test]
     fn opencode_apply_to_args_env_var_pushes_model_flag_and_env() {
-        let source = OpenCodeModelSource::OpenCodeModelEnv("env-model".to_string());
+        let _guard = TestEnvGuard::set_env("OPENCODE_MODEL", "env-model");
+        let _home = setup_isolated_home();
         let mut args = vec!["run".to_string()];
         let mut env = Vec::new();
-        source.apply_to_args(&mut args, &mut env);
+        apply_opencode_model_resolution(
+            &mut args,
+            &mut |k, v| env.push((k, v)),
+            false,
+            None,
+            true,
+        ).unwrap();
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"env-model".to_string()));
         assert!(env.contains(&("MODEL".to_string(), "env-model".to_string())));
@@ -2445,20 +2496,33 @@ mod tests {
 
     #[test]
     fn opencode_apply_to_args_config_default_pushes_env_only() {
-        let source = OpenCodeModelSource::ConfigDefault("config-model".to_string());
+        let _guard = TestEnvGuard::remove_env("OPENCODE_MODEL");
+        let home = setup_isolated_home();
+        write_opencode_config(home.path(), r#"{"model":"config-model"}"#);
         let mut args = vec!["run".to_string()];
         let mut env = Vec::new();
-        source.apply_to_args(&mut args, &mut env);
+        apply_opencode_model_resolution(
+            &mut args,
+            &mut |k, v| env.push((k, v)),
+            false,
+            None,
+            true,
+        ).unwrap();
         assert!(!args.contains(&"--model".to_string()));
         assert!(env.contains(&("MODEL".to_string(), "config-model".to_string())));
     }
 
     #[test]
     fn opencode_apply_to_args_does_not_duplicate_existing_model_flag() {
-        let source = OpenCodeModelSource::CliSwitch("existing".to_string());
         let mut args = vec!["run".to_string(), "--model".to_string(), "existing".to_string()];
         let mut env = Vec::new();
-        source.apply_to_args(&mut args, &mut env);
+        apply_opencode_model_resolution(
+            &mut args,
+            &mut |k, v| env.push((k, v)),
+            false,
+            Some("existing"),
+            true,
+        ).unwrap();
         let count = args.iter().filter(|a| *a == "--model").count();
         assert_eq!(count, 1, "should not duplicate --model flag");
     }
@@ -2919,9 +2983,13 @@ fn run_direct_wrap_pipeline_simulation(
 
     // 4. Model resolution (specifically OpenCode simulation)
     if provider == Provider::OpenCode {
-        if let Ok(source) = resolve_opencode_model(Some("test-model")) {
-            source.apply_to_args(&mut child_args, &mut env_overrides);
-        }
+        let _ = apply_opencode_model_resolution(
+            &mut child_args,
+            &mut |k, v| env_overrides.push((k, v)),
+            false,
+            Some("test-model"),
+            true,
+        );
     }
 
     // 5. Output format (simulation of --format stream-json)
