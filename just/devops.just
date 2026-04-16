@@ -22,16 +22,25 @@ _build package pkg_name *args="":
     echo
 
 
-_install path pkg_name *args="":
+_install path pkg_name binary="" *args="":
     #!/usr/bin/env bash
     set -euo pipefail
 
     echo
-    echo -e "Installing {{yellow}}{{bold}}{{pkg_name}}{{reset}}"
+    if [[ -z "{{binary}}" ]]; then
+        echo -e "Installing {{yellow}}{{bold}}{{pkg_name}}{{reset}}"
+    else
+        echo -e "Installing {{yellow}}{{bold}}{{pkg_name}}{{reset}} ({{italic}}{{blue}}{{binary}}{{reset}})"
+    fi
+
     echo
     cargo install --path {{path}} {{args}} || ( just _play error-2 && just _speak "Problems encountered when trying to install {{pkg_name}}" && exit 1 )
     echo
-    echo -e "✅ {{bold}}{{green}}{{pkg_name}} installed!{{reset}}"
+    if [[ -z "{{binary}}" ]]; then
+        echo -e "✅ {{bold}}{{green}}{{pkg_name}} installed!{{reset}}"
+    else
+        echo -e "✅ {{bold}}{{green}}{{pkg_name}} installed!{{reset}} ({{italic}}{{blue}}{{binary}}{{reset}})"
+    fi
     just _play drop-4 || exit 0
 
 
