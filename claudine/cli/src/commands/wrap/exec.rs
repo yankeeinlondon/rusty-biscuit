@@ -161,8 +161,19 @@ impl StreamTextRenderer {
             return;
         }
 
-        // Regular content — accumulate
+        // Regular content — accumulate.
         self.append_block(line);
+
+        // Sentence-level early flush: once the block has accumulated past
+        // the size threshold and the latest line ends with sentence-
+        // terminating punctuation, flush so the user sees prose as it is
+        // written instead of waiting for a blank-line boundary. Fence and
+        // list cases above already returned, and short buffers fall below
+        // the threshold, so this never fires mid-code and never chops
+        // short responses.
+        if self.block_buffer.len() >= SENTENCE_FLUSH_MIN_BYTES && line_ends_sentence(trimmed) {
+            self.flush_block(out);
+        }
     }
 
     /// Append `content` to the block buffer and stamp the growth clock so
@@ -230,6 +241,30 @@ impl StreamTextRenderer {
         }
         let _ = out.flush();
     }
+}
+
+/// Minimum buffered byte count before a sentence-terminator at the end of a
+/// line is allowed to trigger an early flush. Short single-line responses
+/// (e.g. `"OK."`) stay buffered so they don't render as their own pseudo-
+/// paragraph; only multi-line or otherwise substantial prose qualifies.
+const SENTENCE_FLUSH_MIN_BYTES: usize = 200;
+
+/// Returns `true` when the trimmed line ends with a sentence-terminating
+/// character (`.`, `!`, `?`), optionally followed by a trailing closing
+/// quote / bracket / parenthesis. Trailing whitespace is already stripped by
+/// the caller.
+fn line_ends_sentence(trimmed: &str) -> bool {
+    let bytes = trimmed.as_bytes();
+    let mut idx = bytes.len();
+    while idx > 0 {
+        let ch = bytes[idx - 1];
+        if matches!(ch, b'"' | b'\'' | b')' | b']' | b'}') {
+            idx -= 1;
+            continue;
+        }
+        return matches!(ch, b'.' | b'!' | b'?');
+    }
+    false
 }
 
 fn is_stream_safe_list_item(line: &str) -> bool {
@@ -896,6 +931,7 @@ fn spawn_progress_heartbeat(
 
     let done = Arc::new(AtomicBool::new(false));
     let done_flag = Arc::clone(&done);
+    let stall_threshold = stall_threshold_from_env(policy);
     let handle = thread::spawn(move || {
         let mut next_tick = started_at + policy.interval;
         let term = crate::log::terminal();
@@ -913,6 +949,23 @@ fn spawn_progress_heartbeat(
                 {
                     let mut writer = stream_output.stdout_writer();
                     r.flush_if_idle(&mut writer, policy.silence_window);
+                }
+
+                // Stalled-stream warning: when the provider has gone fully
+                // silent for `stall_threshold`, emit one warning per stall
+                // episode so the user knows the run may be hung. Routed
+                // through the same stderr surface as the heartbeat status
+                // line for spacing consistency.
+                if let Some(metrics) = live_metrics.as_ref() {
+                    let stall_output = stream_output.clone();
+                    let stall_term = term.clone();
+                    let mut emit = move |msg: &str| {
+                        let rendered = Status::new(msg.to_string())
+                            .state(StatusState::Warning)
+                            .render(&stall_term);
+                        stall_output.emit_stderr_line(&rendered);
+                    };
+                    maybe_emit_stall_warning(metrics, now, stall_threshold, &mut emit);
                 }
 
                 emit_progress_heartbeat(
@@ -975,6 +1028,67 @@ fn emit_progress_heartbeat(
     if let Some(desc) = description {
         let rendered = Status::new(desc).state(StatusState::Info).render(term);
         stream_output.emit_stderr_line(&rendered);
+    }
+}
+
+/// Resolve the stall-warning threshold. Defaults to `policy.force_window`
+/// (so a stall warning fires after the same window that already forces a
+/// heartbeat tick during sustained activity), and can be overridden via
+/// the `CLAUDINE_STALL_TIMEOUT_SECONDS` environment variable. Invalid or
+/// non-positive values fall back to the default.
+fn stall_threshold_from_env(policy: HeartbeatPolicy) -> Duration {
+    match std::env::var("CLAUDINE_STALL_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+    {
+        Some(secs) => Duration::from_secs(secs),
+        None => policy.force_window,
+    }
+}
+
+/// Check the live metrics for a stalled stream and emit one warning per
+/// stall episode. Returns `true` when a warning was emitted on this call.
+///
+/// Dedup logic lives in [`progress::should_warn_stall`]; this helper is
+/// the side-effecting wrapper that updates `last_stall_warning_at` and
+/// invokes the caller-provided emitter exactly once per episode.
+fn maybe_emit_stall_warning<F: FnMut(&str)>(
+    metrics: &LiveMetrics,
+    now: Instant,
+    threshold: Duration,
+    emit: &mut F,
+) -> bool {
+    let mut state = match metrics.lock() {
+        Ok(state) => state,
+        Err(_) => return false,
+    };
+    if !progress::should_warn_stall(&state, now, threshold) {
+        return false;
+    }
+    state.last_stall_warning_at = Some(now);
+    let elapsed = now.saturating_duration_since(
+        state.last_event_at.unwrap_or(now),
+    );
+    let secs = elapsed.as_secs();
+    drop(state);
+    let message = format!(
+        "no provider activity in {} \u{2014} provider may be hung; press Ctrl+C to abort",
+        format_stall_duration(secs)
+    );
+    emit(&message);
+    true
+}
+
+/// Format a duration in seconds for the stall warning message.
+/// Mirrors the heartbeat duration formatter at coarse granularity.
+fn format_stall_duration(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3_600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h{}m", secs / 3_600, (secs % 3_600) / 60)
     }
 }
 
@@ -1436,6 +1550,180 @@ mod tests {
         let flushed = String::from_utf8(out).unwrap();
         assert!(flushed.contains("first block"));
         assert!(flushed.contains("second block"));
+    }
+
+    #[test]
+    fn flushes_long_prose_on_sentence_terminator() {
+        // After the block buffer accumulates substantial prose (past the
+        // sentence-flush threshold) and the latest line ends with sentence-
+        // terminating punctuation, flush early so the user sees progress
+        // without waiting for a blank line.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        let long_sentence = "This is a long sentence the agent is writing as part of an \
+            extended paragraph that has not yet reached a blank line boundary and would \
+            otherwise sit invisible in the buffer waiting for darkmatter to render it.\n";
+        assert!(long_sentence.len() > SENTENCE_FLUSH_MIN_BYTES);
+
+        renderer.push(&mut out, long_sentence);
+        let flushed = String::from_utf8(out).unwrap();
+        assert!(
+            flushed.contains("extended paragraph"),
+            "long sentence-terminated line should flush early; got: {flushed:?}"
+        );
+        assert!(renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn does_not_flush_short_line_on_sentence_terminator() {
+        // A short response like "OK." must remain buffered — only buffers
+        // past the size threshold are eligible for sentence-level flush.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "OK.\n");
+        assert!(
+            out.is_empty(),
+            "short line should not trigger sentence flush"
+        );
+        assert!(!renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn does_not_sentence_flush_inside_code_fence() {
+        // Content inside a fenced block must never trigger sentence-level
+        // flush — the renderer waits for the closing fence.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "```\n");
+        let long_inside = "This is a really long line inside a code fence that ends with a \
+            period and is more than the sentence-flush threshold characters long because \
+            we want to verify that fence content is never flushed by the heuristic.\n";
+        assert!(long_inside.len() > SENTENCE_FLUSH_MIN_BYTES);
+        renderer.push(&mut out, long_inside);
+
+        assert!(
+            out.is_empty(),
+            "fenced content must not sentence-flush; got: {:?}",
+            String::from_utf8(out.clone()).unwrap()
+        );
+        assert!(renderer.in_code_fence);
+    }
+
+    #[test]
+    fn does_not_sentence_flush_when_line_lacks_terminator() {
+        // A long line that does not end in . ! or ? must not flush — only
+        // sentence-terminated lines qualify.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        let long_no_terminator = "This is a long line that the agent is writing without \
+            ever reaching a terminating period and so it should remain buffered until \
+            either a blank line arrives or the idle threshold expires from above and so \
+            we keep going for a while longer to comfortably exceed the byte threshold\n";
+        assert!(long_no_terminator.len() > SENTENCE_FLUSH_MIN_BYTES);
+
+        renderer.push(&mut out, long_no_terminator);
+        assert!(
+            out.is_empty(),
+            "non-terminated line must not sentence-flush"
+        );
+        assert!(!renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn maybe_emit_stall_warning_fires_once_per_episode() {
+        use std::cell::Cell;
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let base = Instant::now();
+        let threshold = Duration::from_secs(60);
+
+        // Stall episode 1: last activity 180 s before "now".
+        {
+            let mut s = metrics.lock().unwrap();
+            s.last_event_at = Some(base - Duration::from_secs(180));
+        }
+
+        let count = Cell::new(0u32);
+        let mut emit = |_msg: &str| count.set(count.get() + 1);
+
+        // First call past the threshold emits and marks the warning timestamp.
+        assert!(maybe_emit_stall_warning(&metrics, base, threshold, &mut emit));
+        assert_eq!(count.get(), 1);
+
+        // Same-now call: deduped within the same stall episode.
+        assert!(!maybe_emit_stall_warning(&metrics, base, threshold, &mut emit));
+        assert_eq!(count.get(), 1);
+
+        // Activity resumes — last_event_at advances past the stored warning.
+        {
+            let mut s = metrics.lock().unwrap();
+            s.last_event_at = Some(base + Duration::from_secs(1));
+        }
+        // Still within threshold from the resumed event: no warning.
+        assert!(!maybe_emit_stall_warning(
+            &metrics,
+            base + Duration::from_secs(2),
+            threshold,
+            &mut emit,
+        ));
+        assert_eq!(count.get(), 1);
+
+        // 180 s later the stream is silent again — fresh stall episode warns.
+        assert!(maybe_emit_stall_warning(
+            &metrics,
+            base + Duration::from_secs(180),
+            threshold,
+            &mut emit,
+        ));
+        assert_eq!(count.get(), 2);
+    }
+
+    #[serial_test::serial(stall_env)]
+    #[test]
+    fn stall_threshold_from_env_defaults_to_force_window() {
+        // SAFETY: tests run in a single-threaded test harness section but env
+        // mutation is global. We unset right after to keep adjacent tests
+        // unaffected.
+        // SAFETY: env mutation is process-global; tests in this module don't
+        // touch this var concurrently.
+        unsafe {
+            std::env::remove_var("CLAUDINE_STALL_TIMEOUT_SECONDS");
+        }
+        let policy = HeartbeatPolicy::default();
+        assert_eq!(stall_threshold_from_env(policy), policy.force_window);
+    }
+
+    #[serial_test::serial(stall_env)]
+    #[test]
+    fn stall_threshold_from_env_uses_override_when_set() {
+        // SAFETY: env mutation is process-global; tests in this module don't
+        // touch this var concurrently.
+        unsafe {
+            std::env::set_var("CLAUDINE_STALL_TIMEOUT_SECONDS", "45");
+        }
+        let policy = HeartbeatPolicy::default();
+        assert_eq!(stall_threshold_from_env(policy), Duration::from_secs(45));
+        unsafe {
+            std::env::remove_var("CLAUDINE_STALL_TIMEOUT_SECONDS");
+        }
+    }
+
+    #[serial_test::serial(stall_env)]
+    #[test]
+    fn stall_threshold_from_env_ignores_invalid_value() {
+        // SAFETY: env mutation is process-global; tests in this module don't
+        // touch this var concurrently.
+        unsafe {
+            std::env::set_var("CLAUDINE_STALL_TIMEOUT_SECONDS", "not-a-number");
+        }
+        let policy = HeartbeatPolicy::default();
+        assert_eq!(stall_threshold_from_env(policy), policy.force_window);
+        unsafe {
+            std::env::remove_var("CLAUDINE_STALL_TIMEOUT_SECONDS");
+        }
     }
 
     #[test]

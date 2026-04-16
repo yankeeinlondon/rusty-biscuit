@@ -130,10 +130,10 @@ Provider coverage:
 | Claude | `content_block_delta` with `delta.type = "thinking_delta"` |
 | Codex | `item.completed` / `item.updated` with `item.type = "reasoning"` |
 | OpenCode | Top-level `{"type":"reasoning","text":"…"}` (also resolves nested `part.text`) |
-| Gemini | `thought` events on the candidate stream |
-| Qwen | `thinking` deltas (when emitted by the model) |
+| Gemini | _not yet surfaced_ — `thinkingConfig.includeThoughts` controls model-side emission but no dedicated stream-json event has been observed in this repo's research or fixtures |
+| Qwen | _not yet surfaced_ — when `enable_thinking` is on, the model emits `<think>…</think>` blocks inline inside normal message content rather than as a separate event |
 
-Goose and Kimi do not surface reasoning in their stream protocols; nothing is rendered for them.
+Goose and Kimi do not surface reasoning in their stream protocols; nothing is rendered for them. Adding a typed `Reasoning` variant for Gemini or Qwen requires first observing the wire format; contributions welcome.
 
 ## Warning Rendering
 
@@ -189,6 +189,10 @@ Anything unmatched defaults to `Unknown`, which renders as a red `Agent Error` b
 
 Assistant text reaches stdout through [`StreamTextRenderer`](../../cli/src/commands/wrap/exec.rs). It accumulates lines into a block buffer and renders them through Darkmatter at boundaries (paragraph break, code-fence close, stream-safe list item). Partial trailing lines stream raw the moment they arrive, so the user sees progress as the agent types.
 
+### Sentence-Level Early Flush
+
+For non-fenced prose, the renderer additionally flushes when the buffered block has grown past the `SENTENCE_FLUSH_MIN_BYTES` threshold (200 bytes today) **and** the latest line ends with sentence-terminating punctuation (`.`, `!`, `?`, optionally followed by a closing quote / bracket / parenthesis). This keeps long single-paragraph monologues streaming in roughly sentence-sized chunks instead of waiting for a blank-line boundary, while short responses (`"OK."`) and lines without terminators stay buffered. Code fences and list items are excluded — those branches return earlier in `process_line`.
+
 ### Idle Flush
 
 Block buffers are also flushed when the heartbeat thread observes the renderer has been quiet longer than the heartbeat silence window (default **30 s**). This guarantees that a final paragraph emitted by a slow-to-close provider never sits invisible in the buffer waiting for an EOF that may never arrive.
@@ -197,13 +201,15 @@ When the heartbeat thread runs, it acquires the renderer lock, calls `flush_if_i
 
 ### Stalled-Stream Warning
 
-If two times the silence window passes (default **120 s**) with no `OutputText`, no `ToolCall`, no `ToolResult`, and no `TurnComplete`, the heartbeat emits a `SemanticEvent::Warning`:
+When the heartbeat thread observes that `last_event_at` has been stale for at least `policy.force_window` (default **120 s**), it emits a `Status::Warning` line to stderr exactly once per stall episode:
 
 ```text
 ⚠ no provider activity in 2m — provider may be hung; press Ctrl+C to abort
 ```
 
-The warning is a real semantic event, so it lands in dispatch and the JSONL log alongside everything else. Override the threshold with `CLAUDINE_STALL_TIMEOUT_SECONDS=<seconds>`.
+Dedup uses [`progress::should_warn_stall`](../../lib/src/stream/progress.rs): the warning re-fires only after activity resumes (`last_event_at` advances past the stored `last_stall_warning_at`) and the stream stalls again. Override the threshold with `CLAUDINE_STALL_TIMEOUT_SECONDS=<seconds>`.
+
+The current implementation is stderr-only — the warning does not yet flow through `SemanticEventSink` for dispatch / JSONL logging, because the heartbeat thread does not own the sink. Promoting it to a real `SemanticEvent::Warning` is a follow-up that requires plumbing a thread-safe event injector through the parser-thread / heartbeat-thread boundary.
 
 ## Heartbeat
 

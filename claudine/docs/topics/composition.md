@@ -9,6 +9,13 @@ Two canonical commands:
 
 Both commands share the same five-stage pipeline and inherit full wrapper-grade behavior: environment setup, harness detection, structured streaming, and handler-driven recovery.
 
+Because composition flows through the same execution path as `claudine claude` / `codex` / etc., it inherits every behavior of the live stderr surface documented in [Non-Interactive Sessions](non-interactive-sessions.md):
+
+- **Tool call rendering** — `→ Name(summary)` / `← Name(slot)` with shell-name prefixing for `Bash` / `shell` / `run_command` and `description → subject → prompt → task` field order for `Task`.
+- **Idle flush** — buffered assistant markdown is flushed before the next heartbeat status line whenever the block buffer has been idle for at least the heartbeat silence window (default 30 s), so a dangling final paragraph never sits invisible while a slow-to-close provider waits to exit.
+- **Typed error rendering** — `SemanticEvent::Error` is rendered as a colored `BlockQuote` whose label and border come from `SemanticErrorKind` (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`).
+- **Reasoning / thinking** — provider reasoning (Claude, Codex, OpenCode, Gemini, Qwen) renders into `Section::Thinking` as a `BlockQuote` with the wider `▌ ` border that matches the System Prompt and Agent Prompt sections.
+
 ### Positional Arguments
 
 Each command accepts exactly one file reference plus zero or more `key=value`
