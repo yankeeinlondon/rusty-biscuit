@@ -49,7 +49,7 @@ lint-fix:
 # install CLI binary
 install *args="":
     @just build --release
-    @just _install biscuit-hash-cli "./cli" "Biscuit Hash" {{args}}
+    @just _install "./cli" "Biscuit Hash" {{args}}
 
 # build and show the docs for the library code
 docs:
