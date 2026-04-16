@@ -2,11 +2,10 @@
 //! output.
 //!
 //! OpenCode emits a step-oriented stream: `session_start` metadata, then
-//! alternating `step_start` / `text` / `tool_use` / `tool_result` /
-//! `step_finish` events, plus a final `step_complete` / `turn_complete` that
-//! carries usage / cost / duration. Reasoning and parent-session permission
-//! gaps aren't currently exposed in the NDJSON stream, so they remain out of
-//! scope per the spec.
+//! alternating `step_start` / `text` / `reasoning` / `tool_use` /
+//! `tool_result` / `step_finish` events, plus a final `step_complete` /
+//! `turn_complete` that carries usage / cost / duration. Parent-session
+//! permission gaps aren't currently exposed in the NDJSON stream.
 //!
 //! Routing:
 //!
@@ -15,6 +14,7 @@
 //! - `step_start` / `step_finish` → [`SemanticEvent::Info`] with a
 //!   `step_phase` marker so renderers / heartbeats can key off activity.
 //! - `text` / `text_delta` / `assistant_text` → [`SemanticEvent::OutputText`].
+//! - `reasoning` → [`SemanticEvent::Reasoning`].
 //! - `tool_start` → [`SemanticEvent::ToolCall`] (pre-completion).
 //! - `tool_use` → paired [`SemanticEvent::ToolCall`] + [`SemanticEvent::ToolResult`]
 //!   (OpenCode emits `tool_use` only after the tool has reached `completed` / `error`).
@@ -29,8 +29,8 @@ use serde_json::{Map, Value};
 
 use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::opencode::{
-    OpenCodeError, OpenCodeEvent, OpenCodeInit, OpenCodeStepComplete, OpenCodeStepFinish,
-    OpenCodeStepStart, OpenCodeText, OpenCodeTool,
+    OpenCodeError, OpenCodeEvent, OpenCodeInit, OpenCodeReasoning, OpenCodeStepComplete,
+    OpenCodeStepFinish, OpenCodeStepStart, OpenCodeText, OpenCodeTool,
 };
 use super::semantic::{SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
@@ -202,6 +202,19 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         }
         self.assistant_text.push_str(&text);
         self.sink.on_semantic_event(SemanticEvent::OutputText {
+            text,
+            extra: Value::Object(self.base_extra(raw_kind)),
+        });
+    }
+
+    fn handle_reasoning(&mut self, event: OpenCodeReasoning, raw_kind: &str) {
+        let Some(text) = event.resolved_text() else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        self.sink.on_semantic_event(SemanticEvent::Reasoning {
             text,
             extra: Value::Object(self.base_extra(raw_kind)),
         });
@@ -384,6 +397,9 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
                 | OpenCodeEvent::AssistantText(text),
             ) => {
                 self.handle_text(text, &raw_kind);
+            }
+            Ok(OpenCodeEvent::Reasoning(reasoning)) => {
+                self.handle_reasoning(reasoning, &raw_kind);
             }
             Ok(OpenCodeEvent::StepFinish(sf)) => {
                 self.handle_step_finish(sf, &raw_kind);
@@ -744,6 +760,45 @@ mod tests {
             "must not synthesize a ToolCall when only a completion was observed; got {kinds:?}"
         );
         assert_eq!(n_results, 1, "must emit exactly one ToolResult");
+    }
+
+    #[test]
+    fn reasoning_event_emits_semantic_reasoning() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"reasoning","text":"weighing options"}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let kinds: Vec<&'static str> = collected.iter().map(|e| e.kind_str()).collect();
+        assert_eq!(
+            kinds,
+            vec!["reasoning"],
+            "OpenCode `reasoning` event must route to SemanticEvent::Reasoning, \
+             not fall through to ProviderExtension; got {kinds:?}"
+        );
+        let SemanticEvent::Reasoning { text, .. } = &collected[0] else {
+            panic!("expected Reasoning");
+        };
+        assert_eq!(text, "weighing options");
+    }
+
+    #[test]
+    fn reasoning_with_empty_text_emits_nothing() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"reasoning","text":""}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"reasoning","part":{"text":""}}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"reasoning"}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(
+            collected.is_empty(),
+            "empty / missing reasoning text must not emit any semantic event; got {collected:?}"
+        );
     }
 
     #[test]

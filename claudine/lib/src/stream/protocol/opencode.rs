@@ -45,6 +45,8 @@ pub enum OpenCodeEvent {
     ToolResult(OpenCodeTool),
     #[serde(rename = "tool_end")]
     ToolEnd(OpenCodeTool),
+    #[serde(rename = "reasoning")]
+    Reasoning(OpenCodeReasoning),
 }
 
 /// `init` / `session_start` payload.
@@ -94,6 +96,35 @@ pub struct OpenCodeTextPart {
 }
 
 impl OpenCodeText {
+    pub fn resolved_text(self) -> Option<String> {
+        self.part
+            .and_then(|p| p.text)
+            .or(self.text)
+            .or(self.content)
+    }
+}
+
+/// Reasoning event. Text can arrive at either the top level or nested under
+/// `part.text`, mirroring [`OpenCodeText`]. The `content` fallback is retained
+/// for symmetry with the text shape so callers never have to care which
+/// location the provider happens to use.
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeReasoning {
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub part: Option<OpenCodeReasoningPart>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeReasoningPart {
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+impl OpenCodeReasoning {
     pub fn resolved_text(self) -> Option<String> {
         self.part
             .and_then(|p| p.text)
@@ -578,5 +609,25 @@ mod tests {
     fn opencode_unknown_event_type_fails_typed() {
         let err = serde_json::from_str::<OpenCodeEvent>(r#"{"type":"not_a_real_event"}"#);
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn opencode_reasoning_top_level_text_deserializes() {
+        let event = parse(r#"{"type":"reasoning","text":"Thinking it over"}"#);
+        let OpenCodeEvent::Reasoning(reasoning) = event else {
+            panic!("expected Reasoning");
+        };
+        assert_eq!(reasoning.resolved_text(), Some("Thinking it over".into()));
+    }
+
+    #[test]
+    fn opencode_reasoning_nested_part_text_resolves() {
+        let event = parse(
+            r#"{"type":"reasoning","part":{"id":"prt_1","type":"reasoning","text":"nested prose"}}"#,
+        );
+        let OpenCodeEvent::Reasoning(reasoning) = event else {
+            panic!("expected Reasoning");
+        };
+        assert_eq!(reasoning.resolved_text(), Some("nested prose".into()));
     }
 }

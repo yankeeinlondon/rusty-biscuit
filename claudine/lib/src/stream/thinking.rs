@@ -17,7 +17,7 @@ pub fn render_thinking_block(text: &str, terminal: &Terminal) -> String {
         return String::new();
     }
     let prose = Prose::new(format!("<dim><i>{text}</i></dim>"));
-    BlockQuote::from(prose).render(terminal)
+    BlockQuote::from(prose).with_border("▌ ").render(terminal)
 }
 
 #[cfg(test)]
@@ -46,5 +46,21 @@ mod tests {
         let term = Terminal::builder().build();
         let rendered = render_thinking_block("   \n  ", &term);
         assert_eq!(rendered, "");
+    }
+
+    #[test]
+    fn block_quote_uses_wider_border_character() {
+        let term = Terminal::builder().build();
+        let rendered = render_thinking_block("reflecting", &term);
+        assert!(
+            rendered.contains("▌"),
+            "rendered thinking block must use the wider `▌ ` border to match \
+             the system-prompt and agent-prompt visual style; rendered: {rendered:?}"
+        );
+        assert!(
+            !rendered.contains("│"),
+            "rendered thinking block must NOT use the default narrow `│` border; \
+             rendered: {rendered:?}"
+        );
     }
 }
