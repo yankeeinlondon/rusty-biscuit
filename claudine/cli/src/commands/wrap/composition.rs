@@ -107,6 +107,9 @@ pub(crate) fn execute_composition_request_inner(
     let silent = request.silent;
     let show_checks = !silent;
 
+    let source_repo_root = request.prepared.source_repo_root.as_deref();
+    let launch_workspace = env::resolve_launch_workspace_context(&launch_cwd, source_repo_root);
+
     // -- Provider detection and selection ---------------------------------
 
     let clients = InstalledAiClients::new();
@@ -123,7 +126,6 @@ pub(crate) fn execute_composition_request_inner(
     .filter(|p| clients.path(p.sniff_ai_cli()).is_some())
     .collect();
 
-    let source_repo_root = request.prepared.source_repo_root.as_deref();
     let favorite = load_config_favorite(source_repo_root.unwrap_or(&launch_cwd));
 
     let selected = match select_provider(
@@ -181,6 +183,9 @@ pub(crate) fn execute_composition_request_inner(
     let compose_source_hint = request.file_ref.clone();
 
     if !silent {
+        let mut header_env_plan = env::EnvPlan::default();
+        header_env_plan.package_context = launch_workspace.package_context.clone();
+
         crate::output::log_wrapper_header(
             profile,
             request.yolo,
@@ -193,7 +198,7 @@ pub(crate) fn execute_composition_request_inner(
             request.operation.as_deref(),
             None, // no inline prompt text for compose
             Some(&compose_source_hint),
-            &Default::default(), // env_plan not built yet; header doesn't need it for compose
+            &header_env_plan,
             &term,
         );
     }
@@ -562,6 +567,16 @@ pub(crate) fn execute_composition_request_inner(
     }
 
     switch_process_cwd(child_cwd)?;
+
+    if !silent && !quiet {
+        use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
+        use biscuit_terminal::prelude::Renderable as _;
+
+        let status = Status::from_prose("Starting pre-flight checks".to_string())
+            .state(StatusState::Info)
+            .theme(StatusTheme::Circular);
+        crate::log::message(&status.render(&term));
+    }
 
     // -- Harness detection from effective frontmatter ---------------------
     // THE key architectural fix: harness properties are read from the

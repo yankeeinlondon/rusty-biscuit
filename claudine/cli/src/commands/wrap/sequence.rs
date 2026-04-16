@@ -103,6 +103,14 @@ pub(crate) fn execute_sequence(
     let shared_approval_cache: composition::SharedApprovalCache =
         Arc::new(Mutex::new(HashMap::new()));
 
+    if !silent {
+        let term = log::terminal();
+        let status = Status::from_prose("Starting pre-flight checks".to_string())
+            .state(StatusState::Info)
+            .theme(biscuit_terminal::components::status::StatusTheme::Circular);
+        log::message(&status.render(&term));
+    }
+
     // ── Phase 1: run pre-flight shell discovery for every step ─────────
     //
     // Template `::shell` directives can reference per-step state

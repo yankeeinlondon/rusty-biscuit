@@ -814,6 +814,35 @@ fn run_provider_wrapper_inner(
         }
     }
 
+    let prompt_display = prompt_source.as_inline().map(|s| s.to_string());
+    let interactive_override = interactive_requested && has_prompt;
+    let effective_operation = args.operation.clone().or(extracted.operation);
+
+    if let Some(ref op) = effective_operation {
+        env_overrides.push(("OPERATION".to_string(), op.clone()));
+    }
+
+    if !silent_requested {
+        let mut header_env_plan = env::EnvPlan::default();
+        header_env_plan.package_context = launch_workspace.package_context.clone();
+
+        crate::output::log_wrapper_header(
+            profile,
+            yolo_enabled,
+            effective_non_interactive,
+            interactive_override,
+            detail_requested,
+            repo_requested,
+            None,
+            false, // not a sequence
+            effective_operation.as_deref(),
+            prompt_display.as_deref(),
+            None, // no compose source hint for direct wrapper
+            &header_env_plan,
+            &term,
+        );
+    }
+
     let sp_args = claudine::system_prompt::SystemPromptArgs {
         append_file: args.append_system_prompt.clone(),
         replace_file: args.replace_system_prompt.clone(),
@@ -848,13 +877,6 @@ fn run_provider_wrapper_inner(
     }
     let _ = &sp_artifacts;
 
-    // Universal --operation flag (clap-parsed or extracted from passthrough)
-    let effective_operation = args.operation.clone().or(extracted.operation);
-    if let Some(ref op) = effective_operation {
-        env_overrides.push(("OPERATION".to_string(), op.clone()));
-    }
-
-    // Universal --sandbox flag
     if args.sandbox
         && let Some(warn) = profile.apply_sandbox(&mut child_args)
     {
@@ -876,6 +898,17 @@ fn run_provider_wrapper_inner(
         needs_mcp_shadow_home,
         launch_workspace,
     )?;
+
+    if !silent_requested && !quiet_requested {
+        use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
+        use biscuit_terminal::prelude::Renderable as _;
+
+        let status = Status::from_prose("Starting pre-flight checks".to_string())
+            .state(StatusState::Info)
+            .theme(StatusTheme::Circular);
+        crate::log::message(&status.render(&term));
+    }
+
     if args.timeout.is_some() && !effective_non_interactive {
         return Err(eyre!(
             "--timeout can only be used in non-interactive mode \
@@ -1068,32 +1101,11 @@ fn run_provider_wrapper_inner(
 
     switch_process_cwd(child_cwd)?;
 
-    let prompt_display = prompt_source.as_inline().map(|s| s.to_string());
     let dispatch_context = HashMap::new();
-
-    // Interactive override: user explicitly forced -i with a prompt present
-    let interactive_override = interactive_requested && has_prompt;
 
     // Output verbosity: --silent suppresses everything, --quiet hides env/info preamble
     // but still shows the system prompt when one is active.
     if !silent_requested {
-        // Header line (shown for both default and --quiet)
-        crate::output::log_wrapper_header(
-            profile,
-            yolo_enabled,
-            effective_non_interactive,
-            interactive_override,
-            detail_requested,
-            repo_requested,
-            None,
-            false, // not a sequence
-            effective_operation.as_deref(),
-            prompt_display.as_deref(),
-            None, // no compose source hint for direct wrapper
-            &env_plan,
-            &term,
-        );
-
         if !quiet_requested {
             crate::output::log_wrapper_env_details(&env_plan, mcp_runtime.as_ref(), &term, verbose);
 
@@ -1239,6 +1251,16 @@ fn run_provider_wrapper_inner(
             None
         }
     };
+
+    if !silent_requested && !quiet_requested {
+        use biscuit_terminal::components::status::{Status, StatusState, StatusTheme};
+        use biscuit_terminal::prelude::Renderable as _;
+
+        let status = Status::from_prose("Pre-flight checks have passed".to_string())
+            .state(StatusState::Success)
+            .theme(StatusTheme::Circular);
+        crate::log::message(&status.render(&term));
+    }
 
     // Execute the provider. Composition and harness execution are handled by
     // `claudine compose` / `claudine inline-compose` through the wrapper-grade

@@ -1,11 +1,11 @@
 ---
 source: claudine/cli/tests/wrap_commands.rs
-assertion_line: 316
 expression: redact_temp_home(&redact_session_id(&strip_ansi(&stderr)))
 ---
 
 Claudine ▸ Codex  Interactive  PACKAGE_NAME: claudine-cli (area: claudine)
 
+ℹ Starting pre-flight checks
 Environment Variables:
 • INTERNAL_TOKEN
 • OPENAI_API_KEY
@@ -44,3 +44,5 @@ System Prompt(appended):
   ▌ - whenever you are attempt to convert a string based file reference to a
   ▌ real file path in the filesystem you should use `FileReference` struct
   ▌ from `biscuit-file` and use the `biscuit-file` skill
+
+✓ Pre-flight checks have passed
