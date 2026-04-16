@@ -1,7 +1,7 @@
 ---
 name: claudine
 description: Details on the Claudine library and CLI, including deep research into Agentic CLI platforms such as Claude Code, Codex CLI, Goose, Opencode CLI, and all other Agentic CLI's supported by the Claudine library.
-last_updated: 2026-04-14
+last_updated: 2026-04-16
 ---
 
 ## Claudine Library
@@ -19,6 +19,8 @@ The dispatch pipeline supports a Handlebars-style template engine with 28 variab
 The live stderr surface was hardened on 2026-04-14 (feature: `2026-04-14-response-refinement`). `LiveSemanticSink` in [`claudine/cli/src/commands/wrap/live_semantic_sink.rs`](../../../claudine/cli/src/commands/wrap/live_semantic_sink.rs) enforces a **9-section model** for non-interactive output (execution line, env, system prompt, agent prompt, session ID, thinking prose, tool/info events, final STDOUT, and metadata) with strictly enforced spacing. Thinking prose is rendered as a `BlockQuote` on stderr. Tool calls use a canonical `ToolCallDisplay` contract (`🔧 →` / `🔧 ←`) with humanized names and summarized inputs/results; raw JSON is never dumped to the terminal for known tools. The Gemini parser fix for markdown lists and OpenCode's `--yolo` forward to `--dangerously-skip-permissions` also landed in this cycle.
 
 Hook handlers were hardened on 2026-04-14 (feature: `2026-04-14-more-meta-response`, Plan 1). `claudine handle` now enforces a **5-second execution deadline** (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`) to prevent hook handlers from blocking the parent agent session. When exceeded, the handler aborts and exits 124. Bash and messenger actions also have 3s timeouts when running inside a hook handler. Phase-level tracing spans (`handle_stdin_read`, `handle_dispatch_canonical`, etc.) ensure any future hang is diagnostic.
+
+Composition rendering was unified on 2026-04-16 (fix: `2026-04-16-consistent-rendering`). `compose` and `inline-compose` now share one non-harness execution function (`execute_without_harness` in [`claudine/cli/src/commands/wrap/composition.rs`](../../../claudine/cli/src/commands/wrap/composition.rs)) parameterized by `CompositionExecutionMode::{Direct, Inline}`, one structured-stream helper (`run_structured_composition` returning `CompositionStreamResult`), and one summary emitter (`emit_composition_summary`) with a `defer_section_separator` flag that selects between compose's immediate emission and inline-compose's post-closure deferred emission. The Goose-only legacy (non-structured) path now calls `emit_minimal_composition_summary` to render the same stderr summary block as structured runs, replacing the previous JSONL-only silence from the deleted `emit_legacy_composition_session_event`. The `"agent did not provide a summarized message"` warning is removed from inline-compose (the `SessionEnd` JSONL event already records empty assistant text). Four inline-only behaviors remain guarded and commented: closure validation/file write, deferred summary timing, interrupted-session partial body report, and the writability pre-check.
 
 - [Supported Platforms](supported-platforms.md)
 - [Unified Hook/Event Model](unified-hooks.md)
