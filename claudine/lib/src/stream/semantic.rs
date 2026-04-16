@@ -20,6 +20,44 @@ use crate::events::Provider;
 
 use super::token_usage::NormalizedTokenUsage;
 
+/// Typed classification of an error surfaced through [`SemanticEvent::Error`].
+///
+/// Carries enough information for downstream renderers (live stderr surface,
+/// end-of-run error report) to choose a label and color without re-parsing
+/// the underlying error message. Replays of older JSONL streams that lack a
+/// `kind` field deserialize as [`SemanticErrorKind::Unknown`] via the
+/// `#[serde(default)]` attribute on [`SemanticEvent::Error::kind`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticErrorKind {
+    /// Local configuration problem (missing API key, bad config file, etc.).
+    Configuration,
+    /// Native error reported by the agent CLI itself (model not found,
+    /// invalid CLI usage, etc.).
+    AgentNative,
+    /// Error originating from a remote API the agent talks to (rate limits,
+    /// billing, upstream API failures).
+    ApiRemote,
+    /// User or signal-driven interruption (Ctrl-C, SIGTERM).
+    Interrupted,
+    /// Unclassified error. Default for replay compatibility.
+    #[default]
+    Unknown,
+}
+
+impl SemanticErrorKind {
+    /// Stable lowercase identifier for logging and serialization tags.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SemanticErrorKind::Configuration => "configuration",
+            SemanticErrorKind::AgentNative => "agent_native",
+            SemanticErrorKind::ApiRemote => "api_remote",
+            SemanticErrorKind::Interrupted => "interrupted",
+            SemanticErrorKind::Unknown => "unknown",
+        }
+    }
+}
+
 /// Typed cross-provider stream event.
 ///
 /// See the module docs for the fidelity invariants. In short: every typed
@@ -102,6 +140,8 @@ pub enum SemanticEvent {
     Error {
         message: String,
         terminal: bool,
+        #[serde(default)]
+        kind: SemanticErrorKind,
         extra: Value,
     },
     ProviderExtension {
@@ -259,6 +299,7 @@ mod tests {
             SemanticEvent::Error {
                 message: "quota exceeded".into(),
                 terminal: true,
+                kind: SemanticErrorKind::ApiRemote,
                 extra: json!({}),
             },
             SemanticEvent::ProviderExtension {
@@ -368,5 +409,57 @@ mod tests {
     fn null_sink_is_send() {
         fn assert_send<T: Send>() {}
         assert_send::<NullSemanticSink>();
+    }
+
+    #[test]
+    fn error_kind_round_trips_through_serde() {
+        for kind in [
+            SemanticErrorKind::Configuration,
+            SemanticErrorKind::AgentNative,
+            SemanticErrorKind::ApiRemote,
+            SemanticErrorKind::Interrupted,
+            SemanticErrorKind::Unknown,
+        ] {
+            let event = SemanticEvent::Error {
+                message: "boom".into(),
+                terminal: true,
+                kind,
+                extra: json!({}),
+            };
+            let value = serde_json::to_value(&event).unwrap();
+            let decoded: SemanticEvent = serde_json::from_value(value).unwrap();
+            match decoded {
+                SemanticEvent::Error { kind: decoded_kind, .. } => {
+                    assert_eq!(decoded_kind, kind);
+                }
+                other => panic!("expected Error, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn error_kind_default_is_unknown_when_field_missing() {
+        let raw = json!({
+            "type": "error",
+            "message": "legacy payload",
+            "terminal": true,
+            "extra": {}
+        });
+        let decoded: SemanticEvent = serde_json::from_value(raw).unwrap();
+        match decoded {
+            SemanticEvent::Error { kind, .. } => {
+                assert_eq!(kind, SemanticErrorKind::Unknown);
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_kind_as_str_is_stable() {
+        assert_eq!(SemanticErrorKind::Configuration.as_str(), "configuration");
+        assert_eq!(SemanticErrorKind::AgentNative.as_str(), "agent_native");
+        assert_eq!(SemanticErrorKind::ApiRemote.as_str(), "api_remote");
+        assert_eq!(SemanticErrorKind::Interrupted.as_str(), "interrupted");
+        assert_eq!(SemanticErrorKind::Unknown.as_str(), "unknown");
     }
 }
