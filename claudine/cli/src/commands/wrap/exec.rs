@@ -49,6 +49,11 @@ struct StreamTextRenderer {
     /// output. Safe to enable now that all stderr status lines route through
     /// `StreamOutput`, which guarantees a newline-boundary before writing.
     partial_line_committed: bool,
+    /// Timestamp of the last write into `block_buffer`. Used by
+    /// [`flush_if_idle`] so the heartbeat thread can surface buffered
+    /// assistant text when the provider stalls without emitting a paragraph
+    /// boundary. Reset to `None` whenever the block flushes.
+    last_block_growth_at: Option<Instant>,
     /// Terminal reference for rendering.
     term: Option<Terminal>,
     /// Cached darkmatter options (created once to avoid repeated theme detection).
@@ -69,6 +74,7 @@ impl StreamTextRenderer {
             line_buffer: String::new(),
             in_code_fence: false,
             partial_line_committed: false,
+            last_block_growth_at: None,
             term,
             terminal_options,
         }
@@ -120,7 +126,7 @@ impl StreamTextRenderer {
 
         // Track code fence open/close (``` or ~~~)
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             if self.in_code_fence {
                 // Closing fence — render the complete fenced block
                 self.in_code_fence = false;
@@ -133,14 +139,14 @@ impl StreamTextRenderer {
 
         // Inside a code fence — just accumulate, don't look for boundaries
         if self.in_code_fence {
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             return;
         }
 
         // Blank line outside a code fence = block boundary
         if trimmed.is_empty() {
             // Include the blank line so darkmatter sees proper paragraph spacing
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             self.flush_block(out);
             return;
         }
@@ -150,13 +156,20 @@ impl StreamTextRenderer {
         // the provider stalls after emitting the last list item.
         if is_stream_safe_list_item(trimmed) {
             self.flush_block(out);
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             self.flush_block(out);
             return;
         }
 
         // Regular content — accumulate
-        self.block_buffer.push_str(line);
+        self.append_block(line);
+    }
+
+    /// Append `content` to the block buffer and stamp the growth clock so
+    /// [`flush_if_idle`] can tell how long the buffer has been sitting idle.
+    fn append_block(&mut self, content: &str) {
+        self.block_buffer.push_str(content);
+        self.last_block_growth_at = Some(Instant::now());
     }
 
     /// Render the accumulated block through darkmatter and write to output.
@@ -165,7 +178,29 @@ impl StreamTextRenderer {
             return;
         }
         let block = std::mem::take(&mut self.block_buffer);
+        self.last_block_growth_at = None;
         self.render_markdown(out, &block);
+    }
+
+    /// Flush buffered markdown if it has been sitting idle for at least
+    /// `idle_threshold`. Returns `true` when something was flushed.
+    ///
+    /// Called by the heartbeat thread before it emits its own status line so
+    /// dangling paragraphs cannot remain invisible while the provider stalls
+    /// without closing stdout. An empty buffer is a no-op; a fresh write
+    /// inside the threshold is a no-op.
+    fn flush_if_idle<W: Write>(&mut self, out: &mut W, idle_threshold: Duration) -> bool {
+        if self.block_buffer.is_empty() {
+            return false;
+        }
+        let Some(stamped_at) = self.last_block_growth_at else {
+            return false;
+        };
+        if stamped_at.elapsed() < idle_threshold {
+            return false;
+        }
+        self.flush_block(out);
+        true
     }
 
     /// Flush any remaining buffered content (incomplete line + block buffer).
@@ -176,7 +211,7 @@ impl StreamTextRenderer {
                 // Already streamed raw — do not re-render through darkmatter.
                 self.partial_line_committed = false;
             } else {
-                self.block_buffer.push_str(&leftover);
+                self.append_block(&leftover);
             }
         }
         self.flush_block(out);
@@ -852,6 +887,7 @@ fn spawn_progress_heartbeat(
     started_at: Instant,
     live_metrics: Option<LiveMetrics>,
     stream_output: Arc<StreamOutput>,
+    text_renderer: Option<Arc<std::sync::Mutex<StreamTextRenderer>>>,
     policy: HeartbeatPolicy,
 ) -> Option<(Arc<AtomicBool>, thread::JoinHandle<()>)> {
     if !enabled {
@@ -867,6 +903,18 @@ fn spawn_progress_heartbeat(
         while !done_flag.load(Ordering::Relaxed) {
             let now = Instant::now();
             if now >= next_tick {
+                // Flush any buffered markdown that has been idle for at
+                // least the silence window. This guarantees a dangling
+                // paragraph reaches stdout before the heartbeat status
+                // line reaches stderr, so the heartbeat never appears
+                // above stale assistant text.
+                if let Some(renderer) = &text_renderer
+                    && let Ok(mut r) = renderer.lock()
+                {
+                    let mut writer = stream_output.stdout_writer();
+                    r.flush_if_idle(&mut writer, policy.silence_window);
+                }
+
                 emit_progress_heartbeat(
                     started_at,
                     live_metrics.as_ref(),
@@ -1042,6 +1090,19 @@ pub(crate) fn run_child_stream_semantic(
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
 
+    // Terminal-local renderer for OutputText (stdout markdown). Wrapped
+    // in Arc<Mutex<_>> so the builder closures can retain independent
+    // handles without untangling lifetimes across the FnMut boundary of
+    // the sink's callback storage. Shared with the heartbeat thread so
+    // buffered markdown can be flushed when the provider stalls.
+    //
+    // Note: reasoning rendering is owned entirely by LiveSemanticSink,
+    // which emits BlockQuote-formatted thinking text through the
+    // section-aware stderr emitter. The reasoning_cb passed to the
+    // parser builder is a no-op.
+    let text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
+        Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
+
     let heartbeat_output = stream_output.clone();
     let stdout_output = stream_output.clone();
     let heartbeat = spawn_progress_heartbeat(
@@ -1049,29 +1110,21 @@ pub(crate) fn run_child_stream_semantic(
         started_at,
         Some(live_metrics),
         heartbeat_output,
+        Some(text_renderer.clone()),
         heartbeat_policy,
     );
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
     let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
     let stream_span = Span::current();
+    let stdout_renderer = text_renderer.clone();
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
         let reader = BufReader::new(stdout_pipe);
         let mut out = stdout_output.stdout_writer();
 
-        // Terminal-local renderer for OutputText (stdout markdown). Wrapped
-        // in Arc<Mutex<_>> so the builder closures can retain independent
-        // handles without untangling lifetimes across the FnMut boundary of
-        // the sink's callback storage.
-        //
-        // Note: reasoning rendering is owned entirely by LiveSemanticSink,
-        // which emits BlockQuote-formatted thinking text through the
-        // section-aware stderr emitter. The reasoning_cb passed to the
-        // parser builder is a no-op.
-        let text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
-            Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
+        let text_renderer = stdout_renderer;
 
         let output_cb: OutputTextCallback = {
             let text = text_renderer.clone();
@@ -1221,6 +1274,7 @@ mod tests {
             line_buffer: String::new(),
             in_code_fence: false,
             partial_line_committed: false,
+            last_block_growth_at: None,
             term: None,
             terminal_options: None,
         }
@@ -1309,5 +1363,117 @@ mod tests {
         assert_eq!(flushed, "1. first item\n2. second item\n");
         assert!(renderer.block_buffer.is_empty());
         assert!(renderer.line_buffer.is_empty());
+    }
+
+    #[test]
+    fn flush_if_idle_emits_block_after_threshold() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        // Paragraph without trailing blank line — sits in block_buffer.
+        renderer.push(&mut out, "dangling paragraph line\n");
+        assert!(
+            !renderer.block_buffer.is_empty(),
+            "content should be buffered until a boundary or idle flush"
+        );
+        assert!(
+            out.is_empty(),
+            "block buffered text should not be emitted yet"
+        );
+
+        // Threshold not reached — flush_if_idle is a no-op.
+        assert!(!renderer.flush_if_idle(&mut out, Duration::from_secs(60)));
+        assert!(out.is_empty());
+        assert!(!renderer.block_buffer.is_empty());
+
+        // After the idle window has elapsed, the buffered block flushes.
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(renderer.flush_if_idle(&mut out, Duration::from_millis(5)));
+
+        let flushed = String::from_utf8(out).unwrap();
+        assert!(
+            flushed.contains("dangling paragraph line"),
+            "expected flushed output to contain the buffered paragraph; got: {flushed:?}"
+        );
+        assert!(renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn flush_if_idle_does_not_emit_when_block_empty() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        // No buffered content — must not flush regardless of threshold.
+        assert!(!renderer.flush_if_idle(&mut out, Duration::from_millis(0)));
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn flush_if_idle_resets_growth_clock() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        // Accumulate content, wait past threshold, flush.
+        renderer.push(&mut out, "first block\n");
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(renderer.flush_if_idle(&mut out, Duration::from_millis(5)));
+        assert!(renderer.block_buffer.is_empty());
+
+        // New content arrives — growth clock restarts. An immediate idle
+        // check with a large threshold must not flush the fresh content.
+        renderer.push(&mut out, "second block\n");
+        assert!(
+            !renderer.flush_if_idle(&mut out, Duration::from_secs(30)),
+            "growth clock should restart when new content lands"
+        );
+        assert!(!renderer.block_buffer.is_empty());
+
+        // After the new block has been idle long enough, it flushes.
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(renderer.flush_if_idle(&mut out, Duration::from_millis(5)));
+        assert!(renderer.block_buffer.is_empty());
+
+        let flushed = String::from_utf8(out).unwrap();
+        assert!(flushed.contains("first block"));
+        assert!(flushed.contains("second block"));
+    }
+
+    #[test]
+    fn heartbeat_driven_flush_emits_dangling_paragraph_before_status() {
+        // End-to-end invariant for Phase 2: when the heartbeat thread runs
+        // its idle check against a shared renderer, any buffered assistant
+        // text must reach stdout before the heartbeat emits its own status
+        // line to stderr. We simulate the heartbeat tick with a direct call
+        // rather than spinning a real thread so the test runs deterministically.
+        let renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
+            Arc::new(std::sync::Mutex::new(test_renderer()));
+        let mut stdout_bytes: Vec<u8> = Vec::new();
+        let mut stderr_lines: Vec<String> = Vec::new();
+
+        // Provider emits a final paragraph without a trailing blank line.
+        {
+            let mut r = renderer.lock().unwrap();
+            r.push(&mut stdout_bytes, "final summary line\n");
+        }
+        assert!(
+            stdout_bytes.is_empty(),
+            "buffered text must not escape before the idle window elapses"
+        );
+
+        // Simulate the heartbeat thread's wake-up after the silence window.
+        std::thread::sleep(Duration::from_millis(15));
+        let flushed = {
+            let mut r = renderer.lock().unwrap();
+            r.flush_if_idle(&mut stdout_bytes, Duration::from_millis(5))
+        };
+        assert!(flushed, "idle flush should have fired");
+
+        // Heartbeat emits its status line strictly after the flush.
+        stderr_lines.push("120s · 0 done".into());
+
+        let stdout_text = String::from_utf8(stdout_bytes).unwrap();
+        assert!(stdout_text.contains("final summary line"));
+        assert_eq!(stderr_lines.len(), 1);
+        assert!(stderr_lines[0].contains("120s"));
     }
 }
