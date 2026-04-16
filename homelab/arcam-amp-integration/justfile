@@ -2,6 +2,11 @@ set dotenv-load
 set positional-arguments
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+import "../../just/features.just"
+import "../../just/notify.just"
+import "../../just/ai.just"
+import "../../just/devops.just"
+
 BOLD := '\033[1m'
 ITALIC := '\033[3m'
 DIM := '\033[2m'
