@@ -22,7 +22,7 @@ use super::protocol::gemini::{
     GeminiErrorEvent, GeminiEvent, GeminiInit, GeminiMessage, GeminiResult, GeminiToolResult,
     GeminiToolUse,
 };
-use super::semantic::{SemanticEvent, SemanticEventSink};
+use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -205,9 +205,12 @@ impl<S: SemanticEventSink> GeminiSemanticStreamParser<S> {
             if let Some(kind) = &self.error_kind {
                 extra.insert("error_kind".into(), Value::from(kind.as_str()));
             }
+            let semantic_kind =
+                classify_error(self.error_kind.as_deref(), self.error_message.as_deref());
             self.sink.on_semantic_event(SemanticEvent::Error {
                 message: self.error_message.clone().unwrap_or_default(),
                 terminal: true,
+                kind: semantic_kind,
                 extra: Value::Object(extra),
             });
         } else {
@@ -241,9 +244,11 @@ impl<S: SemanticEventSink> GeminiSemanticStreamParser<S> {
             return;
         }
         self.is_error = true;
+        let semantic_kind = classify_error(self.error_kind.as_deref(), Some(&message));
         self.sink.on_semantic_event(SemanticEvent::Error {
             message,
             terminal: true,
+            kind: semantic_kind,
             extra: Value::Object(extra),
         });
     }
@@ -457,6 +462,54 @@ fn find_list_flush_position(text: &str) -> Option<usize> {
 fn is_numbered_list_start(s: &str) -> bool {
     let digits = s.bytes().take_while(|b| b.is_ascii_digit()).count();
     digits > 0 && s[digits..].starts_with(". ")
+}
+
+/// Map a Gemini error envelope onto a typed [`SemanticErrorKind`].
+///
+/// Gemini errors carry a free-form `severity` field plus a message. This
+/// helper inspects both so the live error renderer and the end-of-run
+/// report can pick a consistent label and color.
+fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
+    if let Some(kind) = error_kind {
+        let lower = kind.to_ascii_lowercase();
+        if lower.contains("auth")
+            || lower.contains("permission")
+            || lower.contains("config")
+            || lower.contains("denied")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("rate") || lower.contains("quota") || lower.contains("billing") {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("abort") {
+            return SemanticErrorKind::Interrupted;
+        }
+        if lower.contains("api") || lower.contains("upstream") || lower.contains("server") {
+            return SemanticErrorKind::ApiRemote;
+        }
+    }
+    if let Some(msg) = message {
+        let lower = msg.to_ascii_lowercase();
+        if lower.contains("rate limit")
+            || lower.contains("quota")
+            || lower.contains("billing")
+            || lower.contains("api error")
+        {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("api key")
+            || lower.contains("authentication")
+            || lower.contains("not authorized")
+            || lower.contains("permission denied")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
+            return SemanticErrorKind::Interrupted;
+        }
+    }
+    SemanticErrorKind::AgentNative
 }
 
 #[cfg(test)]

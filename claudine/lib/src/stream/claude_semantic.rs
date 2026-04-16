@@ -19,7 +19,7 @@ use super::protocol::claude::{
     ClaudeEvent, ClaudeInit, ClaudeRateLimit, ClaudeResult, ClaudeToolResult, ClaudeToolUse,
     ClaudeUser,
 };
-use super::semantic::{SemanticEvent, SemanticEventSink};
+use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::{RateLimitInfo, StreamExecutionSummary};
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -196,9 +196,11 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                 let mut extra = self.base_extra();
                 extra.insert("raw_kind".into(), Value::from(raw_kind));
                 extra.insert("error_kind".into(), Value::from(kind.as_str()));
+                let semantic_kind = classify_error(Some(kind.as_str()), Some(message.as_str()));
                 self.sink.on_semantic_event(SemanticEvent::Error {
                     message,
                     terminal: true,
+                    kind: semantic_kind,
                     extra: Value::Object(extra),
                 });
                 self.terminal_error_emitted = true;
@@ -286,9 +288,12 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             extra.insert("error_kind".into(), Value::from(kind.as_str()));
         }
 
+        let semantic_kind =
+            classify_error(self.error_kind.as_deref(), self.error_message.as_deref());
         self.sink.on_semantic_event(SemanticEvent::Error {
             message: self.error_message.clone().unwrap_or_default(),
             terminal: true,
+            kind: semantic_kind,
             extra: Value::Object(extra),
         });
         self.terminal_error_emitted = true;
@@ -324,9 +329,11 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                 if let Some(reason) = result.terminal_reason.as_deref() {
                     extra.insert("terminal_reason".into(), Value::from(reason));
                 }
+                let semantic_kind = classify_error(self.error_kind.as_deref(), Some(&message));
                 self.sink.on_semantic_event(SemanticEvent::Error {
                     message,
                     terminal: true,
+                    kind: semantic_kind,
                     extra: Value::Object(extra),
                 });
                 self.terminal_error_emitted = true;
@@ -718,6 +725,58 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
     }
 }
 
+/// Map a Claude error envelope onto a typed [`SemanticErrorKind`].
+///
+/// Claude reports errors with a kind discriminator (e.g. `billing_error`,
+/// `rate_limit_error`, `authentication_error`) plus a human message. This
+/// helper inspects both fields so the live error renderer and the
+/// end-of-run report can pick a consistent label and color.
+fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
+    if let Some(kind) = error_kind {
+        let lower = kind.to_ascii_lowercase();
+        if lower.contains("billing")
+            || lower.contains("rate_limit")
+            || lower.contains("ratelimit")
+            || lower.contains("quota")
+            || lower.contains("overload")
+            || lower.contains("api_error")
+            || lower.contains("upstream")
+            || lower.contains("server")
+        {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("auth") || lower.contains("permission") || lower.contains("config") {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("abort") {
+            return SemanticErrorKind::Interrupted;
+        }
+    }
+    if let Some(msg) = message {
+        let lower = msg.to_ascii_lowercase();
+        if lower.contains("rate limit")
+            || lower.contains("quota")
+            || lower.contains("billing")
+            || lower.contains("credit")
+            || lower.contains("api error")
+            || lower.contains("overloaded")
+        {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("api key")
+            || lower.contains("authentication")
+            || lower.contains("not authorized")
+            || lower.contains("permission denied")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
+            return SemanticErrorKind::Interrupted;
+        }
+    }
+    SemanticErrorKind::AgentNative
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
@@ -905,9 +964,10 @@ mod tests {
             .unwrap();
         let events = sink.snapshot();
         match &events[0] {
-            SemanticEvent::Error { message, terminal, extra } => {
+            SemanticEvent::Error { message, terminal, kind, extra } => {
                 assert_eq!(message, "Insufficient credits");
                 assert!(*terminal);
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
                 assert_eq!(extra.get("error_kind"), Some(&json!("billing_error")));
             }
             other => panic!("expected Error, got {other:?}"),
@@ -915,6 +975,30 @@ mod tests {
         let summary = parser.finish(1);
         assert!(summary.is_error);
         assert_eq!(summary.error_kind.as_deref(), Some("billing_error"));
+    }
+
+    #[test]
+    fn classify_error_billing_kind_maps_to_api_remote() {
+        assert_eq!(
+            classify_error(Some("billing_error"), Some("Insufficient credits")),
+            SemanticErrorKind::ApiRemote,
+        );
+    }
+
+    #[test]
+    fn classify_error_authentication_kind_maps_to_configuration() {
+        assert_eq!(
+            classify_error(Some("authentication_error"), None),
+            SemanticErrorKind::Configuration,
+        );
+    }
+
+    #[test]
+    fn classify_error_unknown_kind_with_no_message_falls_back_to_agent_native() {
+        assert_eq!(
+            classify_error(Some("weird_kind"), None),
+            SemanticErrorKind::AgentNative,
+        );
     }
 
     #[test]

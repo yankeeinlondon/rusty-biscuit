@@ -667,6 +667,7 @@ mod tests {
 
     mod semantic_event_to_event_meta_tests {
         use super::*;
+        use crate::stream::semantic::SemanticErrorKind;
         use serde_json::json;
 
         fn env() -> EnvironmentContext {
@@ -741,6 +742,7 @@ mod tests {
             let event = SemanticEvent::Error {
                 message: "billing failed".into(),
                 terminal: true,
+                kind: SemanticErrorKind::Unknown,
                 extra: json!({}),
             };
             let meta = semantic_event_to_event_meta(&event, Provider::Claude, &env(), None);

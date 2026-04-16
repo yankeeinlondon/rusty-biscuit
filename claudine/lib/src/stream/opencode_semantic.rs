@@ -32,7 +32,7 @@ use super::protocol::opencode::{
     OpenCodeError, OpenCodeEvent, OpenCodeInit, OpenCodeReasoning, OpenCodeStepComplete,
     OpenCodeStepFinish, OpenCodeStepStart, OpenCodeText, OpenCodeTool,
 };
-use super::semantic::{SemanticEvent, SemanticEventSink};
+use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -233,9 +233,11 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             .error_message
             .clone()
             .unwrap_or_else(|| "Step failure".to_string());
+        let semantic_kind = classify_error(self.error_kind.as_deref(), Some(&message));
         self.sink.on_semantic_event(SemanticEvent::Error {
             message,
             terminal: true,
+            kind: semantic_kind,
             extra: Value::Object(extra),
         });
     }
@@ -478,6 +480,55 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
         summary.badges = crate::stream::badges::derive_badges(&summary, Provider::OpenCode);
         summary
     }
+}
+
+/// Map an OpenCode error envelope onto a typed [`SemanticErrorKind`].
+fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
+    if let Some(kind) = error_kind {
+        let lower = kind.to_ascii_lowercase();
+        if lower.contains("rate") || lower.contains("quota") || lower.contains("billing") {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("auth")
+            || lower.contains("config")
+            || lower.contains("permission")
+            || lower.contains("provider")
+            || lower.contains("model")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("abort") {
+            return SemanticErrorKind::Interrupted;
+        }
+        if lower.contains("api") || lower.contains("upstream") || lower.contains("server") {
+            return SemanticErrorKind::ApiRemote;
+        }
+    }
+    if let Some(msg) = message {
+        let lower = msg.to_ascii_lowercase();
+        if lower.contains("rate limit")
+            || lower.contains("quota")
+            || lower.contains("billing")
+            || lower.contains("api error")
+            || lower.contains("api timeout")
+        {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("api key")
+            || lower.contains("authentication")
+            || lower.contains("not authorized")
+            || lower.contains("permission denied")
+            || lower.contains("model not found")
+            || lower.contains("invalid model")
+            || lower.contains("providermodelnotfound")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
+            return SemanticErrorKind::Interrupted;
+        }
+    }
+    SemanticErrorKind::AgentNative
 }
 
 #[cfg(test)]

@@ -32,7 +32,7 @@ use super::protocol::codex::{
     CodexItemEnvelope, CodexPermissionItem, CodexPlanUpdate, CodexReasoning, CodexThreadMeta,
     CodexToolItemFields, CodexTurnCompleted,
 };
-use super::semantic::{SemanticEvent, SemanticEventSink};
+use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -179,9 +179,12 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         if let Some(kind) = &self.error_kind {
             extra.insert("error_kind".into(), Value::from(kind.as_str()));
         }
+        let semantic_kind =
+            classify_error(self.error_kind.as_deref(), self.error_message.as_deref());
         self.sink.on_semantic_event(SemanticEvent::Error {
             message: self.error_message.clone().unwrap_or_default(),
             terminal: true,
+            kind: semantic_kind,
             extra: Value::Object(extra),
         });
     }
@@ -568,6 +571,56 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
     }
 }
 
+/// Map a Codex error envelope onto a typed [`SemanticErrorKind`].
+///
+/// Codex surfaces errors as either a typed envelope kind (e.g.
+/// `rate_limit`, `auth`) or a free-form message. This helper inspects both
+/// so the live error renderer and the end-of-run report can pick a
+/// consistent label and color.
+fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
+    if let Some(kind) = error_kind {
+        let lower = kind.to_ascii_lowercase();
+        if lower.contains("rate") || lower.contains("quota") || lower.contains("billing") {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("auth")
+            || lower.contains("config")
+            || lower.contains("permission")
+            || lower.contains("denied")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("abort") {
+            return SemanticErrorKind::Interrupted;
+        }
+        if lower.contains("api") || lower.contains("upstream") || lower.contains("server") {
+            return SemanticErrorKind::ApiRemote;
+        }
+    }
+    if let Some(msg) = message {
+        let lower = msg.to_ascii_lowercase();
+        if lower.contains("rate limit")
+            || lower.contains("quota")
+            || lower.contains("billing")
+            || lower.contains("api error")
+        {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("api key")
+            || lower.contains("authentication")
+            || lower.contains("not authorized")
+            || lower.contains("permission denied")
+            || lower.contains("config")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
+            return SemanticErrorKind::Interrupted;
+        }
+    }
+    SemanticErrorKind::AgentNative
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
@@ -856,6 +909,55 @@ mod tests {
         let summary = parser.finish(1);
         assert!(summary.is_error);
         assert_eq!(summary.error_kind.as_deref(), Some("rate_limit"));
+    }
+
+    #[test]
+    fn classify_error_rate_limit_kind_maps_to_api_remote() {
+        assert_eq!(
+            classify_error(Some("rate_limit"), Some("Too many requests")),
+            SemanticErrorKind::ApiRemote,
+        );
+    }
+
+    #[test]
+    fn classify_error_auth_kind_maps_to_configuration() {
+        assert_eq!(
+            classify_error(Some("auth_error"), Some("missing api key")),
+            SemanticErrorKind::Configuration,
+        );
+    }
+
+    #[test]
+    fn classify_error_unknown_kind_with_billing_message_maps_to_api_remote() {
+        assert_eq!(
+            classify_error(None, Some("Billing quota exceeded")),
+            SemanticErrorKind::ApiRemote,
+        );
+    }
+
+    #[test]
+    fn classify_error_defaults_to_agent_native() {
+        assert_eq!(
+            classify_error(Some("weird_kind"), Some("something broke")),
+            SemanticErrorKind::AgentNative,
+        );
+    }
+
+    #[test]
+    fn error_event_carries_typed_kind_in_semantic_event() {
+        let (events, mut _parser) = new_parser();
+        _parser
+            .feed_line(
+                r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::Error { kind, .. } => {
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
     }
 
     #[test]
