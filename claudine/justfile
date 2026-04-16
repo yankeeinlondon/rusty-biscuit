@@ -1,9 +1,11 @@
+set dotenv-load
+set positional-arguments
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
 import "../just/features.just"
 import "../just/notify.just"
 import "../just/ai.just"
 import "../just/devops.just"
-
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -40,18 +42,17 @@ build *args="":
 
 # Install the CLI
 install *args="":
-    @just _build biscuit-terminal "biscuit-terminal Library" {{args}}
-    @just _build darkmatter "Darkmatter Library" {{args}}
-    @just build
-    @just _install "./cli" "Claudine" "{{args}}"
+    @just _build biscuit-terminal "biscuit-terminal Library" --release {{args}}
+    @just _build darkmatter "Darkmatter Library" --release {{args}}
+    @just build --release
+    @just _install "./cli" "Claudine" {{args}}
 
 # Test both library and CLI.
-test:
-    @just _test claudine
-    @just _test claudine-cli
+test *args="":
+    @just _test claudine {{args}}
+    @just _test claudine-cli {{args}}
 
 # Lint both the library and CLI
-
 lint:
     @just _lint claudine
     @just _lint claudine-cli

@@ -58,3 +58,4 @@ This correctly uses:
 - The `agents/opencode.rs` file uses `plugin_dirs` with plural "plugins" correctly
 - The `opencode.rs` configurator uses singular `plugin_dir` inconsistently
 - Documentation in `provider-quirks.md` already uses plural correctly: "for agents, commands, modes, and plugins"
+
