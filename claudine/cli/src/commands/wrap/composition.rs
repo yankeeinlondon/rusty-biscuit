@@ -982,15 +982,11 @@ fn execute_inline_without_harness(
         (
             result.exit_code,
             result.termination,
-            result.assistant_text,
-            Some((
-                result.summary,
-                result.details,
-                result.had_streamed_assistant,
-            )),
+            result.assistant_text.clone(),
+            Some(result),
         )
     } else {
-        run_legacy_inline(
+        let (exit_code, termination, final_response, _) = run_legacy_inline(
             provider,
             profile,
             binary_path,
@@ -1004,7 +1000,8 @@ fn execute_inline_without_harness(
             stderr_noise,
             term,
             child_spawned,
-        )?
+        )?;
+        (exit_code, termination, final_response, None)
     };
 
     // -- Post-execution: validate disk state and apply closure -------------
@@ -1013,7 +1010,7 @@ fn execute_inline_without_harness(
     let provider_name = crate::output::capitalize_provider(provider);
     let should_separate_checks = deferred_summary
         .as_ref()
-        .is_some_and(|(summary, _, _)| !summary.assistant_text.trim().is_empty());
+        .is_some_and(|result| !result.summary.assistant_text.trim().is_empty());
 
     if show_checks && should_separate_checks {
         eprintln!();
@@ -1149,24 +1146,33 @@ fn execute_inline_without_harness(
     }
 
     // Emit deferred metadata summary
-    if let Some((summary, details, _)) = deferred_summary {
+    if let Some(result) = deferred_summary {
         if stream_verbosity != Verbosity::Silent {
             eprintln!();
         }
         // TODO: Route through sink.emit_trailer_line() for section-aware spacing
-        emit_stream_summary_no_separator_with_context(
-            &summary,
+        emit_composition_summary(
+            &result.summary,
+            &result.details,
             profile,
             env_context,
             stream_verbosity,
             detail_requested,
-            &details,
-            Some(dispatch_context),
+            dispatch_context,
+            None,
+            true,
         );
     } else {
-        // Legacy (non-structured) inline path: emit synthetic session-end
-        // event so composition metadata is consistently logged.
-        emit_legacy_composition_session_event(provider, final_exit, env_context, dispatch_context);
+        // Legacy (non-structured) inline path: emit the minimal summary so
+        // composition metadata is consistently logged and the user sees the
+        // same stderr trailer as structured runs.
+        emit_minimal_composition_summary(
+            provider,
+            final_exit,
+            profile,
+            env_context,
+            dispatch_context,
+        );
     }
 
     Ok(final_exit)
@@ -1258,6 +1264,89 @@ fn run_structured_composition(
         had_streamed_assistant,
         section_stream,
     })
+}
+
+/// Emit the structured-stream summary trailer for a composition run.
+///
+/// Unifies the two previous paths:
+/// - `defer_section_separator = false` (compose): routes through
+///   [`emit_stream_summary_with_context`] so the section tracker inserts the
+///   separator blank exactly once.
+/// - `defer_section_separator = true` (inline-compose): routes through
+///   [`emit_stream_summary_no_separator_with_context`] so the caller controls
+///   the blank-line spacing (e.g. around closure validation output).
+///
+/// Both paths write the JSONL summary event.
+#[allow(clippy::too_many_arguments)]
+fn emit_composition_summary(
+    summary: &claudine::stream::summary::StreamExecutionSummary,
+    details: &StructuredSummaryDetails,
+    profile: &dyn WrapperProfile,
+    env_context: &claudine::events::EnvironmentContext,
+    verbosity: Verbosity,
+    verbose: bool,
+    dispatch_context: &HashMap<String, serde_json::Value>,
+    section_stream: Option<&super::section::SectionStream>,
+    defer_section_separator: bool,
+) {
+    if defer_section_separator {
+        emit_stream_summary_no_separator_with_context(
+            summary,
+            profile,
+            env_context,
+            verbosity,
+            verbose,
+            details,
+            Some(dispatch_context),
+        );
+    } else {
+        emit_stream_summary_with_context(
+            StreamSummaryContext {
+                summary,
+                profile,
+                env_context,
+                verbosity,
+                verbose,
+                details,
+                section_stream,
+            },
+            dispatch_context,
+        );
+    }
+}
+
+/// Emit a minimal composition summary for legacy (non-structured) runs.
+///
+/// Builds a minimal [`StreamExecutionSummary`] (exit_code, is_error, provider)
+/// and routes through [`emit_composition_summary`] with no section stream and
+/// deferred section separators. This delivers the same stderr trailer and
+/// JSONL event that structured runs emit, so legacy paths reach full parity
+/// with structured runs.
+fn emit_minimal_composition_summary(
+    provider: Provider,
+    exit_code: i32,
+    profile: &dyn WrapperProfile,
+    env_context: &claudine::events::EnvironmentContext,
+    dispatch_context: &HashMap<String, serde_json::Value>,
+) {
+    let summary = claudine::stream::summary::StreamExecutionSummary {
+        provider,
+        exit_code,
+        is_error: exit_code != 0,
+        ..Default::default()
+    };
+    let details = StructuredSummaryDetails::default();
+    emit_composition_summary(
+        &summary,
+        &details,
+        profile,
+        env_context,
+        Verbosity::Normal,
+        false,
+        dispatch_context,
+        None,
+        true,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1492,17 +1581,16 @@ fn execute_direct_without_harness(
             std::io::stdout().flush()?;
         }
 
-        emit_stream_summary_with_context(
-            StreamSummaryContext {
-                summary: &result.summary,
-                profile,
-                env_context,
-                verbosity: stream_verbosity,
-                verbose: detail_requested,
-                details: &result.details,
-                section_stream: Some(&result.section_stream),
-            },
+        emit_composition_summary(
+            &result.summary,
+            &result.details,
+            profile,
+            env_context,
+            stream_verbosity,
+            detail_requested,
             dispatch_context,
+            Some(&result.section_stream),
+            false,
         );
 
         Ok(result.exit_code)
@@ -1521,9 +1609,16 @@ fn execute_direct_without_harness(
             child_spawned,
         )?;
 
-        // Emit a synthetic session-end event for non-structured composition
-        // runs so that composition metadata is consistently logged.
-        emit_legacy_composition_session_event(provider, result.data, env_context, dispatch_context);
+        // Legacy (non-structured) compose path: emit the minimal summary so
+        // composition metadata is consistently logged and the user sees the
+        // same stderr trailer as structured runs.
+        emit_minimal_composition_summary(
+            provider,
+            result.data,
+            profile,
+            env_context,
+            dispatch_context,
+        );
 
         Ok(result.data)
     }
@@ -1583,59 +1678,6 @@ fn load_config_favorite(cwd: &Path) -> Option<Provider> {
     let config =
         claudine::dispatch::loader::load_claudine_config(None, repo_root.as_deref()).ok()?;
     Some(config.preferred_agent)
-}
-
-// -- Legacy composition session event --------------------------------------
-
-/// Emit a synthetic `SessionEnd` event for non-structured composition runs.
-///
-/// Structured runs emit this via `emit_stream_summary_with_context`, but
-/// legacy (non-structured) paths return raw process results without any
-/// event emission. This ensures composition metadata is consistently logged
-/// across all execution paths for future resume/reporting UX.
-fn emit_legacy_composition_session_event(
-    provider: Provider,
-    exit_code: i32,
-    env_context: &claudine::events::EnvironmentContext,
-    dispatch_context: &HashMap<String, serde_json::Value>,
-) {
-    use claudine::events::{AgenticEvent, EventMeta};
-
-    let mut extra = HashMap::new();
-    extra.insert("synthetic".into(), serde_json::Value::Bool(true));
-    extra.insert(
-        "synthetic_kind".into(),
-        serde_json::Value::String("composition_legacy_summary".into()),
-    );
-    extra.insert(
-        "exit_code".into(),
-        serde_json::Value::Number(exit_code.into()),
-    );
-    for (key, value) in dispatch_context {
-        extra.insert(key.clone(), value.clone());
-    }
-
-    let meta = EventMeta {
-        provider,
-        event: AgenticEvent::SessionEnd,
-        timestamp: chrono::Utc::now(),
-        session_id: None,
-        cwd: None,
-        tool_name: None,
-        tool_input: None,
-        tool_response: None,
-        error: None,
-        prompt: None,
-        agent_type: None,
-        notification_type: None,
-        notification_message: None,
-        extra,
-        env: env_context.clone(),
-    };
-
-    if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
-        tracing::warn!("Failed to write legacy composition session event: {e}");
-    }
 }
 
 #[cfg(test)]
