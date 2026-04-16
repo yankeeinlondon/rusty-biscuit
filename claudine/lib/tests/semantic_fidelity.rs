@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use claudine::events::{EnvironmentContext, Provider};
 use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::reporting::{semantic_event_to_event_meta, summary_to_event_meta};
-use claudine::stream::semantic::{SemanticEvent, SemanticEventSink};
+use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use claudine::stream::{create_semantic_parser, ParserConfig, StreamProtocol};
 use serde_json::{json, Value};
 
@@ -648,6 +648,7 @@ mod reporting_fidelity {
                 SemanticEvent::Error {
                     message: "x".into(),
                     terminal: false,
+                    kind: SemanticErrorKind::Unknown,
                     extra: json!({}),
                 },
                 "error",
@@ -732,6 +733,7 @@ mod reporting_fidelity {
         let event = SemanticEvent::Error {
             message: "billing failed".into(),
             terminal: true,
+            kind: SemanticErrorKind::Unknown,
             extra: json!({}),
         };
         let meta = semantic_event_to_event_meta(&event, Provider::Claude, &env(), None);
