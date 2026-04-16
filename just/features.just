@@ -36,9 +36,9 @@ _choose_spec filter="":
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "{{filter}}" ]]; then
-        file="$(fd -g '*spec*\.md' features/ |  fzf --height=15 --border --border-label 'Choose a spec or design file')"
+        file="$(fd -g '*spec*\.md'  |  fzf --height=15 --border --border-label 'Choose a spec or design file' )"
     else
-        file="$(fd -g '*spec*\.md' features/ | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the spec file')"
+        file="$(fd -g '*spec*\.md' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the spec file' )"
     fi
     echo "${file}"
 
@@ -148,17 +148,40 @@ implement-review-suggestions feat="" iteration="1":
     echo
 
 # adds a complimentary tech design to the specification file
-design-feature spec="" agent="codex":
+design-feature spec="" agent="":
     #!/usr/bin/env bash
     set -euo pipefail
 
     if [[ -z "{{spec}}" ]]; then
-        file="$(just _choose_spec)"
+        file="$(just _choose_spec features)"
     else
-        file="$(just _choose_spec "{{spec}}")"
+        file="$(just _choose_spec features "{{spec}}")"
     fi
 
-    use_agent="$(echo {{agents}} | fzf --border --border-label "Choose an Agent")"
+    use_agent="$(echo "{{agents}}" | fzf --border --border-label "Choose an Agent")"
+
+    dir="$(dirname ${file})"
+    echo
+    echo -e "Designing the feature from the spec file: {{blue}}${file}{{reset}}. Using {{bold}}{{agent}}{{reset}} agent."
+    claudine compose @prompts/design.md --${use_agent} -y --set "{ spec: \"${file}\", dir: \"${dir}\"  }"
+    echo
+    echo -e "We now have a {{bold}}technical design{{reset}} document for this specification"
+    if [[ "$(just _confirm "Are you ready to create a plan for this feature?")" == "y" ]]; then
+        plan-feature "${file}" "${dir}/tech-design.md"
+    fi
+
+# adds a complimentary tech design to the specification file
+design-fix spec="" agent="codex":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ -z "{{spec}}" ]]; then
+        file="$(just _choose_spec fixes)"
+    else
+        file="$(just _choose_spec fixes "{{spec}}")"
+    fi
+
+    use_agent="$(echo "{{agents}}" | fzf --border --border-label "Choose an Agent")"
 
     dir="$(dirname ${file})"
     echo
