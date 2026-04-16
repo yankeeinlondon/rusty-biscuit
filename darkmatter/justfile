@@ -41,22 +41,6 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Ask Claude Code via a prompt file in a non-interactive session
-# NOTE: just hangs when large multi-line strings are passed via {{PROMPT}} parameters.
-# All callers should write their prompt to a temp file and call this recipe instead.
-_claude_file PROMPT_FILE:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo -e "\033[2m⏳ claude is working (max 30 turns)...\033[0m" >&2
-    (while true; do sleep 30; printf "." >&2; done) &
-    DOTS_PID=$!
-    trap 'kill $DOTS_PID 2>/dev/null || true' EXIT
-    unset ANTHROPIC_API_KEY
-    PROMPT_CONTENT="$(cat "{{PROMPT_FILE}}")"
-    cd .. && claude --dangerously-skip-permissions --max-turns 30 -p "$PROMPT_CONTENT"
-    echo -e "\n\033[2m✓ claude finished\033[0m" >&2
-
-
 
 
 # Build the library and CLI
@@ -118,7 +102,7 @@ install *args="":
     @echo
     @cargo install --path {{CLI_PATH}} {{args}} || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
-    @just _sound_effect drop4
+    @just _play drop4
 
 # Validate the source code without doing a full build
 check:
@@ -136,7 +120,7 @@ review *args="":
     @cd .. && codex exec "/code-review the code in the {{LIB_NAME}} package; use the rust, {{LIBRARY}}, biscuit-terminal, and clap skills during the review. Write your findings to the file '@{{LIBRARY}}/docs/{YYYY}-{MM}. {{LIBRARY}}-review.md' (where YYYY is the current year, and MM is the current month).\n\n$(just deps)\n\n{{args}}"  || ( so-you-say "There was a problem running the code review in the {{LIB_NAME}} package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the {{LIB_NAME}} review."  && exit 1 )
     @echo
     @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
-    @just _sound_effect confirmation
+    @just _play confirmation
     @just _speak "Review for {{LIB_NAME}} package has completed."
 
 
@@ -146,7 +130,7 @@ docs_cli:
     @echo -e "Updating the CLI documents for {{BOLD}}Darkmatter{{RESET}}"
     @echo
     @just _claude_file ./prompts/update-cli-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
-    @just _sound_effect confirmation
+    @just _play confirmation
     @echo
     @echo -e "{{BOLD}}Darkmatter {{GREEN}}CLI Docs{{RESET}} were updated!"
 
@@ -155,7 +139,7 @@ docs_library:
     @echo -e "Updating the documentation for the {{BOLD}}Darkmatter Library{{RESET}}"
     @echo
     @just _claude_file ./prompts/update-library-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
-    @just _sound_effect confirmation
+    @just _play confirmation
 
 readme:
     _readme_files darkmatter

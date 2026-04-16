@@ -1,3 +1,9 @@
+import "../just/features.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+
+
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 set dotenv-load
 set positional-arguments
@@ -25,92 +31,6 @@ default:
     fi
     echo
     just --list | grep -v 'default'
-
-
-# Uses TTS if available but never error
-_speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
-
-# play a sound effect if `playa` CLI is installed (never errors)
-_play effect background="":
-    @playa "{{effect}}" "{{background}}" >/dev/null 2>&1 || exit 0
-
-_notify message title=PACKAGE:
-    #!/usr/bin/env bash
-    if command -v osascript &> /dev/null; then
-        osascript -e 'display notification "message" with title "{{title}}"'
-    elif command -v notify-send &> /dev/null; then
-        notify-send '{{message}}'
-    fi
-
-_ask_opencode prompt:
-    #!/usr/bin/env bash
-    if command -v opencode &> /dev/null; then
-        local MODEL
-        MODEL="${MODEL:-minimax/MiniMax-M2.5-highspeed}"
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}using the {{BOLD}}${MODEL}{{DIM}} model with {{BOLD}}OpenCode CLI{{DIM}}.{{RESET}}"
-        echo -e "{{DIM}}{{ITALIC}}- you can choose a different model by setting the {{BOLD}}MODEL{{DIM}} env variable"
-        echo
-        opencode run "{{prompt}}" --model "$MODEL"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}OpenCode{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}OpenCode{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_claude prompt:
-    #!/usr/bin/env bash
-    if command -v claude &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Claude Code{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        unset ANTHROPIC_API_KEY && claude -p "{{prompt}}"
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Claude{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-_ask_codex prompt:
-    #!/usr/bin/env bash
-    if command -v codex &> /dev/null; then
-        echo
-        echo -e "{{DIM}}{{ITALIC}}- {{RESET}}Note: {{DIM}}{{ITALIC}}using {{BOLD}}Codex CLI{{DIM}} with whatever is setup as the default model.{{RESET}}"
-        echo
-
-        codex exec "{{prompt}}"  || (
-            echo
-            echo -e "Attempt to use {{RED}}{{BOLD}}Codex CLI{{RESET}} for query failed! Will try using Claude instead"
-            echo
-            just _ask_claude "{{prompt}}"
-        )
-    else
-        echo
-        echo -e "{{RED}}{{BOLD}}ERROR:{{RESET}} the attempt to ask the {{BOLD}}Codex{{RESET}} CLI is not possible as the host system does not have it installed!"
-        echo
-        exit 1
-    fi
-
-
-# use an AI agent to respond to a question (uses `AGENT`)
-ask prompt:
-    #!/usr/bin/env bash
-    if [[ "${AGENT,,}" == "opencode" ]]; then
-        just _ask_opencode "{{prompt}}" || ( echo -e "- OpenCode failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    elif [[ "${AGENT,,}" == "codex"  ]]; then
-        just _ask_codex "{{prompt}}" || ( echo -e "- Codex failed so will try using Claude Code instead ..." && just _ask_claude "{{prompt}}" || exit 1 )
-    else
-        just _ask_claude "{{prompt}}" || ( echo -e "- will try using Opencode instead ..." && just _ask_opencode "{{prompt}}" || exit 1 )
-    fi
 
 # build library and CLI
 build *args="":
@@ -160,22 +80,6 @@ docs_cli:
     @echo -e "Building and then showing latest docs for the Sniff CLI"
     @echo ""
     @cargo doc -p {{CLI}} --open
-
-# Open Opencode
-oc *args="":
-    @claudine opencode --include GEMINI_API_KEY --include X_AI_API_KEY --include ZAI_API_KEY --include ZENMUX_API_KEY --include OPEN_ROUTER_API_KEY {{args}}
-
-# Open Claude Code in YOLO mode
-cc *args="":
-    @claudine claude --yolo {{args}}
-
-# Open codex in YOLO mode
-codex *args="":
-    @claudine codex --yolo {{args}}
-
-# Open Claude Code
-gem *args="":
-    @claudine gemini --yolo --include GEMINI_API_KEY {{args}}
 
 # Outdated packages
 outdated:
@@ -295,3 +199,8 @@ skill-audio-programming:
     @cp ./docs/audio-programming/*.md ../.claude/skills/audio-programming
     @md compose ./docs/audio-programming/SKILL.md > ../.claude/skills/audio-programming/SKILL.md
     @echo "Published {{BOLD}}{{GREEN}}audio-programming{{RESET}}"
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true
