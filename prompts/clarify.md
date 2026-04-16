@@ -1,8 +1,7 @@
 ---
-dir: "$(dirname {{spec}})"
-spec: ""
+doc: ""
 start:
-    message: "We are starting the clarification process and will need human involvement."
+    stderr: "We are starting the clarification process and will need human involvement."
 success:
     say: "Specification clarification process is now complete"
 ---
@@ -13,7 +12,7 @@ Your job is to help clarify the requirements, boundaries, and intended decisions
 
 ## Primary Goal
 
-Given the functional specification document: {{spec}}. Analyze this document and identify:
+Given the functional specification document: {{doc}}. Analyze this document and identify:
 
 1. what the document clearly defines
 2. what it implies but does not explicitly define
@@ -83,7 +82,7 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
 ## Task Process
 
-1. Ask a subagent to analyze the document ({{spec}}) and identify 2-3 questions that need clarification from the user. 
+1. Ask a subagent to analyze the document ({{doc}}) and identify 2-3 questions that need clarification from the user. 
 
       - For each question the subagent should be sure to provide:
           - the question
@@ -112,8 +111,8 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
 3. Create a `spec-writer` subagent to:
 
-     - and instruct them to update the document ({{spec}}) based on the decisions made between yourself and the user
-     - provide the subagent both the spec location ({{sped}}) as well as the questions and solutions
+     - and instruct them to update the document ({{doc}}) based on the decisions made between yourself and the user
+     - provide the subagent both the spec location ({{doc}}) as well as the questions and solutions
 
 4. Do an honest review of the specification looking for areas that still feel unclear or underspecified
 

@@ -57,6 +57,21 @@ _get_design_doc dir:
     fi
     echo "${design}"
 
+clarify filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ -z "{{filter}}" ]]; then
+        file="$(fd -g '*spec*\.md'  |  fzf --height=15 --border --border-label 'Choose a spec or design file' )"
+    else
+        file="$(fd -g '*spec*\.md' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the spec file' )"
+    fi
+    agent="$(just _choose_agent)"
+    claudine compose @prompts/clarify.md --${agent} doc="${file}"
+    link="$(just _link $(basename "${file}") "${file}")"
+    echo -e "The {{blue}}${link}{{reset}} file has been {{italic}}clarified{{reset}}"
+
+
 # Specify a feature with a spec file, a design file, or both which has now been implemented
 # and you want to run a review on.
 review-feature feat="":
@@ -165,6 +180,7 @@ design-feature spec="" agent="":
     echo -e "Designing the feature from the spec file: {{blue}}${file}{{reset}}. Using {{bold}}{{agent}}{{reset}} agent."
     claudine compose @prompts/design.md --${use_agent} -y --set "{ spec: \"${file}\", dir: \"${dir}\"  }"
     echo
+    link="$()"
     echo -e "We now have a {{bold}}technical design{{reset}} document for this specification"
     if [[ "$(just _confirm "Are you ready to create a plan for this feature?")" == "y" ]]; then
         plan-feature "${file}" "${dir}/tech-design.md"
