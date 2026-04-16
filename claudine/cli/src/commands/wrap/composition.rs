@@ -67,6 +67,22 @@ struct CompositionStreamResult {
     section_stream: super::section::SectionStream,
 }
 
+/// Mode-specific inputs for [`execute_without_harness`].
+///
+/// Carries the inline-only parameters (closure plan, target path,
+/// interactivity, stderr verbosity) so the merged function can branch its
+/// post-execution logic without dragging optional parameters through every
+/// call.
+enum CompositionExecutionMode<'a> {
+    Direct,
+    Inline {
+        closure_plan: &'a InlineClosurePlan,
+        resolved_path: &'a std::path::Path,
+        session_interactive: bool,
+        show_checks: bool,
+    },
+}
+
 fn composition_dispatch_context(
     request: &CompositionExecutionRequest,
     selection_reason: &SelectionReason,
@@ -821,15 +837,27 @@ pub(crate) fn execute_composition_request_inner(
             exit_code,
             provider,
         })
-    } else if is_inline {
+    } else {
         guard.emit_start_once();
 
-        let closure_plan = match &request.prepared.closure {
-            CompositionClosurePlan::Inline(plan) => plan,
-            _ => unreachable!("is_inline is true but closure is not Inline"),
+        let mode = if is_inline {
+            let closure_plan = match &request.prepared.closure {
+                CompositionClosurePlan::Inline(plan) => plan,
+                _ => unreachable!("is_inline is true but closure is not Inline"),
+            };
+            CompositionExecutionMode::Inline {
+                closure_plan,
+                resolved_path: &request.prepared.resolved_path,
+                session_interactive: request.session_interactive,
+                show_checks,
+            }
+        } else {
+            CompositionExecutionMode::Direct
         };
+
         let mut child_spawned = false;
-        let exit_result = execute_inline_without_harness(
+        let exit_result = execute_without_harness(
+            mode,
             provider,
             profile,
             &binary_path,
@@ -837,16 +865,12 @@ pub(crate) fn execute_composition_request_inner(
             &env_plan.env,
             child_cwd,
             stdin_seed.as_deref(),
-            request.session_interactive,
-            closure_plan,
-            &request.prepared.resolved_path,
             use_structured,
             structured_codex_output.as_ref(),
             stdout_noise,
             stderr_noise,
             stream_verbosity,
             detail_requested,
-            show_checks,
             &env_context,
             &dispatch_context,
             &term,
@@ -871,54 +895,28 @@ pub(crate) fn execute_composition_request_inner(
             exit_code,
             provider,
         })
-    } else {
-        guard.emit_start_once();
-
-        let mut child_spawned = false;
-        let exit_result = execute_direct_without_harness(
-            provider,
-            profile,
-            &binary_path,
-            &child_args,
-            &env_plan.env,
-            child_cwd,
-            stdin_seed.as_deref(),
-            use_structured,
-            structured_codex_output.as_ref(),
-            stdout_noise,
-            stderr_noise,
-            stream_verbosity,
-            detail_requested,
-            &env_context,
-            &dispatch_context,
-            &mut child_spawned,
-        );
-
-        // Mark launched as soon as spawn succeeded — before propagating
-        // any post-spawn error — so the guard correctly classifies
-        // subsequent failures as `Failure` rather than `Blocked`.
-        if child_spawned {
-            guard.mark_provider_launched();
-        }
-        let exit_code = exit_result?;
-
-        if exit_code == 0 {
-            guard.emit_terminal(LifecycleSignal::Success);
-        } else {
-            guard.emit_terminal(LifecycleSignal::Failure);
-        }
-
-        Ok(SingleCompositionOutcome {
-            exit_code,
-            provider,
-        })
     }
 }
 
-// -- Inline closure execution (non-harness) -------------------------------
+// -- Composition execution (non-harness) ----------------------------------
 
+/// Execute a composition request without the harness loop.
+///
+/// Shared implementation for both `compose` (Direct) and `inline-compose`
+/// (Inline). Mode-specific behavior is gated by [`CompositionExecutionMode`]:
+///
+/// - **Direct (compose)**: post-hoc assistant text is routed through the live
+///   sink's section stream so the trailer summary sees consistent state, and
+///   the summary is emitted immediately after the run.
+/// - **Inline (inline-compose)**: assistant text is written straight to
+///   stdout (the body is also captured for closure write-back), the agent
+///   response is validated against the configured closure plan, the target
+///   file is rewritten and cleaned, and the summary is deferred until after
+///   closure validation messages so the section separator does not split
+///   that block.
 #[allow(clippy::too_many_arguments)]
-fn execute_inline_without_harness(
+fn execute_without_harness(
+    mode: CompositionExecutionMode<'_>,
     provider: Provider,
     profile: &dyn WrapperProfile,
     binary_path: &std::path::Path,
@@ -926,23 +924,21 @@ fn execute_inline_without_harness(
     child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
     child_cwd: &std::path::Path,
     stdin_seed: Option<&str>,
-    session_interactive: bool,
-    closure_plan: &InlineClosurePlan,
-    resolved_path: &std::path::Path,
     use_structured: bool,
     structured_codex_output: Option<&StructuredCodexOutput>,
     stdout_noise: &[&str],
     stderr_noise: &[&str],
     stream_verbosity: Verbosity,
     detail_requested: bool,
-    show_checks: bool,
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
     term: &Terminal,
     child_spawned: &mut bool,
 ) -> Result<i32> {
-    // Run the provider and capture output.
-    let (agent_exit, _agent_termination, final_response, deferred_summary) = if use_structured {
+    let is_inline = matches!(mode, CompositionExecutionMode::Inline { .. });
+
+    // -- Run the provider --------------------------------------------------
+    let (agent_exit, final_response, deferred_summary) = if use_structured {
         let result = run_structured_composition(
             provider,
             profile,
@@ -959,10 +955,14 @@ fn execute_inline_without_harness(
             child_spawned,
         )?;
 
-        // Inline-compose: render assistant text to stdout when the provider
-        // did not stream it live. No section stream routing (inline-compose
-        // writes to a file; the section stream is compose-only).
+        // Render assistant text to stdout when the provider did not stream
+        // it live. Compose routes through the section stream so the trailer
+        // summary sees a consistent section state; inline writes directly
+        // because the body will be captured into the target file.
         if !result.had_streamed_assistant && !result.summary.assistant_text.trim().is_empty() {
+            if !is_inline {
+                result.section_stream.enter_final_stdout();
+            }
             let text = &result.summary.assistant_text;
             if std::io::stdout().is_terminal() {
                 let rendered = crate::output::render_assistant_markdown(text, term);
@@ -979,33 +979,138 @@ fn execute_inline_without_harness(
             std::io::stdout().flush()?;
         }
 
-        (
-            result.exit_code,
-            result.termination,
-            result.assistant_text.clone(),
-            Some(result),
-        )
+        let exit = result.exit_code;
+        let response = result.assistant_text.clone();
+        (exit, response, Some(result))
     } else {
-        let (exit_code, termination, final_response, _) = run_legacy_inline(
-            provider,
-            profile,
-            binary_path,
-            child_args,
-            child_env,
-            child_cwd,
-            stdin_seed,
-            session_interactive,
-            structured_codex_output,
-            stdout_noise,
-            stderr_noise,
-            term,
-            child_spawned,
-        )?;
-        (exit_code, termination, final_response, None)
+        // Legacy (non-structured) path. Inline must capture the response so
+        // the closure plan can rewrite the target file; direct just runs the
+        // child and lets it write to stdout on its own.
+        match &mode {
+            CompositionExecutionMode::Inline {
+                session_interactive,
+                ..
+            } => {
+                if *session_interactive {
+                    let result = exec::run_child(
+                        binary_path,
+                        child_args,
+                        child_env,
+                        child_cwd,
+                        None,
+                        exec::ChildIoOptions {
+                            stdout_noise_prefixes: stdout_noise,
+                            stderr_noise_prefixes: stderr_noise,
+                            stdin_seed,
+                        },
+                        child_spawned,
+                    )?;
+                    let response = if provider == Provider::Codex {
+                        if let Some(output) = structured_codex_output {
+                            let text = std::fs::read_to_string(&output.last_message_path)
+                                .unwrap_or_default();
+                            let _ = std::fs::remove_file(&output.last_message_path);
+                            text
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+                    (result.data, response, None)
+                } else {
+                    let mut capture_args = child_args.to_vec();
+                    profile.prepare_captured_output(&mut capture_args);
+                    let capture = exec::run_child_capture(
+                        binary_path,
+                        &capture_args,
+                        child_env,
+                        child_cwd,
+                        None,
+                        exec::ChildIoOptions {
+                            stdout_noise_prefixes: stdout_noise,
+                            stderr_noise_prefixes: stderr_noise,
+                            stdin_seed,
+                        },
+                        child_spawned,
+                    )?;
+                    let response = profile.parse_captured_output(&capture.data.stdout);
+                    if !response.trim().is_empty() {
+                        if std::io::stdout().is_terminal() {
+                            let rendered =
+                                crate::output::render_assistant_markdown(&response, term);
+                            std::io::stdout().write_all(rendered.as_bytes())?;
+                            if !rendered.ends_with('\n') {
+                                std::io::stdout().write_all(b"\n")?;
+                            }
+                        } else {
+                            std::io::stdout().write_all(response.as_bytes())?;
+                            if !response.ends_with('\n') {
+                                std::io::stdout().write_all(b"\n")?;
+                            }
+                        }
+                        std::io::stdout().flush()?;
+                    }
+                    if !capture.data.stderr.trim().is_empty() {
+                        eprintln!("{}", capture.data.stderr);
+                    }
+                    (capture.data.exit_code, response, None)
+                }
+            }
+            CompositionExecutionMode::Direct => {
+                let result = exec::run_child(
+                    binary_path,
+                    child_args,
+                    child_env,
+                    child_cwd,
+                    None,
+                    exec::ChildIoOptions {
+                        stdout_noise_prefixes: stdout_noise,
+                        stderr_noise_prefixes: stderr_noise,
+                        stdin_seed,
+                    },
+                    child_spawned,
+                )?;
+                (result.data, String::new(), None)
+            }
+        }
     };
 
-    // -- Post-execution: validate disk state and apply closure -------------
+    // -- Direct mode: emit summary immediately and return -------------------
+    let (closure_plan, resolved_path, show_checks) = match mode {
+        CompositionExecutionMode::Direct => {
+            if let Some(result) = deferred_summary {
+                emit_composition_summary(
+                    &result.summary,
+                    &result.details,
+                    profile,
+                    env_context,
+                    stream_verbosity,
+                    detail_requested,
+                    dispatch_context,
+                    Some(&result.section_stream),
+                    false,
+                );
+            } else {
+                emit_minimal_composition_summary(
+                    provider,
+                    agent_exit,
+                    profile,
+                    env_context,
+                    dispatch_context,
+                );
+            }
+            return Ok(agent_exit);
+        }
+        CompositionExecutionMode::Inline {
+            closure_plan,
+            resolved_path,
+            show_checks,
+            ..
+        } => (closure_plan, resolved_path, show_checks),
+    };
 
+    // -- Inline mode: validate disk state and apply closure -----------------
     let mut final_exit = agent_exit;
     let provider_name = crate::output::capitalize_provider(provider);
     let should_separate_checks = deferred_summary
@@ -1041,7 +1146,6 @@ fn execute_inline_without_harness(
         .unwrap_or(resolved_path)
         .display();
 
-    // Interrupted: report partial state and bail
     if was_interrupted {
         report_interruption(&display_path, final_response.trim(), term);
         return Ok(1);
@@ -1067,7 +1171,6 @@ fn execute_inline_without_harness(
         };
 
         if final_exit == 0 {
-            // Read post-run frontmatter for comparison (best-effort)
             let post_run_fm = std::fs::read_to_string(resolved_path).ok().map(|text| {
                 let md: darkmatter::markdown::Markdown = text.into();
                 md.frontmatter().as_map().clone()
@@ -1108,8 +1211,6 @@ fn execute_inline_without_harness(
                         }
                     }
 
-                    // Post-processing: run Darkmatter cleanup on the
-                    // generated markdown for higher-quality output.
                     match cleanup_inline_output(resolved_path) {
                         Ok(true) => {
                             if show_checks {
@@ -1119,7 +1220,7 @@ fn execute_inline_without_harness(
                                 ));
                             }
                         }
-                        Ok(false) => {} // no changes needed
+                        Ok(false) => {}
                         Err(error) => {
                             if show_checks {
                                 log::message(&crate::output::fm_check_fail(
@@ -1127,8 +1228,6 @@ fn execute_inline_without_harness(
                                     term,
                                 ));
                             }
-                            // Non-fatal: the document was already written
-                            // successfully, cleanup is a quality pass.
                         }
                     }
                 }
@@ -1145,12 +1244,10 @@ fn execute_inline_without_harness(
         }
     }
 
-    // Emit deferred metadata summary
     if let Some(result) = deferred_summary {
         if stream_verbosity != Verbosity::Silent {
             eprintln!();
         }
-        // TODO: Route through sink.emit_trailer_line() for section-aware spacing
         emit_composition_summary(
             &result.summary,
             &result.details,
@@ -1163,9 +1260,6 @@ fn execute_inline_without_harness(
             true,
         );
     } else {
-        // Legacy (non-structured) inline path: emit the minimal summary so
-        // composition metadata is consistently logged and the user sees the
-        // same stderr trailer as structured runs.
         emit_minimal_composition_summary(
             provider,
             final_exit,
@@ -1177,17 +1271,6 @@ fn execute_inline_without_harness(
 
     Ok(final_exit)
 }
-
-type InlineRunResult = (
-    i32,
-    claudine::harness::ProcessTermination,
-    String,
-    Option<(
-        claudine::stream::summary::StreamExecutionSummary,
-        StructuredSummaryDetails,
-        bool,
-    )>,
-);
 
 /// Run a provider through the structured stream pipeline shared by both
 /// `compose` and `inline-compose`.
@@ -1349,87 +1432,6 @@ fn emit_minimal_composition_summary(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
-fn run_legacy_inline(
-    provider: Provider,
-    profile: &dyn WrapperProfile,
-    binary_path: &std::path::Path,
-    child_args: &[String],
-    child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
-    child_cwd: &std::path::Path,
-    stdin_seed: Option<&str>,
-    session_interactive: bool,
-    structured_codex_output: Option<&StructuredCodexOutput>,
-    stdout_noise: &[&str],
-    stderr_noise: &[&str],
-    term: &Terminal,
-    child_spawned: &mut bool,
-) -> Result<InlineRunResult> {
-    if session_interactive {
-        let result = exec::run_child(
-            binary_path,
-            child_args,
-            child_env,
-            child_cwd,
-            None,
-            exec::ChildIoOptions {
-                stdout_noise_prefixes: stdout_noise,
-                stderr_noise_prefixes: stderr_noise,
-                stdin_seed,
-            },
-            child_spawned,
-        )?;
-        let final_response = if provider == Provider::Codex {
-            if let Some(output) = structured_codex_output {
-                let text = std::fs::read_to_string(&output.last_message_path).unwrap_or_default();
-                let _ = std::fs::remove_file(&output.last_message_path);
-                text
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-        Ok((result.data, result.termination, final_response, None))
-    } else {
-        let mut capture_args = child_args.to_vec();
-        profile.prepare_captured_output(&mut capture_args);
-        let capture = exec::run_child_capture(
-            binary_path,
-            &capture_args,
-            child_env,
-            child_cwd,
-            None,
-            exec::ChildIoOptions {
-                stdout_noise_prefixes: stdout_noise,
-                stderr_noise_prefixes: stderr_noise,
-                stdin_seed,
-            },
-            child_spawned,
-        )?;
-        let response = profile.parse_captured_output(&capture.data.stdout);
-        if !response.trim().is_empty() {
-            if std::io::stdout().is_terminal() {
-                let rendered = crate::output::render_assistant_markdown(&response, term);
-                std::io::stdout().write_all(rendered.as_bytes())?;
-                if !rendered.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            } else {
-                std::io::stdout().write_all(response.as_bytes())?;
-                if !response.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            }
-            std::io::stdout().flush()?;
-        }
-        if !capture.data.stderr.trim().is_empty() {
-            eprintln!("{}", capture.data.stderr);
-        }
-        Ok((capture.data.exit_code, capture.termination, response, None))
-    }
-}
-
 fn report_interruption(
     display_path: &std::path::Display<'_>,
     captured_body: &str,
@@ -1518,110 +1520,6 @@ fn split_frontmatter_and_body(text: &str) -> (&str, &str) {
 
     // No closing delimiter — treat entire text as body
     ("", text)
-}
-
-// -- Direct execution (non-harness) ---------------------------------------
-
-#[allow(clippy::too_many_arguments)]
-fn execute_direct_without_harness(
-    provider: Provider,
-    profile: &dyn WrapperProfile,
-    binary_path: &std::path::Path,
-    child_args: &[String],
-    child_env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
-    child_cwd: &std::path::Path,
-    stdin_seed: Option<&str>,
-    use_structured: bool,
-    structured_codex_output: Option<&StructuredCodexOutput>,
-    stdout_noise: &[&str],
-    stderr_noise: &[&str],
-    stream_verbosity: Verbosity,
-    detail_requested: bool,
-    env_context: &claudine::events::EnvironmentContext,
-    dispatch_context: &HashMap<String, serde_json::Value>,
-    child_spawned: &mut bool,
-) -> Result<i32> {
-    if use_structured {
-        let result = run_structured_composition(
-            provider,
-            profile,
-            binary_path,
-            child_args,
-            child_env,
-            child_cwd,
-            stdin_seed,
-            structured_codex_output,
-            stderr_noise,
-            stream_verbosity,
-            env_context,
-            dispatch_context,
-            child_spawned,
-        )?;
-
-        // Compose-specific: render Codex post-hoc text through the section
-        // stream when nothing was streamed live. `!had_streamed_assistant`
-        // subsumes the old `provider == Provider::Codex` check since only
-        // Codex produces non-empty post-hoc text under these conditions.
-        if !result.had_streamed_assistant && !result.summary.assistant_text.trim().is_empty() {
-            result.section_stream.enter_final_stdout();
-            let text = &result.summary.assistant_text;
-            let term = wrap_terminal();
-            if std::io::stdout().is_terminal() {
-                let rendered = crate::output::render_assistant_markdown(text, &term);
-                std::io::stdout().write_all(rendered.as_bytes())?;
-                if !rendered.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            } else {
-                std::io::stdout().write_all(text.as_bytes())?;
-                if !text.ends_with('\n') {
-                    std::io::stdout().write_all(b"\n")?;
-                }
-            }
-            std::io::stdout().flush()?;
-        }
-
-        emit_composition_summary(
-            &result.summary,
-            &result.details,
-            profile,
-            env_context,
-            stream_verbosity,
-            detail_requested,
-            dispatch_context,
-            Some(&result.section_stream),
-            false,
-        );
-
-        Ok(result.exit_code)
-    } else {
-        let result = exec::run_child(
-            binary_path,
-            child_args,
-            child_env,
-            child_cwd,
-            None,
-            exec::ChildIoOptions {
-                stdout_noise_prefixes: stdout_noise,
-                stderr_noise_prefixes: stderr_noise,
-                stdin_seed,
-            },
-            child_spawned,
-        )?;
-
-        // Legacy (non-structured) compose path: emit the minimal summary so
-        // composition metadata is consistently logged and the user sees the
-        // same stderr trailer as structured runs.
-        emit_minimal_composition_summary(
-            provider,
-            result.data,
-            profile,
-            env_context,
-            dispatch_context,
-        );
-
-        Ok(result.data)
-    }
 }
 
 // -- Interactive provider selection ---------------------------------------
