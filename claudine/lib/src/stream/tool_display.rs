@@ -181,6 +181,20 @@ pub fn extract_tool_summary(tool_name: &str, input: &Value) -> Option<String> {
         if obj.is_empty() {
             return None;
         }
+        // Task extractor: Claude's subagent-spawn tool carries the actual
+        // work in one of several fields. Prefer the shortest human-friendly
+        // field first and fall back through progressively more verbose
+        // shapes so callers never see an arbitrary field like
+        // `subagent_type` win over the task body.
+        if tool_name == "Task" {
+            for key in ["description", "subject", "prompt", "task"] {
+                if let Some(Value::String(s)) = obj.get(key)
+                    && !s.is_empty()
+                {
+                    return Some(s.clone());
+                }
+            }
+        }
         // Per-tool hooks first.
         let preferred_key = match tool_name {
             n if n.contains("search")
@@ -191,7 +205,7 @@ pub fn extract_tool_summary(tool_name: &str, input: &Value) -> Option<String> {
             {
                 Some("query")
             }
-            "Bash" | "bash" | "run_command" => Some("command"),
+            n if is_shell_tool(n) => Some("command"),
             "Read" | "Write" | "Edit"
             | "read_file" | "write_file" | "replace_file_content" => Some("file_path"),
             "Glob" | "Grep" | "list_directory" => Some("pattern"),
@@ -200,6 +214,13 @@ pub fn extract_tool_summary(tool_name: &str, input: &Value) -> Option<String> {
         if let Some(key) = preferred_key
             && let Some(Value::String(s)) = obj.get(key)
         {
+            // Shell-style tools prepend the shell name so users see which
+            // shell actually ran, e.g. `bash ls -la` instead of only `ls -la`.
+            if key == "command"
+                && let Some(shell) = shell_name_for_prefix(tool_name)
+            {
+                return Some(format!("{shell} {s}"));
+            }
             return Some(s.clone());
         }
         // Generic well-known keys.
@@ -232,6 +253,24 @@ pub fn extract_tool_summary(tool_name: &str, input: &Value) -> Option<String> {
     serde_json::to_string(input).ok()
 }
 
+/// Return `true` when `tool_name` is a shell-invoking tool. Matched across
+/// the providers claudine currently parses (Claude's `Bash`, Codex's
+/// `shell`, and the generic `run_command` / `bash` lowercase variant).
+fn is_shell_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "Bash" | "bash" | "run_command" | "shell")
+}
+
+/// Normalized shell prefix for a shell-style tool — `"bash"` for
+/// `Bash`/`bash`, `"shell"` for Codex's `shell` and the generic
+/// `run_command`. Returns `None` for non-shell tools.
+fn shell_name_for_prefix(tool_name: &str) -> Option<&'static str> {
+    match tool_name {
+        "Bash" | "bash" => Some("bash"),
+        "shell" | "run_command" => Some("shell"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod summary_tests {
     use super::*;
@@ -249,7 +288,10 @@ mod summary_tests {
     #[test]
     fn bash_extracts_command() {
         let input = json!({"command": "ls -la"});
-        assert_eq!(extract_tool_summary("Bash", &input).as_deref(), Some("ls -la"));
+        assert_eq!(
+            extract_tool_summary("Bash", &input).as_deref(),
+            Some("bash ls -la")
+        );
     }
 
     #[test]
@@ -285,6 +327,89 @@ mod summary_tests {
         let input = json!([1, 2, 3]);
         let rendered = extract_tool_summary("custom_unknown", &input).unwrap();
         assert_eq!(rendered, "[1,2,3]");
+    }
+
+    #[test]
+    fn bash_summary_prepends_shell_name() {
+        let input = json!({"command": "ls -la"});
+        assert_eq!(
+            extract_tool_summary("Bash", &input).as_deref(),
+            Some("bash ls -la"),
+            "Bash summary must prepend the shell name so users see the invoked shell"
+        );
+    }
+
+    #[test]
+    fn lowercase_bash_summary_prepends_shell_name() {
+        let input = json!({"command": "pwd"});
+        assert_eq!(
+            extract_tool_summary("bash", &input).as_deref(),
+            Some("bash pwd")
+        );
+    }
+
+    #[test]
+    fn codex_shell_summary_prepends_shell_prefix() {
+        let input = json!({"command": "echo hi"});
+        assert_eq!(
+            extract_tool_summary("shell", &input).as_deref(),
+            Some("shell echo hi")
+        );
+    }
+
+    #[test]
+    fn task_extracts_description_first() {
+        let input = json!({
+            "description": "Review the plan",
+            "subject": "Planning review",
+            "prompt": "Please review the plan...",
+            "task": "review",
+            "subagent_type": "general-purpose",
+        });
+        assert_eq!(
+            extract_tool_summary("Task", &input).as_deref(),
+            Some("Review the plan"),
+            "Task extractor must prefer description over other fields"
+        );
+    }
+
+    #[test]
+    fn task_falls_back_to_subject_when_description_absent() {
+        let input = json!({
+            "subject": "Planning review",
+            "prompt": "Please review the plan...",
+            "task": "review",
+        });
+        assert_eq!(
+            extract_tool_summary("Task", &input).as_deref(),
+            Some("Planning review")
+        );
+    }
+
+    #[test]
+    fn task_falls_back_to_prompt_when_description_absent() {
+        let input = json!({
+            "prompt": "Please review the plan in detail.",
+            "task": "review",
+            "subagent_type": "general-purpose",
+        });
+        assert_eq!(
+            extract_tool_summary("Task", &input).as_deref(),
+            Some("Please review the plan in detail."),
+            "Task extractor must fall back to prompt when description and subject are absent"
+        );
+    }
+
+    #[test]
+    fn task_falls_back_to_task_field_as_last_resort() {
+        let input = json!({
+            "task": "review the plan",
+            "subagent_type": "general-purpose",
+        });
+        assert_eq!(
+            extract_tool_summary("Task", &input).as_deref(),
+            Some("review the plan")
+        );
     }
 }
 
@@ -405,7 +530,7 @@ mod from_event_tests {
         };
         let display = ToolCallDisplay::from_result(&event).unwrap();
         assert!(display.status.is_none());
-        assert_eq!(display.summary.as_deref(), Some("ls"));
+        assert_eq!(display.summary.as_deref(), Some("bash ls"));
     }
 
     #[test]
@@ -440,7 +565,7 @@ mod from_event_tests {
         };
         let display = ToolCallDisplay::from_result(&event).unwrap();
         assert!(display.status.is_none());
-        assert_eq!(display.summary.as_deref(), Some("ls"));
+        assert_eq!(display.summary.as_deref(), Some("bash ls"));
     }
 
     #[test]
@@ -454,6 +579,6 @@ mod from_event_tests {
             extra: json!({"input": {"command": "ls -la"}}),
         };
         let display = ToolCallDisplay::from_result(&event).unwrap();
-        assert_eq!(display.summary.as_deref(), Some("ls -la"));
+        assert_eq!(display.summary.as_deref(), Some("bash ls -la"));
     }
 }

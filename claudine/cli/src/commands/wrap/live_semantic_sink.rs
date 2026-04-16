@@ -322,6 +322,9 @@ impl LiveSemanticSink {
     /// - User-controlled content (commands, URLs, paths, raw JSON
     ///   fallbacks) is passed through [`escape_prose`] so stray `<`, `>`,
     ///   `{`, or `\` cannot be interpreted as prose markup.
+    /// - The slot is wrapped in parentheses attached to the tool name
+    ///   (e.g. `→ Bash(<dim><i>bash ls</i></dim>)`) so the rendering
+    ///   reads like a function call rather than a `Name · summary` pair.
     fn render_tool_display(display: ToolCallDisplay) -> String {
         let arrow = match display.direction {
             ToolDirection::Outgoing => '\u{2192}',
@@ -336,7 +339,7 @@ impl LiveSemanticSink {
             (None, None) => None,
         };
         match slot {
-            Some(text) => format!("{arrow} {name} \u{00b7} {text}"),
+            Some(text) => format!("{arrow} {name}({text})"),
             None => format!("{arrow} {name}"),
         }
     }
@@ -845,6 +848,33 @@ mod tests {
         assert!(rendered.contains('\u{2192}'), "expected → in {rendered:?}");
         assert!(rendered.contains("Bash"));
         assert!(rendered.contains("ls"));
+    }
+
+    #[test]
+    fn tool_call_renders_with_parentheses_format() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: Some("Bash".into()),
+            id: Some("t1".into()),
+            input: Some(json!({"command": "ls -la"})),
+            extra: json!({}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            rendered.contains("Bash(") && rendered.contains(")"),
+            "tool call must render as Name(summary) with parentheses: {rendered:?}"
+        );
+        assert!(
+            !rendered.contains(" \u{00b7} "),
+            "tool call must no longer use the `·` separator: {rendered:?}"
+        );
+        // Shell name gets prepended to the command inside the parens.
+        assert!(
+            rendered.contains("bash ls -la"),
+            "summary inside parens must include prepended shell name: {rendered:?}"
+        );
     }
 
     #[test]
