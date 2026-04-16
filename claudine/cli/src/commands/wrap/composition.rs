@@ -49,6 +49,24 @@ pub(crate) struct SingleCompositionOutcome {
     pub provider: Provider,
 }
 
+/// Result of running a structured composition stream.
+///
+/// Produced by [`run_structured_composition`] and consumed by both the
+/// compose and inline-compose callers. The shared function does not emit
+/// the summary; callers decide the timing and routing.
+struct CompositionStreamResult {
+    exit_code: i32,
+    termination: claudine::harness::ProcessTermination,
+    assistant_text: String,
+    summary: claudine::stream::summary::StreamExecutionSummary,
+    details: StructuredSummaryDetails,
+    had_streamed_assistant: bool,
+    /// Shares a `SectionTracker` with the live sink so post-stream trailer
+    /// emitters see consistent section state. Only the compose caller uses
+    /// this; inline-compose ignores it.
+    section_stream: super::section::SectionStream,
+}
+
 fn composition_dispatch_context(
     request: &CompositionExecutionRequest,
     selection_reason: &SelectionReason,
@@ -925,7 +943,7 @@ fn execute_inline_without_harness(
 ) -> Result<i32> {
     // Run the provider and capture output.
     let (agent_exit, _agent_termination, final_response, deferred_summary) = if use_structured {
-        run_structured_inline(
+        let result = run_structured_composition(
             provider,
             profile,
             binary_path,
@@ -938,9 +956,39 @@ fn execute_inline_without_harness(
             stream_verbosity,
             env_context,
             dispatch_context,
-            term,
             child_spawned,
-        )?
+        )?;
+
+        // Inline-compose: render assistant text to stdout when the provider
+        // did not stream it live. No section stream routing (inline-compose
+        // writes to a file; the section stream is compose-only).
+        if !result.had_streamed_assistant && !result.summary.assistant_text.trim().is_empty() {
+            let text = &result.summary.assistant_text;
+            if std::io::stdout().is_terminal() {
+                let rendered = crate::output::render_assistant_markdown(text, term);
+                std::io::stdout().write_all(rendered.as_bytes())?;
+                if !rendered.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            } else {
+                std::io::stdout().write_all(text.as_bytes())?;
+                if !text.ends_with('\n') {
+                    std::io::stdout().write_all(b"\n")?;
+                }
+            }
+            std::io::stdout().flush()?;
+        }
+
+        (
+            result.exit_code,
+            result.termination,
+            result.assistant_text,
+            Some((
+                result.summary,
+                result.details,
+                result.had_streamed_assistant,
+            )),
+        )
     } else {
         run_legacy_inline(
             provider,
@@ -1135,8 +1183,15 @@ type InlineRunResult = (
     )>,
 );
 
+/// Run a provider through the structured stream pipeline shared by both
+/// `compose` and `inline-compose`.
+///
+/// The function builds the live semantic sink, runs the child process, and
+/// applies any Codex-captured post-hoc text to the resulting summary. It
+/// does not emit the summary and does not render assistant text to stdout;
+/// callers decide both timing and section-stream routing.
 #[allow(clippy::too_many_arguments)]
-fn run_structured_inline(
+fn run_structured_composition(
     provider: Provider,
     profile: &dyn WrapperProfile,
     binary_path: &std::path::Path,
@@ -1149,9 +1204,8 @@ fn run_structured_inline(
     stream_verbosity: Verbosity,
     env_context: &claudine::events::EnvironmentContext,
     dispatch_context: &HashMap<String, serde_json::Value>,
-    term: &Terminal,
     child_spawned: &mut bool,
-) -> Result<InlineRunResult> {
+) -> Result<CompositionStreamResult> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig::default();
     let sink = LiveSemanticSink::with_default_wiring(
@@ -1164,6 +1218,7 @@ fn run_structured_inline(
     .with_context_extra(dispatch_context.clone());
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
+    let section_stream = sink.section_stream();
     let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb| {
         let sink = sink.with_output_text_sink(output_cb);
         claudine::stream::create_semantic_parser(provider, sink, parser_config)
@@ -1192,35 +1247,17 @@ fn run_structured_inline(
     if let Some(codex_output) = structured_codex_output {
         codex_output.apply_to_summary(&mut summary);
     }
-    if !had_streamed_assistant && !summary.assistant_text.trim().is_empty() {
-        let text = &summary.assistant_text;
-        if std::io::stdout().is_terminal() {
-            let rendered = crate::output::render_assistant_markdown(text, term);
-            std::io::stdout().write_all(rendered.as_bytes())?;
-            if !rendered.ends_with('\n') {
-                std::io::stdout().write_all(b"\n")?;
-            }
-        } else {
-            std::io::stdout().write_all(text.as_bytes())?;
-            if !text.ends_with('\n') {
-                std::io::stdout().write_all(b"\n")?;
-            }
-        }
-        std::io::stdout().flush()?;
-    }
 
-    if summary.exit_code == 0 && summary.assistant_text.trim().is_empty() {
-        log::warn("the agent did not provide a summarized message on their completed work!");
-    }
-
-    let exit = summary.exit_code;
     let details = summary_details.lock().unwrap().clone();
-    Ok((
-        exit,
+    Ok(CompositionStreamResult {
+        exit_code: summary.exit_code,
         termination,
-        summary.assistant_text.clone(),
-        Some((summary, details, had_streamed_assistant)),
-    ))
+        assistant_text: summary.assistant_text.clone(),
+        summary,
+        details,
+        had_streamed_assistant,
+        section_stream,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1416,49 +1453,29 @@ fn execute_direct_without_harness(
     child_spawned: &mut bool,
 ) -> Result<i32> {
     if use_structured {
-        let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-        let parser_config = claudine::stream::ParserConfig::default();
-        let sink = LiveSemanticSink::with_default_wiring(
+        let result = run_structured_composition(
             provider,
-            env_context.clone(),
-            child_cwd,
-            stream_verbosity,
-            summary_details.clone(),
-        )
-        .with_context_extra(dispatch_context.clone());
-        let live_metrics = sink.live_metrics();
-        let stream_output = sink.stream_output();
-        let section_stream = sink.section_stream();
-        let build_parser: exec::SemanticParserBuilder =
-            Box::new(move |output_cb, _reasoning_cb| {
-                let sink = sink.with_output_text_sink(output_cb);
-                claudine::stream::create_semantic_parser(provider, sink, parser_config)
-            });
-        let stream_result = exec::run_child_stream_semantic(
+            profile,
             binary_path,
             child_args,
             child_env,
             child_cwd,
-            None,
-            stderr_noise,
-            profile.suppress_structured_stderr_on_success(),
-            stream_verbosity != Verbosity::Silent,
             stdin_seed,
-            build_parser,
+            structured_codex_output,
+            stderr_noise,
+            stream_verbosity,
+            env_context,
+            dispatch_context,
             child_spawned,
-            live_metrics,
-            stream_output,
-            claudine::stream::progress::HeartbeatPolicy::default(),
         )?;
-        let mut summary = stream_result.data;
-        if let Some(codex_output) = structured_codex_output {
-            codex_output.apply_to_summary(&mut summary);
-        }
 
-        // Codex doesn't stream text; render its captured response
-        if provider == Provider::Codex && !summary.assistant_text.is_empty() {
-            section_stream.enter_final_stdout();
-            let text = &summary.assistant_text;
+        // Compose-specific: render Codex post-hoc text through the section
+        // stream when nothing was streamed live. `!had_streamed_assistant`
+        // subsumes the old `provider == Provider::Codex` check since only
+        // Codex produces non-empty post-hoc text under these conditions.
+        if !result.had_streamed_assistant && !result.summary.assistant_text.trim().is_empty() {
+            result.section_stream.enter_final_stdout();
+            let text = &result.summary.assistant_text;
             let term = wrap_terminal();
             if std::io::stdout().is_terminal() {
                 let rendered = crate::output::render_assistant_markdown(text, &term);
@@ -1477,18 +1494,18 @@ fn execute_direct_without_harness(
 
         emit_stream_summary_with_context(
             StreamSummaryContext {
-                summary: &summary,
+                summary: &result.summary,
                 profile,
                 env_context,
                 verbosity: stream_verbosity,
                 verbose: detail_requested,
-                details: &summary_details.lock().unwrap().clone(),
-                section_stream: Some(&section_stream),
+                details: &result.details,
+                section_stream: Some(&result.section_stream),
             },
             dispatch_context,
         );
 
-        Ok(summary.exit_code)
+        Ok(result.exit_code)
     } else {
         let result = exec::run_child(
             binary_path,
