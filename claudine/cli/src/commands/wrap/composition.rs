@@ -33,12 +33,11 @@ use super::exec;
 use super::live_semantic_sink::LiveSemanticSink;
 use super::profile::{self, WrapperProfile};
 use super::{
-    HarnessPromptMode, HarnessPromptState, StructuredCodexOutput, StructuredSummaryDetails,
-    WrapperHarnessPermissionProbe, build_harness_shell_options_with_cache,
-    emit_stream_summary_no_separator_with_context, emit_stream_summary_with_context,
-    materialized_harness_prompt_from_prepared, resolve_binary_path, run_harness_loop,
-    structured_verbosity, switch_process_cwd, wrap_terminal,
-    StreamSummaryContext,
+    HarnessPromptMode, HarnessPromptState, StreamSummaryContext, StructuredCodexOutput,
+    StructuredSummaryDetails, WrapperHarnessPermissionProbe,
+    build_harness_shell_options_with_cache, emit_stream_summary_no_separator_with_context,
+    emit_stream_summary_with_context, materialized_harness_prompt_from_prepared,
+    resolve_binary_path, run_harness_loop, structured_verbosity, switch_process_cwd, wrap_terminal,
 };
 use crate::log;
 
@@ -378,10 +377,14 @@ pub(crate) fn execute_composition_request_inner(
     // validate_non_interactive_requirements).
     let _opencode_model_source: Option<super::profile::OpenCodeModelSource> =
         if provider == Provider::OpenCode {
-            let has_model = env_plan.env.contains_key(&std::ffi::OsString::from("MODEL"));
+            let has_model = env_plan
+                .env
+                .contains_key(&std::ffi::OsString::from("MODEL"));
             super::profile::apply_opencode_model_resolution(
                 &mut child_args,
-                &mut |k, v| { env_plan.env.insert(k.into(), v.into()); },
+                &mut |k, v| {
+                    env_plan.env.insert(k.into(), v.into());
+                },
                 has_model,
                 request.model.as_deref(),
                 effective_non_interactive,
@@ -1426,10 +1429,11 @@ fn execute_direct_without_harness(
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
         let section_stream = sink.section_stream();
-        let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb| {
-            let sink = sink.with_output_text_sink(output_cb);
-            claudine::stream::create_semantic_parser(provider, sink, parser_config)
-        });
+        let build_parser: exec::SemanticParserBuilder =
+            Box::new(move |output_cb, _reasoning_cb| {
+                let sink = sink.with_output_text_sink(output_cb);
+                claudine::stream::create_semantic_parser(provider, sink, parser_config)
+            });
         let stream_result = exec::run_child_stream_semantic(
             binary_path,
             child_args,

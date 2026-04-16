@@ -775,7 +775,8 @@ fn run_provider_wrapper_inner(
                 Ok(source) => source,
                 Err(_) => {
                     let term = wrap_terminal();
-                    let report = crate::output::error_report::AgentErrorReport::no_model_provided(provider);
+                    let report =
+                        crate::output::error_report::AgentErrorReport::no_model_provided(provider);
                     report.render(&term);
                     std::process::exit(1);
                 }
@@ -1782,10 +1783,11 @@ fn execute_harness_attempt(
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
         let section_stream = sink.section_stream();
-        let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb| {
-            let sink = sink.with_output_text_sink(output_cb);
-            claudine::stream::create_semantic_parser(provider, sink, parser_config)
-        });
+        let build_parser: exec::SemanticParserBuilder =
+            Box::new(move |output_cb, _reasoning_cb| {
+                let sink = sink.with_output_text_sink(output_cb);
+                claudine::stream::create_semantic_parser(provider, sink, parser_config)
+            });
         let stream_result = exec::run_child_stream_semantic(
             binary_path,
             &launch.args,
@@ -3003,9 +3005,9 @@ fn emit_stream_summary_inner(
         format_verbose_summary_details_prose(summary, details)
     };
     if primary_markup.is_some() || secondary_markup.is_some() {
+        use super::wrap::section::Section;
         use biscuit_terminal::components::prose::Prose;
         use biscuit_terminal::components::renderable::Renderable;
-        use super::wrap::section::Section;
 
         let term = crate::log::terminal();
         if let Some(section_stream) = section_stream {

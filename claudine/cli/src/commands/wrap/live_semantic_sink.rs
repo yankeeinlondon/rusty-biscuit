@@ -302,9 +302,7 @@ impl LiveSemanticSink {
     }
 
     fn render_status(&mut self, section: Section, state: StatusState, description: String) {
-        let rendered = Status::new(description)
-            .state(state)
-            .render(&self.terminal);
+        let rendered = Status::new(description).state(state).render(&self.terminal);
         self.emit_section_line(section, &rendered);
     }
 
@@ -334,9 +332,7 @@ impl LiveSemanticSink {
             (Some(ToolStatus::Success), _) => Some("<dim><i>successful</i></dim>".to_string()),
             (Some(ToolStatus::Error), _) => Some("<red><b>error</b></red>".to_string()),
             (Some(ToolStatus::Pending), _) => Some("<dim><i>pending</i></dim>".to_string()),
-            (None, Some(summary)) => {
-                Some(format!("<dim><i>{}</i></dim>", escape_prose(&summary)))
-            }
+            (None, Some(summary)) => Some(format!("<dim><i>{}</i></dim>", escape_prose(&summary))),
             (None, None) => None,
         };
         match slot {
@@ -1154,9 +1150,7 @@ mod tests {
         for line in &collected {
             let is_blank = line.trim().is_empty();
             if is_blank && prev_blank {
-                panic!(
-                    "two consecutive blank lines in combined section output:\n{collected:#?}"
-                );
+                panic!("two consecutive blank lines in combined section output:\n{collected:#?}");
             }
             prev_blank = is_blank;
         }
@@ -1213,8 +1207,7 @@ mod tests {
             })
         };
 
-        let mut sink = make_sink(lines.clone(), dispatched)
-            .with_output_text_sink(output_cb);
+        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
 
         sink.on_semantic_event(SemanticEvent::OutputText {
             text: "hello ".into(),
@@ -1908,8 +1901,7 @@ mod tests {
             fixture: &[&str],
             model: Option<String>,
         ) -> Vec<(bool, String)> {
-            let captured: Arc<StdMutex<Vec<(bool, String)>>> =
-                Arc::new(StdMutex::new(Vec::new()));
+            let captured: Arc<StdMutex<Vec<(bool, String)>>> = Arc::new(StdMutex::new(Vec::new()));
             let dispatched: Arc<StdMutex<Vec<(AgenticEvent, String)>>> =
                 Arc::new(StdMutex::new(Vec::new()));
 

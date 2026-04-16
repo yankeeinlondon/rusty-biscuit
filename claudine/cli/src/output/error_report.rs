@@ -402,11 +402,7 @@ fn parse_model_suggestions(stderr: &str) -> Option<Vec<String>> {
         }
     }
 
-    if items.is_empty() {
-        None
-    } else {
-        Some(items)
-    }
+    if items.is_empty() { None } else { Some(items) }
 }
 
 #[cfg(test)]
@@ -433,9 +429,11 @@ mod tests {
         let source = OpenCodeModelSource::CliSwitch("xyz".to_string());
         let report = opencode_report(1, stderr, Some(&source));
         assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(report
-            .summary
-            .contains("Invalid model specified in the --model CLI switch"));
+        assert!(
+            report
+                .summary
+                .contains("Invalid model specified in the --model CLI switch")
+        );
         assert!(report.suggestions.is_some());
         assert_eq!(report.suggestions.as_ref().unwrap().len(), 2);
         assert_eq!(report.suggestions.as_ref().unwrap()[0], "abc/one");
@@ -449,9 +447,11 @@ mod tests {
         let source = OpenCodeModelSource::OpenCodeModelEnv("bad".to_string());
         let report = opencode_report(1, stderr, Some(&source));
         assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(report
-            .summary
-            .contains("the OPENCODE_MODEL environment variable"));
+        assert!(
+            report
+                .summary
+                .contains("the OPENCODE_MODEL environment variable")
+        );
         assert_eq!(
             report.location.as_deref(),
             Some("the OPENCODE_MODEL environment variable")
@@ -503,7 +503,11 @@ mod tests {
         assert_eq!(report.category, AgentErrorCategory::Configuration);
         assert!(report.summary.contains("No model specified"));
         assert!(report.summary.contains("<yellow>model</yellow>"));
-        assert!(report.summary.contains("<blue>~/.config/opencode/config.json</blue>"));
+        assert!(
+            report
+                .summary
+                .contains("<blue>~/.config/opencode/config.json</blue>")
+        );
         assert!(report.body_list.is_some());
         let body_list = report.body_list.as_ref().unwrap();
         assert!(body_list.iter().any(|s| s.contains("OPENCODE_MODEL")));
@@ -528,9 +532,11 @@ mod tests {
         );
         assert_eq!(report.exit_code, 1);
         assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(report
-            .summary
-            .contains("Invalid model specified in the --model CLI switch"));
+        assert!(
+            report
+                .summary
+                .contains("Invalid model specified in the --model CLI switch")
+        );
         assert!(report.summary.contains("<yellow>opencode models</yellow>"));
         assert!(report.summary.contains("<dim>[provider]</dim>"));
         assert!(report.summary.contains("<dim>[aggregator]</dim>"));
@@ -566,7 +572,11 @@ mod tests {
         let stderr = "ProviderModelNotFoundError: model xyz not found";
         let report = AgentErrorReport::from_exit_code(Provider::OpenCode, 1, Some(stderr));
         assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(report.summary.contains("Invalid model specified in the command line"));
+        assert!(
+            report
+                .summary
+                .contains("Invalid model specified in the command line")
+        );
         assert!(report.suggestions.is_none());
         assert_eq!(report.location, None);
     }
