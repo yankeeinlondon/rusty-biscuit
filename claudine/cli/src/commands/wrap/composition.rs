@@ -35,8 +35,8 @@ use super::profile::{self, WrapperProfile};
 use super::{
     HarnessPromptMode, HarnessPromptState, StreamSummaryContext, StructuredCodexOutput,
     StructuredSummaryDetails, WrapperHarnessPermissionProbe,
-    build_harness_shell_options_with_cache, emit_stream_summary_no_separator_with_context,
-    emit_stream_summary_with_context, materialized_harness_prompt_from_prepared,
+    build_harness_shell_options_with_cache, emit_stream_summary_with_context, format_summary_prose,
+    format_verbose_summary_details_prose, materialized_harness_prompt_from_prepared,
     resolve_binary_path, run_harness_loop, structured_verbosity, switch_process_cwd, wrap_terminal,
 };
 use crate::log;
@@ -1355,9 +1355,9 @@ fn run_structured_composition(
 /// - `defer_section_separator = false` (compose): routes through
 ///   [`emit_stream_summary_with_context`] so the section tracker inserts the
 ///   separator blank exactly once.
-/// - `defer_section_separator = true` (inline-compose): routes through
-///   [`emit_stream_summary_no_separator_with_context`] so the caller controls
-///   the blank-line spacing (e.g. around closure validation output).
+/// - `defer_section_separator = true` (inline-compose): prints the trailer
+///   directly so the caller controls the blank-line spacing (e.g. around
+///   closure validation output).
 ///
 /// Both paths write the JSONL summary event.
 #[allow(clippy::too_many_arguments)]
@@ -1373,15 +1373,35 @@ fn emit_composition_summary(
     defer_section_separator: bool,
 ) {
     if defer_section_separator {
-        emit_stream_summary_no_separator_with_context(
-            summary,
-            profile,
-            env_context,
-            verbosity,
-            verbose,
-            details,
-            Some(dispatch_context),
-        );
+        use biscuit_terminal::components::prose::Prose;
+
+        if verbosity != Verbosity::Silent
+            && let Some(markup) = format_summary_prose(summary)
+        {
+            let term = crate::log::terminal();
+            let rendered = Prose::new(markup).render(&term);
+            eprintln!("{rendered}");
+        }
+        if verbosity != Verbosity::Silent
+            && verbose
+            && let Some(markup) = format_verbose_summary_details_prose(summary, details)
+        {
+            let term = crate::log::terminal();
+            let rendered = Prose::new(markup).render(&term);
+            eprintln!("  {rendered}");
+        }
+
+        if let Some(protocol) = profile.stream_protocol() {
+            let meta = claudine::stream::reporting::summary_to_event_meta_with_context(
+                summary,
+                protocol,
+                env_context,
+                Some(dispatch_context),
+            );
+            if let Err(e) = claudine::stream::reporting::write_summary_event(&meta) {
+                tracing::warn!("Failed to write stream summary event: {e}");
+            }
+        }
     } else {
         emit_stream_summary_with_context(
             StreamSummaryContext {
