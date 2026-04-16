@@ -824,8 +824,10 @@ fn run_provider_wrapper_inner(
     }
 
     if !silent_requested {
-        let mut header_env_plan = env::EnvPlan::default();
-        header_env_plan.package_context = launch_workspace.package_context.clone();
+        let header_env_plan = env::EnvPlan {
+            package_context: launch_workspace.package_context.clone(),
+            ..Default::default()
+        };
 
         crate::output::log_wrapper_header(
             profile,

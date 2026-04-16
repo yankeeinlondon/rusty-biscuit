@@ -56,7 +56,6 @@ pub(crate) struct SingleCompositionOutcome {
 /// the summary; callers decide the timing and routing.
 struct CompositionStreamResult {
     exit_code: i32,
-    termination: claudine::harness::ProcessTermination,
     assistant_text: String,
     summary: claudine::stream::summary::StreamExecutionSummary,
     details: StructuredSummaryDetails,
@@ -216,8 +215,10 @@ pub(crate) fn execute_composition_request_inner(
     let compose_source_hint = request.file_ref.clone();
 
     if !silent {
-        let mut header_env_plan = env::EnvPlan::default();
-        header_env_plan.package_context = launch_workspace.package_context.clone();
+        let header_env_plan = env::EnvPlan {
+            package_context: launch_workspace.package_context.clone(),
+            ..Default::default()
+        };
 
         crate::output::log_wrapper_header(
             profile,
@@ -1328,7 +1329,6 @@ fn run_structured_composition(
         stream_output,
         claudine::stream::progress::HeartbeatPolicy::default(),
     )?;
-    let termination = stream_result.termination;
     let mut summary = stream_result.data;
 
     let had_streamed_assistant =
@@ -1340,7 +1340,6 @@ fn run_structured_composition(
     let details = summary_details.lock().unwrap().clone();
     Ok(CompositionStreamResult {
         exit_code: summary.exit_code,
-        termination,
         assistant_text: summary.assistant_text.clone(),
         summary,
         details,
