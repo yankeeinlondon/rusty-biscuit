@@ -8,6 +8,7 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
 use claudine::events::Provider;
+use claudine::stream::semantic::SemanticErrorKind;
 
 use crate::log;
 
@@ -17,6 +18,21 @@ pub(crate) enum AgentErrorCategory {
     AgentNative,
     ApiRemote,
     Interrupted,
+}
+
+impl From<SemanticErrorKind> for AgentErrorCategory {
+    fn from(kind: SemanticErrorKind) -> Self {
+        match kind {
+            SemanticErrorKind::Configuration => AgentErrorCategory::Configuration,
+            SemanticErrorKind::AgentNative => AgentErrorCategory::AgentNative,
+            SemanticErrorKind::ApiRemote => AgentErrorCategory::ApiRemote,
+            SemanticErrorKind::Interrupted => AgentErrorCategory::Interrupted,
+            // Unknown maps to AgentNative since it has the broadest "something
+            // went wrong with the agent" framing without overclaiming a
+            // specific upstream cause.
+            SemanticErrorKind::Unknown => AgentErrorCategory::AgentNative,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -565,6 +581,32 @@ mod tests {
         assert_eq!(report.category, AgentErrorCategory::AgentNative);
         assert!(report.summary.contains("the command line"));
         assert_eq!(report.suggestions.as_ref().unwrap()[0], "a");
+    }
+
+    #[test]
+    fn semantic_error_kind_maps_to_agent_error_category() {
+        assert_eq!(
+            AgentErrorCategory::from(SemanticErrorKind::Configuration),
+            AgentErrorCategory::Configuration
+        );
+        assert_eq!(
+            AgentErrorCategory::from(SemanticErrorKind::AgentNative),
+            AgentErrorCategory::AgentNative
+        );
+        assert_eq!(
+            AgentErrorCategory::from(SemanticErrorKind::ApiRemote),
+            AgentErrorCategory::ApiRemote
+        );
+        assert_eq!(
+            AgentErrorCategory::from(SemanticErrorKind::Interrupted),
+            AgentErrorCategory::Interrupted
+        );
+        // Unknown maps to AgentNative so the surface stays consistent with
+        // the existing four-category reporting scheme.
+        assert_eq!(
+            AgentErrorCategory::from(SemanticErrorKind::Unknown),
+            AgentErrorCategory::AgentNative
+        );
     }
 
     #[test]

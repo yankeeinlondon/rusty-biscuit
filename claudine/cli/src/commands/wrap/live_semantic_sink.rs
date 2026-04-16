@@ -31,14 +31,18 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::block_quote::BlockQuote;
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::color::{Color, Tailwind};
+use biscuit_terminal::utils::layout::Margin;
 use claudine::events::{
     AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta, Provider,
 };
 use claudine::stream::progress::{self, LiveMetrics};
-use claudine::stream::semantic::{SemanticEvent, SemanticEventSink};
+use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use claudine::stream::stderr::Verbosity;
 use claudine::stream::thinking::render_thinking_block;
 use claudine::stream::tool_display::{ToolCallDisplay, ToolDirection, ToolStatus};
@@ -313,6 +317,28 @@ impl LiveSemanticSink {
         self.emit_section_line(section, &rendered);
     }
 
+    /// Render a typed [`SemanticEvent::Error`] as a colored `BlockQuote`
+    /// with a label and border derived from [`SemanticErrorKind`]. Each
+    /// rendered line is fed through [`Self::emit_section_line`] so the
+    /// surrounding section spacing stays consistent with status renders.
+    fn render_error_block(&mut self, section: Section, kind: SemanticErrorKind, message: &str) {
+        let (label, border_color) = error_kind_presentation(kind);
+        let escaped = escape_prose(message);
+        let body = format!("<red><b>{label}</b></red>\n{escaped}");
+        let mut block = BlockQuote::new(
+            RenderableContent::from(Prose::new(body)),
+            None::<&str>,
+        )
+        .with_left_block_color(border_color)
+        .with_border("\u{258c} ");
+        block.layout_mut().left_margin = Margin::Chars(0);
+        block.layout_mut().right_margin = Margin::Chars(0);
+        let rendered = block.render(&self.terminal);
+        for line in rendered.lines() {
+            self.emit_section_line(section, line);
+        }
+    }
+
     /// Render a `ToolCallDisplay` into prose-markup for
     /// [`Status::from_prose`]. Per spec:
     ///
@@ -509,8 +535,8 @@ impl LiveSemanticSink {
                     self.render_status(section, StatusState::Warning, message.clone());
                 }
             }
-            SemanticEvent::Error { message, .. } => {
-                self.render_status(section, StatusState::Failure, message.clone());
+            SemanticEvent::Error { message, kind, .. } => {
+                self.render_error_block(section, *kind, message);
             }
             SemanticEvent::ProviderExtension {
                 provider,
@@ -646,6 +672,20 @@ fn escape_prose(input: &str) -> String {
         }
     }
     out
+}
+
+/// Pick the human label and border color for a typed
+/// [`SemanticErrorKind`] when rendered as a live-sink BlockQuote.
+fn error_kind_presentation(kind: SemanticErrorKind) -> (&'static str, Color) {
+    match kind {
+        SemanticErrorKind::Configuration => {
+            ("Configuration Error", Color::Tailwind(Tailwind::Orange700))
+        }
+        SemanticErrorKind::AgentNative => ("Agent Error", Color::Tailwind(Tailwind::Red700)),
+        SemanticErrorKind::ApiRemote => ("API Error", Color::Tailwind(Tailwind::Red700)),
+        SemanticErrorKind::Interrupted => ("Interrupted", Color::Tailwind(Tailwind::Yellow700)),
+        SemanticErrorKind::Unknown => ("Error", Color::Tailwind(Tailwind::Red700)),
+    }
 }
 
 fn provider_short(p: Provider) -> &'static str {
@@ -1026,10 +1066,99 @@ mod tests {
         sink.on_semantic_event(SemanticEvent::Error {
             message: "billing".into(),
             terminal: true,
+            kind: SemanticErrorKind::ApiRemote,
             extra: json!({}),
         });
         let dispatches = dispatched.lock().unwrap().clone();
         assert_eq!(dispatches[0].0, AgenticEvent::TurnError);
+    }
+
+    #[test]
+    fn error_event_renders_blockquote_with_red_border() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::Error {
+            message: "Quota exceeded".into(),
+            terminal: true,
+            kind: SemanticErrorKind::ApiRemote,
+            extra: json!({}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            rendered.contains("API Error"),
+            "expected API Error label, got: {rendered:?}"
+        );
+        assert!(
+            rendered.contains("Quota exceeded"),
+            "expected message text, got: {rendered:?}"
+        );
+        assert!(
+            rendered.contains('\u{258c}'),
+            "expected wider block-quote border (▌), got: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn interrupted_error_renders_blockquote_with_interrupted_label() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::Error {
+            message: "User cancelled".into(),
+            terminal: true,
+            kind: SemanticErrorKind::Interrupted,
+            extra: json!({}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            rendered.contains("Interrupted"),
+            "expected Interrupted label, got: {rendered:?}"
+        );
+        assert!(rendered.contains('\u{258c}'));
+    }
+
+    #[test]
+    fn configuration_error_renders_blockquote_with_configuration_label() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::Error {
+            message: "Bad API key".into(),
+            terminal: true,
+            kind: SemanticErrorKind::Configuration,
+            extra: json!({}),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            rendered.contains("Configuration Error"),
+            "expected Configuration Error label, got: {rendered:?}"
+        );
+        assert!(rendered.contains('\u{258c}'));
+    }
+
+    #[test]
+    fn error_kind_presentation_returns_expected_labels() {
+        assert_eq!(
+            error_kind_presentation(SemanticErrorKind::Configuration).0,
+            "Configuration Error"
+        );
+        assert_eq!(
+            error_kind_presentation(SemanticErrorKind::AgentNative).0,
+            "Agent Error"
+        );
+        assert_eq!(
+            error_kind_presentation(SemanticErrorKind::ApiRemote).0,
+            "API Error"
+        );
+        assert_eq!(
+            error_kind_presentation(SemanticErrorKind::Interrupted).0,
+            "Interrupted"
+        );
+        assert_eq!(
+            error_kind_presentation(SemanticErrorKind::Unknown).0,
+            "Error"
+        );
     }
 
     #[test]
