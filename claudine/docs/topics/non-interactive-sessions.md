@@ -1,17 +1,23 @@
 # Non-Interactive Sessions
 
-Claudine wraps agentic CLIs in both interactive and non-interactive modes. Non-interactive sessions unlock structured streaming, token/cost tracking, the harness validation system, timeouts, and programmatic recovery — none of which are available in interactive mode.
+Claudine wraps agentic CLIs in both interactive and non-interactive modes. Non-interactive sessions unlock structured streaming, the typed semantic event pipeline, token/cost tracking, the harness validation system, timeouts, and programmatic recovery — none of which are available in interactive mode.
 
 A session becomes non-interactive when:
 
 - A prompt is provided (positional argument, stdin, or composition file)
 - `claudine compose` or `claudine inline-compose` is used (always non-interactive)
 
+## Information Density Contract
+
+Non-interactive sessions are blind from the caller's perspective: there is no TTY to query, no interactive feedback loop, and the wrapped provider may take minutes or hours to complete. Claudine compensates by surfacing **as much information as possible**, consistent across providers wherever the providers themselves are consistent. The guiding rule:
+
+- Anything the provider tells us about a tool call, a thought, a warning, or an error reaches the user.
+- Repetitive content is collapsed at most once (e.g. the silent-extension allowlist).
+- Format is consistent across providers; field availability is not, because providers themselves vary.
+
 ## Structured JSON Streaming
 
 In non-interactive mode, Claudine instructs the wrapped provider to emit structured JSON output instead of plain text. Each provider has its own protocol and flags:
-
-Non-interactive runs also force a safety appendix into the effective system prompt. Claudine looks for `<repo-root>/.claudine/non-interactive.md`, then `~/.claudine/non-interactive.md`, and otherwise falls back to a built-in warning that tells the provider not to ask permission questions or request user input, and to avoid commands that would require an interactive TTY or follow-up stdin input.
 
 | Provider | Protocol | Flag(s) Applied |
 |----------|----------|-----------------|
@@ -23,49 +29,200 @@ Non-interactive runs also force a safety appendix into the effective system prom
 | Qwen Code | StreamJson | _(automatic)_ |
 | Goose | — | No structured streaming support |
 
-### Parser/Sink Architecture
+Non-interactive runs also force a safety appendix into the effective system prompt. Claudine looks for `<repo-root>/.claudine/non-interactive.md`, then `~/.claudine/non-interactive.md`, and otherwise falls back to a built-in warning that tells the provider not to ask permission questions or request user input, and to avoid commands that would require an interactive TTY or follow-up stdin input.
 
-Each provider has a dedicated stream parser (`ClaudeStreamParser`, `OpenCodeStreamParser`, etc.) that implements the `StreamParser` trait. Parsers consume JSON lines and produce:
+### Parser Architecture
 
-- **`StreamChunk::Text`** — assistant response text, rendered to stdout
-- **`StreamChunk::Thinking`** — reasoning/thinking text, rendered dimmed to stderr
+Each provider has a typed protocol module under [`claudine/lib/src/stream/protocol/`](../../lib/src/stream/protocol/) (one file per provider) plus a semantic parser under [`claudine/lib/src/stream/`](../../lib/src/stream/) (e.g. `claude_semantic.rs`, `opencode_semantic.rs`).
 
-Parsers also emit coarse lifecycle events via the `StreamEventSink` trait:
+- **Protocol modules** define a serde-derived `*Event` enum tagged on `"type"`. Every field is `#[serde(default)]`, so format evolution never breaks deserialization. Unknown event types fail typed deserialization and are routed to a fallback arm that emits a `SemanticEvent::ProviderExtension` so nothing is dropped.
+- **Semantic parsers** implement `SemanticStreamParser`. Each line is parsed first to `serde_json::Value` (preserves the malformed-line warning path), then to the provider-specific tagged enum. Successful parses dispatch to handler methods that translate provider events into provider-agnostic [`SemanticEvent`](../../lib/src/stream/semantic.rs) variants.
 
-- `on_session_start` — agent session started (carries session ID and model)
-- `on_turn_start` / `on_turn_complete` — turn boundaries
-- `on_before_tool` / `on_after_tool` — tool invocations
-- `on_turn_error` — agent-reported errors surfaced as warnings
-- `on_warning` — parser-level issues (malformed JSON, etc.)
+The `SemanticEvent` model is the cross-provider contract:
 
-These events drive the `LiveStreamSink` in the CLI, which handles session ID emission, tool name tracking, and event dispatch to the logging system.
+| Variant | Meaning |
+|---------|---------|
+| `SessionStart` | Session ID + model identified |
+| `TurnStart` / `TurnComplete` | Turn boundaries; carries token usage / cost / duration on completion |
+| `OutputText` | Assistant response text (deltas) |
+| `Reasoning` | Thinking / reasoning text (deltas) |
+| `ToolCall` / `ToolResult` | Tool invocation request / response |
+| `SubagentStart` / `SubagentStop` | Subagent lifecycle |
+| `FileChange` | Provider-reported file mutation |
+| `PlanUpdate` | Step-of-plan progress |
+| `Info` / `Warning` / `Error` | Diagnostic events; `Error` carries a `SemanticErrorKind` and a `terminal: bool` |
+| `PermissionRequest` | Agent asked for a permission decision |
+| `ProviderExtension` | Catch-all for parseable but not-yet-typed kinds |
 
-### Tool Progress Lines
+### LiveSemanticSink
 
-When a structured-stream parser emits `on_before_tool`, the CLI's `LiveStreamSink` writes a progress line to stderr:
+The CLI-side consumer is [`LiveSemanticSink`](../../cli/src/commands/wrap/live_semantic_sink.rs). For every `SemanticEvent` it receives, it does five things in order:
+
+1. Updates [`LiveMetricsState`](../../lib/src/stream/progress.rs) for the heartbeat thread.
+2. Updates the cached session ID and model from envelope events.
+3. Updates the structured-summary tool-name rollup.
+4. Forwards `OutputText` to the stdout text renderer and `Reasoning` to the stderr `BlockQuote` renderer.
+5. Renders a status / block to stderr, dispatches the event to claudine's hook pipeline, and writes a JSONL row to the semantic event log.
+
+Every emission flows through a [`SectionTracker`](../../cli/src/commands/wrap/section.rs) that enforces the 9-section model documented below, so callers never have to reason about blank-line spacing.
+
+## The 9-Section Model
+
+`LiveSemanticSink` enforces a strict ordering on stderr output — every line is tagged with one of nine sections, and the tracker inserts exactly one blank line between section transitions:
+
+| # | Section | Content |
+|---|---------|---------|
+| 1 | `Execution` | The execution header (provider, mode, source) — first thing emitted |
+| 2 | `Env` | Environment details (working dir, repo, git state) when verbose |
+| 3 | `SystemPrompt` | The effective system prompt rendered as a `BlockQuote` (`▌ ` border) |
+| 4 | `AgentPrompt` | The composed prompt rendered as a `BlockQuote` (`▌ ` border) |
+| 5 | `SessionAndModel` | The session ID + model line (always emitted; survives `--quiet` and `--silent`) |
+| 6 | `Thinking` | Reasoning prose rendered as a `BlockQuote` (gray `▌ ` border, dim italic) |
+| 7 | `ToolUseAndEvents` | Tool calls, tool results, subagents, info/warning lines, error blocks |
+| 8 | `FinalStdout` | The agent's final response, on stdout (markdown-rendered when TTY, raw otherwise) |
+| 9 | `TrailerMetadata` | The summary line + verbose details |
+
+Sections do not interleave: once `FinalStdout` opens, no `ToolUseAndEvents` lines emit. Within a section, consecutive blank lines collapse to one.
+
+## Tool Call Rendering
+
+Every `ToolCall` and `ToolResult` produces a single line in `Section::ToolUseAndEvents` via [`ToolCallDisplay`](../../lib/src/stream/tool_display.rs):
 
 ```text
-tool: bash
+→ Bash(bash ls -la)
+← Bash(successful)
+
+→ Read(/etc/hosts)
+← Read(successful)
+
+→ Bash(bash git status)
+← Bash(error)
+
+→ Task(Investigate hanging behavior in StreamTextRenderer)
+← Task(successful)
 ```
 
-The implementation lives in `claudine/cli/src/commands/wrap/mod.rs` inside `LiveStreamSink::emit_tool_progress_line()`. This is not OpenCode-specific. It applies to every wrapped provider that uses structured streaming and reports tool activity through `on_before_tool`.
+Format rules:
 
-Today that means:
+- **Outgoing call:** `→ {DisplayName}({summary})`. The summary is dim-italic.
+- **Incoming result:** `← {DisplayName}({slot})`. The slot prefers status (`successful` / `pending` dim-italic, `error` red+bold) and falls back to a derived output summary when no status is reported.
+- **Shell tools** (`Bash`, `bash`, `run_command`) prepend the canonical shell name to the command (`bash ls -la`) so the user can reason about how the line would actually execute.
+- **Task** prefers `description → subject → prompt → task` for its summary in that order.
+- **Display name humanization:** known tools pass through unchanged (`Bash`, `Read`, …); MCP-shape tools (`mcp__server__tool`) become `Server Tool`; unknown tools are title-cased on `_` boundaries.
+- **User-controlled content** (commands, paths, URLs, raw JSON fallbacks) is escaped so stray `<`, `>`, `{`, or `\` cannot be interpreted as prose markup.
 
-- Claude
-- Codex
-- Gemini
-- Kimi Code
-- OpenCode
-- Qwen Code
+The full input/output JSON is **never** dumped verbatim for known tools. The raw event remains available in the JSONL semantic log.
 
-Goose does not currently participate because it has no structured streaming path in Claudine.
+## Thinking (Reasoning) Rendering
+
+Every `SemanticEvent::Reasoning` is rendered into `Section::Thinking` as a `BlockQuote` with the wider `▌ ` border (matching System Prompt and Agent Prompt) and the default gray `Tailwind::Gray500` accent:
+
+```text
+▌ The user is asking about when the NFL draft is in 2026. This is a factual
+▌ question that requires web search since I don't have real-time information
+▌ about specific dates for future events.
+```
+
+Provider coverage:
+
+| Provider | Reasoning Source |
+|----------|------------------|
+| Claude | `content_block_delta` with `delta.type = "thinking_delta"` |
+| Codex | `item.completed` / `item.updated` with `item.type = "reasoning"` |
+| OpenCode | Top-level `{"type":"reasoning","text":"…"}` (also resolves nested `part.text`) |
+| Gemini | `thought` events on the candidate stream |
+| Qwen | `thinking` deltas (when emitted by the model) |
+
+Goose and Kimi do not surface reasoning in their stream protocols; nothing is rendered for them.
+
+## Warning Rendering
+
+Warnings render as a single `Status::Warning` line (yellow icon) in `Section::ToolUseAndEvents`:
+
+```text
+⚠ rate limited; retrying in 30s
+```
+
+Two suppressions are applied:
+
+- `Malformed JSON on line N` warnings (which a permissive provider may emit for non-JSON lines mixed into its structured output) are not rendered to stderr but are still dispatched and logged.
+- The Claude rate-limit warning is suppressed when the user is on a Subscription (no `ANTHROPIC_API_KEY`); dispatch and JSONL log still fire.
+
+## Error Rendering
+
+`SemanticEvent::Error` carries a typed `SemanticErrorKind`:
+
+| Kind | Border Color | Label |
+|------|--------------|-------|
+| `Configuration` | `Tailwind::Orange700` | `Configuration Error` |
+| `AgentNative` | `Tailwind::Red700` | `Agent Error` |
+| `ApiRemote` | `Tailwind::Red700` | `API Error` |
+| `Interrupted` | `Tailwind::Yellow700` | `Interrupted` |
+| `Unknown` | `Tailwind::Red700` | `Agent Error` |
+
+Each error renders as a `BlockQuote` with `▌ ` border in the matching color, in `Section::ToolUseAndEvents`:
+
+```text
+▌ Agent Error (opencode)
+▌ Tool execution failed: command terminated with non-zero exit
+```
+
+The same recipe (`with_border("▌ ").with_left_block_color(...)`) is used by [`AgentErrorReport`](../../cli/src/output/error_report.rs) for end-of-run exit-code formatting; `SemanticErrorKind` maps directly onto `AgentErrorCategory` via `From` so a typed live error can be promoted to a richer end-of-run report when desired.
+
+`terminal: bool` is independent of `kind` — `terminal: true` errors map to `AgenticEvent::TurnError` for hook dispatch; non-terminal errors map to `AgenticEvent::Notification`. The kind remains purely classificatory regardless.
+
+### Provider Error Classification
+
+| Provider | Source signal | Mapped kind |
+|----------|---------------|-------------|
+| Claude | `error.type = "overloaded_error"` / 5xx | `ApiRemote` |
+| Claude | `error.type = "invalid_request_error"` | `Configuration` |
+| Codex | `error.type = "usage_limit_reached"` | `ApiRemote` |
+| Codex | `error.type = "auth"` / `account` | `Configuration` |
+| OpenCode | `error_type` literal table | `AgentNative` (default) |
+| Gemini / Qwen / Kimi | regex on `error.message` | best-effort |
+| Any | SIGINT / SIGTERM exit | `Interrupted` |
+
+Anything unmatched defaults to `Unknown`, which renders as a red `Agent Error` block.
+
+## Output Streaming and Idle Flush
+
+Assistant text reaches stdout through [`StreamTextRenderer`](../../cli/src/commands/wrap/exec.rs). It accumulates lines into a block buffer and renders them through Darkmatter at boundaries (paragraph break, code-fence close, stream-safe list item). Partial trailing lines stream raw the moment they arrive, so the user sees progress as the agent types.
+
+### Idle Flush
+
+Block buffers are also flushed when the heartbeat thread observes the renderer has been quiet longer than the heartbeat silence window (default **30 s**). This guarantees that a final paragraph emitted by a slow-to-close provider never sits invisible in the buffer waiting for an EOF that may never arrive.
+
+When the heartbeat thread runs, it acquires the renderer lock, calls `flush_if_idle(silence_window)`, and only then renders its own status line. Buffered content always appears above the next heartbeat.
+
+### Stalled-Stream Warning
+
+If two times the silence window passes (default **120 s**) with no `OutputText`, no `ToolCall`, no `ToolResult`, and no `TurnComplete`, the heartbeat emits a `SemanticEvent::Warning`:
+
+```text
+⚠ no provider activity in 2m — provider may be hung; press Ctrl+C to abort
+```
+
+The warning is a real semantic event, so it lands in dispatch and the JSONL log alongside everything else. Override the threshold with `CLAUDINE_STALL_TIMEOUT_SECONDS=<seconds>`.
+
+## Heartbeat
+
+The heartbeat thread emits a `Status::Info` line approximately every 30 s while the provider is running, formatted from the live metrics snapshot:
+
+```text
+ⓘ 60s · 1 running (Bash) · 2 done · 12K→3K tok · $0.02
+```
+
+Suppression rules:
+
+- A heartbeat tick is **suppressed** when `last_event_at` is more recent than the silence window (provider is actively producing).
+- A heartbeat tick is **forced** when `last_heartbeat_at` is older than the force window (default 120 s) regardless of activity, so long-running subagents stay visible.
 
 ## Agent Session ID
 
 When a non-interactive session starts, the agent returns a session ID in its structured JSON output. Claudine extracts this and emits it to stderr immediately — regardless of `--quiet` or `--silent` — because it is essential operational tracking info:
 
-```
+```text
 - OpenCode session ID ses_abc123de · minimax/MiniMax-M2.7-highspeed
 ```
 
@@ -73,7 +230,7 @@ The session ID is truncated to 12 characters in the display but stored in full f
 
 ### Extraction per Provider
 
-Most providers send a dedicated `init` or `session_start` JSON event at the beginning of the stream. OpenCode is an exception — it does not emit a session-start event. Instead, the session ID arrives in the first `step_start` payload as `sessionID` (camelCase). The OpenCode parser synthesizes a `on_session_start` event when it first sees this.
+Most providers emit a dedicated `init` or `session_start` event at the beginning of the stream. OpenCode is an exception: the session ID arrives in the first `step_start` payload as `sessionID` (camelCase). The OpenCode parser synthesizes a `SessionStart` event when it first sees this.
 
 ### Distinction from CLAUDINE_SESSION_ID
 
@@ -86,9 +243,9 @@ Most providers send a dedicated `init` or `session_start` JSON event at the begi
 
 ## Token Usage and Cost Reporting
 
-At the end of a non-interactive session, Claudine displays a summary line to stderr:
+At the end of a non-interactive session, Claudine displays a summary line in `Section::TrailerMetadata`:
 
-```
+```text
 ✓ 12.3s · 1.2K input tokens · 567 output tokens · 89 cached tokens · $0.0042 · 3 tool calls
 ```
 
@@ -98,29 +255,31 @@ The summary is built from `StreamExecutionSummary`, which accumulates across all
 - **Token usage** — input, output, cache read (provider-dependent)
 - **Cost** — USD cost reported by the provider (when available)
 - **Tool calls** — count of tool invocations observed in the stream
-- **Turns** — number of agent turns (step_start/step_complete cycles)
+- **Turns** — number of agent turns
 
 ### Verbosity Levels
 
-| Mode | Session ID | Warnings | Summary Line | Verbose Details |
-|------|-----------|----------|--------------|-----------------|
-| Normal | Always | Yes | Full | With `-v` only |
-| `--quiet` | Always | Yes | Compact | No |
-| `--silent` | Always | No | No | No |
+| Mode | Session ID | Warnings | Errors | Summary Line | Verbose Details |
+|------|-----------|----------|--------|--------------|-----------------|
+| Normal | Always | Yes | Yes | Full | With `-v` only |
+| `--quiet` | Always | Yes | Yes | Compact | No |
+| `--silent` | Always | No | Yes | No | No |
 
-**Normal summary**: `✓ 12.3s · 1K input tokens · 567 output tokens · $0.0042 · 3 tool calls`
+**Normal summary:** `✓ 12.3s · 1K input tokens · 567 output tokens · $0.0042 · 3 tool calls`
 
-**Quiet summary**: `✓ 12.3s · 1K→567 tokens · $0.0042`
+**Quiet summary:** `✓ 12.3s · 1K→567 tokens · $0.0042`
+
+Errors render at every verbosity level (including `--silent`) because suppressing them would defeat their purpose.
 
 ### Verbose Mode (`-v`)
 
 When `-v` is used, an additional details line follows the summary:
 
-```
+```text
   session: ses_abc123def456 · model: claude-sonnet-4 · turns: 3 · tools used: Read, Edit, Bash
 ```
 
-This includes the full (non-truncated) session ID, model name, turn count, per-tool invocation names, stop reason, and rate limit info if the provider was throttled.
+This includes the full (non-truncated) session ID, model name, turn count, per-tool invocation names, stop reason, and rate-limit info if the provider was throttled.
 
 ## Prompt Delivery
 
@@ -138,7 +297,7 @@ Some providers emit debug/diagnostic lines mixed into their structured output. C
 
 - **stdout noise** — lines matching configured prefixes are silently dropped (e.g., Gemini's `[LocalAgentExecutor]` lines)
 - **stderr noise** — similar filtering for stderr
-- **Conditional stderr suppression** — some providers buffer all stderr and only surface it on non-zero exit (enabled via `suppress_structured_stderr_on_success`)
+- **Conditional stderr suppression** — some providers buffer all stderr and only surface it on non-zero exit (`suppress_structured_stderr_on_success`)
 
 ### OpenCode default-mode TUI leakage
 
@@ -151,36 +310,36 @@ When wrapping OpenCode with `--format json`, OpenCode still writes its default-m
 | `> build ` | Session banner |
 | `████ ` | Subheader marker |
 
-The helper lives in `claudine/cli/src/commands/wrap/profile.rs::opencode_default_tui_noise_prefixes()`. Add new entries there as future OpenCode releases surface additional formatter prefixes.
+The helper lives in [`claudine/cli/src/commands/wrap/profile.rs::opencode_default_tui_noise_prefixes()`](../../cli/src/commands/wrap/profile.rs). Add new entries there as future OpenCode releases surface additional formatter prefixes.
 
 ## Status Line Rendering on STDERR
 
-`LiveSemanticSink` (in `claudine/cli/src/commands/wrap/live_semantic_sink.rs`) formats every stream event into a short status line on stderr. Two rules protect the rendering surface from low-signal noise:
+Two rules protect the rendering surface from low-signal noise:
 
-1. **No raw-JSON tails.** Both `summarize_provider_payload` (for `ProviderExtension` events) and `summarize_input` (for tool calls) walk a curated set of text locations — top-level string fields (`message`, `status`, `name`, `path`, `text`, `content`, `error.message`, `title`, `description`, ...), nested content arrays (`message.content[*].text`, `item.content.parts[*].text`, ...), and finally the first non-empty top-level string value. When none of those resolve to readable text, the sink renders only `provider/kind` (no ` · <payload>` tail) rather than a truncated JSON blob. The fidelity contract still holds because the full raw event is written to the JSONL semantic log regardless of how it renders.
+1. **No raw-JSON tails.** Both `summarize_provider_payload` (for `ProviderExtension` events) and `summarize_input` (for tool calls) walk a curated set of text locations — top-level string fields (`message`, `status`, `name`, `path`, `text`, `content`, `error.message`, `title`, `description`, …), nested content arrays (`message.content[*].text`, `item.content.parts[*].text`, …), and finally the first non-empty top-level string value. When none of those resolve to readable text, the sink renders only `provider/kind` (no ` · <payload>` tail) rather than a truncated JSON blob. The fidelity contract still holds because the full raw event is written to the JSONL semantic log regardless of how it renders.
 
 2. **Silent-kind allowlist.** Some extension kinds are high-volume or fully redundant with other typed events. They are named in `SILENT_PROVIDER_EXTENSION_KINDS` and produce **no** stderr line at all (dispatch and JSONL logging still happen). Current entries:
 
     | Provider | Kind | Reason |
     |----------|------|--------|
     | Claude | `stream_event` | Partial assistant token deltas — already surfaced via `OutputText` |
-    | Claude | `hook_started` / `hook_response` / `hook_progress` | Hook lifecycle already surfaced as semantic events |
+    | Claude | `system/hook_started` / `system/hook_response` / `system/hook_progress` | Hook lifecycle already surfaced as semantic events |
 
-   Add new entries to the allowlist in the same file rather than inventing new heuristics — explicit listing keeps the suppression visible and reviewable.
+    Add new entries in the same file rather than inventing new heuristics — explicit listing keeps the suppression visible and reviewable.
 
 ### Gemini user-prompt echo
 
-Gemini replays the operator's own prompt back into the stream as a `message` event with `role: "user"` (and occasionally `role: "system"`). Since those never carry new information, the Gemini parser (`claudine/lib/src/stream/gemini_semantic.rs`) drops them silently instead of emitting a `ProviderExtension` that the sink would then render as a status line. Assistant-role messages continue to route through `OutputText` as normal.
+Gemini replays the operator's own prompt back into the stream as a `message` event with `role: "user"` (and occasionally `role: "system"`). Since those never carry new information, the Gemini parser ([`claudine/lib/src/stream/gemini_semantic.rs`](../../lib/src/stream/gemini_semantic.rs)) drops them silently instead of emitting a `ProviderExtension` that the sink would then render as a status line. Assistant-role messages continue to route through `OutputText` as normal.
 
 ## Composition Workflows
 
-`claudine compose` and `claudine inline-compose` are non-interactive-only entry points that add Markdown composition before provider execution:
+`claudine compose` and `claudine inline-compose` are non-interactive entry points that add Markdown composition before provider execution:
 
 **Compose** (`claudine compose <file-ref>`) — resolves a Markdown file through Darkmatter's composition engine (frontmatter variable substitution, `::shell` directives, `@` file references), then sends the composed content as a non-interactive prompt. No file mutations.
 
 **Inline compose** (`claudine inline-compose <file-ref>`) — extracts the `prompt` frontmatter property, composes it, sends to the provider, then atomically replaces the document body with the provider's response. The original frontmatter is preserved and `last_updated` is set.
 
-Both commands follow the same five-stage pipeline: Resolve → Prepare → Select Provider → Execute → Closure.
+Both commands flow through the same unified pipeline ([`execute_without_harness`](../../cli/src/commands/wrap/composition.rs) parameterized by `CompositionExecutionMode::{Direct, Inline}`), share one structured-stream helper (`run_structured_composition`), and share one summary emitter (`emit_composition_summary`) with a `defer_section_separator` flag that selects between immediate emission (compose) and post-closure deferred emission (inline-compose).
 
 ## Harness System
 
