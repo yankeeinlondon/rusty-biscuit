@@ -1,7 +1,7 @@
 ---
 name: claudine
 description: Details on the Claudine library and CLI, including deep research into Agentic CLI platforms such as Claude Code, Codex CLI, Goose, Opencode CLI, and all other Agentic CLI's supported by the Claudine library.
-last_updated: 2026-04-16
+last_updated: 2026-04-17
 ---
 
 ## Claudine Library
@@ -47,7 +47,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 
 The CLI uses fuzzy provider matching (exact, prefix, and contains resolution) so users can type shorthand like `cl` for `claude`. The `handle` command accepts event names in multiple formats (canonical snake_case, native provider names, PascalCase, and kebab-case) and is normally invoked from hook registrations wired up by `claudine init`.
 
-System prompt handling is shared across wrapped provider subcommands and the Markdown composition surfaces. The current contract is file-backed only: `--append-system-prompt` / `--asp` and `--replace-system-prompt` / `--rsp`, with standard `system-prompt.md` discovery from the launch CWD hierarchy when neither flag is provided. `compose`, `inline-compose`, and `sequence` all pass through the same `system_prompt` pipeline as the direct provider wrappers.
+System prompt handling is shared across wrapped provider subcommands and the Markdown composition surfaces. The current contract is file-backed only: `--append-system-prompt` / `--asp` and `--replace-system-prompt` / `--rsp`, with standard `system-prompt.md` discovery from the launch CWD hierarchy when neither flag is provided. Direct provider wrappers also support `--edit`, which opens the resolved editor on a temporary `.md` buffer, seeds it from any inline prompt, and aborts cleanly on an empty saved buffer. `compose`, `inline-compose`, and `sequence` all pass through the same `system_prompt` pipeline as the direct provider wrappers.
 
 **Shared Resources**
 
@@ -74,7 +74,7 @@ System prompt handling is shared across wrapped provider subcommands and the Mar
 
 | Command | Description |
 |---------|-------------|
-| `claudine claude\|codex\|gemini\|goose\|kimi\|opencode\|qwen` | Wrap a provider CLI with preflight checks, env sanitization, launch-context-based system prompt resolution, provider-specific prompt injection, MCP injection, and structured streaming |
+| `claudine claude\|codex\|gemini\|goose\|kimi\|opencode\|qwen` | Wrap a provider CLI with preflight checks, env sanitization, launch-context-based system prompt resolution, optional `--edit` prompt drafting in the user's editor, provider-specific prompt injection, MCP injection, and structured streaming |
 
 **Composition**
 
