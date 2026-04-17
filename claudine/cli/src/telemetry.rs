@@ -508,6 +508,7 @@ mod tests {
             yolo: false,
             include: Vec::new(),
             interactive: false,
+            edit: false,
             model: None,
             output: None,
             append_system_prompt: None,

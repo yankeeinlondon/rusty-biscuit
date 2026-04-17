@@ -620,6 +620,10 @@ pub struct WrapperArgs {
     #[arg(short = 'i', long = "interactive")]
     pub interactive: bool,
 
+    /// Open the prompt in an external editor before launching the provider.
+    #[arg(long, conflicts_with = "interactive")]
+    pub edit: bool,
+
     /// Override the model used by the provider.
     #[arg(short = 'm', long = "model", value_name = "MODEL")]
     pub model: Option<String>,
@@ -769,6 +773,7 @@ fn run_provider_wrapper_inner(
     let yolo_requested = args.yolo || extracted.yolo;
     let mut yolo_enabled = yolo_requested;
     let interactive_requested = args.interactive || extracted.interactive;
+    let edit_requested = args.edit || extracted.edit;
     let repo_requested = args.repo || extracted.repo;
     let quiet_requested = args.quiet || extracted.quiet;
     let silent_requested = args.silent || extracted.silent;
@@ -806,6 +811,7 @@ fn run_provider_wrapper_inner(
         structured_mode = tracing::field::Empty,
         has_prompt,
         interactive_requested,
+        edit_requested,
         yolo_requested,
         model_override = %args.model.as_deref().unwrap_or(""),
         child_pid = tracing::field::Empty,
@@ -815,6 +821,13 @@ fn run_provider_wrapper_inner(
     // Early check: --timeout + --interactive is always an error
     if args.timeout.is_some() && interactive_requested {
         return Err(eyre!("--timeout cannot be used with --interactive mode"));
+    }
+
+    // clap catches direct `--edit` + `--interactive` conflicts, but once a
+    // prompt token starts passthrough capture either flag can arrive from the
+    // fallback extractor instead. Keep the merged behavior consistent.
+    if edit_requested && interactive_requested {
+        return Err(eyre!("--edit cannot be used with --interactive"));
     }
 
     // Early check: --timeout requires non-interactive mode
@@ -3368,6 +3381,7 @@ fn print_wrapper_help(provider: Provider) {
 struct ExtractedWrapperFlags {
     yolo: bool,
     interactive: bool,
+    edit: bool,
     repo: bool,
     quiet: bool,
     silent: bool,
@@ -3435,6 +3449,10 @@ fn extract_wrapper_flags_from_passthrough_with_boundary(
             }
             "-i" | "--interactive" => {
                 extracted.interactive = true;
+                remove_indices.push(i);
+            }
+            "--edit" => {
+                extracted.edit = true;
                 remove_indices.push(i);
             }
             "--repo" => {
@@ -3582,6 +3600,16 @@ mod tests {
     }
 
     #[test]
+    fn extract_wrapper_flags_lifts_edit_long_form() {
+        let mut args = vec!["do something".to_string(), "--edit".to_string()];
+
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
+
+        assert!(extracted.edit);
+        assert_eq!(args, vec!["do something"]);
+    }
+
+    #[test]
     fn old_non_interactive_flags_pass_through_to_provider() {
         let mut args = vec![
             "-n".to_string(),
@@ -3689,6 +3717,16 @@ mod tests {
 
         assert!(!extracted.yolo);
         assert_eq!(args, vec!["prompt", "--", "--yolo"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_extracts_edit_before_dash_but_not_after() {
+        let mut args = vec!["prompt".to_string(), "--".to_string(), "--edit".to_string()];
+
+        let extracted = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, 1).unwrap();
+
+        assert!(!extracted.edit);
+        assert_eq!(args, vec!["prompt", "--", "--edit"]);
     }
 
     #[test]
@@ -3860,7 +3898,7 @@ mod tests {
         proptest! {
             #[test]
             fn proptest_extract_wrapper_flags_preserves_others(
-                flags in prop::collection::vec("-y|--yolo|-i|--interactive|-q|--quiet|--silent", 0..5),
+                flags in prop::collection::vec("-y|--yolo|-i|--interactive|--edit|-q|--quiet|--silent", 0..5),
                 others in prop::collection::vec("[a-z0-9]+", 0..10)
             ) {
                 let mut args = Vec::new();
@@ -3890,6 +3928,9 @@ mod tests {
                 }
                 if flags.iter().any(|f| f == "-i" || f == "--interactive") {
                     assert!(extracted.interactive);
+                }
+                if flags.iter().any(|f| f == "--edit") {
+                    assert!(extracted.edit);
                 }
             }
         }

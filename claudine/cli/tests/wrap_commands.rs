@@ -183,6 +183,18 @@ fn wrapper_help_includes_expected_flags() {
     );
 }
 
+#[test]
+fn wrapper_rejects_edit_and_interactive_conflict() {
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["codex", "--edit", "--interactive"])
+        .assert()
+        .failure()
+        .stderr(contains("--edit"))
+        .stderr(contains("--interactive"))
+        .stderr(contains("cannot be used"));
+}
+
 #[cfg(unix)]
 #[test]
 fn wrapper_preserves_passthrough_args_and_injects_env() {
@@ -237,6 +249,74 @@ exit 0
     assert!(env_lines.contains("YOLO=true"));
     assert!(env_lines.contains("INTERACTIVE=false"));
     assert!(env_lines.contains("AGENT_PARAMS=["));
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_consumes_edit_from_passthrough_before_boundary() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let args_path = workspace.path().join("args.txt");
+    let stdin_path = workspace.path().join("stdin.txt");
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+/bin/cat > "$CLAUDINE_STDIN_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .env("CLAUDINE_STDIN_FILE", &stdin_path)
+        .args(["codex", "summarize repo", "--edit"])
+        .assert()
+        .success();
+
+    let args = fs::read_to_string(&args_path).unwrap();
+    assert!(
+        !args.lines().any(|line| line == "--edit"),
+        "pre-boundary --edit should be consumed by Claudine; args were: {args}"
+    );
+
+    let stdin = fs::read_to_string(&stdin_path).unwrap();
+    assert_eq!(stdin, "summarize repo");
+}
+
+#[cfg(unix)]
+#[test]
+fn wrapper_preserves_post_boundary_edit_passthrough() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let args_path = workspace.path().join("args.txt");
+
+    write_executable(
+        &path_dir.join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["codex", "--", "--edit", "--version"])
+        .assert()
+        .success();
+
+    let args = fs::read_to_string(&args_path).unwrap();
+    assert!(
+        args.lines().any(|line| line == "--edit"),
+        "post-boundary --edit should reach the provider; args were: {args}"
+    );
 }
 
 #[cfg(unix)]
@@ -2549,7 +2629,7 @@ for arg in "$@"; do
 done
 
 printf '%s\n' 'Reading prompt from stdin...' >&2
-cat > /dev/null
+/bin/cat > /dev/null
 if [ -n "$last_message" ]; then
   printf '%s\n' 'Recovered answer' > "$last_message"
 fi
@@ -2593,7 +2673,7 @@ for arg in "$@"; do
   prev="$arg"
 done
 
-cat > /dev/null
+/bin/cat > /dev/null
 printf '%s\n' '{"type":"thread.started","thread_id":"codex-1"}'
 printf '%s\n' '{"type":"turn.started"}'
 printf '%s\n' '{"type":"item.started","item":{"id":"t1","type":"command_exec","tool_name":"shell","input":{"cmd":"git status"}}}'
