@@ -181,6 +181,10 @@ fn wrapper_help_includes_expected_flags() {
         plain.contains("--model") || plain.contains("model"),
         "help output should describe model selection; stdout was: {plain}"
     );
+    assert!(
+        plain.contains("--edit"),
+        "help output should describe prompt editing; stdout was: {plain}"
+    );
 }
 
 #[test]

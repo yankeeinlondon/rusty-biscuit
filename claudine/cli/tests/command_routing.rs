@@ -145,11 +145,19 @@ fn agents_and_commands_route_to_empty_state_messages() {
 
 #[test]
 fn completions_write_to_stdout_for_supported_shells() {
-    for (shell, marker) in [
-        ("bash", "_claudine()"),
-        ("zsh", "#compdef claudine"),
-        ("fish", "complete -c claudine"),
-        ("elvish", "edit:completion:arg-completer[claudine]"),
+    for (shell, marker, edit_marker) in [
+        ("bash", "_claudine()", "--edit"),
+        ("zsh", "#compdef claudine", "--edit[Open the prompt"),
+        (
+            "fish",
+            "complete -c claudine",
+            "-l edit -d 'Open the prompt in an external editor before launching the provider'",
+        ),
+        (
+            "elvish",
+            "edit:completion:arg-completer[claudine]",
+            "cand --edit 'Open the prompt in an external editor before launching the provider'",
+        ),
     ] {
         let output = cargo_bin_cmd!("claudine")
             .env("NO_COLOR", "1")
@@ -168,6 +176,10 @@ fn completions_write_to_stdout_for_supported_shells() {
         assert!(
             stderr.trim().is_empty(),
             "expected no stderr, got: {stderr}"
+        );
+        assert!(
+            stdout.contains(edit_marker),
+            "expected {shell} completion output to advertise wrapper --edit support"
         );
     }
 }

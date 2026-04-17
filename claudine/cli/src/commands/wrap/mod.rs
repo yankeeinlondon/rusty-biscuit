@@ -3422,6 +3422,7 @@ fn print_wrapper_help(provider: Provider) {
          \x20 -y, --yolo               Enable provider-specific YOLO/auto-approval mode\n\
          \x20     --include <ENV_NAME>  Preserve this env var even when it matches sensitive-name filters\n\
          \x20 -i, --interactive         Force interactive mode even when a prompt string is provided\n\
+         \x20     --edit                Open the prompt in an external editor before launching the provider\n\
          \x20 -m, --model <MODEL>       Override the model used by the provider\n\
          \x20 -o, --output <FORMAT>     Set the output format (json, text, stream)\n\
           \x20     --asp <FILE>             Append a system prompt from a file\n\
