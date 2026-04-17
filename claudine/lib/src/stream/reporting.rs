@@ -131,6 +131,11 @@ pub fn summary_to_event_meta_with_context(
     {
         provider_summary.insert("context_usage".into(), value);
     }
+    if let Some(stderr_diagnostics) = &summary.stderr_diagnostics
+        && let Ok(value) = serde_json::to_value(stderr_diagnostics)
+    {
+        provider_summary.insert("stderr_diagnostics".into(), value);
+    }
     if !provider_summary.is_empty() {
         extra.insert("provider_summary".into(), Value::Object(provider_summary));
     }
@@ -502,6 +507,85 @@ mod tests {
         assert_eq!(
             meta.extra["provider_summary"]["context_usage"]["percent"],
             Value::from(90.0)
+        );
+    }
+
+    #[test]
+    fn summary_to_event_meta_serializes_stderr_diagnostics_into_provider_summary() {
+        use crate::stream::summary::StderrDiagnostics;
+        use chrono::TimeZone;
+        let mut summary = make_test_summary();
+        summary.stderr_diagnostics = Some(StderrDiagnostics {
+            log_records_parsed: 5,
+            rate_limit_events: 1,
+            malformed_asset_events: 2,
+            api_failures: 0,
+            auth_failures: 0,
+            uncaught_errors: 1,
+            rate_limit_reset_at: Some(Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56).unwrap()),
+        });
+
+        let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &make_test_env());
+
+        let diagnostics = &meta.extra["provider_summary"]["stderr_diagnostics"];
+        assert_eq!(
+            diagnostics["log_records_parsed"],
+            Value::Number(5.into())
+        );
+        assert_eq!(
+            diagnostics["rate_limit_events"],
+            Value::Number(1.into())
+        );
+        assert_eq!(
+            diagnostics["malformed_asset_events"],
+            Value::Number(2.into())
+        );
+        assert_eq!(
+            diagnostics["uncaught_errors"],
+            Value::Number(1.into())
+        );
+        assert!(diagnostics["rate_limit_reset_at"].is_string());
+    }
+
+    #[test]
+    fn summary_to_event_meta_omits_stderr_diagnostics_when_none() {
+        let summary = make_test_summary();
+        let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &make_test_env());
+        // No provider_summary fields at all should be present for the default summary.
+        assert!(!meta.extra.contains_key("provider_summary"));
+    }
+
+    #[test]
+    fn summary_to_event_meta_provider_summary_preserves_raw_rate_and_context_with_diagnostics() {
+        use crate::stream::summary::StderrDiagnostics;
+        let mut summary = make_test_summary();
+        summary.raw_summary = Some(serde_json::json!({"stop_reason":"end_turn"}));
+        summary.rate_limit = Some(crate::stream::summary::RateLimitInfo {
+            is_throttled: Some(true),
+            retry_after_ms: Some(2500),
+            message: Some("Slow down".into()),
+            reset_at: None,
+        });
+        summary.context_usage = Some(crate::stream::summary::ContextUsage {
+            used: Some(80),
+            total: Some(100),
+            percent: Some(80.0),
+        });
+        summary.stderr_diagnostics = Some(StderrDiagnostics {
+            log_records_parsed: 1,
+            malformed_asset_events: 1,
+            ..Default::default()
+        });
+
+        let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &make_test_env());
+        let provider_summary = meta.extra["provider_summary"].as_object().unwrap();
+        assert!(provider_summary.contains_key("raw_summary"));
+        assert!(provider_summary.contains_key("rate_limit"));
+        assert!(provider_summary.contains_key("context_usage"));
+        assert!(provider_summary.contains_key("stderr_diagnostics"));
+        assert_eq!(
+            provider_summary["stderr_diagnostics"]["malformed_asset_events"],
+            Value::Number(1.into())
         );
     }
 
