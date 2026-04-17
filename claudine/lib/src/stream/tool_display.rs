@@ -26,12 +26,19 @@ pub enum ToolStatus {
 /// Display-ready tool event. Per spec: status wins over summary on incoming
 /// events; the formatter NEVER writes a glyph literally — it populates a
 /// biscuit-terminal `Status::ToolUse` instead.
+///
+/// `error_detail` carries a short, human-readable snippet describing *why*
+/// an incoming event failed. Populated only when `status == Some(Error)`.
+/// When present, the renderer appends it after the red `error` label so the
+/// user sees the failure reason inline (e.g. `← Shell(error exit=1 · sed: …)`)
+/// instead of a context-free `error` badge.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolCallDisplay {
     pub direction: ToolDirection,
     pub display_name: String,
     pub summary: Option<String>,
     pub status: Option<ToolStatus>,
+    pub error_detail: Option<String>,
 }
 
 #[cfg(test)]
@@ -57,6 +64,7 @@ mod tests {
             display_name: "Firecrawl Search".into(),
             summary: Some("NFL draft 2026 date".into()),
             status: Some(ToolStatus::Success),
+            error_detail: None,
         };
         let cloned = display.clone();
         assert_eq!(display, cloned);
@@ -131,7 +139,10 @@ mod humanize_tests {
 
     #[test]
     fn firecrawl_double_prefix_collapses_to_single_firecrawl() {
-        assert_eq!(humanize_tool_name("firecrawl_firecrawl_search"), "Firecrawl Search");
+        assert_eq!(
+            humanize_tool_name("firecrawl_firecrawl_search"),
+            "Firecrawl Search"
+        );
     }
 
     #[test]
@@ -141,7 +152,17 @@ mod humanize_tests {
 
     #[test]
     fn claude_builtins_pass_through() {
-        for name in ["Bash", "Edit", "Read", "Write", "Glob", "Grep", "WebFetch", "WebSearch", "Task"] {
+        for name in [
+            "Bash",
+            "Edit",
+            "Read",
+            "Write",
+            "Glob",
+            "Grep",
+            "WebFetch",
+            "WebSearch",
+            "Task",
+        ] {
             assert_eq!(humanize_tool_name(name), name);
         }
     }
@@ -206,8 +227,9 @@ pub fn extract_tool_summary(tool_name: &str, input: &Value) -> Option<String> {
                 Some("query")
             }
             n if is_shell_tool(n) => Some("command"),
-            "Read" | "Write" | "Edit"
-            | "read_file" | "write_file" | "replace_file_content" => Some("file_path"),
+            "Read" | "Write" | "Edit" | "read_file" | "write_file" | "replace_file_content" => {
+                Some("file_path")
+            }
             "Glob" | "Grep" | "list_directory" => Some("pattern"),
             _ => None,
         };
@@ -297,13 +319,19 @@ mod summary_tests {
     #[test]
     fn read_extracts_file_path() {
         let input = json!({"file_path": "/etc/hosts"});
-        assert_eq!(extract_tool_summary("Read", &input).as_deref(), Some("/etc/hosts"));
+        assert_eq!(
+            extract_tool_summary("Read", &input).as_deref(),
+            Some("/etc/hosts")
+        );
     }
 
     #[test]
     fn unknown_tool_falls_back_to_first_string() {
         let input = json!({"weirdo": "interesting", "n": 5});
-        assert_eq!(extract_tool_summary("custom_unknown", &input).as_deref(), Some("interesting"));
+        assert_eq!(
+            extract_tool_summary("custom_unknown", &input).as_deref(),
+            Some("interesting")
+        );
     }
 
     #[test]
@@ -417,10 +445,16 @@ impl ToolCallDisplay {
     /// Build an outgoing display from a `SemanticEvent::ToolCall`. Returns
     /// `None` for non-matching variants.
     pub fn from_call(event: &SemanticEvent) -> Option<Self> {
-        let SemanticEvent::ToolCall { name, input, .. } = event else {
+        let SemanticEvent::ToolCall {
+            name, input, extra, ..
+        } = event
+        else {
             return None;
         };
-        let raw_name = name.as_deref().unwrap_or("");
+        let raw_name = name
+            .as_deref()
+            .or_else(|| extra.get("tool_name").and_then(Value::as_str))
+            .unwrap_or("");
         let display_name = if raw_name.is_empty() {
             "(tool)".into()
         } else {
@@ -434,16 +468,21 @@ impl ToolCallDisplay {
             display_name,
             summary,
             status: None,
+            error_detail: None,
         })
     }
 
     /// Build an incoming display from a `SemanticEvent::ToolResult`. Per
     /// spec: status always wins over summary in the dim slot when present;
-    /// summary is consulted as a fallback only when status is absent.
+    /// summary is consulted as a fallback only when status is absent. When
+    /// status resolves to [`ToolStatus::Error`], a short `error_detail`
+    /// snippet is derived from `exit_code` + the tail of `output` so the
+    /// user sees the failure reason alongside the red `error` label.
     pub fn from_result(event: &SemanticEvent) -> Option<Self> {
         let SemanticEvent::ToolResult {
             name,
             status,
+            exit_code,
             output,
             extra,
             ..
@@ -451,7 +490,10 @@ impl ToolCallDisplay {
         else {
             return None;
         };
-        let raw_name = name.as_deref().unwrap_or("");
+        let raw_name = name
+            .as_deref()
+            .or_else(|| extra.get("tool_name").and_then(Value::as_str))
+            .unwrap_or("");
         let display_name = if raw_name.is_empty() {
             "(tool)".into()
         } else {
@@ -474,12 +516,127 @@ impl ToolCallDisplay {
                 .or_else(|| extra.get("input"))
                 .and_then(|v| extract_tool_summary(raw_name, v))
         };
+        let error_detail = if parsed_status == Some(ToolStatus::Error) {
+            extract_error_detail(*exit_code, output.as_ref(), extra)
+        } else {
+            None
+        };
         Some(Self {
             direction: ToolDirection::Incoming,
             display_name,
             summary,
             status: parsed_status,
+            error_detail,
         })
+    }
+}
+
+/// Derive a short (≤160 chars) error snippet for an incoming error event.
+/// Prefers, in order:
+///
+/// 1. A structured `error.message` field (MCP-style failures).
+/// 2. The last non-empty line of `output` / `result` / `content` / the
+///    stringified body, optionally prefixed with `exit=N` when `exit_code`
+///    is both present and non-zero.
+/// 3. A lone `exit=N` marker when nothing else is available.
+fn extract_error_detail(
+    exit_code: Option<i32>,
+    output: Option<&Value>,
+    extra: &Value,
+) -> Option<String> {
+    // Structured error field (MCP tool failures): `error.message` or top-level
+    // `error` string.
+    if let Some(msg) = extra
+        .get("error")
+        .and_then(|e| match e {
+            Value::String(s) => Some(s.clone()),
+            Value::Object(map) => map.get("message").and_then(Value::as_str).map(String::from),
+            _ => None,
+        })
+        .filter(|s| !s.is_empty())
+    {
+        return Some(with_exit_prefix(exit_code, trim_snippet(&msg)));
+    }
+
+    // Body-derived snippet: take the last non-empty line of a string output.
+    let body_text = output.and_then(value_to_snippet_source);
+    let snippet = body_text
+        .as_deref()
+        .and_then(last_meaningful_line)
+        .map(trim_snippet);
+
+    match (exit_code, snippet) {
+        (Some(code), Some(line)) if code != 0 => Some(format!("exit={code} · {line}")),
+        (_, Some(line)) => Some(line),
+        (Some(code), None) if code != 0 => Some(format!("exit={code}")),
+        _ => None,
+    }
+}
+
+fn with_exit_prefix(exit_code: Option<i32>, snippet: String) -> String {
+    match exit_code {
+        Some(code) if code != 0 => format!("exit={code} · {snippet}"),
+        _ => snippet,
+    }
+}
+
+/// Extract a string body from the `output` value. Covers the three shapes
+/// Codex, Claude, and MCP tools emit: a bare string, a `{aggregated_output}`
+/// wrapper, or an array of `{type, text}` content blocks.
+fn value_to_snippet_source(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(obj) = value.as_object() {
+        for key in ["aggregated_output", "stderr", "stdout", "message", "text"] {
+            if let Some(Value::String(s)) = obj.get(key)
+                && !s.is_empty()
+            {
+                return Some(s.clone());
+            }
+        }
+        if let Some(Value::Array(parts)) = obj.get("content") {
+            let collected: String = parts
+                .iter()
+                .filter_map(|p| p.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !collected.is_empty() {
+                return Some(collected);
+            }
+        }
+    }
+    if let Some(arr) = value.as_array() {
+        let collected: String = arr
+            .iter()
+            .filter_map(|p| p.get("text").and_then(Value::as_str).or_else(|| p.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !collected.is_empty() {
+            return Some(collected);
+        }
+    }
+    None
+}
+
+fn last_meaningful_line(body: &str) -> Option<&str> {
+    let trimmed = body.trim_end_matches(|c: char| c.is_whitespace());
+    trimmed
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+}
+
+fn trim_snippet(body: &str) -> String {
+    const MAX: usize = 160;
+    let single_line = body.lines().find(|l| !l.trim().is_empty()).unwrap_or(body);
+    let trimmed = single_line.trim();
+    if trimmed.chars().count() > MAX {
+        let truncated: String = trimmed.chars().take(MAX - 1).collect();
+        format!("{truncated}\u{2026}")
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -516,6 +673,21 @@ mod from_event_tests {
         let display = ToolCallDisplay::from_result(&event).unwrap();
         assert_eq!(display.status, Some(ToolStatus::Success));
         assert!(display.summary.is_none(), "status wins over summary");
+    }
+
+    #[test]
+    fn from_result_uses_extra_tool_name_when_name_missing() {
+        let event = SemanticEvent::ToolResult {
+            name: None,
+            id: None,
+            status: Some("success".into()),
+            exit_code: None,
+            output: None,
+            extra: json!({"tool_name": "Bash"}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        assert_eq!(display.display_name, "Bash");
+        assert_eq!(display.status, Some(ToolStatus::Success));
     }
 
     #[test]

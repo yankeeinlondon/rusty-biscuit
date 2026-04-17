@@ -94,6 +94,7 @@ pub(crate) struct LiveSemanticSink {
     verbosity: Verbosity,
     session_id: Option<String>,
     model: Option<String>,
+    claude_api_key_source: Option<String>,
     start_emitted: bool,
     summary_details: Arc<Mutex<StructuredSummaryDetails>>,
     context_extra: HashMap<String, Value>,
@@ -132,6 +133,7 @@ impl LiveSemanticSink {
             verbosity,
             session_id: None,
             model: None,
+            claude_api_key_source: None,
             start_emitted: false,
             summary_details,
             context_extra: HashMap::new(),
@@ -206,6 +208,7 @@ impl LiveSemanticSink {
             verbosity,
             session_id: None,
             model: None,
+            claude_api_key_source: None,
             start_emitted: false,
             summary_details,
             context_extra: HashMap::new(),
@@ -336,12 +339,9 @@ impl LiveSemanticSink {
         let (label, border_color) = error_kind_presentation(kind);
         let escaped = escape_prose(message);
         let body = format!("<red><b>{label}</b></red>\n{escaped}");
-        let mut block = BlockQuote::new(
-            RenderableContent::from(Prose::new(body)),
-            None::<&str>,
-        )
-        .with_left_block_color(border_color)
-        .with_border("\u{258c} ");
+        let mut block = BlockQuote::new(RenderableContent::from(Prose::new(body)), None::<&str>)
+            .with_left_block_color(border_color)
+            .with_border("\u{258c} ");
         block.layout_mut().left_margin = Margin::Chars(0);
         block.layout_mut().right_margin = Margin::Chars(0);
         let rendered = block.render(&self.terminal);
@@ -355,7 +355,9 @@ impl LiveSemanticSink {
     ///
     /// - Outgoing summary / incoming success / incoming pending render the
     ///   slot as dim-italic (`<dim><i>…</i></dim>`).
-    /// - Incoming error renders the word `error` as red + bold.
+    /// - Incoming error renders the word `error` as red + bold, followed
+    ///   by a dim-italic error snippet (exit code + last non-empty line of
+    ///   output) when the upstream event provides one.
     /// - User-controlled content (commands, URLs, paths, raw JSON
     ///   fallbacks) is passed through [`escape_prose`] so stray `<`, `>`,
     ///   `{`, or `\` cannot be interpreted as prose markup.
@@ -370,7 +372,13 @@ impl LiveSemanticSink {
         let name = escape_prose(&display.display_name);
         let slot = match (display.status, display.summary) {
             (Some(ToolStatus::Success), _) => Some("<dim><i>successful</i></dim>".to_string()),
-            (Some(ToolStatus::Error), _) => Some("<red><b>error</b></red>".to_string()),
+            (Some(ToolStatus::Error), _) => {
+                let mut s = String::from("<red><b>error</b></red>");
+                if let Some(detail) = display.error_detail.as_deref().filter(|s| !s.is_empty()) {
+                    s.push_str(&format!(" <dim><i>{}</i></dim>", escape_prose(detail)));
+                }
+                Some(s)
+            }
             (Some(ToolStatus::Pending), _) => Some("<dim><i>pending</i></dim>".to_string()),
             (None, Some(summary)) => Some(format!("<dim><i>{}</i></dim>", escape_prose(&summary))),
             (None, None) => None,
@@ -518,9 +526,22 @@ impl LiveSemanticSink {
             SemanticEvent::FileChange {
                 path, change_kind, ..
             } => {
-                let kind = change_kind.as_deref().unwrap_or("change");
+                // Suppress rendering when the event carries neither a path
+                // nor a classification. Codex can emit provisional
+                // `file_change` items with empty bodies that would otherwise
+                // appear as a bare "change" line with no context.
                 let path = path.as_deref().unwrap_or("");
-                self.render_status(section, StatusState::Info, format!("{kind} {path}"));
+                let kind = change_kind.as_deref();
+                if path.is_empty() && kind.is_none() {
+                    return;
+                }
+                let kind_label = kind.unwrap_or("change");
+                let line = if path.is_empty() {
+                    kind_label.to_string()
+                } else {
+                    format!("{kind_label} {path}")
+                };
+                self.render_status(section, StatusState::Info, line);
             }
             SemanticEvent::PlanUpdate { message, .. } => {
                 if let Some(msg) = message {
@@ -537,11 +558,17 @@ impl LiveSemanticSink {
                 // semantic parser surfaces them as Warning events per the
                 // Phase 2 policy. Still dispatched and logged.
                 //
-                // Also suppress the Claude rate-limit Warning when the user
-                // is on a Subscription (no `ANTHROPIC_API_KEY` set); the
-                // dispatch and JSONL log still fire.
+                // Also suppress the legacy generic Claude rate-limit Warning
+                // when the session metadata shows a subscription auth source.
+                // Explicit metadata text such as "approaching limit" must
+                // still render so users can see the next reset window.
                 if !message.starts_with("Malformed JSON on line ")
-                    && !is_suppressed_claude_rate_limit(self.provider, extra)
+                    && !is_suppressed_claude_rate_limit(
+                        self.provider,
+                        message,
+                        extra,
+                        self.claude_api_key_source.as_deref(),
+                    )
                 {
                     self.render_status(section, StatusState::Warning, message.clone());
                 }
@@ -588,10 +615,16 @@ impl SemanticEventSink for LiveSemanticSink {
 
         // 2. Update cached session id / model from envelope events.
         if let SemanticEvent::SessionStart {
-            session_id, model, ..
+            session_id,
+            model,
+            extra,
         } = &event
         {
             self.update_session_state(session_id, model);
+            self.claude_api_key_source = extra
+                .get("api_key_source")
+                .and_then(Value::as_str)
+                .map(String::from);
         }
 
         // 3. Update structured summary's tool-name rollup.
@@ -832,16 +865,24 @@ fn is_silent_extension_kind(provider: Provider, kind: &str) -> bool {
         .any(|(p, k)| *p == provider && *k == kind)
 }
 
-/// Suppress the Claude rate-limit Warning on stderr when the user is on a
-/// Subscription (no `ANTHROPIC_API_KEY` set). The dispatch and JSONL log
-/// continue to fire — only the stderr render is gated.
-fn is_suppressed_claude_rate_limit(provider: Provider, extra: &Value) -> bool {
+/// Suppress only the legacy generic Claude `rate limit` Warning on stderr
+/// when the session metadata shows subscription auth. Explicit Claude
+/// metadata text must still render because it can include cap-window timing.
+fn is_suppressed_claude_rate_limit(
+    provider: Provider,
+    message: &str,
+    extra: &Value,
+    api_key_source: Option<&str>,
+) -> bool {
     if provider != Provider::Claude {
         return false;
     }
     let raw_kind = extra.get("raw_kind").and_then(Value::as_str).unwrap_or("");
-    if raw_kind != "rate_limit_event" {
+    if raw_kind != "rate_limit_event" || message.trim() != "rate limit" {
         return false;
+    }
+    if let Some(api_key_source) = api_key_source {
+        return api_key_source != "ANTHROPIC_API_KEY";
     }
     std::env::var("ANTHROPIC_API_KEY")
         .map(|v| v.trim().is_empty())
@@ -1194,10 +1235,11 @@ mod tests {
         sink.on_semantic_event(SemanticEvent::SessionStart {
             session_id: Some("s1".into()),
             model: Some("claude".into()),
-            extra: json!({}),
+            extra: json!({"api_key_source": "none"}),
         });
         assert_eq!(sink.session_id.as_deref(), Some("s1"));
         assert_eq!(sink.model.as_deref(), Some("claude"));
+        assert_eq!(sink.claude_api_key_source.as_deref(), Some("none"));
         // Task 3.2 routes the session header through the section-aware
         // emit path so the `emit_stderr` closure captures it. The header
         // line must appear; a trailing blank is allowed but not required.
@@ -1893,18 +1935,24 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn claude_rate_limit_warning_suppressed_when_anthropic_api_key_unset() {
-        let _guard = TestEnvGuard::remove("ANTHROPIC_API_KEY");
+    fn claude_generic_rate_limit_warning_suppressed_for_subscription_metadata() {
+        let _guard = TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
         let lines = Arc::new(StdMutex::new(Vec::new()));
         let dispatched = Arc::new(StdMutex::new(Vec::new()));
         let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::SessionStart {
+            session_id: Some("s1".into()),
+            model: Some("claude".into()),
+            extra: json!({"api_key_source": "none"}),
+        });
+        lines.lock().unwrap().clear();
         sink.on_semantic_event(SemanticEvent::Warning {
             message: "rate limit".into(),
             extra: json!({"raw_kind": "rate_limit_event"}),
         });
         assert!(
             lines.lock().unwrap().is_empty(),
-            "rate-limit Warning must not render to stderr without ANTHROPIC_API_KEY"
+            "generic rate-limit Warning must not render for subscription auth"
         );
         assert!(
             !dispatched.lock().unwrap().is_empty(),
@@ -1914,11 +1962,11 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn claude_rate_limit_warning_suppression_preserves_jsonl_log() {
+    fn claude_generic_rate_limit_warning_suppression_preserves_jsonl_log() {
         // Definition of Done: "underlying event still in JSONL for
         // subscription users". Explicit assertion that the event-log
         // closure fires even when the stderr render is suppressed.
-        let _guard = TestEnvGuard::remove("ANTHROPIC_API_KEY");
+        let _guard = TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
         let lines = Arc::new(StdMutex::new(Vec::new()));
         let dispatched = Arc::new(StdMutex::new(Vec::new()));
         let logged: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
@@ -1929,6 +1977,13 @@ mod tests {
             })
         };
         let mut sink = make_sink(lines.clone(), dispatched.clone()).with_event_logger(logger);
+        sink.on_semantic_event(SemanticEvent::SessionStart {
+            session_id: Some("s1".into()),
+            model: Some("claude".into()),
+            extra: json!({"api_key_source": "none"}),
+        });
+        lines.lock().unwrap().clear();
+        logged.lock().unwrap().clear();
         sink.on_semantic_event(SemanticEvent::Warning {
             message: "rate limit".into(),
             extra: json!({"raw_kind": "rate_limit_event"}),
@@ -1947,11 +2002,17 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn claude_rate_limit_warning_renders_when_anthropic_api_key_set() {
-        let _guard = TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
+    fn claude_generic_rate_limit_warning_renders_for_api_key_metadata() {
+        let _guard = TestEnvGuard::remove("ANTHROPIC_API_KEY");
         let lines = Arc::new(StdMutex::new(Vec::new()));
         let dispatched = Arc::new(StdMutex::new(Vec::new()));
         let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::SessionStart {
+            session_id: Some("s1".into()),
+            model: Some("claude".into()),
+            extra: json!({"api_key_source": "ANTHROPIC_API_KEY"}),
+        });
+        lines.lock().unwrap().clear();
         sink.on_semantic_event(SemanticEvent::Warning {
             message: "rate limit".into(),
             extra: json!({"raw_kind": "rate_limit_event"}),
@@ -1959,7 +2020,36 @@ mod tests {
         let rendered = lines.lock().unwrap().join("\n");
         assert!(
             rendered.contains("rate limit"),
-            "rate-limit Warning must render with API key set: {rendered:?}"
+            "generic rate-limit Warning must render for API-key auth: {rendered:?}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn claude_explicit_rate_limit_message_renders_for_subscription_metadata() {
+        let _guard = TestEnvGuard::remove("ANTHROPIC_API_KEY");
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::SessionStart {
+            session_id: Some("s1".into()),
+            model: Some("claude".into()),
+            extra: json!({"api_key_source": "none"}),
+        });
+        lines.lock().unwrap().clear();
+        sink.on_semantic_event(SemanticEvent::Warning {
+            message: "Claude session usage limit approaching; next session window opens at 2024-04-01 19:33:20 UTC".into(),
+            extra: json!({
+                "raw_kind": "rate_limit_event",
+                "rate_limit_status": "approaching_limit",
+                "reset_at": "2024-04-01T19:33:20+00:00"
+            }),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        let unwrapped = rendered.replace("\n  ", "");
+        assert!(
+            unwrapped.contains("next session window opens at 2024-04-01 19:33:20 UTC"),
+            "explicit Claude rate-limit metadata must render for subscriptions: {rendered:?}"
         );
     }
 
