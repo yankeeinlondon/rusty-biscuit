@@ -3,6 +3,7 @@ pub mod claude_semantic;
 pub mod codex_semantic;
 pub mod gemini_semantic;
 pub mod kimi_semantic;
+pub mod logs;
 pub mod opencode_semantic;
 pub mod parser;
 pub mod progress;
