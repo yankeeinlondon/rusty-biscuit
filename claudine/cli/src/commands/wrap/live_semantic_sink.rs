@@ -37,7 +37,7 @@ use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{Color, Tailwind};
-use biscuit_terminal::utils::layout::Margin;
+use biscuit_terminal::utils::layout::{Margin, WordWrap};
 use claudine::events::{
     AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta, Provider,
 };
@@ -339,7 +339,8 @@ impl LiveSemanticSink {
         let (label, border_color) = error_kind_presentation(kind);
         let escaped = escape_prose(message);
         let body = format!("<red><b>{label}</b></red>\n{escaped}");
-        let mut block = BlockQuote::new(RenderableContent::from(Prose::new(body)), None::<&str>)
+        let prose = Prose::new(body).with_word_wrap(WordWrap::WrapProse(None, None));
+        let mut block = BlockQuote::new(RenderableContent::from(prose), None::<&str>)
             .with_left_block_color(border_color)
             .with_border("\u{258c} ");
         block.layout_mut().left_margin = Margin::Chars(0);
@@ -359,6 +360,12 @@ impl LiveSemanticSink {
     /// Execution is not interrupted for these records (Codex classifies
     /// them at `ERROR` severity but continues) so the label is forced to
     /// `WARN` regardless of the incoming level.
+    ///
+    /// The BlockQuote border uses the centered `┃` glyph (U+2503) so the
+    /// bar lines up visually with the centered `⚠` warning icon emitted
+    /// one row above by `Status::from_prose(Warning)`. The left-aligned
+    /// `▌` used by thinking/error blocks would sit off-center under the
+    /// icon and read as a misalignment rather than a continuation.
     fn render_tracing_diagnostic(&mut self, section: Section, target: &str, message: &str) {
         let border_color = Color::Tailwind(Tailwind::Orange700);
 
@@ -373,10 +380,11 @@ impl LiveSemanticSink {
             self.emit_section_line(section, line);
         }
 
-        let body_prose = Prose::new(escape_prose(message));
+        let body_prose =
+            Prose::new(escape_prose(message)).with_word_wrap(WordWrap::WrapProse(None, None));
         let mut block = BlockQuote::new(RenderableContent::from(body_prose), None::<&str>)
             .with_left_block_color(border_color)
-            .with_border("\u{258c} ");
+            .with_border("\u{2503} ");
         block.layout_mut().left_margin = Margin::Chars(0);
         block.layout_mut().right_margin = Margin::Chars(0);
         let body_rendered = block.render(&self.terminal);
@@ -2148,9 +2156,16 @@ mod tests {
             rendered.contains("forked agents inherit the parent agent type"),
             "tracing body must appear in the BlockQuote: {rendered:?}"
         );
+        // Warning BlockQuote must use the centered ┃ (U+2503) glyph so the
+        // bar aligns under the centered ⚠ Warning icon. The left-aligned
+        // ▌ (U+258C) used by thinking/error blocks must NOT appear here.
         assert!(
-            rendered.contains("\u{258c}"),
-            "tracing BlockQuote must use the ▌ border: {rendered:?}"
+            rendered.contains("\u{2503}"),
+            "tracing BlockQuote must use the centered ┃ border: {rendered:?}"
+        );
+        assert!(
+            !rendered.contains("\u{258c}"),
+            "tracing BlockQuote must not use the left-aligned ▌ border: {rendered:?}"
         );
     }
 
