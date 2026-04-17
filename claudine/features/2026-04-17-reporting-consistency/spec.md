@@ -208,6 +208,7 @@ group concurrently.
 
 All three subagent commits landed cleanly:
 
+
 - ccf9ec72 feat(claudine): align Claude rate-limit and tool-call reporting
 
 - d3c48035 style(claudine): apply cargo fmt across stream and wrap modules
@@ -228,3 +229,16 @@ corrective entry citing the independent verification.
 ```
 
 
+## Codex
+
+- Codex session ID `019d9bc8-bec`
+- `sniff git commits` was not a valid command here, so I fell back to `git log --oneline -n 12` for real commit examples.
+- I verified the semantic commit pair with `git show --stat --format=fuller`:
+  - `60f0acc4 fix(claudine): improve reporting consistency`
+  - `93a94d67 docs(knowledge): fix git commit --only pathspec ordering`
+- I checked repository state with `sniff repo git-status --history 4 --plain`, which reported:
+  - `HEAD -> claudine` at `328ca68`
+  - `claudine` ahead of `main` by 37 commits
+  - this file staged with `58 added, 0 removed`
+- The main lesson from the run was that zsh will treat literal backticks inside inline `git commit -m "..."` shell strings as command substitution, which strips code spans like ``--`` and ``-m`` unless they are escaped or kept out of the shell.
+- The commit body for `93a94d67` inherited that loss of literal backticks; I left it as-is and documented the warning here instead.
