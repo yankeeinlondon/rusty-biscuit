@@ -1309,10 +1309,8 @@ fn run_structured_composition(
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
     let section_stream = sink.section_stream();
-    let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb| {
-        let sink = sink.with_output_text_sink(output_cb);
-        claudine::stream::create_semantic_parser(provider, sink, parser_config)
-    });
+    let (build_parser, stderr_bridge) =
+        super::build_structured_plumbing(provider, sink, parser_config);
     let stream_result = exec::run_child_stream_semantic(
         binary_path,
         child_args,
@@ -1328,6 +1326,7 @@ fn run_structured_composition(
         live_metrics,
         stream_output,
         claudine::stream::progress::HeartbeatPolicy::default(),
+        stderr_bridge,
     )?;
     let mut summary = stream_result.data;
 

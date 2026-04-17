@@ -248,6 +248,17 @@ impl LiveSemanticSink {
         self
     }
 
+    /// Set the output-text callback on an already-constructed sink.
+    ///
+    /// Used by the structured wrapper path when the sink has been wrapped in
+    /// a [`claudine::stream::semantic::SharedSemanticSink`] ahead of thread
+    /// spawning — the parser builder closure locks the inner sink and calls
+    /// this setter so the exec-layer `StreamTextRenderer` stays in the stdout
+    /// thread while the sink itself is shared with the stderr log bridge.
+    pub(crate) fn set_output_text_sink(&mut self, emit: OutputTextFn) {
+        self.emit_output_text = Some(emit);
+    }
+
     /// Wire a JSONL logger invoked for every [`SemanticEvent`] the sink
     /// receives. Typical wiring points this at
     /// [`claudine::stream::reporting::write_summary_event`] with best-effort

@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
+use claudine::stream::logs::{StderrBridgeHandle, StderrIngestOutcome};
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
 use claudine::stream::progress::{self, HeartbeatPolicy, LiveMetrics};
 use claudine::stream::summary::StreamExecutionSummary;
@@ -1173,6 +1174,7 @@ pub(crate) fn run_child_stream_semantic(
     live_metrics: LiveMetrics,
     stream_output: Arc<StreamOutput>,
     heartbeat_policy: HeartbeatPolicy,
+    stderr_bridge: Option<StderrBridgeHandle>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
@@ -1294,6 +1296,12 @@ pub(crate) fn run_child_stream_semantic(
     let plain = crate::log::is_plain();
     let stderr_term = crate::log::terminal();
     let stderr_span = Span::current();
+    let (mut bridge_for_thread, finalize_for_main) = match stderr_bridge {
+        Some(StderrBridgeHandle { bridge, finalize }) => (Some(bridge), Some(finalize)),
+        None => (None, None),
+    };
+    let has_bridge = bridge_for_thread.is_some();
+    let capture_always = has_bridge;
     let stderr_handle = thread::spawn(move || {
         let _stderr_guard = stderr_span.enter();
         let reader = BufReader::new(pipe);
@@ -1303,6 +1311,18 @@ pub(crate) fn run_child_stream_semantic(
             if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
             }
+
+            // When a bridge is installed, offer the raw line first so it can
+            // classify structured log records (and their multi-line tails) in
+            // real time. Consumed lines are suppressed from raw passthrough
+            // and never land in the captured buffer — the semantic event the
+            // bridge emitted already carries everything operators need.
+            if let Some(bridge) = bridge_for_thread.as_mut()
+                && matches!(bridge.ingest(&line), StderrIngestOutcome::Consumed)
+            {
+                continue;
+            }
+
             let formatted = crate::output::try_format_api_error(&line, &stderr_term);
             let output_line = formatted.as_deref().unwrap_or(&line);
             let output_line = if plain {
@@ -1311,12 +1331,13 @@ pub(crate) fn run_child_stream_semantic(
                 output_line.to_string()
             };
 
-            if suppress_stderr_on_success {
+            if suppress_stderr_on_success || capture_always {
                 if !captured.is_empty() {
                     captured.push('\n');
                 }
                 captured.push_str(&output_line);
-            } else {
+            }
+            if !suppress_stderr_on_success {
                 let mut err = std::io::stderr().lock();
                 let _ = writeln!(err, "{output_line}");
             }
@@ -1354,6 +1375,21 @@ pub(crate) fn run_child_stream_semantic(
     let mut summary = parser.finish(exit_code);
     if summary.duration_ms.is_none() {
         summary.duration_ms = Some(started_at.elapsed().as_millis() as u64);
+    }
+
+    // Merge stderr-derived diagnostics after both reader threads have
+    // joined. The bridge accumulated counters into its own shared state
+    // during streaming; the finalizer reads that state and enriches the
+    // summary. `stderr_text` is attached here so every structured
+    // bridge-enabled session carries the captured stderr regardless of
+    // `suppress_stderr_on_success`. Badge recomputation happens inside
+    // the finalizer so stderr-derived diagnostics show up in the final
+    // `summary.badges` vector.
+    if let Some(finalize) = finalize_for_main {
+        if !captured.is_empty() && summary.stderr_text.is_none() {
+            summary.stderr_text = Some(captured.clone());
+        }
+        finalize(&mut summary);
     }
 
     Ok(ProcessResult {

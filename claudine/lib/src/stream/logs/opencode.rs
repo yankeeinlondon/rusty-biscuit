@@ -916,7 +916,14 @@ fn max_reset_at(
     }
 }
 
-fn merge_rate_limit(existing: Option<RateLimitInfo>, incoming: RateLimitInfo) -> RateLimitInfo {
+/// Merge an incoming [`RateLimitInfo`] into an existing one field-by-field.
+///
+/// Used by the wrapper layer after a structured OpenCode run to combine the
+/// stdout parser's rate-limit signals with the ones the stderr log bridge
+/// accumulated during streaming. The merge is additive: `is_throttled = true`
+/// wins, `retry_after_ms` takes the maximum, incoming `message` replaces when
+/// present, and `reset_at` takes the later of the two timestamps.
+pub fn merge_rate_limit(existing: Option<RateLimitInfo>, incoming: RateLimitInfo) -> RateLimitInfo {
     let Some(mut base) = existing else {
         return incoming;
     };
@@ -935,6 +942,32 @@ fn merge_rate_limit(existing: Option<RateLimitInfo>, incoming: RateLimitInfo) ->
     }
     base.reset_at = max_reset_at(base.reset_at, incoming.reset_at);
     base
+}
+
+/// Merge the bridge's accumulated [`SharedStderrState`] into a summary.
+///
+/// Called once by the wrapper layer after the stderr thread has joined.
+/// Always sets `summary.stderr_diagnostics` when the bridge parsed at least
+/// one structured log record. Always merges `summary.rate_limit` when the
+/// bridge accumulated stderr-side rate-limit state. Always recomputes
+/// `summary.badges` via [`crate::stream::badges::derive_badges`] so the
+/// stderr-derived badge categories (rate-limit resets, malformed-asset
+/// warnings) appear in the final output.
+pub fn merge_stderr_state_into_summary(
+    state: &std::sync::Arc<std::sync::Mutex<SharedStderrState>>,
+    summary: &mut crate::stream::summary::StreamExecutionSummary,
+) {
+    let Ok(state) = state.lock() else {
+        return;
+    };
+    if state.any_records() {
+        summary.stderr_diagnostics = Some(state.diagnostics.clone());
+    }
+    if let Some(stderr_rl) = state.rate_limit.clone() {
+        summary.rate_limit = Some(merge_rate_limit(summary.rate_limit.clone(), stderr_rl));
+    }
+    drop(state);
+    summary.badges = crate::stream::badges::derive_badges(summary, summary.provider);
 }
 
 #[cfg(test)]

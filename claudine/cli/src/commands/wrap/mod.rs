@@ -368,6 +368,75 @@ pub(crate) fn structured_verbosity(silent: bool, quiet: bool) -> Verbosity {
     }
 }
 
+/// Build the structured-stream parser builder plus an optional stderr bridge.
+///
+/// All providers share the same stdout parser construction pattern, but
+/// OpenCode additionally wires an [`OpenCodeLogBridge`] into the stderr
+/// reader thread so classified `--print-logs` records flow through the
+/// same semantic sink as stdout events. When a bridge is returned, the
+/// caller is responsible for threading it through
+/// [`exec::run_child_stream_semantic`] so the stderr thread can consume
+/// classified lines and the final summary can merge the bridge's
+/// accumulated diagnostics.
+///
+/// ## Returns
+///
+/// * `build_parser` — parser-builder closure passed to
+///   [`exec::run_child_stream_semantic`].
+/// * `stderr_bridge` — `Some` for OpenCode, `None` otherwise. The bridge
+///   owns its own shared state clone so the finalizer closure can merge
+///   stderr-derived diagnostics into the summary after the reader threads
+///   join.
+///
+/// [`OpenCodeLogBridge`]: claudine::stream::logs::opencode::OpenCodeLogBridge
+fn build_structured_plumbing(
+    provider: Provider,
+    sink: live_semantic_sink::LiveSemanticSink,
+    parser_config: claudine::stream::ParserConfig,
+) -> (
+    exec::SemanticParserBuilder,
+    Option<claudine::stream::logs::StderrBridgeHandle>,
+) {
+    use claudine::stream::logs::StderrBridgeHandle;
+    use claudine::stream::logs::opencode::{OpenCodeLogBridge, merge_stderr_state_into_summary};
+    use claudine::stream::semantic::{ObservedSemanticSink, SharedSemanticSink};
+    use std::sync::atomic::AtomicBool;
+
+    if provider == Provider::OpenCode {
+        let shared = SharedSemanticSink::new(sink);
+        let live_sink_inner = Arc::clone(shared.inner());
+        let stdout_seen = Arc::new(AtomicBool::new(false));
+
+        let bridge = OpenCodeLogBridge::new(shared.clone(), Arc::clone(&stdout_seen), None);
+        let bridge_state = bridge.shared_state();
+        let finalize: claudine::stream::logs::SummaryFinalizer =
+            Box::new(move |summary| {
+                merge_stderr_state_into_summary(&bridge_state, summary);
+            });
+        let stderr_bridge = Some(StderrBridgeHandle {
+            bridge: Box::new(bridge),
+            finalize,
+        });
+
+        let stdout_sink = ObservedSemanticSink::new(shared, stdout_seen);
+        let build_parser: exec::SemanticParserBuilder =
+            Box::new(move |output_cb, _reasoning_cb| {
+                if let Ok(mut inner) = live_sink_inner.lock() {
+                    inner.set_output_text_sink(output_cb);
+                }
+                claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
+            });
+        (build_parser, stderr_bridge)
+    } else {
+        let build_parser: exec::SemanticParserBuilder =
+            Box::new(move |output_cb, _reasoning_cb| {
+                let sink = sink.with_output_text_sink(output_cb);
+                claudine::stream::create_semantic_parser(provider, sink, parser_config)
+            });
+        (build_parser, None)
+    }
+}
+
 pub(crate) fn wrap_terminal() -> Terminal {
     crate::log::terminal()
 }
@@ -1353,11 +1422,8 @@ fn run_provider_wrapper_inner(
             // Codex-final-stdout emission uses this handle so every section
             // transition shares the same tracker state.
             let section_stream = sink.section_stream();
-            let build_parser: exec::SemanticParserBuilder =
-                Box::new(move |output_cb, _reasoning_cb| {
-                    let sink = sink.with_output_text_sink(output_cb);
-                    claudine::stream::create_semantic_parser(provider, sink, parser_config)
-                });
+            let (build_parser, stderr_bridge) =
+                build_structured_plumbing(provider, sink, parser_config);
             let mut _spawned = false;
             let stream_result = exec::run_child_stream_semantic(
                 binary_path.as_path(),
@@ -1374,6 +1440,7 @@ fn run_provider_wrapper_inner(
                 live_metrics,
                 stream_output,
                 claudine::stream::progress::HeartbeatPolicy::default(),
+                stderr_bridge,
             )?;
             let mut summary = stream_result.data;
             if let Some(codex_output) = structured_codex_output.as_ref() {
@@ -1785,11 +1852,8 @@ fn execute_harness_attempt(
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
         let section_stream = sink.section_stream();
-        let build_parser: exec::SemanticParserBuilder =
-            Box::new(move |output_cb, _reasoning_cb| {
-                let sink = sink.with_output_text_sink(output_cb);
-                claudine::stream::create_semantic_parser(provider, sink, parser_config)
-            });
+        let (build_parser, stderr_bridge) =
+            build_structured_plumbing(provider, sink, parser_config);
         let stream_result = exec::run_child_stream_semantic(
             binary_path,
             &launch.args,
@@ -1805,6 +1869,7 @@ fn execute_harness_attempt(
             live_metrics,
             stream_output,
             claudine::stream::progress::HeartbeatPolicy::default(),
+            stderr_bridge,
         )?;
         let termination = stream_result.termination;
         let mut summary = stream_result.data;
