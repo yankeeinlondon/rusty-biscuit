@@ -426,27 +426,40 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         }
     }
 
-    fn handle_item_updated(&mut self, env: CodexItemEnvelope, raw_kind: &str, raw: Value) {
-        // `item.updated` streams partial progress while a long-running tool
-        // executes. Surfacing them as `Info` events lets the heartbeat track
-        // activity during Codex's otherwise silent reasoning/command stretches.
-        let message = env
-            .item
-            .as_ref()
-            .and_then(|item| match item {
-                CodexItem::AgentMessage(m) => m.collected_text(),
-                CodexItem::Reasoning(r) => r.text.clone(),
-                _ => None,
-            })
-            .unwrap_or_else(|| "item.updated".to_string());
-        let mut extra = self.base_extra(raw_kind);
-        if let Some(item) = raw.get("item") {
-            extra.insert("item".into(), item.clone());
+    fn handle_item_updated(&mut self, env: CodexItemEnvelope, raw_kind: &str, _raw: Value) {
+        // `item.updated` carries partial-progress snapshots for long-running
+        // items. Route by inner item type:
+        //
+        // - `todo_list` / `plan_update` → `PlanUpdate` (the update really
+        //   is a new plan state).
+        // - `agent_message` / `reasoning` → `Reasoning` prose, so callers
+        //   render it via the thinking block-quote rather than a one-line
+        //   `Info` glyph.
+        // - Everything else (tool-progress pulses, unknown types) is
+        //   dropped on stderr; the raw line is still captured in the JSONL
+        //   log for post-hoc inspection.
+        let Some(item) = env.item else {
+            return;
+        };
+        match item {
+            CodexItem::TodoList(p) | CodexItem::PlanUpdate(p) => {
+                self.handle_plan_update_item(&p, raw_kind);
+            }
+            CodexItem::AgentMessage(m) => {
+                if let Some(text) = m.collected_text() {
+                    let mut extra = self.base_extra(raw_kind);
+                    extra.insert("origin".into(), Value::from("item.updated"));
+                    self.sink.on_semantic_event(SemanticEvent::Reasoning {
+                        text,
+                        extra: Value::Object(extra),
+                    });
+                }
+            }
+            CodexItem::Reasoning(r) => {
+                self.handle_reasoning_item(&r, raw_kind);
+            }
+            _ => {}
         }
-        self.sink.on_semantic_event(SemanticEvent::Info {
-            message,
-            extra: Value::Object(extra),
-        });
     }
 
     fn emit_top_level_tool_use(&mut self, fields: CodexToolItemFields, raw_kind: &str) {
@@ -723,7 +736,7 @@ mod tests {
     }
 
     #[test]
-    fn item_updated_emits_info_with_progress() {
+    fn item_updated_reasoning_emits_reasoning_event() {
         let (events, mut parser) = new_parser();
         parser
             .feed_line(
@@ -732,9 +745,54 @@ mod tests {
             .unwrap();
         let collected = events.lock().unwrap().clone();
         match &collected[0] {
-            SemanticEvent::Info { message, .. } => assert_eq!(message, "still thinking"),
-            other => panic!("expected Info, got {other:?}"),
+            SemanticEvent::Reasoning { text, .. } => assert_eq!(text, "still thinking"),
+            other => panic!("expected Reasoning, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn item_updated_todo_list_emits_plan_update() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"item.updated","item":{"id":"p1","type":"todo_list","message":"step 2 done"}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::PlanUpdate { message, .. } => {
+                assert_eq!(message.as_deref(), Some("step 2 done"));
+            }
+            other => panic!("expected PlanUpdate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn item_updated_command_execution_is_suppressed() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"item.updated","item":{"id":"cmd1","type":"command_execution","command":"make","aggregated_output":"partial"}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(
+            collected.is_empty(),
+            "command_execution progress must not leak 'item.updated' Info events; got {collected:?}"
+        );
+    }
+
+    #[test]
+    fn item_updated_unknown_item_is_suppressed() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"item.updated","item":{"id":"x1","type":"brand_new_kind"}}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(
+            collected.is_empty(),
+            "unknown item.updated types must not leak on stderr; got {collected:?}"
+        );
     }
 
     #[test]

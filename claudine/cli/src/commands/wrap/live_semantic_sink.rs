@@ -857,6 +857,14 @@ const SILENT_PROVIDER_EXTENSION_KINDS: &[(Provider, &str)] = &[
     (Provider::Claude, "system/hook_started"),
     (Provider::Claude, "system/hook_response"),
     (Provider::Claude, "system/hook_progress"),
+    // Codex: unknown/unmodeled item lifecycle markers. When the inner
+    // `item.type` is something Claudine does not classify (new Codex
+    // builds, experimental item types), the parser falls back to a
+    // ProviderExtension. Leaking `codex/item.started · {...}` onto stderr
+    // is noise — the underlying detail is what callers care about, and
+    // the raw event is still in the JSONL log.
+    (Provider::Codex, "item.started"),
+    (Provider::Codex, "item.completed"),
 ];
 
 fn is_silent_extension_kind(provider: Provider, kind: &str) -> bool {
