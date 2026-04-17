@@ -416,3 +416,4 @@ fn claude_rate_limit_suppressed_when_api_key_source_is_login_managed() {
 - Captured false-positive warning from today's log: `~/.claudine/logs/2026-04-16.jsonl` (grep for `"semantic_kind":"warning"`)
 - Current suppression predicate: `claudine/cli/src/commands/wrap/live_semantic_sink.rs:827-838`
 - Existing coverage gap: `claudine/lib/tests/fixtures/providers/claude.ndjson` contains only a billing_error scenario; no tool-use scenarios exist in any claude fixture.
+
