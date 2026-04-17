@@ -407,7 +407,12 @@ fn build_structured_plumbing(
         let live_sink_inner = Arc::clone(shared.inner());
         let stdout_seen = Arc::new(AtomicBool::new(false));
 
-        let bridge = OpenCodeLogBridge::new(shared.clone(), Arc::clone(&stdout_seen), None);
+        let (early_tx, early_rx) = std::sync::mpsc::channel();
+        let bridge = OpenCodeLogBridge::new(
+            shared.clone(),
+            Arc::clone(&stdout_seen),
+            Some(early_tx),
+        );
         let bridge_state = bridge.shared_state();
         let finalize: claudine::stream::logs::SummaryFinalizer =
             Box::new(move |summary| {
@@ -416,6 +421,7 @@ fn build_structured_plumbing(
         let stderr_bridge = Some(StderrBridgeHandle {
             bridge: Box::new(bridge),
             finalize,
+            early_terminate: Some(early_rx),
         });
 
         let stdout_sink = ObservedSemanticSink::new(shared, stdout_seen);

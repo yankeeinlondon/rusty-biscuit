@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
-use claudine::stream::logs::{StderrBridgeHandle, StderrIngestOutcome};
+use claudine::stream::logs::{EarlyTermination, StderrBridgeHandle, StderrIngestOutcome};
+use std::sync::mpsc::{Receiver, TryRecvError};
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
 use claudine::stream::progress::{self, HeartbeatPolicy, LiveMetrics};
 use claudine::stream::summary::StreamExecutionSummary;
@@ -677,6 +678,202 @@ fn wait_with_signal_handling(
     ))
 }
 
+/// Polling wait loop used when an [`EarlyTermination`] receiver is attached
+/// to the structured stream executor.
+///
+/// Behaves like [`wait_with_signal_handling`] while also polling the
+/// stderr-bridge channel. When a signal arrives, the child's process group
+/// is sent `SIGTERM` and escalated to `SIGKILL` after a 5-second grace
+/// period. The return value preserves existing SIGINT semantics and reports
+/// `Interrupted` when either a user Ctrl-C or a bridge-signaled early
+/// termination reaped the child.
+///
+/// Isolated to the bridge path so non-OpenCode runs keep the existing
+/// `child.wait()`-based helper.
+#[cfg(unix)]
+fn wait_with_signal_and_early_termination(
+    child: &mut Child,
+    child_in_own_pgroup: bool,
+    early_rx: Receiver<EarlyTermination>,
+) -> Result<(
+    i32,
+    claudine::harness::ProcessTermination,
+    Option<EarlyTermination>,
+)> {
+    use std::sync::atomic::AtomicU8;
+
+    let interrupt_count = Arc::new(AtomicU8::new(0));
+    let child_pid = child.id();
+
+    let counter = Arc::clone(&interrupt_count);
+    let _guard = unsafe {
+        signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+            let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            if !child_in_own_pgroup {
+                return;
+            }
+            match count {
+                1 => {
+                    libc::kill(-(child_pid as i32), libc::SIGINT);
+                }
+                2 => {
+                    libc::kill(-(child_pid as i32), libc::SIGTERM);
+                }
+                _ => {
+                    libc::kill(-(child_pid as i32), libc::SIGKILL);
+                }
+            }
+        })
+    }?;
+
+    let mut early_termination: Option<EarlyTermination> = None;
+    let mut grace_deadline: Option<Instant> = None;
+    let poll_interval = Duration::from_millis(75);
+    let grace_period = Duration::from_secs(5);
+
+    loop {
+        if let Some(status) = child.try_wait()? {
+            let code = exit_code_from_status(status);
+            let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
+            let termination = if was_interrupted || early_termination.is_some() {
+                claudine::harness::ProcessTermination::Interrupted
+            } else {
+                claudine::harness::ProcessTermination::Completed
+            };
+            return Ok((code, termination, early_termination));
+        }
+
+        if early_termination.is_none() {
+            match early_rx.try_recv() {
+                Ok(signal) => {
+                    tracing::info!(
+                        child_pid,
+                        "early-termination signal received; sending SIGTERM to child process group",
+                    );
+                    let kill_pid = if child_in_own_pgroup {
+                        -(child_pid as i32)
+                    } else {
+                        child_pid as i32
+                    };
+                    unsafe {
+                        libc::kill(kill_pid, libc::SIGTERM);
+                    }
+                    early_termination = Some(signal);
+                    grace_deadline = Some(Instant::now() + grace_period);
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    // Channel closed with no signal; continue normal polling.
+                }
+            }
+        }
+
+        if let Some(deadline) = grace_deadline
+            && Instant::now() >= deadline
+        {
+            tracing::warn!(
+                child_pid,
+                "child did not exit after early-termination SIGTERM; escalating to SIGKILL",
+            );
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGKILL);
+            }
+            grace_deadline = None;
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
+#[cfg(not(unix))]
+fn wait_with_signal_and_early_termination(
+    child: &mut Child,
+    _child_in_own_pgroup: bool,
+    early_rx: Receiver<EarlyTermination>,
+) -> Result<(
+    i32,
+    claudine::harness::ProcessTermination,
+    Option<EarlyTermination>,
+)> {
+    let mut early_termination: Option<EarlyTermination> = None;
+    let mut grace_deadline: Option<Instant> = None;
+    let poll_interval = Duration::from_millis(75);
+    let grace_period = Duration::from_secs(5);
+
+    loop {
+        if let Some(status) = child.try_wait()? {
+            let code = exit_code_from_status(status);
+            let termination = if early_termination.is_some() {
+                claudine::harness::ProcessTermination::Interrupted
+            } else {
+                claudine::harness::ProcessTermination::Completed
+            };
+            return Ok((code, termination, early_termination));
+        }
+
+        if early_termination.is_none() {
+            match early_rx.try_recv() {
+                Ok(signal) => {
+                    let _ = child.kill();
+                    early_termination = Some(signal);
+                    grace_deadline = Some(Instant::now() + grace_period);
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {}
+            }
+        }
+
+        if let Some(deadline) = grace_deadline
+            && Instant::now() >= deadline
+        {
+            let _ = child.kill();
+            grace_deadline = None;
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
+/// Overwrite the synthesized failure fields when the stderr bridge signals
+/// a terminal early-exit condition. Today only
+/// [`EarlyTermination::RateLimit`] applies, which produces a
+/// `usage_limit_reached` error so the summary, JSONL log, and Quota badge
+/// all describe the failure even though the child was killed by a signal.
+///
+/// Preserves any parser-provided `rate_limit` fields field-by-field:
+/// `is_throttled` is forced to `Some(true)`, `message` is only set when
+/// absent, and `reset_at` keeps the first non-`None` value.
+fn apply_early_termination_to_summary(
+    summary: &mut StreamExecutionSummary,
+    termination: &EarlyTermination,
+) {
+    match termination {
+        EarlyTermination::RateLimit { message, reset_at } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("usage_limit_reached".into());
+            summary.error_message = Some(message.clone());
+
+            let mut rate_limit = summary.rate_limit.clone().unwrap_or_default();
+            rate_limit.is_throttled = Some(true);
+            if rate_limit.message.is_none() {
+                rate_limit.message = Some(message.clone());
+            }
+            if rate_limit.reset_at.is_none()
+                && let Some(reset) = reset_at
+            {
+                rate_limit.reset_at = Some(*reset);
+            }
+            summary.rate_limit = Some(rate_limit);
+        }
+    }
+}
+
 /// Wait for the child with a timeout, sending SIGTERM then SIGKILL.
 ///
 /// Returns `(exit_code, termination_kind)`.
@@ -1296,9 +1493,13 @@ pub(crate) fn run_child_stream_semantic(
     let plain = crate::log::is_plain();
     let stderr_term = crate::log::terminal();
     let stderr_span = Span::current();
-    let (mut bridge_for_thread, finalize_for_main) = match stderr_bridge {
-        Some(StderrBridgeHandle { bridge, finalize }) => (Some(bridge), Some(finalize)),
-        None => (None, None),
+    let (mut bridge_for_thread, finalize_for_main, early_terminate_rx) = match stderr_bridge {
+        Some(StderrBridgeHandle {
+            bridge,
+            finalize,
+            early_terminate,
+        }) => (Some(bridge), Some(finalize), early_terminate),
+        None => (None, None, None),
     };
     let has_bridge = bridge_for_thread.is_some();
     let capture_always = has_bridge;
@@ -1351,10 +1552,14 @@ pub(crate) fn run_child_stream_semantic(
         stdin_pipe.write_all(seed.as_bytes())?;
     }
 
-    let (exit_code, termination) = if let Some(seconds) = timeout {
-        wait_with_timeout(&mut child, seconds)?
+    let (exit_code, termination, early_termination) = if let Some(seconds) = timeout {
+        let (code, term) = wait_with_timeout(&mut child, seconds)?;
+        (code, term, None)
+    } else if let Some(rx) = early_terminate_rx {
+        wait_with_signal_and_early_termination(&mut child, true, rx)?
     } else {
-        wait_with_signal_handling(&mut child, true)?
+        let (code, term) = wait_with_signal_handling(&mut child, true)?;
+        (code, term, None)
     };
 
     kill_process_group(&mut child);
@@ -1375,6 +1580,16 @@ pub(crate) fn run_child_stream_semantic(
     let mut summary = parser.finish(exit_code);
     if summary.duration_ms.is_none() {
         summary.duration_ms = Some(started_at.elapsed().as_millis() as u64);
+    }
+
+    // Apply early-termination overrides before the stderr finalizer so the
+    // finalizer's badge recomputation observes the synthesized error fields
+    // (for example, a `usage_limit_reached` error_kind that maps to a Quota
+    // badge). The bridge signaled early termination from the stderr thread;
+    // the main wait loop then killed the child's process group, so the raw
+    // exit code reflects SIGTERM rather than a meaningful provider status.
+    if let Some(termination) = early_termination.as_ref() {
+        apply_early_termination_to_summary(&mut summary, termination);
     }
 
     // Merge stderr-derived diagnostics after both reader threads have
@@ -1799,5 +2014,69 @@ mod tests {
         assert!(stdout_text.contains("final summary line"));
         assert_eq!(stderr_lines.len(), 1);
         assert!(stderr_lines[0].contains("120s"));
+    }
+
+    #[test]
+    fn apply_early_termination_rate_limit_sets_usage_limit_summary_fields() {
+        use chrono::TimeZone;
+        let reset_at = chrono::Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56).unwrap();
+        let mut summary = StreamExecutionSummary {
+            exit_code: 143,
+            is_error: false,
+            ..Default::default()
+        };
+        let termination = EarlyTermination::RateLimit {
+            message: "OpenCode usage limit reached; resets at 2026-04-16 04:18:56 UTC".into(),
+            reset_at: Some(reset_at),
+        };
+
+        apply_early_termination_to_summary(&mut summary, &termination);
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("usage_limit_reached"));
+        assert!(
+            summary
+                .error_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("usage limit"),
+        );
+        let rl = summary.rate_limit.as_ref().expect("rate_limit populated");
+        assert_eq!(rl.is_throttled, Some(true));
+        assert_eq!(rl.reset_at, Some(reset_at));
+        assert!(rl.message.as_deref().unwrap_or("").contains("usage limit"));
+    }
+
+    #[test]
+    fn apply_early_termination_preserves_existing_rate_limit_fields() {
+        use chrono::TimeZone;
+        let existing_reset = chrono::Utc.with_ymd_and_hms(2026, 4, 16, 2, 0, 0).unwrap();
+        let mut summary = StreamExecutionSummary {
+            rate_limit: Some(claudine::stream::summary::RateLimitInfo {
+                is_throttled: Some(false),
+                retry_after_ms: Some(5000),
+                message: Some("pre-existing".into()),
+                reset_at: Some(existing_reset),
+            }),
+            ..Default::default()
+        };
+        let incoming_reset = chrono::Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56).unwrap();
+        let termination = EarlyTermination::RateLimit {
+            message: "OpenCode usage limit reached".into(),
+            reset_at: Some(incoming_reset),
+        };
+
+        apply_early_termination_to_summary(&mut summary, &termination);
+
+        let rl = summary.rate_limit.as_ref().unwrap();
+        // is_throttled is forced to true even when existing said false.
+        assert_eq!(rl.is_throttled, Some(true));
+        // Existing message is preserved.
+        assert_eq!(rl.message.as_deref(), Some("pre-existing"));
+        // Existing reset_at is preserved (do not clobber parser-provided state).
+        assert_eq!(rl.reset_at, Some(existing_reset));
+        // retry_after_ms is untouched.
+        assert_eq!(rl.retry_after_ms, Some(5000));
     }
 }

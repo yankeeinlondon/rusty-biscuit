@@ -8,7 +8,9 @@
 
 pub mod opencode;
 
-pub use opencode::StderrIngestOutcome;
+pub use opencode::{EarlyTermination, StderrIngestOutcome};
+
+use std::sync::mpsc::Receiver;
 
 use crate::stream::summary::StreamExecutionSummary;
 
@@ -47,10 +49,15 @@ pub type SummaryFinalizer = Box<dyn FnOnce(&mut StreamExecutionSummary) + Send>;
 /// The `bridge` is moved into the stderr reader thread where it classifies
 /// one line at a time; the `finalize` closure is invoked after the stderr
 /// thread has joined so the wrapper can merge accumulated stderr-side
-/// state into the final summary. The two pieces are separate because the
-/// bridge is owned by the thread while the summary is owned by the main
-/// execution path.
+/// state into the final summary. The `early_terminate` receiver is polled
+/// from the main wait loop so a pre-stream usage-cap failure can abort the
+/// child process without blocking on `child.wait()`.
+///
+/// The three pieces are separate because the bridge is owned by the stderr
+/// thread, the receiver is owned by the main wait loop, and the finalizer
+/// runs on the main thread after both reader threads have joined.
 pub struct StderrBridgeHandle {
     pub bridge: Box<dyn StderrLogBridge>,
     pub finalize: SummaryFinalizer,
+    pub early_terminate: Option<Receiver<EarlyTermination>>,
 }
