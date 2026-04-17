@@ -476,6 +476,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
             badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
+            stderr_diagnostics: None,
         };
         summary.badges = crate::stream::badges::derive_badges(&summary, Provider::OpenCode);
         summary

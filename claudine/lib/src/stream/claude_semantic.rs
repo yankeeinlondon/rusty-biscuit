@@ -387,6 +387,7 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             is_throttled: event.is_throttled,
             retry_after_ms: event.retry_after_ms,
             message: event.message.clone(),
+            reset_at: None,
         };
 
         let mut extra = self.base_extra();
@@ -719,6 +720,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
             badges: Vec::new(),
             raw_summary: self.raw_summary,
             stderr_text: None,
+            stderr_diagnostics: None,
         };
         summary.badges = crate::stream::badges::derive_badges(&summary, Provider::Claude);
         summary

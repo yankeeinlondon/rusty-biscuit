@@ -565,6 +565,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
             badges: Vec::new(),
             raw_summary: self.raw_summary,
             stderr_text: None,
+            stderr_diagnostics: None,
         };
         summary.badges = crate::stream::badges::derive_badges(&summary, Provider::Codex);
         summary

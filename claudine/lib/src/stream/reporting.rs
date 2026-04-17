@@ -427,6 +427,7 @@ mod tests {
             badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
+            stderr_diagnostics: None,
         }
     }
 
@@ -479,6 +480,7 @@ mod tests {
             is_throttled: Some(true),
             retry_after_ms: Some(1500),
             message: Some("Slow down".into()),
+            reset_at: None,
         });
         summary.context_usage = Some(crate::stream::summary::ContextUsage {
             used: Some(90),
