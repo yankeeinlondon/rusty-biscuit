@@ -45,14 +45,13 @@ _install path pkg_name binary="" *args="":
 
 
 # commits all the staged changes with OpenCode (model is MODEL or COMMIT_MODEL)
-commit *args="":
+commit agent="opencode" *args="":
     @echo ""
     @echo -e "Committing staged changes in the {{bold}}Rusty Biscuit{{reset}} monorepo to git"
-    @echo -e "{{dim}}{{italic}}- using the {{reset}}{{italic}}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M2.7-highspeed}} {{dim}}model{{reset}}"
     @echo ""
     @echo -e "{{bold}}{{blue}}Staged Files:{{reset}}"
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose --opencode "@prompts/commit.md" --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M2.7-highspeed}}" -y {{args}}
+    @claudine compose --{{agent}} "@prompts/commit.md" --op "commit" --quiet -y {{args}}
     @just _speak "git commits completed in rusty-biscuit monorepo"
     @sniff repo git-status 2>/dev/null || exit 0
     @echo
