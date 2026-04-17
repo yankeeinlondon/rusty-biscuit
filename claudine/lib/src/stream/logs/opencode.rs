@@ -1659,4 +1659,101 @@ mod tests {
         assert_eq!(merged.message.as_deref(), Some("new"));
         assert_eq!(merged.reset_at, Some(newer));
     }
+
+    #[test]
+    fn merge_stderr_state_applies_diagnostics_and_recomputes_badges() {
+        use crate::events::Provider;
+        use crate::stream::badges::BadgeCategory;
+        use crate::stream::summary::StreamExecutionSummary;
+
+        let state = Arc::new(Mutex::new(SharedStderrState {
+            diagnostics: StderrDiagnostics {
+                log_records_parsed: 3,
+                malformed_asset_events: 2,
+                ..Default::default()
+            },
+            rate_limit: None,
+        }));
+        let mut summary = StreamExecutionSummary {
+            provider: Provider::OpenCode,
+            ..Default::default()
+        };
+
+        merge_stderr_state_into_summary(&state, &mut summary);
+
+        let diagnostics = summary
+            .stderr_diagnostics
+            .as_ref()
+            .expect("diagnostics should be attached");
+        assert_eq!(diagnostics.log_records_parsed, 3);
+        assert_eq!(diagnostics.malformed_asset_events, 2);
+        assert!(
+            summary
+                .badges
+                .iter()
+                .any(|b| b.category == BadgeCategory::Config),
+            "Config badge should be recomputed after merge",
+        );
+    }
+
+    #[test]
+    fn merge_stderr_state_merges_rate_limit_and_yields_rate_limit_badge() {
+        use chrono::TimeZone;
+        use crate::events::Provider;
+        use crate::stream::badges::BadgeCategory;
+        use crate::stream::summary::StreamExecutionSummary;
+
+        let reset = Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56).unwrap();
+        let state = Arc::new(Mutex::new(SharedStderrState {
+            diagnostics: StderrDiagnostics {
+                log_records_parsed: 1,
+                rate_limit_events: 1,
+                rate_limit_reset_at: Some(reset),
+                ..Default::default()
+            },
+            rate_limit: Some(RateLimitInfo {
+                is_throttled: Some(true),
+                retry_after_ms: None,
+                message: Some("OpenCode usage limit reached".into()),
+                reset_at: Some(reset),
+            }),
+        }));
+        let mut summary = StreamExecutionSummary {
+            provider: Provider::OpenCode,
+            ..Default::default()
+        };
+
+        merge_stderr_state_into_summary(&state, &mut summary);
+
+        let rate_limit = summary
+            .rate_limit
+            .as_ref()
+            .expect("rate_limit should be merged onto summary");
+        assert_eq!(rate_limit.is_throttled, Some(true));
+        assert_eq!(rate_limit.reset_at, Some(reset));
+        assert!(
+            summary
+                .badges
+                .iter()
+                .any(|b| b.category == BadgeCategory::RateLimit),
+            "RateLimit badge should be recomputed after merge",
+        );
+    }
+
+    #[test]
+    fn merge_stderr_state_without_records_does_not_attach_diagnostics() {
+        use crate::events::Provider;
+        use crate::stream::summary::StreamExecutionSummary;
+
+        let state = Arc::new(Mutex::new(SharedStderrState::default()));
+        let mut summary = StreamExecutionSummary {
+            provider: Provider::OpenCode,
+            ..Default::default()
+        };
+
+        merge_stderr_state_into_summary(&state, &mut summary);
+        assert!(summary.stderr_diagnostics.is_none());
+        assert!(summary.rate_limit.is_none());
+        assert!(summary.badges.is_empty());
+    }
 }
