@@ -253,18 +253,16 @@ exit 0
 
 #[cfg(unix)]
 #[test]
-fn wrapper_consumes_edit_from_passthrough_before_boundary() {
+fn wrapper_rejects_edit_without_interactive_terminal_before_launch() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
     let args_path = workspace.path().join("args.txt");
-    let stdin_path = workspace.path().join("stdin.txt");
 
     write_executable(
         &path_dir.join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
-/bin/cat > "$CLAUDINE_STDIN_FILE"
 exit 0
 "#,
     );
@@ -273,19 +271,15 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["codex", "summarize repo", "--edit"])
         .assert()
-        .success();
+        .failure()
+        .stderr(contains("--edit requires an interactive terminal"));
 
-    let args = fs::read_to_string(&args_path).unwrap();
     assert!(
-        !args.lines().any(|line| line == "--edit"),
-        "pre-boundary --edit should be consumed by Claudine; args were: {args}"
+        !args_path.exists(),
+        "provider should not launch when --edit is requested without a TTY"
     );
-
-    let stdin = fs::read_to_string(&stdin_path).unwrap();
-    assert_eq!(stdin, "summarize repo");
 }
 
 #[cfg(unix)]
