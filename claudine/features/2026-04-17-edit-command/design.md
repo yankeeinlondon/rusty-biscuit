@@ -150,19 +150,33 @@ Concrete examples:
 | `claudine codex --edit --model gpt-5` | Edit first, then forward with the `--model` override. |
 | `claudine claude --edit -- --dangerously-skip-permissions` | Edit first; post-`--` args are opaque passthrough. |
 
+`--edit` is always interpreted by Claudine when it appears **before** the
+`--` separator. If a provider CLI also exposes an `--edit` flag and the
+user wants to forward it, the **sole** escape hatch is to place it after
+`--`. Claudine does not inspect provider argument grammars and does not
+expose an alternate flag name; pre-`--` `--edit` is unconditionally
+Claudine-owned.
+
 ### Editor lifecycle visible to the user
 
-1. Claudine prints a one-line status to stderr before launching the
+1. Claudine first verifies that both stdin and stdout are attached to a
+   TTY. If either is not (piped stdin, redirected stdout, etc.),
+   Claudine exits with `--edit requires an interactive terminal`
+   **before** any editor is launched.
+2. Claudine prints a one-line status to stderr before launching the
    editor: `✎ opening <editor> for prompt…`.
-2. Editor opens with the seed (if any) already in the buffer.
-3. Claudine's process blocks. GUI editors receive the
+3. Editor opens with the seed (if any) already in the buffer.
+4. Claudine's process blocks. GUI editors receive the
    `wait_args_for_editor` flag so the CLI wrapper doesn't detach.
-4. When the user closes the buffer, Claudine reads the file, trims
+5. When the user closes the buffer, Claudine reads the file, trims
    trailing whitespace, and resumes the wrap pipeline.
-5. A non-zero editor exit, a deleted buffer file, or an empty
-   (whitespace-only) buffer aborts the session with a formatted error
-   (see "Error handling" below).
-6. The temp file is deleted on return via
+6. A non-zero editor exit or a deleted buffer file aborts the session
+   with a formatted error (see "Error handling" below). An empty
+   (whitespace-only after `trim_end()`) buffer is a **clean abort**:
+   Claudine exits `0` with a single stderr line `prompt empty; aborted`
+   and does not invoke the provider. This follows the `git commit`,
+   `visudo`, and `crontab -e` conventions.
+7. The temp file is deleted on return via
    `tempfile::NamedTempFile::drop`.
 
 ### Section ordering (stderr)
@@ -211,10 +225,13 @@ If all three paths fail, Claudine returns an error with the
 5. Block on Command::status()
 6. On editor exit(0):
      a. Re-read the file as UTF-8
-     b. Validate existence + non-empty-after-trim
+     b. Validate existence (a missing file is `EditorError::Missing`).
+        Emptiness-after-trim is NOT an error: it is a clean-abort
+        signal the caller handles by returning `Ok(None)`.
      c. trim_end() the content (we preserve leading whitespace —
         some users deliberately lead with a blank line)
-     d. Return the resulting String
+     d. If the trimmed content is empty, return `Ok(None)`; otherwise
+        return `Ok(Some(content))`.
 7. NamedTempFile drops → temp file removed
 ```
 
@@ -262,7 +279,12 @@ pub fn launch_editor_on_path(path: &Path) -> Result<(), EditorError>;
 ///
 /// `suffix` is appended to the temp file name (".md" by convention for
 /// Markdown-flavoured prompts).
-pub fn edit_text(initial: &str, suffix: &str) -> Result<String, EditorError>;
+///
+/// Returns `Ok(Some(text))` when the user saved non-empty content, and
+/// `Ok(None)` when the buffer is empty after `trim_end()` — callers
+/// should treat `Ok(None)` as a clean user-initiated abort, not an
+/// error.
+pub fn edit_text(initial: &str, suffix: &str) -> Result<Option<String>, EditorError>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EditorError {
@@ -270,8 +292,6 @@ pub enum EditorError {
     NoEditorFound,
     #[error("editor exited with status {0}")]
     NonZeroExit(i32),
-    #[error("edited file is empty")]
-    Empty,
     #[error("edited file was deleted during editing")]
     Missing,
     #[error("failed to launch editor {editor:?}: {source}")]
@@ -355,13 +375,17 @@ In `run_provider_wrapper`, immediately **after** the call to
 
 ```rust
 if edit_requested {
-    // Disallow incompatible sources.
+    // Preflight: --edit requires an interactive TTY on both ends.
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        return Err(eyre!("--edit requires an interactive terminal"));
+    }
+
+    // InheritStdin is already impossible here because stdin is a TTY,
+    // but keep the match for defence-in-depth.
     match &prompt_source {
         profile::PromptSource::InheritStdin => {
-            return Err(eyre!(
-                "--edit cannot be combined with piped stdin; \
-                 pipe the prompt OR use --edit, not both"
-            ));
+            return Err(eyre!("--edit requires an interactive terminal"));
         }
         _ => {}
     }
@@ -373,10 +397,20 @@ if edit_requested {
         eprintln!("✎ opening editor for prompt…");
     }
 
-    let edited = darkmatter::editor::edit_text(&seed, ".md")
-        .wrap_err("failed to edit prompt")?;
-
-    prompt_source = profile::PromptSource::Inline(edited);
+    match darkmatter::editor::edit_text(&seed, ".md")
+        .wrap_err("failed to edit prompt")?
+    {
+        Some(text) => {
+            prompt_source = profile::PromptSource::Inline(text);
+        }
+        None => {
+            // Clean abort: empty buffer after trim_end().
+            if !silent_requested {
+                eprintln!("prompt empty; aborted");
+            }
+            return Ok(());
+        }
+    }
 }
 ```
 
@@ -402,7 +436,8 @@ to non-interactive (matching the existing wrap semantics and the
 | `--quiet` / `-q` | Suppresses info lines but still prints the `✎ opening editor…` status. |
 | `--silent` | Suppresses the `✎ opening editor…` status. Editor still launches. |
 | `--dry-run` | Editor launches; dry-run preview renders with the edited text. |
-| Piped stdin | Hard error at the `if edit_requested { ... }` branch. The two are contradictory input sources. |
+| Non-interactive session | Hard-fail at preflight. `--edit` requires both stdin and stdout to be attached to a TTY; piped stdin, redirected stdout, or any non-TTY handle produces `--edit requires an interactive terminal` before the editor is launched. |
+| Provider-level `--edit` | Provider CLIs that expose their own `--edit` flag must receive it **after** the `--` separator. Pre-`--` `--edit` is always interpreted by Claudine; there is no provider-awareness and no alternate flag name. |
 | `--append-system-prompt` / `--replace-system-prompt` | Independent. Both flags still apply to the system prompt; `--edit` only affects the user prompt. |
 | `--mcp`, `--use`, `--strict` | Independent. MCP tag resolution runs on the edited prompt exactly as it does for any inline prompt. |
 | `--timeout` | Works normally. Editor time is not counted against the provider timeout; the timeout starts when the child process launches. |
@@ -424,12 +459,18 @@ Specific error messages:
    > Tip: run `sniff editors install` to pick one interactively.
 2. **Editor non-zero exit** — `EditorError::NonZeroExit(code)` renders
    as `editor exited with status <code> (prompt abandoned)`.
-3. **Empty prompt** — `EditorError::Empty` renders as `prompt is empty
-   after editing; run without --edit or try again`.
-4. **Missing file** — `EditorError::Missing` renders as `prompt buffer
+3. **Missing file** — `EditorError::Missing` renders as `prompt buffer
    was deleted during editing`.
-5. **Launch failure** — `EditorError::LaunchFailed { editor, source }`
+4. **Launch failure** — `EditorError::LaunchFailed { editor, source }`
    renders as `failed to launch <editor>: <io error>`.
+5. **Non-interactive session** — raised before the editor launches when
+   stdin or stdout is not a TTY; renders as `--edit requires an
+   interactive terminal`.
+
+Note: an empty buffer is **not** an error. It is a clean abort handled
+directly in `run_provider_wrapper` (stderr `prompt empty; aborted`,
+exit `0`); see "Claudine Integration → step 4" and the editor
+lifecycle.
 
 None of these cases leak a backtrace or location line (per the
 homelab-style error handling memory).
@@ -451,8 +492,11 @@ homelab-style error handling memory).
    ```bash
    EDITOR='sh -c "echo appended >> \"$0\""'
    ```
-   The test asserts the returned string equals `seed + "appended\n"`.
-4. `edit_text` empty-buffer path: mock `EDITOR` that truncates the file.
+   The test asserts the returned value is
+   `Ok(Some(seed + "appended\n"))` (trimmed at the end).
+4. `edit_text` empty-buffer path: mock `EDITOR` that truncates the
+   file. The test asserts the returned value is `Ok(None)` — this is
+   a clean abort, not an error.
 5. `edit_text` non-zero exit path: mock `EDITOR` that `exit 1`s.
 
 ### Claudine CLI integration tests
@@ -460,18 +504,28 @@ homelab-style error handling memory).
 Use `assert_cmd` + `predicates` (already the convention per the
 monorepo memory):
 
-1. `--edit` + piped stdin → exits non-zero with the hard-error message.
-2. `--edit` + `--interactive` → clap rejects at parse time with
+1. `--edit` with piped stdin → exits non-zero with
+   `--edit requires an interactive terminal` on stderr; editor is not
+   launched. (Specific case of the broader non-TTY preflight rule.)
+2. `--edit` with stdout redirected to a file → exits non-zero with the
+   same `--edit requires an interactive terminal` message; editor is
+   not launched.
+3. `--edit` + `--interactive` → clap rejects at parse time with
    `cannot be used with '--interactive'`.
-3. `--edit` with `EDITOR` set to a script that writes `"edited
+4. `--edit` with `EDITOR` set to a script that writes `"edited
    prompt"` → wrap pipeline continues in `--dry-run` mode and the
    preview shows `edited prompt` as the prompt.
-4. `--edit "seed text"` with a mock editor that appends `" + more"` →
+5. `--edit "seed text"` with a mock editor that appends `" + more"` →
    preview shows `seed text + more`.
-5. `--edit` after a `--` separator is **not** consumed by the extractor
-   (POSIX opaque agent args); the flag is forwarded to the provider
-   verbatim. Test: `claudine claude -- --edit` → preview's passthrough
-   contains `--edit` and Claudine's `edit_requested` is `false`.
+6. `--edit` with a mock editor that truncates the file → Claudine
+   exits `0` with `prompt empty; aborted` on stderr, no provider is
+   invoked, and no preview is rendered.
+7. Post-`--` `--edit` is the **sole** escape hatch for forwarding the
+   token to the provider. The extractor must not consume it, and
+   Claudine's own edit flow must not activate. Test:
+   `claudine claude -- --edit` → preview's passthrough contains `--edit`
+   verbatim, Claudine's `edit_requested` is `false`, and no editor is
+   launched.
 
 ### Mock editor pattern
 
@@ -502,7 +556,10 @@ to an inline `sh -c` that reads `$0` as the file path argument. The
 
 - `darkmatter/lib/src/editor/mod.rs` — new module with
   `resolve_editor_command`, `wait_args_for_editor`, `launch_editor_on_path`,
-  `edit_text`, `EditorError`, and the `DEFAULT_EDITOR_PRIORITY` constant.
+  `edit_text` (returns `Result<Option<String>, EditorError>`; `Ok(None)`
+  signals a clean empty-buffer abort), `EditorError` (no `Empty`
+  variant — empty buffers are not errors), and the
+  `DEFAULT_EDITOR_PRIORITY` constant.
 - `darkmatter/lib/src/editor/tests.rs` (or `#[cfg(test)] mod tests` in
   the module) — library-level tests per the plan above.
 - `claudine/features/2026-04-17-edit-command/design.md` — this file.
@@ -522,7 +579,11 @@ to an inline `sh -c` that reads `$0` as the file path argument. The
     `"--edit"` arm.
   - `run_provider_wrapper` — OR-merge `edit_requested`; insert the
     editor invocation block between `extract_prompt_source_from_passthrough`
-    and the downstream `has_prompt` computation.
+    and the downstream `has_prompt` computation. The block performs a
+    `std::io::IsTerminal` preflight (both stdin and stdout must be
+    TTYs) before launching the editor, and handles `Ok(None)` from
+    `edit_text` as a clean abort (stderr `prompt empty; aborted`,
+    exit `0`, provider not invoked).
   - `print_wrapper_help` — document the new flag.
 - No change to `claudine/lib/` (pure CLI feature).
 
