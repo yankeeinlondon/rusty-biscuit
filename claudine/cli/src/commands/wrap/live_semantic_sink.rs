@@ -325,9 +325,16 @@ impl LiveSemanticSink {
     }
 
     fn render_status_prose(&mut self, section: Section, state: StatusState, description: String) {
-        let rendered = Status::from_prose(description)
-            .state(state)
-            .render(&self.terminal);
+        let mut status = Status::from_prose(description).state(state);
+        // Tool-call and tool-result lines are the only consumers of this
+        // helper today and they render as `→ Name(details)` / `← Name(…)`.
+        // The Status default hanging indent of 2 lines continuation lines
+        // up under the tool name glyph — but not under the text past the
+        // `→ ` arrow. Bumping the hanging indent by 2 (one for the arrow,
+        // one for the trailing space) lines the wrap under the first
+        // letter of the tool name, which is what users expect.
+        status.layout_mut().word_wrap = status.layout().word_wrap.clone().with_hanging_indent(4);
+        let rendered = status.render(&self.terminal);
         self.emit_section_line(section, &rendered);
     }
 
@@ -1946,11 +1953,21 @@ mod tests {
         }
     }
 
-    /// Strip biscuit-terminal Layout soft-wrap continuations ("-\n  " or
-    /// "\n  ") so assertions can check the pre-wrap content regardless of
-    /// the terminal-aware column budget applied by `Status` + `Layout`.
+    /// Strip biscuit-terminal Layout soft-wrap continuations so assertions
+    /// can check the pre-wrap content regardless of the terminal-aware
+    /// column budget applied by `Status` + `Layout`.
+    ///
+    /// Handles both the 2-space hanging indent used by generic status lines
+    /// (`ProviderExtension`, `Info`, `Warning`) and the 4-space hanging
+    /// indent used by tool-call status lines (`→ Name(...)` / `← Name(...)`)
+    /// which bump the indent to align continuation text under the tool
+    /// name rather than under the state-icon glyph.
     fn strip_layout_wraps(rendered: &str) -> String {
-        rendered.replace("-\n  ", "").replace("\n  ", "")
+        rendered
+            .replace("-\n    ", "")
+            .replace("\n    ", "")
+            .replace("-\n  ", "")
+            .replace("\n  ", "")
     }
 
     #[test]

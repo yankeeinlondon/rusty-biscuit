@@ -297,18 +297,17 @@ fn is_shell_tool(tool_name: &str) -> bool {
 }
 
 /// Normalized shell prefix for a shell-style tool — `"bash"` for
-/// `Bash`/`bash`, `"shell"` for the generic `run_command` fallback, and
-/// the concrete shell name for Codex's resolved-shell variants.
-/// Returns `None` for non-shell tools.
+/// `Bash`/`bash`, `"shell"` for the generic `run_command` fallback.
+///
+/// Returns `None` for concrete shell names (`zsh`, `sh`, `fish`, …) and
+/// for non-shell tools. Concrete shells already appear in the humanized
+/// tool name (e.g. `Zsh(...)`), so repeating the shell inside the
+/// parentheses would duplicate information: `Zsh(zsh -lc '…')` reads
+/// worse than `Zsh(-lc '…')`.
 fn shell_name_for_prefix(tool_name: &str) -> Option<&'static str> {
     match tool_name {
         "Bash" | "bash" => Some("bash"),
         "shell" | "run_command" => Some("shell"),
-        "zsh" => Some("zsh"),
-        "sh" => Some("sh"),
-        "fish" => Some("fish"),
-        "dash" => Some("dash"),
-        "ksh" => Some("ksh"),
         _ => None,
     }
 }
@@ -406,17 +405,21 @@ mod summary_tests {
     }
 
     #[test]
-    fn codex_zsh_summary_prepends_zsh_prefix() {
-        // When the Codex protocol layer detects a concrete shell from the
-        // leading `/bin/zsh` token it hands us `zsh` as the tool name and a
-        // pre-stripped command. The summary must prepend the detected shell
-        // so the rendered line reads as `Zsh(zsh -lc '...')` instead of the
-        // generic `Shell(shell /bin/zsh -lc '...')`.
-        let input = json!({"command": "-lc 'sed -n 1,5p file'"});
-        assert_eq!(
-            extract_tool_summary("zsh", &input).as_deref(),
-            Some("zsh -lc 'sed -n 1,5p file'")
-        );
+    fn codex_concrete_shell_summary_does_not_duplicate_shell_name() {
+        // The Codex protocol layer already resolves concrete shells to a
+        // humanized tool name (`Zsh(...)`, `Bash(...)`, `Fish(...)`), and
+        // strips the leading `/bin/<shell>` path from the command. The
+        // summary inside the parentheses should NOT add another copy of the
+        // shell name — `Zsh(zsh -lc ...)` reads worse than
+        // `Zsh(-lc ...)`.
+        for shell in ["zsh", "sh", "fish", "dash", "ksh"] {
+            let input = json!({"command": "-lc 'sed -n 1,5p file'"});
+            assert_eq!(
+                extract_tool_summary(shell, &input).as_deref(),
+                Some("-lc 'sed -n 1,5p file'"),
+                "{shell} summary must not duplicate the shell name inside the parens"
+            );
+        }
     }
 
     #[test]
