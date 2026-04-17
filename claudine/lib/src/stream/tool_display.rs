@@ -753,4 +753,105 @@ mod from_event_tests {
         let display = ToolCallDisplay::from_result(&event).unwrap();
         assert_eq!(display.summary.as_deref(), Some("bash ls -la"));
     }
+
+    #[test]
+    fn from_result_error_detail_combines_exit_code_and_last_line() {
+        let event = SemanticEvent::ToolResult {
+            name: Some("shell".into()),
+            id: None,
+            status: Some("failure".into()),
+            exit_code: Some(1),
+            output: Some(json!(
+                "sed: 1,260p: command not found\nsed: invalid range\n"
+            )),
+            extra: json!({}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        assert_eq!(display.status, Some(ToolStatus::Error));
+        assert_eq!(
+            display.error_detail.as_deref(),
+            Some("exit=1 · sed: invalid range")
+        );
+    }
+
+    #[test]
+    fn from_result_error_detail_reads_aggregated_output_wrapper() {
+        let event = SemanticEvent::ToolResult {
+            name: Some("shell".into()),
+            id: None,
+            status: Some("failure".into()),
+            exit_code: Some(2),
+            output: Some(json!({"aggregated_output": "no matches\n"})),
+            extra: json!({}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        assert_eq!(display.error_detail.as_deref(), Some("exit=2 · no matches"));
+    }
+
+    #[test]
+    fn from_result_error_detail_falls_back_to_exit_code_when_output_empty() {
+        let event = SemanticEvent::ToolResult {
+            name: Some("shell".into()),
+            id: None,
+            status: Some("failure".into()),
+            exit_code: Some(127),
+            output: None,
+            extra: json!({}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        assert_eq!(display.error_detail.as_deref(), Some("exit=127"));
+    }
+
+    #[test]
+    fn from_result_error_detail_reads_mcp_error_message() {
+        let event = SemanticEvent::ToolResult {
+            name: Some("memory".into()),
+            id: None,
+            status: Some("failed".into()),
+            exit_code: None,
+            output: None,
+            extra: json!({"error": {"message": "user cancelled MCP tool call"}}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        assert_eq!(
+            display.error_detail.as_deref(),
+            Some("user cancelled MCP tool call")
+        );
+    }
+
+    #[test]
+    fn from_result_error_detail_absent_for_success_path() {
+        let event = SemanticEvent::ToolResult {
+            name: Some("shell".into()),
+            id: None,
+            status: Some("success".into()),
+            exit_code: Some(0),
+            output: Some(json!("file.txt\n")),
+            extra: json!({}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        assert!(display.error_detail.is_none());
+    }
+
+    #[test]
+    fn from_result_error_detail_truncates_long_snippets() {
+        let long = "x".repeat(300);
+        let event = SemanticEvent::ToolResult {
+            name: Some("shell".into()),
+            id: None,
+            status: Some("failure".into()),
+            exit_code: Some(1),
+            output: Some(json!(long)),
+            extra: json!({}),
+        };
+        let display = ToolCallDisplay::from_result(&event).unwrap();
+        let detail = display.error_detail.expect("error_detail");
+        assert!(detail.starts_with("exit=1 · "));
+        assert!(
+            detail.chars().count() <= "exit=1 · ".chars().count() + 160,
+            "snippet length must be capped, got {}",
+            detail.chars().count()
+        );
+        assert!(detail.ends_with('\u{2026}'));
+    }
 }

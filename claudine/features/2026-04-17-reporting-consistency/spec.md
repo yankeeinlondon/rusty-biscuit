@@ -164,6 +164,10 @@ Verified with:
 
 ## Claude
 
+- great job at providing tool calls
+- the `claude/system/task_progress` and `claude/system/task_notification` are useful but should be improved in their look and feel
+- `Bash(error)` says nothing about the error we encountered; this would be very useful
+
 ```sh
  → Bash(bash git diff --staged claudine/lib/src/stream/semantic.rs | head -100)
  ← Bash(successful)
@@ -185,6 +189,42 @@ group concurrently.
  → Bash(bash git diff --staged claudine/cli/src/commands/wrap/mod.rs claudine/cli/tests/wrap_commands.rs
   claudine/lib/tests/semantic_fidelity.rs)
  ← Bash(successful)
+ claude/system/task_progress · Running Commit only just/devops.just with reordered flags
+ → Bash(bash git commit -m "$(cat <<'EOF'
+  chore: parameterize commit recipe with agent argument
+
+  - add `agent="opencode"` positional arg so callers can run the commit prompt through any Claudine-backed agent (e.g. `just
+  commit codex`)
+  - drop the `--model` flag and "using $MODEL" echo so model selection defers to the chosen agent's own defaults
+  - interpolate `--{{agent}}` into the `claudine compose` invocation to wire the new argument through
+  EOF
+  )" --only -- just/devops.just)
+ ← Bash(successful)
+ claude/system/task_progress · Running Verify commit and remaining status
+ → Bash(bash git log -1 --oneline && echo "---" && git status --short)
+ ← Bash(successful)
+ → Edit(/Users/ken/.claudine/worktrees/rusty-biscuit/claudine/docs/knowledge/commits.md)
+ ← Edit(successful)
+
+All three subagent commits landed cleanly:
+
+- ccf9ec72 feat(claudine): align Claude rate-limit and tool-call reporting
+
+- d3c48035 style(claudine): apply cargo fmt across stream and wrap modules
+
+- 20e14d7d chore: parameterize commit recipe with agent argument
+
+Repo state: 21 staged files committed. Three new unrelated unstaged modifications (spec.md, protocol/codex.rs, tool_display.rs)
+appeared during the run from concurrent work — left untouched per "do not second-guess what was staged."
+
+Lessons learned added to docs/knowledge/commits.md: All three subagents independently hit the same gotcha —
+git commit --only -- path -m "msg" fails because -- terminates option parsing, making -m a pathspec. Correct form is
+git commit --only -m "msg" -- path1 path2. The earlier line-29 recommendation in the file had this backwards, so I appended a
+corrective entry citing the independent verification.
+
+
+
+✓ 329s · 527 input tokens · 17K output tokens · 1.6M cached tokens · $3.28 cost basis · 44 tool calls
 ```
 
 
