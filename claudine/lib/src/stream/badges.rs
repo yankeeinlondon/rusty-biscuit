@@ -22,6 +22,7 @@ pub enum BadgeCategory {
     RateLimit,
     ContextPressure,
     Permission,
+    Config,
 }
 
 /// Severity of a badge from the operator's perspective.
@@ -203,6 +204,36 @@ pub fn derive_badges(summary: &StreamExecutionSummary, provider: Provider) -> Ve
         });
     }
 
+    if let Some(diagnostics) = summary.stderr_diagnostics.as_ref() {
+        let already_has_rate_limit =
+            badges.iter().any(|b| b.category == BadgeCategory::RateLimit);
+        if !already_has_rate_limit && diagnostics.rate_limit_events > 0 {
+            let reset_hint = diagnostics
+                .rate_limit_reset_at
+                .map(|reset| format!(" (resets at {})", reset.format("%Y-%m-%d %H:%M:%S UTC")))
+                .unwrap_or_default();
+            badges.push(SessionBadge {
+                category: BadgeCategory::RateLimit,
+                severity: BadgeSeverity::Warning,
+                label: "Rate Limit".into(),
+                message: format!("Rate limit hit{reset_hint}"),
+                remediation_url: dashboard_url.clone(),
+            });
+        }
+
+        if diagnostics.malformed_asset_events > 0 {
+            let count = diagnostics.malformed_asset_events;
+            let noun = if count == 1 { "asset" } else { "assets" };
+            badges.push(SessionBadge {
+                category: BadgeCategory::Config,
+                severity: BadgeSeverity::Warning,
+                label: "Config".into(),
+                message: format!("Skipped {count} malformed OpenCode {noun}"),
+                remediation_url: None,
+            });
+        }
+    }
+
     badges
 }
 
@@ -380,6 +411,7 @@ mod tests {
                 is_throttled: Some(true),
                 retry_after_ms: Some(5000),
                 message: Some("Rate limit exceeded".into()),
+                reset_at: None,
             }),
             ..Default::default()
         };
@@ -398,6 +430,7 @@ mod tests {
                 is_throttled: Some(false),
                 retry_after_ms: None,
                 message: None,
+                reset_at: None,
             }),
             ..Default::default()
         };
@@ -416,6 +449,7 @@ mod tests {
                 is_throttled: Some(true),
                 retry_after_ms: Some(1000),
                 message: Some("Slow down".into()),
+                reset_at: None,
             }),
             ..Default::default()
         };
@@ -504,5 +538,123 @@ mod tests {
         let badges = derive_badges(&summary, Provider::KimiCode);
         assert_eq!(badges.len(), 1);
         assert_eq!(badges[0].category, BadgeCategory::ContextPressure);
+    }
+
+    #[test]
+    fn stderr_diagnostics_rate_limit_yields_rate_limit_badge() {
+        use crate::stream::summary::StderrDiagnostics;
+        let summary = StreamExecutionSummary {
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 3,
+                rate_limit_events: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        assert_eq!(badges.len(), 1);
+        assert_eq!(badges[0].category, BadgeCategory::RateLimit);
+        assert_eq!(badges[0].severity, BadgeSeverity::Warning);
+        assert_eq!(badges[0].label, "Rate Limit");
+    }
+
+    #[test]
+    fn stderr_diagnostics_rate_limit_includes_reset_time_in_message() {
+        use crate::stream::summary::StderrDiagnostics;
+        use chrono::TimeZone;
+        let summary = StreamExecutionSummary {
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 1,
+                rate_limit_events: 1,
+                rate_limit_reset_at: Some(
+                    chrono::Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56).unwrap(),
+                ),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        assert_eq!(badges.len(), 1);
+        assert!(badges[0].message.contains("2026-04-16 04:18:56"));
+    }
+
+    #[test]
+    fn stderr_diagnostics_does_not_duplicate_rate_limit_badge_from_error_kind() {
+        use crate::stream::summary::StderrDiagnostics;
+        let summary = StreamExecutionSummary {
+            is_error: true,
+            error_kind: Some("rate_limit".into()),
+            error_message: Some("Too many requests".into()),
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 1,
+                rate_limit_events: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        let rate_limit_count = badges
+            .iter()
+            .filter(|b| b.category == BadgeCategory::RateLimit)
+            .count();
+        assert_eq!(rate_limit_count, 1);
+    }
+
+    #[test]
+    fn stderr_diagnostics_malformed_assets_yields_config_badge() {
+        use crate::stream::summary::StderrDiagnostics;
+        let summary = StreamExecutionSummary {
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 2,
+                malformed_asset_events: 2,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        assert_eq!(badges.len(), 1);
+        assert_eq!(badges[0].category, BadgeCategory::Config);
+        assert_eq!(badges[0].severity, BadgeSeverity::Warning);
+        assert_eq!(badges[0].label, "Config");
+        assert!(badges[0].message.contains("2 malformed"));
+        assert!(badges[0].message.contains("assets"));
+    }
+
+    #[test]
+    fn stderr_diagnostics_single_malformed_asset_uses_singular_noun() {
+        use crate::stream::summary::StderrDiagnostics;
+        let summary = StreamExecutionSummary {
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 1,
+                malformed_asset_events: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        assert_eq!(badges.len(), 1);
+        assert_eq!(badges[0].category, BadgeCategory::Config);
+        assert!(badges[0].message.contains("1 malformed"));
+        assert!(badges[0].message.ends_with("asset"));
+    }
+
+    #[test]
+    fn stderr_diagnostics_empty_counts_produce_no_badges() {
+        use crate::stream::summary::StderrDiagnostics;
+        let summary = StreamExecutionSummary {
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let badges = derive_badges(&summary, Provider::OpenCode);
+        assert!(badges.is_empty());
+    }
+
+    #[test]
+    fn config_category_serializes_snake_case() {
+        let json = serde_json::to_string(&BadgeCategory::Config).unwrap();
+        assert_eq!(json, "\"config\"");
     }
 }
