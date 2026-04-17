@@ -13,6 +13,7 @@
 //! - [`testing`] - Testing utilities for terminal output verification
 
 pub mod diff;
+pub mod editor;
 pub mod markdown;
 pub mod mermaid;
 pub mod render;
