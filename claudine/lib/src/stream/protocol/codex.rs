@@ -571,7 +571,11 @@ impl CodexToolItemFields {
         self.tool_name
             .as_deref()
             .or(self.name.as_deref())
-            .or_else(|| self.command.as_ref().map(|_| "shell"))
+            .or_else(|| {
+                self.command
+                    .as_deref()
+                    .map(|cmd| detect_shell_from_command(cmd).unwrap_or("shell"))
+            })
     }
 
     pub fn resolved_tool_id(&self) -> Option<&str> {
@@ -588,8 +592,9 @@ impl CodexToolItemFields {
         if let Some(v) = self.parameters.as_ref() {
             return Some(v.clone());
         }
-        if let Some(cmd) = self.command.as_ref() {
-            return Some(serde_json::json!({ "command": cmd }));
+        if let Some(cmd) = self.command.as_deref() {
+            let trimmed = strip_shell_path_prefix(cmd);
+            return Some(serde_json::json!({ "command": trimmed }));
         }
         None
     }
@@ -647,6 +652,47 @@ impl CodexToolItemFields {
         if self.aggregated_output.is_none() {
             self.aggregated_output = started.aggregated_output;
         }
+    }
+}
+
+/// Detect the shell binary name from the leading token of a `command` string
+/// emitted by Codex's `command_execution` items.
+///
+/// Codex wraps every shell command in an absolute invocation such as
+/// `/bin/zsh -lc '<script>'`. Returning `"zsh"` (rather than the generic
+/// `"shell"`) gives the live surface an accurate label and lets
+/// [`tool_display`](crate::stream::tool_display) treat the command as a
+/// shell tool with the right prefix. Returns `None` when the leading token
+/// does not look like a shell path we recognize.
+pub(crate) fn detect_shell_from_command(command: &str) -> Option<&'static str> {
+    let first = command.split_whitespace().next()?;
+    let basename = first.rsplit('/').next().unwrap_or(first);
+    match basename {
+        "zsh" => Some("zsh"),
+        "bash" => Some("bash"),
+        "sh" => Some("sh"),
+        "fish" => Some("fish"),
+        "dash" => Some("dash"),
+        "ksh" => Some("ksh"),
+        _ => None,
+    }
+}
+
+/// Strip a leading `/path/to/<shell>` token from a command string so the
+/// rendered summary reads as `zsh -lc '…'` rather than
+/// `zsh /bin/zsh -lc '…'` after `tool_display` prepends the detected shell
+/// name. When the first token does not name a recognized shell the command
+/// is returned unchanged.
+pub(crate) fn strip_shell_path_prefix(command: &str) -> String {
+    let trimmed = command.trim_start();
+    let Some((first, rest)) = trimmed.split_once(char::is_whitespace) else {
+        return command.to_string();
+    };
+    let basename = first.rsplit('/').next().unwrap_or(first);
+    if detect_shell_from_command(basename).is_some() && first.contains('/') {
+        rest.trim_start().to_string()
+    } else {
+        command.to_string()
     }
 }
 
@@ -879,8 +925,8 @@ mod tests {
             });
         assert_eq!(
             extracted.as_deref(),
-            Some("/bin/zsh -lc 'ls'"),
-            "command must be exposed via resolved_input (either as string value or nested command key): fields = {fields:?}"
+            Some("-lc 'ls'"),
+            "command must be exposed via resolved_input with the `/bin/<shell>` path stripped so the rendered summary reads as `zsh -lc '…'`: fields = {fields:?}"
         );
     }
 
@@ -961,5 +1007,89 @@ mod tests {
             Some("file.txt\n"),
             "aggregated_output must be exposed via resolved_output"
         );
+    }
+
+    #[test]
+    fn detect_shell_from_command_recognizes_absolute_paths() {
+        assert_eq!(detect_shell_from_command("/bin/zsh -lc 'ls'"), Some("zsh"));
+        assert_eq!(
+            detect_shell_from_command("/usr/local/bin/bash -c 'ls'"),
+            Some("bash")
+        );
+        assert_eq!(detect_shell_from_command("/bin/fish -c 'ls'"), Some("fish"));
+    }
+
+    #[test]
+    fn detect_shell_from_command_returns_none_for_non_shell_commands() {
+        assert_eq!(detect_shell_from_command("ls -la"), None);
+        assert_eq!(detect_shell_from_command("/usr/bin/git status"), None);
+        assert_eq!(detect_shell_from_command(""), None);
+    }
+
+    #[test]
+    fn strip_shell_path_prefix_removes_absolute_shell_token() {
+        assert_eq!(
+            strip_shell_path_prefix("/bin/zsh -lc 'sed -n 1,5p file'"),
+            "-lc 'sed -n 1,5p file'"
+        );
+        assert_eq!(
+            strip_shell_path_prefix("/usr/local/bin/bash -c 'ls -la'"),
+            "-c 'ls -la'"
+        );
+    }
+
+    #[test]
+    fn strip_shell_path_prefix_preserves_commands_without_shell_path() {
+        assert_eq!(strip_shell_path_prefix("ls -la"), "ls -la");
+        assert_eq!(strip_shell_path_prefix("git status"), "git status");
+        // Bare `zsh` without a path prefix is preserved — the prefix handler
+        // only activates on absolute paths so the "zsh -lc ..." summary
+        // emitted by tool_display still reads sensibly.
+        assert_eq!(strip_shell_path_prefix("zsh -lc 'x'"), "zsh -lc 'x'");
+    }
+
+    #[test]
+    fn codex_command_execution_resolves_shell_name_from_command() {
+        let line = r#"{"type":"item.started","item":{"id":"cmd1","type":"command_execution","command":"/bin/zsh -lc 'ls'"}}"#;
+        let event: CodexEvent = serde_json::from_str(line).expect("valid event");
+        let CodexEvent::ItemStarted(env) = event else {
+            panic!("expected ItemStarted");
+        };
+        let fields = env.item.expect("item").as_tool_fields().cloned_via_merge();
+        assert_eq!(fields.resolved_tool_name(), Some("zsh"));
+        let input = fields.resolved_input().expect("synthesized input");
+        assert_eq!(
+            input.get("command").and_then(Value::as_str),
+            Some("-lc 'ls'"),
+            "shell path prefix must be stripped from the synthesized command",
+        );
+    }
+
+    // Tiny helper so the test above can borrow-then-clone the fields without
+    // adding a public clone method to the production API.
+    trait CloneViaMerge {
+        fn cloned_via_merge(self) -> CodexToolItemFields;
+    }
+    impl CloneViaMerge for Option<&CodexToolItemFields> {
+        fn cloned_via_merge(self) -> CodexToolItemFields {
+            let src = self.expect("tool fields");
+            let mut dst = CodexToolItemFields::default();
+            dst.merge_started(CodexToolItemFields {
+                id: src.id.clone(),
+                name: src.name.clone(),
+                tool_name: src.tool_name.clone(),
+                input: src.input.clone(),
+                arguments: src.arguments.clone(),
+                parameters: src.parameters.clone(),
+                output: src.output.clone(),
+                result: src.result.clone(),
+                content: src.content.clone(),
+                status: src.status.clone(),
+                exit_code: src.exit_code,
+                command: src.command.clone(),
+                aggregated_output: src.aggregated_output.clone(),
+            });
+            dst
+        }
     }
 }

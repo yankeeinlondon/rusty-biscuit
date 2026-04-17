@@ -190,15 +190,29 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         });
     }
 
-    fn handle_agent_message_item(&mut self, msg: &CodexAgentMessage, _raw_kind: &str) {
+    fn handle_agent_message_item(&mut self, msg: &CodexAgentMessage, raw_kind: &str) {
         // Accumulate text for the summary's assistant_text (used as a fallback
         // when --output-last-message is unavailable). Do not emit OutputText
         // to avoid double-rendering with the file-based text source, and do
         // not leak to ProviderExtension — the event is preserved in the raw
         // JSONL log, and ProviderExtension should be reserved for events the
         // semantic layer genuinely does not understand.
+        //
+        // Also emit a Reasoning event so the live stderr surface renders the
+        // intermediate prose Codex produces between tool calls as a grey
+        // BlockQuote. Without this, non-interactive Codex sessions appear to
+        // skip straight from one tool to the next with no visible narrative.
+        // The authoritative final assistant text still arrives via
+        // `--output-last-message`, so any duplication between the last
+        // BlockQuote and the final stdout is intentional and rare.
         if let Some(text) = msg.collected_text() {
             self.assistant_text.push_str(&text);
+            let mut extra = self.base_extra(raw_kind);
+            extra.insert("origin".into(), Value::from("agent_message"));
+            self.sink.on_semantic_event(SemanticEvent::Reasoning {
+                text,
+                extra: Value::Object(extra),
+            });
         }
     }
 

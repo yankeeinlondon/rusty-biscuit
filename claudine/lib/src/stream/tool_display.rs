@@ -168,6 +168,16 @@ mod humanize_tests {
     }
 
     #[test]
+    fn concrete_shells_humanize_with_title_case() {
+        // Codex now reports the concrete shell ("zsh", "bash", etc.) as the
+        // tool name; the display layer must humanize those to a leading-
+        // capital form so the render reads as `Zsh(...)` not `zsh(...)`.
+        assert_eq!(humanize_tool_name("zsh"), "Zsh");
+        assert_eq!(humanize_tool_name("fish"), "Fish");
+        assert_eq!(humanize_tool_name("dash"), "Dash");
+    }
+
+    #[test]
     fn mcp_prefix_renders_server_and_tool() {
         assert_eq!(
             humanize_tool_name("mcp__firecrawl__deep_research"),
@@ -277,18 +287,28 @@ pub fn extract_tool_summary(tool_name: &str, input: &Value) -> Option<String> {
 
 /// Return `true` when `tool_name` is a shell-invoking tool. Matched across
 /// the providers claudine currently parses (Claude's `Bash`, Codex's
-/// `shell`, and the generic `run_command` / `bash` lowercase variant).
+/// `shell` / concrete-shell alias, and the generic `run_command` / `bash`
+/// lowercase variant).
 fn is_shell_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "Bash" | "bash" | "run_command" | "shell")
+    matches!(
+        tool_name,
+        "Bash" | "bash" | "run_command" | "shell" | "zsh" | "sh" | "fish" | "dash" | "ksh"
+    )
 }
 
 /// Normalized shell prefix for a shell-style tool — `"bash"` for
-/// `Bash`/`bash`, `"shell"` for Codex's `shell` and the generic
-/// `run_command`. Returns `None` for non-shell tools.
+/// `Bash`/`bash`, `"shell"` for the generic `run_command` fallback, and
+/// the concrete shell name for Codex's resolved-shell variants.
+/// Returns `None` for non-shell tools.
 fn shell_name_for_prefix(tool_name: &str) -> Option<&'static str> {
     match tool_name {
         "Bash" | "bash" => Some("bash"),
         "shell" | "run_command" => Some("shell"),
+        "zsh" => Some("zsh"),
+        "sh" => Some("sh"),
+        "fish" => Some("fish"),
+        "dash" => Some("dash"),
+        "ksh" => Some("ksh"),
         _ => None,
     }
 }
@@ -382,6 +402,20 @@ mod summary_tests {
         assert_eq!(
             extract_tool_summary("shell", &input).as_deref(),
             Some("shell echo hi")
+        );
+    }
+
+    #[test]
+    fn codex_zsh_summary_prepends_zsh_prefix() {
+        // When the Codex protocol layer detects a concrete shell from the
+        // leading `/bin/zsh` token it hands us `zsh` as the tool name and a
+        // pre-stripped command. The summary must prepend the detected shell
+        // so the rendered line reads as `Zsh(zsh -lc '...')` instead of the
+        // generic `Shell(shell /bin/zsh -lc '...')`.
+        let input = json!({"command": "-lc 'sed -n 1,5p file'"});
+        assert_eq!(
+            extract_tool_summary("zsh", &input).as_deref(),
+            Some("zsh -lc 'sed -n 1,5p file'")
         );
     }
 

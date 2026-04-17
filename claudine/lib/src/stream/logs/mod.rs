@@ -1,11 +1,12 @@
 //! Structured log parsing for provider stderr streams.
 //!
-//! OpenCode is the first (and currently only) provider that emits
-//! structured log records on stderr when launched with `--print-logs
-//! --log-level ERROR`. This module holds pure parsing and classification
-//! helpers so the wrapper layer can consume stderr log lines without
-//! pulling provider-specific logic out of the CLI.
+//! OpenCode emits structured log records on stderr when launched with
+//! `--print-logs --log-level ERROR`; Codex emits `tracing-subscriber`
+//! formatted lines unconditionally. Both shapes are parsed here so the
+//! wrapper layer can consume stderr log lines without pulling
+//! provider-specific logic out of the CLI.
 
+pub mod codex;
 pub mod opencode;
 
 pub use opencode::{EarlyTermination, StderrIngestOutcome};
@@ -32,6 +33,15 @@ where
 {
     fn ingest(&mut self, line: &str) -> StderrIngestOutcome {
         opencode::OpenCodeLogBridge::ingest(self, line)
+    }
+}
+
+impl<S> StderrLogBridge for codex::CodexLogBridge<S>
+where
+    S: crate::stream::semantic::SemanticEventSink,
+{
+    fn ingest(&mut self, line: &str) -> StderrIngestOutcome {
+        codex::CodexLogBridge::ingest(self, line)
     }
 }
 

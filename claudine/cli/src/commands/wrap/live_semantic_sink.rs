@@ -350,6 +350,41 @@ impl LiveSemanticSink {
         }
     }
 
+    /// Render a Codex tracing-style diagnostic as a two-part stderr block:
+    ///
+    /// - A `Status`-shaped header line with an orange `WARN(<target>:)`
+    ///   prose label so operators can see which module fired.
+    /// - An orange-bordered `BlockQuote` body carrying the diagnostic text.
+    ///
+    /// Execution is not interrupted for these records (Codex classifies
+    /// them at `ERROR` severity but continues) so the label is forced to
+    /// `WARN` regardless of the incoming level.
+    fn render_tracing_diagnostic(&mut self, section: Section, target: &str, message: &str) {
+        let border_color = Color::Tailwind(Tailwind::Orange700);
+
+        let header_prose = format!(
+            "<orange>WARN(<dim><i>{}:</i></dim>)</orange>",
+            escape_prose(target)
+        );
+        let header_rendered = Status::from_prose(header_prose)
+            .state(StatusState::Warning)
+            .render(&self.terminal);
+        for line in header_rendered.lines() {
+            self.emit_section_line(section, line);
+        }
+
+        let body_prose = Prose::new(escape_prose(message));
+        let mut block = BlockQuote::new(RenderableContent::from(body_prose), None::<&str>)
+            .with_left_block_color(border_color)
+            .with_border("\u{258c} ");
+        block.layout_mut().left_margin = Margin::Chars(0);
+        block.layout_mut().right_margin = Margin::Chars(0);
+        let body_rendered = block.render(&self.terminal);
+        for line in body_rendered.lines() {
+            self.emit_section_line(section, line);
+        }
+    }
+
     /// Render a `ToolCallDisplay` into prose-markup for
     /// [`Status::from_prose`]. Per spec:
     ///
@@ -562,14 +597,24 @@ impl LiveSemanticSink {
                 // when the session metadata shows a subscription auth source.
                 // Explicit metadata text such as "approaching limit" must
                 // still render so users can see the next reset window.
-                if !message.starts_with("Malformed JSON on line ")
-                    && !is_suppressed_claude_rate_limit(
+                if message.starts_with("Malformed JSON on line ")
+                    || is_suppressed_claude_rate_limit(
                         self.provider,
                         message,
                         extra,
                         self.claude_api_key_source.as_deref(),
                     )
                 {
+                    return;
+                }
+                // Codex stderr bridge emits Warnings enriched with a
+                // `tracing_target` extra. Those want a two-line rendering
+                // (Status header + orange BlockQuote) so operators can read
+                // the diagnostic without the raw `TIMESTAMP LEVEL ...`
+                // formatting leaking through.
+                if let Some(target) = extra.get("tracing_target").and_then(Value::as_str) {
+                    self.render_tracing_diagnostic(section, target, message);
+                } else {
                     self.render_status(section, StatusState::Warning, message.clone());
                 }
             }
@@ -2074,6 +2119,38 @@ mod tests {
         assert!(
             rendered.contains("considering the options"),
             "reasoning text must appear in stderr: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn tracing_warning_renders_header_and_block_quote_body() {
+        let lines = Arc::new(StdMutex::new(Vec::new()));
+        let dispatched = Arc::new(StdMutex::new(Vec::new()));
+        let mut sink = make_sink(lines.clone(), dispatched.clone());
+        sink.on_semantic_event(SemanticEvent::Warning {
+            message: "forked agents inherit the parent agent type".into(),
+            extra: json!({
+                "provider": "codex",
+                "tracing_target": "codex_core::tools::router",
+                "tracing_level": "error",
+            }),
+        });
+        let rendered = lines.lock().unwrap().join("\n");
+        assert!(
+            rendered.contains("WARN"),
+            "tracing warning must render the WARN label regardless of the incoming level: {rendered:?}"
+        );
+        assert!(
+            rendered.contains("codex_core::tools::router"),
+            "tracing target must appear in the header: {rendered:?}"
+        );
+        assert!(
+            rendered.contains("forked agents inherit the parent agent type"),
+            "tracing body must appear in the BlockQuote: {rendered:?}"
+        );
+        assert!(
+            rendered.contains("\u{258c}"),
+            "tracing BlockQuote must use the ▌ border: {rendered:?}"
         );
     }
 

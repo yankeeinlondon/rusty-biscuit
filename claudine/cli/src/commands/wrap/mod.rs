@@ -398,6 +398,7 @@ fn build_structured_plumbing(
     Option<claudine::stream::logs::StderrBridgeHandle>,
 ) {
     use claudine::stream::logs::StderrBridgeHandle;
+    use claudine::stream::logs::codex::CodexLogBridge;
     use claudine::stream::logs::opencode::{OpenCodeLogBridge, merge_stderr_state_into_summary};
     use claudine::stream::semantic::{ObservedSemanticSink, SharedSemanticSink};
     use std::sync::atomic::AtomicBool;
@@ -421,6 +422,29 @@ fn build_structured_plumbing(
         });
 
         let stdout_sink = ObservedSemanticSink::new(shared, stdout_seen);
+        let build_parser: exec::SemanticParserBuilder =
+            Box::new(move |output_cb, _reasoning_cb| {
+                if let Ok(mut inner) = live_sink_inner.lock() {
+                    inner.set_output_text_sink(output_cb);
+                }
+                claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
+            });
+        (build_parser, stderr_bridge)
+    } else if provider == Provider::Codex {
+        // Codex emits `tracing-subscriber` records on stderr that we'd
+        // rather render inline through the live sink (as an orange
+        // BlockQuote) than leak raw to the terminal. Share the sink so the
+        // stdout parser and the stderr bridge feed one rendering pipeline.
+        let shared = SharedSemanticSink::new(sink);
+        let live_sink_inner = Arc::clone(shared.inner());
+        let bridge = CodexLogBridge::new(shared.clone());
+        let stderr_bridge = Some(StderrBridgeHandle {
+            bridge: Box::new(bridge),
+            finalize: Box::new(|_summary| {}),
+            early_terminate: None,
+        });
+
+        let stdout_sink = shared;
         let build_parser: exec::SemanticParserBuilder =
             Box::new(move |output_cb, _reasoning_cb| {
                 if let Ok(mut inner) = live_sink_inner.lock() {
