@@ -346,11 +346,12 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::OpenCode,
-            kind: kind.to_string(),
-            payload,
-        });
+        self.sink
+            .on_semantic_event(SemanticEvent::ProviderExtension {
+                provider: Provider::OpenCode,
+                kind: kind.to_string(),
+                payload,
+            });
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
@@ -557,7 +558,10 @@ mod tests {
         };
         (
             events,
-            Box::new(OpenCodeSemanticStreamParser::new(sink, Some("gpt-4o".into()))),
+            Box::new(OpenCodeSemanticStreamParser::new(
+                sink,
+                Some("gpt-4o".into()),
+            )),
         )
     }
 
@@ -582,7 +586,9 @@ mod tests {
     #[test]
     fn text_emits_output_text() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"text","text":"hello"}"#).unwrap();
+        parser
+            .feed_line(r#"{"type":"text","text":"hello"}"#)
+            .unwrap();
         let collected = events.lock().unwrap().clone();
         assert!(matches!(
             collected[0],
@@ -618,7 +624,9 @@ mod tests {
             .unwrap();
         let collected = events.lock().unwrap().clone();
         match &collected[0] {
-            SemanticEvent::ToolResult { id, name, status, .. } => {
+            SemanticEvent::ToolResult {
+                id, name, status, ..
+            } => {
                 assert_eq!(id.as_deref(), Some("t999"));
                 assert_eq!(name.as_deref(), Some("bash"));
                 assert_eq!(status.as_deref(), Some("success"));
@@ -656,7 +664,10 @@ mod tests {
             .feed_line(r#"{"type":"error","error_message":"API timeout"}"#)
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(matches!(collected[0], SemanticEvent::Error { terminal: true, .. }));
+        assert!(matches!(
+            collected[0],
+            SemanticEvent::Error { terminal: true, .. }
+        ));
         let summary = parser.finish(1);
         assert!(summary.is_error);
     }
@@ -678,7 +689,10 @@ mod tests {
     fn malformed_json_emits_warning() {
         let (events, mut parser) = new_parser();
         assert!(parser.feed_line("garbage").is_ok());
-        assert!(matches!(events.lock().unwrap()[0], SemanticEvent::Warning { .. }));
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SemanticEvent::Warning { .. }
+        ));
     }
 
     #[test]
@@ -800,11 +814,18 @@ mod tests {
     #[test]
     fn tool_use_event_emits_only_tool_result_not_synthesized_call() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#).unwrap();
+        parser
+            .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
+            .unwrap();
         parser
             .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#)
             .unwrap();
-        let kinds: Vec<&'static str> = events.lock().unwrap().iter().map(|e| e.kind_str()).collect();
+        let kinds: Vec<&'static str> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|e| e.kind_str())
+            .collect();
         let n_calls = kinds.iter().filter(|k| **k == "tool_call").count();
         let n_results = kinds.iter().filter(|k| **k == "tool_result").count();
         assert_eq!(
@@ -843,9 +864,7 @@ mod tests {
         parser
             .feed_line(r#"{"type":"reasoning","part":{"text":""}}"#)
             .unwrap();
-        parser
-            .feed_line(r#"{"type":"reasoning"}"#)
-            .unwrap();
+        parser.feed_line(r#"{"type":"reasoning"}"#).unwrap();
         let collected = events.lock().unwrap().clone();
         assert!(
             collected.is_empty(),
@@ -858,7 +877,9 @@ mod tests {
         // Ensure the trailer count matches the rendered-line count by keeping
         // `tool_calls += 1` even though no ToolCall event is emitted.
         let (_events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#).unwrap();
+        parser
+            .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
+            .unwrap();
         parser
             .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#)
             .unwrap();

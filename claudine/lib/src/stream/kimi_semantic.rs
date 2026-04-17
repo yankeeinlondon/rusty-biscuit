@@ -235,11 +235,12 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::KimiCode,
-            kind: kind.to_string(),
-            payload,
-        });
+        self.sink
+            .on_semantic_event(SemanticEvent::ProviderExtension {
+                provider: Provider::KimiCode,
+                kind: kind.to_string(),
+                payload,
+            });
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
@@ -444,9 +445,7 @@ mod tests {
     fn context_pressure_emits_warning() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(
-                r#"{"type":"StatusUpdate","context_usage":{"used":110000,"total":128000}}"#,
-            )
+            .feed_line(r#"{"type":"StatusUpdate","context_usage":{"used":110000,"total":128000}}"#)
             .unwrap();
         let collected = events.lock().unwrap().clone();
         match &collected[0] {
@@ -462,9 +461,7 @@ mod tests {
     fn context_below_threshold_emits_nothing() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(
-                r#"{"type":"StatusUpdate","context_usage":{"used":50000,"total":128000}}"#,
-            )
+            .feed_line(r#"{"type":"StatusUpdate","context_usage":{"used":50000,"total":128000}}"#)
             .unwrap();
         assert!(events.lock().unwrap().is_empty());
     }
@@ -480,7 +477,10 @@ mod tests {
                 r#"{"type":"tool_result","tool_use_id":"k1","status":"success","content":"clean"}"#,
             )
             .unwrap();
-        assert_eq!(kinds(&events.lock().unwrap()), vec!["tool_call", "tool_result"]);
+        assert_eq!(
+            kinds(&events.lock().unwrap()),
+            vec!["tool_call", "tool_result"]
+        );
     }
 
     #[test]
@@ -509,7 +509,10 @@ mod tests {
     fn malformed_json_emits_warning() {
         let (events, mut parser) = new_parser();
         assert!(parser.feed_line("x").is_ok());
-        assert!(matches!(events.lock().unwrap()[0], SemanticEvent::Warning { .. }));
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SemanticEvent::Warning { .. }
+        ));
     }
 
     #[test]

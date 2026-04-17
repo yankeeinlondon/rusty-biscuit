@@ -13,8 +13,8 @@ pub mod reporting;
 pub mod semantic;
 pub mod stderr;
 pub mod summary;
-pub mod token_usage;
 pub mod thinking;
+pub mod token_usage;
 pub mod tool_display;
 
 use serde::{Deserialize, Serialize};
@@ -212,7 +212,9 @@ mod tests {
     mod semantic_parser {
         use std::sync::{Arc, Mutex};
 
-        use super::super::{create_semantic_parser, ParserConfig, SemanticEvent, SemanticEventSink};
+        use super::super::{
+            ParserConfig, SemanticEvent, SemanticEventSink, create_semantic_parser,
+        };
         use crate::events::Provider;
 
         struct RecordingSemanticSink {
@@ -242,9 +244,7 @@ mod tests {
                 .feed_line(r#"{"type":"init","session_id":"s1","model":"claude"}"#)
                 .unwrap();
             parser
-                .feed_line(
-                    r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#,
-                )
+                .feed_line(r#"{"type":"assistant","content":[{"type":"text","text":"Hello"}]}"#)
                 .unwrap();
             parser
                 .feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#)
@@ -302,9 +302,9 @@ mod tests {
                 .unwrap();
 
             let collected = events.lock().unwrap().clone();
-            assert!(collected
-                .iter()
-                .any(|e| matches!(e, SemanticEvent::Reasoning { text, .. } if text == "pondering")));
+            assert!(collected.iter().any(
+                |e| matches!(e, SemanticEvent::Reasoning { text, .. } if text == "pondering")
+            ));
         }
 
         #[test]
@@ -323,9 +323,9 @@ mod tests {
                 .unwrap();
 
             let collected = events.lock().unwrap().clone();
-            assert!(collected
-                .iter()
-                .any(|e| matches!(e, SemanticEvent::Warning { message, .. } if message == "Rate limit")));
+            assert!(collected.iter().any(
+                |e| matches!(e, SemanticEvent::Warning { message, .. } if message == "Rate limit")
+            ));
         }
     }
 }

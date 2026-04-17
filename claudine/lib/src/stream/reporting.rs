@@ -528,22 +528,13 @@ mod tests {
         let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &make_test_env());
 
         let diagnostics = &meta.extra["provider_summary"]["stderr_diagnostics"];
-        assert_eq!(
-            diagnostics["log_records_parsed"],
-            Value::Number(5.into())
-        );
-        assert_eq!(
-            diagnostics["rate_limit_events"],
-            Value::Number(1.into())
-        );
+        assert_eq!(diagnostics["log_records_parsed"], Value::Number(5.into()));
+        assert_eq!(diagnostics["rate_limit_events"], Value::Number(1.into()));
         assert_eq!(
             diagnostics["malformed_asset_events"],
             Value::Number(2.into())
         );
-        assert_eq!(
-            diagnostics["uncaught_errors"],
-            Value::Number(1.into())
-        );
+        assert_eq!(diagnostics["uncaught_errors"], Value::Number(1.into()));
         assert!(diagnostics["rate_limit_reset_at"].is_string());
     }
 

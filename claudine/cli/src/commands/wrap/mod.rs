@@ -408,16 +408,12 @@ fn build_structured_plumbing(
         let stdout_seen = Arc::new(AtomicBool::new(false));
 
         let (early_tx, early_rx) = std::sync::mpsc::channel();
-        let bridge = OpenCodeLogBridge::new(
-            shared.clone(),
-            Arc::clone(&stdout_seen),
-            Some(early_tx),
-        );
+        let bridge =
+            OpenCodeLogBridge::new(shared.clone(), Arc::clone(&stdout_seen), Some(early_tx));
         let bridge_state = bridge.shared_state();
-        let finalize: claudine::stream::logs::SummaryFinalizer =
-            Box::new(move |summary| {
-                merge_stderr_state_into_summary(&bridge_state, summary);
-            });
+        let finalize: claudine::stream::logs::SummaryFinalizer = Box::new(move |summary| {
+            merge_stderr_state_into_summary(&bridge_state, summary);
+        });
         let stderr_bridge = Some(StderrBridgeHandle {
             bridge: Box::new(bridge),
             finalize,

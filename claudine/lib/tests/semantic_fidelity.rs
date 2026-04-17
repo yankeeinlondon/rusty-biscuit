@@ -18,8 +18,8 @@ use claudine::events::{EnvironmentContext, Provider};
 use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::reporting::{semantic_event_to_event_meta, summary_to_event_meta};
 use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
-use claudine::stream::{create_semantic_parser, ParserConfig, StreamProtocol};
-use serde_json::{json, Value};
+use claudine::stream::{ParserConfig, StreamProtocol, create_semantic_parser};
+use serde_json::{Value, json};
 
 struct Recording {
     events: Arc<Mutex<Vec<SemanticEvent>>>,

@@ -3772,7 +3772,8 @@ exit 0
     let output = assert.get_output();
     let exit_code = output.status.code().unwrap_or(-1);
     assert_eq!(
-        exit_code, 1,
+        exit_code,
+        1,
         "pre-stream rate limit must map to exit_code=1; got {exit_code}, stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -3966,10 +3967,7 @@ exit 0
         "both malformed asset events should be accumulated: row={row}",
     );
     assert!(
-        diagnostics["log_records_parsed"]
-            .as_u64()
-            .unwrap_or(0)
-            >= 2,
+        diagnostics["log_records_parsed"].as_u64().unwrap_or(0) >= 2,
         "log_records_parsed should count both records: row={row}",
     );
 

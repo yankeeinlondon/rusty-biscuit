@@ -12,11 +12,11 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
 use claudine::stream::logs::{EarlyTermination, StderrBridgeHandle, StderrIngestOutcome};
-use std::sync::mpsc::{Receiver, TryRecvError};
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
 use claudine::stream::progress::{self, HeartbeatPolicy, LiveMetrics};
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use tracing::{Span, info_span};
 
 use super::stream_io::StreamOutput;
@@ -1265,9 +1265,7 @@ fn maybe_emit_stall_warning<F: FnMut(&str)>(
         return false;
     }
     state.last_stall_warning_at = Some(now);
-    let elapsed = now.saturating_duration_since(
-        state.last_event_at.unwrap_or(now),
-    );
+    let elapsed = now.saturating_duration_since(state.last_event_at.unwrap_or(now));
     let secs = elapsed.as_secs();
     drop(state);
     let message = format!(
@@ -1901,11 +1899,15 @@ mod tests {
         let mut emit = |_msg: &str| count.set(count.get() + 1);
 
         // First call past the threshold emits and marks the warning timestamp.
-        assert!(maybe_emit_stall_warning(&metrics, base, threshold, &mut emit));
+        assert!(maybe_emit_stall_warning(
+            &metrics, base, threshold, &mut emit
+        ));
         assert_eq!(count.get(), 1);
 
         // Same-now call: deduped within the same stall episode.
-        assert!(!maybe_emit_stall_warning(&metrics, base, threshold, &mut emit));
+        assert!(!maybe_emit_stall_warning(
+            &metrics, base, threshold, &mut emit
+        ));
         assert_eq!(count.get(), 1);
 
         // Activity resumes — last_event_at advances past the stored warning.
@@ -2019,7 +2021,9 @@ mod tests {
     #[test]
     fn apply_early_termination_rate_limit_sets_usage_limit_summary_fields() {
         use chrono::TimeZone;
-        let reset_at = chrono::Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56).unwrap();
+        let reset_at = chrono::Utc
+            .with_ymd_and_hms(2026, 4, 16, 4, 18, 56)
+            .unwrap();
         let mut summary = StreamExecutionSummary {
             exit_code: 143,
             is_error: false,
@@ -2061,7 +2065,9 @@ mod tests {
             }),
             ..Default::default()
         };
-        let incoming_reset = chrono::Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56).unwrap();
+        let incoming_reset = chrono::Utc
+            .with_ymd_and_hms(2026, 4, 16, 4, 18, 56)
+            .unwrap();
         let termination = EarlyTermination::RateLimit {
             message: "OpenCode usage limit reached".into(),
             reset_at: Some(incoming_reset),

@@ -82,13 +82,20 @@ impl<S: SemanticEventSink> QwenSemanticStreamParser<S> {
         });
     }
 
-    fn handle_message(&mut self, msg: QwenMessage, from_assistant_type: bool, raw_kind: &str, raw: Value) {
+    fn handle_message(
+        &mut self,
+        msg: QwenMessage,
+        from_assistant_type: bool,
+        raw_kind: &str,
+        raw: Value,
+    ) {
         if !from_assistant_type && msg.role.as_deref() != Some("assistant") {
-            self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-                provider: Provider::QwenCode,
-                kind: "message.non_assistant".into(),
-                payload: raw,
-            });
+            self.sink
+                .on_semantic_event(SemanticEvent::ProviderExtension {
+                    provider: Provider::QwenCode,
+                    kind: "message.non_assistant".into(),
+                    payload: raw,
+                });
             return;
         }
         let Some(text) = msg.resolved_text() else {
@@ -222,11 +229,12 @@ impl<S: SemanticEventSink> QwenSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::QwenCode,
-            kind: kind.to_string(),
-            payload,
-        });
+        self.sink
+            .on_semantic_event(SemanticEvent::ProviderExtension {
+                provider: Provider::QwenCode,
+                kind: kind.to_string(),
+                payload,
+            });
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
@@ -408,14 +416,19 @@ mod tests {
         parser
             .feed_line(r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#)
             .unwrap();
-        assert!(matches!(events.lock().unwrap()[0], SemanticEvent::SessionStart { .. }));
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SemanticEvent::SessionStart { .. }
+        ));
     }
 
     #[test]
     fn assistant_message_emits_output_text() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(r#"{"type":"message","role":"assistant","content":[{"text":"Hello from Qwen"}]}"#)
+            .feed_line(
+                r#"{"type":"message","role":"assistant","content":[{"text":"Hello from Qwen"}]}"#,
+            )
             .unwrap();
         assert!(matches!(
             events.lock().unwrap()[0],
@@ -436,7 +449,10 @@ mod tests {
                 r#"{"type":"tool_response","tool_use_id":"q1","status":"success","content":"clean"}"#,
             )
             .unwrap();
-        assert_eq!(kinds(&events.lock().unwrap()), vec!["tool_call", "tool_result"]);
+        assert_eq!(
+            kinds(&events.lock().unwrap()),
+            vec!["tool_call", "tool_result"]
+        );
     }
 
     #[test]
@@ -448,7 +464,11 @@ mod tests {
             )
             .unwrap();
         match &events.lock().unwrap()[0] {
-            SemanticEvent::TurnComplete { duration_ms, token_usage, .. } => {
+            SemanticEvent::TurnComplete {
+                duration_ms,
+                token_usage,
+                ..
+            } => {
                 assert_eq!(*duration_ms, Some(3000));
                 assert_eq!(token_usage.as_ref().unwrap().input, Some(100));
             }
@@ -464,7 +484,10 @@ mod tests {
                 r#"{"type":"system","subtype":"session_start","session_id":"q2","model":"qwen3-coder"}"#,
             )
             .unwrap();
-        assert!(matches!(events.lock().unwrap()[0], SemanticEvent::SessionStart { .. }));
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SemanticEvent::SessionStart { .. }
+        ));
         let summary = parser.finish(0);
         assert_eq!(summary.session_id.as_deref(), Some("q2"));
     }
@@ -495,7 +518,10 @@ mod tests {
     fn malformed_json_emits_warning() {
         let (events, mut parser) = new_parser();
         assert!(parser.feed_line("x").is_ok());
-        assert!(matches!(events.lock().unwrap()[0], SemanticEvent::Warning { .. }));
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SemanticEvent::Warning { .. }
+        ));
     }
 
     #[test]

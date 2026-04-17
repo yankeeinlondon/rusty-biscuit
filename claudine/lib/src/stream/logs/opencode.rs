@@ -120,7 +120,10 @@ pub fn parse_line(line: &str) -> ParsedOpenCodeStderrLine {
         return ParsedOpenCodeStderrLine::RawText(line.to_string());
     };
 
-    let Some(level) = caps.name("level").and_then(|m| LogLevel::from_str(m.as_str())) else {
+    let Some(level) = caps
+        .name("level")
+        .and_then(|m| LogLevel::from_str(m.as_str()))
+    else {
         return ParsedOpenCodeStderrLine::RawText(line.to_string());
     };
 
@@ -154,11 +157,7 @@ pub fn classify(record: &OpenCodeLogRecord) -> LogClassification {
         return classification;
     }
 
-    let service = record
-        .tags
-        .get("service")
-        .map(|s| s.as_str())
-        .unwrap_or("");
+    let service = record.tags.get("service").map(|s| s.as_str()).unwrap_or("");
 
     if (service == "llm" || service == "provider")
         && let Some(classification) = classify_llm_failure(record, service)
@@ -259,9 +258,7 @@ fn extract_value(body: &str, start: usize) -> (String, usize) {
     // or the end of the line.
     let mut cursor = start;
     while cursor < len {
-        if (bytes[cursor] == b' ' || bytes[cursor] == b'\t')
-            && is_tag_boundary(bytes, cursor + 1)
-        {
+        if (bytes[cursor] == b' ' || bytes[cursor] == b'\t') && is_tag_boundary(bytes, cursor + 1) {
             break;
         }
         cursor += 1;
@@ -618,9 +615,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
 
     fn handle_raw(&mut self, line: &str) -> StderrIngestOutcome {
         match classify_raw(line) {
-            LogClassification::UncaughtError { raw_text } => {
-                self.on_uncaught_error(raw_text, None)
-            }
+            LogClassification::UncaughtError { raw_text } => self.on_uncaught_error(raw_text, None),
             _ => StderrIngestOutcome::NotConsumed,
         }
     }
@@ -663,10 +658,7 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
             );
         }
         if !provider_error.is_empty() {
-            extra_map.insert(
-                "provider_error".into(),
-                Value::String(provider_error),
-            );
+            extra_map.insert("provider_error".into(), Value::String(provider_error));
         }
 
         if stdout_seen {
@@ -808,14 +800,16 @@ impl<S: SemanticEventSink> OpenCodeLogBridge<S> {
     ) -> StderrIngestOutcome {
         {
             let mut state = self.state.lock().expect("stderr state poisoned");
-            state.diagnostics.uncaught_errors =
-                state.diagnostics.uncaught_errors.saturating_add(1);
+            state.diagnostics.uncaught_errors = state.diagnostics.uncaught_errors.saturating_add(1);
         }
 
         let mut extra_map = Map::new();
         extra_map.insert("provider".into(), Value::String("opencode".into()));
         extra_map.insert("source".into(), Value::String("stderr_log".into()));
-        extra_map.insert("classification".into(), Value::String("uncaught_error".into()));
+        extra_map.insert(
+            "classification".into(),
+            Value::String("uncaught_error".into()),
+        );
         extra_map.insert("raw".into(), Value::String(raw_text.clone()));
 
         if let Some(record) = record {
@@ -987,7 +981,10 @@ mod tests {
                 ParsedOpenCodeStderrLine::Structured(record) => {
                     assert_eq!(record.level, expected, "{level_str}");
                     assert_eq!(record.delta_ms, 5);
-                    assert_eq!(record.tags.get("service").map(String::as_str), Some("default"));
+                    assert_eq!(
+                        record.tags.get("service").map(String::as_str),
+                        Some("default")
+                    );
                     assert_eq!(record.tags.get("msg").map(String::as_str), Some("ok"));
                 }
                 other => panic!("expected Structured for {level_str}, got {other:?}"),
@@ -1024,12 +1021,18 @@ mod tests {
         let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
             panic!("expected Structured");
         };
-        assert_eq!(record.tags.get("service").map(String::as_str), Some("default"));
+        assert_eq!(
+            record.tags.get("service").map(String::as_str),
+            Some("default")
+        );
         assert_eq!(
             record.tags.get("providerID").map(String::as_str),
             Some("zai-coding-plan")
         );
-        assert_eq!(record.tags.get("modelID").map(String::as_str), Some("glm-5.1"));
+        assert_eq!(
+            record.tags.get("modelID").map(String::as_str),
+            Some("glm-5.1")
+        );
         assert_eq!(record.message, "");
     }
 
@@ -1098,7 +1101,10 @@ mod tests {
         let skill_line = "ERROR 2026-04-15T21:28:30 +0ms service=config skill=/tmp/s.md err=ENOENT failed to load skill";
         let agent_line = "ERROR 2026-04-15T21:28:30 +0ms service=config agent=/tmp/a.md err=ENOENT failed to load agent";
 
-        for (line, expected) in [(skill_line, AssetType::Skill), (agent_line, AssetType::Agent)] {
+        for (line, expected) in [
+            (skill_line, AssetType::Skill),
+            (agent_line, AssetType::Agent),
+        ] {
             let ParsedOpenCodeStderrLine::Structured(record) = parse_line(line) else {
                 panic!("expected Structured for {line}");
             };
@@ -1127,7 +1133,10 @@ mod tests {
                 assert_eq!(status_code, 429);
                 assert_eq!(error_name, "AI_RetryError");
                 let reset = reset_at.expect("reset_at should be parsed");
-                assert_eq!(reset.format("%Y-%m-%d %H:%M:%S").to_string(), "2026-04-16 04:18:56");
+                assert_eq!(
+                    reset.format("%Y-%m-%d %H:%M:%S").to_string(),
+                    "2026-04-16 04:18:56"
+                );
             }
             other => panic!("expected RateLimit, got {other:?}"),
         }
@@ -1413,8 +1422,7 @@ mod tests {
     #[test]
     fn unclassified_structured_line_returns_not_consumed() {
         let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), None);
-        let outcome =
-            bridge.ingest("INFO 2026-04-15T21:28:30 +0ms service=default msg=hello");
+        let outcome = bridge.ingest("INFO 2026-04-15T21:28:30 +0ms service=default msg=hello");
         assert_eq!(outcome, StderrIngestOutcome::NotConsumed);
         assert_eq!(bridge.sink.events.len(), 0);
         let state = bridge.state.lock().unwrap();
@@ -1461,8 +1469,7 @@ mod tests {
     #[test]
     fn rate_limit_after_stdout_emits_warning_no_early_terminate() {
         let (tx, rx) = OpenCodeLogBridge::<RecordingSink>::new_early_terminate_channel();
-        let mut bridge =
-            OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
+        let mut bridge = OpenCodeLogBridge::new(RecordingSink::default(), stdout_seen(), Some(tx));
         let line = r#"ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2026-04-16 04:18:56\"}}"}]}}"#;
         assert_eq!(bridge.ingest(line), StderrIngestOutcome::Consumed);
         assert_eq!(bridge.sink.events.len(), 1);
@@ -1617,7 +1624,10 @@ mod tests {
             } => {
                 assert!(*terminal);
                 assert_eq!(*kind, SemanticErrorKind::Unknown);
-                assert!(!message.contains('\u{1b}'), "ANSI must be stripped: {message}");
+                assert!(
+                    !message.contains('\u{1b}'),
+                    "ANSI must be stripped: {message}"
+                );
                 assert_string(extra, "classification", "uncaught_error");
             }
             other => panic!("expected Error, got {other:?}"),
@@ -1698,10 +1708,10 @@ mod tests {
 
     #[test]
     fn merge_stderr_state_merges_rate_limit_and_yields_rate_limit_badge() {
-        use chrono::TimeZone;
         use crate::events::Provider;
         use crate::stream::badges::BadgeCategory;
         use crate::stream::summary::StreamExecutionSummary;
+        use chrono::TimeZone;
 
         let reset = Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56).unwrap();
         let state = Arc::new(Mutex::new(SharedStderrState {

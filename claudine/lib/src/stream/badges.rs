@@ -158,7 +158,9 @@ pub fn derive_badges(summary: &StreamExecutionSummary, provider: Provider) -> Ve
         }
     }
 
-    let already_has_rate_limit = badges.iter().any(|b| b.category == BadgeCategory::RateLimit);
+    let already_has_rate_limit = badges
+        .iter()
+        .any(|b| b.category == BadgeCategory::RateLimit);
 
     if !already_has_rate_limit
         && let Some(rate_limit) = summary.rate_limit.as_ref()
@@ -205,8 +207,9 @@ pub fn derive_badges(summary: &StreamExecutionSummary, provider: Provider) -> Ve
     }
 
     if let Some(diagnostics) = summary.stderr_diagnostics.as_ref() {
-        let already_has_rate_limit =
-            badges.iter().any(|b| b.category == BadgeCategory::RateLimit);
+        let already_has_rate_limit = badges
+            .iter()
+            .any(|b| b.category == BadgeCategory::RateLimit);
         if !already_has_rate_limit && diagnostics.rate_limit_events > 0 {
             let reset_hint = diagnostics
                 .rate_limit_reset_at
@@ -287,7 +290,8 @@ mod tests {
 
     #[test]
     fn auth_kind_yields_auth_badge_with_dashboard_url() {
-        let summary = summary_with_kind(Provider::Claude, "authentication_error", "Invalid API key");
+        let summary =
+            summary_with_kind(Provider::Claude, "authentication_error", "Invalid API key");
         let badges = derive_badges(&summary, Provider::Claude);
         assert_eq!(badges.len(), 1);
         let badge = &badges[0];
@@ -328,8 +332,7 @@ mod tests {
 
     #[test]
     fn billing_kind_yields_billing_badge() {
-        let summary =
-            summary_with_kind(Provider::Claude, "billing_error", "Insufficient credits");
+        let summary = summary_with_kind(Provider::Claude, "billing_error", "Insufficient credits");
         let badges = derive_badges(&summary, Provider::Claude);
         assert_eq!(badges.len(), 1);
         assert_eq!(badges[0].category, BadgeCategory::Billing);
@@ -371,8 +374,7 @@ mod tests {
 
     #[test]
     fn rate_limit_kind_yields_rate_limit_badge() {
-        let summary =
-            summary_with_kind(Provider::Codex, "rate_limit", "Too many requests");
+        let summary = summary_with_kind(Provider::Codex, "rate_limit", "Too many requests");
         let badges = derive_badges(&summary, Provider::Codex);
         assert_eq!(badges.len(), 1);
         assert_eq!(badges[0].category, BadgeCategory::RateLimit);
@@ -383,8 +385,7 @@ mod tests {
 
     #[test]
     fn permission_kind_yields_permission_badge() {
-        let summary =
-            summary_with_kind(Provider::Gemini, "permission_error", "Access denied");
+        let summary = summary_with_kind(Provider::Gemini, "permission_error", "Access denied");
         let badges = derive_badges(&summary, Provider::Gemini);
         assert_eq!(badges.len(), 1);
         assert_eq!(badges[0].category, BadgeCategory::Permission);
@@ -503,8 +504,11 @@ mod tests {
 
     #[test]
     fn billing_error_does_not_produce_rate_limit_badge() {
-        let summary =
-            summary_with_kind(Provider::Claude, "billing_error", "Credit balance is too low");
+        let summary = summary_with_kind(
+            Provider::Claude,
+            "billing_error",
+            "Credit balance is too low",
+        );
         let badges = derive_badges(&summary, Provider::Claude);
         let rate_limit_count = badges
             .iter()
@@ -567,7 +571,9 @@ mod tests {
                 log_records_parsed: 1,
                 rate_limit_events: 1,
                 rate_limit_reset_at: Some(
-                    chrono::Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56).unwrap(),
+                    chrono::Utc
+                        .with_ymd_and_hms(2026, 4, 16, 4, 18, 56)
+                        .unwrap(),
                 ),
                 ..Default::default()
             }),

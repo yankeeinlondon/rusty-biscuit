@@ -307,9 +307,7 @@ mod tests {
                 model: Some("claude".into()),
                 extra: json!({"provider": "claude"}),
             },
-            SemanticEvent::TurnStart {
-                extra: json!({}),
-            },
+            SemanticEvent::TurnStart { extra: json!({}) },
             SemanticEvent::TurnComplete {
                 provider_status: Some("ok".into()),
                 token_usage: Some(NormalizedTokenUsage {
@@ -397,54 +395,70 @@ mod tests {
         let mut sorted = kinds.clone();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(sorted.len(), kinds.len(), "kind_str must be unique per variant");
+        assert_eq!(
+            sorted.len(),
+            kinds.len(),
+            "kind_str must be unique per variant"
+        );
     }
 
     #[test]
     fn is_activity_excludes_envelope_events() {
-        assert!(!SemanticEvent::SessionStart {
-            session_id: None,
-            model: None,
-            extra: json!({}),
-        }
-        .is_activity());
+        assert!(
+            !SemanticEvent::SessionStart {
+                session_id: None,
+                model: None,
+                extra: json!({}),
+            }
+            .is_activity()
+        );
         assert!(!SemanticEvent::TurnStart { extra: json!({}) }.is_activity());
-        assert!(!SemanticEvent::TurnComplete {
-            provider_status: None,
-            token_usage: None,
-            cost_usd: None,
-            duration_ms: None,
-            extra: json!({}),
-        }
-        .is_activity());
-        assert!(!SemanticEvent::PermissionRequest {
-            kind: None,
-            tool_name: None,
-            extra: json!({}),
-        }
-        .is_activity());
+        assert!(
+            !SemanticEvent::TurnComplete {
+                provider_status: None,
+                token_usage: None,
+                cost_usd: None,
+                duration_ms: None,
+                extra: json!({}),
+            }
+            .is_activity()
+        );
+        assert!(
+            !SemanticEvent::PermissionRequest {
+                kind: None,
+                tool_name: None,
+                extra: json!({}),
+            }
+            .is_activity()
+        );
     }
 
     #[test]
     fn is_activity_includes_work_events() {
-        assert!(SemanticEvent::OutputText {
-            text: "x".into(),
-            extra: json!({}),
-        }
-        .is_activity());
-        assert!(SemanticEvent::ToolCall {
-            name: None,
-            id: None,
-            input: None,
-            extra: json!({}),
-        }
-        .is_activity());
-        assert!(SemanticEvent::ProviderExtension {
-            provider: Provider::Claude,
-            kind: "x".into(),
-            payload: json!({}),
-        }
-        .is_activity());
+        assert!(
+            SemanticEvent::OutputText {
+                text: "x".into(),
+                extra: json!({}),
+            }
+            .is_activity()
+        );
+        assert!(
+            SemanticEvent::ToolCall {
+                name: None,
+                id: None,
+                input: None,
+                extra: json!({}),
+            }
+            .is_activity()
+        );
+        assert!(
+            SemanticEvent::ProviderExtension {
+                provider: Provider::Claude,
+                kind: "x".into(),
+                payload: json!({}),
+            }
+            .is_activity()
+        );
     }
 
     #[test]
@@ -455,7 +469,8 @@ mod tests {
                 serde_json::from_value(value.clone()).expect("deserialize");
             let value2 = serde_json::to_value(&decoded).expect("re-serialize");
             assert_eq!(
-                value, value2,
+                value,
+                value2,
                 "round-trip lost fidelity for kind {}",
                 event.kind_str()
             );
@@ -510,7 +525,9 @@ mod tests {
             let value = serde_json::to_value(&event).unwrap();
             let decoded: SemanticEvent = serde_json::from_value(value).unwrap();
             match decoded {
-                SemanticEvent::Error { kind: decoded_kind, .. } => {
+                SemanticEvent::Error {
+                    kind: decoded_kind, ..
+                } => {
                     assert_eq!(decoded_kind, kind);
                 }
                 other => panic!("expected Error, got {other:?}"),

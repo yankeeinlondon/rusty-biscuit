@@ -571,10 +571,7 @@ mod tests {
         assert_eq!(resolved.name.as_deref(), Some("bash"));
         assert_eq!(resolved.status.as_deref(), Some("completed"));
         let input = resolved.input.expect("input from part.state");
-        assert_eq!(
-            input.get("command").and_then(Value::as_str),
-            Some("ls -la")
-        );
+        assert_eq!(input.get("command").and_then(Value::as_str), Some("ls -la"));
         let output = resolved.output.expect("output from part.state");
         assert_eq!(output.as_str(), Some("file.txt"));
     }

@@ -97,11 +97,12 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::Codex,
-            kind: kind.to_string(),
-            payload,
-        });
+        self.sink
+            .on_semantic_event(SemanticEvent::ProviderExtension {
+                provider: Provider::Codex,
+                kind: kind.to_string(),
+                payload,
+            });
     }
 
     fn handle_thread_started(&mut self, meta: CodexThreadMeta, raw_kind: &str) {
@@ -215,15 +216,29 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
     }
 
     fn handle_file_change_item(&mut self, fc: &CodexFileChange, raw_kind: &str) {
-        let mut extra = self.base_extra(raw_kind);
-        if let Some(id) = &fc.id {
-            extra.insert("id".into(), Value::from(id.as_str()));
+        // Codex emits file_change paths inside a `changes[]` array on
+        // `item.completed`; fan out one FileChange per entry so the stderr
+        // surface shows one line per touched path. Empty payloads (e.g.
+        // bare `item.started` with no path or kind) are dropped rather than
+        // rendered as a context-free "change" line.
+        let entries = fc.resolved_entries();
+        if entries.is_empty() {
+            return;
         }
-        self.sink.on_semantic_event(SemanticEvent::FileChange {
-            path: fc.resolved_path().map(String::from),
-            change_kind: fc.resolved_kind().map(String::from),
-            extra: Value::Object(extra),
-        });
+        for (path, change_kind) in entries {
+            let mut extra = self.base_extra(raw_kind);
+            if let Some(id) = &fc.id {
+                extra.insert("id".into(), Value::from(id.as_str()));
+            }
+            if let Some(status) = &fc.status {
+                extra.insert("status".into(), Value::from(status.as_str()));
+            }
+            self.sink.on_semantic_event(SemanticEvent::FileChange {
+                path,
+                change_kind,
+                extra: Value::Object(extra),
+            });
+        }
     }
 
     fn handle_plan_update_item(&mut self, p: &CodexPlanUpdate, raw_kind: &str) {
@@ -237,12 +252,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         });
     }
 
-    fn handle_permission_item(
-        &mut self,
-        perm: &CodexPermissionItem,
-        kind: &str,
-        raw_kind: &str,
-    ) {
+    fn handle_permission_item(&mut self, perm: &CodexPermissionItem, kind: &str, raw_kind: &str) {
         if kind == "user_input" {
             self.user_input_prompts += 1;
         } else {
@@ -250,11 +260,12 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         }
         let mut extra = self.base_extra(raw_kind);
         extra.insert("permission_kind".into(), Value::from(kind));
-        self.sink.on_semantic_event(SemanticEvent::PermissionRequest {
-            kind: Some(kind.to_string()),
-            tool_name: perm.name.clone(),
-            extra: Value::Object(extra),
-        });
+        self.sink
+            .on_semantic_event(SemanticEvent::PermissionRequest {
+                kind: Some(kind.to_string()),
+                tool_name: perm.name.clone(),
+                extra: Value::Object(extra),
+            });
     }
 
     fn tool_call_from_fields(&self, fields: &CodexToolItemFields, raw_kind: &str) -> SemanticEvent {
@@ -276,7 +287,11 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         }
     }
 
-    fn tool_result_from_fields(&self, fields: &CodexToolItemFields, raw_kind: &str) -> SemanticEvent {
+    fn tool_result_from_fields(
+        &self,
+        fields: &CodexToolItemFields,
+        raw_kind: &str,
+    ) -> SemanticEvent {
         let mut extra = self.base_extra(raw_kind);
         if let Some(id) = fields.resolved_tool_id() {
             extra.insert("tool_id".into(), Value::from(id));
@@ -649,7 +664,10 @@ mod tests {
         };
         (
             events,
-            Box::new(CodexSemanticStreamParser::new(sink, Some("codex-mini".into()))),
+            Box::new(CodexSemanticStreamParser::new(
+                sink,
+                Some("codex-mini".into()),
+            )),
         )
     }
 
@@ -730,15 +748,55 @@ mod tests {
         let collected = events.lock().unwrap().clone();
         match &collected[0] {
             SemanticEvent::FileChange {
-                path,
-                change_kind,
-                ..
+                path, change_kind, ..
             } => {
                 assert_eq!(path.as_deref(), Some("src/lib.rs"));
                 assert_eq!(change_kind.as_deref(), Some("modified"));
             }
             other => panic!("expected FileChange, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn file_change_item_fans_out_per_changes_entry() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"item.completed","item":{"id":"f1","type":"file_change","changes":[{"path":"src/lib.rs","kind":"update"},{"path":"tests/smoke.rs","kind":"add"}],"status":"completed"}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let file_changes: Vec<_> = collected
+            .iter()
+            .filter_map(|e| match e {
+                SemanticEvent::FileChange {
+                    path, change_kind, ..
+                } => Some((path.clone(), change_kind.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            file_changes,
+            vec![
+                (Some("src/lib.rs".into()), Some("update".into())),
+                (Some("tests/smoke.rs".into()), Some("add".into())),
+            ]
+        );
+    }
+
+    #[test]
+    fn file_change_item_without_path_or_kind_is_suppressed() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"item.started","item":{"id":"f1","type":"file_change"}}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(
+            !collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::FileChange { .. })),
+            "empty file_change must not emit a FileChange event"
+        );
     }
 
     #[test]
@@ -831,9 +889,7 @@ mod tests {
         let (call_name, call_input) = evs
             .iter()
             .find_map(|e| match e {
-                SemanticEvent::ToolCall { name, input, .. } => {
-                    Some((name.clone(), input.clone()))
-                }
+                SemanticEvent::ToolCall { name, input, .. } => Some((name.clone(), input.clone())),
                 _ => None,
             })
             .expect("ToolCall emitted");
@@ -906,7 +962,10 @@ mod tests {
             )
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(matches!(collected[0], SemanticEvent::Error { terminal: true, .. }));
+        assert!(matches!(
+            collected[0],
+            SemanticEvent::Error { terminal: true, .. }
+        ));
         let summary = parser.finish(1);
         assert!(summary.is_error);
         assert_eq!(summary.error_kind.as_deref(), Some("rate_limit"));
@@ -1004,9 +1063,7 @@ mod tests {
         let (events, mut parser) = new_parser();
         let result = parser.feed_line("not json");
         assert!(result.is_ok());
-        parser
-            .feed_line(r#"{"type":"turn.started"}"#)
-            .unwrap();
+        parser.feed_line(r#"{"type":"turn.started"}"#).unwrap();
         let ks = kinds(&events.lock().unwrap());
         assert_eq!(ks, vec!["warning", "turn_start"]);
     }
@@ -1025,7 +1082,9 @@ mod tests {
         let collected = events.lock().unwrap().clone();
         assert_eq!(kinds(&collected), vec!["tool_call", "tool_result"]);
         match &collected[1] {
-            SemanticEvent::ToolResult { status, exit_code, .. } => {
+            SemanticEvent::ToolResult {
+                status, exit_code, ..
+            } => {
                 assert_eq!(status.as_deref(), Some("success"));
                 assert_eq!(*exit_code, Some(0));
             }
@@ -1078,11 +1137,18 @@ mod tests {
         let captured = events.lock().unwrap().clone();
         let ks = kinds(&captured);
         assert_eq!(
-            ks, vec!["tool_call", "tool_result"],
+            ks,
+            vec!["tool_call", "tool_result"],
             "command_execution must route to paired ToolCall + ToolResult, got {ks:?}"
         );
 
-        let SemanticEvent::ToolResult { status, exit_code, output, .. } = &captured[1] else {
+        let SemanticEvent::ToolResult {
+            status,
+            exit_code,
+            output,
+            ..
+        } = &captured[1]
+        else {
             panic!("expected ToolResult as second event, got {:?}", captured[1]);
         };
         assert_eq!(status.as_deref(), Some("success"));
@@ -1112,15 +1178,18 @@ mod tests {
 
     #[test]
     fn codex_fixture_full_replay_produces_no_provider_extensions() {
-        let fixture = std::fs::read_to_string(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/providers/codex.ndjson"),
-        )
+        let fixture = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/providers/codex.ndjson"
+        ))
         .expect("codex.ndjson must exist — Task 1 should have created it");
 
         let (events, mut parser) = new_parser();
         for (i, line) in fixture.lines().enumerate() {
             let line = line.trim();
-            if line.is_empty() { continue; }
+            if line.is_empty() {
+                continue;
+            }
             parser
                 .feed_line(line)
                 .unwrap_or_else(|e| panic!("line {}: {:?}", i + 1, e));
