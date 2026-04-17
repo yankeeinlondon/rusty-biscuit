@@ -146,6 +146,7 @@ review feat="":
     fi
     feature="$(basename "${dir}")"
     feature="$(just _title_case ${feature#????-??-??-})"
+    agent="$(just _choose_agent)"
 
     echo -e "🏃‍♂️ Starting review for the {{bold}}{{yellow}}${feature}{{reset}} feature"
     echo
@@ -153,7 +154,7 @@ review feat="":
     [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
     echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
 
-    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})" }"
+    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})"
     echo
     echo "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
     echo
