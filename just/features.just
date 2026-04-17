@@ -29,6 +29,7 @@ _choose_agent:
     #!/usr/bin/env bash
     set -euo pipefail
     agent="$(echo "{{agents}}" | fzf --height=15 --border --border-label 'Choose the Agent to use')"
+    echo "${agent}"
 
 
 # ask user to choose a spec file
@@ -36,9 +37,20 @@ _choose_spec filter="":
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "{{filter}}" ]]; then
-        file="$(fd -g '*spec*\.md'  |  fzf --height=15 --border --border-label 'Choose a spec or design file' )"
+        file="$(fd -g '*spec*\.md'  |  fzf --height=15 --border --border-label 'Choose a spec file' )"
     else
         file="$(fd -g '*spec*\.md' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the spec file' )"
+    fi
+    echo "${file}"
+
+# ask user to choose a plan file
+_choose_plan filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "{{filter}}" ]]; then
+        file="$(fd -g '*plan*\.md'  |  fzf --height=15 --border --border-label 'Choose a plan file' )"
+    else
+        file="$(fd -g '*plan*\.md' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the plan file' )"
     fi
     echo "${file}"
 
@@ -71,10 +83,40 @@ clarify filter="":
     link="$(just _link $(basename "${file}") "${file}")"
     echo -e "The {{blue}}${link}{{reset}} file has been {{italic}}clarified{{reset}}"
 
+# implements a plan, phase by phase
+implement-plan filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    plan="$(just _choose_plan "{{filter}}")"
+    phases="$(md get "${plan}" phases)"
+    link="$(just _link "${plan}" "$(just _abs_path "${plan}")")"
+
+    echo -e "Implementing the {{blue}}${link}{{reset}} plan"
+    echo -e "- will be run {{italic}}phase{{reset}} by {{italic}}phase{{reset}} ({{italic}}{{dim}}${phases} phases{{reset}})"
+
+    agent="$(just _choose_agent)"
+    echo -e "Will call the {{bold}}${agent} agent to implement each phase"
+    echo
+    current="$(md get "${plan}" starting_phase || 1)"
+    while true; do
+        claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} --${agent} -y
+        echo
+        git add .
+        just commit
+        echo
+        [[ ${current} -ge ${phases} ]] && break
+        ((current++))
+    done
+    echo
+    echo -e "The {{blue}}${link}{{reset}} plan has completed ({{dim}}{{italic}}phases{{reset}})"
+    echo
+
+
 
 # Specify a feature with a spec file, a design file, or both which has now been implemented
 # and you want to run a review on.
-review-feature feat="":
+review feat="":
     #!/usr/bin/env bash
     set -euo pipefail
     doc="$(just _choose_feature {{feat}}'')"
@@ -111,7 +153,7 @@ review-feature feat="":
     [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
     echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
 
-    claudine compose "@prompts/review-feature.md" -y --set "{ dir: \"${dir}\", spec: \"$(basename ${spec})\", design: \"$(basename ${design})\" }"
+    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})" }"
     echo
     echo "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
     echo
@@ -163,21 +205,21 @@ implement-review-suggestions feat="" iteration="1":
     echo
 
 # adds a complimentary tech design to the specification file
-design-feature spec="" agent="":
+design filter="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ -z "{{spec}}" ]]; then
-        file="$(just _choose_spec features)"
+    if [[ -z "{{filter}}" ]]; then
+        file="$(just _choose_spec)"
     else
-        file="$(just _choose_spec features "{{spec}}")"
+        file="$(just _choose_spec "{{filter}}")"
     fi
 
     use_agent="$(echo "{{agents}}" | fzf --border --border-label "Choose an Agent")"
 
     dir="$(dirname ${file})"
     echo
-    echo -e "Designing the feature from the spec file: {{blue}}${file}{{reset}}. Using {{bold}}{{agent}}{{reset}} agent."
+    echo -e "Creating a technical design from the spec file: {{blue}}${file}{{reset}}. Using {{bold}}${use_agent}{{reset}} agent."
     claudine compose @prompts/design.md --${use_agent} -y --set "{ spec: \"${file}\", dir: \"${dir}\"  }"
     echo
     link="$()"
@@ -186,32 +228,8 @@ design-feature spec="" agent="":
         plan-feature "${file}" "${dir}/tech-design.md"
     fi
 
-# adds a complimentary tech design to the specification file
-design-fix spec="" agent="codex":
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    if [[ -z "{{spec}}" ]]; then
-        file="$(just _choose_spec fixes)"
-    else
-        file="$(just _choose_spec fixes "{{spec}}")"
-    fi
-
-    use_agent="$(echo "{{agents}}" | fzf --border --border-label "Choose an Agent")"
-
-    dir="$(dirname ${file})"
-    echo
-    echo -e "Designing the feature from the spec file: {{blue}}${file}{{reset}}. Using {{bold}}{{agent}}{{reset}} agent."
-    claudine compose @prompts/design.md --{{agent}} -y --set "{ spec: \"${file}\", dir: \"${dir}\"  }"
-    echo
-    echo -e "We now have a **technical design** document for this specification"
-    if [[ "$(just _confirm "Are you ready to create a plan for this feature?")" == "y" ]]; then
-        plan-feature "${file}" "${dir}/tech-design.md"
-    fi
-
-
 # Helps to fill in the details of your specification so that it fully articulates your requirements
-clarify-spec spec="":
+clarify spec="":
     #!/usr/bin/env bash
     set -euo pipefail
 
