@@ -26,6 +26,8 @@ Today Claudine installs a static completion script via `clap_complete::generate`
 - Setter-value completion.
 - Position-aware setter suppression (suppressing file candidates *after* the positional file reference has already been matched earlier on the command line).
 - HOME walk beyond the two hardcoded paths `~/.claudine/prompts` and `~/.claudine/sequences`.
+- `%` recursive-prefix support — user types the character literally; no expanded recursive walk is performed by completion.
+- `{{ENV}}` / `{{VAR}}` environment-variable interpolation — user types it literally; completion does not expand variables before scoping candidates.
 
 ## Commands affected
 
@@ -67,13 +69,23 @@ The completion scope depends on the sigil in the user's current partial:
 | *(empty — bare `<TAB>`)* | Depth-1 listing of: repo root; cwd; `<repo>/prompts/` (if present); `<repo>/sequences/` (if present); `<package-area>/prompts/` (if present) for every package area; `<package-area>/sequences/` (if present) for every package area. |
 | `./` or `../` | cwd-relative walk, standard filesystem path completion semantics. |
 | `@` (magic) | Recursive walk of: repo root (all subdirectories); `~/.claudine/prompts`; `~/.claudine/sequences`. Subject to the skip list and walk bounds below. |
-| `!` (package) | Package-area walk only, corresponding to `FileReference::Package` resolution. |
+| `!` (package) | Walk rooted at the package area containing cwd (as resolved by `sniff::filesystem::repo::package_area_for_dir`). If cwd is not inside any package area, the result is zero candidates. |
 | `vault:` | **Out of scope for v1.** No candidates produced; the user types the remainder literally. |
 | Absolute path (`/…`) | **Out of scope for v1.** No candidates produced. |
+| `%` (recursive prefix) | **Out of scope for v1.** No candidates produced; user types the character literally. |
+| `{{VAR}}` (env interpolation) | **Out of scope for v1.** No candidates produced; user types the interpolation literally. |
 
 ### Package-area semantics
 
-"Package area" means a top-level directory in the workspace that hosts a Cargo package (e.g. `claudine/`, `darkmatter/`, `biscuit-file/`). The authoritative enumeration is given in the `Monorepo Structure` section of `CLAUDE.md`, but the completion code **must not** hard-code the list. Package areas should be discovered at runtime — for example via `cargo metadata --no-deps --format-version 1`, or by scanning top-level directories for a `Cargo.toml`. The discovery mechanism is an implementation choice but must remain resilient to new areas being added without a `claudine` rebuild.
+"Package area" means a top-level directory in the workspace that hosts a Cargo package (e.g. `claudine/`, `darkmatter/`, `biscuit-file/`). The authoritative enumeration is given in the `Monorepo Structure` section of `CLAUDE.md`, but the completion code **must not** hard-code the list.
+
+Package-area discovery is delegated to the `sniff` library. The CLI equivalent is `sniff repo package-area` (source: `sniff/cli/src/args.rs`); the library entry point is `sniff::filesystem::repo::package_area_for_dir(&Path) -> Option<&str>` (source: `sniff/lib/src/filesystem/repo/types.rs:272`). Completion must call the library function directly, not shell out.
+
+This makes the notion of "package area" consistent with the rest of the repo's tooling — no divergent definition inside claudine.
+
+### `!` sigil resolution
+
+The `!` sigil resolves to the package area containing cwd, using `sniff::filesystem::repo::package_area_for_dir`. This mirrors `FileReference::Package` resolution exactly — no cross-area fallback, and no "list across all package areas when ambiguous" behavior. If cwd is not inside any package area, the completion produces zero candidates.
 
 ### Walk bounds
 
@@ -146,11 +158,12 @@ A concrete end-to-end latency budget (e.g. "p95 completion response under X ms o
 - **HOME walk expansion.** Today only `~/.claudine/prompts` and `~/.claudine/sequences` are in scope for `@`. Should other well-known user-scope directories participate?
 - **Latency budget.** Pick a concrete p95 ceiling after measuring.
 - **Static-fallback retention.** Decide whether to keep `clap_complete::generate` as a secondary install path.
-- **Discovery mechanism for package areas.** `cargo metadata` vs. directory scan vs. a baked-in allowlist refreshed at build time — pick one and document the tradeoff.
+- **`%` recursive-prefix completion.** Should `%@prompts/` walk recursively where `@prompts/` walks non-recursively? Deferred; revisit once the base `@` behavior is in production.
+- **`{{ENV}}` interpolation.** Should completion expand `{{HOME}}/prompts/<TAB>` using the caller's environment before resolving candidates? Touches shell semantics; deferred.
 
 ## Dependencies and risks
 
 - **`clap_complete` `unstable-dynamic`.** The dynamic completion engine is behind an explicitly unstable feature flag. Upstream API changes may force a rework of the `CompletionCandidates` wiring. Pin the `clap_complete` version and track its release notes.
 - **Bootstrap install flow is new.** Users upgrading from the static generator will need to re-install their completion snippet. Release notes must call this out prominently.
 - **Frontmatter parsing at completion time.** `inline-compose` and `sequence` completion introduce disk I/O and YAML parsing into the `<TAB>` path. The prefix filter, size cap, and result cap together bound the cost, but the introduction itself is a departure from pure path completion. Measurement before rollout is essential.
-- **Package-area discovery.** Runtime discovery via `cargo metadata` adds a subprocess invocation per completion session unless cached. A directory-scan fallback avoids the subprocess but risks drifting from the true workspace membership. Choose deliberately.
+- **`sniff` as a build-time dependency of `claudine-cli`.** Completion requires `sniff` at runtime to resolve package areas. If `sniff` is not already a claudine-cli dependency, adding it will enlarge the compilation footprint of the CLI. Verify whether `claudine-cli` already depends on `sniff` (directly or transitively) before treating this as a new cost.
