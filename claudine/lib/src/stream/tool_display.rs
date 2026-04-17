@@ -35,6 +35,11 @@ pub enum ToolStatus {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolCallDisplay {
     pub direction: ToolDirection,
+    /// Raw provider-side tool name (e.g. `"Read"`, `"read_file"`,
+    /// `"Bash"`). Preserved alongside [`Self::display_name`] so renderers
+    /// can classify the tool (file vs shell vs generic) without having
+    /// to reverse-engineer the humanized label.
+    pub raw_name: String,
     pub display_name: String,
     pub summary: Option<String>,
     pub status: Option<ToolStatus>,
@@ -61,6 +66,7 @@ mod tests {
     fn struct_round_trips_via_clone_and_eq() {
         let display = ToolCallDisplay {
             direction: ToolDirection::Incoming,
+            raw_name: "firecrawl_firecrawl_search".into(),
             display_name: "Firecrawl Search".into(),
             summary: Some("NFL draft 2026 date".into()),
             status: Some(ToolStatus::Success),
@@ -502,6 +508,7 @@ impl ToolCallDisplay {
             .and_then(|v| extract_tool_summary(raw_name, v));
         Some(Self {
             direction: ToolDirection::Outgoing,
+            raw_name: raw_name.to_string(),
             display_name,
             summary,
             status: None,
@@ -544,7 +551,18 @@ impl ToolCallDisplay {
             "pending" | "running" | "in_progress" => Some(ToolStatus::Pending),
             _ => None,
         });
-        let summary = if parsed_status.is_some() {
+        let summary = if is_file_tool_name(raw_name) {
+            // File tools carry the file path as their summary. Keep it
+            // populated regardless of status so renderers can annotate
+            // `← Read(successful, <path>)` and `← Read(error, <path>)`
+            // with the same file reference the outgoing `→ Read(<path>)`
+            // used. The raw output body is never used here — only the
+            // structured `file_path` input — so there is no risk of
+            // leaking raw bytes into the status slot.
+            extra
+                .get("input")
+                .and_then(|v| extract_tool_summary(raw_name, v))
+        } else if parsed_status.is_some() {
             None
         } else {
             // Status absent: fall back to a derived output summary.
@@ -560,12 +578,37 @@ impl ToolCallDisplay {
         };
         Some(Self {
             direction: ToolDirection::Incoming,
+            raw_name: raw_name.to_string(),
             display_name,
             summary,
             status: parsed_status,
             error_detail,
         })
     }
+
+    /// Return `true` when the tool operates on a file path that the
+    /// renderer should turn into an OSC8 link (e.g. `Read`, `Write`,
+    /// `Edit`, Codex's `read_file` / `write_file`, Gemini's
+    /// `replace_file_content`).
+    pub fn is_file_tool(&self) -> bool {
+        is_file_tool_name(&self.raw_name)
+    }
+}
+
+/// Canonical set of file-path tool names across the providers Claudine
+/// parses. Centralised so rendering + summary extraction share one list.
+pub fn is_file_tool_name(raw: &str) -> bool {
+    matches!(
+        raw,
+        "Read"
+            | "Write"
+            | "Edit"
+            | "NotebookEdit"
+            | "read_file"
+            | "write_file"
+            | "edit_file"
+            | "replace_file_content"
+    )
 }
 
 /// Derive a short (≤160 chars) error snippet for an incoming error event.
