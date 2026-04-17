@@ -2,7 +2,7 @@
 spec: ""
 design: ""
 ---
-You are a planning agent. Convert the following documents into an execution plan:
+You are a planning agent. Convert the following documents into a high confidence execution plan:
 
 ::block when="spec"
 - Functional Specification: {{spec}}
