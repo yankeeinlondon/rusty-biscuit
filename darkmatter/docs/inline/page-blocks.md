@@ -1,9 +1,14 @@
 # Page Blocks
 
-In Darkmatter you can specify start and end blocks in a page and then add:
+Page blocks let you keep conditional regions directly inside a Markdown document. During composition, Darkmatter evaluates each block and either keeps its body content or removes it entirely.
 
-- conditional expressions which determine if the block will be rendered when _composed_
-- NOTE: we may add other features for these blocks in the future but for now they're mainly for conditional rendering.
+The syntax is:
+
+```md
+::block when="..."
+content
+::end-block
+```
 
 ## Example Blocks
 
@@ -22,25 +27,60 @@ Bar is the best
 ::end-block
 ```
 
-## Parameters Attributes
+## Options
 
-1. `when`
+### `when`
 
-    The primary use case for using page blocks is 
+The `when` option controls whether the block body is kept.
 
-2. FUTURE: more later
+```md
+::block when="draft"
+This renders only when `draft` is truthy.
+::end-block
+```
 
+If `when` is omitted, the block is treated as enabled and its body is rendered.
 
-## Conditional Logic
+## Nesting
 
-The conditional logic in the `when` variable is the same conditional logic provided by the [block transclusion](../transclusion/block-transclusion.md#conditional-transclusion)'s `when` clauses. 
+Page blocks can be nested. Inner blocks are only evaluated if their parent block rendered.
+
+```md
+::block when="outer"
+Outer content
+
+::block when="inner"
+Inner content
+::end-block
+
+::end-block
+```
+
+## Boolean Conditional Logic
+
+The `when` expression uses Darkmatter's shared [Boolean Conditional Logic](../topics/boolean-conditional-logic.md) system. That same evaluator is also used by block transclusion.
+
+Common examples:
+
+```md
+::block when="env.AGENT"
+display when the AGENT environment variable is set
+::end-block
+
+::block when="env.AGENT == 'claude'"
+display when the AGENT environment variable is equal to `claude`
+::end-block
+
+::block when="And(draft, user.role == 'admin')"
+display only when both conditions are true
+::end-block
+```
 
 ### ENV variables
 
-In the prior example we showed conditional comparisons we made to frontmatter properties but we can also compare against environment variables:
+Environment variables are available under `env.*`:
 
 ```md
-
 ::block when="env.AGENT"
 display when the AGENT environment variable is set
 ::end-block
@@ -48,3 +88,10 @@ display when the AGENT environment variable is set
 ::block when="env.AGENT == 'claude'"
 display when the AGENT environment variable is equal to 'claude'
 ::end-block
+```
+
+## Notes
+
+- Page blocks are ignored inside fenced code blocks.
+- Unknown page-block options are reported as warnings during composition.
+- Page blocks run before later inline stages such as body interpolation, so a false block is removed before its inner content can be interpolated or otherwise processed.

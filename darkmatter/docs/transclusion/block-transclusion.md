@@ -126,31 +126,23 @@ And then finally the maybe most powerful option/key is `when` which provides _co
 
 #### Conditional Transclusion
 
-The `when` option allows you to express a condition which must equal `true` for the transclusion to be included. When a condition reaches a `false` outcome then nothing is rendered (and the transclusion reference is removed).
+The `when` option allows you to express a condition which must evaluate to `true` for the transclusion to be included. When the condition is false, nothing is rendered and the directive is removed.
 
-The conditional logic provided for is based on the values of frontmatter and in the same way that the [interpolation](./interpolation.md) stage got some helpful utility properties injected into the frontmatter for interpolation, we get that SAME `ctx` and `env` based frontmatter dictionaries made available here.
+Transclusion uses Darkmatter's shared [Boolean Conditional Logic](../topics/boolean-conditional-logic.md) evaluator. That same evaluator is also used by page blocks, so `when=` behaves consistently across both features.
 
-Logic operations include:
+Conditions can read from:
 
-- `{property} == {property}` equality
-- `{property} != {property}` not equal
-- `{property} > {property}` - greater than (_properties which are unable to be converted to a number are converted to 0_)
-- `{property} >= {property}` - greater than or equal (_properties which are unable to be converted to a number are converted to 0_)
-- `{property} < {property}` - less than (_properties which are unable to be converted to a number are converted to 0_)
-- Unary ops
-    - `{property}` truthy evaluation
-    - `!{property}` falsy evaluation
-- Functions
-    - `HasKey({property}, key)` - _tests whether property is a dictionary and "has" the specified "key"_
-    - `Contains({property}, value)`  - _tests whether a property is an array or an object and whether one of it's elements/values is the value specified_
-    - `Length({property})`
-        - if the property is an array then the numeric value represents the length of the array
-        - if the property is a dictionary then the numeric value represents the number _keys_ in the dictionary
-        - in both numeric and string values it returns the character length
-        - in boolean values it return 0
-- Combinators
-    - `And(a,b,c)` - _a tuple of properties or operations which are each evaluated to a true/false value and if ALL are `true` then the resultant value is `true`_
-    - `Or(a,b,c)` - _a tuple of properties or operations which are each evaluated to a true/false value and if ANY are `true` then the resultant value is `true`_
+- frontmatter and inherited compose state
+- `ctx.*` runtime context variables
+- `env.*` environment variables
+
+Common patterns include:
+
+- equality checks like `stage == 'draft'`
+- env gates like `env.AGENT == 'claude'`
+- truthy checks like `draft`
+- negation like `!env.AGENT`
+- compound conditions like `And(release.enabled, env.CI)`
 
 Example:
 
@@ -160,8 +152,10 @@ Example:
 
 in this example:
 
-- the two frontmatter variables are evaluated to see if they are _truthy_
+- the two environment variables are evaluated to see if they are _truthy_
 - if either one is then the condition result in a `true` outcome and the transclusion is executed
+
+For the full grammar, truthiness rules, supported operators, functions, and edge cases, see [Boolean Conditional Logic](../topics/boolean-conditional-logic.md).
 
 ## Non Markdown Local Files
 
