@@ -18,6 +18,7 @@ pub enum RepoAction {
     GitStatus {
         history: usize,
         refresh_remotes: bool,
+        compact: bool,
         package: Option<String>,
     },
     Hash {
@@ -587,6 +588,9 @@ pub enum RepoSubcommand {
         /// Fetch remotes to check if branches are out of sync
         #[arg(long)]
         refresh_remotes: bool,
+        /// Only render the Status section
+        #[arg(long)]
+        compact: bool,
         /// Scope git view to a specific package or package area
         #[arg(short, long, value_name = "PKG")]
         package: Option<String>,
@@ -1017,10 +1021,12 @@ impl Commands {
                 Some(RepoSubcommand::GitStatus {
                     history,
                     refresh_remotes,
+                    compact,
                     package,
                 }) => RepoAction::GitStatus {
                     history: *history,
                     refresh_remotes: *refresh_remotes,
+                    compact: *compact,
                     package: package.clone(),
                 },
                 Some(RepoSubcommand::Hash { sha }) => RepoAction::Hash { sha: sha.clone() },
@@ -1344,6 +1350,7 @@ Structure:
 Git:
   sniff repo git-status               Show git status and recent commits
   sniff repo git-status --history 20  Show more commits
+  sniff repo git-status --compact     Show only the Status section
   sniff repo hash HEAD                Show latest commit details
   sniff repo staged-files             List staged files
   sniff repo unstaged-files           List unstaged files
@@ -2040,6 +2047,7 @@ mod tests {
                     Some(RepoSubcommand::GitStatus {
                         history,
                         refresh_remotes,
+                        compact,
                         package,
                     }),
                 ..
@@ -2047,6 +2055,7 @@ mod tests {
             {
                 assert_eq!(history, DEFAULT_COMMIT_COUNT);
                 assert!(!refresh_remotes);
+                assert!(!compact);
                 assert!(package.is_none());
             } else {
                 panic!("Expected repo git-status");
@@ -2061,6 +2070,7 @@ mod tests {
                 "--history",
                 "20",
                 "--refresh-remotes",
+                "--compact",
                 "--package",
                 "homelab",
             ])
@@ -2070,6 +2080,7 @@ mod tests {
                     Some(RepoSubcommand::GitStatus {
                         history,
                         refresh_remotes,
+                        compact,
                         package,
                     }),
                 ..
@@ -2077,6 +2088,7 @@ mod tests {
             {
                 assert_eq!(history, 20);
                 assert!(refresh_remotes);
+                assert!(compact);
                 assert_eq!(package.as_deref(), Some("homelab"));
             } else {
                 panic!("Expected repo git-status with flags");
@@ -2178,6 +2190,7 @@ mod tests {
                 repo_subcommand: Some(RepoSubcommand::GitStatus {
                     history: 25,
                     refresh_remotes: true,
+                    compact: true,
                     package: Some("homelab".to_string()),
                 }),
             };
@@ -2185,10 +2198,12 @@ mod tests {
                 Some(RepoAction::GitStatus {
                     history,
                     refresh_remotes,
+                    compact,
                     package,
                 }) => {
                     assert_eq!(history, 25);
                     assert!(refresh_remotes);
+                    assert!(compact);
                     assert_eq!(package.as_deref(), Some("homelab"));
                 }
                 _ => panic!("Expected GitStatus action"),
