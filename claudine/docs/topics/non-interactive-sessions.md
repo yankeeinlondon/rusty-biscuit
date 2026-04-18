@@ -194,6 +194,8 @@ Anything unmatched defaults to `Unknown`, which renders as a red `Agent Error` b
 
 Assistant text reaches stdout through [`StreamTextRenderer`](../../cli/src/commands/wrap/exec.rs). It accumulates lines into a block buffer and renders them through Darkmatter at boundaries (paragraph break, code-fence close, stream-safe list item). Partial trailing lines stream raw the moment they arrive, so the user sees progress as the agent types.
 
+When a streamed fragment is rendered as its own Markdown document, Darkmatter may add a trailing blank line that was not present in the provider's source text. `StreamTextRenderer` trims those synthetic trailing blank lines back to the provider-authored newline count before writing to stdout, which keeps standalone headings and list items from turning into loose, double-spaced output during streaming.
+
 ### Sentence-Level Early Flush
 
 For non-fenced prose, the renderer additionally flushes when the buffered block has grown past the `SENTENCE_FLUSH_MIN_BYTES` threshold (200 bytes today) **and** the latest line ends with sentence-terminating punctuation (`.`, `!`, `?`, optionally followed by a closing quote / bracket / parenthesis). This keeps long single-paragraph monologues streaming in roughly sentence-sized chunks instead of waiting for a blank-line boundary, while short responses (`"OK."`) and lines without terminators stay buffered. Code fences and list items are excluded — those branches return earlier in `process_line`.
@@ -215,6 +217,20 @@ When the heartbeat thread observes that `last_event_at` has been stale for at le
 Dedup uses [`progress::should_warn_stall`](../../lib/src/stream/progress.rs): the warning re-fires only after activity resumes (`last_event_at` advances past the stored `last_stall_warning_at`) and the stream stalls again. Override the threshold with `CLAUDINE_STALL_TIMEOUT_SECONDS=<seconds>`.
 
 The current implementation is stderr-only — the warning does not yet flow through `SemanticEventSink` for dispatch / JSONL logging, because the heartbeat thread does not own the sink. Promoting it to a real `SemanticEvent::Warning` is a follow-up that requires plumbing a thread-safe event injector through the parser-thread / heartbeat-thread boundary.
+
+### OpenCode Silent-Stall Recovery
+
+OpenCode has an additional recovery path because its structured stdout stream is not a reliable process-lifecycle contract:
+
+- Some successful runs end on `step_finish.part.reason = "stop"` and then never exit cleanly.
+- Some subagent-heavy runs go completely silent after the last visible `Task(...)` completion even though the parent process remains alive.
+
+To avoid indefinite hangs in those cases, Claudine's OpenCode wait loop now polls `LiveMetricsState` while it waits for process exit:
+
+- If OpenCode has already reported `provider_status = "stop"` and then stays silent for the normal stall window (default **120 s**), Claudine terminates the hung process and treats the run as successful.
+- If OpenCode has no visible in-flight work and stays silent for the hard recovery window (default **300 s**), Claudine terminates the process and synthesizes `error_kind = "provider_stalled"`.
+
+Set `CLAUDINE_OPENCODE_HANG_TIMEOUT_SECONDS=<seconds>` to override the hard silent-stall recovery window.
 
 ## Heartbeat
 

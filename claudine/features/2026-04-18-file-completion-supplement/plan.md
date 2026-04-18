@@ -1,7 +1,7 @@
 ---
 phases: 6
 created: 2026-04-18
-start_phase: 1
+start_phase: 2
 source_files_during_phase_1: []
 docs_updated_during_phase_1:
   - claudine/features/2026-04-18-file-completion-supplement/plan.md
@@ -11,10 +11,12 @@ source_files_during_phase_2:
   - biscuit-file/lib/src/file_reference/mod.rs
   - biscuit-file/lib/src/file_reference/context.rs
   - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/src/lib.rs
   - biscuit-file/lib/tests/implicit_relative.rs
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase2: []
+packages_during_phase_2: [biscuit-file]
 source_files_during_phase_3:
   - sniff/lib/src/filesystem/docs.rs
   - sniff/lib/src/filesystem/mod.rs
