@@ -542,8 +542,7 @@ pub fn print_pretty(metadata: &TerminalMetadata, verbose: u8) {
         );
         println!(
             "  TERM_PROGRAM: {}",
-            std::env::var("TERM_PROGRAM")
-                .unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
+            std::env::var("TERM_PROGRAM").unwrap_or_else(|_| format!("{}unset{}", s.dim, s.reset))
         );
         println!(
             "  COLORTERM:  {}",
@@ -616,10 +615,7 @@ mod tests {
         assert_eq!(TerminalApp::Kitty.to_string(), "Kitty");
         assert_eq!(TerminalApp::Ghostty.to_string(), "Ghostty");
         assert_eq!(TerminalApp::ITerm2.to_string(), "ITerm2");
-        assert_eq!(
-            TerminalApp::Other("xterm".to_string()).to_string(),
-            "xterm"
-        );
+        assert_eq!(TerminalApp::Other("xterm".to_string()).to_string(), "xterm");
         assert_eq!(
             TerminalApp::Other("Windows Terminal".to_string()).to_string(),
             "Windows Terminal"
