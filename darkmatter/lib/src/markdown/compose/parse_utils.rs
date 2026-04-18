@@ -82,6 +82,49 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// Consumes `expected` if it is the next character.
+    ///
+    /// ## Returns
+    ///
+    /// `true` if the character was present and consumed, `false` otherwise.
+    pub fn try_consume_char(&mut self, expected: char) -> bool {
+        if self.current() == Some(expected) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Attempts to read a `.NAME` suffix after an identifier.
+    ///
+    /// Returns `Ok(None)` when the next character is not `.`. When a `.`
+    /// is present, consumes it and reads a single identifier segment via
+    /// [`read_identifier`](Self::read_identifier). Nested dotted keys such
+    /// as `set.author.name` are explicitly rejected because the v1
+    /// property-form grammar only permits one segment after `set`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns a [`CursorError`] when the identifier segment is missing or
+    /// when a second `.` follows the consumed segment.
+    pub fn read_dotted_suffix(&mut self, line: usize) -> Result<Option<String>, CursorError> {
+        if !self.try_consume_char('.') {
+            return Ok(None);
+        }
+
+        let name = self.read_identifier(line)?;
+
+        if self.current() == Some('.') {
+            return Err(CursorError {
+                line,
+                message: "nested dotted keys are not supported in v1".to_string(),
+            });
+        }
+
+        Ok(Some(name))
+    }
+
     pub fn read_identifier(&mut self, line: usize) -> Result<String, CursorError> {
         let mut out = String::new();
         let Some(ch) = self.current() else {
