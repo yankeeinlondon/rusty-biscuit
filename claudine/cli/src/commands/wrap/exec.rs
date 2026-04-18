@@ -276,90 +276,6 @@ fn is_stream_safe_list_item(line: &str) -> bool {
     }
 }
 
-/// Renders streamed thinking/reasoning text dimmed to stderr.
-///
-/// Accumulates thinking text and emits it via Prose dim+italic styling so it
-/// is visually distinct from assistant text. A leading "Thinking..." label is
-/// printed when the first thinking chunk arrives.
-///
-/// Writes to stderr using short-lived locks to avoid blocking the separate
-/// stderr processing thread.
-///
-/// ## Note
-///
-/// This renderer is **no longer wired** into the structured-stream path.
-/// `LiveSemanticSink` now owns reasoning rendering end-to-end via
-/// [`render_thinking_block`], emitting a BlockQuote through the section-aware
-/// stderr emitter. The struct and its methods are retained for potential
-/// future use outside the structured path.
-#[allow(dead_code)]
-struct StreamThinkingRenderer {
-    buffer: String,
-    active: bool,
-}
-
-impl StreamThinkingRenderer {
-    #[allow(dead_code)]
-    fn new() -> Self {
-        Self {
-            buffer: String::new(),
-            active: false,
-        }
-    }
-
-    #[allow(dead_code)]
-    fn push(&mut self, text: &str) {
-        if !self.active {
-            // Emit a dim+italic "Thinking..." header on first thinking chunk
-            let header = Self::render_dim_italic("\u{27e1} Thinking...");
-            eprintln!("{header}");
-            self.active = true;
-        }
-        self.buffer.push_str(text);
-
-        // Emit complete lines immediately (dimmed)
-        while let Some(newline_pos) = self.buffer.find('\n') {
-            let line = self.buffer[..newline_pos].to_string();
-            self.buffer.drain(..=newline_pos);
-            let rendered = Self::render_dim(&line);
-            eprintln!("{rendered}");
-        }
-    }
-
-    /// Flush remaining thinking text and reset state when switching to
-    /// assistant text or finishing the stream.
-    #[allow(dead_code)]
-    fn flush_if_active(&mut self) {
-        if !self.active {
-            return;
-        }
-        if !self.buffer.is_empty() {
-            let remaining = std::mem::take(&mut self.buffer);
-            let rendered = Self::render_dim(&remaining);
-            eprintln!("{rendered}");
-        }
-        // Blank line to separate thinking from assistant text
-        eprintln!();
-        self.active = false;
-    }
-
-    #[allow(dead_code)]
-    fn render_dim(text: &str) -> String {
-        use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable;
-        let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim>{safe}</dim>")).render(&crate::log::terminal())
-    }
-
-    #[allow(dead_code)]
-    fn render_dim_italic(text: &str) -> String {
-        use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable;
-        let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim><i>{safe}</i></dim>")).render(&crate::log::terminal())
-    }
-}
-
 /// Spawn the provider child process and return its exit code.
 ///
 /// ## Environment
@@ -455,7 +371,9 @@ pub(crate) fn run_child(
     // macOS) and the child writes to stdout/stderr during startup, both
     // processes block on pipe I/O with no reader on the other end.
     let stdout_handle = if filter_stdout {
-        let pipe = child.stdout.take().expect("stdout was set to piped");
+        let pipe = child.stdout.take().expect(
+            "child stdout must be piped: Stdio::piped() was set on the child Command above",
+        );
         let prefixes: Vec<String> = io
             .stdout_noise_prefixes
             .iter()
@@ -483,7 +401,9 @@ pub(crate) fn run_child(
     };
 
     let stderr_handle = if filter_stderr {
-        let pipe = child.stderr.take().expect("stderr was set to piped");
+        let pipe = child.stderr.take().expect(
+            "child stderr must be piped: Stdio::piped() was set on the child Command above",
+        );
         let prefixes: Vec<String> = io
             .stderr_noise_prefixes
             .iter()
@@ -626,14 +546,21 @@ fn wait_with_signal_handling(
     child_in_own_pgroup: bool,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicU8, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
     let interrupt_count = Arc::new(AtomicU8::new(0));
+    let child_exited = Arc::new(AtomicBool::new(false));
     let child_pid = child.id();
 
     let counter = Arc::clone(&interrupt_count);
+    let exited = Arc::clone(&child_exited);
     let _guard = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+            // Never signal a PID we no longer own — the kernel may have
+            // recycled `child_pid` onto an unrelated process by now.
+            if exited.load(Ordering::SeqCst) {
+                return;
+            }
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
             if !child_in_own_pgroup {
                 // Child shares our process group; the terminal already
@@ -656,6 +583,10 @@ fn wait_with_signal_handling(
     }?;
 
     let status = child.wait()?;
+    // Set the exit flag BEFORE the `_guard` drops so a SIGINT that arrives
+    // in the narrow window between `wait` returning and the guard being
+    // dropped still sees an exited child and refuses to signal the PID.
+    child_exited.store(true, Ordering::SeqCst);
     let code = exit_code_from_status(status);
     let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
     let termination = if was_interrupted {
@@ -700,14 +631,21 @@ fn wait_with_signal_and_early_termination(
     claudine::harness::ProcessTermination,
     Option<EarlyTermination>,
 )> {
-    use std::sync::atomic::AtomicU8;
+    use std::sync::atomic::{AtomicBool, AtomicU8};
 
     let interrupt_count = Arc::new(AtomicU8::new(0));
+    let child_exited = Arc::new(AtomicBool::new(false));
     let child_pid = child.id();
 
     let counter = Arc::clone(&interrupt_count);
+    let exited = Arc::clone(&child_exited);
     let _guard = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+            // Don't signal a PID we no longer own (it may have been
+            // recycled onto an unrelated process).
+            if exited.load(Ordering::SeqCst) {
+                return;
+            }
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
             if !child_in_own_pgroup {
                 return;
@@ -733,6 +671,9 @@ fn wait_with_signal_and_early_termination(
 
     loop {
         if let Some(status) = child.try_wait()? {
+            // Mark the PID as reaped before the 5-second grace window's
+            // signal guard can drop so we never signal a recycled PID.
+            child_exited.store(true, Ordering::SeqCst);
             let code = exit_code_from_status(status);
             let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
             let termination = if was_interrupted || early_termination.is_some() {
@@ -1041,7 +982,10 @@ pub(crate) fn run_child_capture(
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
     // Capture stdout into a string, applying noise filtering
-    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .expect("child stdout must be piped: Stdio::piped() was set on the child Command above");
     let stdout_noise: Vec<String> = io
         .stdout_noise_prefixes
         .iter()
@@ -1064,7 +1008,10 @@ pub(crate) fn run_child_capture(
     });
 
     // Capture stderr into a string, applying noise filtering
-    let stderr_pipe = child.stderr.take().expect("stderr was set to piped");
+    let stderr_pipe = child
+        .stderr
+        .take()
+        .expect("child stderr must be piped: Stdio::piped() was set on the child Command above");
     let stderr_noise: Vec<String> = io
         .stderr_noise_prefixes
         .iter()
@@ -1426,7 +1373,10 @@ pub(crate) fn run_child_stream_semantic(
     );
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
-    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .expect("child stdout must be piped: Stdio::piped() was set on the child Command above");
     let stream_span = Span::current();
     let stdout_renderer = text_renderer.clone();
     let stdout_handle = thread::spawn(move || {
@@ -1483,7 +1433,10 @@ pub(crate) fn run_child_stream_semantic(
         parser
     });
 
-    let pipe = child.stderr.take().expect("stderr was set to piped");
+    let pipe = child
+        .stderr
+        .take()
+        .expect("child stderr must be piped: Stdio::piped() was set on the child Command above");
     let prefixes: Vec<String> = stderr_noise_prefixes
         .iter()
         .map(|s| s.to_string())
