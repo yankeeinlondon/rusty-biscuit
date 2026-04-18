@@ -1,5 +1,6 @@
 ---
 lessons_learned: "@docs/knowledge/commits.md"
+timeout: 10m
 ---
 # Commit Staged Files
 
