@@ -1,91 +1,263 @@
-//! Bootstrap snippet rendering for `claudine completions <shell>`.
+//! Shell completion script rendering for `claudine completions <shell>`.
 //!
-//! Phase 4 of the `2026-04-17-file-completion` feature replaces the
-//! previous static `clap_complete::generate(...)` output with one-liner
-//! bootstrap snippets that activate dynamic completion at shell startup.
-//! The snippets rely on clap_complete's `CompleteEnv` runtime path, which
-//! is wired up in [`crate::completion::maybe_complete`] and fires
-//! whenever `COMPLETE` is set in the environment.
+//! Phase 5 of the `2026-04-18-file-completion-supplement` feature replaces
+//! the previous one-line `COMPLETE=<shell> claudine` bootstrap snippets with
+//! shell-specific scripts that shell out to the hidden `claudine __complete`
+//! subcommand at the documented argument positions.
 //!
-//! ## Snippet shape per shell
+//! The supplement acceptance matrix only covers `bash`, `zsh`, and `fish`.
+//! `powershell` and `elvish` retain the legacy `COMPLETE`-based bootstrap
+//! snippet so already-installed scripts and future shell additions keep
+//! working. The legacy `CompleteEnv` path in [`super::command_factory`] is
+//! still reachable for users who have not regenerated their scripts.
 //!
-//! | Shell        | Emitted snippet                                       |
-//! | ------------ | ----------------------------------------------------- |
-//! | `bash`       | `source <(COMPLETE=bash claudine)`                    |
-//! | `zsh`        | `source <(COMPLETE=zsh claudine)`                     |
-//! | `fish`       | `COMPLETE=fish claudine \| source`                    |
-//! | `powershell` | `& { $env:COMPLETE="powershell"; claudine } \| Out-String \| Invoke-Expression` |
-//! | `elvish`     | `eval (E:COMPLETE=elvish claudine \| slurp)`          |
+//! ## Installation
 //!
-//! Users add the one-liner to their shell rc file once; Claudine owns the
-//! actual completion output via the `COMPLETE` hook in `main()` and never
-//! needs the user to regenerate a script when the binary changes.
+//! Bash:
 //!
-//! ## PowerShell note
+//! ```sh
+//! claudine completions bash > ~/.local/share/bash-completion/completions/claudine
+//! ```
 //!
-//! PowerShell does not support an inline `VAR=value` prefix for child
-//! process invocation the way POSIX shells do. The snippet scopes the env
-//! var to a script block (`& { ... }`) so `COMPLETE` only exists for the
-//! duration of the `claudine` invocation, then pipes the output through
-//! `Invoke-Expression` to register the handler in the user's session.
+//! Zsh:
+//!
+//! ```sh
+//! claudine completions zsh > "${fpath[1]}/_claudine"
+//! ```
+//!
+//! Fish:
+//!
+//! ```sh
+//! claudine completions fish > ~/.config/fish/completions/claudine.fish
+//! ```
+//!
+//! The scripts work the same way on every shell: on each `<TAB>`, the
+//! registered callback invokes `claudine __complete --current <INDEX> --
+//! <argv>`. The hidden engine classifies the cursor position, applies the
+//! supplement's curated-scope / broad-scan rules, and prints one candidate
+//! per line on stdout. The shell then presents those candidates to the user.
+//! When `__complete` returns no candidates, each shell falls back to its
+//! default file completion so non-targeted argument positions still behave
+//! as if completion were unset.
 
 use clap_complete::Shell;
 
-/// Render the bootstrap snippet for `shell`.
+/// Render the completion script for `shell`.
 ///
 /// Returned string includes a trailing newline so it prints cleanly as a
-/// CLI subcommand output. The output deliberately does not include any
-/// framing prose (no "# paste this in ~/.bashrc" comment) — the command's
-/// `--help` / `EXAMPLES` section already carries the human-facing guidance,
-/// and keeping the stdout shape pure makes it trivial to pipe the output
-/// directly into a shell rc file.
+/// CLI subcommand output. Redirect the output into the shell's completion
+/// file; the scripts are idempotent on reload.
 pub(crate) fn render(shell: Shell) -> String {
     match shell {
-        Shell::Bash => "source <(COMPLETE=bash claudine)\n".to_string(),
-        Shell::Zsh => "source <(COMPLETE=zsh claudine)\n".to_string(),
-        Shell::Fish => "COMPLETE=fish claudine | source\n".to_string(),
+        Shell::Bash => BASH_SCRIPT.to_string(),
+        Shell::Zsh => ZSH_SCRIPT.to_string(),
+        Shell::Fish => FISH_SCRIPT.to_string(),
+        Shell::PowerShell => legacy_bootstrap(Shell::PowerShell),
+        Shell::Elvish => legacy_bootstrap(Shell::Elvish),
+        // `clap_complete::Shell` is `#[non_exhaustive]`; any future shell
+        // that clap adds falls back to the bash-style script. That is the
+        // closest documented shape for POSIX-like shells.
+        _ => BASH_SCRIPT.to_string(),
+    }
+}
+
+/// Legacy `COMPLETE=<shell> claudine` one-liner retained for shells that the
+/// supplement spec does not cover (powershell, elvish). The legacy runtime
+/// path in [`super::command_factory`] continues to serve these callers.
+fn legacy_bootstrap(shell: Shell) -> String {
+    match shell {
         Shell::PowerShell => {
             "& { $env:COMPLETE=\"powershell\"; claudine } | Out-String | Invoke-Expression\n"
                 .to_string()
         }
         Shell::Elvish => "eval (E:COMPLETE=elvish claudine | slurp)\n".to_string(),
-        // `clap_complete::Shell` is `#[non_exhaustive]`; any future shell
-        // that clap adds falls back to the bash-style snippet. That is the
-        // closest documented shape for POSIX-like shells.
         _ => "source <(COMPLETE=bash claudine)\n".to_string(),
     }
 }
+
+/// Bash completion script.
+///
+/// Registers `_claudine_complete` as the completion function for the
+/// `claudine` command. On every `<TAB>`, the function shells out to
+/// `claudine __complete --current $COMP_CWORD -- "${COMP_WORDS[@]}"` and
+/// treats each line of stdout as a candidate. If the call fails or returns
+/// no candidates, bash falls back to default file completion (`bashdefault`
+/// + `default`).
+///
+/// `-o nosort` preserves the order the engine emits (currently alphabetical
+/// from a `BTreeSet`, but the spec reserves the right to change this). The
+/// `-o nospace` option is intentionally NOT set: bash's default trailing
+/// space after a unique match is correct for every supplement candidate
+/// (files, not directories).
+const BASH_SCRIPT: &str = r#"# Claudine shell completions (bash)
+# Generated by `claudine completions bash`.
+#
+# The `__complete` subcommand is the supplement engine. It classifies the
+# cursor position and prints one candidate per line on stdout. When it has
+# no candidates (non-targeted positions, errors) the script lets bash fall
+# back to its default file completion.
+
+_claudine_complete() {
+    local IFS=$'\n'
+    local candidates
+    candidates=( $(command claudine __complete --current "$COMP_CWORD" -- "${COMP_WORDS[@]}" 2>/dev/null) )
+    if [ ${#candidates[@]} -gt 0 ] && [ -n "${candidates[0]}" ]; then
+        COMPREPLY=( "${candidates[@]}" )
+        return 0
+    fi
+    COMPREPLY=()
+    return 0
+}
+
+complete -o nosort -o bashdefault -o default -F _claudine_complete claudine
+"#;
+
+/// Zsh completion script.
+///
+/// Uses the `#compdef claudine` directive so the file can be dropped under
+/// any directory in `$fpath` and be autoloaded. The main function splits
+/// `__complete`'s stdout on newlines (`(@f)` flag), then feeds the resulting
+/// array to `compadd`. When the supplement engine emits nothing, the script
+/// falls back to `_files` for default file completion.
+const ZSH_SCRIPT: &str = r#"#compdef claudine
+# Claudine shell completions (zsh)
+# Generated by `claudine completions zsh`.
+#
+# The `__complete` subcommand is the supplement engine. It classifies the
+# cursor position and prints one candidate per line on stdout. When it has
+# no candidates (non-targeted positions, errors) the function falls back to
+# `_files` so default file completion still fires.
+
+_claudine() {
+    local -a candidates
+    local current=$((CURRENT - 1))
+    candidates=("${(@f)$(command claudine __complete --current $current -- "${words[@]}" 2>/dev/null)}")
+    if (( ${#candidates[@]} > 0 )) && [[ -n "${candidates[1]}" ]]; then
+        compadd -- "${candidates[@]}"
+        return 0
+    fi
+    _files
+}
+
+compdef _claudine claudine
+"#;
+
+/// Fish completion script.
+///
+/// Fish's completion model merges every `complete -c claudine ...` command
+/// into one candidate set, so the script registers a single completion that
+/// delegates entirely to `__complete`. The `-f` flag disables the default
+/// file-completion fallback; the supplement engine itself decides when to
+/// emit file candidates (and emits none otherwise, in which case fish
+/// simply shows nothing — matching the spec's "non-targeted positions stay
+/// on default" intent on shells where a clean fallback is cheap).
+const FISH_SCRIPT: &str = r#"# Claudine shell completions (fish)
+# Generated by `claudine completions fish`.
+#
+# The `__complete` subcommand is the supplement engine. It classifies the
+# cursor position and prints one candidate per line on stdout. When it has
+# no candidates (non-targeted positions, errors) fish falls back to
+# default file completion via the `--force-files` retry.
+
+function __claudine_complete
+    set -l tokens (commandline -opc)
+    set -l current_partial (commandline -ct)
+    set -l argv_all claudine $tokens[2..] $current_partial
+    set -l idx (math (count $argv_all) - 1)
+    command claudine __complete --current $idx -- $argv_all 2>/dev/null
+end
+
+complete -c claudine -f -a '(__claudine_complete)'
+"#;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn bash_snippet_is_a_source_completion_one_liner() {
-        assert_eq!(render(Shell::Bash), "source <(COMPLETE=bash claudine)\n");
+    fn bash_script_registers_complete_callback() {
+        let out = render(Shell::Bash);
+        assert!(out.contains("_claudine_complete()"));
+        assert!(out.contains("claudine __complete --current"));
+        assert!(out.contains("complete"));
+        assert!(out.contains("-F _claudine_complete claudine"));
+        assert!(out.ends_with('\n'));
     }
 
     #[test]
-    fn zsh_snippet_is_a_source_completion_one_liner() {
-        assert_eq!(render(Shell::Zsh), "source <(COMPLETE=zsh claudine)\n");
+    fn bash_script_forwards_full_argv_to_engine() {
+        let out = render(Shell::Bash);
+        // The engine needs the full argv (binary + subcommand + flags +
+        // partial token) to classify; the bash adapter must pass all of
+        // `COMP_WORDS` as the trailing positional.
+        assert!(out.contains("\"${COMP_WORDS[@]}\""));
+        assert!(out.contains("$COMP_CWORD"));
     }
 
     #[test]
-    fn fish_snippet_pipes_into_source() {
-        assert_eq!(render(Shell::Fish), "COMPLETE=fish claudine | source\n");
+    fn bash_script_falls_back_to_default_completion() {
+        let out = render(Shell::Bash);
+        // `-o bashdefault -o default` lets bash attempt its native
+        // completion (usually filenames) when our function leaves
+        // COMPREPLY empty. This is how non-targeted argument positions
+        // keep behaving as if completion were unset.
+        assert!(out.contains("-o bashdefault"));
+        assert!(out.contains("-o default"));
     }
 
     #[test]
-    fn elvish_snippet_uses_eval_slurp() {
-        assert_eq!(
-            render(Shell::Elvish),
-            "eval (E:COMPLETE=elvish claudine | slurp)\n",
+    fn zsh_script_registers_compdef_directive() {
+        let out = render(Shell::Zsh);
+        assert!(out.starts_with("#compdef claudine"));
+        assert!(out.contains("_claudine()"));
+        assert!(out.contains("claudine __complete --current"));
+        assert!(out.contains("compdef _claudine claudine"));
+        assert!(out.ends_with('\n'));
+    }
+
+    #[test]
+    fn zsh_script_forwards_words_and_current_to_engine() {
+        let out = render(Shell::Zsh);
+        assert!(out.contains("\"${words[@]}\""));
+        assert!(out.contains("$((CURRENT - 1))"));
+    }
+
+    #[test]
+    fn zsh_script_falls_back_to_files_on_empty_candidates() {
+        let out = render(Shell::Zsh);
+        assert!(
+            out.contains("_files"),
+            "zsh script must fall back to `_files` when the supplement \
+             engine emits no candidates: {out}"
         );
     }
 
     #[test]
-    fn powershell_snippet_directs_user_through_invoke_expression() {
+    fn fish_script_registers_complete_function() {
+        let out = render(Shell::Fish);
+        assert!(out.contains("function __claudine_complete"));
+        assert!(out.contains("claudine __complete --current"));
+        assert!(out.contains("complete -c claudine"));
+        assert!(out.contains("-a '(__claudine_complete)'"));
+        assert!(out.ends_with('\n'));
+    }
+
+    #[test]
+    fn fish_script_computes_argv_from_commandline() {
+        let out = render(Shell::Fish);
+        // commandline -opc gives prior tokens, -ct gives the current
+        // partial — the adapter has to reassemble a full argv from both.
+        assert!(out.contains("commandline -opc"));
+        assert!(out.contains("commandline -ct"));
+    }
+
+    #[test]
+    fn powershell_script_retains_legacy_bootstrap() {
         let out = render(Shell::PowerShell);
+        // The supplement acceptance matrix is bash/zsh/fish only, so
+        // powershell keeps the legacy one-liner that activates the
+        // `CompleteEnv` runtime path. This preserves behavior for users
+        // who installed on powershell before the supplement shipped.
         assert!(out.contains("Invoke-Expression"));
         assert!(out.contains("claudine"));
         assert!(out.contains("$env:COMPLETE"));
@@ -93,7 +265,18 @@ mod tests {
     }
 
     #[test]
-    fn every_snippet_ends_with_a_newline() {
+    fn elvish_script_retains_legacy_bootstrap() {
+        let out = render(Shell::Elvish);
+        assert_eq!(
+            out,
+            "eval (E:COMPLETE=elvish claudine | slurp)\n",
+            "elvish must retain the legacy COMPLETE bootstrap — the \
+             supplement matrix covers bash/zsh/fish only"
+        );
+    }
+
+    #[test]
+    fn every_script_ends_with_a_newline() {
         for shell in [
             Shell::Bash,
             Shell::Zsh,
@@ -103,8 +286,29 @@ mod tests {
         ] {
             assert!(
                 render(shell).ends_with('\n'),
-                "snippet for {shell:?} missing trailing newline",
+                "script for {shell:?} missing trailing newline",
+            );
+        }
+    }
+
+    #[test]
+    fn supplement_shells_invoke_the_hidden_complete_subcommand() {
+        // The entire purpose of the Phase 5 rewrite is that bash/zsh/fish
+        // scripts no longer rely on `COMPLETE=<shell> claudine`; they
+        // shell out to `claudine __complete` directly. Lock that in.
+        for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+            let out = render(shell);
+            assert!(
+                out.contains("claudine __complete --current"),
+                "{shell:?} script must invoke the hidden `__complete` \
+                 subcommand; output was: {out}"
+            );
+            assert!(
+                !out.contains("COMPLETE="),
+                "{shell:?} script must not use the legacy `COMPLETE=<shell>` \
+                 bootstrap path; output was: {out}"
             );
         }
     }
 }
+

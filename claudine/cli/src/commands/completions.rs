@@ -4,25 +4,32 @@ use color_eyre::eyre::Result;
 /// Arguments for shell completion generation.
 #[derive(Args)]
 #[command(after_help = r#"EXAMPLES:
-    # Bash: Add to ~/.bashrc
-    claudine completions bash >> ~/.bashrc
+    # Bash: Redirect into your bash-completion directory
+    claudine completions bash > ~/.local/share/bash-completion/completions/claudine
 
-    # Zsh: Add to ~/.zshrc
-    claudine completions zsh >> ~/.zshrc
+    # Zsh: Redirect into the first directory in $fpath
+    claudine completions zsh > "${fpath[1]}/_claudine"
 
-    # Fish: Add to ~/.config/fish/config.fish
-    claudine completions fish >> ~/.config/fish/config.fish
+    # Fish: Redirect into the fish completion directory
+    claudine completions fish > ~/.config/fish/completions/claudine.fish
 
-    # PowerShell: Add to your profile
+    # PowerShell (legacy bootstrap): Add to your profile
     claudine completions powershell >> $PROFILE
 
-    # Elvish: Add to ~/.elvish/rc.elv
+    # Elvish (legacy bootstrap): Add to ~/.elvish/rc.elv
     claudine completions elvish >> ~/.elvish/rc.elv
 
-    The emitted line is a one-time bootstrap: it activates Claudine's
-    dynamic completer, which re-queries the running binary on every
-    <TAB>. You never need to regenerate a script when Claudine ships
-    new composition commands or file-reference behavior.
+    For bash, zsh, and fish, the emitted script registers a completion
+    callback that shells out to `claudine __complete` on every <TAB>.
+    The hidden engine tracks the running binary, so regenerating the
+    script is only required after a Claudine upgrade that changes the
+    callback contract — the completion output itself always reflects
+    the currently installed binary.
+
+    PowerShell and Elvish retain the legacy one-line `COMPLETE=<shell>`
+    bootstrap because the supplement acceptance matrix covers
+    bash/zsh/fish only. Stale installed scripts on any shell continue
+    to reach the legacy completion path until regenerated.
 "#)]
 pub struct CompletionsArgs {
     /// Shell to generate completions for (bash, zsh, fish, powershell, elvish).
@@ -30,13 +37,18 @@ pub struct CompletionsArgs {
     pub shell: clap_complete::Shell,
 }
 
-/// Emit a one-time bootstrap snippet that activates dynamic completion.
+/// Emit the shell completion script for the requested shell.
 ///
-/// The snippet wires the user's shell to invoke `COMPLETE=<shell> claudine`
-/// on every `<TAB>`. The actual completion logic lives in
-/// [`crate::completion::maybe_complete`], which is dispatched from `main()`
-/// before any normal CLI startup, so the completion surface tracks the
-/// running binary automatically.
+/// For `bash`, `zsh`, and `fish` this is a full completion script that
+/// registers a callback shelling out to `claudine __complete` at every
+/// `<TAB>`. The callback runs the supplement engine in
+/// [`crate::completion::supplement`] against the full argv the shell
+/// passes in.
+///
+/// For `powershell` and `elvish` this remains a one-line `COMPLETE=<shell>`
+/// bootstrap that activates the legacy `CompleteEnv` runtime path in
+/// [`crate::completion::maybe_complete`]. Those two shells are outside the
+/// supplement spec's bash/zsh/fish acceptance matrix.
 pub fn run(args: CompletionsArgs) -> Result<()> {
     use std::io::Write;
 
