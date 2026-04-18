@@ -290,3 +290,93 @@ fn package_prefix_with_no_repo_context_returns_zero_candidates() {
          got: {candidates:?}",
     );
 }
+
+// ---------------------------------------------------------------------
+// End-to-end failure modes (spec §Failure modes)
+//
+// These cases are covered by unit tests in
+// `src/completion/{file_reference,validate}.rs`, but Phase 5 calls for
+// verifying end to end that the completion subprocess never surfaces
+// diagnostics and returns cleanly (possibly zero candidates) even when
+// the repo contains adversarial fixtures.
+// ---------------------------------------------------------------------
+
+#[test]
+fn inline_compose_silently_omits_malformed_and_oversized_files() {
+    let workspace = TestWorkspace::named("completion-failure-modes");
+    let root = workspace.path();
+    seed_fixtures(root);
+
+    let prompts = root.join("prompts");
+    // Malformed frontmatter — YAML fails to parse as a prompt value.
+    fs::write(
+        prompts.join("malformed.md"),
+        "---\nprompt: [unterminated\n\nbody without close\n",
+    )
+    .unwrap();
+    // Empty prompt — explicitly forbidden by the validator.
+    fs::write(prompts.join("empty-prompt.md"), "---\nprompt: \"\"\n---\nbody\n").unwrap();
+    // Oversized file — skipped before parsing.
+    let padding = "a".repeat((1024 * 1024 + 1) as usize);
+    fs::write(
+        prompts.join("oversized.md"),
+        format!("---\nprompt: hi\n---\n{padding}"),
+    )
+    .unwrap();
+
+    let candidates = run_completion(root, &["inline-compose", "@"]);
+
+    // The valid fixture still comes through.
+    assert!(
+        candidates.iter().any(|c| c == "@prompts/with-prompt.md"),
+        "inline-compose must still surface valid prompt fixtures; got: {candidates:?}",
+    );
+    // Every failure-mode fixture is silently dropped.
+    assert!(
+        !candidates.iter().any(|c| c == "@prompts/malformed.md"),
+        "malformed frontmatter must be dropped; got: {candidates:?}",
+    );
+    assert!(
+        !candidates.iter().any(|c| c == "@prompts/empty-prompt.md"),
+        "empty-prompt files must be dropped; got: {candidates:?}",
+    );
+    assert!(
+        !candidates.iter().any(|c| c == "@prompts/oversized.md"),
+        "oversized files must be dropped; got: {candidates:?}",
+    );
+}
+
+#[test]
+fn missing_prompts_and_sequences_directories_return_cleanly() {
+    // The spec lists missing `prompts/` or `sequences/` directories as a
+    // silent failure mode. Build a minimal workspace with no such
+    // directories and assert the completion subprocess still returns
+    // successfully with no diagnostics leaking onto stderr.
+    let workspace = TestWorkspace::named("completion-missing-dirs");
+    let root = workspace.path();
+    assert!(init_git_repo(root));
+    fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nresolver = \"2\"\nmembers = [\"placeholder\"]\n",
+    )
+    .unwrap();
+    let placeholder = root.join("placeholder");
+    fs::create_dir_all(&placeholder).unwrap();
+    fs::write(
+        placeholder.join("Cargo.toml"),
+        "[package]\nname = \"placeholder\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    fs::create_dir_all(placeholder.join("src")).unwrap();
+    fs::write(placeholder.join("src").join("lib.rs"), "// placeholder\n").unwrap();
+
+    // Zero candidates are acceptable — what matters is that the
+    // subprocess exits successfully (verified inside `run_completion`)
+    // and nothing about the empty tree becomes a shell-visible error.
+    let candidates = run_completion(root, &["inline-compose", "@"]);
+    assert!(
+        candidates.iter().all(|c| !c.contains("prompts/")
+            && !c.contains("sequences/")),
+        "no prompts/sequences entries should be produced; got: {candidates:?}",
+    );
+}

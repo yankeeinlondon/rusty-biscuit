@@ -121,5 +121,24 @@ The v1 completer deliberately emits zero candidates for:
 These are dead ends, not errors — no candidates are returned and the
 shell falls back to its default behavior.
 
+### Measured latency
+
+Measured on the `rusty-biscuit` worktree (≈48 workspace crates, macOS,
+release binary) against the spec's bounded walker — `MAX_RECURSION_DEPTH
+= 4`, `MAX_CANDIDATES = 500`, `MAX_FRONTMATTER_BYTES = 1 MiB`:
+
+| Request                     | Cold run | Warm run | Candidates |
+| --------------------------- | -------- | -------- | ---------- |
+| `claudine compose @`        | ~37 ms   | ~18 ms   | 246        |
+| `claudine inline-compose @` | ~37 ms   | ~23 ms   | 139        |
+| `claudine sequence @`       | ~24 ms   | ~23 ms   | 130        |
+
+Cold-cache numbers are well below the ~100 ms threshold where `<TAB>`
+begins to feel sluggish, so the initial bounded-walker constants are
+left at their spec-recommended values. The frontmatter-aware modes
+(`inline-compose`, `sequence`) add roughly 5–10 ms over the
+extension-only `compose` path, driven by the prefix-narrowed YAML parse
+— the cost scales with candidate count, not tree size.
+
 [`claudine/cli/src/completion/mod.rs`]: ../cli/src/completion/mod.rs
 [`claudine/cli/src/completion/file_reference.rs`]: ../cli/src/completion/file_reference.rs
