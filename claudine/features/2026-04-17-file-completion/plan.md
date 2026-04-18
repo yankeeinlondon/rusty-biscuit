@@ -1,7 +1,7 @@
 ---
 phases: 6
 created: 2026-04-17
-start_phase: 3
+start_phase: 4
 source_files_during_phase_0: []
 docs_updated_during_phase_0: []
 docs_created_during_phase_0:
