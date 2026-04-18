@@ -18,6 +18,7 @@ use clap::CommandFactory;
 use clap_complete::{ArgValueCompleter, CompletionCandidate};
 
 use crate::argv;
+use crate::completion::file_reference;
 
 /// Discriminates per-command behavior for the completer attached to the
 /// shared `args` positional. Phase 1 uses this only for a stable marker;
@@ -72,22 +73,33 @@ fn attach_mode_completer(cmd: &mut clap::Command, mode: ComposeMode) {
         return;
     };
 
-    let completer = ArgValueCompleter::new(move |current: &OsStr| {
-        phase1_placeholder_complete(mode, current)
-    });
+    let completer =
+        ArgValueCompleter::new(move |current: &OsStr| dispatch_complete(mode, current));
 
     let owned = std::mem::replace(sub, clap::Command::new("__placeholder__"));
     let rebuilt = owned.mut_arg("args", |arg| arg.add(completer));
     let _ = std::mem::replace(sub, rebuilt);
 }
 
-/// Placeholder completer for Phase 1.
+/// Dispatch a completion request into the Phase 2 discovery layer.
 ///
-/// Returns an empty candidate list. Phase 2 replaces this with token
-/// classification, scope discovery, and bounded directory walking; Phase 3
-/// layers mode-specific file validation on top.
-fn phase1_placeholder_complete(_mode: ComposeMode, _current: &OsStr) -> Vec<CompletionCandidate> {
-    Vec::new()
+/// Phase 2 owns token classification, scope discovery, and bounded directory
+/// walking; the resulting [`file_reference::FileCompletionEntry`] list is
+/// converted to [`CompletionCandidate`]s here.
+///
+/// `_mode` is currently unused because Phase 2 emits every walked entry.
+/// Phase 3 will route per-mode validators through this seam, at which point
+/// the mode tag will determine the `.md` extension gate vs. frontmatter
+/// parsing.
+fn dispatch_complete(_mode: ComposeMode, current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(partial) = current.to_str() else {
+        return Vec::new();
+    };
+    let ctx = file_reference::CompletionRepoContext::discover();
+    file_reference::discover_candidates(partial, &ctx)
+        .into_iter()
+        .map(|entry| CompletionCandidate::new(entry.value))
+        .collect()
 }
 
 #[cfg(test)]
