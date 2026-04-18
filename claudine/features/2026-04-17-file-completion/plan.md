@@ -1,12 +1,24 @@
 ---
 phases: 6
 created: 2026-04-17
-start_phase: 0
+start_phase: 2
 source_files_during_phase_0: []
 docs_updated_during_phase_0: []
 docs_created_during_phase_0:
   - claudine/features/2026-04-17-file-completion/phase-0-lock.md
 skills_files_updated_during_phase0: []
+source_files_during_phase_1:
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/main.rs
+  - claudine/cli/src/completion/mod.rs
+  - claudine/cli/src/completion/command_factory.rs
+  - claudine/cli/src/completion/file_reference.rs
+  - claudine/cli/src/completion/validate.rs
+  - claudine/cli/src/completion/bootstrap.rs
+  - claudine/cli/tests/argv_normalization.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase1: []
 packages:
   - claudine-cli
 ---
