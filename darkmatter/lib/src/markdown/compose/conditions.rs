@@ -5,7 +5,7 @@
 //! `transclusion/conditions.rs` to avoid cross-module coupling.
 
 use super::EffectiveState;
-use super::interpolation::{ComparisonOp, Expr, parse};
+use super::interpolation::{ComparisonOp, Expr, parse_condition};
 use serde_json::Value;
 use tracing::{debug, trace};
 
@@ -36,7 +36,7 @@ pub fn evaluate_condition(
 ) -> Result<bool, ConditionError> {
     trace!(expr = %expr, line, "conditions: evaluating");
 
-    let parsed = parse(expr).map_err(|e| ConditionError::Parse {
+    let parsed = parse_condition(expr).map_err(|e| ConditionError::Parse {
         expr: expr.to_string(),
         line,
         message: e.to_string(),
@@ -117,22 +117,22 @@ fn eval_function(name: &str, args: &[Expr], state: &EffectiveState) -> Result<Va
     let name = name.to_ascii_lowercase();
     match name.as_str() {
         "and" => {
-            let result = args
-                .iter()
-                .map(|arg| eval_expr(arg, state))
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .all(is_truthy);
-            Ok(Value::Bool(result))
+            for arg in args {
+                let value = eval_expr(arg, state)?;
+                if !is_truthy(&value) {
+                    return Ok(Value::Bool(false));
+                }
+            }
+            Ok(Value::Bool(true))
         }
         "or" => {
-            let result = args
-                .iter()
-                .map(|arg| eval_expr(arg, state))
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .any(is_truthy);
-            Ok(Value::Bool(result))
+            for arg in args {
+                let value = eval_expr(arg, state)?;
+                if is_truthy(&value) {
+                    return Ok(Value::Bool(true));
+                }
+            }
+            Ok(Value::Bool(false))
         }
         "haskey" | "has_key" => {
             if args.len() < 2 {
