@@ -13,6 +13,14 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase3: []
+source_files_during_phase_4:
+  - claudine/cli/src/argv.rs
+  - claudine/cli/tests/argv_normalization.rs
+docs_updated_during_phase_4:
+  - claudine/docs/topics/composition.md
+docs_created_during_phase_4:
+  - claudine/docs/topics/argv-normalization.md
+skills_files_updated_during_phase4: []
 packages:
   - claudine-cli
 ---

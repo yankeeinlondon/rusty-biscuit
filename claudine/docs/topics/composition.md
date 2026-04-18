@@ -96,11 +96,17 @@ Steps:
 
 Both commands use a deterministic precedence chain:
 
-1. **Explicit flag** (`--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`) — highest priority
+1. **Explicit flag** (`--provider <slug>`, or the shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`, `--roo`) — highest priority
 2. **Single installed** — if only one provider remains after `--exclude` filtering
 3. **Frontmatter hint** — the `agent` property in the effective (composed) frontmatter, fuzzy-matched against provider names
 4. **Config favorite** — `settings.linking.preference[0]` from `~/.claudine/config.json` or `<repo>/.claudine/config.json`
 5. **Interactive chooser** — if a TTY is available, prompt the user; otherwise error
+
+The shorthand booleans and the `--provider` value both accept fuzzy
+input (`cl` → `claude`, `gem` → `gemini`, `oc` → `open_code`). The
+[argv normalizer](argv-normalization.md) rewrites every shorthand into
+a canonical `--provider <slug>` pair before clap runs, so runtime
+provider selection only ever reads the single `--provider` field.
 
 ### The `--interactive` Flag
 

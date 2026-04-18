@@ -98,7 +98,15 @@ const PROVIDER_BOOLEAN_FLAGS: &[(&str, Provider)] = &[
 /// then Rule 3 on the rewritten argv. See [the module docs](self) for
 /// pass-through guarantees.
 pub(crate) fn normalize(raw: Vec<OsString>) -> Vec<OsString> {
-    if completion_mode_active() {
+    normalize_with_completion(raw, completion_mode_active())
+}
+
+/// Dependency-injected variant of [`normalize`] that avoids reading the
+/// process environment. Tests use this so they can assert the COMPLETE
+/// pass-through guarantee without racing against other tests on a
+/// shared env var.
+fn normalize_with_completion(raw: Vec<OsString>, completion_active: bool) -> Vec<OsString> {
+    if completion_active {
         return raw;
     }
     if raw.len() < 2 {
@@ -559,6 +567,43 @@ mod tests {
     #[test]
     fn completion_mode_active_is_safe_to_call() {
         let _ = completion_mode_active();
+    }
+
+    #[test]
+    fn normalize_is_noop_when_completion_mode_is_injected() {
+        // `normalize_with_completion` lets tests assert the COMPLETE
+        // guarantee without touching process-wide env vars (which would
+        // race against other parallel tests on the same `normalize`).
+        let input = argv(&[
+            "claudine", "compose", "file.md", "--gemini", "name=Ken", "--help",
+        ]);
+        assert_eq!(
+            normalize_with_completion(input.clone(), true),
+            input,
+            "argv must pass through untouched while completion mode is active"
+        );
+    }
+
+    #[test]
+    fn normalize_with_completion_off_matches_normalize_happy_path() {
+        // Lock in that `normalize_with_completion(_, false)` produces the
+        // exact argv `normalize` would emit for the same input when the
+        // environment is clean — otherwise the test-only entry point
+        // could silently drift from the production path.
+        let input = argv(&[
+            "claudine", "compose", "file.md", "--gemini", "name=Ken", "--help",
+        ]);
+        let expected = argv(&[
+            "claudine",
+            "compose",
+            "file.md",
+            "--provider",
+            "gemini",
+            "--",
+            "name=Ken",
+            "--help",
+        ]);
+        assert_eq!(normalize_with_completion(input, false), expected);
     }
 
     // ── Rule 1: provider boolean → --provider <slug> ─────────────────
