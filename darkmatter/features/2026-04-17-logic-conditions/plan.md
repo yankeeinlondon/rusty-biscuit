@@ -2,6 +2,15 @@
 phases: 4
 created: 2026-04-17
 start_phase: 1
+source_files_during_phase_1:
+    - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/lexer.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/parser.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages:
+    - darkmatter
 ---
 
 # Execution Plan: Infix Logic Conditions
@@ -62,8 +71,8 @@ High. The design keeps the change localized to the existing interpolation lexer/
 
 - Add `Token::AndAnd` and `Token::OrOr`.
 - Make lexer behavior mode-specific:
-  - interpolation mode: `|` and `||` both map to fallback; `&&` stays invalid
-  - condition mode: `|` stays fallback, `||` becomes logical OR, `&&` becomes logical AND
+    - interpolation mode: `|` and `||` both map to fallback; `&&` stays invalid
+    - condition mode: `|` stays fallback, `||` becomes logical OR, `&&` becomes logical AND
 - Keep single `&` invalid in all modes.
 
 **Observable outcome**
@@ -79,12 +88,12 @@ High. The design keeps the change localized to the existing interpolation lexer/
 **Work**
 
 - Add condition-mode parsing functions for:
-  - logical OR
-  - logical AND
-  - fallback
-  - comparison
-  - unary
-  - primary
+    - logical OR
+    - logical AND
+    - fallback
+    - comparison
+    - unary
+    - primary
 - Implement precedence so fallback binds tighter than `&&`, and `&&` binds tighter than `||`.
 - Lower `a && b` to `And(a, b)` and `a || b` to `Or(a, b)` using the existing function-call AST representation.
 
@@ -158,10 +167,10 @@ High. The design keeps the change localized to the existing interpolation lexer/
 
 - Run targeted condition tests once added.
 - Manually validate these behaviors in tests or REPL-style helpers:
-  - `false && UnknownFn(x)` returns `false`
-  - `true || UnknownFn(x)` returns `true`
-  - `And(false, UnknownFn(x))` returns `false`
-  - `Or(true, UnknownFn(x))` returns `true`
+    - `false && UnknownFn(x)` returns `false`
+    - `true || UnknownFn(x)` returns `true`
+    - `And(false, UnknownFn(x))` returns `false`
+    - `Or(true, UnknownFn(x))` returns `true`
 
 ## Phase 3: Add regression coverage across parser, evaluator, and consumers
 
@@ -181,14 +190,14 @@ High. The design keeps the change localized to the existing interpolation lexer/
 **Work**
 
 - Add coverage for:
-  - `a && b`
-  - `a || b`
-  - `a && b || c`
-  - `a || b && c`
-  - `(a || b) && c`
-  - `a || (b | c)`
-  - interpolation `plan || "plan.md"` still treated as fallback
-  - interpolation `a && b` still rejected
+    - `a && b`
+    - `a || b`
+    - `a && b || c`
+    - `a || b && c`
+    - `(a || b) && c`
+    - `a || (b | c)`
+    - interpolation `plan || "plan.md"` still treated as fallback
+    - interpolation `a && b` still rejected
 
 **Observable outcome**
 
@@ -221,10 +230,10 @@ High. The design keeps the change localized to the existing interpolation lexer/
 **Work**
 
 - Add or extend compose tests covering:
-  - page blocks using `&&`
-  - page blocks using `||`
-  - transclusion directives using mixed infix logic
-  - fallback and infix operators in one condition
+    - page blocks using `&&`
+    - page blocks using `||`
+    - transclusion directives using mixed infix logic
+    - fallback and infix operators in one condition
 
 **Observable outcome**
 
@@ -250,7 +259,7 @@ High. The design keeps the change localized to the existing interpolation lexer/
 - `cargo test -p darkmatter logic_conditions`
 - If no dedicated filter exists, run `cargo test -p darkmatter compose`
 - Run full crate validation before leaving the phase:
-  - `cargo test -p darkmatter`
+    - `cargo test -p darkmatter`
 
 ## Phase 4: Document behavior and complete release validation
 
@@ -272,12 +281,12 @@ High. The design keeps the change localized to the existing interpolation lexer/
 - Retain `And(...)` and `Or(...)` as valid alternatives.
 - Document precedence and grouping, including fallback `|`.
 - Call out the mode split explicitly:
-  - `when="a || b"` means logical OR
-  - `{{ a || "default" }}` remains fallback sugar
+    - `when="a || b"` means logical OR
+    - `{{ a || "default" }}` remains fallback sugar
 - Add examples that exercise:
-  - boolean infix conditions
-  - grouped expressions
-  - fallback mixed with boolean logic
+    - boolean infix conditions
+    - grouped expressions
+    - fallback mixed with boolean logic
 
 **Observable outcome**
 
@@ -311,19 +320,19 @@ High. The design keeps the change localized to the existing interpolation lexer/
 ## Parallel Work Map
 
 - After Step 1.1:
-  - lexer token work
-  - parser precedence work
+    - lexer token work
+    - parser precedence work
 - After Step 2.1:
-  - evaluator short-circuit work
-  - consumer-audit work
+    - evaluator short-circuit work
+    - consumer-audit work
 - After Phase 2:
-  - parser tests
-  - evaluator tests
-  - compose integration tests
-  - reference-graph test
+    - parser tests
+    - evaluator tests
+    - compose integration tests
+    - reference-graph test
 - During Phase 4:
-  - docs update
-  - final validation run
+    - docs update
+    - final validation run
 
 ## Done Criteria
 
