@@ -340,6 +340,42 @@ mod opencode_round_trip {
         assert_eq!(summary.assistant_text, "hello");
         assert_eq!(summary.tool_calls, Some(1));
     }
+
+    #[test]
+    fn tool_start_input_survives_to_tool_result_display() {
+        // Regression for the 2026-04-18 OpenCode reporting contract:
+        // `tool_start` → `tool_end` pairs must carry the request-side input
+        // through to the emitted `ToolResult` so renderers can annotate
+        // successful incoming events with a meaningful slot.
+        use claudine::stream::tool_display::{ToolCallDisplay, ToolStatus};
+
+        let lines = [
+            r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls -la"}}}"#,
+            r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
+        ];
+        let (events, _) = replay(Provider::OpenCode, &lines, Some("gpt-4o".into()));
+        let result = events
+            .iter()
+            .find(|e| matches!(e, SemanticEvent::ToolResult { .. }))
+            .expect("expected a ToolResult");
+        let SemanticEvent::ToolResult { extra, .. } = result else {
+            unreachable!()
+        };
+        assert_eq!(
+            extra.get("input").and_then(|v| v.get("command")),
+            Some(&json!("ls -la")),
+            "OpenCode tool_start input must survive into ToolResult.extra"
+        );
+
+        // And the display layer must surface it alongside a resolved status.
+        let display = ToolCallDisplay::from_result(result).expect("Bash ToolResult");
+        assert_eq!(display.status, Some(ToolStatus::Success));
+        assert_eq!(
+            display.summary.as_deref(),
+            Some("bash ls -la"),
+            "successful Bash results must keep the cached command summary"
+        );
+    }
 }
 
 mod qwen_round_trip {

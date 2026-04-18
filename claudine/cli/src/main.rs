@@ -7,6 +7,7 @@ mod args;
 mod argv;
 mod cli_utils;
 mod commands;
+mod completion;
 mod log;
 mod output;
 mod provider_values;
@@ -105,6 +106,14 @@ fn parse_cli_from(argv: &[OsString]) -> Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
+
+    // When invoked as a completion subprocess (COMPLETE=<shell> claudine …),
+    // `maybe_complete` writes either a registration snippet or candidate
+    // list to stdout and exits before returning. In normal runs it is a
+    // no-op and control falls through to argv normalization. Must run
+    // *before* `argv::normalize(...)` so the normalizer's COMPLETE guard
+    // never has to absorb a completion subprocess on the happy path.
+    completion::maybe_complete();
 
     let argv: Vec<OsString> = argv::normalize(std::env::args_os().collect());
 

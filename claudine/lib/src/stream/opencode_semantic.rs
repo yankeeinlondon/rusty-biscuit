@@ -315,7 +315,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
 
     fn handle_tool_result(&mut self, tool: OpenCodeTool, raw_kind: &str) {
         let resolved = tool.resolve();
-        let (cached_name, _cached_input) = resolved
+        let (cached_name, cached_input) = resolved
             .id
             .as_ref()
             .and_then(|id| self.tool_uses.remove(id))
@@ -333,6 +333,15 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         }
         if let Some(err) = &resolved.error {
             extra.insert("error".into(), err.clone());
+        }
+        // Preserve the original tool input alongside the result so renderers
+        // can annotate successful incoming tool events with the same slot
+        // content the outgoing `→ Name(...)` arrow used. Prefer a
+        // wire-provided `input` on the `tool_result` / `tool_end` payload
+        // (rare but permitted) and fall back to the cached input captured
+        // on the paired `tool_start`.
+        if let Some(input) = resolved.input.or(cached_input) {
+            extra.insert("input".into(), input);
         }
 
         self.sink.on_semantic_event(SemanticEvent::ToolResult {
@@ -869,6 +878,71 @@ mod tests {
         assert!(
             collected.is_empty(),
             "empty / missing reasoning text must not emit any semantic event; got {collected:?}"
+        );
+    }
+
+    #[test]
+    fn tool_start_tool_end_pair_preserves_cached_input_on_result() {
+        // Per the 2026-04-18 OpenCode reporting contract, a `tool_start`'s
+        // input must survive into the paired `tool_end` ToolResult so
+        // renderers can annotate successful incoming events with the same
+        // slot content the outgoing arrow used.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls -la"}}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let result = collected
+            .iter()
+            .find(|e| matches!(e, SemanticEvent::ToolResult { .. }))
+            .expect("expected a ToolResult");
+        let SemanticEvent::ToolResult { extra, .. } = result else {
+            unreachable!()
+        };
+        let input = extra
+            .get("input")
+            .expect("extra['input'] must survive into ToolResult");
+        assert_eq!(input.get("command").and_then(Value::as_str), Some("ls -la"));
+    }
+
+    #[test]
+    fn tool_end_wire_input_wins_over_cached_input() {
+        // When the wire `tool_end` payload carries its own `input` (rare
+        // but permitted), the parser must prefer it over the cached
+        // request-side input so we never overwrite fresher data.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok","input":{"command":"pwd"}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let result = collected
+            .iter()
+            .find(|e| matches!(e, SemanticEvent::ToolResult { .. }))
+            .expect("expected a ToolResult");
+        let SemanticEvent::ToolResult { extra, .. } = result else {
+            unreachable!()
+        };
+        assert_eq!(
+            extra
+                .get("input")
+                .and_then(|v| v.get("command"))
+                .and_then(Value::as_str),
+            Some("pwd"),
+            "wire-provided input must win over cached input"
         );
     }
 

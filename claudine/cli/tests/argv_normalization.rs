@@ -270,12 +270,84 @@ fn passthrough_hooks_describe_still_runs() {
     );
 }
 
-// `COMPLETE` completion-mode guard is covered by
-// `normalize_is_noop_when_complete_env_is_set` inside `claudine/cli/src/argv.rs`
-// rather than here; exercising it through the compiled binary would
-// trigger `clap_complete::CompleteEnv::complete()` and short-circuit the
-// whole CLI before our normalizer runs, which defeats the purpose of
-// the regression.
+// ──────────────────────────────────────────────────────────────────────
+// Feature: `2026-04-17-file-completion` (Phase 1.4)
+//
+// The pre-clap argv normalizer has a `COMPLETE` env-var guard that makes
+// `normalize_inner` a strict no-op under completion mode. The unit test
+// `normalize_is_noop_when_complete_env_is_set` inside
+// `claudine/cli/src/argv.rs` proves that guard at the function boundary.
+//
+// Phase 1.4 adds the complementary binary-level proof: once
+// `completion::maybe_complete()` runs in `main.rs` before argv
+// normalization, setting `COMPLETE=<shell>` must exit via
+// `CompleteEnv::complete()` with a registration snippet on stdout — it
+// must *not* fall through into argv normalization, wrapper parsing,
+// config loading, or any runtime error path. If it ever does, users who
+// have completions wired up will see spurious CLI chatter on every
+// shell startup.
+// ──────────────────────────────────────────────────────────────────────
+
+/// Verify that setting `COMPLETE=<shell>` short-circuits the binary at
+/// the `maybe_complete()` hook. A completion subprocess must:
+///
+/// 1. exit `success`;
+/// 2. emit a registration snippet on stdout (the clap_complete handshake
+///    always names the binary, `claudine`, in the generated script);
+/// 3. leave stderr completely clean — normalization, config checks,
+///    telemetry init, and wrapper launch must all be skipped.
+///
+/// The wrapper-argv form (`COMPLETE=bash claudine claude --some-flag`)
+/// is also exercised to prove the short-circuit beats the
+/// wrapper-launch branch specifically. Without the `maybe_complete()`
+/// hook in `main.rs`, the wrapper form would try to spawn the Claude
+/// Code CLI and the assertion would fail noisily.
+#[test]
+fn complete_env_short_circuits_before_argv_normalization() {
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("COMPLETE", "bash")
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stdout.contains("claudine"),
+        "COMPLETE=bash registration must mention the binary name; \
+         got stdout: {stdout}",
+    );
+    assert!(
+        stderr.trim().is_empty(),
+        "COMPLETE=bash subprocess must not touch stderr; \
+         got stderr: {stderr}",
+    );
+}
+
+#[test]
+fn complete_env_short_circuits_wrapper_argv_without_launching_provider() {
+    // Without the `maybe_complete()` hook, this invocation would fall
+    // through to the wrapper launch path and either spawn the Claude
+    // Code binary or fail with a "claude not found" error on stderr.
+    // The short-circuit is what keeps shell completion setup cheap.
+    let output = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("COMPLETE", "bash")
+        .args(["claude", "--some-passthrough-flag"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.trim().is_empty(),
+        "COMPLETE=bash wrapper subprocess must never reach wrapper \
+         launch; got stderr: {stderr}",
+    );
+}
 
 /// `spec.md`: `--claud` (near-miss of `--claude`) is intentionally NOT
 /// rewritten by Rule 1. Clap must surface the standard unknown-argument

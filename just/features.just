@@ -138,10 +138,10 @@ implement-plan filter="":
 
 # Specify a feature with a spec file, a design file, or both which has now been implemented
 # and you want to run a review on.
-review feat="":
+review iteration="1":
     #!/usr/bin/env bash
     set -euo pipefail
-    doc="$(just _choose_feature {{feat}}'')"
+    doc="$(just _choose_feature)"
     dir="$(dirname "${doc}")"
     if [[ "${doc}" == *"design"* ]]; then
         design="${doc}"
@@ -176,9 +176,11 @@ review feat="":
     [[ -n "${design}" ]] && echo -e "    - Design File: {{dim}}$(basename ${design}){{reset}}"
     echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
 
-    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})"
+    claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})" iteration={{iteration}}
+    review_file="${dir}/review-${iteration}.md"
+    link="$(just _link "${review_file}" "$(_abs_path "${review_file}")")"
     echo
-    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
+    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed: ${link}"
     echo
 
 
@@ -224,7 +226,7 @@ implement-review-suggestions feat="" iteration="1":
 
     claudine compose "@prompts/implement-review-suggestions.md" -y --set "{ dir: \"${dir}\", spec: \"$(basename ${spec})\", design: \"$(basename ${design})\" }"
     echo
-    echo "🎉 the {{italic}}implementation{{reset}} of the review ({{dim}}{{blue}}${review}{{reset}}) for {{bold}}{{yellow}}${feature}{{reset}} has completed"
+    echo -e "🎉 the {{italic}}implementation{{reset}} of the review ({{dim}}{{blue}}${review}{{reset}}) for {{bold}}{{yellow}}${feature}{{reset}} has completed"
     echo
 
 # adds a complimentary tech design to the specification file
@@ -248,7 +250,7 @@ design filter="":
     link="$()"
     echo -e "We now have a {{bold}}technical design{{reset}} document for this specification"
     if [[ "$(just _confirm "Are you ready to create a plan for this feature?")" == "y" ]]; then
-        plan-feature "${file}" "${dir}/tech-design.md"
+        just plan-feature "${file}" "${dir}/tech-design.md"
     fi
 
 clarify filter="":

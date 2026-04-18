@@ -90,10 +90,10 @@ Every `ToolCall` and `ToolResult` produces a single line in `Section::ToolUseAnd
 
 ```text
 → Bash(bash ls -la)
-← Bash(successful)
+← Bash(successful, bash ls -la)
 
 → Read(/etc/hosts)
-← Read(successful)
+← Read(successful, /etc/hosts)
 
 → Bash(bash git status)
 ← Bash(error)
@@ -105,13 +105,18 @@ Every `ToolCall` and `ToolResult` produces a single line in `Section::ToolUseAnd
 Format rules:
 
 - **Outgoing call:** `→ {DisplayName}({summary})`. The summary is dim-italic.
-- **Incoming result:** `← {DisplayName}({slot})`. The slot prefers status (`successful` / `pending` dim-italic, `error` red+bold) and falls back to a derived output summary when no status is reported.
+- **Incoming result:** `← {DisplayName}({slot})`. The slot resolves status and summary independently and renders both when both are available, so a successful tool result reads symmetrically with the outgoing call. The status word (`successful` / `pending` dim-italic, `error` red+bold) appears first; a derived summary follows when one can be extracted from the cached input or the result output.
+- **Summary precedence:** `extract_tool_summary` runs against `extra["input"]` first (the cached request-side input from the paired tool call), then falls back to `output` when no input-derived summary is available. File tools surface the requested path; shell tools surface the executed command. Tools that `extract_tool_summary` does not know about render as the bare status (`← Read(successful)`) rather than fabricating content.
 - **Shell tools** (`Bash`, `bash`, `run_command`) prepend the canonical shell name to the command (`bash ls -la`) so the user can reason about how the line would actually execute.
 - **Task** prefers `description → subject → prompt → task` for its summary in that order.
 - **Display name humanization:** known tools pass through unchanged (`Bash`, `Read`, …); MCP-shape tools (`mcp__server__tool`) become `Server Tool`; unknown tools are title-cased on `_` boundaries.
 - **User-controlled content** (commands, paths, URLs, raw JSON fallbacks) is escaped so stray `<`, `>`, `{`, or `\` cannot be interpreted as prose markup.
 
 The full input/output JSON is **never** dumped verbatim for known tools. The raw event remains available in the JSONL semantic log.
+
+### OpenCode Phase Markers
+
+OpenCode emits `step_start` and `step_finish` wire events to bracket each turn-internal phase. The OpenCode semantic parser still maps these to `SemanticEvent::Info { extra["step_phase"] }` so they continue to flow through `LiveMetrics` and the JSONL log, but the live sink suppresses any OpenCode `Info` event that carries `extra["step_phase"]` from stderr — they were visually noisy and added blank-line gaps around real tool lines without contributing user-visible meaning. Other providers' `Info` events are unaffected.
 
 ## Thinking (Reasoning) Rendering
 
