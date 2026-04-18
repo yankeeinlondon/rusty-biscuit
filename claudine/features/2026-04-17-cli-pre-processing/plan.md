@@ -8,6 +8,11 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase2: []
+source_files_during_phase_3:
+  - claudine/cli/src/argv.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase3: []
 packages:
   - claudine-cli
 ---
