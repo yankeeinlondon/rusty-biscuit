@@ -1,0 +1,153 @@
+import "../just/features.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+
+
+PACKAGE := "Claudine"
+LIB_NAME := PACKAGE + " Library"
+CLI_NAME := PACKAGE + " CLI"
+LIBRARY := lowercase(PACKAGE)
+CLI := lowercase(PACKAGE) + "-cli"
+CLI_PATH := "./cli"
+
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null; then
+        md just.md
+    else
+        echo
+        echo -e "{{BOLD}}{{PACKAGE}} ({{RESET}}Library & CLI{{BOLD}}){{RESET}}"
+        echo "======================================================================================"
+        echo ""
+    fi
+
+
+    just --list | grep -v 'default'
+    echo
+
+
+# Build the library and CLI
+build *args="":
+    @just _build claudine "Claudine Library" {{args}}
+    @just _build claudine-cli "Claudine CLI" {{args}}
+
+# Install the CLI
+install *args="":
+    @just _build biscuit-terminal "biscuit-file Library" {{args}}
+    @just _build darkmatter "Darkmatter Library" {{args}}
+    @just build
+    @just _install "{{CLI_PATH}}" "{{PACKAGE}}" "{{args}}"
+
+
+
+# Test both library and CLI.
+# Primary verification for Claudine uses `cargo nextest run`.
+# PTY smoke tests remain manual-only via `cargo test -p claudine-cli --test pty_tests -- --ignored`.
+# Snapshot changes should be reviewed with `cargo insta review` / `cargo insta accept`.
+test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if cargo nextest --version >/dev/null 2>&1; then
+        TEST_RUNNER=(cargo nextest run)
+        echo -e "{{DIM}}Using cargo nextest run for Claudine verification{{RESET}}"
+    else
+        TEST_RUNNER=(cargo test)
+        echo -e "{{YELLOW}}cargo-nextest is not installed; falling back to cargo test{{RESET}}"
+    fi
+
+    echo
+    echo -e "🏃 Testing {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    echo
+    "${TEST_RUNNER[@]}" -p {{LIBRARY}} || ( just _speak "The {{LIB_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing tests!" && exit 1 )
+    echo
+    echo -e "✅ {{BOLD}}{{GREEN}}{{LIB_NAME}} has passed all tests{{RESET}}"
+    echo
+    echo -e "Testing {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    echo
+    "${TEST_RUNNER[@]}" -p "{{CLI}}" || ( just _speak "The {{CLI_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing tests!" && exit 1 )
+    echo
+    echo -e "✅ {{BOLD}}{{GREEN}}{{CLI_NAME}} has passed all tests{{RESET}}"
+
+# Lint both the library and CLI
+
+lint:
+    @just _lint claudine
+    @just _lint claudine-cli
+
+# Lint (and fix) both the library and CLI
+lint-fix:
+    @just _lint claudine || just _fix_lint claudine
+    @just _lint claudine-cli || just _fix_lint claudine-cli
+
+
+# Validate the source code without doing a full build
+check:
+    @cargo check -p {{LIBRARY}} -p {{CLI}}
+
+# Run the latest debug build of the Claudine CLI
+cli *args="":
+    @cargo run -p {{CLI}} {{args}}
+
+git-conflict:
+    #!/usr/bin/env bash
+    base=$(git merge-base HEAD main)
+    echo "=== commits on each side ==="
+    git log --oneline --left-right --graph HEAD...main
+
+    echo
+    echo "=== files changed on both sides ==="
+    comm -12 \
+    <(git diff --name-only $base..HEAD | sort) \
+    <(git diff --name-only $base..main | sort)
+
+    echo
+    echo "=== dry-run merge preview ==="
+    git merge-tree $base HEAD main
+
+
+# Show the dependencies for this package
+deps:
+    @echo "Dependencies:"
+    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{LIBRARY}}*:"
+
+prompt:
+    #!/usr/bin/env bash
+    FILE="./prompts/$(date +%F-%H.%M.%S-prompt.md)"
+    md edit "${FILE}"
+    claudine compose "${FILE}" --opencode --model zai-coding-plan/glm-5.1 --op "prompt"
+    just _speak "Prompt was completed"
+    if confirm "Keep prompt file?"; then
+        echo -e "prompt saved as {{BLUE}}${FILE}{{RESET}}"
+        echo
+    else
+        rm "${FILE}"
+        echo -e "prompt file {{RED}}removed{{RESET}} ({{DIM}}${FILE}{{RESET}})"
+    fi
+
+# Show all README.md files in the package
+readme_files:
+    @sniff docs --readme --json | jq -r '[.[] | select(.relative | startswith("{{LIBRARY}}")) | "@" + .relative ] | join(" ")'
+
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true
