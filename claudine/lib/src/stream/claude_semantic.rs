@@ -11,6 +11,8 @@
 //! - Anything else that is still valid JSON is preserved as
 //!   [`SemanticEvent::ProviderExtension`] rather than silently dropped.
 
+use std::collections::HashMap;
+
 use serde_json::{Map, Value};
 
 use super::parser::{SemanticStreamParser, StreamParseError};
@@ -19,7 +21,7 @@ use super::protocol::claude::{
     ClaudeEvent, ClaudeInit, ClaudeRateLimit, ClaudeResult, ClaudeToolResult, ClaudeToolUse,
     ClaudeUser,
 };
-use super::semantic::{SemanticEvent, SemanticEventSink};
+use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::{RateLimitInfo, StreamExecutionSummary};
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -29,6 +31,17 @@ use crate::events::Provider;
 /// over cosmetic ordering (spec: "preserving streaming wins over
 /// cosmetic ordering").
 const MAX_PRE_INIT_HOOK_EVENTS: usize = 32;
+
+/// Maximum number of bytes we will accumulate in a single pending
+/// `tool_use.input_json` buffer before giving up.
+///
+/// Claude streams tool inputs as a series of `input_json_delta` events
+/// that the parser concatenates until the accumulated string parses as
+/// JSON. A malformed or truncated stream that never closes the JSON
+/// would otherwise grow the buffer without bound and OOM a long-lived
+/// wrapper process. At 1 MiB we're well past any legitimate tool-input
+/// payload but still small enough to recover from a transient outage.
+const MAX_PENDING_TOOL_USE_INPUT_BYTES: usize = 1 << 20;
 
 /// Known raw event `type` strings that are NOT modeled by [`ClaudeEvent`] but
 /// should still map to specific semantic events rather than
@@ -43,12 +56,20 @@ mod allowlist {
 }
 
 /// Native stream parser for Claude Code emitting [`SemanticEvent`]s.
+struct PendingClaudeToolUse {
+    id: Option<String>,
+    name: Option<String>,
+    raw_kind: String,
+    input_json: String,
+}
+
 pub struct ClaudeSemanticStreamParser<S: SemanticEventSink> {
     sink: S,
     line_num: usize,
     // Session state
     session_id: Option<String>,
     model: Option<String>,
+    api_key_source: Option<String>,
     // Accumulated assistant output
     assistant_text: String,
     // Summary state
@@ -74,6 +95,8 @@ pub struct ClaudeSemanticStreamParser<S: SemanticEventSink> {
     /// Buffered hook events (raw kind + raw value) that arrived prior to
     /// `SessionStart`. Drained in FIFO order once session_start is emitted.
     pre_init_hook_buffer: Vec<(String, Value)>,
+    tool_uses: HashMap<String, (Option<String>, Option<Value>)>,
+    pending_tool_use: Option<PendingClaudeToolUse>,
 }
 
 impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
@@ -83,6 +106,7 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             line_num: 0,
             session_id: None,
             model: None,
+            api_key_source: None,
             assistant_text: String::new(),
             token_usage: None,
             cost_usd: None,
@@ -99,6 +123,8 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             terminal_error_emitted: false,
             session_started: false,
             pre_init_hook_buffer: Vec::new(),
+            tool_uses: HashMap::new(),
+            pending_tool_use: None,
         }
     }
 
@@ -132,9 +158,7 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                 Some(s) if !s.is_empty() => format!("system/{s}"),
                 _ => "system".to_string(),
             };
-            if !self.session_started
-                && self.pre_init_hook_buffer.len() < MAX_PRE_INIT_HOOK_EVENTS
-            {
+            if !self.session_started && self.pre_init_hook_buffer.len() < MAX_PRE_INIT_HOOK_EVENTS {
                 self.pre_init_hook_buffer.push((ext_kind, raw.clone()));
             } else {
                 self.emit_provider_extension(&ext_kind, raw.clone());
@@ -143,15 +167,21 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         }
         self.session_id = init.session_id;
         self.model = init.model;
+        self.api_key_source = init.api_key_source;
         super::trace_session_metadata(
             Provider::Claude,
             self.session_id.as_deref(),
             self.model.as_deref(),
         );
+        let mut extra = self.base_extra();
+        extra.insert("raw_kind".into(), Value::from(raw_kind));
+        if let Some(api_key_source) = self.api_key_source.as_deref() {
+            extra.insert("api_key_source".into(), Value::from(api_key_source));
+        }
         self.sink.on_semantic_event(SemanticEvent::SessionStart {
             session_id: self.session_id.clone(),
             model: self.model.clone(),
-            extra: self.extra_with(raw_kind),
+            extra: Value::Object(extra),
         });
         self.session_started = true;
         // Drain any hook events that arrived before the session-ID marker so
@@ -174,15 +204,15 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             return;
         };
         let mut text_parts = String::new();
-        for part in content {
-            if part.kind.as_deref() == Some("text")
-                && let Some(text) = part.text
-            {
-                text_parts.push_str(&text);
-            }
-        }
 
         if let Some(kind) = error_kind {
+            for part in content {
+                if part.kind.as_deref() == Some("text")
+                    && let Some(text) = part.text
+                {
+                    text_parts.push_str(&text);
+                }
+            }
             self.is_error = true;
             self.error_kind = Some(kind.clone());
             let message = if !text_parts.is_empty() {
@@ -196,9 +226,11 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                 let mut extra = self.base_extra();
                 extra.insert("raw_kind".into(), Value::from(raw_kind));
                 extra.insert("error_kind".into(), Value::from(kind.as_str()));
+                let semantic_kind = classify_error(Some(kind.as_str()), Some(message.as_str()));
                 self.sink.on_semantic_event(SemanticEvent::Error {
                     message,
                     terminal: true,
+                    kind: semantic_kind,
                     extra: Value::Object(extra),
                 });
                 self.terminal_error_emitted = true;
@@ -206,14 +238,24 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             return;
         }
 
-        if text_parts.is_empty() {
-            return;
+        for part in content {
+            let part_kind = part.kind.clone();
+            match part_kind.as_deref() {
+                Some("tool_use") => {
+                    if let Some(tool_use) = part.into_tool_use() {
+                        self.flush_assistant_text(&mut text_parts, raw_kind);
+                        self.handle_tool_use(tool_use, raw_kind);
+                    }
+                }
+                Some("text") => {
+                    if let Some(text) = part.text {
+                        text_parts.push_str(&text);
+                    }
+                }
+                _ => {}
+            }
         }
-        self.assistant_text.push_str(&text_parts);
-        self.sink.on_semantic_event(SemanticEvent::OutputText {
-            text: super::ensure_message_newline(text_parts),
-            extra: self.extra_with(raw_kind),
-        });
+        self.flush_assistant_text(&mut text_parts, raw_kind);
     }
 
     fn handle_content_block_delta(&mut self, event: ClaudeContentBlockDelta, raw_kind: &str) {
@@ -244,6 +286,22 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                     });
                 }
             }
+            Some("input_json_delta") => {
+                if let Some(partial_json) = delta.partial_json {
+                    if self.try_complete_pending_tool_use(&partial_json) {
+                        return;
+                    }
+                    let mut payload = Map::new();
+                    payload.insert("type".into(), Value::from("input_json_delta"));
+                    payload.insert("partial_json".into(), Value::from(partial_json));
+                    self.sink
+                        .on_semantic_event(SemanticEvent::ProviderExtension {
+                            provider: Provider::Claude,
+                            kind: "content_block_delta.other".into(),
+                            payload: Value::Object(payload),
+                        });
+                }
+            }
             _ => {
                 // input_json_delta and other deltas fall through — preserve as
                 // a ProviderExtension so partial JSON stream data isn't lost.
@@ -254,11 +312,12 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                 if let Some(text) = delta.partial_json {
                     payload.insert("partial_json".into(), Value::from(text));
                 }
-                self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-                    provider: Provider::Claude,
-                    kind: "content_block_delta.other".into(),
-                    payload: Value::Object(payload),
-                });
+                self.sink
+                    .on_semantic_event(SemanticEvent::ProviderExtension {
+                        provider: Provider::Claude,
+                        kind: "content_block_delta.other".into(),
+                        payload: Value::Object(payload),
+                    });
             }
         }
     }
@@ -266,7 +325,27 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
     fn handle_content_block_start(&mut self, cbs: ClaudeContentBlockStart, raw_kind: &str) {
         if let Some(block) = cbs.content_block {
             if block.kind.as_deref() == Some("tool_use") {
-                self.handle_tool_use(block.into_tool_use(), raw_kind);
+                self.flush_pending_tool_use(None);
+                let mut tool_use = block.into_tool_use();
+                let tool_id = tool_use.resolved_tool_id().map(String::from);
+                let tool_name = tool_use.resolved_tool_name().map(String::from);
+                let tool_input = tool_use.take_input();
+
+                if let Some(id) = tool_id.clone() {
+                    self.tool_uses
+                        .insert(id, (tool_name.clone(), tool_input.clone()));
+                }
+
+                if tool_input.is_some() {
+                    self.emit_tool_call(tool_name, tool_id, tool_input, raw_kind);
+                } else {
+                    self.pending_tool_use = Some(PendingClaudeToolUse {
+                        id: tool_id,
+                        name: tool_name,
+                        raw_kind: raw_kind.to_string(),
+                        input_json: String::new(),
+                    });
+                }
             } else {
                 // Non-tool content blocks (text, image) don't carry data here;
                 // they show up via content_block_delta. Skip without logging.
@@ -286,9 +365,12 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             extra.insert("error_kind".into(), Value::from(kind.as_str()));
         }
 
+        let semantic_kind =
+            classify_error(self.error_kind.as_deref(), self.error_message.as_deref());
         self.sink.on_semantic_event(SemanticEvent::Error {
             message: self.error_message.clone().unwrap_or_default(),
             terminal: true,
+            kind: semantic_kind,
             extra: Value::Object(extra),
         });
         self.terminal_error_emitted = true;
@@ -324,9 +406,11 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                 if let Some(reason) = result.terminal_reason.as_deref() {
                     extra.insert("terminal_reason".into(), Value::from(reason));
                 }
+                let semantic_kind = classify_error(self.error_kind.as_deref(), Some(&message));
                 self.sink.on_semantic_event(SemanticEvent::Error {
                     message,
                     terminal: true,
+                    kind: semantic_kind,
                     extra: Value::Object(extra),
                 });
                 self.terminal_error_emitted = true;
@@ -376,10 +460,12 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
     }
 
     fn handle_rate_limit(&mut self, event: ClaudeRateLimit, raw_kind: &str) {
+        let warning_message = render_claude_rate_limit_message(&event);
         let info = RateLimitInfo {
-            is_throttled: event.is_throttled,
+            is_throttled: event.resolved_is_throttled(),
             retry_after_ms: event.retry_after_ms,
-            message: event.message.clone(),
+            message: warning_message.clone(),
+            reset_at: event.resolved_reset_at(),
         };
 
         let mut extra = self.base_extra();
@@ -390,25 +476,47 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         if let Some(retry_after_ms) = info.retry_after_ms {
             extra.insert("retry_after_ms".into(), Value::from(retry_after_ms));
         }
-
-        let message = info
-            .message
-            .clone()
-            .unwrap_or_else(|| "rate limit".to_string());
+        if let Some(reset_at) = info.reset_at {
+            extra.insert("reset_at".into(), Value::from(reset_at.to_rfc3339()));
+        }
+        if let Some(status) = event.resolved_status() {
+            extra.insert("rate_limit_status".into(), Value::from(status));
+        }
+        if let Some(rate_limit_type) = event.resolved_rate_limit_type() {
+            extra.insert("rate_limit_type".into(), Value::from(rate_limit_type));
+        }
+        if let Some(overage_status) = event.resolved_overage_status() {
+            extra.insert("overage_status".into(), Value::from(overage_status));
+        }
+        if let Some(api_key_source) = self.api_key_source.as_deref() {
+            extra.insert("api_key_source".into(), Value::from(api_key_source));
+        }
         self.rate_limit = Some(info);
 
-        self.sink.on_semantic_event(SemanticEvent::Warning {
-            message,
-            extra: Value::Object(extra),
-        });
+        if let Some(message) = warning_message {
+            self.sink.on_semantic_event(SemanticEvent::Warning {
+                message,
+                extra: Value::Object(extra),
+            });
+        }
     }
 
     fn handle_tool_use(&mut self, mut tu: ClaudeToolUse, raw_kind: &str) {
-        self.tool_calls += 1;
+        self.flush_pending_tool_use(None);
         let tool_id = tu.resolved_tool_id().map(String::from);
         let tool_name = tu.resolved_tool_name().map(String::from);
         let tool_input = tu.take_input();
-        super::trace_tool_event(Provider::Claude, self.tool_calls, tool_name.as_deref());
+        if let Some(id) = tool_id.clone() {
+            self.tool_uses
+                .insert(id, (tool_name.clone(), tool_input.clone()));
+        }
+        self.emit_tool_call(tool_name, tool_id, tool_input, raw_kind);
+    }
+
+    fn handle_tool_result(&mut self, tr: ClaudeToolResult, raw_kind: &str) {
+        let tool_id = tr.resolved_tool_id().map(String::from);
+        self.flush_pending_tool_use(tool_id.as_deref());
+        let (tool_name, cached_input) = self.take_tool_use_metadata(tool_id.as_deref());
 
         let mut extra = self.base_extra();
         extra.insert("raw_kind".into(), Value::from(raw_kind));
@@ -418,28 +526,14 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         if let Some(name) = &tool_name {
             extra.insert("tool_name".into(), Value::from(name.as_str()));
         }
-
-        self.sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: tool_name,
-            id: tool_id,
-            input: tool_input,
-            extra: Value::Object(extra),
-        });
-    }
-
-    fn handle_tool_result(&mut self, tr: ClaudeToolResult, raw_kind: &str) {
-        let tool_id = tr.resolved_tool_id().map(String::from);
-
-        let mut extra = self.base_extra();
-        extra.insert("raw_kind".into(), Value::from(raw_kind));
-        if let Some(id) = &tool_id {
-            extra.insert("tool_id".into(), Value::from(id.as_str()));
+        if let Some(input) = cached_input {
+            extra.insert("input".into(), input);
         }
 
         let output = tr.response();
 
         self.sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: None,
+            name: tool_name,
             id: tool_id,
             status: None,
             exit_code: None,
@@ -479,6 +573,8 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                     } else {
                         Some("success".to_string())
                     };
+                    self.flush_pending_tool_use(tool_id.as_deref());
+                    let (tool_name, cached_input) = self.take_tool_use_metadata(tool_id.as_deref());
 
                     let mut extra = self.base_extra();
                     extra.insert("raw_kind".into(), Value::from(raw_kind));
@@ -486,9 +582,15 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                     if let Some(id) = &tool_id {
                         extra.insert("tool_id".into(), Value::from(id.as_str()));
                     }
+                    if let Some(name) = &tool_name {
+                        extra.insert("tool_name".into(), Value::from(name.as_str()));
+                    }
+                    if let Some(input) = cached_input {
+                        extra.insert("input".into(), input);
+                    }
 
                     self.sink.on_semantic_event(SemanticEvent::ToolResult {
-                        name: None,
+                        name: tool_name,
                         id: tool_id,
                         status,
                         exit_code: None,
@@ -507,11 +609,12 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                     } else {
                         format!("user.{other}")
                     };
-                    self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-                        provider: Provider::Claude,
-                        kind: kind_label,
-                        payload: block,
-                    });
+                    self.sink
+                        .on_semantic_event(SemanticEvent::ProviderExtension {
+                            provider: Provider::Claude,
+                            kind: kind_label,
+                            payload: block,
+                        });
                 }
             }
         }
@@ -547,10 +650,7 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
                     .or_else(|| raw.get("id"))
                     .and_then(Value::as_str)
                     .map(String::from);
-                let status = raw
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .map(String::from);
+                let status = raw.get("status").and_then(Value::as_str).map(String::from);
                 self.sink.on_semantic_event(SemanticEvent::SubagentStop {
                     name,
                     id,
@@ -596,11 +696,12 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::Claude,
-            kind: kind.to_string(),
-            payload,
-        });
+        self.sink
+            .on_semantic_event(SemanticEvent::ProviderExtension {
+                provider: Provider::Claude,
+                kind: kind.to_string(),
+                payload,
+            });
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
@@ -610,6 +711,136 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
             message: format!("Malformed JSON on line {}: {err}", self.line_num),
             extra: Value::Object(extra),
         });
+    }
+
+    fn flush_assistant_text(&mut self, text_parts: &mut String, raw_kind: &str) {
+        if text_parts.is_empty() {
+            return;
+        }
+        let text = std::mem::take(text_parts);
+        self.assistant_text.push_str(&text);
+        self.sink.on_semantic_event(SemanticEvent::OutputText {
+            text: super::ensure_message_newline(text),
+            extra: self.extra_with(raw_kind),
+        });
+    }
+
+    fn emit_tool_call(
+        &mut self,
+        tool_name: Option<String>,
+        tool_id: Option<String>,
+        tool_input: Option<Value>,
+        raw_kind: &str,
+    ) {
+        self.tool_calls += 1;
+        super::trace_tool_event(Provider::Claude, self.tool_calls, tool_name.as_deref());
+
+        let mut extra = self.base_extra();
+        extra.insert("raw_kind".into(), Value::from(raw_kind));
+        if let Some(id) = &tool_id {
+            extra.insert("tool_id".into(), Value::from(id.as_str()));
+        }
+        if let Some(name) = &tool_name {
+            extra.insert("tool_name".into(), Value::from(name.as_str()));
+        }
+
+        self.sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: tool_name,
+            id: tool_id,
+            input: tool_input,
+            extra: Value::Object(extra),
+        });
+    }
+
+    fn try_complete_pending_tool_use(&mut self, partial_json: &str) -> bool {
+        let Some(pending) = self.pending_tool_use.as_mut() else {
+            return false;
+        };
+        // Cap the accumulated buffer so a malformed / unterminated stream
+        // cannot drive the wrapper to OOM. If we exceed the cap, drop the
+        // pending entry and emit a terminal semantic error so operators
+        // see why the tool call never landed.
+        if pending.input_json.len().saturating_add(partial_json.len())
+            > MAX_PENDING_TOOL_USE_INPUT_BYTES
+        {
+            let dropped = self
+                .pending_tool_use
+                .take()
+                .expect("pending tool use present");
+            let tool_name = dropped.name.as_deref().unwrap_or("<unknown>").to_string();
+            let message = format!(
+                "Dropping pending tool_use `{tool_name}`: input_json exceeded {} bytes without \
+                 closing JSON",
+                MAX_PENDING_TOOL_USE_INPUT_BYTES
+            );
+            self.is_error = true;
+            if self.error_message.is_none() {
+                self.error_message = Some(message.clone());
+            }
+            if !self.terminal_error_emitted {
+                let mut extra = self.base_extra();
+                extra.insert("raw_kind".into(), Value::from("input_json_overflow"));
+                if let Some(id) = dropped.id.as_deref() {
+                    extra.insert("tool_id".into(), Value::from(id));
+                }
+                if let Some(name) = dropped.name.as_deref() {
+                    extra.insert("tool_name".into(), Value::from(name));
+                }
+                extra.insert(
+                    "input_bytes_seen".into(),
+                    Value::from(dropped.input_json.len()),
+                );
+                self.sink.on_semantic_event(SemanticEvent::Error {
+                    message,
+                    terminal: false,
+                    kind: SemanticErrorKind::AgentNative,
+                    extra: Value::Object(extra),
+                });
+            }
+            return true;
+        }
+        pending.input_json.push_str(partial_json);
+        let Ok(input) = serde_json::from_str::<Value>(&pending.input_json) else {
+            return true;
+        };
+        let pending = self
+            .pending_tool_use
+            .take()
+            .expect("pending tool use present");
+        if let Some(id) = pending.id.clone() {
+            self.tool_uses
+                .insert(id, (pending.name.clone(), Some(input.clone())));
+        }
+        self.emit_tool_call(pending.name, pending.id, Some(input), &pending.raw_kind);
+        true
+    }
+
+    fn flush_pending_tool_use(&mut self, tool_id: Option<&str>) {
+        let Some(pending) = self.pending_tool_use.take() else {
+            return;
+        };
+        if let Some(tool_id) = tool_id
+            && pending.id.as_deref() != Some(tool_id)
+        {
+            self.pending_tool_use = Some(pending);
+            return;
+        }
+        let input = if pending.input_json.trim().is_empty() {
+            None
+        } else {
+            serde_json::from_str::<Value>(&pending.input_json).ok()
+        };
+        if let Some(id) = pending.id.clone() {
+            self.tool_uses
+                .insert(id, (pending.name.clone(), input.clone()));
+        }
+        self.emit_tool_call(pending.name, pending.id, input, &pending.raw_kind);
+    }
+
+    fn take_tool_use_metadata(&mut self, tool_id: Option<&str>) -> (Option<String>, Option<Value>) {
+        tool_id
+            .and_then(|id| self.tool_uses.remove(id))
+            .unwrap_or((None, None))
     }
 }
 
@@ -712,9 +943,97 @@ impl<S: SemanticEventSink> SemanticStreamParser for ClaudeSemanticStreamParser<S
             badges: Vec::new(),
             raw_summary: self.raw_summary,
             stderr_text: None,
+            stderr_diagnostics: None,
         };
         summary.badges = crate::stream::badges::derive_badges(&summary, Provider::Claude);
         summary
+    }
+}
+
+/// Map a Claude error envelope onto a typed [`SemanticErrorKind`].
+///
+/// Claude reports errors with a kind discriminator (e.g. `billing_error`,
+/// `rate_limit_error`, `authentication_error`) plus a human message. This
+/// helper inspects both fields so the live error renderer and the
+/// end-of-run report can pick a consistent label and color.
+fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
+    if let Some(kind) = error_kind {
+        let lower = kind.to_ascii_lowercase();
+        if lower.contains("billing")
+            || lower.contains("rate_limit")
+            || lower.contains("ratelimit")
+            || lower.contains("quota")
+            || lower.contains("overload")
+            || lower.contains("api_error")
+            || lower.contains("upstream")
+            || lower.contains("server")
+        {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("auth") || lower.contains("permission") || lower.contains("config") {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("abort") {
+            return SemanticErrorKind::Interrupted;
+        }
+    }
+    if let Some(msg) = message {
+        let lower = msg.to_ascii_lowercase();
+        if lower.contains("rate limit")
+            || lower.contains("quota")
+            || lower.contains("billing")
+            || lower.contains("credit")
+            || lower.contains("api error")
+            || lower.contains("overloaded")
+        {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("api key")
+            || lower.contains("authentication")
+            || lower.contains("not authorized")
+            || lower.contains("permission denied")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
+            return SemanticErrorKind::Interrupted;
+        }
+    }
+    SemanticErrorKind::AgentNative
+}
+
+fn render_claude_rate_limit_message(event: &ClaudeRateLimit) -> Option<String> {
+    if let Some(message) = event
+        .resolved_message()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Some(message.to_string());
+    }
+
+    let reset_hint = event
+        .resolved_reset_at()
+        .map(|reset| {
+            format!(
+                "; next session window opens at {}",
+                reset.format("%Y-%m-%d %H:%M:%S UTC")
+            )
+        })
+        .unwrap_or_default();
+
+    if event.resolved_overage_status() == Some("blocked")
+        || event.resolved_status() == Some("limited")
+        || event.resolved_is_throttled() == Some(true)
+    {
+        return Some(format!("Claude session usage limit reached{reset_hint}"));
+    }
+
+    match event.resolved_status() {
+        Some("approaching_limit") => Some(format!(
+            "Claude session usage limit approaching{reset_hint}"
+        )),
+        Some("allowed") | None => None,
+        Some(status) => Some(format!("Claude rate limit status: {status}{reset_hint}")),
     }
 }
 
@@ -755,7 +1074,10 @@ mod tests {
         }
     }
 
-    fn new_parser() -> (RecordingSink, Box<ClaudeSemanticStreamParser<RecordingSink>>) {
+    fn new_parser() -> (
+        RecordingSink,
+        Box<ClaudeSemanticStreamParser<RecordingSink>>,
+    ) {
         let sink = RecordingSink::new();
         let sink_shared = RecordingSink {
             events: sink.events.clone(),
@@ -768,14 +1090,24 @@ mod tests {
     fn init_emits_session_start() {
         let (sink, mut parser) = new_parser();
         parser
-            .feed_line(r#"{"type":"init","session_id":"s1","model":"claude"}"#)
+            .feed_line(
+                r#"{"type":"init","session_id":"s1","model":"claude","apiKeySource":"none"}"#,
+            )
             .unwrap();
         let events = sink.snapshot();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            SemanticEvent::SessionStart { session_id, model, .. } => {
+            SemanticEvent::SessionStart {
+                session_id,
+                model,
+                extra,
+            } => {
                 assert_eq!(session_id.as_deref(), Some("s1"));
                 assert_eq!(model.as_deref(), Some("claude"));
+                assert_eq!(
+                    extra.get("api_key_source").and_then(Value::as_str),
+                    Some("none")
+                );
             }
             other => panic!("expected SessionStart, got {other:?}"),
         }
@@ -833,9 +1165,7 @@ mod tests {
     fn tool_use_and_result_emit_typed_events() {
         let (sink, mut parser) = new_parser();
         parser
-            .feed_line(
-                r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#,
-            )
+            .feed_line(r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls"}}"#)
             .unwrap();
         parser
             .feed_line(r#"{"type":"tool_result","tool_use_id":"t1","content":"ok"}"#)
@@ -844,7 +1174,9 @@ mod tests {
         let events = sink.snapshot();
         assert_eq!(events.len(), 2);
         match &events[0] {
-            SemanticEvent::ToolCall { name, id, input, .. } => {
+            SemanticEvent::ToolCall {
+                name, id, input, ..
+            } => {
                 assert_eq!(name.as_deref(), Some("bash"));
                 assert_eq!(id.as_deref(), Some("t1"));
                 assert_eq!(input, &Some(json!({"cmd": "ls"})));
@@ -852,7 +1184,10 @@ mod tests {
             other => panic!("expected ToolCall, got {other:?}"),
         }
         match &events[1] {
-            SemanticEvent::ToolResult { id, output, .. } => {
+            SemanticEvent::ToolResult {
+                name, id, output, ..
+            } => {
+                assert_eq!(name.as_deref(), Some("bash"));
                 assert_eq!(id.as_deref(), Some("t1"));
                 assert_eq!(output, &Some(json!("ok")));
             }
@@ -876,7 +1211,57 @@ mod tests {
     }
 
     #[test]
-    fn rate_limit_emits_warning() {
+    fn content_block_start_and_delta_emit_tool_call_with_merged_input() {
+        let (sink, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"content_block_start","content_block":{"type":"tool_use","id":"t3","name":"bash"}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"command\":\"ls -la\"}"}}"#,
+            )
+            .unwrap();
+        let events = sink.snapshot();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            SemanticEvent::ToolCall {
+                name, id, input, ..
+            } => {
+                assert_eq!(name.as_deref(), Some("bash"));
+                assert_eq!(id.as_deref(), Some("t3"));
+                assert_eq!(input, &Some(json!({"command": "ls -la"})));
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn assistant_envelope_tool_use_emits_tool_call_in_order() {
+        let (sink, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Checking tests."},{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"cargo test -p claudine"}}]}}"#,
+            )
+            .unwrap();
+        let events = sink.snapshot();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], SemanticEvent::OutputText { .. }));
+        match &events[1] {
+            SemanticEvent::ToolCall {
+                name, id, input, ..
+            } => {
+                assert_eq!(name.as_deref(), Some("Bash"));
+                assert_eq!(id.as_deref(), Some("tu_1"));
+                assert_eq!(input, &Some(json!({"command": "cargo test -p claudine"})));
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rate_limit_emits_warning_with_original_message() {
         let (sink, mut parser) = new_parser();
         parser
             .feed_line(
@@ -896,6 +1281,56 @@ mod tests {
     }
 
     #[test]
+    fn approaching_rate_limit_without_message_renders_reset_window_warning() {
+        let (sink, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"rate_limit_event","rate_limit_info":{"status":"approaching_limit","resetsAt":1712000000,"rateLimitType":"usage","overageStatus":"allowed"}}"#,
+            )
+            .unwrap();
+        let events = sink.snapshot();
+        match &events[0] {
+            SemanticEvent::Warning { message, extra } => {
+                assert!(message.contains("approaching"));
+                assert!(message.contains("next session window opens at"));
+                assert_eq!(
+                    extra.get("rate_limit_status").and_then(Value::as_str),
+                    Some("approaching_limit")
+                );
+                assert_eq!(
+                    extra.get("reset_at").and_then(Value::as_str),
+                    Some("2024-04-01T19:33:20+00:00")
+                );
+            }
+            other => panic!("expected Warning, got {other:?}"),
+        }
+        let summary = parser.finish(0);
+        let rate_limit = summary.rate_limit.expect("rate limit summary");
+        assert_eq!(rate_limit.is_throttled, Some(false));
+        assert_eq!(
+            rate_limit.message.as_deref(),
+            Some(
+                "Claude session usage limit approaching; next session window opens at 2024-04-01 19:33:20 UTC"
+            )
+        );
+        assert_eq!(
+            rate_limit.reset_at.map(|dt| dt.timestamp()),
+            Some(1712000000)
+        );
+    }
+
+    #[test]
+    fn non_throttled_rate_limit_without_message_or_status_emits_no_warning() {
+        let (sink, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"rate_limit_event","is_throttled":false}"#)
+            .unwrap();
+        assert!(sink.snapshot().is_empty());
+        let summary = parser.finish(0);
+        assert_eq!(summary.rate_limit.and_then(|rl| rl.message), None);
+    }
+
+    #[test]
     fn error_event_emits_terminal_error() {
         let (sink, mut parser) = new_parser();
         parser
@@ -905,9 +1340,15 @@ mod tests {
             .unwrap();
         let events = sink.snapshot();
         match &events[0] {
-            SemanticEvent::Error { message, terminal, extra } => {
+            SemanticEvent::Error {
+                message,
+                terminal,
+                kind,
+                extra,
+            } => {
                 assert_eq!(message, "Insufficient credits");
                 assert!(*terminal);
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
                 assert_eq!(extra.get("error_kind"), Some(&json!("billing_error")));
             }
             other => panic!("expected Error, got {other:?}"),
@@ -915,6 +1356,30 @@ mod tests {
         let summary = parser.finish(1);
         assert!(summary.is_error);
         assert_eq!(summary.error_kind.as_deref(), Some("billing_error"));
+    }
+
+    #[test]
+    fn classify_error_billing_kind_maps_to_api_remote() {
+        assert_eq!(
+            classify_error(Some("billing_error"), Some("Insufficient credits")),
+            SemanticErrorKind::ApiRemote,
+        );
+    }
+
+    #[test]
+    fn classify_error_authentication_kind_maps_to_configuration() {
+        assert_eq!(
+            classify_error(Some("authentication_error"), None),
+            SemanticErrorKind::Configuration,
+        );
+    }
+
+    #[test]
+    fn classify_error_unknown_kind_with_no_message_falls_back_to_agent_native() {
+        assert_eq!(
+            classify_error(Some("weird_kind"), None),
+            SemanticErrorKind::AgentNative,
+        );
     }
 
     #[test]
@@ -927,7 +1392,13 @@ mod tests {
             .unwrap();
         let events = sink.snapshot();
         match &events[0] {
-            SemanticEvent::TurnComplete { provider_status, cost_usd, duration_ms, token_usage, .. } => {
+            SemanticEvent::TurnComplete {
+                provider_status,
+                cost_usd,
+                duration_ms,
+                token_usage,
+                ..
+            } => {
                 assert_eq!(provider_status.as_deref(), Some("end_turn"));
                 assert_eq!(*cost_usd, Some(0.0042));
                 assert_eq!(*duration_ms, Some(12345));
@@ -960,7 +1431,11 @@ mod tests {
             .unwrap();
         let events = sink.snapshot();
         match &events[0] {
-            SemanticEvent::ProviderExtension { provider, kind, payload } => {
+            SemanticEvent::ProviderExtension {
+                provider,
+                kind,
+                payload,
+            } => {
                 assert_eq!(*provider, Provider::Claude);
                 assert_eq!(kind, "some_future_event");
                 assert_eq!(payload.get("foo"), Some(&json!("bar")));
@@ -995,7 +1470,9 @@ mod tests {
             .unwrap();
         let events = sink.snapshot();
         match &events[0] {
-            SemanticEvent::SubagentStop { name, id, status, .. } => {
+            SemanticEvent::SubagentStop {
+                name, id, status, ..
+            } => {
                 assert_eq!(name.as_deref(), Some("researcher"));
                 assert_eq!(id.as_deref(), Some("sa_1"));
                 assert_eq!(status.as_deref(), Some("success"));
@@ -1083,15 +1560,24 @@ mod tests {
     fn user_event_routes_tool_result_to_semantic_tool_result() {
         let (sink, mut parser) = new_parser();
         parser
+            .feed_line(
+                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"echo hello"}}]}}"#,
+            )
+            .unwrap();
+        parser
             .feed_line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"hello","is_error":false}]},"session_id":"s1"}"#)
             .unwrap();
-        let kinds = sink.kinds();
+        let events = sink.snapshot();
+        assert!(matches!(events[1], SemanticEvent::ToolResult { .. }));
+        let SemanticEvent::ToolResult { name, status, .. } = &events[1] else {
+            panic!("expected ToolResult, got {:?}", events[1]);
+        };
+        assert_eq!(name.as_deref(), Some("Bash"));
+        assert_eq!(status.as_deref(), Some("success"));
         assert!(
-            kinds.contains(&"tool_result"),
-            "expected tool_result; got {kinds:?}"
-        );
-        assert!(
-            !kinds.contains(&"provider_extension"),
+            !events
+                .iter()
+                .any(|event| matches!(event, SemanticEvent::ProviderExtension { .. })),
             "user event must not leak as ProviderExtension"
         );
     }
@@ -1107,7 +1593,11 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, SemanticEvent::Error { terminal: true, .. }))
             .collect();
-        assert_eq!(terminal_errors.len(), 1, "expected exactly one terminal Error; got {terminal_errors:?}");
+        assert_eq!(
+            terminal_errors.len(),
+            1,
+            "expected exactly one terminal Error; got {terminal_errors:?}"
+        );
         if let SemanticEvent::Error { message, extra, .. } = terminal_errors[0] {
             let lower = message.to_lowercase();
             assert!(
@@ -1121,11 +1611,22 @@ mod tests {
         }
         let summary = parser.finish(1);
         assert_eq!(summary.error_kind.as_deref(), Some("billing_error"));
-        let billing = summary.badges.iter().find(|b| b.category == crate::stream::badges::BadgeCategory::Billing);
-        assert!(billing.is_some(), "summary must carry a Billing badge, not a RateLimit one; got {:?}", summary.badges);
+        let billing = summary
+            .badges
+            .iter()
+            .find(|b| b.category == crate::stream::badges::BadgeCategory::Billing);
         assert!(
-            !summary.badges.iter().any(|b| b.category == crate::stream::badges::BadgeCategory::RateLimit),
-            "billing_error must NOT produce a RateLimit badge; got {:?}", summary.badges
+            billing.is_some(),
+            "summary must carry a Billing badge, not a RateLimit one; got {:?}",
+            summary.badges
+        );
+        assert!(
+            !summary
+                .badges
+                .iter()
+                .any(|b| b.category == crate::stream::badges::BadgeCategory::RateLimit),
+            "billing_error must NOT produce a RateLimit badge; got {:?}",
+            summary.badges
         );
     }
 
@@ -1217,15 +1718,18 @@ mod tests {
 
     #[test]
     fn claude_fixture_full_replay_produces_no_provider_extensions() {
-        let fixture = std::fs::read_to_string(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/providers/claude.ndjson"),
-        )
+        let fixture = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/providers/claude.ndjson"
+        ))
         .expect("claude.ndjson must exist");
 
         let (sink, mut parser) = new_parser();
         for (i, line) in fixture.lines().enumerate() {
             let line = line.trim();
-            if line.is_empty() { continue; }
+            if line.is_empty() {
+                continue;
+            }
             parser
                 .feed_line(line)
                 .unwrap_or_else(|e| panic!("line {}: {:?}", i + 1, e));
@@ -1247,6 +1751,45 @@ mod tests {
             "captured Claude fixture must produce zero non-hook ProviderExtension events; found {}: {:#?}",
             ext.len(),
             ext.iter().take(3).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn unterminated_input_json_delta_is_bounded() {
+        let (sink, mut parser) = new_parser();
+        // Open a pending tool_use but never close the JSON.
+        parser
+            .feed_line(
+                r#"{"type":"content_block_start","content_block":{"type":"tool_use","id":"t1","name":"bash"}}"#,
+            )
+            .unwrap();
+
+        // Craft a chunk larger than the cap to trigger the overflow path
+        // in a single delta.
+        let junk = "x".repeat(MAX_PENDING_TOOL_USE_INPUT_BYTES + 10);
+        let line = serde_json::json!({
+            "type": "content_block_delta",
+            "delta": {"type": "input_json_delta", "partial_json": junk},
+        })
+        .to_string();
+        parser.feed_line(&line).unwrap();
+
+        let events = sink.snapshot();
+        let overflow: Vec<&SemanticEvent> = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    SemanticEvent::Error { extra, .. }
+                        if extra.get("raw_kind").and_then(Value::as_str)
+                            == Some("input_json_overflow")
+                )
+            })
+            .collect();
+        assert_eq!(
+            overflow.len(),
+            1,
+            "expected exactly one overflow Error event; got {events:#?}"
         );
     }
 

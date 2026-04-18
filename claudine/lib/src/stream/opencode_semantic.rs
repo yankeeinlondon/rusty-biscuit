@@ -2,11 +2,10 @@
 //! output.
 //!
 //! OpenCode emits a step-oriented stream: `session_start` metadata, then
-//! alternating `step_start` / `text` / `tool_use` / `tool_result` /
-//! `step_finish` events, plus a final `step_complete` / `turn_complete` that
-//! carries usage / cost / duration. Reasoning and parent-session permission
-//! gaps aren't currently exposed in the NDJSON stream, so they remain out of
-//! scope per the spec.
+//! alternating `step_start` / `text` / `reasoning` / `tool_use` /
+//! `tool_result` / `step_finish` events, plus a final `step_complete` /
+//! `turn_complete` that carries usage / cost / duration. Parent-session
+//! permission gaps aren't currently exposed in the NDJSON stream.
 //!
 //! Routing:
 //!
@@ -15,6 +14,7 @@
 //! - `step_start` / `step_finish` → [`SemanticEvent::Info`] with a
 //!   `step_phase` marker so renderers / heartbeats can key off activity.
 //! - `text` / `text_delta` / `assistant_text` → [`SemanticEvent::OutputText`].
+//! - `reasoning` → [`SemanticEvent::Reasoning`].
 //! - `tool_start` → [`SemanticEvent::ToolCall`] (pre-completion).
 //! - `tool_use` → paired [`SemanticEvent::ToolCall`] + [`SemanticEvent::ToolResult`]
 //!   (OpenCode emits `tool_use` only after the tool has reached `completed` / `error`).
@@ -29,10 +29,10 @@ use serde_json::{Map, Value};
 
 use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::opencode::{
-    OpenCodeError, OpenCodeEvent, OpenCodeInit, OpenCodeStepComplete, OpenCodeStepFinish,
-    OpenCodeStepStart, OpenCodeText, OpenCodeTool,
+    OpenCodeError, OpenCodeEvent, OpenCodeInit, OpenCodeReasoning, OpenCodeStepComplete,
+    OpenCodeStepFinish, OpenCodeStepStart, OpenCodeText, OpenCodeTool,
 };
-use super::semantic::{SemanticEvent, SemanticEventSink};
+use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -207,6 +207,19 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         });
     }
 
+    fn handle_reasoning(&mut self, event: OpenCodeReasoning, raw_kind: &str) {
+        let Some(text) = event.resolved_text() else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        self.sink.on_semantic_event(SemanticEvent::Reasoning {
+            text,
+            extra: Value::Object(self.base_extra(raw_kind)),
+        });
+    }
+
     fn handle_error(&mut self, event: OpenCodeError, raw_kind: &str) {
         self.is_error = true;
         self.error_kind = event.resolved_kind();
@@ -220,9 +233,11 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             .error_message
             .clone()
             .unwrap_or_else(|| "Step failure".to_string());
+        let semantic_kind = classify_error(self.error_kind.as_deref(), Some(&message));
         self.sink.on_semantic_event(SemanticEvent::Error {
             message,
             terminal: true,
+            kind: semantic_kind,
             extra: Value::Object(extra),
         });
     }
@@ -300,7 +315,7 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
 
     fn handle_tool_result(&mut self, tool: OpenCodeTool, raw_kind: &str) {
         let resolved = tool.resolve();
-        let (cached_name, _cached_input) = resolved
+        let (cached_name, cached_input) = resolved
             .id
             .as_ref()
             .and_then(|id| self.tool_uses.remove(id))
@@ -319,6 +334,15 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         if let Some(err) = &resolved.error {
             extra.insert("error".into(), err.clone());
         }
+        // Preserve the original tool input alongside the result so renderers
+        // can annotate successful incoming tool events with the same slot
+        // content the outgoing `→ Name(...)` arrow used. Prefer a
+        // wire-provided `input` on the `tool_result` / `tool_end` payload
+        // (rare but permitted) and fall back to the cached input captured
+        // on the paired `tool_start`.
+        if let Some(input) = resolved.input.or(cached_input) {
+            extra.insert("input".into(), input);
+        }
 
         self.sink.on_semantic_event(SemanticEvent::ToolResult {
             name: cached_name,
@@ -331,11 +355,12 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::OpenCode,
-            kind: kind.to_string(),
-            payload,
-        });
+        self.sink
+            .on_semantic_event(SemanticEvent::ProviderExtension {
+                provider: Provider::OpenCode,
+                kind: kind.to_string(),
+                payload,
+            });
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
@@ -384,6 +409,9 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
                 | OpenCodeEvent::AssistantText(text),
             ) => {
                 self.handle_text(text, &raw_kind);
+            }
+            Ok(OpenCodeEvent::Reasoning(reasoning)) => {
+                self.handle_reasoning(reasoning, &raw_kind);
             }
             Ok(OpenCodeEvent::StepFinish(sf)) => {
                 self.handle_step_finish(sf, &raw_kind);
@@ -458,10 +486,60 @@ impl<S: SemanticEventSink> SemanticStreamParser for OpenCodeSemanticStreamParser
             badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
+            stderr_diagnostics: None,
         };
         summary.badges = crate::stream::badges::derive_badges(&summary, Provider::OpenCode);
         summary
     }
+}
+
+/// Map an OpenCode error envelope onto a typed [`SemanticErrorKind`].
+fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
+    if let Some(kind) = error_kind {
+        let lower = kind.to_ascii_lowercase();
+        if lower.contains("rate") || lower.contains("quota") || lower.contains("billing") {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("auth")
+            || lower.contains("config")
+            || lower.contains("permission")
+            || lower.contains("provider")
+            || lower.contains("model")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("abort") {
+            return SemanticErrorKind::Interrupted;
+        }
+        if lower.contains("api") || lower.contains("upstream") || lower.contains("server") {
+            return SemanticErrorKind::ApiRemote;
+        }
+    }
+    if let Some(msg) = message {
+        let lower = msg.to_ascii_lowercase();
+        if lower.contains("rate limit")
+            || lower.contains("quota")
+            || lower.contains("billing")
+            || lower.contains("api error")
+            || lower.contains("api timeout")
+        {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("api key")
+            || lower.contains("authentication")
+            || lower.contains("not authorized")
+            || lower.contains("permission denied")
+            || lower.contains("model not found")
+            || lower.contains("invalid model")
+            || lower.contains("providermodelnotfound")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
+            return SemanticErrorKind::Interrupted;
+        }
+    }
+    SemanticErrorKind::AgentNative
 }
 
 #[cfg(test)]
@@ -489,7 +567,10 @@ mod tests {
         };
         (
             events,
-            Box::new(OpenCodeSemanticStreamParser::new(sink, Some("gpt-4o".into()))),
+            Box::new(OpenCodeSemanticStreamParser::new(
+                sink,
+                Some("gpt-4o".into()),
+            )),
         )
     }
 
@@ -514,7 +595,9 @@ mod tests {
     #[test]
     fn text_emits_output_text() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"text","text":"hello"}"#).unwrap();
+        parser
+            .feed_line(r#"{"type":"text","text":"hello"}"#)
+            .unwrap();
         let collected = events.lock().unwrap().clone();
         assert!(matches!(
             collected[0],
@@ -550,7 +633,9 @@ mod tests {
             .unwrap();
         let collected = events.lock().unwrap().clone();
         match &collected[0] {
-            SemanticEvent::ToolResult { id, name, status, .. } => {
+            SemanticEvent::ToolResult {
+                id, name, status, ..
+            } => {
                 assert_eq!(id.as_deref(), Some("t999"));
                 assert_eq!(name.as_deref(), Some("bash"));
                 assert_eq!(status.as_deref(), Some("success"));
@@ -588,7 +673,10 @@ mod tests {
             .feed_line(r#"{"type":"error","error_message":"API timeout"}"#)
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(matches!(collected[0], SemanticEvent::Error { terminal: true, .. }));
+        assert!(matches!(
+            collected[0],
+            SemanticEvent::Error { terminal: true, .. }
+        ));
         let summary = parser.finish(1);
         assert!(summary.is_error);
     }
@@ -610,7 +698,10 @@ mod tests {
     fn malformed_json_emits_warning() {
         let (events, mut parser) = new_parser();
         assert!(parser.feed_line("garbage").is_ok());
-        assert!(matches!(events.lock().unwrap()[0], SemanticEvent::Warning { .. }));
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SemanticEvent::Warning { .. }
+        ));
     }
 
     #[test]
@@ -732,11 +823,18 @@ mod tests {
     #[test]
     fn tool_use_event_emits_only_tool_result_not_synthesized_call() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#).unwrap();
+        parser
+            .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
+            .unwrap();
         parser
             .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#)
             .unwrap();
-        let kinds: Vec<&'static str> = events.lock().unwrap().iter().map(|e| e.kind_str()).collect();
+        let kinds: Vec<&'static str> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|e| e.kind_str())
+            .collect();
         let n_calls = kinds.iter().filter(|k| **k == "tool_call").count();
         let n_results = kinds.iter().filter(|k| **k == "tool_result").count();
         assert_eq!(
@@ -747,11 +845,115 @@ mod tests {
     }
 
     #[test]
+    fn reasoning_event_emits_semantic_reasoning() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"reasoning","text":"weighing options"}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let kinds: Vec<&'static str> = collected.iter().map(|e| e.kind_str()).collect();
+        assert_eq!(
+            kinds,
+            vec!["reasoning"],
+            "OpenCode `reasoning` event must route to SemanticEvent::Reasoning, \
+             not fall through to ProviderExtension; got {kinds:?}"
+        );
+        let SemanticEvent::Reasoning { text, .. } = &collected[0] else {
+            panic!("expected Reasoning");
+        };
+        assert_eq!(text, "weighing options");
+    }
+
+    #[test]
+    fn reasoning_with_empty_text_emits_nothing() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"reasoning","text":""}"#)
+            .unwrap();
+        parser
+            .feed_line(r#"{"type":"reasoning","part":{"text":""}}"#)
+            .unwrap();
+        parser.feed_line(r#"{"type":"reasoning"}"#).unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(
+            collected.is_empty(),
+            "empty / missing reasoning text must not emit any semantic event; got {collected:?}"
+        );
+    }
+
+    #[test]
+    fn tool_start_tool_end_pair_preserves_cached_input_on_result() {
+        // Per the 2026-04-18 OpenCode reporting contract, a `tool_start`'s
+        // input must survive into the paired `tool_end` ToolResult so
+        // renderers can annotate successful incoming events with the same
+        // slot content the outgoing arrow used.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls -la"}}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let result = collected
+            .iter()
+            .find(|e| matches!(e, SemanticEvent::ToolResult { .. }))
+            .expect("expected a ToolResult");
+        let SemanticEvent::ToolResult { extra, .. } = result else {
+            unreachable!()
+        };
+        let input = extra
+            .get("input")
+            .expect("extra['input'] must survive into ToolResult");
+        assert_eq!(input.get("command").and_then(Value::as_str), Some("ls -la"));
+    }
+
+    #[test]
+    fn tool_end_wire_input_wins_over_cached_input() {
+        // When the wire `tool_end` payload carries its own `input` (rare
+        // but permitted), the parser must prefer it over the cached
+        // request-side input so we never overwrite fresher data.
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls"}}}"#,
+            )
+            .unwrap();
+        parser
+            .feed_line(
+                r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok","input":{"command":"pwd"}}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let result = collected
+            .iter()
+            .find(|e| matches!(e, SemanticEvent::ToolResult { .. }))
+            .expect("expected a ToolResult");
+        let SemanticEvent::ToolResult { extra, .. } = result else {
+            unreachable!()
+        };
+        assert_eq!(
+            extra
+                .get("input")
+                .and_then(|v| v.get("command"))
+                .and_then(Value::as_str),
+            Some("pwd"),
+            "wire-provided input must win over cached input"
+        );
+    }
+
+    #[test]
     fn tool_use_event_still_increments_tool_calls_counter() {
         // Ensure the trailer count matches the rendered-line count by keeping
         // `tool_calls += 1` even though no ToolCall event is emitted.
         let (_events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#).unwrap();
+        parser
+            .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#)
+            .unwrap();
         parser
             .feed_line(r#"{"type":"tool_use","part":{"id":"t1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file.txt"}}}"#)
             .unwrap();

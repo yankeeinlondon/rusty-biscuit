@@ -234,6 +234,7 @@ mod tests {
             badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
+            stderr_diagnostics: None,
         }
     }
 

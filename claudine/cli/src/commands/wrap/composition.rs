@@ -56,7 +56,6 @@ pub(crate) struct SingleCompositionOutcome {
 /// the summary; callers decide the timing and routing.
 struct CompositionStreamResult {
     exit_code: i32,
-    termination: claudine::harness::ProcessTermination,
     assistant_text: String,
     summary: claudine::stream::summary::StreamExecutionSummary,
     details: StructuredSummaryDetails,
@@ -216,8 +215,10 @@ pub(crate) fn execute_composition_request_inner(
     let compose_source_hint = request.file_ref.clone();
 
     if !silent {
-        let mut header_env_plan = env::EnvPlan::default();
-        header_env_plan.package_context = launch_workspace.package_context.clone();
+        let header_env_plan = env::EnvPlan {
+            package_context: launch_workspace.package_context.clone(),
+            ..Default::default()
+        };
 
         crate::output::log_wrapper_header(
             profile,
@@ -473,19 +474,32 @@ pub(crate) fn execute_composition_request_inner(
         }
     }
 
-    let launch_context = claudine::system_prompt::LaunchContext::from_cwd(&launch_cwd)
-        .unwrap_or_else(|_| claudine::system_prompt::LaunchContext {
-            cwd: launch_cwd.clone(),
-            repo_root: None,
-            package_area_root: None,
-            package_root: None,
-        });
+    let launch_context = match claudine::system_prompt::LaunchContext::from_cwd(&launch_cwd) {
+        Ok(context) => context,
+        Err(error) => {
+            if request.repo {
+                return Err(eyre!(
+                    "--repo requires startup repo detection, but launch-context detection failed: {error}"
+                ));
+            }
+            if !silent && !quiet {
+                log::warn(&format!(
+                    "launch-context detection failed; continuing without repo/package context: {error}"
+                ));
+            }
+            claudine::system_prompt::LaunchContext {
+                cwd: launch_cwd.clone(),
+                repo_root: None,
+                package_area_root: None,
+                package_root: None,
+            }
+        }
+    };
     let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
         &request.system_prompt_args,
         &launch_context,
         effective_non_interactive,
-    )
-    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    )?;
 
     let mut sp_artifacts: Vec<super::system_prompt::SystemPromptArtifact> = Vec::new();
 
@@ -538,7 +552,15 @@ pub(crate) fn execute_composition_request_inner(
     } else {
         &[]
     };
-    let stderr_noise = profile.stderr_noise_prefixes();
+    // Interactive TUIs (Codex, OpenCode, etc.) must inherit stderr directly.
+    // A non-empty stderr filter causes `exec::run_child` to pipe stderr,
+    // which flips `isolate_process_group` on and leaves the child in a
+    // background pgroup — it then hangs on SIGTTIN when reading the TTY.
+    let stderr_noise = if effective_non_interactive {
+        profile.stderr_noise_prefixes()
+    } else {
+        &[]
+    };
 
     let use_structured = profile.supports_structured_stream() && effective_non_interactive;
     let stream_verbosity = structured_verbosity(silent, quiet);
@@ -1308,10 +1330,8 @@ fn run_structured_composition(
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();
     let section_stream = sink.section_stream();
-    let build_parser: exec::SemanticParserBuilder = Box::new(move |output_cb, _reasoning_cb| {
-        let sink = sink.with_output_text_sink(output_cb);
-        claudine::stream::create_semantic_parser(provider, sink, parser_config)
-    });
+    let (build_parser, stderr_bridge) =
+        super::build_structured_plumbing(provider, sink, parser_config);
     let stream_result = exec::run_child_stream_semantic(
         binary_path,
         child_args,
@@ -1327,8 +1347,8 @@ fn run_structured_composition(
         live_metrics,
         stream_output,
         claudine::stream::progress::HeartbeatPolicy::default(),
+        stderr_bridge,
     )?;
-    let termination = stream_result.termination;
     let mut summary = stream_result.data;
 
     let had_streamed_assistant =
@@ -1340,7 +1360,6 @@ fn run_structured_composition(
     let details = summary_details.lock().unwrap().clone();
     Ok(CompositionStreamResult {
         exit_code: summary.exit_code,
-        termination,
         assistant_text: summary.assistant_text.clone(),
         summary,
         details,

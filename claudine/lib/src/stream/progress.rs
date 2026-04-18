@@ -101,6 +101,11 @@ pub struct LiveMetricsState {
     /// otherwise a flood of tool events can hide a long-running subagent
     /// indefinitely.
     pub last_heartbeat_at: Option<Instant>,
+    /// Wall-clock time of the most recent stalled-stream warning emission.
+    /// Used by [`should_warn_stall`] to dedupe warnings within a single
+    /// stall episode — once activity resumes (`last_event_at` advances past
+    /// this value), the next stall is allowed to warn again.
+    pub last_stall_warning_at: Option<Instant>,
 }
 
 impl LiveMetricsState {
@@ -314,6 +319,38 @@ pub fn describe_heartbeat(
     Some(parts.join(" \u{00b7} "))
 }
 
+/// Decide whether the heartbeat should emit a stalled-stream warning.
+///
+/// Returns `true` when:
+/// - some activity has been observed (`last_event_at.is_some()`),
+/// - the elapsed time since that last activity meets or exceeds
+///   `stall_threshold`, AND
+/// - no warning has been emitted yet during this stall episode (i.e.
+///   `last_stall_warning_at` is `None` or strictly older than
+///   `last_event_at`).
+///
+/// Callers are expected to set `last_stall_warning_at = Some(now)` after a
+/// successful warning emission so the same stall does not re-fire on every
+/// subsequent heartbeat tick. Once activity resumes, `last_event_at`
+/// naturally advances past the stored warning timestamp and the next stall
+/// is again eligible to warn.
+pub fn should_warn_stall(
+    state: &LiveMetricsState,
+    now: Instant,
+    stall_threshold: Duration,
+) -> bool {
+    let Some(last_event) = state.last_event_at else {
+        return false;
+    };
+    if now.saturating_duration_since(last_event) < stall_threshold {
+        return false;
+    }
+    match state.last_stall_warning_at {
+        Some(warned_at) => warned_at < last_event,
+        None => true,
+    }
+}
+
 fn format_duration(d: Duration) -> String {
     let secs = d.as_secs_f64();
     if secs < 10.0 {
@@ -471,6 +508,64 @@ mod tests {
         )
         .unwrap();
         assert!(desc.contains("200s"));
+    }
+
+    #[test]
+    fn should_warn_stall_returns_false_when_threshold_not_reached() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        state.last_event_at = Some(now);
+        assert!(
+            !should_warn_stall(&state, now, Duration::from_secs(60)),
+            "fresh activity must not trigger a stall warning"
+        );
+    }
+
+    #[test]
+    fn should_warn_stall_returns_true_after_threshold() {
+        let mut state = LiveMetricsState::default();
+        let now = Instant::now();
+        state.last_event_at = Some(now - Duration::from_secs(120));
+        assert!(
+            should_warn_stall(&state, now, Duration::from_secs(60)),
+            "elapsed-since-activity past threshold must trigger a warning"
+        );
+    }
+
+    #[test]
+    fn should_warn_stall_dedupes_within_one_episode() {
+        let mut state = LiveMetricsState::default();
+        let last_event = Instant::now() - Duration::from_secs(120);
+        state.last_event_at = Some(last_event);
+        // Mark the warning as already fired during this stall episode.
+        state.last_stall_warning_at = Some(last_event + Duration::from_secs(60));
+        assert!(
+            !should_warn_stall(&state, Instant::now(), Duration::from_secs(60)),
+            "stall warning must not re-fire within the same stall episode"
+        );
+    }
+
+    #[test]
+    fn should_warn_stall_re_fires_after_activity_resumes() {
+        let mut state = LiveMetricsState::default();
+        // Activity resumed AFTER a previous stall warning was emitted.
+        let prior_warning = Instant::now() - Duration::from_secs(180);
+        let resumed_at = Instant::now() - Duration::from_secs(120);
+        state.last_stall_warning_at = Some(prior_warning);
+        state.last_event_at = Some(resumed_at);
+        assert!(
+            should_warn_stall(&state, Instant::now(), Duration::from_secs(60)),
+            "a fresh stall episode after resumed activity must warn again"
+        );
+    }
+
+    #[test]
+    fn should_warn_stall_returns_false_when_no_activity_seen_yet() {
+        let state = LiveMetricsState::default();
+        assert!(
+            !should_warn_stall(&state, Instant::now(), Duration::from_secs(60)),
+            "must not warn when no activity has been observed at all"
+        );
     }
 
     #[test]

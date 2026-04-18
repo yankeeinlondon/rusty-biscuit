@@ -9,6 +9,13 @@ Two canonical commands:
 
 Both commands share the same five-stage pipeline and inherit full wrapper-grade behavior: environment setup, harness detection, structured streaming, and handler-driven recovery.
 
+Because composition flows through the same execution path as `claudine claude` / `codex` / etc., it inherits every behavior of the live stderr surface documented in [Non-Interactive Sessions](non-interactive-sessions.md):
+
+- **Tool call rendering** — `→ Name(summary)` / `← Name(slot)` with shell-name prefixing for `Bash` / `shell` / `run_command` and `description → subject → prompt → task` field order for `Task`.
+- **Idle flush** — buffered assistant markdown is flushed before the next heartbeat status line whenever the block buffer has been idle for at least the heartbeat silence window (default 30 s), so a dangling final paragraph never sits invisible while a slow-to-close provider waits to exit.
+- **Typed error rendering** — `SemanticEvent::Error` is rendered as a colored `BlockQuote` whose label and border come from `SemanticErrorKind` (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`).
+- **Reasoning / thinking** — provider reasoning (Claude, Codex, OpenCode, Gemini, Qwen) renders into `Section::Thinking` as a `BlockQuote` with the wider `▌ ` border that matches the System Prompt and Agent Prompt sections.
+
 ### Positional Arguments
 
 Each command accepts exactly one file reference plus zero or more `key=value`
@@ -31,6 +38,37 @@ parsing fails, so `count=3`, `enabled=true`, `tags=["a","b"]`, and
 
 Inline setters override matching keys from `--set`. For `sequence`, reserved
 per-step overlay keys still win over both `--set` and shorthand setters.
+
+### Shell Completion
+
+The file-reference positional on all three composition commands is wired
+to Claudine's dynamic completer. Type part of a file reference and press
+`<TAB>`; the shell calls back into Claudine itself to produce candidates
+that match the command's validity rules:
+
+| Command            | Completion filter                                                      |
+| ------------------ | ---------------------------------------------------------------------- |
+| `compose`          | any `.md` / `.markdown` file (extension-only)                          |
+| `inline-compose`   | markdown files with a non-empty string `prompt:` frontmatter value     |
+| `sequence`         | markdown files whose frontmatter resolves to a valid sequence plan     |
+
+Sigils pick the scope:
+
+- `@<TAB>` walks the current repo root plus `~/.claudine/{prompts,sequences}`.
+- `!<TAB>` walks only the current monorepo package area.
+- `./<TAB>` / `../<TAB>` list immediate children of cwd / parent.
+- A bare partial (`<TAB>` with no sigil) shows a curated landing menu
+  union.
+
+`key=<TAB>` setters and explicitly unsupported prefixes (`vault:`, `/abs`,
+`%`, `{{…}}`) return zero candidates so the shell falls back to its
+default behavior.
+
+The completer binary updates automatically — Claudine owns the runtime
+completion output, so you never need to regenerate a static script.
+Install the one-time bootstrap snippet with
+`claudine completions <shell>`; see [shell-completions.md](../shell-completions.md)
+for the full install matrix and the unsupported-prefix rationale.
 
 ## Direct Composition
 
@@ -89,11 +127,17 @@ Steps:
 
 Both commands use a deterministic precedence chain:
 
-1. **Explicit flag** (`--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`) — highest priority
+1. **Explicit flag** (`--provider <slug>`, or the shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`, `--roo`) — highest priority
 2. **Single installed** — if only one provider remains after `--exclude` filtering
 3. **Frontmatter hint** — the `agent` property in the effective (composed) frontmatter, fuzzy-matched against provider names
 4. **Config favorite** — `settings.linking.preference[0]` from `~/.claudine/config.json` or `<repo>/.claudine/config.json`
 5. **Interactive chooser** — if a TTY is available, prompt the user; otherwise error
+
+The shorthand booleans and the `--provider` value both accept fuzzy
+input (`cl` → `claude`, `gem` → `gemini`, `oc` → `open_code`). The
+[argv normalizer](argv-normalization.md) rewrites every shorthand into
+a canonical `--provider <slug>` pair before clap runs, so runtime
+provider selection only ever reads the single `--provider` field.
 
 ### The `--interactive` Flag
 

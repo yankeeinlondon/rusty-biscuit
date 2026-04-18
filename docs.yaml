@@ -1,0 +1,20 @@
+specification:
+    aliases:
+        - spec
+        - prd
+    patterns:
+        - "*spec*.md"
+        - "*-prd.md"
+    default: "spec.md"
+    look_for:
+        - "features"
+        - "fixes"
+        - "reviews"
+tech_design:
+    patterns:
+        - "*tech-design*.md"
+    default: "tech-design.md"
+    look_for:
+        - "features"
+        - "fixes"
+        - "reviews"

@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::badges::SessionBadge;
@@ -13,6 +14,25 @@ pub struct RateLimitInfo {
     pub retry_after_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_at: Option<DateTime<Utc>>,
+}
+
+/// Stderr-derived diagnostics captured from provider logs.
+///
+/// Populated when a provider emits structured log records on stderr that
+/// Claudine can parse and classify. Attached to [`StreamExecutionSummary`]
+/// only when at least one structured log line was parsed in the session.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StderrDiagnostics {
+    pub log_records_parsed: u32,
+    pub rate_limit_events: u32,
+    pub malformed_asset_events: u32,
+    pub api_failures: u32,
+    pub auth_failures: u32,
+    pub uncaught_errors: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_reset_at: Option<DateTime<Utc>>,
 }
 
 /// Context window pressure info (Kimi-specific, extensible).
@@ -76,6 +96,8 @@ pub struct StreamExecutionSummary {
     pub raw_summary: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stderr_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr_diagnostics: Option<StderrDiagnostics>,
 }
 
 impl Default for StreamExecutionSummary {
@@ -103,6 +125,7 @@ impl Default for StreamExecutionSummary {
             badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
+            stderr_diagnostics: None,
         }
     }
 }
@@ -154,6 +177,7 @@ mod tests {
             badges: Vec::new(),
             raw_summary: Some(serde_json::json!({"stop_reason": "end_turn"})),
             stderr_text: Some("stderr text".into()),
+            stderr_diagnostics: None,
         };
         let json = serde_json::to_string(&summary).unwrap();
         let restored: StreamExecutionSummary = serde_json::from_str(&json).unwrap();
@@ -188,10 +212,100 @@ mod tests {
             is_throttled: Some(true),
             retry_after_ms: Some(5000),
             message: Some("Rate limit exceeded".into()),
+            reset_at: None,
         };
         let json = serde_json::to_string(&info).unwrap();
         let restored: RateLimitInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(info, restored);
+    }
+
+    #[test]
+    fn rate_limit_info_round_trip_with_reset_at() {
+        use chrono::TimeZone;
+        let info = RateLimitInfo {
+            is_throttled: Some(true),
+            retry_after_ms: None,
+            message: Some("Usage limit reached".into()),
+            reset_at: Some(Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56).unwrap()),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"reset_at\""));
+        let restored: RateLimitInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(info, restored);
+    }
+
+    #[test]
+    fn rate_limit_info_skips_reset_at_when_none() {
+        let info = RateLimitInfo {
+            is_throttled: Some(true),
+            retry_after_ms: None,
+            message: None,
+            reset_at: None,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(!json.contains("reset_at"));
+    }
+
+    #[test]
+    fn stderr_diagnostics_default_is_all_zero() {
+        let diagnostics = StderrDiagnostics::default();
+        assert_eq!(diagnostics.log_records_parsed, 0);
+        assert_eq!(diagnostics.rate_limit_events, 0);
+        assert_eq!(diagnostics.malformed_asset_events, 0);
+        assert_eq!(diagnostics.api_failures, 0);
+        assert_eq!(diagnostics.auth_failures, 0);
+        assert_eq!(diagnostics.uncaught_errors, 0);
+        assert!(diagnostics.rate_limit_reset_at.is_none());
+    }
+
+    #[test]
+    fn stderr_diagnostics_round_trip_full() {
+        use chrono::TimeZone;
+        let diagnostics = StderrDiagnostics {
+            log_records_parsed: 12,
+            rate_limit_events: 1,
+            malformed_asset_events: 2,
+            api_failures: 1,
+            auth_failures: 0,
+            uncaught_errors: 3,
+            rate_limit_reset_at: Some(Utc.with_ymd_and_hms(2026, 4, 16, 4, 18, 56).unwrap()),
+        };
+        let json = serde_json::to_string(&diagnostics).unwrap();
+        let restored: StderrDiagnostics = serde_json::from_str(&json).unwrap();
+        assert_eq!(diagnostics, restored);
+    }
+
+    #[test]
+    fn stderr_diagnostics_skips_reset_at_when_none() {
+        let diagnostics = StderrDiagnostics {
+            log_records_parsed: 1,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&diagnostics).unwrap();
+        assert!(!json.contains("rate_limit_reset_at"));
+    }
+
+    #[test]
+    fn summary_stderr_diagnostics_skipped_when_none() {
+        let summary = StreamExecutionSummary::default();
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(!json.contains("stderr_diagnostics"));
+    }
+
+    #[test]
+    fn summary_stderr_diagnostics_round_trips_when_set() {
+        let summary = StreamExecutionSummary {
+            stderr_diagnostics: Some(StderrDiagnostics {
+                log_records_parsed: 4,
+                malformed_asset_events: 2,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&summary).unwrap();
+        assert!(json.contains("\"stderr_diagnostics\""));
+        let restored: StreamExecutionSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.stderr_diagnostics, summary.stderr_diagnostics);
     }
 
     #[test]

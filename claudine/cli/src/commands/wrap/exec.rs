@@ -11,10 +11,12 @@ use std::time::{Duration, Instant};
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::terminal::Terminal;
+use claudine::stream::logs::{EarlyTermination, StderrBridgeHandle, StderrIngestOutcome};
 use claudine::stream::parser::{SemanticStreamParser, StreamParseError};
 use claudine::stream::progress::{self, HeartbeatPolicy, LiveMetrics};
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use tracing::{Span, info_span};
 
 use super::stream_io::StreamOutput;
@@ -49,6 +51,11 @@ struct StreamTextRenderer {
     /// output. Safe to enable now that all stderr status lines route through
     /// `StreamOutput`, which guarantees a newline-boundary before writing.
     partial_line_committed: bool,
+    /// Timestamp of the last write into `block_buffer`. Used by
+    /// [`flush_if_idle`] so the heartbeat thread can surface buffered
+    /// assistant text when the provider stalls without emitting a paragraph
+    /// boundary. Reset to `None` whenever the block flushes.
+    last_block_growth_at: Option<Instant>,
     /// Terminal reference for rendering.
     term: Option<Terminal>,
     /// Cached darkmatter options (created once to avoid repeated theme detection).
@@ -69,6 +76,7 @@ impl StreamTextRenderer {
             line_buffer: String::new(),
             in_code_fence: false,
             partial_line_committed: false,
+            last_block_growth_at: None,
             term,
             terminal_options,
         }
@@ -120,7 +128,7 @@ impl StreamTextRenderer {
 
         // Track code fence open/close (``` or ~~~)
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             if self.in_code_fence {
                 // Closing fence — render the complete fenced block
                 self.in_code_fence = false;
@@ -133,14 +141,14 @@ impl StreamTextRenderer {
 
         // Inside a code fence — just accumulate, don't look for boundaries
         if self.in_code_fence {
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             return;
         }
 
         // Blank line outside a code fence = block boundary
         if trimmed.is_empty() {
             // Include the blank line so darkmatter sees proper paragraph spacing
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             self.flush_block(out);
             return;
         }
@@ -150,13 +158,31 @@ impl StreamTextRenderer {
         // the provider stalls after emitting the last list item.
         if is_stream_safe_list_item(trimmed) {
             self.flush_block(out);
-            self.block_buffer.push_str(line);
+            self.append_block(line);
             self.flush_block(out);
             return;
         }
 
-        // Regular content — accumulate
-        self.block_buffer.push_str(line);
+        // Regular content — accumulate.
+        self.append_block(line);
+
+        // Sentence-level early flush: once the block has accumulated past
+        // the size threshold and the latest line ends with sentence-
+        // terminating punctuation, flush so the user sees prose as it is
+        // written instead of waiting for a blank-line boundary. Fence and
+        // list cases above already returned, and short buffers fall below
+        // the threshold, so this never fires mid-code and never chops
+        // short responses.
+        if self.block_buffer.len() >= SENTENCE_FLUSH_MIN_BYTES && line_ends_sentence(trimmed) {
+            self.flush_block(out);
+        }
+    }
+
+    /// Append `content` to the block buffer and stamp the growth clock so
+    /// [`flush_if_idle`] can tell how long the buffer has been sitting idle.
+    fn append_block(&mut self, content: &str) {
+        self.block_buffer.push_str(content);
+        self.last_block_growth_at = Some(Instant::now());
     }
 
     /// Render the accumulated block through darkmatter and write to output.
@@ -165,7 +191,29 @@ impl StreamTextRenderer {
             return;
         }
         let block = std::mem::take(&mut self.block_buffer);
+        self.last_block_growth_at = None;
         self.render_markdown(out, &block);
+    }
+
+    /// Flush buffered markdown if it has been sitting idle for at least
+    /// `idle_threshold`. Returns `true` when something was flushed.
+    ///
+    /// Called by the heartbeat thread before it emits its own status line so
+    /// dangling paragraphs cannot remain invisible while the provider stalls
+    /// without closing stdout. An empty buffer is a no-op; a fresh write
+    /// inside the threshold is a no-op.
+    fn flush_if_idle<W: Write>(&mut self, out: &mut W, idle_threshold: Duration) -> bool {
+        if self.block_buffer.is_empty() {
+            return false;
+        }
+        let Some(stamped_at) = self.last_block_growth_at else {
+            return false;
+        };
+        if stamped_at.elapsed() < idle_threshold {
+            return false;
+        }
+        self.flush_block(out);
+        true
     }
 
     /// Flush any remaining buffered content (incomplete line + block buffer).
@@ -176,7 +224,7 @@ impl StreamTextRenderer {
                 // Already streamed raw — do not re-render through darkmatter.
                 self.partial_line_committed = false;
             } else {
-                self.block_buffer.push_str(&leftover);
+                self.append_block(&leftover);
             }
         }
         self.flush_block(out);
@@ -197,94 +245,34 @@ impl StreamTextRenderer {
     }
 }
 
+/// Minimum buffered byte count before a sentence-terminator at the end of a
+/// line is allowed to trigger an early flush. Short single-line responses
+/// (e.g. `"OK."`) stay buffered so they don't render as their own pseudo-
+/// paragraph; only multi-line or otherwise substantial prose qualifies.
+const SENTENCE_FLUSH_MIN_BYTES: usize = 200;
+
+/// Returns `true` when the trimmed line ends with a sentence-terminating
+/// character (`.`, `!`, `?`), optionally followed by a trailing closing
+/// quote / bracket / parenthesis. Trailing whitespace is already stripped by
+/// the caller.
+fn line_ends_sentence(trimmed: &str) -> bool {
+    let bytes = trimmed.as_bytes();
+    let mut idx = bytes.len();
+    while idx > 0 {
+        let ch = bytes[idx - 1];
+        if matches!(ch, b'"' | b'\'' | b')' | b']' | b'}') {
+            idx -= 1;
+            continue;
+        }
+        return matches!(ch, b'.' | b'!' | b'?');
+    }
+    false
+}
+
 fn is_stream_safe_list_item(line: &str) -> bool {
     line.starts_with("- ") || line.starts_with("* ") || line.starts_with("+ ") || {
         let digits = line.bytes().take_while(|b| b.is_ascii_digit()).count();
         digits > 0 && line[digits..].starts_with(". ")
-    }
-}
-
-/// Renders streamed thinking/reasoning text dimmed to stderr.
-///
-/// Accumulates thinking text and emits it via Prose dim+italic styling so it
-/// is visually distinct from assistant text. A leading "Thinking..." label is
-/// printed when the first thinking chunk arrives.
-///
-/// Writes to stderr using short-lived locks to avoid blocking the separate
-/// stderr processing thread.
-///
-/// ## Note
-///
-/// This renderer is **no longer wired** into the structured-stream path.
-/// `LiveSemanticSink` now owns reasoning rendering end-to-end via
-/// [`render_thinking_block`], emitting a BlockQuote through the section-aware
-/// stderr emitter. The struct and its methods are retained for potential
-/// future use outside the structured path.
-#[allow(dead_code)]
-struct StreamThinkingRenderer {
-    buffer: String,
-    active: bool,
-}
-
-impl StreamThinkingRenderer {
-    #[allow(dead_code)]
-    fn new() -> Self {
-        Self {
-            buffer: String::new(),
-            active: false,
-        }
-    }
-
-    #[allow(dead_code)]
-    fn push(&mut self, text: &str) {
-        if !self.active {
-            // Emit a dim+italic "Thinking..." header on first thinking chunk
-            let header = Self::render_dim_italic("\u{27e1} Thinking...");
-            eprintln!("{header}");
-            self.active = true;
-        }
-        self.buffer.push_str(text);
-
-        // Emit complete lines immediately (dimmed)
-        while let Some(newline_pos) = self.buffer.find('\n') {
-            let line = self.buffer[..newline_pos].to_string();
-            self.buffer.drain(..=newline_pos);
-            let rendered = Self::render_dim(&line);
-            eprintln!("{rendered}");
-        }
-    }
-
-    /// Flush remaining thinking text and reset state when switching to
-    /// assistant text or finishing the stream.
-    #[allow(dead_code)]
-    fn flush_if_active(&mut self) {
-        if !self.active {
-            return;
-        }
-        if !self.buffer.is_empty() {
-            let remaining = std::mem::take(&mut self.buffer);
-            let rendered = Self::render_dim(&remaining);
-            eprintln!("{rendered}");
-        }
-        // Blank line to separate thinking from assistant text
-        eprintln!();
-        self.active = false;
-    }
-
-    #[allow(dead_code)]
-    fn render_dim(text: &str) -> String {
-        use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable;
-        let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim>{safe}</dim>")).render(&crate::log::terminal())
-    }
-
-    #[allow(dead_code)]
-    fn render_dim_italic(text: &str) -> String {
-        use biscuit_terminal::components::prose::Prose;
-        use biscuit_terminal::components::renderable::Renderable;
-        let safe = text.replace('<', "\\<");
-        Prose::new(format!("<dim><i>{safe}</i></dim>")).render(&crate::log::terminal())
     }
 }
 
@@ -383,7 +371,9 @@ pub(crate) fn run_child(
     // macOS) and the child writes to stdout/stderr during startup, both
     // processes block on pipe I/O with no reader on the other end.
     let stdout_handle = if filter_stdout {
-        let pipe = child.stdout.take().expect("stdout was set to piped");
+        let pipe = child.stdout.take().expect(
+            "child stdout must be piped: Stdio::piped() was set on the child Command above",
+        );
         let prefixes: Vec<String> = io
             .stdout_noise_prefixes
             .iter()
@@ -411,7 +401,9 @@ pub(crate) fn run_child(
     };
 
     let stderr_handle = if filter_stderr {
-        let pipe = child.stderr.take().expect("stderr was set to piped");
+        let pipe = child.stderr.take().expect(
+            "child stderr must be piped: Stdio::piped() was set on the child Command above",
+        );
         let prefixes: Vec<String> = io
             .stderr_noise_prefixes
             .iter()
@@ -554,14 +546,21 @@ fn wait_with_signal_handling(
     child_in_own_pgroup: bool,
 ) -> Result<(i32, claudine::harness::ProcessTermination)> {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicU8, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
     let interrupt_count = Arc::new(AtomicU8::new(0));
+    let child_exited = Arc::new(AtomicBool::new(false));
     let child_pid = child.id();
 
     let counter = Arc::clone(&interrupt_count);
+    let exited = Arc::clone(&child_exited);
     let _guard = unsafe {
         signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+            // Never signal a PID we no longer own — the kernel may have
+            // recycled `child_pid` onto an unrelated process by now.
+            if exited.load(Ordering::SeqCst) {
+                return;
+            }
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
             if !child_in_own_pgroup {
                 // Child shares our process group; the terminal already
@@ -584,6 +583,10 @@ fn wait_with_signal_handling(
     }?;
 
     let status = child.wait()?;
+    // Set the exit flag BEFORE the `_guard` drops so a SIGINT that arrives
+    // in the narrow window between `wait` returning and the guard being
+    // dropped still sees an exited child and refuses to signal the PID.
+    child_exited.store(true, Ordering::SeqCst);
     let code = exit_code_from_status(status);
     let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
     let termination = if was_interrupted {
@@ -604,6 +607,212 @@ fn wait_with_signal_handling(
         exit_code_from_status(status),
         claudine::harness::ProcessTermination::Completed,
     ))
+}
+
+/// Polling wait loop used when an [`EarlyTermination`] receiver is attached
+/// to the structured stream executor.
+///
+/// Behaves like [`wait_with_signal_handling`] while also polling the
+/// stderr-bridge channel. When a signal arrives, the child's process group
+/// is sent `SIGTERM` and escalated to `SIGKILL` after a 5-second grace
+/// period. The return value preserves existing SIGINT semantics and reports
+/// `Interrupted` when either a user Ctrl-C or a bridge-signaled early
+/// termination reaped the child.
+///
+/// Isolated to the bridge path so non-OpenCode runs keep the existing
+/// `child.wait()`-based helper.
+#[cfg(unix)]
+fn wait_with_signal_and_early_termination(
+    child: &mut Child,
+    child_in_own_pgroup: bool,
+    early_rx: Receiver<EarlyTermination>,
+) -> Result<(
+    i32,
+    claudine::harness::ProcessTermination,
+    Option<EarlyTermination>,
+)> {
+    use std::sync::atomic::{AtomicBool, AtomicU8};
+
+    let interrupt_count = Arc::new(AtomicU8::new(0));
+    let child_exited = Arc::new(AtomicBool::new(false));
+    let child_pid = child.id();
+
+    let counter = Arc::clone(&interrupt_count);
+    let exited = Arc::clone(&child_exited);
+    let _guard = unsafe {
+        signal_hook::low_level::register(signal_hook::consts::SIGINT, move || {
+            // Don't signal a PID we no longer own (it may have been
+            // recycled onto an unrelated process).
+            if exited.load(Ordering::SeqCst) {
+                return;
+            }
+            let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            if !child_in_own_pgroup {
+                return;
+            }
+            match count {
+                1 => {
+                    libc::kill(-(child_pid as i32), libc::SIGINT);
+                }
+                2 => {
+                    libc::kill(-(child_pid as i32), libc::SIGTERM);
+                }
+                _ => {
+                    libc::kill(-(child_pid as i32), libc::SIGKILL);
+                }
+            }
+        })
+    }?;
+
+    let mut early_termination: Option<EarlyTermination> = None;
+    let mut grace_deadline: Option<Instant> = None;
+    let poll_interval = Duration::from_millis(75);
+    let grace_period = Duration::from_secs(5);
+
+    loop {
+        if let Some(status) = child.try_wait()? {
+            // Mark the PID as reaped before the 5-second grace window's
+            // signal guard can drop so we never signal a recycled PID.
+            child_exited.store(true, Ordering::SeqCst);
+            let code = exit_code_from_status(status);
+            let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
+            let termination = if was_interrupted || early_termination.is_some() {
+                claudine::harness::ProcessTermination::Interrupted
+            } else {
+                claudine::harness::ProcessTermination::Completed
+            };
+            return Ok((code, termination, early_termination));
+        }
+
+        if early_termination.is_none() {
+            match early_rx.try_recv() {
+                Ok(signal) => {
+                    tracing::info!(
+                        child_pid,
+                        "early-termination signal received; sending SIGTERM to child process group",
+                    );
+                    let kill_pid = if child_in_own_pgroup {
+                        -(child_pid as i32)
+                    } else {
+                        child_pid as i32
+                    };
+                    unsafe {
+                        libc::kill(kill_pid, libc::SIGTERM);
+                    }
+                    early_termination = Some(signal);
+                    grace_deadline = Some(Instant::now() + grace_period);
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    // Channel closed with no signal; continue normal polling.
+                }
+            }
+        }
+
+        if let Some(deadline) = grace_deadline
+            && Instant::now() >= deadline
+        {
+            tracing::warn!(
+                child_pid,
+                "child did not exit after early-termination SIGTERM; escalating to SIGKILL",
+            );
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGKILL);
+            }
+            grace_deadline = None;
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
+#[cfg(not(unix))]
+fn wait_with_signal_and_early_termination(
+    child: &mut Child,
+    _child_in_own_pgroup: bool,
+    early_rx: Receiver<EarlyTermination>,
+) -> Result<(
+    i32,
+    claudine::harness::ProcessTermination,
+    Option<EarlyTermination>,
+)> {
+    let mut early_termination: Option<EarlyTermination> = None;
+    let mut grace_deadline: Option<Instant> = None;
+    let poll_interval = Duration::from_millis(75);
+    let grace_period = Duration::from_secs(5);
+
+    loop {
+        if let Some(status) = child.try_wait()? {
+            let code = exit_code_from_status(status);
+            let termination = if early_termination.is_some() {
+                claudine::harness::ProcessTermination::Interrupted
+            } else {
+                claudine::harness::ProcessTermination::Completed
+            };
+            return Ok((code, termination, early_termination));
+        }
+
+        if early_termination.is_none() {
+            match early_rx.try_recv() {
+                Ok(signal) => {
+                    let _ = child.kill();
+                    early_termination = Some(signal);
+                    grace_deadline = Some(Instant::now() + grace_period);
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {}
+            }
+        }
+
+        if let Some(deadline) = grace_deadline
+            && Instant::now() >= deadline
+        {
+            let _ = child.kill();
+            grace_deadline = None;
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
+/// Overwrite the synthesized failure fields when the stderr bridge signals
+/// a terminal early-exit condition. Today only
+/// [`EarlyTermination::RateLimit`] applies, which produces a
+/// `usage_limit_reached` error so the summary, JSONL log, and Quota badge
+/// all describe the failure even though the child was killed by a signal.
+///
+/// Preserves any parser-provided `rate_limit` fields field-by-field:
+/// `is_throttled` is forced to `Some(true)`, `message` is only set when
+/// absent, and `reset_at` keeps the first non-`None` value.
+fn apply_early_termination_to_summary(
+    summary: &mut StreamExecutionSummary,
+    termination: &EarlyTermination,
+) {
+    match termination {
+        EarlyTermination::RateLimit { message, reset_at } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("usage_limit_reached".into());
+            summary.error_message = Some(message.clone());
+
+            let mut rate_limit = summary.rate_limit.clone().unwrap_or_default();
+            rate_limit.is_throttled = Some(true);
+            if rate_limit.message.is_none() {
+                rate_limit.message = Some(message.clone());
+            }
+            if rate_limit.reset_at.is_none()
+                && let Some(reset) = reset_at
+            {
+                rate_limit.reset_at = Some(*reset);
+            }
+            summary.rate_limit = Some(rate_limit);
+        }
+    }
 }
 
 /// Wait for the child with a timeout, sending SIGTERM then SIGKILL.
@@ -773,7 +982,10 @@ pub(crate) fn run_child_capture(
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
 
     // Capture stdout into a string, applying noise filtering
-    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .expect("child stdout must be piped: Stdio::piped() was set on the child Command above");
     let stdout_noise: Vec<String> = io
         .stdout_noise_prefixes
         .iter()
@@ -796,7 +1008,10 @@ pub(crate) fn run_child_capture(
     });
 
     // Capture stderr into a string, applying noise filtering
-    let stderr_pipe = child.stderr.take().expect("stderr was set to piped");
+    let stderr_pipe = child
+        .stderr
+        .take()
+        .expect("child stderr must be piped: Stdio::piped() was set on the child Command above");
     let stderr_noise: Vec<String> = io
         .stderr_noise_prefixes
         .iter()
@@ -852,6 +1067,7 @@ fn spawn_progress_heartbeat(
     started_at: Instant,
     live_metrics: Option<LiveMetrics>,
     stream_output: Arc<StreamOutput>,
+    text_renderer: Option<Arc<std::sync::Mutex<StreamTextRenderer>>>,
     policy: HeartbeatPolicy,
 ) -> Option<(Arc<AtomicBool>, thread::JoinHandle<()>)> {
     if !enabled {
@@ -860,6 +1076,7 @@ fn spawn_progress_heartbeat(
 
     let done = Arc::new(AtomicBool::new(false));
     let done_flag = Arc::clone(&done);
+    let stall_threshold = stall_threshold_from_env(policy);
     let handle = thread::spawn(move || {
         let mut next_tick = started_at + policy.interval;
         let term = crate::log::terminal();
@@ -867,6 +1084,35 @@ fn spawn_progress_heartbeat(
         while !done_flag.load(Ordering::Relaxed) {
             let now = Instant::now();
             if now >= next_tick {
+                // Flush any buffered markdown that has been idle for at
+                // least the silence window. This guarantees a dangling
+                // paragraph reaches stdout before the heartbeat status
+                // line reaches stderr, so the heartbeat never appears
+                // above stale assistant text.
+                if let Some(renderer) = &text_renderer
+                    && let Ok(mut r) = renderer.lock()
+                {
+                    let mut writer = stream_output.stdout_writer();
+                    r.flush_if_idle(&mut writer, policy.silence_window);
+                }
+
+                // Stalled-stream warning: when the provider has gone fully
+                // silent for `stall_threshold`, emit one warning per stall
+                // episode so the user knows the run may be hung. Routed
+                // through the same stderr surface as the heartbeat status
+                // line for spacing consistency.
+                if let Some(metrics) = live_metrics.as_ref() {
+                    let stall_output = stream_output.clone();
+                    let stall_term = term.clone();
+                    let mut emit = move |msg: &str| {
+                        let rendered = Status::new(msg.to_string())
+                            .state(StatusState::Warning)
+                            .render(&stall_term);
+                        stall_output.emit_stderr_line(&rendered);
+                    };
+                    maybe_emit_stall_warning(metrics, now, stall_threshold, &mut emit);
+                }
+
                 emit_progress_heartbeat(
                     started_at,
                     live_metrics.as_ref(),
@@ -927,6 +1173,65 @@ fn emit_progress_heartbeat(
     if let Some(desc) = description {
         let rendered = Status::new(desc).state(StatusState::Info).render(term);
         stream_output.emit_stderr_line(&rendered);
+    }
+}
+
+/// Resolve the stall-warning threshold. Defaults to `policy.force_window`
+/// (so a stall warning fires after the same window that already forces a
+/// heartbeat tick during sustained activity), and can be overridden via
+/// the `CLAUDINE_STALL_TIMEOUT_SECONDS` environment variable. Invalid or
+/// non-positive values fall back to the default.
+fn stall_threshold_from_env(policy: HeartbeatPolicy) -> Duration {
+    match std::env::var("CLAUDINE_STALL_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+    {
+        Some(secs) => Duration::from_secs(secs),
+        None => policy.force_window,
+    }
+}
+
+/// Check the live metrics for a stalled stream and emit one warning per
+/// stall episode. Returns `true` when a warning was emitted on this call.
+///
+/// Dedup logic lives in [`progress::should_warn_stall`]; this helper is
+/// the side-effecting wrapper that updates `last_stall_warning_at` and
+/// invokes the caller-provided emitter exactly once per episode.
+fn maybe_emit_stall_warning<F: FnMut(&str)>(
+    metrics: &LiveMetrics,
+    now: Instant,
+    threshold: Duration,
+    emit: &mut F,
+) -> bool {
+    let mut state = match metrics.lock() {
+        Ok(state) => state,
+        Err(_) => return false,
+    };
+    if !progress::should_warn_stall(&state, now, threshold) {
+        return false;
+    }
+    state.last_stall_warning_at = Some(now);
+    let elapsed = now.saturating_duration_since(state.last_event_at.unwrap_or(now));
+    let secs = elapsed.as_secs();
+    drop(state);
+    let message = format!(
+        "no provider activity in {} \u{2014} provider may be hung; press Ctrl+C to abort",
+        format_stall_duration(secs)
+    );
+    emit(&message);
+    true
+}
+
+/// Format a duration in seconds for the stall warning message.
+/// Mirrors the heartbeat duration formatter at coarse granularity.
+fn format_stall_duration(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3_600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h{}m", secs / 3_600, (secs % 3_600) / 60)
     }
 }
 
@@ -1011,6 +1316,7 @@ pub(crate) fn run_child_stream_semantic(
     live_metrics: LiveMetrics,
     stream_output: Arc<StreamOutput>,
     heartbeat_policy: HeartbeatPolicy,
+    stderr_bridge: Option<StderrBridgeHandle>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(env.contains_key(&OsString::from("PATH")));
     debug_assert!(env.contains_key(&OsString::from("HOME")));
@@ -1042,6 +1348,19 @@ pub(crate) fn run_child_stream_semantic(
     *child_spawned = true;
     Span::current().record("child_pid", tracing::field::display(child.id()));
 
+    // Terminal-local renderer for OutputText (stdout markdown). Wrapped
+    // in Arc<Mutex<_>> so the builder closures can retain independent
+    // handles without untangling lifetimes across the FnMut boundary of
+    // the sink's callback storage. Shared with the heartbeat thread so
+    // buffered markdown can be flushed when the provider stalls.
+    //
+    // Note: reasoning rendering is owned entirely by LiveSemanticSink,
+    // which emits BlockQuote-formatted thinking text through the
+    // section-aware stderr emitter. The reasoning_cb passed to the
+    // parser builder is a no-op.
+    let text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
+        Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
+
     let heartbeat_output = stream_output.clone();
     let stdout_output = stream_output.clone();
     let heartbeat = spawn_progress_heartbeat(
@@ -1049,29 +1368,24 @@ pub(crate) fn run_child_stream_semantic(
         started_at,
         Some(live_metrics),
         heartbeat_output,
+        Some(text_renderer.clone()),
         heartbeat_policy,
     );
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
-    let stdout_pipe = child.stdout.take().expect("stdout was set to piped");
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .expect("child stdout must be piped: Stdio::piped() was set on the child Command above");
     let stream_span = Span::current();
+    let stdout_renderer = text_renderer.clone();
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
         let reader = BufReader::new(stdout_pipe);
         let mut out = stdout_output.stdout_writer();
 
-        // Terminal-local renderer for OutputText (stdout markdown). Wrapped
-        // in Arc<Mutex<_>> so the builder closures can retain independent
-        // handles without untangling lifetimes across the FnMut boundary of
-        // the sink's callback storage.
-        //
-        // Note: reasoning rendering is owned entirely by LiveSemanticSink,
-        // which emits BlockQuote-formatted thinking text through the
-        // section-aware stderr emitter. The reasoning_cb passed to the
-        // parser builder is a no-op.
-        let text_renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
-            Arc::new(std::sync::Mutex::new(StreamTextRenderer::new()));
+        let text_renderer = stdout_renderer;
 
         let output_cb: OutputTextCallback = {
             let text = text_renderer.clone();
@@ -1119,7 +1433,10 @@ pub(crate) fn run_child_stream_semantic(
         parser
     });
 
-    let pipe = child.stderr.take().expect("stderr was set to piped");
+    let pipe = child
+        .stderr
+        .take()
+        .expect("child stderr must be piped: Stdio::piped() was set on the child Command above");
     let prefixes: Vec<String> = stderr_noise_prefixes
         .iter()
         .map(|s| s.to_string())
@@ -1127,6 +1444,16 @@ pub(crate) fn run_child_stream_semantic(
     let plain = crate::log::is_plain();
     let stderr_term = crate::log::terminal();
     let stderr_span = Span::current();
+    let (mut bridge_for_thread, finalize_for_main, early_terminate_rx) = match stderr_bridge {
+        Some(StderrBridgeHandle {
+            bridge,
+            finalize,
+            early_terminate,
+        }) => (Some(bridge), Some(finalize), early_terminate),
+        None => (None, None, None),
+    };
+    let has_bridge = bridge_for_thread.is_some();
+    let capture_always = has_bridge;
     let stderr_handle = thread::spawn(move || {
         let _stderr_guard = stderr_span.enter();
         let reader = BufReader::new(pipe);
@@ -1136,6 +1463,18 @@ pub(crate) fn run_child_stream_semantic(
             if prefixes.iter().any(|p| line.starts_with(p.as_str())) {
                 continue;
             }
+
+            // When a bridge is installed, offer the raw line first so it can
+            // classify structured log records (and their multi-line tails) in
+            // real time. Consumed lines are suppressed from raw passthrough
+            // and never land in the captured buffer — the semantic event the
+            // bridge emitted already carries everything operators need.
+            if let Some(bridge) = bridge_for_thread.as_mut()
+                && matches!(bridge.ingest(&line), StderrIngestOutcome::Consumed)
+            {
+                continue;
+            }
+
             let formatted = crate::output::try_format_api_error(&line, &stderr_term);
             let output_line = formatted.as_deref().unwrap_or(&line);
             let output_line = if plain {
@@ -1144,12 +1483,13 @@ pub(crate) fn run_child_stream_semantic(
                 output_line.to_string()
             };
 
-            if suppress_stderr_on_success {
+            if suppress_stderr_on_success || capture_always {
                 if !captured.is_empty() {
                     captured.push('\n');
                 }
                 captured.push_str(&output_line);
-            } else {
+            }
+            if !suppress_stderr_on_success {
                 let mut err = std::io::stderr().lock();
                 let _ = writeln!(err, "{output_line}");
             }
@@ -1163,10 +1503,14 @@ pub(crate) fn run_child_stream_semantic(
         stdin_pipe.write_all(seed.as_bytes())?;
     }
 
-    let (exit_code, termination) = if let Some(seconds) = timeout {
-        wait_with_timeout(&mut child, seconds)?
+    let (exit_code, termination, early_termination) = if let Some(seconds) = timeout {
+        let (code, term) = wait_with_timeout(&mut child, seconds)?;
+        (code, term, None)
+    } else if let Some(rx) = early_terminate_rx {
+        wait_with_signal_and_early_termination(&mut child, true, rx)?
     } else {
-        wait_with_signal_handling(&mut child, true)?
+        let (code, term) = wait_with_signal_handling(&mut child, true)?;
+        (code, term, None)
     };
 
     kill_process_group(&mut child);
@@ -1187,6 +1531,31 @@ pub(crate) fn run_child_stream_semantic(
     let mut summary = parser.finish(exit_code);
     if summary.duration_ms.is_none() {
         summary.duration_ms = Some(started_at.elapsed().as_millis() as u64);
+    }
+
+    // Apply early-termination overrides before the stderr finalizer so the
+    // finalizer's badge recomputation observes the synthesized error fields
+    // (for example, a `usage_limit_reached` error_kind that maps to a Quota
+    // badge). The bridge signaled early termination from the stderr thread;
+    // the main wait loop then killed the child's process group, so the raw
+    // exit code reflects SIGTERM rather than a meaningful provider status.
+    if let Some(termination) = early_termination.as_ref() {
+        apply_early_termination_to_summary(&mut summary, termination);
+    }
+
+    // Merge stderr-derived diagnostics after both reader threads have
+    // joined. The bridge accumulated counters into its own shared state
+    // during streaming; the finalizer reads that state and enriches the
+    // summary. `stderr_text` is attached here so every structured
+    // bridge-enabled session carries the captured stderr regardless of
+    // `suppress_stderr_on_success`. Badge recomputation happens inside
+    // the finalizer so stderr-derived diagnostics show up in the final
+    // `summary.badges` vector.
+    if let Some(finalize) = finalize_for_main {
+        if !captured.is_empty() && summary.stderr_text.is_none() {
+            summary.stderr_text = Some(captured.clone());
+        }
+        finalize(&mut summary);
     }
 
     Ok(ProcessResult {
@@ -1221,6 +1590,7 @@ mod tests {
             line_buffer: String::new(),
             in_code_fence: false,
             partial_line_committed: false,
+            last_block_growth_at: None,
             term: None,
             terminal_options: None,
         }
@@ -1309,5 +1679,363 @@ mod tests {
         assert_eq!(flushed, "1. first item\n2. second item\n");
         assert!(renderer.block_buffer.is_empty());
         assert!(renderer.line_buffer.is_empty());
+    }
+
+    #[test]
+    fn flush_if_idle_emits_block_after_threshold() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        // Paragraph without trailing blank line — sits in block_buffer.
+        renderer.push(&mut out, "dangling paragraph line\n");
+        assert!(
+            !renderer.block_buffer.is_empty(),
+            "content should be buffered until a boundary or idle flush"
+        );
+        assert!(
+            out.is_empty(),
+            "block buffered text should not be emitted yet"
+        );
+
+        // Threshold not reached — flush_if_idle is a no-op.
+        assert!(!renderer.flush_if_idle(&mut out, Duration::from_secs(60)));
+        assert!(out.is_empty());
+        assert!(!renderer.block_buffer.is_empty());
+
+        // After the idle window has elapsed, the buffered block flushes.
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(renderer.flush_if_idle(&mut out, Duration::from_millis(5)));
+
+        let flushed = String::from_utf8(out).unwrap();
+        assert!(
+            flushed.contains("dangling paragraph line"),
+            "expected flushed output to contain the buffered paragraph; got: {flushed:?}"
+        );
+        assert!(renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn flush_if_idle_does_not_emit_when_block_empty() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        // No buffered content — must not flush regardless of threshold.
+        assert!(!renderer.flush_if_idle(&mut out, Duration::from_millis(0)));
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn flush_if_idle_resets_growth_clock() {
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        // Accumulate content, wait past threshold, flush.
+        renderer.push(&mut out, "first block\n");
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(renderer.flush_if_idle(&mut out, Duration::from_millis(5)));
+        assert!(renderer.block_buffer.is_empty());
+
+        // New content arrives — growth clock restarts. An immediate idle
+        // check with a large threshold must not flush the fresh content.
+        renderer.push(&mut out, "second block\n");
+        assert!(
+            !renderer.flush_if_idle(&mut out, Duration::from_secs(30)),
+            "growth clock should restart when new content lands"
+        );
+        assert!(!renderer.block_buffer.is_empty());
+
+        // After the new block has been idle long enough, it flushes.
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(renderer.flush_if_idle(&mut out, Duration::from_millis(5)));
+        assert!(renderer.block_buffer.is_empty());
+
+        let flushed = String::from_utf8(out).unwrap();
+        assert!(flushed.contains("first block"));
+        assert!(flushed.contains("second block"));
+    }
+
+    #[test]
+    fn flushes_long_prose_on_sentence_terminator() {
+        // After the block buffer accumulates substantial prose (past the
+        // sentence-flush threshold) and the latest line ends with sentence-
+        // terminating punctuation, flush early so the user sees progress
+        // without waiting for a blank line.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        let long_sentence = "This is a long sentence the agent is writing as part of an \
+            extended paragraph that has not yet reached a blank line boundary and would \
+            otherwise sit invisible in the buffer waiting for darkmatter to render it.\n";
+        assert!(long_sentence.len() > SENTENCE_FLUSH_MIN_BYTES);
+
+        renderer.push(&mut out, long_sentence);
+        let flushed = String::from_utf8(out).unwrap();
+        assert!(
+            flushed.contains("extended paragraph"),
+            "long sentence-terminated line should flush early; got: {flushed:?}"
+        );
+        assert!(renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn does_not_flush_short_line_on_sentence_terminator() {
+        // A short response like "OK." must remain buffered — only buffers
+        // past the size threshold are eligible for sentence-level flush.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "OK.\n");
+        assert!(
+            out.is_empty(),
+            "short line should not trigger sentence flush"
+        );
+        assert!(!renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn does_not_sentence_flush_inside_code_fence() {
+        // Content inside a fenced block must never trigger sentence-level
+        // flush — the renderer waits for the closing fence.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(&mut out, "```\n");
+        let long_inside = "This is a really long line inside a code fence that ends with a \
+            period and is more than the sentence-flush threshold characters long because \
+            we want to verify that fence content is never flushed by the heuristic.\n";
+        assert!(long_inside.len() > SENTENCE_FLUSH_MIN_BYTES);
+        renderer.push(&mut out, long_inside);
+
+        assert!(
+            out.is_empty(),
+            "fenced content must not sentence-flush; got: {:?}",
+            String::from_utf8(out.clone()).unwrap()
+        );
+        assert!(renderer.in_code_fence);
+    }
+
+    #[test]
+    fn does_not_sentence_flush_when_line_lacks_terminator() {
+        // A long line that does not end in . ! or ? must not flush — only
+        // sentence-terminated lines qualify.
+        let mut renderer = test_renderer();
+        let mut out = Vec::new();
+
+        let long_no_terminator = "This is a long line that the agent is writing without \
+            ever reaching a terminating period and so it should remain buffered until \
+            either a blank line arrives or the idle threshold expires from above and so \
+            we keep going for a while longer to comfortably exceed the byte threshold\n";
+        assert!(long_no_terminator.len() > SENTENCE_FLUSH_MIN_BYTES);
+
+        renderer.push(&mut out, long_no_terminator);
+        assert!(
+            out.is_empty(),
+            "non-terminated line must not sentence-flush"
+        );
+        assert!(!renderer.block_buffer.is_empty());
+    }
+
+    #[test]
+    fn maybe_emit_stall_warning_fires_once_per_episode() {
+        use std::cell::Cell;
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let base = Instant::now();
+        let threshold = Duration::from_secs(60);
+
+        // Stall episode 1: last activity 180 s before "now".
+        {
+            let mut s = metrics.lock().unwrap();
+            s.last_event_at = Some(base - Duration::from_secs(180));
+        }
+
+        let count = Cell::new(0u32);
+        let mut emit = |_msg: &str| count.set(count.get() + 1);
+
+        // First call past the threshold emits and marks the warning timestamp.
+        assert!(maybe_emit_stall_warning(
+            &metrics, base, threshold, &mut emit
+        ));
+        assert_eq!(count.get(), 1);
+
+        // Same-now call: deduped within the same stall episode.
+        assert!(!maybe_emit_stall_warning(
+            &metrics, base, threshold, &mut emit
+        ));
+        assert_eq!(count.get(), 1);
+
+        // Activity resumes — last_event_at advances past the stored warning.
+        {
+            let mut s = metrics.lock().unwrap();
+            s.last_event_at = Some(base + Duration::from_secs(1));
+        }
+        // Still within threshold from the resumed event: no warning.
+        assert!(!maybe_emit_stall_warning(
+            &metrics,
+            base + Duration::from_secs(2),
+            threshold,
+            &mut emit,
+        ));
+        assert_eq!(count.get(), 1);
+
+        // 180 s later the stream is silent again — fresh stall episode warns.
+        assert!(maybe_emit_stall_warning(
+            &metrics,
+            base + Duration::from_secs(180),
+            threshold,
+            &mut emit,
+        ));
+        assert_eq!(count.get(), 2);
+    }
+
+    #[serial_test::serial(stall_env)]
+    #[test]
+    fn stall_threshold_from_env_defaults_to_force_window() {
+        // SAFETY: tests run in a single-threaded test harness section but env
+        // mutation is global. We unset right after to keep adjacent tests
+        // unaffected.
+        // SAFETY: env mutation is process-global; tests in this module don't
+        // touch this var concurrently.
+        unsafe {
+            std::env::remove_var("CLAUDINE_STALL_TIMEOUT_SECONDS");
+        }
+        let policy = HeartbeatPolicy::default();
+        assert_eq!(stall_threshold_from_env(policy), policy.force_window);
+    }
+
+    #[serial_test::serial(stall_env)]
+    #[test]
+    fn stall_threshold_from_env_uses_override_when_set() {
+        // SAFETY: env mutation is process-global; tests in this module don't
+        // touch this var concurrently.
+        unsafe {
+            std::env::set_var("CLAUDINE_STALL_TIMEOUT_SECONDS", "45");
+        }
+        let policy = HeartbeatPolicy::default();
+        assert_eq!(stall_threshold_from_env(policy), Duration::from_secs(45));
+        unsafe {
+            std::env::remove_var("CLAUDINE_STALL_TIMEOUT_SECONDS");
+        }
+    }
+
+    #[serial_test::serial(stall_env)]
+    #[test]
+    fn stall_threshold_from_env_ignores_invalid_value() {
+        // SAFETY: env mutation is process-global; tests in this module don't
+        // touch this var concurrently.
+        unsafe {
+            std::env::set_var("CLAUDINE_STALL_TIMEOUT_SECONDS", "not-a-number");
+        }
+        let policy = HeartbeatPolicy::default();
+        assert_eq!(stall_threshold_from_env(policy), policy.force_window);
+        unsafe {
+            std::env::remove_var("CLAUDINE_STALL_TIMEOUT_SECONDS");
+        }
+    }
+
+    #[test]
+    fn heartbeat_driven_flush_emits_dangling_paragraph_before_status() {
+        // End-to-end invariant for Phase 2: when the heartbeat thread runs
+        // its idle check against a shared renderer, any buffered assistant
+        // text must reach stdout before the heartbeat emits its own status
+        // line to stderr. We simulate the heartbeat tick with a direct call
+        // rather than spinning a real thread so the test runs deterministically.
+        let renderer: Arc<std::sync::Mutex<StreamTextRenderer>> =
+            Arc::new(std::sync::Mutex::new(test_renderer()));
+        let mut stdout_bytes: Vec<u8> = Vec::new();
+        let mut stderr_lines: Vec<String> = Vec::new();
+
+        // Provider emits a final paragraph without a trailing blank line.
+        {
+            let mut r = renderer.lock().unwrap();
+            r.push(&mut stdout_bytes, "final summary line\n");
+        }
+        assert!(
+            stdout_bytes.is_empty(),
+            "buffered text must not escape before the idle window elapses"
+        );
+
+        // Simulate the heartbeat thread's wake-up after the silence window.
+        std::thread::sleep(Duration::from_millis(15));
+        let flushed = {
+            let mut r = renderer.lock().unwrap();
+            r.flush_if_idle(&mut stdout_bytes, Duration::from_millis(5))
+        };
+        assert!(flushed, "idle flush should have fired");
+
+        // Heartbeat emits its status line strictly after the flush.
+        stderr_lines.push("120s · 0 done".into());
+
+        let stdout_text = String::from_utf8(stdout_bytes).unwrap();
+        assert!(stdout_text.contains("final summary line"));
+        assert_eq!(stderr_lines.len(), 1);
+        assert!(stderr_lines[0].contains("120s"));
+    }
+
+    #[test]
+    fn apply_early_termination_rate_limit_sets_usage_limit_summary_fields() {
+        use chrono::TimeZone;
+        let reset_at = chrono::Utc
+            .with_ymd_and_hms(2026, 4, 16, 4, 18, 56)
+            .unwrap();
+        let mut summary = StreamExecutionSummary {
+            exit_code: 143,
+            is_error: false,
+            ..Default::default()
+        };
+        let termination = EarlyTermination::RateLimit {
+            message: "OpenCode usage limit reached; resets at 2026-04-16 04:18:56 UTC".into(),
+            reset_at: Some(reset_at),
+        };
+
+        apply_early_termination_to_summary(&mut summary, &termination);
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("usage_limit_reached"));
+        assert!(
+            summary
+                .error_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("usage limit"),
+        );
+        let rl = summary.rate_limit.as_ref().expect("rate_limit populated");
+        assert_eq!(rl.is_throttled, Some(true));
+        assert_eq!(rl.reset_at, Some(reset_at));
+        assert!(rl.message.as_deref().unwrap_or("").contains("usage limit"));
+    }
+
+    #[test]
+    fn apply_early_termination_preserves_existing_rate_limit_fields() {
+        use chrono::TimeZone;
+        let existing_reset = chrono::Utc.with_ymd_and_hms(2026, 4, 16, 2, 0, 0).unwrap();
+        let mut summary = StreamExecutionSummary {
+            rate_limit: Some(claudine::stream::summary::RateLimitInfo {
+                is_throttled: Some(false),
+                retry_after_ms: Some(5000),
+                message: Some("pre-existing".into()),
+                reset_at: Some(existing_reset),
+            }),
+            ..Default::default()
+        };
+        let incoming_reset = chrono::Utc
+            .with_ymd_and_hms(2026, 4, 16, 4, 18, 56)
+            .unwrap();
+        let termination = EarlyTermination::RateLimit {
+            message: "OpenCode usage limit reached".into(),
+            reset_at: Some(incoming_reset),
+        };
+
+        apply_early_termination_to_summary(&mut summary, &termination);
+
+        let rl = summary.rate_limit.as_ref().unwrap();
+        // is_throttled is forced to true even when existing said false.
+        assert_eq!(rl.is_throttled, Some(true));
+        // Existing message is preserved.
+        assert_eq!(rl.message.as_deref(), Some("pre-existing"));
+        // Existing reset_at is preserved (do not clobber parser-provided state).
+        assert_eq!(rl.reset_at, Some(existing_reset));
+        // retry_after_ms is untouched.
+        assert_eq!(rl.retry_after_ms, Some(5000));
     }
 }

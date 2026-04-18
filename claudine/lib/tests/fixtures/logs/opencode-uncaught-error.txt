@@ -1,0 +1,7 @@
+ERROR 2026-04-15T21:28:30 +33ms service=default name=TypeError message=U.split is not a function. (In 'U.split("/")', 'U.split' is undefined) stack=TypeError: U.split is not a function. (In 'U.split("/")', 'U.split' is undefined)
+    at O (/$bunfs/root/chunk-sar77g92.js:1063:43512)
+    at Z (/$bunfs/root/src/index.js:540:5380)
+    at processTicksAndRejections (native:7:39) fatal
+[91m[1mError: [0mUnexpected error, check log file at  for more details
+
+U.split is not a function. (In 'U.split("/")', 'U.split' is undefined)

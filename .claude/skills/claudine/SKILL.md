@@ -1,7 +1,7 @@
 ---
 name: claudine
 description: Details on the Claudine library and CLI, including deep research into Agentic CLI platforms such as Claude Code, Codex CLI, Goose, Opencode CLI, and all other Agentic CLI's supported by the Claudine library.
-last_updated: 2026-04-16
+last_updated: 2026-04-17
 ---
 
 ## Claudine Library
@@ -22,6 +22,8 @@ Hook handlers were hardened on 2026-04-14 (feature: `2026-04-14-more-meta-respon
 
 Composition rendering was unified on 2026-04-16 (fix: `2026-04-16-consistent-rendering`). `compose` and `inline-compose` now share one non-harness execution function (`execute_without_harness` in [`claudine/cli/src/commands/wrap/composition.rs`](../../../claudine/cli/src/commands/wrap/composition.rs)) parameterized by `CompositionExecutionMode::{Direct, Inline}`, one structured-stream helper (`run_structured_composition` returning `CompositionStreamResult`), and one summary emitter (`emit_composition_summary`) with a `defer_section_separator` flag that selects between compose's immediate emission and inline-compose's post-closure deferred emission. The Goose-only legacy (non-structured) path now calls `emit_minimal_composition_summary` to render the same stderr summary block as structured runs, replacing the previous JSONL-only silence from the deleted `emit_legacy_composition_session_event`. The `"agent did not provide a summarized message"` warning is removed from inline-compose (the `SessionEnd` JSONL event already records empty assistant text). Four inline-only behaviors remain guarded and commented: closure validation/file write, deferred summary timing, interrupted-session partial body report, and the writability pre-check.
 
+The non-interactive stderr surface was strengthened on 2026-04-16 (fix: `2026-04-16-more-is-more`). Tool call rendering switched from `→ Name · summary` to `→ Name(summary)` / `← Name(slot)` so it reads like a function call; shell-style tools (`Bash`, `bash`, `shell`, `run_command`) prepend the canonical shell name to the command (`bash ls -la`); and the `Task` extractor now prefers `description → subject → prompt → task` so the agent's actual task body wins over fields like `subagent_type`. `StreamTextRenderer` gained `last_block_growth_at` plus `flush_if_idle()`, and the heartbeat thread calls `flush_if_idle(silence_window)` (default 30 s) before emitting any status line so a dangling final paragraph reaches the user even when the provider never closes stdout. OpenCode now exposes a typed `Reasoning` variant on `OpenCodeEvent` (top-level `text` and nested `part.text`) that routes into `SemanticEvent::Reasoning` instead of `ProviderExtension`; `render_thinking_block()` was widened from a thin border to `▌ ` so thinking matches System Prompt and Agent Prompt visually. Finally, `SemanticEvent::Error` gained a typed `kind: SemanticErrorKind` field (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`, with `#[serde(default) = Unknown]` for replay compatibility); each provider parser classifies its errors before emission; the live sink renders them as colored `BlockQuote`s with `▌ ` border (orange `Configuration Error`, red `Agent Error` / `API Error`, yellow `Interrupted`, red `Error`); and `From<SemanticErrorKind> for AgentErrorCategory` aligns live error kinds with the end-of-run [`AgentErrorReport`](../../../claudine/cli/src/output/error_report.rs) surface. Dispatch behavior remains keyed off `terminal: bool`; `kind` is classificatory metadata only.
+
 - [Supported Platforms](supported-platforms.md)
 - [Unified Hook/Event Model](unified-hooks.md)
 - [Supported Actions](hook-actions.md)
@@ -37,6 +39,7 @@ For deeper topic references in the repo (not duplicated here), see:
 - [MCP Catalog](../../../claudine/docs/topics/mcp-catalog.md) and [MCP Mode](../../../claudine/docs/topics/mcp-mode.md)
 - [Protect Service](../../../claudine/docs/topics/protect-service.md) — standalone deny catalog, scan surfaces, rule groups, merge semantics, dispatch integration
 - [Traces and Logging](../../../claudine/docs/topics/traces-and-logging.md), [Log Reporting](../../../claudine/docs/topics/log-reporting.md)
+- [CLI Pre-Parsing and Clap Parsing](../../../claudine/docs/topics/cli-pre-parsing.md) — pre-clap argv normalization pipeline, strict vs. lenient clap passes, why the pre-parser exists, and best practices for maintaining the layer. Rule-by-rule reference: [argv-normalization.md](../../../claudine/docs/topics/argv-normalization.md).
 
 
 ## Claudine CLI
@@ -45,7 +48,9 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 
 The CLI uses fuzzy provider matching (exact, prefix, and contains resolution) so users can type shorthand like `cl` for `claude`. The `handle` command accepts event names in multiple formats (canonical snake_case, native provider names, PascalCase, and kebab-case) and is normally invoked from hook registrations wired up by `claudine init`.
 
-System prompt handling is shared across wrapped provider subcommands and the Markdown composition surfaces. The current contract is file-backed only: `--append-system-prompt` / `--asp` and `--replace-system-prompt` / `--rsp`, with standard `system-prompt.md` discovery from the launch CWD hierarchy when neither flag is provided. `compose`, `inline-compose`, and `sequence` all pass through the same `system_prompt` pipeline as the direct provider wrappers.
+Argv is pre-parsed before clap on 2026-04-17 (feature: `2026-04-17-cli-pre-processing`). `argv::normalize` in [`claudine/cli/src/argv.rs`](../../../claudine/cli/src/argv.rs) is the single seam between `std::env::args_os()` and `Cli::parse_from`. It applies four purely syntactic rules in a fixed order: **Rule 1** rewrites provider booleans (`--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`, `--opencode`, `--qwen`, `--roo`) to `--provider <slug>` on composition subcommands only so wrapper passthrough is preserved; **Rule 2** canonicalizes `--provider <value>` / `--provider=<value>` via `Provider::fuzzy_match_cli_name`; **Rule 4** hoists a trailing `--help` / `-h` to argv position 1 on composition subcommands so the root custom help handler fires (the root `Cli` sets `disable_help_flag = true`); **Rule 3** inserts a single `--` separator before the first `key=value` setter that follows an interleaved flag after a previously seen positional, fixing the original `claudine compose file.md --gemini name=Ken --help` bug where clap's greedy positional absorbed `--help`. Rule 4 must run before Rule 3 so `--help` is lifted out of the trailing setter region before the separator lands. The normalizer is a strict no-op under `COMPLETE` (shell completion), after the first literal `--`, on non-UTF-8 tokens, for argv with fewer than two elements, and on non-composition subcommands (wrappers and everything else). Clap then parses via `parse_cli_from` in [`claudine/cli/src/main.rs`](../../../claudine/cli/src/main.rs): non-wrapper subcommands take a single strict `Cli::parse_from` pass, while wrapper subcommands take a lenient pass that clones the command tree and marks each wrapper with `ignore_errors(true)` so unknown tokens flow into the wrapped child CLI's argv, with a strict-pass fallback for defensive safety. `COMPOSITION_FLAGS_WITH_VALUE` in `argv.rs` mirrors the clap value-bearing flag surface of `ComposeArgs` and `SequenceArgs`; the drift-detection test `composition_flags_with_value_matches_clap_surface` iterates `augment_args(...)` at test time to catch missing entries.
+
+System prompt handling is shared across wrapped provider subcommands and the Markdown composition surfaces. The current contract is file-backed only: `--append-system-prompt` / `--asp` and `--replace-system-prompt` / `--rsp`, with standard `system-prompt.md` discovery from the launch CWD hierarchy when neither flag is provided. Direct provider wrappers also support `--edit`, which opens the resolved editor on a temporary `.md` buffer, seeds it from any inline prompt, and aborts cleanly on an empty saved buffer. `compose`, `inline-compose`, and `sequence` all pass through the same `system_prompt` pipeline as the direct provider wrappers.
 
 **Shared Resources**
 
@@ -72,7 +77,7 @@ System prompt handling is shared across wrapped provider subcommands and the Mar
 
 | Command | Description |
 |---------|-------------|
-| `claudine claude\|codex\|gemini\|goose\|kimi\|opencode\|qwen` | Wrap a provider CLI with preflight checks, env sanitization, launch-context-based system prompt resolution, provider-specific prompt injection, MCP injection, and structured streaming |
+| `claudine claude\|codex\|gemini\|goose\|kimi\|opencode\|qwen` | Wrap a provider CLI with preflight checks, env sanitization, launch-context-based system prompt resolution, optional `--edit` prompt drafting in the user's editor, provider-specific prompt injection, MCP injection, and structured streaming |
 
 **Composition**
 

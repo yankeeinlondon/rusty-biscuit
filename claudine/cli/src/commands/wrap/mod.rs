@@ -368,6 +368,101 @@ pub(crate) fn structured_verbosity(silent: bool, quiet: bool) -> Verbosity {
     }
 }
 
+/// Build the structured-stream parser builder plus an optional stderr bridge.
+///
+/// All providers share the same stdout parser construction pattern, but
+/// OpenCode additionally wires an [`OpenCodeLogBridge`] into the stderr
+/// reader thread so classified `--print-logs` records flow through the
+/// same semantic sink as stdout events. When a bridge is returned, the
+/// caller is responsible for threading it through
+/// [`exec::run_child_stream_semantic`] so the stderr thread can consume
+/// classified lines and the final summary can merge the bridge's
+/// accumulated diagnostics.
+///
+/// ## Returns
+///
+/// * `build_parser` — parser-builder closure passed to
+///   [`exec::run_child_stream_semantic`].
+/// * `stderr_bridge` — `Some` for OpenCode, `None` otherwise. The bridge
+///   owns its own shared state clone so the finalizer closure can merge
+///   stderr-derived diagnostics into the summary after the reader threads
+///   join.
+///
+/// [`OpenCodeLogBridge`]: claudine::stream::logs::opencode::OpenCodeLogBridge
+fn build_structured_plumbing(
+    provider: Provider,
+    sink: live_semantic_sink::LiveSemanticSink,
+    parser_config: claudine::stream::ParserConfig,
+) -> (
+    exec::SemanticParserBuilder,
+    Option<claudine::stream::logs::StderrBridgeHandle>,
+) {
+    use claudine::stream::logs::StderrBridgeHandle;
+    use claudine::stream::logs::codex::CodexLogBridge;
+    use claudine::stream::logs::opencode::{OpenCodeLogBridge, merge_stderr_state_into_summary};
+    use claudine::stream::semantic::{ObservedSemanticSink, SharedSemanticSink};
+    use std::sync::atomic::AtomicBool;
+
+    if provider == Provider::OpenCode {
+        let shared = SharedSemanticSink::new(sink);
+        let live_sink_inner = Arc::clone(shared.inner());
+        let stdout_seen = Arc::new(AtomicBool::new(false));
+
+        let (early_tx, early_rx) = std::sync::mpsc::channel();
+        let bridge =
+            OpenCodeLogBridge::new(shared.clone(), Arc::clone(&stdout_seen), Some(early_tx));
+        let bridge_state = bridge.shared_state();
+        let finalize: claudine::stream::logs::SummaryFinalizer = Box::new(move |summary| {
+            merge_stderr_state_into_summary(&bridge_state, summary);
+        });
+        let stderr_bridge = Some(StderrBridgeHandle {
+            bridge: Box::new(bridge),
+            finalize,
+            early_terminate: Some(early_rx),
+        });
+
+        let stdout_sink = ObservedSemanticSink::new(shared, stdout_seen);
+        let build_parser: exec::SemanticParserBuilder =
+            Box::new(move |output_cb, _reasoning_cb| {
+                if let Ok(mut inner) = live_sink_inner.lock() {
+                    inner.set_output_text_sink(output_cb);
+                }
+                claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
+            });
+        (build_parser, stderr_bridge)
+    } else if provider == Provider::Codex {
+        // Codex emits `tracing-subscriber` records on stderr that we'd
+        // rather render inline through the live sink (as an orange
+        // BlockQuote) than leak raw to the terminal. Share the sink so the
+        // stdout parser and the stderr bridge feed one rendering pipeline.
+        let shared = SharedSemanticSink::new(sink);
+        let live_sink_inner = Arc::clone(shared.inner());
+        let bridge = CodexLogBridge::new(shared.clone());
+        let stderr_bridge = Some(StderrBridgeHandle {
+            bridge: Box::new(bridge),
+            finalize: Box::new(|_summary| {}),
+            early_terminate: None,
+        });
+
+        let stdout_sink = shared;
+        let build_parser: exec::SemanticParserBuilder =
+            Box::new(move |output_cb, _reasoning_cb| {
+                if let Ok(mut inner) = live_sink_inner.lock() {
+                    inner.set_output_text_sink(output_cb);
+                }
+                claudine::stream::create_semantic_parser(provider, stdout_sink, parser_config)
+            });
+        (build_parser, stderr_bridge)
+    } else {
+        let build_parser: exec::SemanticParserBuilder =
+            Box::new(move |output_cb, _reasoning_cb| {
+                let sink = sink.with_output_text_sink(output_cb);
+                claudine::stream::create_semantic_parser(provider, sink, parser_config)
+            });
+        (build_parser, None)
+    }
+}
+
 pub(crate) fn wrap_terminal() -> Terminal {
     crate::log::terminal()
 }
@@ -390,9 +485,8 @@ pub(crate) struct WrapStartupDetection {
 /// walked the tree 3-5 times (once in `detect_environment_fast`, once in
 /// `LaunchContext::from_cwd`, and twice inside `build_child_env`). This
 /// helper collapses that into a single scan and then builds the three
-/// consumer contexts from borrowed data, falling back to empty contexts
-/// on detection errors so startup never blocks on an unrelated failure.
-pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
+/// consumer contexts from borrowed data.
+pub(crate) fn detect_wrap_startup(cwd: &Path) -> Result<WrapStartupDetection> {
     use sniff::request::*;
 
     let plan = DetectionPlan::new()
@@ -409,7 +503,8 @@ pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
                 .without_formatting(),
         );
 
-    let result = sniff::detect_with_plan(plan).unwrap_or_default();
+    let result = sniff::detect_with_plan(plan)
+        .map_err(|e| eyre!("startup detection failed for '{}': {e}", cwd.display()))?;
 
     let launch_context = claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
 
@@ -429,10 +524,29 @@ pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
 
     let env_context = claudine::events::environment_context_from_sniff_result(result);
 
-    WrapStartupDetection {
+    Ok(WrapStartupDetection {
         env_context,
         launch_context,
         launch_workspace,
+    })
+}
+
+fn fallback_wrap_startup(cwd: &Path) -> WrapStartupDetection {
+    WrapStartupDetection {
+        env_context: EnvironmentContext::default(),
+        launch_context: claudine::system_prompt::LaunchContext {
+            cwd: cwd.to_path_buf(),
+            repo_root: None,
+            package_area_root: None,
+            package_root: None,
+        },
+        launch_workspace: env::LaunchWorkspaceContext {
+            launch_cwd: cwd.to_path_buf(),
+            repo_root: None,
+            child_cwd: cwd.to_path_buf(),
+            package_context: None,
+            warnings: Vec::new(),
+        },
     }
 }
 
@@ -524,6 +638,10 @@ pub struct WrapperArgs {
     /// Force interactive mode even when a prompt string is provided.
     #[arg(short = 'i', long = "interactive")]
     pub interactive: bool,
+
+    /// Open the prompt in an external editor before launching the provider.
+    #[arg(long, conflicts_with = "interactive")]
+    pub edit: bool,
 
     /// Override the model used by the provider.
     #[arg(short = 'm', long = "model", value_name = "MODEL")]
@@ -637,6 +755,62 @@ pub fn run_provider_wrapper(provider: Provider, args: WrapperArgs, verbose: u8) 
     std::process::exit(code);
 }
 
+fn maybe_edit_prompt_source(
+    prompt_source: profile::PromptSource,
+    silent_requested: bool,
+) -> Result<Option<profile::PromptSource>> {
+    maybe_edit_prompt_source_with(
+        prompt_source,
+        silent_requested,
+        std::io::stdin().is_terminal() && std::io::stdout().is_terminal(),
+        darkmatter::editor::resolve_editor_command,
+        darkmatter::editor::edit_text,
+    )
+}
+
+fn maybe_edit_prompt_source_with<Resolve, Edit>(
+    prompt_source: profile::PromptSource,
+    silent_requested: bool,
+    terminal_ready: bool,
+    resolve_editor: Resolve,
+    edit_text_fn: Edit,
+) -> Result<Option<profile::PromptSource>>
+where
+    Resolve: FnOnce() -> std::result::Result<String, darkmatter::editor::EditorError>,
+    Edit:
+        FnOnce(&str, &str) -> std::result::Result<Option<String>, darkmatter::editor::EditorError>,
+{
+    if !terminal_ready || matches!(prompt_source, profile::PromptSource::InheritStdin) {
+        return Err(eyre!("--edit requires an interactive terminal"));
+    }
+
+    let seed = match prompt_source {
+        profile::PromptSource::None => String::new(),
+        profile::PromptSource::Inline(text) => text,
+        profile::PromptSource::InheritStdin => unreachable!("handled by terminal preflight"),
+    };
+
+    let editor_command = resolve_editor()?;
+    let editor_name = editor_command
+        .split_whitespace()
+        .next()
+        .unwrap_or(editor_command.as_str());
+
+    if !silent_requested {
+        log::info(&format!("opening {editor_name} for prompt..."));
+    }
+
+    match edit_text_fn(&seed, ".md")? {
+        Some(edited_text) => Ok(Some(profile::PromptSource::Inline(edited_text))),
+        None => {
+            if !silent_requested {
+                log::info("prompt empty; aborted");
+            }
+            Ok(None)
+        }
+    }
+}
+
 fn run_provider_wrapper_inner(
     provider: Provider,
     args: WrapperArgs,
@@ -649,16 +823,6 @@ fn run_provider_wrapper_inner(
         )
     })?;
     let cwd = std::env::current_dir()?;
-
-    // One sniff-based scan produces the raw git + repo-structure data that
-    // the rest of startup needs. The result is consumed by three separate
-    // consumers (EnvironmentContext, LaunchContext, LaunchWorkspaceContext)
-    // without ever walking the filesystem again — this avoids the 3-5
-    // redundant tree walks the earlier pipeline performed.
-    let startup = detect_wrap_startup(&cwd);
-    let env_context = startup.env_context;
-    let launch_context = startup.launch_context;
-    let launch_workspace = startup.launch_workspace;
 
     let term = wrap_terminal();
 
@@ -674,6 +838,7 @@ fn run_provider_wrapper_inner(
     let yolo_requested = args.yolo || extracted.yolo;
     let mut yolo_enabled = yolo_requested;
     let interactive_requested = args.interactive || extracted.interactive;
+    let edit_requested = args.edit || extracted.edit;
     let repo_requested = args.repo || extracted.repo;
     let quiet_requested = args.quiet || extracted.quiet;
     let silent_requested = args.silent || extracted.silent;
@@ -681,6 +846,29 @@ fn run_provider_wrapper_inner(
     let mut env_overrides: Vec<(String, String)> = Vec::new();
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
+
+    // One sniff-based scan produces the raw git + repo-structure data that
+    // the rest of startup needs. The result is consumed by three separate
+    // consumers (EnvironmentContext, LaunchContext, LaunchWorkspaceContext)
+    // without ever walking the filesystem again — this avoids the 3-5
+    // redundant tree walks the earlier pipeline performed.
+    let startup = match detect_wrap_startup(&cwd) {
+        Ok(startup) => startup,
+        Err(error) => {
+            if repo_requested {
+                return Err(eyre!(
+                    "--repo requires startup repo detection, but startup detection failed: {error}"
+                ));
+            }
+            deferred_warnings.push(format!(
+                "startup detection failed; continuing without repo/package context: {error}"
+            ));
+            fallback_wrap_startup(&cwd)
+        }
+    };
+    let env_context = startup.env_context;
+    let launch_context = startup.launch_context;
+    let launch_workspace = startup.launch_workspace;
 
     // In the direct-wrap path the child inherits stdin automatically —
     // we don't need to detect or seed it. Pass false so that a non-tty
@@ -697,6 +885,13 @@ fn run_provider_wrapper_inner(
         profile::extract_prompt_source_from_passthrough(profile, &child_args, has_piped_stdin)?;
     child_args = extracted_args;
 
+    if edit_requested {
+        let Some(edited_prompt) = maybe_edit_prompt_source(prompt_source, silent_requested)? else {
+            return Ok((0, None, None));
+        };
+        prompt_source = edited_prompt;
+    }
+
     // Default: non-interactive when a prompt reaches the child, interactive
     // otherwise. --interactive/-i overrides the default back to interactive.
     let has_prompt = prompt_source.has_prompt_or_stdin();
@@ -711,6 +906,7 @@ fn run_provider_wrapper_inner(
         structured_mode = tracing::field::Empty,
         has_prompt,
         interactive_requested,
+        edit_requested,
         yolo_requested,
         model_override = %args.model.as_deref().unwrap_or(""),
         child_pid = tracing::field::Empty,
@@ -720,6 +916,13 @@ fn run_provider_wrapper_inner(
     // Early check: --timeout + --interactive is always an error
     if args.timeout.is_some() && interactive_requested {
         return Err(eyre!("--timeout cannot be used with --interactive mode"));
+    }
+
+    // clap catches direct `--edit` + `--interactive` conflicts, but once a
+    // prompt token starts passthrough capture either flag can arrive from the
+    // fallback extractor instead. Keep the merged behavior consistent.
+    if edit_requested && interactive_requested {
+        return Err(eyre!("--edit cannot be used with --interactive"));
     }
 
     // Early check: --timeout requires non-interactive mode
@@ -824,8 +1027,10 @@ fn run_provider_wrapper_inner(
     }
 
     if !silent_requested {
-        let mut header_env_plan = env::EnvPlan::default();
-        header_env_plan.package_context = launch_workspace.package_context.clone();
+        let header_env_plan = env::EnvPlan {
+            package_context: launch_workspace.package_context.clone(),
+            ..Default::default()
+        };
 
         crate::output::log_wrapper_header(
             profile,
@@ -852,8 +1057,7 @@ fn run_provider_wrapper_inner(
         &sp_args,
         &launch_context,
         non_interactive_requested,
-    )
-    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    )?;
 
     let mut sp_artifacts: Vec<super::wrap::system_prompt::SystemPromptArtifact> = Vec::new();
 
@@ -1351,11 +1555,8 @@ fn run_provider_wrapper_inner(
             // Codex-final-stdout emission uses this handle so every section
             // transition shares the same tracker state.
             let section_stream = sink.section_stream();
-            let build_parser: exec::SemanticParserBuilder =
-                Box::new(move |output_cb, _reasoning_cb| {
-                    let sink = sink.with_output_text_sink(output_cb);
-                    claudine::stream::create_semantic_parser(provider, sink, parser_config)
-                });
+            let (build_parser, stderr_bridge) =
+                build_structured_plumbing(provider, sink, parser_config);
             let mut _spawned = false;
             let stream_result = exec::run_child_stream_semantic(
                 binary_path.as_path(),
@@ -1372,6 +1573,7 @@ fn run_provider_wrapper_inner(
                 live_metrics,
                 stream_output,
                 claudine::stream::progress::HeartbeatPolicy::default(),
+                stderr_bridge,
             )?;
             let mut summary = stream_result.data;
             if let Some(codex_output) = structured_codex_output.as_ref() {
@@ -1783,11 +1985,8 @@ fn execute_harness_attempt(
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
         let section_stream = sink.section_stream();
-        let build_parser: exec::SemanticParserBuilder =
-            Box::new(move |output_cb, _reasoning_cb| {
-                let sink = sink.with_output_text_sink(output_cb);
-                claudine::stream::create_semantic_parser(provider, sink, parser_config)
-            });
+        let (build_parser, stderr_bridge) =
+            build_structured_plumbing(provider, sink, parser_config);
         let stream_result = exec::run_child_stream_semantic(
             binary_path,
             &launch.args,
@@ -1803,6 +2002,7 @@ fn execute_harness_attempt(
             live_metrics,
             stream_output,
             claudine::stream::progress::HeartbeatPolicy::default(),
+            stderr_bridge,
         )?;
         let termination = stream_result.termination;
         let mut summary = stream_result.data;
@@ -3253,6 +3453,7 @@ fn print_wrapper_help(provider: Provider) {
          \x20 -y, --yolo               Enable provider-specific YOLO/auto-approval mode\n\
          \x20     --include <ENV_NAME>  Preserve this env var even when it matches sensitive-name filters\n\
          \x20 -i, --interactive         Force interactive mode even when a prompt string is provided\n\
+         \x20     --edit                Open the prompt in an external editor before launching the provider\n\
          \x20 -m, --model <MODEL>       Override the model used by the provider\n\
          \x20 -o, --output <FORMAT>     Set the output format (json, text, stream)\n\
           \x20     --asp <FILE>             Append a system prompt from a file\n\
@@ -3275,6 +3476,7 @@ fn print_wrapper_help(provider: Provider) {
 struct ExtractedWrapperFlags {
     yolo: bool,
     interactive: bool,
+    edit: bool,
     repo: bool,
     quiet: bool,
     silent: bool,
@@ -3342,6 +3544,10 @@ fn extract_wrapper_flags_from_passthrough_with_boundary(
             }
             "-i" | "--interactive" => {
                 extracted.interactive = true;
+                remove_indices.push(i);
+            }
+            "--edit" => {
+                extracted.edit = true;
                 remove_indices.push(i);
             }
             "--repo" => {
@@ -3463,6 +3669,92 @@ mod tests {
     }
 
     #[test]
+    fn maybe_edit_prompt_source_rejects_non_tty_sessions() {
+        let err = maybe_edit_prompt_source_with(
+            profile::PromptSource::Inline("seed".to_string()),
+            false,
+            false,
+            || Ok("code".to_string()),
+            |_, _| Ok(Some("edited".to_string())),
+        )
+        .unwrap_err();
+
+        assert_eq!(err.to_string(), "--edit requires an interactive terminal");
+    }
+
+    #[test]
+    fn maybe_edit_prompt_source_rejects_inherited_stdin() {
+        let err = maybe_edit_prompt_source_with(
+            profile::PromptSource::InheritStdin,
+            false,
+            true,
+            || Ok("code".to_string()),
+            |_, _| Ok(Some("edited".to_string())),
+        )
+        .unwrap_err();
+
+        assert_eq!(err.to_string(), "--edit requires an interactive terminal");
+    }
+
+    #[test]
+    fn maybe_edit_prompt_source_replaces_seed_with_edited_text() {
+        let edited = maybe_edit_prompt_source_with(
+            profile::PromptSource::Inline("seed prompt".to_string()),
+            true,
+            true,
+            || Ok("code".to_string()),
+            |seed, suffix| {
+                assert_eq!(seed, "seed prompt");
+                assert_eq!(suffix, ".md");
+                Ok(Some("edited prompt".to_string()))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            edited,
+            Some(profile::PromptSource::Inline("edited prompt".to_string()))
+        );
+    }
+
+    #[test]
+    fn maybe_edit_prompt_source_uses_empty_seed_when_no_prompt_exists() {
+        let edited = maybe_edit_prompt_source_with(
+            profile::PromptSource::None,
+            true,
+            true,
+            || Ok("code".to_string()),
+            |seed, suffix| {
+                assert_eq!(seed, "");
+                assert_eq!(suffix, ".md");
+                Ok(Some("typed from scratch".to_string()))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            edited,
+            Some(profile::PromptSource::Inline(
+                "typed from scratch".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn maybe_edit_prompt_source_returns_clean_abort_for_empty_buffer() {
+        let edited = maybe_edit_prompt_source_with(
+            profile::PromptSource::Inline("seed".to_string()),
+            true,
+            true,
+            || Ok("code".to_string()),
+            |_, _| Ok(None),
+        )
+        .unwrap();
+
+        assert_eq!(edited, None);
+    }
+
+    #[test]
     fn extract_wrapper_flags_lifts_reserved_aliases_from_passthrough() {
         let mut args = vec![
             "--json".to_string(),
@@ -3485,6 +3777,16 @@ mod tests {
         let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
 
         assert!(extracted.interactive);
+        assert_eq!(args, vec!["do something"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_lifts_edit_long_form() {
+        let mut args = vec!["do something".to_string(), "--edit".to_string()];
+
+        let extracted = extract_wrapper_flags_from_passthrough(&mut args).unwrap();
+
+        assert!(extracted.edit);
         assert_eq!(args, vec!["do something"]);
     }
 
@@ -3596,6 +3898,16 @@ mod tests {
 
         assert!(!extracted.yolo);
         assert_eq!(args, vec!["prompt", "--", "--yolo"]);
+    }
+
+    #[test]
+    fn extract_wrapper_flags_extracts_edit_before_dash_but_not_after() {
+        let mut args = vec!["prompt".to_string(), "--".to_string(), "--edit".to_string()];
+
+        let extracted = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, 1).unwrap();
+
+        assert!(!extracted.edit);
+        assert_eq!(args, vec!["prompt", "--", "--edit"]);
     }
 
     #[test]
@@ -3767,7 +4079,7 @@ mod tests {
         proptest! {
             #[test]
             fn proptest_extract_wrapper_flags_preserves_others(
-                flags in prop::collection::vec("-y|--yolo|-i|--interactive|-q|--quiet|--silent", 0..5),
+                flags in prop::collection::vec("-y|--yolo|-i|--interactive|--edit|-q|--quiet|--silent", 0..5),
                 others in prop::collection::vec("[a-z0-9]+", 0..10)
             ) {
                 let mut args = Vec::new();
@@ -3797,6 +4109,9 @@ mod tests {
                 }
                 if flags.iter().any(|f| f == "-i" || f == "--interactive") {
                     assert!(extracted.interactive);
+                }
+                if flags.iter().any(|f| f == "--edit") {
+                    assert!(extracted.edit);
                 }
             }
         }

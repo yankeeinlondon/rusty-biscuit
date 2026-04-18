@@ -1628,6 +1628,9 @@ impl WrapperProfile for OpencodeWrapper {
     fn apply_structured_stream(&self, args: &mut Vec<String>) {
         args.push("--format".to_string());
         args.push("json".to_string());
+        args.push("--print-logs".to_string());
+        args.push("--log-level".to_string());
+        args.push("ERROR".to_string());
     }
 
     fn stderr_noise_prefixes(&self) -> &'static [&'static str] {

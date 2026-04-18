@@ -530,11 +530,11 @@ pub fn render_text(
                     // Side-effect only: calls std::process::exit
                     print_package_area_has_source_code_changes(result, base_dir, verbose);
                 }
-                Some(RepoAction::GitStatus { .. }) => {
+                Some(RepoAction::GitStatus { compact, .. }) => {
                     if let Some(ref filesystem) = result.filesystem
                         && let Some(ref git) = filesystem.git
                     {
-                        out.push_str(&render_git_section(git, history_count, verbose));
+                        out.push_str(&render_git_section(git, history_count, verbose, *compact));
                     }
                 }
                 Some(RepoAction::Structure { filter, .. }) => {

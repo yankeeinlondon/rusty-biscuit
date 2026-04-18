@@ -21,6 +21,19 @@ use crate::log;
 use crate::provider_values::provider_value_parser;
 
 /// Shared flags for composition commands.
+///
+/// ## Notes
+///
+/// The eight provider boolean fields (`claude`, `codex`, `gemini`, `goose`,
+/// `kimicode`, `opencode`, `qwen`, `roo`) are handled entirely by the
+/// pre-clap argv normalizer in [`crate::argv`]: Rule 1 rewrites each
+/// `--<provider>` token to the canonical `--provider <slug>` pair before
+/// clap ever sees it. The struct fields and clap `#[arg(...)]` declarations
+/// are retained as user-facing help entries only — their parsed boolean
+/// values are never read at runtime (see [`Self::explicit_provider`]).
+///
+/// Retiring these fields is tracked in the
+/// `2026-04-17-cli-pre-processing` spec follow-ups.
 #[derive(Debug, Clone, Args)]
 pub struct SharedComposeArgs {
     /// Use a specific provider.
@@ -147,16 +160,15 @@ pub struct SharedComposeArgs {
 }
 
 impl SharedComposeArgs {
+    /// Explicit provider selected on the command line.
+    ///
+    /// After [`crate::argv::normalize`], provider boolean flags (`--claude`,
+    /// `--gemini`, …) have already been rewritten to `--provider <slug>`,
+    /// so runtime selection only needs to read the canonical `provider`
+    /// field. The boolean fields remain on the struct as user-facing help
+    /// entries but are never set in practice.
     pub(crate) fn explicit_provider(&self) -> Option<Provider> {
         self.provider
-            .or_else(|| self.claude.then_some(Provider::Claude))
-            .or_else(|| self.codex.then_some(Provider::Codex))
-            .or_else(|| self.gemini.then_some(Provider::Gemini))
-            .or_else(|| self.goose.then_some(Provider::Goose))
-            .or_else(|| self.kimicode.then_some(Provider::KimiCode))
-            .or_else(|| self.opencode.then_some(Provider::OpenCode))
-            .or_else(|| self.qwen.then_some(Provider::QwenCode))
-            .or_else(|| self.roo.then_some(Provider::RooCode))
     }
 
     pub(crate) fn excluded(&self) -> BTreeSet<Provider> {

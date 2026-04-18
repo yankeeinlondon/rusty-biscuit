@@ -32,7 +32,7 @@ use super::protocol::codex::{
     CodexItemEnvelope, CodexPermissionItem, CodexPlanUpdate, CodexReasoning, CodexThreadMeta,
     CodexToolItemFields, CodexTurnCompleted,
 };
-use super::semantic::{SemanticEvent, SemanticEventSink};
+use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -97,11 +97,12 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::Codex,
-            kind: kind.to_string(),
-            payload,
-        });
+        self.sink
+            .on_semantic_event(SemanticEvent::ProviderExtension {
+                provider: Provider::Codex,
+                kind: kind.to_string(),
+                payload,
+            });
     }
 
     fn handle_thread_started(&mut self, meta: CodexThreadMeta, raw_kind: &str) {
@@ -179,22 +180,39 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         if let Some(kind) = &self.error_kind {
             extra.insert("error_kind".into(), Value::from(kind.as_str()));
         }
+        let semantic_kind =
+            classify_error(self.error_kind.as_deref(), self.error_message.as_deref());
         self.sink.on_semantic_event(SemanticEvent::Error {
             message: self.error_message.clone().unwrap_or_default(),
             terminal: true,
+            kind: semantic_kind,
             extra: Value::Object(extra),
         });
     }
 
-    fn handle_agent_message_item(&mut self, msg: &CodexAgentMessage, _raw_kind: &str) {
+    fn handle_agent_message_item(&mut self, msg: &CodexAgentMessage, raw_kind: &str) {
         // Accumulate text for the summary's assistant_text (used as a fallback
         // when --output-last-message is unavailable). Do not emit OutputText
         // to avoid double-rendering with the file-based text source, and do
         // not leak to ProviderExtension — the event is preserved in the raw
         // JSONL log, and ProviderExtension should be reserved for events the
         // semantic layer genuinely does not understand.
+        //
+        // Also emit a Reasoning event so the live stderr surface renders the
+        // intermediate prose Codex produces between tool calls as a grey
+        // BlockQuote. Without this, non-interactive Codex sessions appear to
+        // skip straight from one tool to the next with no visible narrative.
+        // The authoritative final assistant text still arrives via
+        // `--output-last-message`, so any duplication between the last
+        // BlockQuote and the final stdout is intentional and rare.
         if let Some(text) = msg.collected_text() {
             self.assistant_text.push_str(&text);
+            let mut extra = self.base_extra(raw_kind);
+            extra.insert("origin".into(), Value::from("agent_message"));
+            self.sink.on_semantic_event(SemanticEvent::Reasoning {
+                text,
+                extra: Value::Object(extra),
+            });
         }
     }
 
@@ -212,15 +230,29 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
     }
 
     fn handle_file_change_item(&mut self, fc: &CodexFileChange, raw_kind: &str) {
-        let mut extra = self.base_extra(raw_kind);
-        if let Some(id) = &fc.id {
-            extra.insert("id".into(), Value::from(id.as_str()));
+        // Codex emits file_change paths inside a `changes[]` array on
+        // `item.completed`; fan out one FileChange per entry so the stderr
+        // surface shows one line per touched path. Empty payloads (e.g.
+        // bare `item.started` with no path or kind) are dropped rather than
+        // rendered as a context-free "change" line.
+        let entries = fc.resolved_entries();
+        if entries.is_empty() {
+            return;
         }
-        self.sink.on_semantic_event(SemanticEvent::FileChange {
-            path: fc.resolved_path().map(String::from),
-            change_kind: fc.resolved_kind().map(String::from),
-            extra: Value::Object(extra),
-        });
+        for (path, change_kind) in entries {
+            let mut extra = self.base_extra(raw_kind);
+            if let Some(id) = &fc.id {
+                extra.insert("id".into(), Value::from(id.as_str()));
+            }
+            if let Some(status) = &fc.status {
+                extra.insert("status".into(), Value::from(status.as_str()));
+            }
+            self.sink.on_semantic_event(SemanticEvent::FileChange {
+                path,
+                change_kind,
+                extra: Value::Object(extra),
+            });
+        }
     }
 
     fn handle_plan_update_item(&mut self, p: &CodexPlanUpdate, raw_kind: &str) {
@@ -234,12 +266,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         });
     }
 
-    fn handle_permission_item(
-        &mut self,
-        perm: &CodexPermissionItem,
-        kind: &str,
-        raw_kind: &str,
-    ) {
+    fn handle_permission_item(&mut self, perm: &CodexPermissionItem, kind: &str, raw_kind: &str) {
         if kind == "user_input" {
             self.user_input_prompts += 1;
         } else {
@@ -247,11 +274,12 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         }
         let mut extra = self.base_extra(raw_kind);
         extra.insert("permission_kind".into(), Value::from(kind));
-        self.sink.on_semantic_event(SemanticEvent::PermissionRequest {
-            kind: Some(kind.to_string()),
-            tool_name: perm.name.clone(),
-            extra: Value::Object(extra),
-        });
+        self.sink
+            .on_semantic_event(SemanticEvent::PermissionRequest {
+                kind: Some(kind.to_string()),
+                tool_name: perm.name.clone(),
+                extra: Value::Object(extra),
+            });
     }
 
     fn tool_call_from_fields(&self, fields: &CodexToolItemFields, raw_kind: &str) -> SemanticEvent {
@@ -273,7 +301,11 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         }
     }
 
-    fn tool_result_from_fields(&self, fields: &CodexToolItemFields, raw_kind: &str) -> SemanticEvent {
+    fn tool_result_from_fields(
+        &self,
+        fields: &CodexToolItemFields,
+        raw_kind: &str,
+    ) -> SemanticEvent {
         let mut extra = self.base_extra(raw_kind);
         if let Some(id) = fields.resolved_tool_id() {
             extra.insert("tool_id".into(), Value::from(id));
@@ -408,27 +440,40 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
         }
     }
 
-    fn handle_item_updated(&mut self, env: CodexItemEnvelope, raw_kind: &str, raw: Value) {
-        // `item.updated` streams partial progress while a long-running tool
-        // executes. Surfacing them as `Info` events lets the heartbeat track
-        // activity during Codex's otherwise silent reasoning/command stretches.
-        let message = env
-            .item
-            .as_ref()
-            .and_then(|item| match item {
-                CodexItem::AgentMessage(m) => m.collected_text(),
-                CodexItem::Reasoning(r) => r.text.clone(),
-                _ => None,
-            })
-            .unwrap_or_else(|| "item.updated".to_string());
-        let mut extra = self.base_extra(raw_kind);
-        if let Some(item) = raw.get("item") {
-            extra.insert("item".into(), item.clone());
+    fn handle_item_updated(&mut self, env: CodexItemEnvelope, raw_kind: &str, _raw: Value) {
+        // `item.updated` carries partial-progress snapshots for long-running
+        // items. Route by inner item type:
+        //
+        // - `todo_list` / `plan_update` → `PlanUpdate` (the update really
+        //   is a new plan state).
+        // - `agent_message` / `reasoning` → `Reasoning` prose, so callers
+        //   render it via the thinking block-quote rather than a one-line
+        //   `Info` glyph.
+        // - Everything else (tool-progress pulses, unknown types) is
+        //   dropped on stderr; the raw line is still captured in the JSONL
+        //   log for post-hoc inspection.
+        let Some(item) = env.item else {
+            return;
+        };
+        match item {
+            CodexItem::TodoList(p) | CodexItem::PlanUpdate(p) => {
+                self.handle_plan_update_item(&p, raw_kind);
+            }
+            CodexItem::AgentMessage(m) => {
+                if let Some(text) = m.collected_text() {
+                    let mut extra = self.base_extra(raw_kind);
+                    extra.insert("origin".into(), Value::from("item.updated"));
+                    self.sink.on_semantic_event(SemanticEvent::Reasoning {
+                        text,
+                        extra: Value::Object(extra),
+                    });
+                }
+            }
+            CodexItem::Reasoning(r) => {
+                self.handle_reasoning_item(&r, raw_kind);
+            }
+            _ => {}
         }
-        self.sink.on_semantic_event(SemanticEvent::Info {
-            message,
-            extra: Value::Object(extra),
-        });
     }
 
     fn emit_top_level_tool_use(&mut self, fields: CodexToolItemFields, raw_kind: &str) {
@@ -562,10 +607,61 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
             badges: Vec::new(),
             raw_summary: self.raw_summary,
             stderr_text: None,
+            stderr_diagnostics: None,
         };
         summary.badges = crate::stream::badges::derive_badges(&summary, Provider::Codex);
         summary
     }
+}
+
+/// Map a Codex error envelope onto a typed [`SemanticErrorKind`].
+///
+/// Codex surfaces errors as either a typed envelope kind (e.g.
+/// `rate_limit`, `auth`) or a free-form message. This helper inspects both
+/// so the live error renderer and the end-of-run report can pick a
+/// consistent label and color.
+fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
+    if let Some(kind) = error_kind {
+        let lower = kind.to_ascii_lowercase();
+        if lower.contains("rate") || lower.contains("quota") || lower.contains("billing") {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("auth")
+            || lower.contains("config")
+            || lower.contains("permission")
+            || lower.contains("denied")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("abort") {
+            return SemanticErrorKind::Interrupted;
+        }
+        if lower.contains("api") || lower.contains("upstream") || lower.contains("server") {
+            return SemanticErrorKind::ApiRemote;
+        }
+    }
+    if let Some(msg) = message {
+        let lower = msg.to_ascii_lowercase();
+        if lower.contains("rate limit")
+            || lower.contains("quota")
+            || lower.contains("billing")
+            || lower.contains("api error")
+        {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("api key")
+            || lower.contains("authentication")
+            || lower.contains("not authorized")
+            || lower.contains("permission denied")
+            || lower.contains("config")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
+            return SemanticErrorKind::Interrupted;
+        }
+    }
+    SemanticErrorKind::AgentNative
 }
 
 #[cfg(test)]
@@ -595,7 +691,10 @@ mod tests {
         };
         (
             events,
-            Box::new(CodexSemanticStreamParser::new(sink, Some("codex-mini".into()))),
+            Box::new(CodexSemanticStreamParser::new(
+                sink,
+                Some("codex-mini".into()),
+            )),
         )
     }
 
@@ -651,7 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn item_updated_emits_info_with_progress() {
+    fn item_updated_reasoning_emits_reasoning_event() {
         let (events, mut parser) = new_parser();
         parser
             .feed_line(
@@ -660,9 +759,54 @@ mod tests {
             .unwrap();
         let collected = events.lock().unwrap().clone();
         match &collected[0] {
-            SemanticEvent::Info { message, .. } => assert_eq!(message, "still thinking"),
-            other => panic!("expected Info, got {other:?}"),
+            SemanticEvent::Reasoning { text, .. } => assert_eq!(text, "still thinking"),
+            other => panic!("expected Reasoning, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn item_updated_todo_list_emits_plan_update() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"item.updated","item":{"id":"p1","type":"todo_list","message":"step 2 done"}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::PlanUpdate { message, .. } => {
+                assert_eq!(message.as_deref(), Some("step 2 done"));
+            }
+            other => panic!("expected PlanUpdate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn item_updated_command_execution_is_suppressed() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"item.updated","item":{"id":"cmd1","type":"command_execution","command":"make","aggregated_output":"partial"}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(
+            collected.is_empty(),
+            "command_execution progress must not leak 'item.updated' Info events; got {collected:?}"
+        );
+    }
+
+    #[test]
+    fn item_updated_unknown_item_is_suppressed() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"item.updated","item":{"id":"x1","type":"brand_new_kind"}}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(
+            collected.is_empty(),
+            "unknown item.updated types must not leak on stderr; got {collected:?}"
+        );
     }
 
     #[test]
@@ -676,15 +820,55 @@ mod tests {
         let collected = events.lock().unwrap().clone();
         match &collected[0] {
             SemanticEvent::FileChange {
-                path,
-                change_kind,
-                ..
+                path, change_kind, ..
             } => {
                 assert_eq!(path.as_deref(), Some("src/lib.rs"));
                 assert_eq!(change_kind.as_deref(), Some("modified"));
             }
             other => panic!("expected FileChange, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn file_change_item_fans_out_per_changes_entry() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(
+                r#"{"type":"item.completed","item":{"id":"f1","type":"file_change","changes":[{"path":"src/lib.rs","kind":"update"},{"path":"tests/smoke.rs","kind":"add"}],"status":"completed"}}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        let file_changes: Vec<_> = collected
+            .iter()
+            .filter_map(|e| match e {
+                SemanticEvent::FileChange {
+                    path, change_kind, ..
+                } => Some((path.clone(), change_kind.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            file_changes,
+            vec![
+                (Some("src/lib.rs".into()), Some("update".into())),
+                (Some("tests/smoke.rs".into()), Some("add".into())),
+            ]
+        );
+    }
+
+    #[test]
+    fn file_change_item_without_path_or_kind_is_suppressed() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"item.started","item":{"id":"f1","type":"file_change"}}"#)
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        assert!(
+            !collected
+                .iter()
+                .any(|e| matches!(e, SemanticEvent::FileChange { .. })),
+            "empty file_change must not emit a FileChange event"
+        );
     }
 
     #[test]
@@ -777,9 +961,7 @@ mod tests {
         let (call_name, call_input) = evs
             .iter()
             .find_map(|e| match e {
-                SemanticEvent::ToolCall { name, input, .. } => {
-                    Some((name.clone(), input.clone()))
-                }
+                SemanticEvent::ToolCall { name, input, .. } => Some((name.clone(), input.clone())),
                 _ => None,
             })
             .expect("ToolCall emitted");
@@ -852,10 +1034,62 @@ mod tests {
             )
             .unwrap();
         let collected = events.lock().unwrap().clone();
-        assert!(matches!(collected[0], SemanticEvent::Error { terminal: true, .. }));
+        assert!(matches!(
+            collected[0],
+            SemanticEvent::Error { terminal: true, .. }
+        ));
         let summary = parser.finish(1);
         assert!(summary.is_error);
         assert_eq!(summary.error_kind.as_deref(), Some("rate_limit"));
+    }
+
+    #[test]
+    fn classify_error_rate_limit_kind_maps_to_api_remote() {
+        assert_eq!(
+            classify_error(Some("rate_limit"), Some("Too many requests")),
+            SemanticErrorKind::ApiRemote,
+        );
+    }
+
+    #[test]
+    fn classify_error_auth_kind_maps_to_configuration() {
+        assert_eq!(
+            classify_error(Some("auth_error"), Some("missing api key")),
+            SemanticErrorKind::Configuration,
+        );
+    }
+
+    #[test]
+    fn classify_error_unknown_kind_with_billing_message_maps_to_api_remote() {
+        assert_eq!(
+            classify_error(None, Some("Billing quota exceeded")),
+            SemanticErrorKind::ApiRemote,
+        );
+    }
+
+    #[test]
+    fn classify_error_defaults_to_agent_native() {
+        assert_eq!(
+            classify_error(Some("weird_kind"), Some("something broke")),
+            SemanticErrorKind::AgentNative,
+        );
+    }
+
+    #[test]
+    fn error_event_carries_typed_kind_in_semantic_event() {
+        let (events, mut _parser) = new_parser();
+        _parser
+            .feed_line(
+                r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
+            )
+            .unwrap();
+        let collected = events.lock().unwrap().clone();
+        match &collected[0] {
+            SemanticEvent::Error { kind, .. } => {
+                assert_eq!(*kind, SemanticErrorKind::ApiRemote);
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
     }
 
     #[test]
@@ -901,9 +1135,7 @@ mod tests {
         let (events, mut parser) = new_parser();
         let result = parser.feed_line("not json");
         assert!(result.is_ok());
-        parser
-            .feed_line(r#"{"type":"turn.started"}"#)
-            .unwrap();
+        parser.feed_line(r#"{"type":"turn.started"}"#).unwrap();
         let ks = kinds(&events.lock().unwrap());
         assert_eq!(ks, vec!["warning", "turn_start"]);
     }
@@ -922,7 +1154,9 @@ mod tests {
         let collected = events.lock().unwrap().clone();
         assert_eq!(kinds(&collected), vec!["tool_call", "tool_result"]);
         match &collected[1] {
-            SemanticEvent::ToolResult { status, exit_code, .. } => {
+            SemanticEvent::ToolResult {
+                status, exit_code, ..
+            } => {
                 assert_eq!(status.as_deref(), Some("success"));
                 assert_eq!(*exit_code, Some(0));
             }
@@ -975,11 +1209,18 @@ mod tests {
         let captured = events.lock().unwrap().clone();
         let ks = kinds(&captured);
         assert_eq!(
-            ks, vec!["tool_call", "tool_result"],
+            ks,
+            vec!["tool_call", "tool_result"],
             "command_execution must route to paired ToolCall + ToolResult, got {ks:?}"
         );
 
-        let SemanticEvent::ToolResult { status, exit_code, output, .. } = &captured[1] else {
+        let SemanticEvent::ToolResult {
+            status,
+            exit_code,
+            output,
+            ..
+        } = &captured[1]
+        else {
             panic!("expected ToolResult as second event, got {:?}", captured[1]);
         };
         assert_eq!(status.as_deref(), Some("success"));
@@ -1009,15 +1250,18 @@ mod tests {
 
     #[test]
     fn codex_fixture_full_replay_produces_no_provider_extensions() {
-        let fixture = std::fs::read_to_string(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/providers/codex.ndjson"),
-        )
+        let fixture = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/providers/codex.ndjson"
+        ))
         .expect("codex.ndjson must exist — Task 1 should have created it");
 
         let (events, mut parser) = new_parser();
         for (i, line) in fixture.lines().enumerate() {
             let line = line.trim();
-            if line.is_empty() { continue; }
+            if line.is_empty() {
+                continue;
+            }
             parser
                 .feed_line(line)
                 .unwrap_or_else(|e| panic!("line {}: {:?}", i + 1, e));

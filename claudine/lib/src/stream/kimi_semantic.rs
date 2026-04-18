@@ -13,7 +13,7 @@ use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::kimi::{
     KimiContent, KimiErrorEvent, KimiEvent, KimiInit, KimiStatusUpdate, KimiTool,
 };
-use super::semantic::{SemanticEvent, SemanticEventSink};
+use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::{ContextUsage, StreamExecutionSummary};
 use super::token_usage::NormalizedTokenUsage;
 use crate::events::Provider;
@@ -164,9 +164,12 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
         if let Some(kind) = &self.error_kind {
             extra.insert("error_kind".into(), Value::from(kind.as_str()));
         }
+        let semantic_kind =
+            classify_error(self.error_kind.as_deref(), self.error_message.as_deref());
         self.sink.on_semantic_event(SemanticEvent::Error {
             message: self.error_message.clone().unwrap_or_default(),
             terminal: true,
+            kind: semantic_kind,
             extra: Value::Object(extra),
         });
     }
@@ -232,11 +235,12 @@ impl<S: SemanticEventSink> KimiSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        self.sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::KimiCode,
-            kind: kind.to_string(),
-            payload,
-        });
+        self.sink
+            .on_semantic_event(SemanticEvent::ProviderExtension {
+                provider: Provider::KimiCode,
+                kind: kind.to_string(),
+                payload,
+            });
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
@@ -334,10 +338,51 @@ impl<S: SemanticEventSink> SemanticStreamParser for KimiSemanticStreamParser<S> 
             badges: Vec::new(),
             raw_summary: None,
             stderr_text: None,
+            stderr_diagnostics: None,
         };
         summary.badges = crate::stream::badges::derive_badges(&summary, Provider::KimiCode);
         summary
     }
+}
+
+/// Map a Kimi Code error envelope onto a typed [`SemanticErrorKind`].
+fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
+    if let Some(kind) = error_kind {
+        let lower = kind.to_ascii_lowercase();
+        if lower.contains("rate") || lower.contains("quota") || lower.contains("billing") {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("auth") || lower.contains("config") || lower.contains("permission") {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("abort") {
+            return SemanticErrorKind::Interrupted;
+        }
+        if lower.contains("api") || lower.contains("upstream") || lower.contains("server") {
+            return SemanticErrorKind::ApiRemote;
+        }
+    }
+    if let Some(msg) = message {
+        let lower = msg.to_ascii_lowercase();
+        if lower.contains("rate limit")
+            || lower.contains("quota")
+            || lower.contains("billing")
+            || lower.contains("api error")
+        {
+            return SemanticErrorKind::ApiRemote;
+        }
+        if lower.contains("api key")
+            || lower.contains("authentication")
+            || lower.contains("not authorized")
+            || lower.contains("permission denied")
+        {
+            return SemanticErrorKind::Configuration;
+        }
+        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
+            return SemanticErrorKind::Interrupted;
+        }
+    }
+    SemanticErrorKind::AgentNative
 }
 
 #[cfg(test)]
@@ -400,9 +445,7 @@ mod tests {
     fn context_pressure_emits_warning() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(
-                r#"{"type":"StatusUpdate","context_usage":{"used":110000,"total":128000}}"#,
-            )
+            .feed_line(r#"{"type":"StatusUpdate","context_usage":{"used":110000,"total":128000}}"#)
             .unwrap();
         let collected = events.lock().unwrap().clone();
         match &collected[0] {
@@ -418,9 +461,7 @@ mod tests {
     fn context_below_threshold_emits_nothing() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(
-                r#"{"type":"StatusUpdate","context_usage":{"used":50000,"total":128000}}"#,
-            )
+            .feed_line(r#"{"type":"StatusUpdate","context_usage":{"used":50000,"total":128000}}"#)
             .unwrap();
         assert!(events.lock().unwrap().is_empty());
     }
@@ -436,7 +477,10 @@ mod tests {
                 r#"{"type":"tool_result","tool_use_id":"k1","status":"success","content":"clean"}"#,
             )
             .unwrap();
-        assert_eq!(kinds(&events.lock().unwrap()), vec!["tool_call", "tool_result"]);
+        assert_eq!(
+            kinds(&events.lock().unwrap()),
+            vec!["tool_call", "tool_result"]
+        );
     }
 
     #[test]
@@ -465,7 +509,10 @@ mod tests {
     fn malformed_json_emits_warning() {
         let (events, mut parser) = new_parser();
         assert!(parser.feed_line("x").is_ok());
-        assert!(matches!(events.lock().unwrap()[0], SemanticEvent::Warning { .. }));
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SemanticEvent::Warning { .. }
+        ));
     }
 
     #[test]

@@ -166,10 +166,7 @@ fn report_send_failure(route: &ResolvedMessagingRoute, error: &str, kind: &str) 
     // user-facing WARN noise.
     debug!(
         route = route.name,
-        provider,
-        kind,
-        error,
-        "messaging send failed"
+        provider, kind, error, "messaging send failed"
     );
 }
 
@@ -180,11 +177,17 @@ fn failure_hint(error: &str) -> Option<&'static str> {
     let lower = error.to_ascii_lowercase();
     if lower.contains("env var") || lower.contains("environment variable") {
         Some("Set the referenced environment variable or supply the secret inline.")
-    } else if lower.contains("unauthorized") || lower.contains("401") || lower.contains("invalid_auth") {
+    } else if lower.contains("unauthorized")
+        || lower.contains("401")
+        || lower.contains("invalid_auth")
+    {
         Some("Check the route's credentials — the provider rejected the token.")
     } else if lower.contains("forbidden") || lower.contains("403") {
         Some("Confirm the bot has permission to post to the configured channel/recipient.")
-    } else if lower.contains("not found") || lower.contains("channel_not_found") || lower.contains("404") {
+    } else if lower.contains("not found")
+        || lower.contains("channel_not_found")
+        || lower.contains("404")
+    {
         Some("Verify the channel, recipient, or group id in your messaging config.")
     } else if lower.contains("dns") || lower.contains("connect") || lower.contains("timed out") {
         Some("Check network connectivity to the messaging provider.")

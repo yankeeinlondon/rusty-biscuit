@@ -5,19 +5,24 @@ use color_eyre::eyre::Result;
 #[derive(Args)]
 #[command(after_help = r#"EXAMPLES:
     # Bash: Add to ~/.bashrc
-    source <(claudine completions bash)
+    claudine completions bash >> ~/.bashrc
 
     # Zsh: Add to ~/.zshrc
-    source <(claudine completions zsh)
+    claudine completions zsh >> ~/.zshrc
 
     # Fish: Add to ~/.config/fish/config.fish
-    claudine completions fish | source
+    claudine completions fish >> ~/.config/fish/config.fish
 
     # PowerShell: Add to your profile
-    claudine completions powershell | Out-String | Invoke-Expression
+    claudine completions powershell >> $PROFILE
 
     # Elvish: Add to ~/.elvish/rc.elv
-    eval (claudine completions elvish | slurp)
+    claudine completions elvish >> ~/.elvish/rc.elv
+
+    The emitted line is a one-time bootstrap: it activates Claudine's
+    dynamic completer, which re-queries the running binary on every
+    <TAB>. You never need to regenerate a script when Claudine ships
+    new composition commands or file-reference behavior.
 "#)]
 pub struct CompletionsArgs {
     /// Shell to generate completions for (bash, zsh, fish, powershell, elvish).
@@ -25,23 +30,19 @@ pub struct CompletionsArgs {
     pub shell: clap_complete::Shell,
 }
 
-/// Generate shell completions.
+/// Emit a one-time bootstrap snippet that activates dynamic completion.
+///
+/// The snippet wires the user's shell to invoke `COMPLETE=<shell> claudine`
+/// on every `<TAB>`. The actual completion logic lives in
+/// [`crate::completion::maybe_complete`], which is dispatched from `main()`
+/// before any normal CLI startup, so the completion surface tracks the
+/// running binary automatically.
 pub fn run(args: CompletionsArgs) -> Result<()> {
-    use clap::CommandFactory;
-    let mut cmd = super::super::Cli::command();
+    use std::io::Write;
 
-    if args.shell == clap_complete::Shell::Zsh {
-        // clap_complete generates zsh completions with `--option=[desc]` style,
-        // which completes with `=` glued to the flag. Post-process to remove the
-        // `=` so zsh uses space-separated `--option <value>` style instead.
-        let mut buf = Vec::new();
-        clap_complete::generate(args.shell, &mut cmd, "claudine", &mut buf);
-        let output = String::from_utf8(buf)?;
-        let patched = output.replace("=-[", "-[").replace("=[", "[");
-        print!("{patched}");
-    } else {
-        clap_complete::generate(args.shell, &mut cmd, "claudine", &mut std::io::stdout());
-    }
-
+    let snippet = super::super::completion::bootstrap::render(args.shell);
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    handle.write_all(snippet.as_bytes())?;
     Ok(())
 }

@@ -13,12 +13,53 @@
 //!
 //! Design context lives in `claudine/features/2026-04-14-more-meta-response/`.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::events::Provider;
 
 use super::token_usage::NormalizedTokenUsage;
+
+/// Typed classification of an error surfaced through [`SemanticEvent::Error`].
+///
+/// Carries enough information for downstream renderers (live stderr surface,
+/// end-of-run error report) to choose a label and color without re-parsing
+/// the underlying error message. Replays of older JSONL streams that lack a
+/// `kind` field deserialize as [`SemanticErrorKind::Unknown`] via the
+/// `#[serde(default)]` attribute on [`SemanticEvent::Error::kind`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticErrorKind {
+    /// Local configuration problem (missing API key, bad config file, etc.).
+    Configuration,
+    /// Native error reported by the agent CLI itself (model not found,
+    /// invalid CLI usage, etc.).
+    AgentNative,
+    /// Error originating from a remote API the agent talks to (rate limits,
+    /// billing, upstream API failures).
+    ApiRemote,
+    /// User or signal-driven interruption (Ctrl-C, SIGTERM).
+    Interrupted,
+    /// Unclassified error. Default for replay compatibility.
+    #[default]
+    Unknown,
+}
+
+impl SemanticErrorKind {
+    /// Stable lowercase identifier for logging and serialization tags.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SemanticErrorKind::Configuration => "configuration",
+            SemanticErrorKind::AgentNative => "agent_native",
+            SemanticErrorKind::ApiRemote => "api_remote",
+            SemanticErrorKind::Interrupted => "interrupted",
+            SemanticErrorKind::Unknown => "unknown",
+        }
+    }
+}
 
 /// Typed cross-provider stream event.
 ///
@@ -102,6 +143,8 @@ pub enum SemanticEvent {
     Error {
         message: String,
         terminal: bool,
+        #[serde(default)]
+        kind: SemanticErrorKind,
         extra: Value,
     },
     ProviderExtension {
@@ -174,6 +217,84 @@ impl SemanticEventSink for NullSemanticSink {
     fn on_semantic_event(&mut self, _event: SemanticEvent) {}
 }
 
+/// Thread-safe sink wrapper backed by `Arc<Mutex<S>>`.
+///
+/// Lets multiple producers (stdout parser, stderr log bridge) share a single
+/// downstream sink without rewriting it for lock-free fanout. Events are
+/// serialized by the mutex so the downstream sink always sees one event at a
+/// time. Cloning produces another handle to the same inner sink; dropping a
+/// clone does not affect the others.
+pub struct SharedSemanticSink<S: SemanticEventSink> {
+    inner: Arc<Mutex<S>>,
+}
+
+impl<S: SemanticEventSink> SharedSemanticSink<S> {
+    /// Wrap a sink so it can be shared across threads.
+    pub fn new(sink: S) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(sink)),
+        }
+    }
+
+    /// Access the shared inner sink through its `Arc<Mutex<_>>`.
+    pub fn inner(&self) -> &Arc<Mutex<S>> {
+        &self.inner
+    }
+}
+
+impl<S: SemanticEventSink> Clone for SharedSemanticSink<S> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+impl<S: SemanticEventSink> SemanticEventSink for SharedSemanticSink<S> {
+    fn on_semantic_event(&mut self, event: SemanticEvent) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.on_semantic_event(event);
+        }
+    }
+}
+
+/// Sink wrapper that flips a shared `AtomicBool` the first time any stdout
+/// semantic event is forwarded.
+///
+/// Used by the OpenCode structured wrapper path to tell stderr-derived
+/// diagnostics whether stdout activity has already begun — for example, to
+/// decide whether a rate-limit classification should emit a
+/// [`SemanticEvent::Warning`] (stdout already seen) or
+/// [`SemanticEvent::Error`] with early-termination (no stdout activity yet).
+pub struct ObservedSemanticSink<S: SemanticEventSink> {
+    inner: S,
+    stdout_event_seen: Arc<AtomicBool>,
+}
+
+impl<S: SemanticEventSink> ObservedSemanticSink<S> {
+    /// Build a new observed wrapper around `sink` that sets
+    /// `stdout_event_seen` the first time any semantic event is forwarded.
+    pub fn new(sink: S, stdout_event_seen: Arc<AtomicBool>) -> Self {
+        Self {
+            inner: sink,
+            stdout_event_seen,
+        }
+    }
+
+    /// Clone handle into the shared `stdout_event_seen` gate so other
+    /// producers (for example the stderr log bridge) can read the flag.
+    pub fn stdout_event_seen(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.stdout_event_seen)
+    }
+}
+
+impl<S: SemanticEventSink> SemanticEventSink for ObservedSemanticSink<S> {
+    fn on_semantic_event(&mut self, event: SemanticEvent) {
+        self.stdout_event_seen.store(true, Ordering::SeqCst);
+        self.inner.on_semantic_event(event);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,9 +307,7 @@ mod tests {
                 model: Some("claude".into()),
                 extra: json!({"provider": "claude"}),
             },
-            SemanticEvent::TurnStart {
-                extra: json!({}),
-            },
+            SemanticEvent::TurnStart { extra: json!({}) },
             SemanticEvent::TurnComplete {
                 provider_status: Some("ok".into()),
                 token_usage: Some(NormalizedTokenUsage {
@@ -259,6 +378,7 @@ mod tests {
             SemanticEvent::Error {
                 message: "quota exceeded".into(),
                 terminal: true,
+                kind: SemanticErrorKind::ApiRemote,
                 extra: json!({}),
             },
             SemanticEvent::ProviderExtension {
@@ -275,54 +395,70 @@ mod tests {
         let mut sorted = kinds.clone();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(sorted.len(), kinds.len(), "kind_str must be unique per variant");
+        assert_eq!(
+            sorted.len(),
+            kinds.len(),
+            "kind_str must be unique per variant"
+        );
     }
 
     #[test]
     fn is_activity_excludes_envelope_events() {
-        assert!(!SemanticEvent::SessionStart {
-            session_id: None,
-            model: None,
-            extra: json!({}),
-        }
-        .is_activity());
+        assert!(
+            !SemanticEvent::SessionStart {
+                session_id: None,
+                model: None,
+                extra: json!({}),
+            }
+            .is_activity()
+        );
         assert!(!SemanticEvent::TurnStart { extra: json!({}) }.is_activity());
-        assert!(!SemanticEvent::TurnComplete {
-            provider_status: None,
-            token_usage: None,
-            cost_usd: None,
-            duration_ms: None,
-            extra: json!({}),
-        }
-        .is_activity());
-        assert!(!SemanticEvent::PermissionRequest {
-            kind: None,
-            tool_name: None,
-            extra: json!({}),
-        }
-        .is_activity());
+        assert!(
+            !SemanticEvent::TurnComplete {
+                provider_status: None,
+                token_usage: None,
+                cost_usd: None,
+                duration_ms: None,
+                extra: json!({}),
+            }
+            .is_activity()
+        );
+        assert!(
+            !SemanticEvent::PermissionRequest {
+                kind: None,
+                tool_name: None,
+                extra: json!({}),
+            }
+            .is_activity()
+        );
     }
 
     #[test]
     fn is_activity_includes_work_events() {
-        assert!(SemanticEvent::OutputText {
-            text: "x".into(),
-            extra: json!({}),
-        }
-        .is_activity());
-        assert!(SemanticEvent::ToolCall {
-            name: None,
-            id: None,
-            input: None,
-            extra: json!({}),
-        }
-        .is_activity());
-        assert!(SemanticEvent::ProviderExtension {
-            provider: Provider::Claude,
-            kind: "x".into(),
-            payload: json!({}),
-        }
-        .is_activity());
+        assert!(
+            SemanticEvent::OutputText {
+                text: "x".into(),
+                extra: json!({}),
+            }
+            .is_activity()
+        );
+        assert!(
+            SemanticEvent::ToolCall {
+                name: None,
+                id: None,
+                input: None,
+                extra: json!({}),
+            }
+            .is_activity()
+        );
+        assert!(
+            SemanticEvent::ProviderExtension {
+                provider: Provider::Claude,
+                kind: "x".into(),
+                payload: json!({}),
+            }
+            .is_activity()
+        );
     }
 
     #[test]
@@ -333,7 +469,8 @@ mod tests {
                 serde_json::from_value(value.clone()).expect("deserialize");
             let value2 = serde_json::to_value(&decoded).expect("re-serialize");
             assert_eq!(
-                value, value2,
+                value,
+                value2,
                 "round-trip lost fidelity for kind {}",
                 event.kind_str()
             );
@@ -368,5 +505,144 @@ mod tests {
     fn null_sink_is_send() {
         fn assert_send<T: Send>() {}
         assert_send::<NullSemanticSink>();
+    }
+
+    #[test]
+    fn error_kind_round_trips_through_serde() {
+        for kind in [
+            SemanticErrorKind::Configuration,
+            SemanticErrorKind::AgentNative,
+            SemanticErrorKind::ApiRemote,
+            SemanticErrorKind::Interrupted,
+            SemanticErrorKind::Unknown,
+        ] {
+            let event = SemanticEvent::Error {
+                message: "boom".into(),
+                terminal: true,
+                kind,
+                extra: json!({}),
+            };
+            let value = serde_json::to_value(&event).unwrap();
+            let decoded: SemanticEvent = serde_json::from_value(value).unwrap();
+            match decoded {
+                SemanticEvent::Error {
+                    kind: decoded_kind, ..
+                } => {
+                    assert_eq!(decoded_kind, kind);
+                }
+                other => panic!("expected Error, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn error_kind_default_is_unknown_when_field_missing() {
+        let raw = json!({
+            "type": "error",
+            "message": "legacy payload",
+            "terminal": true,
+            "extra": {}
+        });
+        let decoded: SemanticEvent = serde_json::from_value(raw).unwrap();
+        match decoded {
+            SemanticEvent::Error { kind, .. } => {
+                assert_eq!(kind, SemanticErrorKind::Unknown);
+            }
+            other => panic!("expected Error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_kind_as_str_is_stable() {
+        assert_eq!(SemanticErrorKind::Configuration.as_str(), "configuration");
+        assert_eq!(SemanticErrorKind::AgentNative.as_str(), "agent_native");
+        assert_eq!(SemanticErrorKind::ApiRemote.as_str(), "api_remote");
+        assert_eq!(SemanticErrorKind::Interrupted.as_str(), "interrupted");
+        assert_eq!(SemanticErrorKind::Unknown.as_str(), "unknown");
+    }
+
+    #[derive(Default)]
+    struct CollectingSink {
+        events: Vec<SemanticEvent>,
+    }
+
+    impl SemanticEventSink for CollectingSink {
+        fn on_semantic_event(&mut self, event: SemanticEvent) {
+            self.events.push(event);
+        }
+    }
+
+    #[test]
+    fn shared_sink_forwards_events_to_inner() {
+        let mut sink = SharedSemanticSink::new(CollectingSink::default());
+        sink.on_semantic_event(SemanticEvent::Info {
+            message: "one".into(),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::Warning {
+            message: "two".into(),
+            extra: json!({}),
+        });
+        let guard = sink.inner().lock().unwrap();
+        assert_eq!(guard.events.len(), 2);
+        assert_eq!(guard.events[0].kind_str(), "info");
+        assert_eq!(guard.events[1].kind_str(), "warning");
+    }
+
+    #[test]
+    fn shared_sink_is_clone_shares_inner_state() {
+        let sink = SharedSemanticSink::new(CollectingSink::default());
+        let mut a = sink.clone();
+        let mut b = sink.clone();
+        a.on_semantic_event(SemanticEvent::Info {
+            message: "from-a".into(),
+            extra: json!({}),
+        });
+        b.on_semantic_event(SemanticEvent::Info {
+            message: "from-b".into(),
+            extra: json!({}),
+        });
+        let guard = sink.inner().lock().unwrap();
+        assert_eq!(guard.events.len(), 2);
+    }
+
+    #[test]
+    fn observed_sink_sets_flag_on_first_event() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut sink = ObservedSemanticSink::new(CollectingSink::default(), flag.clone());
+        assert!(!flag.load(Ordering::SeqCst));
+        sink.on_semantic_event(SemanticEvent::SessionStart {
+            session_id: None,
+            model: None,
+            extra: json!({}),
+        });
+        assert!(flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn observed_sink_forwards_every_event() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut sink = ObservedSemanticSink::new(CollectingSink::default(), flag);
+        sink.on_semantic_event(SemanticEvent::TurnStart { extra: json!({}) });
+        sink.on_semantic_event(SemanticEvent::OutputText {
+            text: "hi".into(),
+            extra: json!({}),
+        });
+        sink.on_semantic_event(SemanticEvent::TurnComplete {
+            provider_status: None,
+            token_usage: None,
+            cost_usd: None,
+            duration_ms: None,
+            extra: json!({}),
+        });
+        assert_eq!(sink.inner.events.len(), 3);
+    }
+
+    #[test]
+    fn observed_sink_exposes_shared_flag() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let sink = ObservedSemanticSink::new(CollectingSink::default(), flag.clone());
+        let observed_flag = sink.stdout_event_seen();
+        assert!(Arc::ptr_eq(&flag, &observed_flag));
     }
 }
