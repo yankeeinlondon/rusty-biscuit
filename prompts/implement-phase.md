@@ -17,6 +17,12 @@ You are done when:
 - all functionality defined in phase {{phase}} has been implemented
 - all tests are passing (using `just test` in the {{ctx.current_package_area}} package area)
 - all lints are passing (using `just lint` in the {{ctx.current_package_area}} package area)
+- You must set the following Frontmatter properties:
+    - `source_files_during_phase_{{phase}}` should be set to all source code files which were created or updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
+    - `docs_updated_during_phase_{{phase}}` should be set to all documentation files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
+    - `docs_created_during_phase_{{phase}}` should be set to all documentation files which were created during this phase of the implementation; put an empty list (e.g., `[]`) if none
+    - `skills_files_updated_during_phase{{phase}}` should be set to all agent skill files which were updated during this phase of the implementation; put an empty list (e.g., `[]`) if none
+    - if this is a monorepo, then include `packages` as a list of packages in the monorepo which were touched by the implementation in phase {{phase}}
 
 **IMPORTANT:** 
 
