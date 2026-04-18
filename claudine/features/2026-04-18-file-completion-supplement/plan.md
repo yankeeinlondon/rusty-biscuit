@@ -46,6 +46,7 @@ docs_updated_during_phase_5:
   - claudine/docs/topics/composition.md
 docs_created_during_phase_5: []
 skills_files_updated_during_phase5: []
+packages_during_phase_5: [claudine-cli]
 source_files_during_phase_6:
   - claudine/features/2026-04-18-file-completion-supplement/plan.md
 docs_updated_during_phase_6:
