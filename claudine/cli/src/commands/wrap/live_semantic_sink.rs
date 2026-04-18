@@ -479,11 +479,18 @@ impl LiveSemanticSink {
             None
         };
         let slot = match (display.status, &display.summary) {
-            (Some(ToolStatus::Success), _) => {
+            (Some(ToolStatus::Success), summary) => {
                 let mut s = String::from("<dim><i>successful</i></dim>");
                 if let Some(path) = file_path {
                     s.push_str(", ");
                     s.push_str(&format!("<dim>{}</dim>", self.render_file_link(path)));
+                } else if let Some(text) = summary.as_deref().filter(|t| !t.is_empty()) {
+                    // Non-file successful results still carry useful summary
+                    // text derived from the tool's input (e.g. `bash ls -la`).
+                    // Render `successful, <summary>` so the incoming arrow
+                    // mirrors the outgoing arrow's metadata.
+                    s.push_str(", ");
+                    s.push_str(&format!("<dim><i>{}</i></dim>", escape_prose(text)));
                 }
                 Some(s)
             }
@@ -498,7 +505,17 @@ impl LiveSemanticSink {
                 }
                 Some(s)
             }
-            (Some(ToolStatus::Pending), _) => Some("<dim><i>pending</i></dim>".to_string()),
+            (Some(ToolStatus::Pending), summary) => {
+                let mut s = String::from("<dim><i>pending</i></dim>");
+                if let Some(path) = file_path {
+                    s.push_str(", ");
+                    s.push_str(&format!("<dim>{}</dim>", self.render_file_link(path)));
+                } else if let Some(text) = summary.as_deref().filter(|t| !t.is_empty()) {
+                    s.push_str(", ");
+                    s.push_str(&format!("<dim><i>{}</i></dim>", escape_prose(text)));
+                }
+                Some(s)
+            }
             (None, Some(summary)) => {
                 if is_file_tool {
                     Some(self.render_file_link(summary))
@@ -725,7 +742,19 @@ impl LiveSemanticSink {
                     self.render_status(section, StatusState::Info, msg.clone());
                 }
             }
-            SemanticEvent::Info { message, .. } => {
+            SemanticEvent::Info { message, extra } => {
+                // Suppress OpenCode's `step_start` / `step_finish` phase
+                // markers from the rendered stderr surface. They carry no
+                // user-visible meaning (internal phase boundaries between
+                // tool batches) and produce visual noise around tool lines.
+                // The events still flow through dispatch, JSONL logging, and
+                // the LiveMetrics heartbeat — only the human-visible Status
+                // line is suppressed. Suppression is gated on
+                // `extra["step_phase"]` so unrelated Info events from
+                // OpenCode (or any other provider) are unaffected.
+                if self.provider == Provider::OpenCode && extra.get("step_phase").is_some() {
+                    return;
+                }
                 self.render_status(section, StatusState::Info, message.clone());
             }
             SemanticEvent::Warning { message, extra } => {
@@ -1307,7 +1336,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_result_status_wins_over_input_summary() {
+    fn tool_result_success_status_co_renders_with_input_summary() {
         let lines = Arc::new(StdMutex::new(Vec::new()));
         let dispatched = Arc::new(StdMutex::new(Vec::new()));
         let mut sink = make_sink(lines.clone(), dispatched.clone());
@@ -1322,17 +1351,17 @@ mod tests {
         let rendered = lines.lock().unwrap().join("\n");
         assert!(rendered.contains('\u{2190}'), "expected ← arrow");
         assert!(rendered.contains("Bash"), "expected humanized tool name");
-        // Per Task 1.4's "status wins over summary" rule, the input summary
-        // "ls -la" must NOT appear when status is present — status text only.
-        assert!(
-            !rendered.contains("ls -la"),
-            "input summary must not appear when status is present: {rendered:?}"
-        );
-        // "completed" is a success-ish status; from_result maps it to
-        // ToolStatus::Success, which renders as "successful".
+        // Per the 2026-04-18 contract, a successful incoming tool result
+        // renders `status + summary` together when a summary derived from
+        // the cached input is available — so the user can see what command
+        // succeeded, not just that something succeeded.
         assert!(
             rendered.contains("successful"),
             "expected mapped status word 'successful': {rendered:?}"
+        );
+        assert!(
+            rendered.contains("bash ls -la"),
+            "expected shell summary `bash ls -la` to co-render with status: {rendered:?}"
         );
     }
 
@@ -2151,6 +2180,18 @@ mod tests {
             let stderr_lines = golden_stderr::replay_to_stderr(provider, &lines_ref, None);
 
             for line in &stderr_lines {
+                // Tool result lines (`← Name(...)`) and tool call lines
+                // (`→ Name(...)`) legitimately carry tool slot content
+                // derived from input or output text, which may include
+                // arbitrary characters — for example, a successful
+                // `run_shell_command` whose output is grep results that
+                // happen to embed JSON strings. Per the 2026-04-18
+                // contract, those summaries co-render with the status,
+                // so the raw-JSON guard does not apply to lines wrapped
+                // in a tool arrow.
+                if line.contains('\u{2190}') || line.contains('\u{2192}') {
+                    continue;
+                }
                 // Heuristic: a line is "raw JSON" if it contains both `{`
                 // and a JSON-shaped key-value opener like `":`.
                 let has_json_obj_opener = line.contains('{') && line.contains("\":");
@@ -2970,6 +3011,72 @@ mod tests {
             assert!(
                 joined.contains("Bash"),
                 "humanized tool name must appear: {joined:?}"
+            );
+        }
+
+        /// 2026-04-18 contract: OpenCode `step_start` / `step_finish`
+        /// phase markers MUST NOT render to stderr. They were previously
+        /// surfaced as `Info` Status lines that produced visual noise
+        /// around the actual tool events. The events are still emitted
+        /// for JSONL/dispatch but suppressed at the sink boundary.
+        #[test]
+        fn opencode_step_phase_info_events_suppressed_from_stderr() {
+            let lines = replay_to_stderr(
+                Provider::OpenCode,
+                &[
+                    r#"{"type":"step_start","sessionID":"ses_1"}"#,
+                    r#"{"type":"tool_start","part":{"id":"t1","tool_name":"read","input":{"file_path":"a.md"}}}"#,
+                    r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"hi"}}"#,
+                    r#"{"type":"step_finish","sessionID":"ses_1"}"#,
+                ],
+                Some("gpt-4o".into()),
+            );
+            let joined = lines.join("\n");
+            assert!(
+                !joined.contains("step_start"),
+                "step_start must not render to stderr: {joined:?}"
+            );
+            assert!(
+                !joined.contains("step_finish"),
+                "step_finish must not render to stderr: {joined:?}"
+            );
+            assert!(
+                joined.contains("Read"),
+                "real tool events must still render: {joined:?}"
+            );
+        }
+
+        /// 2026-04-18 contract: a successful OpenCode `Bash` (or other
+        /// shell-shaped) tool result MUST carry the cached input summary
+        /// alongside the `successful` status. `Bash(successful)` with no
+        /// slot was the regression this guards against.
+        #[test]
+        fn opencode_bash_success_carries_summary_alongside_status() {
+            let lines = replay_to_stderr(
+                Provider::OpenCode,
+                &[
+                    r#"{"type":"step_start","sessionID":"ses_1"}"#,
+                    r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls -la"}}}"#,
+                    r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"file.txt"}}"#,
+                ],
+                Some("gpt-4o".into()),
+            );
+            let joined = lines.join("\n");
+            assert!(
+                joined.contains('\u{2190}'),
+                "incoming ← arrow must render: {joined:?}"
+            );
+            assert!(
+                joined.contains("Bash"),
+                "humanized tool name must appear: {joined:?}"
+            );
+            assert!(
+                joined.contains("successful"),
+                "status word must still render: {joined:?}"
+            );
+            assert!(
+                joined.contains("bash ls -la"),
+                "shell summary must co-render with status: {joined:?}"
             );
         }
 

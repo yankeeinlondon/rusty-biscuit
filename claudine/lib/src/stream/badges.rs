@@ -224,17 +224,13 @@ pub fn derive_badges(summary: &StreamExecutionSummary, provider: Provider) -> Ve
             });
         }
 
-        if diagnostics.malformed_asset_events > 0 {
-            let count = diagnostics.malformed_asset_events;
-            let noun = if count == 1 { "asset" } else { "assets" };
-            badges.push(SessionBadge {
-                category: BadgeCategory::Config,
-                severity: BadgeSeverity::Warning,
-                label: "Config".into(),
-                message: format!("Skipped {count} malformed OpenCode {noun}"),
-                remediation_url: None,
-            });
-        }
+        // Malformed-asset events intentionally do NOT emit a trailer
+        // badge — each malformed asset is already surfaced once per
+        // line as a `SemanticEvent::Warning` ("󰀨 Skipped malformed
+        // OpenCode <kind>: <path>"), which is the authoritative
+        // human-visible surface. The `malformed_asset_events`
+        // counter on `StderrDiagnostics` is preserved for JSONL
+        // reporting and downstream dashboards.
     }
 
     badges
@@ -607,8 +603,12 @@ mod tests {
     }
 
     #[test]
-    fn stderr_diagnostics_malformed_assets_yields_config_badge() {
+    fn stderr_diagnostics_malformed_assets_does_not_emit_config_badge() {
         use crate::stream::summary::StderrDiagnostics;
+        // Per the 2026-04-18 OpenCode reporting contract, malformed
+        // asset events are surfaced once per line as Warning events
+        // and MUST NOT be repeated as a trailer Config badge — even
+        // when the diagnostics counter is non-zero.
         let summary = StreamExecutionSummary {
             stderr_diagnostics: Some(StderrDiagnostics {
                 log_records_parsed: 2,
@@ -618,17 +618,17 @@ mod tests {
             ..Default::default()
         };
         let badges = derive_badges(&summary, Provider::OpenCode);
-        assert_eq!(badges.len(), 1);
-        assert_eq!(badges[0].category, BadgeCategory::Config);
-        assert_eq!(badges[0].severity, BadgeSeverity::Warning);
-        assert_eq!(badges[0].label, "Config");
-        assert!(badges[0].message.contains("2 malformed"));
-        assert!(badges[0].message.contains("assets"));
+        assert!(
+            !badges.iter().any(|b| b.category == BadgeCategory::Config),
+            "Config trailer badge must be absent for malformed assets: {badges:?}"
+        );
     }
 
     #[test]
-    fn stderr_diagnostics_single_malformed_asset_uses_singular_noun() {
+    fn stderr_diagnostics_single_malformed_asset_does_not_emit_config_badge() {
         use crate::stream::summary::StderrDiagnostics;
+        // Singular-noun branch is also gone — no trailer badge regardless
+        // of the count.
         let summary = StreamExecutionSummary {
             stderr_diagnostics: Some(StderrDiagnostics {
                 log_records_parsed: 1,
@@ -638,10 +638,10 @@ mod tests {
             ..Default::default()
         };
         let badges = derive_badges(&summary, Provider::OpenCode);
-        assert_eq!(badges.len(), 1);
-        assert_eq!(badges[0].category, BadgeCategory::Config);
-        assert!(badges[0].message.contains("1 malformed"));
-        assert!(badges[0].message.ends_with("asset"));
+        assert!(
+            !badges.iter().any(|b| b.category == BadgeCategory::Config),
+            "Config trailer badge must be absent for single malformed asset: {badges:?}"
+        );
     }
 
     #[test]

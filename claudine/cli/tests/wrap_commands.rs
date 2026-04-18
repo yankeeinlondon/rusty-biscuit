@@ -3882,12 +3882,14 @@ exit 0
 }
 
 /// Phase 6 scenario: a malformed asset stderr line during an otherwise-
-/// successful run should surface as a Warning + Config badge without
-/// failing the session.
+/// successful run should surface as a Warning event (rendered once per
+/// line) without failing the session. Per the 2026-04-18 OpenCode
+/// reporting contract, the diagnostics counter is preserved while the
+/// trailer Config badge is suppressed.
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
-fn opencode_stderr_malformed_asset_yields_config_badge_and_success() {
+fn opencode_stderr_malformed_asset_records_diagnostic_without_config_badge() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     let fake_home = workspace.path().join("home");
@@ -3921,15 +3923,18 @@ exit 0
         serde_json::json!(1),
         "stderr diagnostics should record one malformed asset: row={row}",
     );
-    let badges = row["extra"]["badges"]
-        .as_array()
-        .unwrap_or_else(|| panic!("expected badges array: row={row}"));
-    assert!(
-        badges
-            .iter()
-            .any(|b| b["category"] == serde_json::json!("config")),
-        "Config badge should be present in badges: {badges:?}",
-    );
+    // Per the 2026-04-18 OpenCode reporting contract, malformed-asset
+    // events do not produce a trailer Config badge — the per-line
+    // Warning surface is the authoritative reporting channel. The
+    // `badges` field may be absent or empty; either is acceptable as
+    // long as no Config-category badge is present.
+    let badges = row["extra"]["badges"].as_array();
+    if let Some(b) = badges {
+        assert!(
+            !b.iter().any(|b| b["category"] == serde_json::json!("config")),
+            "Config trailer badge must be absent — malformed assets are surfaced once per Warning line: {b:?}",
+        );
+    }
     assert_eq!(
         row["extra"]["exit_code"],
         serde_json::json!(0),
@@ -4049,13 +4054,16 @@ exit 0
         "log_records_parsed should count both records: row={row}",
     );
 
-    let badges = row["extra"]["badges"]
-        .as_array()
-        .unwrap_or_else(|| panic!("expected badges array: row={row}"));
-    assert!(
-        badges
-            .iter()
-            .any(|b| b["category"] == serde_json::json!("config")),
-        "Config badge should be recomputed after stderr merge: {badges:?}",
-    );
+    // Per the 2026-04-18 OpenCode reporting contract, malformed-asset
+    // events do not produce a trailer Config badge — the per-line
+    // Warning surface is the authoritative reporting channel. The
+    // `badges` field may be absent or empty; either is acceptable as
+    // long as no Config-category badge is present.
+    let badges = row["extra"]["badges"].as_array();
+    if let Some(b) = badges {
+        assert!(
+            !b.iter().any(|b| b["category"] == serde_json::json!("config")),
+            "Config trailer badge must be absent after stderr merge — diagnostics counter still records the events: {b:?}",
+        );
+    }
 }

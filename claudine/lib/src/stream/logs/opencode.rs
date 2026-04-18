@@ -1671,7 +1671,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_stderr_state_applies_diagnostics_and_recomputes_badges() {
+    fn merge_stderr_state_applies_diagnostics_without_emitting_config_badge() {
         use crate::events::Provider;
         use crate::stream::badges::BadgeCategory;
         use crate::stream::summary::StreamExecutionSummary;
@@ -1691,6 +1691,10 @@ mod tests {
 
         merge_stderr_state_into_summary(&state, &mut summary);
 
+        // Per the 2026-04-18 OpenCode reporting contract, the malformed
+        // asset counter is preserved on the summary (so JSONL/dashboards
+        // can observe it) but the trailer Config badge is removed —
+        // each malformed asset is already surfaced as a per-line Warning.
         let diagnostics = summary
             .stderr_diagnostics
             .as_ref()
@@ -1698,11 +1702,12 @@ mod tests {
         assert_eq!(diagnostics.log_records_parsed, 3);
         assert_eq!(diagnostics.malformed_asset_events, 2);
         assert!(
-            summary
+            !summary
                 .badges
                 .iter()
                 .any(|b| b.category == BadgeCategory::Config),
-            "Config badge should be recomputed after merge",
+            "Config trailer badge must NOT be emitted for malformed assets: {:?}",
+            summary.badges,
         );
     }
 
