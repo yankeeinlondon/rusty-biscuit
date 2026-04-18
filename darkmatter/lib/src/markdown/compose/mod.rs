@@ -1494,18 +1494,27 @@ impl Markdown {
         report: &mut ComposeReport,
     ) -> MarkdownResult<String> {
         // ── Core compose (cacheable via single-flight) ─────────────
+        let overlay_hash = cache::hashing::set_overlay_hash(
+            directive_options.set_object.as_ref(),
+            &directive_options.set_properties,
+        );
+        let options_hash = cache::hashing::combine_options_overlay_hash(
+            cache::hashing::options_hash(options),
+            overlay_hash,
+        );
         let persistent_ctx = cache::PersistentContext {
             source_id: cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),
             state_hash: cache::hashing::effective_state_hash(state),
             context_hash: cache::hashing::context_hash(state.context()),
-            options_hash: cache::hashing::options_hash(options),
+            options_hash,
         };
         let cache_key = format!(
-            "compose:{:016x}:{:016x}:{:016x}:{:016x}",
+            "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}",
             persistent_ctx.source_id,
             persistent_ctx.state_hash,
             persistent_ctx.context_hash,
-            persistent_ctx.options_hash
+            persistent_ctx.options_hash,
+            overlay_hash,
         );
         let cache_handle = runtime.cache.clone();
 
@@ -1519,6 +1528,13 @@ impl Markdown {
             _ => None,
         };
         let path_buf = path.to_path_buf();
+
+        // Snapshot the per-directive set overlay. The overlay is applied to
+        // the child's authored frontmatter before any of the child's pre-op
+        // stages run; it does NOT propagate through `child_options` so
+        // grandchildren do not inherit it.
+        let set_object = directive_options.set_object.clone();
+        let set_properties = directive_options.set_properties.clone();
 
         let cached = cache_handle.get_or_compute_compose(
             &cache_key,
@@ -1534,6 +1550,31 @@ impl Markdown {
 
                 let mut compose_runtime = runtime.clone_for_child();
                 let mut child = compose_runtime.load_markdown(path)?;
+
+                // Apply the three-layer set overlay on the child's frontmatter
+                // before any of its pre-op stages observe it. Keeping this
+                // scoped inside the closure preserves the rule that
+                // grandchildren referenced by the child's own `::file`
+                // directives do NOT inherit this parent-applied overlay.
+                if set_object.is_some() || !set_properties.is_empty() {
+                    let base_map: serde_json::Map<String, Value> = child
+                        .frontmatter()
+                        .as_map()
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
+                    let overlaid = state::apply_set_overrides(
+                        &base_map,
+                        set_object.as_ref(),
+                        &set_properties,
+                    );
+                    let fm_mut = child.frontmatter_mut().as_map_mut();
+                    fm_mut.clear();
+                    for (key, value) in overlaid {
+                        fm_mut.insert(key, value);
+                    }
+                }
+
                 let child_report =
                     child.run_compose_pipeline_internal(child_options, &mut compose_runtime)?;
                 runtime.merge_child(&compose_runtime);
