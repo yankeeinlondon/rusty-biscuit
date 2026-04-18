@@ -80,6 +80,12 @@ pub(crate) fn is_valid_inline_compose(path: &Path) -> bool {
 /// to a real sequence plan — inline scalars, inline objects, or an external
 /// YAML reference. Any parse failure or unresolved external file drops the
 /// candidate silently.
+///
+/// Defense-in-depth: the validator also requires at least one resolved step,
+/// even though [`resolve_sequence_plan`] today rejects empty lists via its
+/// internal normalizer. Pinning the invariant here keeps completion aligned
+/// with the spirit of the spec if the library ever accepts empty plans as
+/// `Ok(Some(_))`.
 pub(crate) fn is_valid_sequence(path: &Path) -> bool {
     if !has_markdown_extension(path) {
         return false;
@@ -94,7 +100,10 @@ pub(crate) fn is_valid_sequence(path: &Path) -> bool {
         original_text: text,
         markdown,
     };
-    matches!(resolve_sequence_plan(&source), Ok(Some(_)))
+    match resolve_sequence_plan(&source) {
+        Ok(Some(plan)) => !plan.steps.is_empty(),
+        _ => false,
+    }
 }
 
 /// Accept `.md` and `.markdown` extensions case-insensitively.

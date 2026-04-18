@@ -21,7 +21,7 @@
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
-use sniff::filesystem::repo::{RepoInfo, detect_repo_structure};
+use sniff::filesystem::repo::detect_repo_structure;
 
 /// Maximum recursion depth for `@` / `!` walks. Children of the walk root sit
 /// at depth 1; a value of 4 means we surface entries up to four directories
@@ -99,20 +99,10 @@ pub(crate) struct FileCompletionEntry {
 /// Lightweight repo awareness for completion. Built once per completion
 /// request via [`Self::discover`] and threaded through the discovery
 /// helpers so they all see the same view of the filesystem.
-///
-/// `repo` and `current_package_area` are populated for completeness even
-/// though Phase 2 reads only the derived `repo_root` and
-/// `current_package_area_root`. They give Phase 3 + later iterations cheap
-/// access to the full `RepoInfo` (e.g. listing all package areas for the
-/// future cross-area landing menu) without re-walking the repo.
 #[derive(Debug, Clone)]
 pub(crate) struct CompletionRepoContext {
     pub cwd: PathBuf,
     pub repo_root: Option<PathBuf>,
-    #[allow(dead_code)]
-    pub repo: Option<RepoInfo>,
-    #[allow(dead_code)]
-    pub current_package_area: Option<String>,
     pub current_package_area_root: Option<PathBuf>,
 }
 
@@ -127,25 +117,49 @@ impl CompletionRepoContext {
     /// Discover repo context for an explicit `cwd`. The test-friendly entry
     /// point so unit tests can swap in fixture trees without touching the
     /// process's working directory.
+    ///
+    /// Walks upward from `cwd` looking for a directory that
+    /// [`detect_repo_structure`] recognises as a workspace, so the feature
+    /// works from any subdirectory — matching the spec's contract that `!`
+    /// resolves against "the package area containing cwd". Without this
+    /// walk-up, `sniff::detect_repo_structure` only inspects the literal
+    /// argument directory and silently returns `None` for every subdir
+    /// below the workspace root.
+    ///
+    /// The spec's `!` sigil contract is "zero candidates if cwd is not
+    /// inside any package area." We interpret `sniff`'s pseudo-area
+    /// `"root"` as "not a named package area" and refuse to resolve a walk
+    /// root in that case — matching the spec literally and keeping `!`
+    /// scoped to real, named monorepo areas.
     pub(crate) fn for_cwd(cwd: PathBuf) -> Self {
-        let repo = detect_repo_structure(&cwd).ok().flatten();
+        let repo = find_repo_for_cwd(&cwd);
         let repo_root = repo.as_ref().map(|r| r.root.clone());
-        let current_package_area = repo
+        let current_package_area_root = repo
             .as_ref()
-            .and_then(|info| info.package_area_for_dir(&cwd).map(str::to_string));
-        let current_package_area_root = match (&repo_root, &current_package_area) {
-            (Some(root), Some(area)) if area != "root" => Some(root.join(area)),
-            (Some(root), Some(_)) => Some(root.clone()),
-            _ => None,
-        };
+            .and_then(|info| info.package_area_for_dir(&cwd))
+            .filter(|area| *area != "root")
+            .and_then(|area| repo_root.as_ref().map(|root| root.join(area)));
         Self {
             cwd,
             repo_root,
-            repo,
-            current_package_area,
             current_package_area_root,
         }
     }
+}
+
+/// Walk upward from `cwd` looking for the nearest directory whose manifest
+/// structure [`detect_repo_structure`] can recognise as a workspace.
+///
+/// Returns the first successful detection. The cap on ancestor traversal
+/// is whatever the filesystem provides via [`Path::ancestors`], which
+/// terminates at the filesystem root, so the walk always halts.
+fn find_repo_for_cwd(cwd: &Path) -> Option<sniff::filesystem::repo::RepoInfo> {
+    for ancestor in cwd.ancestors() {
+        if let Ok(Some(info)) = detect_repo_structure(ancestor) {
+            return Some(info);
+        }
+    }
+    None
 }
 
 /// Classify the user's current partial token.
@@ -223,7 +237,6 @@ fn is_unsupported_prefix(partial: &str) -> bool {
 
 fn discover_bare(partial: &str, ctx: &CompletionRepoContext) -> Vec<FileCompletionEntry> {
     let mut out = Vec::new();
-    let mut budget = MAX_CANDIDATES;
 
     // 1. cwd immediate children → bare values, rank 0
     list_immediate(&ctx.cwd, &mut |path, is_dir, name| {
@@ -286,12 +299,8 @@ fn discover_bare(partial: &str, ctx: &CompletionRepoContext) -> Vec<FileCompleti
         }
     }
 
-    // The bare path runs only depth-1 listings, so the global budget is
-    // unlikely to bite, but we still cap defensively for huge cwds.
-    if out.len() > budget {
-        out.truncate(budget);
-    }
-    let _ = &mut budget;
+    // Bare listings are depth-1 only; dedup_and_sort enforces MAX_CANDIDATES
+    // for the final slice, so no additional cap is needed here.
     out
 }
 
@@ -353,24 +362,27 @@ fn discover_magic(partial: &str, ctx: &CompletionRepoContext) -> Vec<FileComplet
     let mut budget = MAX_CANDIDATES;
 
     if let Some(repo_root) = ctx.repo_root.as_ref() {
-        for (path, is_dir, _depth) in collect_walk(repo_root, MAX_RECURSION_DEPTH, &mut budget) {
-            let Ok(rel) = path.strip_prefix(repo_root) else {
-                continue;
-            };
-            let Some(rel_str) = relative_to_value(rel) else {
-                continue;
-            };
-            if rel_str.is_empty() {
-                continue;
-            }
-            let value = render_value("@", &rel_str, is_dir);
-            if value.starts_with(partial) {
-                out.push(FileCompletionEntry {
-                    value,
-                    resolved_path: path,
-                    is_dir,
-                    source_rank: 2,
-                });
+        let tail = strip_sigil(partial, "@");
+        if let Some((walk_root, remaining_depth)) = narrow_walk_root(tail, repo_root) {
+            for (path, is_dir, _depth) in collect_walk(&walk_root, remaining_depth, &mut budget) {
+                let Ok(rel) = path.strip_prefix(repo_root) else {
+                    continue;
+                };
+                let Some(rel_str) = relative_to_value(rel) else {
+                    continue;
+                };
+                if rel_str.is_empty() {
+                    continue;
+                }
+                let value = render_value("@", &rel_str, is_dir);
+                if value.starts_with(partial) {
+                    out.push(FileCompletionEntry {
+                        value,
+                        resolved_path: path,
+                        is_dir,
+                        source_rank: 2,
+                    });
+                }
             }
         }
     }
@@ -378,7 +390,13 @@ fn discover_magic(partial: &str, ctx: &CompletionRepoContext) -> Vec<FileComplet
     if let Some(home) = dirs::home_dir() {
         for (sub, prefix) in [("prompts", "@prompts/"), ("sequences", "@sequences/")] {
             let root = home.join(".claudine").join(sub);
-            for (path, is_dir, _depth) in collect_walk(&root, MAX_RECURSION_DEPTH, &mut budget) {
+            // Strip the sigil + scope prefix (`prompts/` or `sequences/`) so
+            // narrowing only sees the committed path inside that scope.
+            let tail = strip_scope_prefix(partial, prefix);
+            let Some((walk_root, remaining_depth)) = narrow_walk_root(tail, &root) else {
+                continue;
+            };
+            for (path, is_dir, _depth) in collect_walk(&walk_root, remaining_depth, &mut budget) {
                 let Ok(rel) = path.strip_prefix(&root) else {
                     continue;
                 };
@@ -410,7 +428,11 @@ fn discover_package(partial: &str, ctx: &CompletionRepoContext) -> Vec<FileCompl
     };
     let mut out = Vec::new();
     let mut budget = MAX_CANDIDATES;
-    for (path, is_dir, _depth) in collect_walk(area_root, MAX_RECURSION_DEPTH, &mut budget) {
+    let tail = strip_sigil(partial, "!");
+    let Some((walk_root, remaining_depth)) = narrow_walk_root(tail, area_root) else {
+        return out;
+    };
+    for (path, is_dir, _depth) in collect_walk(&walk_root, remaining_depth, &mut budget) {
         let Ok(rel) = path.strip_prefix(area_root) else {
             continue;
         };
@@ -431,6 +453,62 @@ fn discover_package(partial: &str, ctx: &CompletionRepoContext) -> Vec<FileCompl
         }
     }
     out
+}
+
+/// Return everything after `sigil` in `partial`, or the full `partial` if it
+/// does not start with the sigil (defensive — classify_token guarantees the
+/// match in practice).
+fn strip_sigil<'a>(partial: &'a str, sigil: &str) -> &'a str {
+    partial.strip_prefix(sigil).unwrap_or(partial)
+}
+
+/// Return everything after the magic `@prompts/` / `@sequences/` scope
+/// prefix, or `""` when `partial` does not reach into the scope yet.
+fn strip_scope_prefix<'a>(partial: &'a str, full_prefix: &str) -> &'a str {
+    if let Some(rest) = partial.strip_prefix(full_prefix) {
+        return rest;
+    }
+    // Partial is still inside the sigil itself (e.g. `@prom`) — nothing
+    // committed under the scope yet, so the caller should walk the whole
+    // scope root.
+    ""
+}
+
+/// Narrow a walk to the stable path prefix a user has already typed.
+///
+/// `tail` is the portion of the partial after the sigil (and, for the home
+/// scope, after the `prompts/`/`sequences/` scope prefix). Splitting on the
+/// last `/` isolates the committed directory path; the fragment after it is
+/// a filename prefix the walker cannot narrow by.
+///
+/// Returns `Some((walk_root, remaining_depth))` when the narrowed root
+/// exists, or `None` when the user has committed to a path that no longer
+/// resolves on disk (early zero-candidate exit). When `tail` contains no
+/// `/`, the original `root` and full [`MAX_RECURSION_DEPTH`] are returned
+/// unchanged — sibling prefixes could still match.
+///
+/// The remaining depth is `MAX_RECURSION_DEPTH - committed_segments` so the
+/// total reach from the original root is preserved exactly, matching the
+/// unnarrowed walker's bound.
+fn narrow_walk_root(tail: &str, root: &Path) -> Option<(PathBuf, usize)> {
+    let Some(last_slash) = tail.rfind('/') else {
+        return Some((root.to_path_buf(), MAX_RECURSION_DEPTH));
+    };
+    let committed = &tail[..last_slash];
+    let segments = committed.split('/').filter(|s| !s.is_empty()).count();
+    let remaining = MAX_RECURSION_DEPTH.saturating_sub(segments);
+    if remaining == 0 {
+        return None;
+    }
+    let narrowed = if committed.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(committed)
+    };
+    if !narrowed.is_dir() {
+        return None;
+    }
+    Some((narrowed, remaining))
 }
 
 /// Walk `dir` non-recursively and invoke `visit(path, is_dir, name)` for each
@@ -665,8 +743,6 @@ mod tests {
         CompletionRepoContext {
             cwd,
             repo_root: None,
-            repo: None,
-            current_package_area: None,
             current_package_area_root: None,
         }
     }
@@ -675,8 +751,6 @@ mod tests {
         CompletionRepoContext {
             cwd,
             repo_root: Some(repo_root),
-            repo: None,
-            current_package_area: None,
             current_package_area_root: None,
         }
     }
@@ -689,8 +763,6 @@ mod tests {
         CompletionRepoContext {
             cwd,
             repo_root: Some(repo_root),
-            repo: None,
-            current_package_area: Some("test-area".into()),
             current_package_area_root: Some(area_root),
         }
     }
@@ -1014,5 +1086,155 @@ mod tests {
         let deduped = dedup_and_sort(entries);
         let values: Vec<&str> = deduped.iter().map(|e| e.value.as_str()).collect();
         assert_eq!(values, vec!["z.md", "!area.md", "@a.md"]);
+    }
+
+    // -- narrow_walk_root --------------------------------------------------
+
+    #[test]
+    fn narrow_without_slash_returns_root_and_full_depth() {
+        let tmp = TempDir::new().unwrap();
+        let (walk_root, depth) =
+            narrow_walk_root("prompt", tmp.path()).expect("root must be walkable");
+        assert_eq!(walk_root, tmp.path());
+        assert_eq!(depth, MAX_RECURSION_DEPTH);
+    }
+
+    #[test]
+    fn narrow_with_committed_segment_descends_and_reduces_depth() {
+        let tmp = TempDir::new().unwrap();
+        let sub = tmp.path().join("prompts");
+        fs::create_dir_all(&sub).unwrap();
+        let (walk_root, depth) =
+            narrow_walk_root("prompts/r", tmp.path()).expect("prompts dir exists");
+        assert_eq!(walk_root, sub);
+        assert_eq!(depth, MAX_RECURSION_DEPTH - 1);
+    }
+
+    #[test]
+    fn narrow_returns_none_when_committed_path_missing() {
+        let tmp = TempDir::new().unwrap();
+        // No `ghost/` on disk — caller must treat this as zero candidates.
+        assert!(narrow_walk_root("ghost/r", tmp.path()).is_none());
+    }
+
+    #[test]
+    fn narrow_returns_none_when_depth_exhausted() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("a/b/c/d")).unwrap();
+        // Committed path has 4 segments; MAX_RECURSION_DEPTH is 4, so
+        // remaining depth would be 0 and the narrow must bail.
+        assert!(narrow_walk_root("a/b/c/d/", tmp.path()).is_none());
+    }
+
+    #[test]
+    fn narrow_magic_walk_still_surfaces_nested_prompts() {
+        // End-to-end check that the narrowing branch wires into
+        // `discover_magic` correctly: typing `@prompts/` should still
+        // surface nested files under `repo_root/prompts`.
+        let tmp = TempDir::new().unwrap();
+        write_file(&tmp.path().join("prompts").join("review.md"), "");
+        write_file(
+            &tmp.path().join("prompts").join("nested").join("deep.md"),
+            "",
+        );
+        // Sibling outside the narrowed subtree must not appear.
+        write_file(&tmp.path().join("docs").join("guide.md"), "");
+        let ctx = ctx_with_repo(tmp.path().to_path_buf(), tmp.path().to_path_buf());
+
+        let values: Vec<String> = discover_candidates("@prompts/", &ctx)
+            .into_iter()
+            .map(|e| e.value)
+            .collect();
+        assert!(values.contains(&"@prompts/review.md".to_string()));
+        assert!(values.contains(&"@prompts/nested/deep.md".to_string()));
+        assert!(values.iter().all(|v| v.starts_with("@prompts/")));
+    }
+
+    // -- repo-less `@` walking --------------------------------------------
+
+    #[test]
+    fn magic_without_repo_root_returns_empty_when_home_scope_empty() {
+        // `repo_root = None` path exercises the home-only branch of
+        // `discover_magic`. Without a seeded `~/.claudine` tree the
+        // output is just empty (or whatever happens to be in the
+        // developer's real home — which we deliberately do not touch
+        // here because this is a purely "does it short-circuit" test).
+        let tmp = TempDir::new().unwrap();
+        let ctx = ctx_with_cwd(tmp.path().to_path_buf());
+        // We cannot inject HOME into `discover_magic` without changing
+        // signatures, so the behavioural coverage for "walks only HOME"
+        // lives in the integration test
+        // `at_prefix_walks_only_home_scope_when_no_repo_context`. This
+        // unit test just asserts the repo-less path does not panic and
+        // never surfaces a cwd-rooted candidate under `@`.
+        let values: Vec<String> = discover_candidates("@", &ctx)
+            .into_iter()
+            .map(|e| e.value)
+            .collect();
+        assert!(
+            values.iter().all(|v| !v.starts_with("@") || v.starts_with("@prompts/") || v.starts_with("@sequences/")),
+            "repo-less @ must not emit arbitrary cwd paths; got: {values:?}",
+        );
+    }
+
+    // -- non-UTF-8 path handling ------------------------------------------
+
+    // APFS (macOS's default) enforces valid UTF-8 filenames, so this
+    // end-to-end walker test is only meaningful on Linux where ext4/tmpfs
+    // accept arbitrary bytes. The `relative_to_value` helper has pure
+    // in-memory coverage for non-UTF-8 below; this test adds the walker-
+    // level contract where the filesystem allows it.
+    #[cfg(all(unix, target_os = "linux"))]
+    #[test]
+    fn walker_drops_files_with_non_utf8_names() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let tmp = TempDir::new().unwrap();
+        write_file(&tmp.path().join("ok.md"), "");
+        let bad_name = OsStr::from_bytes(&[b'b', 0xff, b'a', b'd', b'.', b'm', b'd']);
+        fs::write(tmp.path().join(bad_name), "").unwrap();
+
+        let ctx = ctx_with_repo(tmp.path().to_path_buf(), tmp.path().to_path_buf());
+        let values: Vec<String> = discover_candidates("@", &ctx)
+            .into_iter()
+            .map(|e| e.value)
+            .collect();
+        assert!(values.contains(&"@ok.md".to_string()));
+        assert!(
+            values.iter().all(|v| v.is_ascii()),
+            "non-UTF-8 filenames must never surface as candidates; \
+             got: {values:?}",
+        );
+    }
+
+    #[test]
+    fn relative_to_value_drops_non_normal_components() {
+        // The walker never passes `..` / absolute prefixes through, but
+        // the helper is called often enough that pinning the contract
+        // here guards against a future regression.
+        assert_eq!(
+            relative_to_value(Path::new("a/b/c")).as_deref(),
+            Some("a/b/c"),
+        );
+        assert!(relative_to_value(Path::new("../up")).is_none());
+        assert!(relative_to_value(Path::new("/abs")).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relative_to_value_drops_non_utf8_components() {
+        // Pure in-memory test — does not touch the filesystem, so it
+        // runs on macOS too. An `OsStr` built from raw bytes that include
+        // an invalid UTF-8 sequence can be joined into a `PathBuf` but
+        // its component fails `to_str()`, which is what the walker
+        // relies on to drop non-UTF-8 entries.
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let bad = OsStr::from_bytes(&[b'b', 0xff, b'.', b'm', b'd']);
+        let mut path = PathBuf::from("dir");
+        path.push(bad);
+        assert!(relative_to_value(&path).is_none());
     }
 }
