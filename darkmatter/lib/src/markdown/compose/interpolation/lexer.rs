@@ -241,8 +241,31 @@ pub enum Token {
     /// Unary logical not `!`.
     Bang,
 
+    /// Logical AND `&&` (condition mode only).
+    AndAnd,
+
+    /// Logical OR `||` (condition mode only).
+    OrOr,
+
     /// End of input.
     Eof,
+}
+
+/// Parse mode controlling how `|`, `||`, and `&&` are tokenized.
+///
+/// Interpolation mode preserves legacy fallback semantics where both `|` and
+/// `||` map to [`Token::Pipe`] and `&&` is rejected. Condition mode enables
+/// infix logical operators for `when="..."` expressions: `||` becomes
+/// [`Token::OrOr`] and `&&` becomes [`Token::AndAnd`] while single `|` stays as
+/// the fallback operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParseMode {
+    /// Interpolation parsing (default). `||` collapses to fallback, `&&` is invalid.
+    #[default]
+    Interpolation,
+
+    /// Condition parsing. `||` is logical OR, `&&` is logical AND.
+    Condition,
 }
 
 impl fmt::Display for Token {
@@ -259,6 +282,8 @@ impl fmt::Display for Token {
             Token::NumberLiteral(n) => write!(f, "{}", n),
             Token::CompOp(op) => write!(f, "{}", op),
             Token::Bang => write!(f, "!"),
+            Token::AndAnd => write!(f, "&&"),
+            Token::OrOr => write!(f, "||"),
             Token::Eof => write!(f, "<EOF>"),
         }
     }
@@ -343,15 +368,34 @@ impl LexerError {
 pub struct Lexer<'a> {
     input: &'a str,
     pos: usize,
+    mode: ParseMode,
 }
 
 impl<'a> Lexer<'a> {
-    /// Creates a new lexer for the given expression content.
+    /// Creates a new lexer for the given expression content in interpolation mode.
     ///
     /// The input should be the content between `{{` and `}}`, not including
     /// the delimiters themselves.
     pub fn new(input: &'a str) -> Self {
-        Self { input, pos: 0 }
+        Self::with_mode(input, ParseMode::Interpolation)
+    }
+
+    /// Creates a new lexer for the given expression content with a specific parse mode.
+    ///
+    /// Condition mode enables `&&` and `||` as logical operators. Interpolation
+    /// mode preserves the legacy behavior where `||` collapses to fallback and
+    /// `&&` is rejected.
+    pub fn with_mode(input: &'a str, mode: ParseMode) -> Self {
+        Self {
+            input,
+            pos: 0,
+            mode,
+        }
+    }
+
+    /// Returns the current parse mode for this lexer.
+    pub fn mode(&self) -> ParseMode {
+        self.mode
     }
 
     /// Returns the next token from the input.
@@ -374,11 +418,35 @@ impl<'a> Lexer<'a> {
         match ch {
             '|' => {
                 self.advance();
-                // Accept || as equivalent to | (fallback operator)
                 if self.current_char() == Some('|') {
                     self.advance();
+                    // In condition mode, `||` is logical OR. In interpolation
+                    // mode, `||` collapses to fallback for backward compatibility.
+                    match self.mode {
+                        ParseMode::Condition => Ok(Token::OrOr),
+                        ParseMode::Interpolation => Ok(Token::Pipe),
+                    }
+                } else {
+                    Ok(Token::Pipe)
                 }
-                Ok(Token::Pipe)
+            }
+            '&' => {
+                self.advance();
+                if self.current_char() == Some('&') {
+                    self.advance();
+                    match self.mode {
+                        ParseMode::Condition => Ok(Token::AndAnd),
+                        ParseMode::Interpolation => Err(LexerError::new(
+                            "Unexpected character: '&'",
+                            start_pos,
+                        )),
+                    }
+                } else {
+                    Err(LexerError::new(
+                        "Unexpected character: '&'",
+                        start_pos,
+                    ))
+                }
             }
             '?' => {
                 self.advance();
