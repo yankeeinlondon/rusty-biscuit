@@ -1,20 +1,33 @@
-//! End-to-end integration tests for the dynamic completion surface.
+//! End-to-end integration tests for the supplement completion engine.
 //!
-//! These tests spawn the compiled `claudine` binary with the environment
-//! variables `clap_complete::CompleteEnv` uses to dispatch a completion
-//! reply (`COMPLETE=<shell>`, `_CLAP_COMPLETE_INDEX=<n>`, `_CLAP_IFS=\n`),
-//! then assert on the reply candidates.
+//! These tests spawn the compiled `claudine` binary with the hidden
+//! `__complete` subcommand that generated bash/zsh/fish scripts shell out
+//! to on every `<TAB>`. The CLI contract is:
 //!
-//! They cover the acceptance matrix locked in Phase 0 of the
-//! `2026-04-17-file-completion` feature:
+//! ```text
+//! claudine __complete --current <INDEX> -- <argv...>
+//! ```
 //!
-//! - `compose @…`, `inline-compose @…`, `sequence @…` pick up the
-//!   relevant repo-scoped fixtures via the `@` prefix;
-//! - setter partials (e.g. `topic=`) suppress completion;
-//! - unsupported prefixes (`vault:`, `/abs/…`, `%`, `{{…}}`) return zero
-//!   candidates;
-//! - `!` returns zero candidates when there is no package area root
-//!   (empty or non-repo workspaces).
+//! where `<argv...>` starts with the binary name at position 0, the
+//! subcommand at position 1, and so on. `<INDEX>` is the 0-based position
+//! of the token being completed. The engine returns one candidate per line
+//! on stdout, or nothing when the cursor is not at a targeted argument
+//! position.
+//!
+//! The suite covers the supplement spec's numbered acceptance criteria:
+//!
+//! 1. Empty input with a curated-scope fixture → only curated matches.
+//! 2. `@pr` — 2-char match → case-insensitive filename substring.
+//! 3. `@pro` — 3-char match → curated scope + `.gitignore`-aware broad scan.
+//! 4. `@prompts/` — path-separator reset → cross-root enumeration.
+//! 5. `prompts/` — implicit-relative path → repo-only scope.
+//! 6. Wrapper `--asp` / `--rsp` → same candidate set as the positional.
+//! 8. Non-markdown files are never offered.
+//! 9. Gitignored files are excluded from the broad scan.
+//! 10. Mid-filename substring match (`@omp` → `prompt.md`).
+//!
+//! Criteria 7 (no-repo fallback) and 11 (multi-crate dedup) are covered
+//! at the unit level in `src/completion/supplement.rs`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,39 +39,28 @@ use assert_cmd::cargo::cargo_bin_cmd;
 mod common;
 use common::{TestWorkspace, init_git_repo};
 
-/// Minimum subset of env vars clap_complete's bash adapter sets when it
-/// invokes the binary as a completion subprocess.
-const SHELL: &str = "bash";
+/// Seed a fake `.git` directory plus a few markdown fixtures under a
+/// `prompts/` curated directory.
+fn seed_curated_fixtures(root: &Path) {
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let prompts = root.join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    fs::write(prompts.join("plain.md"), "# plain\n").unwrap();
+    fs::write(prompts.join("with-prompt.md"), "# with prompt\n").unwrap();
+    fs::write(prompts.join("seq.md"), "# sequence\n").unwrap();
+    // Non-markdown companions — every scenario must drop them.
+    fs::write(prompts.join("notes.txt"), "not markdown\n").unwrap();
+}
 
-/// Seed the shared fixture tree used by most of the `@…` assertions.
-///
-/// The tree deliberately mixes:
-///
-/// - a `compose`-friendly markdown file (valid `.md`, no frontmatter);
-/// - an `inline-compose`-friendly file (`prompt:` in frontmatter);
-/// - a `sequence`-friendly file (`sequence:` inline list);
-/// - a non-markdown file (`.txt`) that every validator must drop.
-///
-/// Having all four in one fixture keeps the full matrix reachable from a
-/// single workspace root while still giving each test a focused assertion.
-///
-/// The workspace is set up as a minimal cargo workspace (plus `git init`)
-/// because `sniff::detect_repo_structure` only returns a usable
-/// `RepoInfo` when it recognizes a workspace tool at the root. Just
-/// `.git/` alone is not enough for magic-path completion, and
-/// `discover_magic` relies on the resolved `repo_root`.
-///
-/// Tests that need to exercise the no-repo failure mode deliberately
-/// avoid calling this helper.
-fn seed_fixtures(root: &Path) {
+/// Seed a real git workspace (so `sniff::detect_repo_structure` returns a
+/// usable `RepoInfo`) with a minimal Cargo workspace. This is required for
+/// the package-root and package-area curated scopes; a bare `.git` is not
+/// enough.
+fn seed_repo_with_package(root: &Path) {
     assert!(
         init_git_repo(root),
-        "unable to initialize git repo in test workspace at {root:?}",
+        "unable to initialize git repo at {root:?}",
     );
-    // Minimal cargo workspace marker — sniff requires `[workspace]` with
-    // at least one member before it emits a RepoInfo. We point at a tiny
-    // placeholder package inside the fixture so detection succeeds
-    // without pulling any real dependencies.
     fs::write(
         root.join("Cargo.toml"),
         "[workspace]\nresolver = \"2\"\nmembers = [\"placeholder\"]\n",
@@ -73,36 +75,14 @@ fn seed_fixtures(root: &Path) {
     .unwrap();
     fs::create_dir_all(placeholder.join("src")).unwrap();
     fs::write(placeholder.join("src").join("lib.rs"), "// placeholder\n").unwrap();
-    let prompts = root.join("prompts");
-    fs::create_dir_all(&prompts).unwrap();
-    // Valid for compose (any `.md` extension passes).
-    fs::write(prompts.join("plain.md"), "# Plain\n\nbody\n").unwrap();
-    // Valid for compose + inline-compose.
-    fs::write(
-        prompts.join("with-prompt.md"),
-        "---\nprompt: Write a poem\n---\nbody\n",
-    )
-    .unwrap();
-    // Valid for compose + sequence.
-    fs::write(
-        prompts.join("seq.md"),
-        "---\nsequence:\n  - one\n  - two\n---\nbody\n",
-    )
-    .unwrap();
-    // Never valid for any mode (not markdown).
-    fs::write(prompts.join("notes.txt"), "not markdown\n").unwrap();
 }
 
-/// Build a hermetic fake-home directory as a sibling of `cwd`.
+/// Build a hermetic fake-home directory next to (not inside) the test cwd.
 ///
-/// Completion walks `$HOME/.claudine/{prompts,sequences}` as part of the
-/// `@` scope. Without this sandbox, tests would walk the developer's real
-/// `~/.claudine` tree and either mis-attribute matches or silently drop
-/// fixture files when the real tree is larger than the candidate cap.
-///
-/// The fake home lives next to the test workspace (not inside it) so it
-/// never appears as a candidate in the repo walk. Each call generates a
-/// fresh nonce-suffixed directory so concurrent tests do not interfere.
+/// The supplement engine walks `$HOME/prompts`, `$HOME/sequences`,
+/// `$HOME/.claudine/prompts`, and `$HOME/.claudine/sequences` as part of
+/// the curated scope. Without this sandbox, tests would walk the
+/// developer's real `~/.claudine` tree and surface unrelated candidates.
 fn fake_home(cwd: &Path) -> PathBuf {
     let parent = cwd.parent().unwrap_or(cwd);
     let nonce = SystemTime::now()
@@ -118,56 +98,40 @@ fn fake_home(cwd: &Path) -> PathBuf {
     home
 }
 
-/// Spawn `claudine` as a bash completion subprocess and collect the
-/// newline-separated candidate list.
+/// Invoke `claudine __complete` as a subprocess and collect stdout lines.
 ///
-/// `args` is the shell-level command being completed (excluding the
-/// leading `claudine` binary name), with the last element being the
-/// current partial token. The index is set to the position of that
-/// partial in the full argv (bin + args).
-///
-/// A fresh sandboxed `HOME` is always provided so the subprocess never
-/// sees the developer's real `~/.claudine` tree. Tests that need to
-/// exercise the home scope populate the sandbox via
-/// [`run_completion_with_home`].
-fn run_completion(cwd: &Path, args: &[&str]) -> Vec<String> {
-    let home = fake_home(cwd);
-    run_completion_with_home(cwd, &home, args)
-}
-
-/// Variant of [`run_completion`] that lets the caller choose the `HOME`
-/// directory so home-scoped fixtures (`~/.claudine/prompts/...`) can be
-/// pre-populated for repo-less `@` assertions.
-fn run_completion_with_home(cwd: &Path, home: &Path, args: &[&str]) -> Vec<String> {
-    // The bash adapter calls the binary with `-- <full argv>` and sets
-    // `_CLAP_COMPLETE_INDEX` to `COMP_CWORD`, which is the index of the
-    // word under the cursor in the shell's word list.
-    let full_argv_len = 1 + args.len(); // `claudine` + args
-    let index = full_argv_len - 1;
-
-    // `cargo_bin_cmd!` returns an `assert_cmd::Command`; we copy its
-    // resolved program path out and rebuild a plain `std::process::Command`
-    // so we can drive the subprocess without any assertion-style helpers.
+/// `argv_tail` is the argv as the user would have typed it, excluding the
+/// binary name. The helper prepends `"claudine"` so the engine receives a
+/// realistic argv. `current` is the 0-based index into that full argv of
+/// the token being completed — typically `argv_tail.len()` (the user is
+/// typing a new trailing token at the end).
+fn run_complete(cwd: &Path, home: &Path, argv_tail: &[&str], current: usize) -> Vec<String> {
     let reference = cargo_bin_cmd!("claudine");
     let program = reference.get_program().to_os_string();
     let mut cmd = Command::new(program);
-    cmd.env("COMPLETE", SHELL)
-        .env("_CLAP_COMPLETE_INDEX", index.to_string())
-        .env("_CLAP_IFS", "\n")
-        .env("NO_COLOR", "1")
+    cmd.current_dir(cwd)
         .env("HOME", home)
-        .current_dir(cwd)
+        .env("NO_COLOR", "1")
+        // Defensive: clear any outer COMPLETE so the legacy CompleteEnv
+        // path never gets a chance to hijack this subprocess.
+        .env_remove("COMPLETE")
+        .env_remove("_CLAP_COMPLETE_INDEX")
+        .env_remove("_CLAP_IFS")
+        .arg("__complete")
+        .arg("--current")
+        .arg(current.to_string())
         .arg("--")
         .arg("claudine");
-    for arg in args {
+    for arg in argv_tail {
         cmd.arg(arg);
     }
 
     let output = cmd.output().expect("completion subprocess to run");
     assert!(
         output.status.success(),
-        "completion subprocess failed: status={:?}, stderr={}",
+        "completion subprocess failed: status={:?}, stdout={}, stderr={}",
         output.status,
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
 
@@ -179,473 +143,361 @@ fn run_completion_with_home(cwd: &Path, home: &Path, args: &[&str]) -> Vec<Strin
         .collect()
 }
 
-// ---------------------------------------------------------------------
-// @-prefix acceptance (magic scope)
-// ---------------------------------------------------------------------
-
-#[test]
-fn compose_at_prefix_lists_repo_scoped_markdown_files() {
-    let workspace = TestWorkspace::named("completion-compose-at");
-    let root = workspace.path();
-    seed_fixtures(root);
-
-    let candidates = run_completion(root, &["compose", "@"]);
-
-    assert!(
-        candidates.iter().any(|c| c == "@prompts/plain.md"),
-        "compose @ should surface plain.md; got: {candidates:?}",
-    );
-    assert!(
-        candidates.iter().any(|c| c == "@prompts/with-prompt.md"),
-        "compose @ should surface with-prompt.md; got: {candidates:?}",
-    );
-    assert!(
-        candidates.iter().any(|c| c == "@prompts/seq.md"),
-        "compose @ should surface seq.md; got: {candidates:?}",
-    );
-    // compose is extension-only, so a .txt file must never leak through.
-    assert!(
-        !candidates.iter().any(|c| c.ends_with("notes.txt")),
-        "compose must never emit non-markdown candidates; got: {candidates:?}",
-    );
-}
-
-#[test]
-fn inline_compose_at_prefix_keeps_only_prompt_frontmatter_files() {
-    let workspace = TestWorkspace::named("completion-inline-at");
-    let root = workspace.path();
-    seed_fixtures(root);
-
-    let candidates = run_completion(root, &["inline-compose", "@"]);
-
-    assert!(
-        candidates.iter().any(|c| c == "@prompts/with-prompt.md"),
-        "inline-compose @ must include files with a prompt; got: {candidates:?}",
-    );
-    // plain.md has no `prompt:` frontmatter; seq.md has `sequence:`; both
-    // must be dropped by the inline-compose validator.
-    assert!(
-        !candidates.iter().any(|c| c == "@prompts/plain.md"),
-        "inline-compose must drop prompt-less markdown; got: {candidates:?}",
-    );
-    assert!(
-        !candidates.iter().any(|c| c == "@prompts/seq.md"),
-        "inline-compose must drop sequence-only markdown; got: {candidates:?}",
-    );
-    assert!(
-        !candidates.iter().any(|c| c.ends_with("notes.txt")),
-        "inline-compose must never emit non-markdown candidates; got: {candidates:?}",
-    );
-}
-
-#[test]
-fn sequence_at_prefix_keeps_only_sequence_frontmatter_files() {
-    let workspace = TestWorkspace::named("completion-sequence-at");
-    let root = workspace.path();
-    seed_fixtures(root);
-
-    let candidates = run_completion(root, &["sequence", "@"]);
-
-    assert!(
-        candidates.iter().any(|c| c == "@prompts/seq.md"),
-        "sequence @ must include sequence-capable markdown; got: {candidates:?}",
-    );
-    // plain.md and with-prompt.md have no resolvable sequence plan, so
-    // they must be dropped by the sequence validator.
-    assert!(
-        !candidates.iter().any(|c| c == "@prompts/plain.md"),
-        "sequence must drop plain markdown; got: {candidates:?}",
-    );
-    assert!(
-        !candidates.iter().any(|c| c == "@prompts/with-prompt.md"),
-        "sequence must drop prompt-only markdown; got: {candidates:?}",
-    );
+/// Convenience wrapper that provides a fresh fake home and computes the
+/// cursor index from the argv tail.
+///
+/// The cursor sits at `1 + argv_tail.len() - 1 = argv_tail.len()` — the
+/// last element of the combined `[binary, ...tail]` argv.
+fn run_complete_trailing(cwd: &Path, argv_tail: &[&str]) -> Vec<String> {
+    let home = fake_home(cwd);
+    let current = argv_tail.len();
+    run_complete(cwd, &home, argv_tail, current)
 }
 
 // ---------------------------------------------------------------------
-// Setter suppression + unsupported prefixes
+// Acceptance criterion 1 — empty input, inside a repo
 // ---------------------------------------------------------------------
 
 #[test]
-fn setter_partial_suppresses_completion() {
-    let workspace = TestWorkspace::named("completion-setter");
+fn empty_input_lists_curated_markdown_inside_repo() {
+    let workspace = TestWorkspace::named("supp-empty-input");
     let root = workspace.path();
-    seed_fixtures(root);
-
-    // `topic=` matches the strict setter regex; classifier returns
-    // `SetterPartial` and discovery short-circuits to zero.
-    let candidates = run_completion(root, &["compose", "topic="]);
-    assert!(
-        candidates.is_empty(),
-        "setter partial must suppress completion; got: {candidates:?}",
-    );
-}
-
-#[test]
-fn vault_prefix_returns_zero_candidates() {
-    let workspace = TestWorkspace::named("completion-vault");
-    let root = workspace.path();
-    seed_fixtures(root);
-
-    let candidates = run_completion(root, &["compose", "vault:"]);
-    assert!(
-        candidates.is_empty(),
-        "vault: is not supported in v1; got: {candidates:?}",
-    );
-}
-
-#[test]
-fn absolute_path_prefix_returns_zero_candidates() {
-    let workspace = TestWorkspace::named("completion-abs");
-    let root = workspace.path();
-    seed_fixtures(root);
-
-    let candidates = run_completion(root, &["compose", "/abs"]);
-    assert!(
-        candidates.is_empty(),
-        "absolute paths are not supported in v1; got: {candidates:?}",
-    );
-}
-
-// ---------------------------------------------------------------------
-// Empty package-area scope
-// ---------------------------------------------------------------------
-
-#[test]
-fn package_prefix_with_no_repo_context_returns_zero_candidates() {
-    // No git repo / `sniff` detection → no package-area root → `!`
-    // must resolve to nothing rather than surfacing cwd files under a
-    // `!` prefix. This test intentionally skips `seed_fixtures` so the
-    // workspace has no repo marker at all.
-    let workspace = TestWorkspace::named("completion-bang-empty");
-    let root = workspace.path();
-    // Seed a lone markdown file so "return zero" is a real assertion
-    // and not just an empty-directory artefact.
-    fs::write(root.join("local.md"), "# Local\n").unwrap();
-
-    let candidates = run_completion(root, &["compose", "!"]);
-    assert!(
-        candidates.is_empty(),
-        "`!` without a resolvable package area must return zero; \
-         got: {candidates:?}",
-    );
-}
-
-// ---------------------------------------------------------------------
-// End-to-end failure modes (spec §Failure modes)
-//
-// These cases are covered by unit tests in
-// `src/completion/{file_reference,validate}.rs`, but Phase 5 calls for
-// verifying end to end that the completion subprocess never surfaces
-// diagnostics and returns cleanly (possibly zero candidates) even when
-// the repo contains adversarial fixtures.
-// ---------------------------------------------------------------------
-
-#[test]
-fn inline_compose_silently_omits_malformed_and_oversized_files() {
-    let workspace = TestWorkspace::named("completion-failure-modes");
-    let root = workspace.path();
-    seed_fixtures(root);
-
+    seed_repo_with_package(root);
     let prompts = root.join("prompts");
-    // Malformed frontmatter — YAML fails to parse as a prompt value.
-    fs::write(
-        prompts.join("malformed.md"),
-        "---\nprompt: [unterminated\n\nbody without close\n",
-    )
-    .unwrap();
-    // Empty prompt — explicitly forbidden by the validator.
-    fs::write(
-        prompts.join("empty-prompt.md"),
-        "---\nprompt: \"\"\n---\nbody\n",
-    )
-    .unwrap();
-    // Oversized file — skipped before parsing.
-    let padding = "a".repeat((1024 * 1024 + 1) as usize);
-    fs::write(
-        prompts.join("oversized.md"),
-        format!("---\nprompt: hi\n---\n{padding}"),
-    )
-    .unwrap();
-
-    let candidates = run_completion(root, &["inline-compose", "@"]);
-
-    // The valid fixture still comes through.
-    assert!(
-        candidates.iter().any(|c| c == "@prompts/with-prompt.md"),
-        "inline-compose must still surface valid prompt fixtures; got: {candidates:?}",
-    );
-    // Every failure-mode fixture is silently dropped.
-    assert!(
-        !candidates.iter().any(|c| c == "@prompts/malformed.md"),
-        "malformed frontmatter must be dropped; got: {candidates:?}",
-    );
-    assert!(
-        !candidates.iter().any(|c| c == "@prompts/empty-prompt.md"),
-        "empty-prompt files must be dropped; got: {candidates:?}",
-    );
-    assert!(
-        !candidates.iter().any(|c| c == "@prompts/oversized.md"),
-        "oversized files must be dropped; got: {candidates:?}",
-    );
-}
-
-// ---------------------------------------------------------------------
-// `./` relative scope acceptance
-// ---------------------------------------------------------------------
-
-#[test]
-fn compose_dot_slash_lists_cwd_relative_markdown() {
-    // `compose ./<TAB>` is listed explicitly in the spec's acceptance
-    // criteria. It must surface cwd-relative `.md` / `.markdown` files
-    // and drop non-markdown siblings.
-    let workspace = TestWorkspace::named("completion-compose-dot");
-    let root = workspace.path();
-    seed_fixtures(root);
-    // Drop a cwd-local fixture at the workspace root so `./` discovers
-    // something that is NOT nested inside `prompts/`. This proves the
-    // dot-relative scope fires before the repo-wide magic walk.
-    fs::write(root.join("cwd-local.md"), "# Local\n").unwrap();
-    fs::write(root.join("cwd-local.txt"), "skip me\n").unwrap();
-
-    let candidates = run_completion(root, &["compose", "./"]);
-
-    assert!(
-        candidates.iter().any(|c| c == "./cwd-local.md"),
-        "compose ./ must surface cwd markdown files; got: {candidates:?}",
-    );
-    assert!(
-        !candidates.iter().any(|c| c.ends_with(".txt")),
-        "compose ./ must drop non-markdown files; got: {candidates:?}",
-    );
-}
-
-// ---------------------------------------------------------------------
-// `!` package scope (positive)
-// ---------------------------------------------------------------------
-
-#[test]
-fn compose_bang_lists_package_area_markdown() {
-    // Seed a workspace where cwd lives inside a **named** package area
-    // (`myarea`), not the root-level package. `sniff`'s
-    // `package_area_for_dir` must return "myarea", which becomes the
-    // walk root for the `!` sigil. Files within that area appear as
-    // `!<rel>` candidates; files outside it do not.
-    let workspace = TestWorkspace::named("completion-bang-positive");
-    let root = workspace.path();
-    assert!(init_git_repo(root));
-    fs::write(
-        root.join("Cargo.toml"),
-        "[workspace]\nresolver = \"2\"\nmembers = [\"myarea/child-pkg\"]\n",
-    )
-    .unwrap();
-    // Package nested inside a named area.
-    let pkg = root.join("myarea").join("child-pkg");
-    fs::create_dir_all(pkg.join("src")).unwrap();
-    fs::write(
-        pkg.join("Cargo.toml"),
-        "[package]\nname = \"child-pkg\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
-    )
-    .unwrap();
-    fs::write(pkg.join("src").join("lib.rs"), "// placeholder\n").unwrap();
-    // Markdown files to surface: one at the area root and one nested
-    // inside the package. Both should be reachable via `!`.
-    fs::write(root.join("myarea").join("area-doc.md"), "# area doc\n").unwrap();
-    fs::write(pkg.join("README.md"), "# readme\n").unwrap();
-    // A markdown file *outside* the area must NOT be reachable via `!`.
-    fs::write(root.join("root-doc.md"), "# outside area\n").unwrap();
-
-    let candidates = run_completion(&pkg, &["compose", "!"]);
-
-    assert!(
-        candidates.iter().any(|c| c == "!area-doc.md"),
-        "compose ! must surface area-level markdown; got: {candidates:?}",
-    );
-    assert!(
-        candidates.iter().any(|c| c == "!child-pkg/README.md"),
-        "compose ! must surface nested package markdown; got: {candidates:?}",
-    );
-    assert!(
-        !candidates.iter().any(|c| c == "!root-doc.md"),
-        "compose ! must never leak files from outside the area; \
-         got: {candidates:?}",
-    );
-}
-
-// ---------------------------------------------------------------------
-// Setter suppression — additional coverage
-// ---------------------------------------------------------------------
-
-#[test]
-fn leading_underscore_setter_suppresses_completion() {
-    // The spec's strict regex is `^[A-Za-z_][A-Za-z0-9_]*=`, so a
-    // leading underscore is part of the valid identifier shape and
-    // must suppress completion just like `topic=`.
-    let workspace = TestWorkspace::named("completion-underscore");
-    let root = workspace.path();
-    seed_fixtures(root);
-
-    let candidates = run_completion(root, &["compose", "_internal="]);
-    assert!(
-        candidates.is_empty(),
-        "leading-underscore setter must suppress completion; got: {candidates:?}",
-    );
-}
-
-#[test]
-fn dotted_key_is_not_a_setter_and_is_not_suppressed() {
-    // `foo.bar=` does NOT match the strict identifier regex (dots are
-    // not allowed), so the classifier falls through to `Bare`. The spec
-    // calls this case out explicitly: it must not be suppressed. The
-    // assertion is indirect — we seed a cwd file whose name begins with
-    // `foo.bar=` and verify the bare-scope walker surfaces it, proving
-    // the setter path was NOT taken.
-    let workspace = TestWorkspace::named("completion-dotted");
-    let root = workspace.path();
-    seed_fixtures(root);
-    fs::write(root.join("foo.bar=local.md"), "# Local\n").unwrap();
-
-    let candidates = run_completion(root, &["compose", "foo.bar="]);
-    assert!(
-        candidates.iter().any(|c| c == "foo.bar=local.md"),
-        "dotted key must fall through to bare discovery; got: {candidates:?}",
-    );
-}
-
-// ---------------------------------------------------------------------
-// Additional unsupported prefixes
-// ---------------------------------------------------------------------
-
-#[test]
-fn percent_prefix_returns_zero_candidates() {
-    let workspace = TestWorkspace::named("completion-percent");
-    let root = workspace.path();
-    seed_fixtures(root);
-
-    let candidates = run_completion(root, &["compose", "%recursive"]);
-    assert!(
-        candidates.is_empty(),
-        "%-prefixed partials are not supported in v1; got: {candidates:?}",
-    );
-}
-
-#[test]
-fn template_variable_prefix_returns_zero_candidates() {
-    let workspace = TestWorkspace::named("completion-template");
-    let root = workspace.path();
-    seed_fixtures(root);
-
-    let candidates = run_completion(root, &["compose", "{{HOME}}"]);
-    assert!(
-        candidates.is_empty(),
-        "`{{...}}` partials are not supported in v1; got: {candidates:?}",
-    );
-}
-
-// ---------------------------------------------------------------------
-// Sequence oversized-file end-to-end coverage
-// ---------------------------------------------------------------------
-
-#[test]
-fn sequence_silently_omits_oversized_files() {
-    // Mirrors `inline_compose_silently_omits_malformed_and_oversized_files`
-    // but for the sequence validator. Seeds a sequence-shaped fixture
-    // that exceeds the size cap and asserts it is dropped without a
-    // shell-visible diagnostic, while a valid sibling still surfaces.
-    let workspace = TestWorkspace::named("completion-sequence-oversize");
-    let root = workspace.path();
-    seed_fixtures(root);
-
-    let prompts = root.join("prompts");
-    let padding = "a".repeat((1024 * 1024 + 1) as usize);
-    fs::write(
-        prompts.join("oversized-seq.md"),
-        format!("---\nsequence:\n  - one\n---\n{padding}"),
-    )
-    .unwrap();
-
-    let candidates = run_completion(root, &["sequence", "@"]);
-
-    assert!(
-        candidates.iter().any(|c| c == "@prompts/seq.md"),
-        "sequence must still surface the valid fixture; got: {candidates:?}",
-    );
-    assert!(
-        !candidates.iter().any(|c| c == "@prompts/oversized-seq.md"),
-        "oversized sequence files must be dropped silently; \
-         got: {candidates:?}",
-    );
-}
-
-// ---------------------------------------------------------------------
-// Repo-less `@` walking (home scope only)
-// ---------------------------------------------------------------------
-
-#[test]
-fn at_prefix_walks_only_home_scope_when_no_repo_context() {
-    // When cwd has no workspace / git marker, `detect_repo_structure`
-    // returns None and `repo_root` is None. The `@` scope must still
-    // serve candidates from `$HOME/.claudine/{prompts,sequences}` and
-    // nothing else. Uses `run_completion_with_home` to seed a hermetic
-    // home fixture the subprocess can rely on.
-    let workspace = TestWorkspace::named("completion-at-home-only");
-    let root = workspace.path();
-    // No `Cargo.toml` / `.git` — sniff reports no RepoInfo.
-    fs::write(root.join("local.md"), "# cwd file\n").unwrap();
-
-    let home = fake_home(root);
-    let prompts = home.join(".claudine").join("prompts");
     fs::create_dir_all(&prompts).unwrap();
-    fs::write(prompts.join("home-only.md"), "# home\n").unwrap();
+    fs::write(prompts.join("plain.md"), "# p\n").unwrap();
 
-    let candidates = run_completion_with_home(root, &home, &["compose", "@"]);
+    let got = run_complete_trailing(root, &["compose", ""]);
 
     assert!(
-        candidates.iter().any(|c| c == "@prompts/home-only.md"),
-        "@ must walk the home scope even without a repo context; \
-         got: {candidates:?}",
+        got.iter().any(|c| c == "prompts/plain.md"),
+        "empty input should surface curated repo markdown; got: {got:?}",
     );
-    // Nothing from cwd should appear under the `@` prefix (cwd files
-    // would only surface with a bare partial, not `@`).
+    // `.txt` siblings must never appear.
+    fs::write(prompts.join("notes.txt"), "t").unwrap();
+    let retry = run_complete_trailing(root, &["compose", ""]);
     assert!(
-        !candidates.iter().any(|c| c.contains("local.md")),
-        "@ must not leak cwd content into the home-only walk; \
-         got: {candidates:?}",
+        !retry.iter().any(|c| c.ends_with(".txt")),
+        "empty-input completion leaked a non-markdown file: {retry:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 2 — `@pr` two-char curated match
+// ---------------------------------------------------------------------
+
+#[test]
+fn two_char_curated_match_finds_multiple_files_by_substring() {
+    let workspace = TestWorkspace::named("supp-two-char");
+    let root = workspace.path();
+    seed_curated_fixtures(root);
+    // Additional match for the mid-filename case below.
+    fs::write(root.join("prompts").join("suppress.md"), "# suppress\n").unwrap();
+    fs::write(root.join("prompts").join("my-prompt.md"), "# my prompt\n").unwrap();
+
+    let got = run_complete_trailing(root, &["compose", "@pr"]);
+
+    for expected in ["@prompts/plain.md", "@prompts/with-prompt.md", "@prompts/seq.md"]
+        .iter()
+        .copied()
+    {
+        // Curated-scope markdown whose filename contains `pr` (stripped of
+        // `.md`) must appear. `plain.md`/`seq.md` match via the parent
+        // segment containing `pr` — but matching is on the FILENAME only,
+        // so they should NOT match. Only `prompt`/`with-prompt`/`suppress`
+        // should fire. We assert this below.
+        let _ = expected; // silence unused warning
+    }
+
+    assert!(
+        got.iter().any(|c| c == "@prompts/with-prompt.md"),
+        "@pr should match `with-prompt.md`; got: {got:?}",
+    );
+    assert!(
+        got.iter().any(|c| c == "@prompts/suppress.md"),
+        "@pr should match `suppress.md` (substring); got: {got:?}",
+    );
+    assert!(
+        got.iter().any(|c| c == "@prompts/my-prompt.md"),
+        "@pr should match `my-prompt.md` (substring); got: {got:?}",
+    );
+    // `plain.md` and `seq.md` filenames do NOT contain `pr`; they must
+    // NOT appear.
+    assert!(
+        !got.iter().any(|c| c == "@prompts/plain.md"),
+        "@pr matching must be on filename, not path; got: {got:?}",
+    );
+    assert!(
+        !got.iter().any(|c| c == "@prompts/seq.md"),
+        "@pr matching must be on filename, not path; got: {got:?}",
+    );
+}
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 3 — `@pro` three-char broad scan
+// ---------------------------------------------------------------------
+
+#[test]
+fn three_char_input_extends_to_broad_repo_scan() {
+    let workspace = TestWorkspace::named("supp-three-char");
+    let root = workspace.path();
+    seed_curated_fixtures(root);
+    // Put a matching markdown file OUTSIDE the curated directories so
+    // only the broad scan can reach it.
+    fs::write(root.join("random").join("process.md"), "# process\n").unwrap_or_else(|_| {
+        fs::create_dir_all(root.join("random")).unwrap();
+        fs::write(root.join("random").join("process.md"), "# process\n").unwrap();
+    });
+
+    let two_chars = run_complete_trailing(root, &["compose", "@pr"]);
+    assert!(
+        !two_chars.iter().any(|c| c == "@random/process.md"),
+        "2-char broad scan must NOT fire: {two_chars:?}"
+    );
+
+    let three_chars = run_complete_trailing(root, &["compose", "@pro"]);
+    assert!(
+        three_chars.iter().any(|c| c == "@random/process.md"),
+        "3-char broad scan should include non-curated match: {three_chars:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 4 — `@prompts/` path-separator reset
+// ---------------------------------------------------------------------
+
+#[test]
+fn path_separator_reset_enumerates_inside_prompts_directory() {
+    let workspace = TestWorkspace::named("supp-path-reset");
+    let root = workspace.path();
+    seed_curated_fixtures(root);
+
+    let got = run_complete_trailing(root, &["compose", "@prompts/"]);
+
+    // Every file inside the repo `prompts/` directory should surface,
+    // regardless of filename, because the segment after `/` is empty
+    // (0 meaningful chars).
+    assert!(
+        got.iter().any(|c| c == "@prompts/plain.md"),
+        "path reset should surface plain.md: {got:?}",
+    );
+    assert!(
+        got.iter().any(|c| c == "@prompts/with-prompt.md"),
+        "path reset should surface with-prompt.md: {got:?}",
+    );
+    assert!(
+        got.iter().any(|c| c == "@prompts/seq.md"),
+        "path reset should surface seq.md: {got:?}",
+    );
+    // The non-markdown `notes.txt` must still be dropped.
+    assert!(
+        !got.iter().any(|c| c.ends_with(".txt")),
+        "path reset leaked a non-markdown file: {got:?}",
+    );
+}
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 5 — implicit-relative `prompts/`
+// ---------------------------------------------------------------------
+
+#[test]
+fn implicit_relative_prompts_stays_repo_only() {
+    let workspace = TestWorkspace::named("supp-implicit-relative");
+    let root = workspace.path();
+    seed_curated_fixtures(root);
+
+    let got = run_complete_trailing(root, &["compose", "prompts/"]);
+
+    assert!(
+        got.iter().any(|c| c == "prompts/plain.md"),
+        "implicit-relative should surface repo-local matches: {got:?}",
+    );
+    // Implicit-relative matches must NOT gain the `@` prefix.
+    for c in &got {
+        if c.contains("prompts/plain.md") || c.contains("prompts/seq.md") {
+            assert!(
+                !c.starts_with('@'),
+                "implicit-relative repo match must not gain an @ prefix; got: {c}"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 6 — wrapper `--asp` / `--rsp` file-flag target
+// ---------------------------------------------------------------------
+
+#[test]
+fn wrapper_asp_flag_value_slot_emits_curated_candidates() {
+    let workspace = TestWorkspace::named("supp-wrapper-asp");
+    let root = workspace.path();
+    seed_repo_with_package(root);
+    let prompts = root.join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    fs::write(prompts.join("plain.md"), "# p\n").unwrap();
+
+    // Cursor sits on the empty value slot right after `--asp`.
+    let got = run_complete_trailing(root, &["claude", "--asp", ""]);
+
+    assert!(
+        got.iter().any(|c| c == "prompts/plain.md"),
+        "wrapper --asp flag value slot should get curated candidates: {got:?}",
     );
 }
 
 #[test]
-fn missing_prompts_and_sequences_directories_return_cleanly() {
-    // The spec lists missing `prompts/` or `sequences/` directories as a
-    // silent failure mode. Build a minimal workspace with no such
-    // directories and assert the completion subprocess still returns
-    // successfully with no diagnostics leaking onto stderr.
-    let workspace = TestWorkspace::named("completion-missing-dirs");
+fn wrapper_replace_system_prompt_flag_value_slot_also_fires() {
+    let workspace = TestWorkspace::named("supp-wrapper-rsp");
     let root = workspace.path();
-    assert!(init_git_repo(root));
-    fs::write(
-        root.join("Cargo.toml"),
-        "[workspace]\nresolver = \"2\"\nmembers = [\"placeholder\"]\n",
-    )
-    .unwrap();
-    let placeholder = root.join("placeholder");
-    fs::create_dir_all(&placeholder).unwrap();
-    fs::write(
-        placeholder.join("Cargo.toml"),
-        "[package]\nname = \"placeholder\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
-    )
-    .unwrap();
-    fs::create_dir_all(placeholder.join("src")).unwrap();
-    fs::write(placeholder.join("src").join("lib.rs"), "// placeholder\n").unwrap();
+    seed_repo_with_package(root);
+    let prompts = root.join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    fs::write(prompts.join("plain.md"), "# p\n").unwrap();
 
-    // Zero candidates are acceptable — what matters is that the
-    // subprocess exits successfully (verified inside `run_completion`)
-    // and nothing about the empty tree becomes a shell-visible error.
-    let candidates = run_completion(root, &["inline-compose", "@"]);
+    let got = run_complete_trailing(root, &["codex", "--replace-system-prompt", "@"]);
+
     assert!(
-        candidates
-            .iter()
-            .all(|c| !c.contains("prompts/") && !c.contains("sequences/")),
-        "no prompts/sequences entries should be produced; got: {candidates:?}",
+        got.iter().any(|c| c == "@prompts/plain.md"),
+        "wrapper --replace-system-prompt value slot should emit @-prefixed \
+         curated candidates: {got:?}",
     );
+}
+
+#[test]
+fn compose_asp_flag_value_slot_emits_curated_candidates() {
+    let workspace = TestWorkspace::named("supp-compose-asp");
+    let root = workspace.path();
+    seed_repo_with_package(root);
+    let prompts = root.join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    fs::write(prompts.join("plain.md"), "# p\n").unwrap();
+
+    let got = run_complete_trailing(root, &["compose", "file.md", "--asp", ""]);
+
+    assert!(
+        got.iter().any(|c| c == "prompts/plain.md"),
+        "compose --asp flag value slot should get curated candidates: {got:?}",
+    );
+}
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 8 — non-markdown files are never offered
+// ---------------------------------------------------------------------
+
+#[test]
+fn non_markdown_files_never_surface() {
+    let workspace = TestWorkspace::named("supp-non-markdown");
+    let root = workspace.path();
+    seed_curated_fixtures(root);
+    fs::write(root.join("prompts").join("code.rs"), "fn main(){}\n").unwrap();
+
+    let got = run_complete_trailing(root, &["compose", "@"]);
+
+    assert!(
+        !got.iter().any(|c| c.ends_with(".txt")),
+        "non-markdown .txt candidate leaked: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c.ends_with(".rs")),
+        "non-markdown .rs candidate leaked: {got:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 9 — gitignored files excluded from broad scan
+// ---------------------------------------------------------------------
+
+#[test]
+fn gitignored_files_excluded_from_broad_scan() {
+    let workspace = TestWorkspace::named("supp-gitignore");
+    let root = workspace.path();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    fs::create_dir_all(root.join("target")).unwrap();
+    fs::write(root.join("target").join("processed.md"), "# p\n").unwrap();
+    // Put a SURFACE match so the broad scan actually fires and has a
+    // candidate to compare against.
+    fs::write(root.join("processed.md"), "# p\n").unwrap();
+
+    let got = run_complete_trailing(root, &["compose", "@pro"]);
+
+    assert!(
+        got.iter().any(|c| c == "@processed.md"),
+        "broad scan should include top-level match: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "@target/processed.md"),
+        "gitignored file must NOT appear in broad scan: {got:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 10 — mid-filename substring match
+// ---------------------------------------------------------------------
+
+#[test]
+fn mid_filename_substring_match_fires() {
+    let workspace = TestWorkspace::named("supp-mid-filename");
+    let root = workspace.path();
+    seed_curated_fixtures(root);
+    // `prompt.md` contains `omp` in the middle, so `@omp<tab>` must
+    // match.
+    fs::write(root.join("prompts").join("prompt.md"), "# p\n").unwrap();
+
+    let got = run_complete_trailing(root, &["compose", "@omp"]);
+
+    assert!(
+        got.iter().any(|c| c == "@prompts/prompt.md"),
+        "mid-filename substring match failed: {got:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// Non-targeted positions → engine emits nothing
+// ---------------------------------------------------------------------
+
+#[test]
+fn non_targeted_subcommand_emits_no_candidates() {
+    let workspace = TestWorkspace::named("supp-non-targeted");
+    let root = workspace.path();
+    seed_curated_fixtures(root);
+
+    // `hooks` is not a composition or wrapper subcommand; the engine
+    // must return empty stdout so the shell falls back to its default
+    // completion.
+    let got = run_complete_trailing(root, &["hooks", ""]);
+    assert!(
+        got.is_empty(),
+        "non-targeted subcommand must return empty stdout: {got:?}"
+    );
+}
+
+#[test]
+fn setter_shaped_token_suppresses_completion() {
+    let workspace = TestWorkspace::named("supp-setter");
+    let root = workspace.path();
+    seed_curated_fixtures(root);
+
+    // `key=val` at the positional slot is a setter, not a file
+    // reference; the engine must suppress completion.
+    let got = run_complete_trailing(root, &["compose", "key="]);
+    assert!(
+        got.is_empty(),
+        "setter-shaped token must suppress completion: {got:?}"
+    );
+}
+
+#[test]
+fn unsupported_prefix_returns_no_candidates() {
+    let workspace = TestWorkspace::named("supp-unsupported");
+    let root = workspace.path();
+    seed_curated_fixtures(root);
+
+    for prefix in ["!pkg", "vault:x", "./local", "/abs/path", "%recursive", "{{HOME}}"] {
+        let got = run_complete_trailing(root, &["compose", prefix]);
+        assert!(
+            got.is_empty(),
+            "unsupported prefix `{prefix}` must return no candidates: {got:?}"
+        );
+    }
 }
