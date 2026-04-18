@@ -5,7 +5,7 @@
 //! of purely syntactic rewrite rules, and returns the rewritten argv for
 //! clap to parse.
 //!
-//! The planned rewrite rules (feature `2026-04-17-cli-pre-processing`) are:
+//! The rewrite rules (feature `2026-04-17-cli-pre-processing`) are:
 //!
 //! - **Rule 1** — provider boolean flags (`--claude`, `--codex`, …) rewrite
 //!   to `--provider <slug>`.
@@ -15,9 +15,8 @@
 //!   `sequence`), insert a single `--` separator before the first positional
 //!   setter that follows an interleaved flag.
 //!
-//! Phase 1 lands the module plumbing and the shared ingress seam only.
-//! `normalize` is intentionally behaviorally neutral here; Rules 1-3 land
-//! in later phases.
+//! Phase 1 landed the module plumbing and the shared ingress seam.
+//! Phase 2 adds Rules 1 and 2. Rule 3 lands in Phase 3.
 //!
 //! ## Pass-through guarantees
 //!
@@ -34,6 +33,8 @@
 
 use std::ffi::OsString;
 
+use claudine::events::Provider;
+
 /// Wrapper subcommands that hand off to an external agent CLI.
 pub(crate) const WRAPPER_SUBCOMMANDS: &[&str] = &[
     "claude", "codex", "gemini", "kimi", "qwen", "opencode", "goose",
@@ -48,10 +49,24 @@ pub(crate) const COMPOSITION_SUBCOMMANDS: &[&str] = &["compose", "inline-compose
 /// their value (distinct from the `--flag=value` form, which is one token).
 const GLOBAL_FLAGS_WITH_VALUE: &[&str] = &["--debug"];
 
+/// Mapping of user-facing provider boolean flags to the canonical
+/// [`Provider`] they select. Rule 1 rewrites the flag to
+/// `--provider <Provider::as_slug()>`.
+const PROVIDER_BOOLEAN_FLAGS: &[(&str, Provider)] = &[
+    ("--claude", Provider::Claude),
+    ("--codex", Provider::Codex),
+    ("--gemini", Provider::Gemini),
+    ("--goose", Provider::Goose),
+    ("--kimi", Provider::KimiCode),
+    ("--opencode", Provider::OpenCode),
+    ("--qwen", Provider::QwenCode),
+    ("--roo", Provider::RooCode),
+];
+
 /// Normalize raw argv before clap parses it.
 ///
-/// In Phase 1 this is a no-op beyond the pass-through guards. Later phases
-/// plug in Rules 1-3 against the scanner helpers below.
+/// Applies Rules 1 and 2 left-to-right, stopping at the first literal `--`.
+/// See [the module docs](self) for pass-through guarantees.
 pub(crate) fn normalize(raw: Vec<OsString>) -> Vec<OsString> {
     if completion_mode_active() {
         return raw;
@@ -59,7 +74,93 @@ pub(crate) fn normalize(raw: Vec<OsString>) -> Vec<OsString> {
     if raw.len() < 2 {
         return raw;
     }
-    raw
+
+    let stop = first_dash_dash_index(&raw).unwrap_or(raw.len());
+    let mut out: Vec<OsString> = Vec::with_capacity(raw.len());
+    let mut index = 0;
+    while index < stop {
+        let token = &raw[index];
+        match as_utf8(token) {
+            Some(text) => {
+                if let Some(provider) = provider_for_boolean_flag(text) {
+                    // Rule 1: `--claude` → `--provider claude`
+                    out.push(OsString::from("--provider"));
+                    out.push(OsString::from(provider.as_slug()));
+                    index += 1;
+                    continue;
+                }
+
+                if text == "--provider" {
+                    // Rule 2 (space form): `--provider cl` → `--provider claude`
+                    out.push(token.clone());
+                    index += 1;
+                    if index < stop {
+                        let value_token = &raw[index];
+                        match as_utf8(value_token) {
+                            Some(value_text) if is_fuzzy_provider_value(value_text) => {
+                                let rewritten = Provider::fuzzy_match_cli_name(value_text)
+                                    .map(|p| OsString::from(p.as_slug()))
+                                    .unwrap_or_else(|| value_token.clone());
+                                out.push(rewritten);
+                            }
+                            _ => out.push(value_token.clone()),
+                        }
+                        index += 1;
+                    }
+                    continue;
+                }
+
+                if let Some(value_text) = text.strip_prefix("--provider=") {
+                    // Rule 2 (equals form): `--provider=oc` → `--provider=open_code`
+                    if is_fuzzy_provider_value(value_text)
+                        && let Some(provider) = Provider::fuzzy_match_cli_name(value_text)
+                    {
+                        out.push(OsString::from(format!(
+                            "--provider={}",
+                            provider.as_slug()
+                        )));
+                        index += 1;
+                        continue;
+                    }
+                    out.push(token.clone());
+                    index += 1;
+                    continue;
+                }
+
+                out.push(token.clone());
+                index += 1;
+            }
+            None => {
+                out.push(token.clone());
+                index += 1;
+            }
+        }
+    }
+
+    // Copy the `--` separator and everything after it verbatim.
+    while index < raw.len() {
+        out.push(raw[index].clone());
+        index += 1;
+    }
+
+    out
+}
+
+/// Returns the [`Provider`] that a boolean flag token selects, if any.
+fn provider_for_boolean_flag(token: &str) -> Option<Provider> {
+    PROVIDER_BOOLEAN_FLAGS
+        .iter()
+        .find(|(flag, _)| *flag == token)
+        .map(|(_, provider)| *provider)
+}
+
+/// True when a `--provider` value token is a candidate for fuzzy rewrite.
+///
+/// Empty values and hyphen-prefixed tokens (which look like flags) are left
+/// alone so clap can emit its native "a value is required" / invalid-value
+/// errors instead of the normalizer silently swallowing them.
+fn is_fuzzy_provider_value(value: &str) -> bool {
+    !value.is_empty() && !value.starts_with('-')
 }
 
 /// Locate the first subcommand token in argv that matches any candidate.
@@ -323,5 +424,264 @@ mod tests {
     #[test]
     fn completion_mode_active_is_safe_to_call() {
         let _ = completion_mode_active();
+    }
+
+    // ── Rule 1: provider boolean → --provider <slug> ─────────────────
+
+    #[test]
+    fn rule_1_rewrites_claude_boolean_to_provider_slug() {
+        let input = argv(&["claudine", "compose", "file.md", "--claude"]);
+        let expected = argv(&["claudine", "compose", "file.md", "--provider", "claude"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_1_rewrites_gemini_boolean_in_interleaved_position() {
+        let input = argv(&["claudine", "compose", "--gemini", "file.md"]);
+        let expected = argv(&["claudine", "compose", "--provider", "gemini", "file.md"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_1_preserves_canonical_kimi_slug() {
+        let input = argv(&["claudine", "compose", "--kimi"]);
+        let expected = argv(&["claudine", "compose", "--provider", "kimi_code"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_1_preserves_canonical_opencode_slug() {
+        let input = argv(&["claudine", "compose", "--opencode"]);
+        let expected = argv(&["claudine", "compose", "--provider", "open_code"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_1_preserves_canonical_qwen_slug() {
+        let input = argv(&["claudine", "compose", "--qwen"]);
+        let expected = argv(&["claudine", "compose", "--provider", "qwen_code"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_1_preserves_canonical_roo_slug() {
+        let input = argv(&["claudine", "compose", "--roo"]);
+        let expected = argv(&["claudine", "compose", "--provider", "roo_code"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_1_rewrites_every_provider_boolean() {
+        let booleans = [
+            ("--claude", "claude"),
+            ("--codex", "codex"),
+            ("--gemini", "gemini"),
+            ("--goose", "goose"),
+            ("--kimi", "kimi_code"),
+            ("--opencode", "open_code"),
+            ("--qwen", "qwen_code"),
+            ("--roo", "roo_code"),
+        ];
+        for (flag, slug) in booleans {
+            let input = argv(&["claudine", "compose", flag]);
+            let expected = argv(&["claudine", "compose", "--provider", slug]);
+            assert_eq!(normalize(input), expected, "flag {flag}");
+        }
+    }
+
+    #[test]
+    fn rule_1_duplicates_survive_to_clap() {
+        let input = argv(&["claudine", "compose", "--claude", "--gemini"]);
+        let expected = argv(&[
+            "claudine",
+            "compose",
+            "--provider",
+            "claude",
+            "--provider",
+            "gemini",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_1_coexists_with_explicit_provider_flag() {
+        let input = argv(&[
+            "claudine",
+            "compose",
+            "--provider",
+            "claude",
+            "--gemini",
+            "file.md",
+        ]);
+        let expected = argv(&[
+            "claudine",
+            "compose",
+            "--provider",
+            "claude",
+            "--provider",
+            "gemini",
+            "file.md",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_1_does_not_fuzzy_match_near_miss_flags() {
+        let input = argv(&["claudine", "compose", "--claud", "file.md"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_1_ignores_provider_booleans_after_dash_dash() {
+        let input = argv(&["claudine", "claude", "--", "--gemini", "file.md"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    // ── Rule 2: fuzzy --provider <value> canonicalization ────────────
+
+    #[test]
+    fn rule_2_rewrites_cl_to_claude_via_space_form() {
+        let input = argv(&["claudine", "compose", "--provider", "cl"]);
+        let expected = argv(&["claudine", "compose", "--provider", "claude"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_2_rewrites_gem_to_gemini_via_space_form() {
+        let input = argv(&["claudine", "compose", "--provider", "gem"]);
+        let expected = argv(&["claudine", "compose", "--provider", "gemini"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_2_rewrites_gem_via_equals_form() {
+        let input = argv(&["claudine", "compose", "--provider=gem"]);
+        let expected = argv(&["claudine", "compose", "--provider=gemini"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_2_canonicalizes_exact_slug_unchanged() {
+        let input = argv(&["claudine", "compose", "--provider", "claude"]);
+        let expected = argv(&["claudine", "compose", "--provider", "claude"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_2_leaves_unknown_value_untouched() {
+        let input = argv(&["claudine", "compose", "--provider", "nonesuch"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_2_leaves_missing_value_untouched() {
+        let input = argv(&["claudine", "compose", "--provider"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_2_leaves_empty_equals_value_untouched() {
+        let input = argv(&["claudine", "compose", "--provider="]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_2_leaves_hyphen_prefixed_next_token_untouched() {
+        let input = argv(&["claudine", "compose", "--provider", "-x"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_2_does_not_cross_dash_dash() {
+        let input = argv(&["claudine", "claude", "--", "--provider", "cl"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_2_skips_value_after_dash_dash_boundary() {
+        // `--provider` immediately before a `--` still advertises a value token;
+        // the `--` is after the scan range, so the flag is treated as
+        // value-less and the separator passes through untouched.
+        let input = argv(&["claudine", "compose", "--provider", "--", "name=Ken"]);
+        let expected = argv(&["claudine", "compose", "--provider", "--", "name=Ken"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    // ── Combined Rule 1 + Rule 2 flow ────────────────────────────────
+
+    #[test]
+    fn rules_compose_boolean_then_fuzzy_value() {
+        let input = argv(&[
+            "claudine",
+            "compose",
+            "--gemini",
+            "file.md",
+            "--provider",
+            "cl",
+        ]);
+        let expected = argv(&[
+            "claudine",
+            "compose",
+            "--provider",
+            "gemini",
+            "file.md",
+            "--provider",
+            "claude",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    // ── Pass-through assertions for non-provider argv ────────────────
+
+    #[test]
+    fn normalize_leaves_version_argv_untouched() {
+        let input = argv(&["claudine", "--version"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn normalize_leaves_hooks_describe_untouched() {
+        let input = argv(&["claudine", "hooks", "--describe"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn normalize_leaves_wrapper_passthrough_untouched() {
+        let input = argv(&[
+            "claudine", "claude", "--", "--resume", "some-session-id",
+        ]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn provider_for_boolean_flag_matches_every_entry() {
+        for (flag, expected_provider) in PROVIDER_BOOLEAN_FLAGS {
+            assert_eq!(
+                provider_for_boolean_flag(flag),
+                Some(*expected_provider),
+                "flag {flag}"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_for_boolean_flag_rejects_unknown() {
+        assert_eq!(provider_for_boolean_flag("--claud"), None);
+        assert_eq!(provider_for_boolean_flag("--anthropic"), None);
+        assert_eq!(provider_for_boolean_flag("--plain"), None);
+    }
+
+    #[test]
+    fn is_fuzzy_provider_value_accepts_typical_tokens() {
+        assert!(is_fuzzy_provider_value("cl"));
+        assert!(is_fuzzy_provider_value("claude"));
+        assert!(is_fuzzy_provider_value("open_code"));
+    }
+
+    #[test]
+    fn is_fuzzy_provider_value_rejects_empty_and_flag_like() {
+        assert!(!is_fuzzy_provider_value(""));
+        assert!(!is_fuzzy_provider_value("-x"));
+        assert!(!is_fuzzy_provider_value("--x"));
     }
 }

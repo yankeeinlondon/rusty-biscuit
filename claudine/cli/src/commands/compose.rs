@@ -147,16 +147,15 @@ pub struct SharedComposeArgs {
 }
 
 impl SharedComposeArgs {
+    /// Explicit provider selected on the command line.
+    ///
+    /// After [`crate::argv::normalize`], provider boolean flags (`--claude`,
+    /// `--gemini`, …) have already been rewritten to `--provider <slug>`,
+    /// so runtime selection only needs to read the canonical `provider`
+    /// field. The boolean fields remain on the struct as user-facing help
+    /// entries but are never set in practice.
     pub(crate) fn explicit_provider(&self) -> Option<Provider> {
         self.provider
-            .or_else(|| self.claude.then_some(Provider::Claude))
-            .or_else(|| self.codex.then_some(Provider::Codex))
-            .or_else(|| self.gemini.then_some(Provider::Gemini))
-            .or_else(|| self.goose.then_some(Provider::Goose))
-            .or_else(|| self.kimicode.then_some(Provider::KimiCode))
-            .or_else(|| self.opencode.then_some(Provider::OpenCode))
-            .or_else(|| self.qwen.then_some(Provider::QwenCode))
-            .or_else(|| self.roo.then_some(Provider::RooCode))
     }
 
     pub(crate) fn excluded(&self) -> BTreeSet<Provider> {
