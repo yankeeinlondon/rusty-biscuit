@@ -69,19 +69,22 @@ _get_design_doc dir:
     fi
     echo "${design}"
 
-clarify filter="":
+_get_spec_doc dir:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ -z "{{filter}}" ]]; then
-        file="$(fd -g '*spec*\.md'  |  fzf --height=15 --border --border-label 'Choose a spec or design file' )"
+    mapfile -t files < <(fd -g '*spec*.md' "{{dir}}")
+    if [[ ${#files[@]} -eq 1 ]]; then
+        spec="${files[0]}"
+    elif [[ ${#files[@]} -eq 0 ]]; then
+        spec=""
     else
-        file="$(fd -g '*spec*\.md' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose the spec file' )"
+        spec="$( ( echo "NONE"; fd -g '*spec*.md' "{{dir}}" ) | fzf --height=5 --border --border-label 'Choose matching spec (or NONE to skip)' )"
+        [[ "${spec}" == "NONE" ]] && spec=""
     fi
-    agent="$(just _choose_agent)"
-    claudine compose @prompts/clarify.md --${agent} doc="${file}"
-    link="$(just _link $(basename "${file}") "${file}")"
-    echo -e "The {{blue}}${link}{{reset}} file has been {{italic}}clarified{{reset}}"
+    echo "${spec}"
+
+
 
 # implements a plan, phase by phase
 implement-plan filter="":
@@ -89,16 +92,35 @@ implement-plan filter="":
     set -euo pipefail
 
     plan="$(just _choose_plan "{{filter}}")"
-    phases="$(md get "${plan}" phases)"
+    if [[ -z "${plan}" ]]; then
+        echo -e "{{red}}No plan file selected — aborting.{{reset}}" >&2
+        exit 1
+    fi
+
+    phases="$(md get "${plan}" phases 2>/dev/null || echo "")"
+    if [[ ! "${phases}" =~ ^[0-9]+$ ]] || (( phases < 1 )); then
+        echo -e "{{red}}Plan is missing a numeric 'phases' field — aborting.{{reset}}" >&2
+        exit 1
+    fi
+
+    current="$(md get "${plan}" start_phase 2>/dev/null || echo 1)"
+    if [[ ! "${current}" =~ ^[0-9]+$ ]]; then
+        current=1
+    fi
+    if (( current > phases )); then
+        echo -e "{{red}}start_phase (${current}) exceeds total phases (${phases}) — aborting.{{reset}}" >&2
+        exit 1
+    fi
+
     link="$(just _link "${plan}" "$(just _abs_path "${plan}")")"
 
     echo -e "Implementing the {{blue}}${link}{{reset}} plan"
     echo -e "- will be run {{italic}}phase{{reset}} by {{italic}}phase{{reset}} ({{italic}}{{dim}}${phases} phases{{reset}})"
+    echo -e "- we will start with phase ${current}"
 
     agent="$(just _choose_agent)"
-    echo -e "Will call the {{bold}}${agent} agent to implement each phase"
+    echo -e "Will call the {{bold}}${agent}{{reset}} agent to implement each phase"
     echo
-    current="$(md get "${plan}" starting_phase || 1)"
     while true; do
         claudine compose "@prompts/implement-phase.md" plan="${plan}" phase=${current} --${agent} -y
         echo
@@ -109,7 +131,7 @@ implement-plan filter="":
         ((current++))
     done
     echo
-    echo -e "The {{blue}}${link}{{reset}} plan has completed ({{dim}}{{italic}}phases{{reset}})"
+    echo -e "The {{blue}}${link}{{reset}} plan has completed ({{dim}}{{italic}}${phases} phases{{reset}})"
     echo
 
 
@@ -229,73 +251,74 @@ design filter="":
         plan-feature "${file}" "${dir}/tech-design.md"
     fi
 
-# Helps to fill in the details of your specification so that it fully articulates your requirements
-clarify spec="":
+clarify filter="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ -z "{{spec}}" ]]; then
-        file="$(just _choose_spec)"
+    if [[ -z "{{filter}}" ]]; then
+        file="$(fd -g '*{spec,design}*.md' | fzf --height=15 --border --border-label 'Choose a spec or design file' )"
     else
-        file="$(just _choose_spec "{{spec}}")"
+        file="$(fd -g '*{spec,design}*.md' | rg "{{filter}}" | fzf --height=15 --border --border-label 'Choose a spec or design file' )"
     fi
 
-    filename="$(basename "${file}")"
-    abs_filename="$(just _abs_path "${file}")"
-    link="$(just _link "${filename}" "${abs_filename}")"
-    echo
-    echo -e "🏃‍♂️ clarifying the requirements in the spec file {{blue}}${link}{{reset}} ..."
-    if claudine compose "@prompts/clarify.md" --claude -y -i --set "{ spec: \"{{spec}}\"  }"; then
-        echo
-        echo -e "We have completed the {{italic}}clarification{{reset}} work on the specification file ({{blue}}${link}{{reset}})"
-        echo
-        echo -e "With the specification file now clarified, it might be a good time to create a complimentary tech-design document."
-        if [[ "$(just _confirm "Start the technical design?")" == "y" ]]; then
-            just design-feature "${file}"
-        else
-            echo
-            echo -e "Ok, run {{green}}just design-feature {{dim}}[spec]{{reset}} when you're ready."
-            echo
-            exit 0
-        fi
-    else
-        echo "there were problems that occurred during the clarification process"
-    fi
+    agent="$(just _choose_agent)"
+    claudine compose "@prompts/clarify.md" --${agent} doc="@"$(sniff repo package-area)"/${file}" -y -i
+    link="$(just _link $(basename "${file}") "${file}")"
+    echo -e "The {{blue}}${link}{{reset}} file has been {{italic}}clarified{{reset}}"
 
 plan-feature spec="" design="":
     #!/usr/bin/env bash
     set -euo pipefail
 
-    if [[ -z "{{spec}}" ]]; then
-        spec_file="$(just _choose_spec)"
-    else
-        if [[ "{{spec}}" == *.md ]]; then
-            spec_file="{{spec}}"
+    spec_file="{{spec}}"
+    design_file="{{design}}"
+
+    # If neither was provided, let the user pick a spec or design file, then
+    # optionally add the complementary doc from the same directory.
+    if [[ -z "${spec_file}" && -z "${design_file}" ]]; then
+        doc="$(just _choose_feature)"
+        if [[ -z "${doc}" ]]; then
+            echo -e "{{red}}No spec or design file selected — aborting.{{reset}}" >&2
+            exit 1
+        fi
+        doc_dir="$(dirname "${doc}")"
+        if [[ "$(basename "${doc}")" == *design* ]]; then
+            design_file="${doc}"
+            if [[ "$(just _confirm "Do you want to include a matching {{bold}}spec{{reset}} file?")" == "y" ]]; then
+                spec_file="$(just _get_spec_doc "${doc_dir}")"
+            fi
         else
-            spec_file=""
+            spec_file="${doc}"
+            if [[ "$(just _confirm "Do you want to include a matching {{bold}}design{{reset}} file?")" == "y" ]]; then
+                design_file="$(just _get_design_doc "${doc_dir}")"
+            fi
         fi
     fi
-    dir="$(dirname "${spec_file}")"
-    if [[ -z "{{design}}" ]]; then
-        design_file="$(just _get_design_doc "${dir}")"
-    else
-        design_file="{{design}}"
-    fi
+
     agent="$(just _choose_agent)"
 
-    if [[ -z "${design_file}" ]]; then
-        design_info=""
-    else
-        abs_design_filename="$(just _abs_path "${design_file}")"
-        link_design="$(just _link "$(basename "${design_file}")" "${abs_design_filename}")"
-        design_info=" {{italic}}and the{{reset}} {{blue}}${link_design}{{reset}}"
+    spec_info=""
+    if [[ -n "${spec_file}" ]]; then
+        spec_filename="$(basename "${spec_file}")"
+        abs_spec_filename="$(just _abs_path "${spec_file}")"
+        link_spec="$(just _link "${spec_filename}" "${abs_spec_filename}")"
+        spec_info="{{blue}}${link_spec}{{reset}}"
     fi
 
-    spec_filename="$(basename "${spec_file}")"
-    abs_spec_filename="$(just _abs_path "${spec_file}")"
-    link_spec="$(just _link "${spec_filename}" "${abs_spec_filename}")"
+    design_info=""
+    if [[ -n "${design_file}" ]]; then
+        design_filename="$(basename "${design_file}")"
+        abs_design_filename="$(just _abs_path "${design_file}")"
+        link_design="$(just _link "${design_filename}" "${abs_design_filename}")"
+        if [[ -n "${spec_info}" ]]; then
+            design_info=" {{italic}}and the{{reset}} {{blue}}${link_design}{{reset}}"
+        else
+            design_info="{{blue}}${link_design}{{reset}}"
+        fi
+    fi
+
     echo
-    echo -e "🏃‍♂️ creating a detailed {{bold}}plan{{reset}} from the {{blue}}${link_spec}{{reset}}${design_info}"
+    echo -e "🏃‍♂️ creating a detailed {{bold}}plan{{reset}} from the ${spec_info}${design_info}"
     echo
     claudine compose @prompts/plan.md -y --${agent} --set "{ spec: \"${spec_file}\", design: \"${design_file}\" }"
     echo

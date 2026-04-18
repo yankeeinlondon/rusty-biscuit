@@ -8,7 +8,7 @@ green := '\033[32m'
 yellow := '\033[33m'
 blue := '\033[34m'
 
-dim := '\033[2m'
+# dim := '\033[2m'
 
 # Build the package
 _build package pkg_name *args="":
@@ -53,7 +53,7 @@ commit agent="opencode" *args="":
     @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
     @claudine compose --{{agent}} "@prompts/commit.md" --op "commit" --quiet -y {{args}}
     @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
+    @sniff repo git-status --compact 2>/dev/null || exit 0
     @echo
 
 
