@@ -1,7 +1,15 @@
 ---
 phases: 6
 created: 2026-04-17
-start_phase: 0
+start_phase: 2
+source_files_during_phase_2:
+  - claudine/cli/src/argv.rs
+  - claudine/cli/src/commands/compose.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
+packages:
+  - claudine-cli
 ---
 # Execution Plan — CLI Argv Pre-Processing
 

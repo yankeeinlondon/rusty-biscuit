@@ -208,7 +208,6 @@ group concurrently.
 
 All three subagent commits landed cleanly:
 
-
 - ccf9ec72 feat(claudine): align Claude rate-limit and tool-call reporting
 
 - d3c48035 style(claudine): apply cargo fmt across stream and wrap modules
@@ -231,14 +230,58 @@ corrective entry citing the independent verification.
 
 ## Codex
 
-- Codex session ID `019d9bc8-bec`
-- `sniff git commits` was not a valid command here, so I fell back to `git log --oneline -n 12` for real commit examples.
-- I verified the semantic commit pair with `git show --stat --format=fuller`:
-  - `60f0acc4 fix(claudine): improve reporting consistency`
-  - `93a94d67 docs(knowledge): fix git commit --only pathspec ordering`
-- I checked repository state with `sniff repo git-status --history 4 --plain`, which reported:
-  - `HEAD -> claudine` at `328ca68`
-  - `claudine` ahead of `main` by 37 commits
-  - this file staged with `58 added, 0 removed`
-- The main lesson from the run was that zsh will treat literal backticks inside inline `git commit -m "..."` shell strings as command substitution, which strips code spans like ``--`` and ``-m`` unless they are escaped or kept out of the shell.
-- The commit body for `93a94d67` inherited that loss of literal backticks; I left it as-is and documented the warning here instead.
+- 
+
+```sh
+- Codex session ID 019d9bc8-bec
+
+ → Shell(shell /bin/zsh -lc "sed -n '1,220p' docs/knowledge/commits.md")
+ ← Shell(successful)
+ → Shell(shell /bin/zsh -lc 'git diff --cached -- docs/knowledge/commits.md')
+ ← Shell(successful)
+ → Shell(shell /bin/zsh -lc 'git diff --cached -- claudine/features/2026-04-17-reporting-consistency/spec.md
+  claudine/lib/src/stream/protocol/codex.rs claudine/lib/src/stream/tool_display.rs')
+ ← Shell(successful)
+ → Shell(shell /bin/zsh -lc 'git status --short')
+ ← Shell(successful)
+ codex/item.started · item.started
+ codex/item.completed · item.completed
+ codex/item.started · item.started
+ codex/item.completed · item.completed
+ codex/item.started · item.started
+ codex/item.completed · item.completed
+ codex/item.started · item.started
+ codex/item.completed · item.completed
+ → Shell(shell /bin/zsh -lc "git show --stat --format=fuller 60f0acc4db3b42c8df9a49681dfd4c0d9674d85d && printf '\\n---\\n'
+  && git show --stat --format=fuller 93a94d67fcdb2fb77df434da58f9cbabce4ce346")
+ ← Shell(successful)
+ → Shell(shell /bin/zsh -lc 'sniff repo')
+ → Shell(shell /bin/zsh -lc "git status --short && printf '\\n---\\n' && git log --oneline -n 4")
+ ← Shell(successful)
+ ← Shell(successful)
+ change
+ change
+ codex/item.started · item.started
+ codex/item.completed · item.completed
+ codex/item.started · item.started
+ codex/item.completed · item.completed
+ → Shell(shell /bin/zsh -lc 'git status --short')
+ ← Shell(successful)
+ item.updated
+
+Committed the staged work as two semantic groups:
+
+- 60f0acc4 fix(claudine): improve reporting consistency
+- 93a94d67 docs(knowledge): fix git commit --only pathspec ordering
+
+sniff repo ran successfully and the repo is now clean except for one new unstaged edit to commits.md. I added a new lesson
+there about zsh eating literal backticks inside inline git commit -m "..." shell commands, since that came up during the worker
+run and was not already documented.
+
+One caveat: the docs(knowledge) commit succeeded, but its body lost the literal `--` / `-m` code spans because the worker’s
+shell command let zsh treat backticks as command substitution. I did not amend it. No tests, builds, or formatting were run.
+
+
+
+✓ 148s · 508K input tokens · 6K output tokens · 459K cached tokens · 8 tool calls
+```
