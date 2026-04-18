@@ -109,6 +109,28 @@ pub struct LiveMetricsState {
 }
 
 impl LiveMetricsState {
+    fn remove_in_flight_tool(&mut self, id: Option<&str>, name: Option<&str>) {
+        if let Some(id) = id
+            && self.in_flight.remove(id).is_some()
+        {
+            return;
+        }
+        if let Some(name) = name {
+            self.in_flight.remove(name);
+        }
+    }
+
+    fn remove_in_flight_subagent(&mut self, id: Option<&str>, name: Option<&str>) {
+        if let Some(id) = id
+            && self.in_flight_subagents.remove(id).is_some()
+        {
+            return;
+        }
+        if let Some(name) = name {
+            self.in_flight_subagents.remove(name);
+        }
+    }
+
     pub fn record_tool_start(&mut self, id: String, name: Option<String>, now: Instant) {
         self.in_flight.insert(
             id,
@@ -190,9 +212,11 @@ impl LiveMetricsState {
                 );
             }
             SemanticEvent::ToolResult { id, .. } => {
-                if let Some(id) = id {
-                    self.in_flight.remove(id.as_str());
-                }
+                let name = match event {
+                    SemanticEvent::ToolResult { name, .. } => name.as_deref(),
+                    _ => None,
+                };
+                self.remove_in_flight_tool(id.as_deref(), name);
                 self.done_count += 1;
             }
             SemanticEvent::SubagentStart { id, name, .. } => {
@@ -209,9 +233,11 @@ impl LiveMetricsState {
                 );
             }
             SemanticEvent::SubagentStop { id, .. } => {
-                if let Some(id) = id {
-                    self.in_flight_subagents.remove(id.as_str());
-                }
+                let name = match event {
+                    SemanticEvent::SubagentStop { name, .. } => name.as_deref(),
+                    _ => None,
+                };
+                self.remove_in_flight_subagent(id.as_deref(), name);
                 self.subagent_done_count += 1;
             }
             SemanticEvent::TurnComplete {
@@ -647,6 +673,38 @@ mod tests {
         }
 
         #[test]
+        fn tool_result_without_id_uses_name_fallback_to_clear_in_flight() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::ToolCall {
+                    name: Some("Task".into()),
+                    id: None,
+                    input: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert_eq!(state.in_flight.len(), 1);
+            state.observe_event(
+                &SemanticEvent::ToolResult {
+                    name: Some("Task".into()),
+                    id: None,
+                    status: Some("success".into()),
+                    exit_code: None,
+                    output: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert!(
+                state.in_flight.is_empty(),
+                "id-less completion should clear the name-keyed in-flight tool"
+            );
+            assert_eq!(state.done_count, 1);
+        }
+
+        #[test]
         fn subagent_start_stop_tracked() {
             let mut state = LiveMetricsState::default();
             let now = Instant::now();
@@ -669,6 +727,35 @@ mod tests {
                 now,
             );
             assert!(state.in_flight_subagents.is_empty());
+            assert_eq!(state.subagent_done_count, 1);
+        }
+
+        #[test]
+        fn subagent_stop_without_id_uses_name_fallback() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::SubagentStart {
+                    name: Some("researcher".into()),
+                    id: None,
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert_eq!(state.in_flight_subagents.len(), 1);
+            state.observe_event(
+                &SemanticEvent::SubagentStop {
+                    name: Some("researcher".into()),
+                    id: None,
+                    status: Some("success".into()),
+                    extra: serde_json::json!({}),
+                },
+                now,
+            );
+            assert!(
+                state.in_flight_subagents.is_empty(),
+                "id-less stop should clear the name-keyed in-flight subagent"
+            );
             assert_eq!(state.subagent_done_count, 1);
         }
 

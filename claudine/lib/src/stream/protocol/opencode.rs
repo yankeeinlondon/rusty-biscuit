@@ -47,6 +47,12 @@ pub enum OpenCodeEvent {
     ToolEnd(OpenCodeTool),
     #[serde(rename = "reasoning")]
     Reasoning(OpenCodeReasoning),
+    #[serde(rename = "task_started")]
+    TaskStarted(OpenCodeTaskEvent),
+    #[serde(rename = "task_completed")]
+    TaskCompleted(OpenCodeTaskEvent),
+    #[serde(rename = "task_progress")]
+    TaskProgress(OpenCodeTaskProgress),
 }
 
 /// `init` / `session_start` payload.
@@ -131,6 +137,46 @@ impl OpenCodeReasoning {
             .or(self.text)
             .or(self.content)
     }
+}
+
+/// Task / subagent lifecycle event. OpenCode task records are close to the
+/// Claude shape: a stable task id, a human-facing task name, and an optional
+/// completion status on terminal events.
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeTaskEvent {
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[serde(default, rename = "taskId")]
+    pub task_id_camel: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub task_name: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+impl OpenCodeTaskEvent {
+    pub fn resolved_task_id(&self) -> Option<String> {
+        self.task_id
+            .clone()
+            .or_else(|| self.task_id_camel.clone())
+            .or_else(|| self.id.clone())
+    }
+
+    pub fn resolved_name(&self) -> Option<String> {
+        self.name.clone().or_else(|| self.task_name.clone())
+    }
+}
+
+/// OpenCode task progress narration. Keep the payload intentionally small and
+/// alias-friendly so format drift degrades to a harmless empty `Info`.
+#[derive(Debug, Default, Deserialize)]
+pub struct OpenCodeTaskProgress {
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 /// `step_finish` payload with nested `part.tokens` / `part.cost` / `part.reason`.
@@ -489,6 +535,37 @@ mod tests {
             panic!("expected Error");
         };
         assert_eq!(err.resolved_message(), Some("API timeout".into()));
+    }
+
+    #[test]
+    fn opencode_task_started_deserializes() {
+        let event = parse(r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#);
+        let OpenCodeEvent::TaskStarted(task) = event else {
+            panic!("expected TaskStarted");
+        };
+        assert_eq!(task.resolved_task_id().as_deref(), Some("sa1"));
+        assert_eq!(task.resolved_name().as_deref(), Some("researcher"));
+    }
+
+    #[test]
+    fn opencode_task_completed_deserializes() {
+        let event =
+            parse(r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#);
+        let OpenCodeEvent::TaskCompleted(task) = event else {
+            panic!("expected TaskCompleted");
+        };
+        assert_eq!(task.resolved_task_id().as_deref(), Some("sa1"));
+        assert_eq!(task.resolved_name().as_deref(), Some("researcher"));
+        assert_eq!(task.status.as_deref(), Some("success"));
+    }
+
+    #[test]
+    fn opencode_task_progress_deserializes() {
+        let event = parse(r#"{"type":"task_progress","message":"working"}"#);
+        let OpenCodeEvent::TaskProgress(progress) = event else {
+            panic!("expected TaskProgress");
+        };
+        assert_eq!(progress.message.as_deref(), Some("working"));
     }
 
     #[test]
