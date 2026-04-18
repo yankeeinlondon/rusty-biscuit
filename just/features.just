@@ -177,8 +177,10 @@ review iteration="1":
     echo -e "    - Feature Directory: {{dim}}${dir}{{reset}}"
 
     claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})" iteration={{iteration}}
+    review_file="${dir}/review-${iteration}.md"
+    link="$(just _link "${review_file}" "$(_abs_path "${review_file}")")"
     echo
-    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
+    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed: ${link}"
     echo
 
 
@@ -224,7 +226,7 @@ implement-review-suggestions feat="" iteration="1":
 
     claudine compose "@prompts/implement-review-suggestions.md" -y --set "{ dir: \"${dir}\", spec: \"$(basename ${spec})\", design: \"$(basename ${design})\" }"
     echo
-    echo "🎉 the {{italic}}implementation{{reset}} of the review ({{dim}}{{blue}}${review}{{reset}}) for {{bold}}{{yellow}}${feature}{{reset}} has completed"
+    echo -e "🎉 the {{italic}}implementation{{reset}} of the review ({{dim}}{{blue}}${review}{{reset}}) for {{bold}}{{yellow}}${feature}{{reset}} has completed"
     echo
 
 # adds a complimentary tech design to the specification file
