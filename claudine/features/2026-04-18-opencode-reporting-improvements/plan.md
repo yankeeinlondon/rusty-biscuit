@@ -21,6 +21,13 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase3: []
+source_files_during_phase_4:
+  - claudine/cli/src/commands/wrap/live_semantic_sink.rs
+docs_updated_during_phase_4:
+  - claudine/docs/topics/non-interactive-sessions.md
+  - claudine/features/2026-04-18-opencode-reporting-improvements/plan.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase4: []
 packages: [claudine, claudine-cli]
 ---
 
