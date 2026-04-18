@@ -16,7 +16,7 @@
 //!   setter that follows an interleaved flag.
 //!
 //! Phase 1 landed the module plumbing and the shared ingress seam.
-//! Phase 2 adds Rules 1 and 2. Rule 3 lands in Phase 3.
+//! Phase 2 added Rules 1 and 2. Phase 3 adds Rule 3.
 //!
 //! ## Pass-through guarantees
 //!
@@ -42,12 +42,41 @@ pub(crate) const WRAPPER_SUBCOMMANDS: &[&str] = &[
 
 /// Composition subcommands that collect positional args plus `key=value`
 /// setters in any order. Rule 3 only fires on these subcommands.
-#[allow(dead_code)]
 pub(crate) const COMPOSITION_SUBCOMMANDS: &[&str] = &["compose", "inline-compose", "sequence"];
 
 /// Claudine root-level global long flags that consume the following token as
 /// their value (distinct from the `--flag=value` form, which is one token).
 const GLOBAL_FLAGS_WITH_VALUE: &[&str] = &["--debug"];
+
+/// Composition-subcommand flags whose value lives in the next argv slot
+/// rather than in a `--flag=value` pair. Rule 3 uses this to skip over
+/// flag values so that a value like `gpt-4` after `-m` is not misclassified
+/// as a positional token.
+///
+/// The list mirrors the `#[arg(...)]` surface of `SharedComposeArgs` (and
+/// `sequence`'s `--fail-fast`). When a new value-bearing composition flag is
+/// added to the clap surface, add it here so Rule 3 keeps classifying its
+/// value correctly.
+const COMPOSITION_FLAGS_WITH_VALUE: &[&str] = &[
+    "--provider",
+    "--exclude",
+    "--include",
+    "--model",
+    "-m",
+    "--output",
+    "-o",
+    "--append-system-prompt",
+    "--asp",
+    "--replace-system-prompt",
+    "--rsp",
+    "--timeout",
+    "-t",
+    "--operation",
+    "--op",
+    "--set",
+    "--use",
+    "--fail-fast",
+];
 
 /// Mapping of user-facing provider boolean flags to the canonical
 /// [`Provider`] they select. Rule 1 rewrites the flag to
@@ -65,8 +94,9 @@ const PROVIDER_BOOLEAN_FLAGS: &[(&str, Provider)] = &[
 
 /// Normalize raw argv before clap parses it.
 ///
-/// Applies Rules 1 and 2 left-to-right, stopping at the first literal `--`.
-/// See [the module docs](self) for pass-through guarantees.
+/// Applies Rules 1 and 2 left-to-right, stopping at the first literal `--`,
+/// then Rule 3 on the rewritten argv. See [the module docs](self) for
+/// pass-through guarantees.
 pub(crate) fn normalize(raw: Vec<OsString>) -> Vec<OsString> {
     if completion_mode_active() {
         return raw;
@@ -143,7 +173,81 @@ pub(crate) fn normalize(raw: Vec<OsString>) -> Vec<OsString> {
         index += 1;
     }
 
-    out
+    apply_composition_separator(out)
+}
+
+/// Apply Rule 3: insert a single `--` before the first setter-shaped token on
+/// `compose`, `inline-compose`, or `sequence` that follows an interleaved
+/// flag after a previously seen positional.
+///
+/// No-ops when:
+///
+/// - The argv already contains a `--` separator.
+/// - The argv does not target a composition subcommand.
+/// - No positional was seen before the first setter-shaped token.
+/// - No flag interleaved between that positional and the setter.
+/// - The subcommand token is preceded by a non-flag, non-matching token
+///   (i.e. an unknown subcommand owns position 1; clap handles it).
+fn apply_composition_separator(argv: Vec<OsString>) -> Vec<OsString> {
+    if first_dash_dash_index(&argv).is_some() {
+        return argv;
+    }
+    let Some((sub_idx, _)) = find_subcommand(&argv, COMPOSITION_SUBCOMMANDS) else {
+        return argv;
+    };
+
+    let mut saw_positional = false;
+    let mut saw_flag_after_positional = false;
+    let mut insertion_index: Option<usize> = None;
+
+    let mut cursor = sub_idx + 1;
+    while cursor < argv.len() {
+        let Some(token) = as_utf8(&argv[cursor]) else {
+            // Non-UTF-8 tokens are pattern-invisible. Treat them as opaque
+            // and do not let them advance the state machine.
+            cursor += 1;
+            continue;
+        };
+
+        if is_composition_flag_with_value(token) {
+            if saw_positional {
+                saw_flag_after_positional = true;
+            }
+            // Skip the flag token and its value slot.
+            cursor += 2;
+            continue;
+        }
+
+        if looks_like_flag(token) {
+            if saw_positional {
+                saw_flag_after_positional = true;
+            }
+            cursor += 1;
+            continue;
+        }
+
+        if looks_like_setter(token) {
+            if saw_positional && saw_flag_after_positional {
+                insertion_index = Some(cursor);
+                break;
+            }
+            cursor += 1;
+            continue;
+        }
+
+        saw_positional = true;
+        cursor += 1;
+    }
+
+    let Some(idx) = insertion_index else {
+        return argv;
+    };
+
+    let mut result = Vec::with_capacity(argv.len() + 1);
+    result.extend(argv[..idx].iter().cloned());
+    result.push(OsString::from("--"));
+    result.extend(argv[idx..].iter().cloned());
+    result
 }
 
 /// Returns the [`Provider`] that a boolean flag token selects, if any.
@@ -238,6 +342,37 @@ fn is_global_flag_with_value(token: &str) -> bool {
         return false;
     }
     GLOBAL_FLAGS_WITH_VALUE.contains(&token)
+}
+
+/// True when `token` is a composition-surface flag whose value lives in the
+/// next argv slot rather than in a `--flag=value` pair.
+fn is_composition_flag_with_value(token: &str) -> bool {
+    if token.contains('=') {
+        return false;
+    }
+    COMPOSITION_FLAGS_WITH_VALUE.contains(&token)
+}
+
+/// True when `token` matches the composition shorthand-setter key pattern
+/// `^[A-Za-z_][A-Za-z0-9_-]*=`.
+///
+/// This is the same key validation used by
+/// [`crate::commands::compose::parse_compose_setter`]; keeping them in lockstep
+/// guarantees that any token Rule 3 protects behind a `--` separator will be
+/// classified the same way by the downstream positional parser.
+fn looks_like_setter(token: &str) -> bool {
+    let Some(eq_pos) = token.find('=') else {
+        return false;
+    };
+    let key = &token[..eq_pos];
+    let mut chars = key.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return false;
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
 }
 
 #[cfg(test)]
@@ -683,5 +818,337 @@ mod tests {
         assert!(!is_fuzzy_provider_value(""));
         assert!(!is_fuzzy_provider_value("-x"));
         assert!(!is_fuzzy_provider_value("--x"));
+    }
+
+    // ── Rule 3: `--` insertion for interleaved setters ───────────────
+
+    #[test]
+    fn rule_3_inserts_separator_before_help_after_flag() {
+        let input = argv(&[
+            "claudine", "compose", "file.md", "--gemini", "name=Ken", "--help",
+        ]);
+        let expected = argv(&[
+            "claudine",
+            "compose",
+            "file.md",
+            "--provider",
+            "gemini",
+            "--",
+            "name=Ken",
+            "--help",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_3_inserts_separator_on_inline_compose() {
+        let input = argv(&[
+            "claudine",
+            "inline-compose",
+            "file.md",
+            "--gemini",
+            "k=v",
+            "--help",
+        ]);
+        let expected = argv(&[
+            "claudine",
+            "inline-compose",
+            "file.md",
+            "--provider",
+            "gemini",
+            "--",
+            "k=v",
+            "--help",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_3_inserts_separator_on_sequence() {
+        let input = argv(&[
+            "claudine", "sequence", "file.md", "--gemini", "k=v", "--help",
+        ]);
+        let expected = argv(&[
+            "claudine",
+            "sequence",
+            "file.md",
+            "--provider",
+            "gemini",
+            "--",
+            "k=v",
+            "--help",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_3_does_not_fire_without_flag_between_positional_and_setter() {
+        let input = argv(&["claudine", "compose", "file.md", "key=val"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_3_does_not_fire_when_setter_precedes_positional() {
+        let input = argv(&["claudine", "compose", "key=val", "file.md"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_3_does_not_fire_for_non_setter_trailing_token() {
+        // `other.md` is not a setter; the second-file clap error is the
+        // intended pre-existing behavior.
+        let input = argv(&["claudine", "compose", "file.md", "--gemini", "other.md"]);
+        let expected = argv(&[
+            "claudine",
+            "compose",
+            "file.md",
+            "--provider",
+            "gemini",
+            "other.md",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_3_is_noop_when_dash_dash_already_present() {
+        // `--gemini` is before the user-provided `--`, so Rule 1 still
+        // rewrites it. Rule 3 must not insert a second `--`.
+        let input = argv(&[
+            "claudine",
+            "compose",
+            "file.md",
+            "--gemini",
+            "--",
+            "name=Ken",
+        ]);
+        let expected = argv(&[
+            "claudine",
+            "compose",
+            "file.md",
+            "--provider",
+            "gemini",
+            "--",
+            "name=Ken",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_3_is_noop_when_user_provided_dash_dash_precedes_setter() {
+        // Pure Rule-3 no-op: a `--` already brackets the setter, so the
+        // normalizer must not rewrite anything.
+        let input = argv(&[
+            "claudine",
+            "compose",
+            "file.md",
+            "--provider",
+            "gemini",
+            "--",
+            "name=Ken",
+        ]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_3_does_not_fire_on_non_composition_subcommand() {
+        let input = argv(&["claudine", "hooks", "file.md", "--gemini", "k=v", "--help"]);
+        // Rule 1 still rewrites `--gemini`, but Rule 3 is gated to composition.
+        let expected = argv(&[
+            "claudine",
+            "hooks",
+            "file.md",
+            "--provider",
+            "gemini",
+            "k=v",
+            "--help",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_3_does_not_fire_without_positional() {
+        let input = argv(&["claudine", "compose", "--help"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_3_handles_root_globals_before_subcommand() {
+        // Real-tree regression case from the phase plan: root `--plain` must
+        // not stop Rule 3 from firing on `compose`.
+        let input = argv(&[
+            "claudine", "--plain", "compose", "file.md", "--gemini", "name=Ken", "--help",
+        ]);
+        let expected = argv(&[
+            "claudine",
+            "--plain",
+            "compose",
+            "file.md",
+            "--provider",
+            "gemini",
+            "--",
+            "name=Ken",
+            "--help",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_3_skips_value_of_flag_with_value() {
+        // `--model gpt-4` consumes its value; `gpt-4` must not be treated as
+        // a positional, so Rule 3 should not fire.
+        let input = argv(&["claudine", "compose", "file.md", "--model", "gpt-4"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_3_fires_after_short_flag_with_value() {
+        // `-m gpt-4` consumes its value; the setter afterward still warrants
+        // the separator.
+        let input = argv(&[
+            "claudine", "compose", "file.md", "-m", "gpt-4", "k=v", "--help",
+        ]);
+        let expected = argv(&[
+            "claudine", "compose", "file.md", "-m", "gpt-4", "--", "k=v", "--help",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_3_fires_after_equals_form_flag() {
+        // `--provider=gemini` is a single token; Rule 3 must still treat it
+        // as an interleaved flag.
+        let input = argv(&[
+            "claudine",
+            "compose",
+            "file.md",
+            "--provider=gemini",
+            "k=v",
+            "--help",
+        ]);
+        let expected = argv(&[
+            "claudine",
+            "compose",
+            "file.md",
+            "--provider=gemini",
+            "--",
+            "k=v",
+            "--help",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_3_inserts_at_first_qualifying_setter_only() {
+        // Two setters after the flag; `--` must land only before the first.
+        let input = argv(&[
+            "claudine", "compose", "file.md", "--gemini", "a=1", "b=2", "--help",
+        ]);
+        let expected = argv(&[
+            "claudine",
+            "compose",
+            "file.md",
+            "--provider",
+            "gemini",
+            "--",
+            "a=1",
+            "b=2",
+            "--help",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_3_ignores_setter_before_positional() {
+        // Leading setter does not count as a positional; the later setter
+        // after the flag fires Rule 3 because a real positional was seen in
+        // between.
+        let input = argv(&[
+            "claudine",
+            "compose",
+            "k=early",
+            "file.md",
+            "--gemini",
+            "k=late",
+            "--help",
+        ]);
+        let expected = argv(&[
+            "claudine",
+            "compose",
+            "k=early",
+            "file.md",
+            "--provider",
+            "gemini",
+            "--",
+            "k=late",
+            "--help",
+        ]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_3_ignores_boolean_flag_before_positional() {
+        // `--yolo` before the positional should not flip the "flag after
+        // positional" flag, so no insertion.
+        let input = argv(&["claudine", "compose", "--yolo", "file.md", "k=v"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    // ── Rule 3 helpers ────────────────────────────────────────────────
+
+    #[test]
+    fn looks_like_setter_matches_parse_compose_setter_pattern() {
+        assert!(looks_like_setter("key=val"));
+        assert!(looks_like_setter("_private=true"));
+        assert!(looks_like_setter("my-key=value"));
+        assert!(looks_like_setter("key="));
+    }
+
+    #[test]
+    fn looks_like_setter_rejects_non_setter_tokens() {
+        assert!(!looks_like_setter("file.md"));
+        assert!(!looks_like_setter("compose"));
+        assert!(!looks_like_setter("--gemini"));
+        assert!(!looks_like_setter("=foo"));
+        assert!(!looks_like_setter("9key=val"));
+        assert!(!looks_like_setter("foo.bar=baz"));
+        assert!(!looks_like_setter("/path=val"));
+        assert!(!looks_like_setter(""));
+    }
+
+    #[test]
+    fn is_composition_flag_with_value_matches_known_flags() {
+        for flag in [
+            "--provider",
+            "--exclude",
+            "--include",
+            "--model",
+            "-m",
+            "--output",
+            "-o",
+            "--append-system-prompt",
+            "--asp",
+            "--replace-system-prompt",
+            "--rsp",
+            "--timeout",
+            "-t",
+            "--operation",
+            "--op",
+            "--set",
+            "--use",
+            "--fail-fast",
+        ] {
+            assert!(
+                is_composition_flag_with_value(flag),
+                "expected flag {flag} to be value-bearing"
+            );
+        }
+    }
+
+    #[test]
+    fn is_composition_flag_with_value_rejects_equals_and_unknown() {
+        assert!(!is_composition_flag_with_value("--provider=gemini"));
+        assert!(!is_composition_flag_with_value("--yolo"));
+        assert!(!is_composition_flag_with_value("--plain"));
+        assert!(!is_composition_flag_with_value("file.md"));
     }
 }
