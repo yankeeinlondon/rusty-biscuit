@@ -2,7 +2,6 @@
 phases: 4
 created: 2026-04-17
 start_phase: 1
-packages: [claudine]
 source_files_during_phase_1: []
 docs_updated_during_phase_1: [claudine/features/2026-04-18-opencode-reporting-improvements/plan.md]
 docs_created_during_phase_1: []
@@ -14,6 +13,15 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase2: []
+source_files_during_phase_3:
+  - claudine/cli/src/commands/wrap/live_semantic_sink.rs
+  - claudine/lib/src/stream/badges.rs
+  - claudine/lib/src/stream/logs/opencode.rs
+  - claudine/cli/tests/wrap_commands.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase3: []
+packages: [claudine, claudine-cli]
 ---
 
 ## Phase 1 Baseline — Audit Findings
