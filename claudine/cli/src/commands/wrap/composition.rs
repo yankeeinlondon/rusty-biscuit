@@ -474,19 +474,32 @@ pub(crate) fn execute_composition_request_inner(
         }
     }
 
-    let launch_context = claudine::system_prompt::LaunchContext::from_cwd(&launch_cwd)
-        .unwrap_or_else(|_| claudine::system_prompt::LaunchContext {
-            cwd: launch_cwd.clone(),
-            repo_root: None,
-            package_area_root: None,
-            package_root: None,
-        });
+    let launch_context = match claudine::system_prompt::LaunchContext::from_cwd(&launch_cwd) {
+        Ok(context) => context,
+        Err(error) => {
+            if request.repo {
+                return Err(eyre!(
+                    "--repo requires startup repo detection, but launch-context detection failed: {error}"
+                ));
+            }
+            if !silent && !quiet {
+                log::warn(&format!(
+                    "launch-context detection failed; continuing without repo/package context: {error}"
+                ));
+            }
+            claudine::system_prompt::LaunchContext {
+                cwd: launch_cwd.clone(),
+                repo_root: None,
+                package_area_root: None,
+                package_root: None,
+            }
+        }
+    };
     let effective_sp = claudine::system_prompt::resolve_and_prepare_for_session(
         &request.system_prompt_args,
         &launch_context,
         effective_non_interactive,
-    )
-    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    )?;
 
     let mut sp_artifacts: Vec<super::system_prompt::SystemPromptArtifact> = Vec::new();
 

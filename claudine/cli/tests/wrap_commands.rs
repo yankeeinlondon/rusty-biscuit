@@ -1037,6 +1037,31 @@ exit 0
 
 #[cfg(unix)]
 #[test]
+fn wrapper_missing_explicit_system_prompt_fails_visibly() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let missing_prompt = workspace.path().join("missing-prompt.md");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args([
+            "codex",
+            "--append-system-prompt",
+            missing_prompt.to_str().unwrap(),
+            "--",
+            "--version",
+        ])
+        .assert()
+        .code(1)
+        .stderr(contains("missing-prompt.md"));
+}
+
+#[cfg(unix)]
+#[test]
 fn wrapper_universal_model_flag_passes_to_provider() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
@@ -1616,6 +1641,33 @@ fn compose_rejects_non_markdown_file() {
         .args(["compose", txt_file.to_str().unwrap()])
         .assert()
         .code(1);
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_missing_explicit_system_prompt_fails_visibly() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    let md_file = workspace.path().join("prompt.md");
+    let missing_prompt = workspace.path().join("missing-system-prompt.md");
+    fs::create_dir_all(&path_dir).unwrap();
+    fs::write(&md_file, "---\ntitle: test\n---\nHello compose\n").unwrap();
+
+    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+
+    cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .env("PATH", &path_dir)
+        .args([
+            "compose",
+            "--codex",
+            "--append-system-prompt",
+            missing_prompt.to_str().unwrap(),
+            md_file.to_str().unwrap(),
+        ])
+        .assert()
+        .code(1)
+        .stderr(contains("missing-system-prompt.md"));
 }
 
 #[test]
@@ -3931,7 +3983,8 @@ exit 0
     let badges = row["extra"]["badges"].as_array();
     if let Some(b) = badges {
         assert!(
-            !b.iter().any(|b| b["category"] == serde_json::json!("config")),
+            !b.iter()
+                .any(|b| b["category"] == serde_json::json!("config")),
             "Config trailer badge must be absent — malformed assets are surfaced once per Warning line: {b:?}",
         );
     }
@@ -4062,7 +4115,8 @@ exit 0
     let badges = row["extra"]["badges"].as_array();
     if let Some(b) = badges {
         assert!(
-            !b.iter().any(|b| b["category"] == serde_json::json!("config")),
+            !b.iter()
+                .any(|b| b["category"] == serde_json::json!("config")),
             "Config trailer badge must be absent after stderr merge — diagnostics counter still records the events: {b:?}",
         );
     }

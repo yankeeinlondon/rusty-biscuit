@@ -485,9 +485,8 @@ pub(crate) struct WrapStartupDetection {
 /// walked the tree 3-5 times (once in `detect_environment_fast`, once in
 /// `LaunchContext::from_cwd`, and twice inside `build_child_env`). This
 /// helper collapses that into a single scan and then builds the three
-/// consumer contexts from borrowed data, falling back to empty contexts
-/// on detection errors so startup never blocks on an unrelated failure.
-pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
+/// consumer contexts from borrowed data.
+pub(crate) fn detect_wrap_startup(cwd: &Path) -> Result<WrapStartupDetection> {
     use sniff::request::*;
 
     let plan = DetectionPlan::new()
@@ -504,7 +503,8 @@ pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
                 .without_formatting(),
         );
 
-    let result = sniff::detect_with_plan(plan).unwrap_or_default();
+    let result = sniff::detect_with_plan(plan)
+        .map_err(|e| eyre!("startup detection failed for '{}': {e}", cwd.display()))?;
 
     let launch_context = claudine::system_prompt::LaunchContext::from_sniff_result(&result, cwd);
 
@@ -524,10 +524,29 @@ pub(crate) fn detect_wrap_startup(cwd: &Path) -> WrapStartupDetection {
 
     let env_context = claudine::events::environment_context_from_sniff_result(result);
 
-    WrapStartupDetection {
+    Ok(WrapStartupDetection {
         env_context,
         launch_context,
         launch_workspace,
+    })
+}
+
+fn fallback_wrap_startup(cwd: &Path) -> WrapStartupDetection {
+    WrapStartupDetection {
+        env_context: EnvironmentContext::default(),
+        launch_context: claudine::system_prompt::LaunchContext {
+            cwd: cwd.to_path_buf(),
+            repo_root: None,
+            package_area_root: None,
+            package_root: None,
+        },
+        launch_workspace: env::LaunchWorkspaceContext {
+            launch_cwd: cwd.to_path_buf(),
+            repo_root: None,
+            child_cwd: cwd.to_path_buf(),
+            package_context: None,
+            warnings: Vec::new(),
+        },
     }
 }
 
@@ -805,16 +824,6 @@ fn run_provider_wrapper_inner(
     })?;
     let cwd = std::env::current_dir()?;
 
-    // One sniff-based scan produces the raw git + repo-structure data that
-    // the rest of startup needs. The result is consumed by three separate
-    // consumers (EnvironmentContext, LaunchContext, LaunchWorkspaceContext)
-    // without ever walking the filesystem again — this avoids the 3-5
-    // redundant tree walks the earlier pipeline performed.
-    let startup = detect_wrap_startup(&cwd);
-    let env_context = startup.env_context;
-    let launch_context = startup.launch_context;
-    let launch_workspace = startup.launch_workspace;
-
     let term = wrap_terminal();
 
     let binary_path = info_span!(
@@ -837,6 +846,29 @@ fn run_provider_wrapper_inner(
     let mut env_overrides: Vec<(String, String)> = Vec::new();
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
+
+    // One sniff-based scan produces the raw git + repo-structure data that
+    // the rest of startup needs. The result is consumed by three separate
+    // consumers (EnvironmentContext, LaunchContext, LaunchWorkspaceContext)
+    // without ever walking the filesystem again — this avoids the 3-5
+    // redundant tree walks the earlier pipeline performed.
+    let startup = match detect_wrap_startup(&cwd) {
+        Ok(startup) => startup,
+        Err(error) => {
+            if repo_requested {
+                return Err(eyre!(
+                    "--repo requires startup repo detection, but startup detection failed: {error}"
+                ));
+            }
+            deferred_warnings.push(format!(
+                "startup detection failed; continuing without repo/package context: {error}"
+            ));
+            fallback_wrap_startup(&cwd)
+        }
+    };
+    let env_context = startup.env_context;
+    let launch_context = startup.launch_context;
+    let launch_workspace = startup.launch_workspace;
 
     // In the direct-wrap path the child inherits stdin automatically —
     // we don't need to detect or seed it. Pass false so that a non-tty
@@ -1025,8 +1057,7 @@ fn run_provider_wrapper_inner(
         &sp_args,
         &launch_context,
         non_interactive_requested,
-    )
-    .unwrap_or(claudine::system_prompt::EffectiveSystemPrompt::None);
+    )?;
 
     let mut sp_artifacts: Vec<super::wrap::system_prompt::SystemPromptArtifact> = Vec::new();
 
@@ -3703,7 +3734,9 @@ mod tests {
 
         assert_eq!(
             edited,
-            Some(profile::PromptSource::Inline("typed from scratch".to_string()))
+            Some(profile::PromptSource::Inline(
+                "typed from scratch".to_string()
+            ))
         );
     }
 
