@@ -20,13 +20,18 @@ the single pre-clap entry point.
 
 ## Pipeline placement
 
-```text
-                ┌────────────────────────────┐
-std::env::args_os│  argv::normalize(...)       │  Vec<OsString>
-  ──────────────▶│  - Rule 1: booleans        │──────────────▶ Cli::parse_from
-                 │  - Rule 2: fuzzy value     │
-                 │  - Rule 3: `--` insertion  │
-                 └────────────────────────────┘
+```mermaid
+flowchart LR
+    A["std::env::args_os"] --> B["argv::normalize"]
+    subgraph B["argv::normalize"]
+        direction TB
+        R1["Rule 1: provider boolean rewrite<br/><i>composition subcommands only</i>"]
+        R2["Rule 2: fuzzy --provider value"]
+        R4["Rule 4: --help hoist<br/><i>composition subcommands only</i>"]
+        R3["Rule 3: -- separator insertion<br/><i>composition subcommands only</i>"]
+        R1 --> R2 --> R4 --> R3
+    end
+    B --> C["Cli::parse_from"]
 ```
 
 `main.rs` collects argv once, passes it to `argv::normalize`, and reuses
@@ -39,6 +44,12 @@ Rules are applied in order, in a single left-to-right pass, and stop at
 the first literal `--` token.
 
 ### Rule 1 — provider boolean → `--provider <slug>`
+
+Rule 1 is **gated on composition subcommands** (`compose`,
+`inline-compose`, `sequence`). The same tokens appearing on wrapper
+subcommands (`claude`, `codex`, …) are left alone so they pass through
+to the wrapped child CLI unchanged. See [Pass-through guarantees](#pass-through-guarantees)
+below.
 
 The eight user-facing provider booleans are rewritten to the canonical
 `--provider <slug>` pair using `Provider::as_slug()`:
@@ -166,6 +177,62 @@ Rule 3 is intentionally narrow. It does not fire when:
 - no positional has been seen yet
   (`claudine compose --help` — nothing to protect).
 
+### Rule 4 — `--help` / `-h` hoisting
+
+The root `Cli` declares its own non-global `help: bool` with
+`disable_help_flag = true`, which means composition subcommands never
+inherit a functional `--help` handler. Without intervention, typing
+`claudine compose file.md --help` collapses into clap's greedy positional
+collector and surfaces one of two confusing errors:
+
+```text
+error: unexpected argument '--help' found
+  tip: to pass '--help' as a value, use '-- --help'
+```
+
+or (after Rule 3 inserts `--`):
+
+```text
+Error: expected at most one file reference, but got multiple: file.md, --help
+```
+
+Rule 4 defuses that by scanning the argv between the composition
+subcommand and the first literal `--` for an exact `--help` or `-h`
+token and hoisting it to argv position 1, before the subcommand. The
+resulting argv short-circuits into Claudine's custom help handler (via
+`cli.help == true` in `main.rs`) regardless of what else appears on the
+command line.
+
+**Before**
+
+```sh
+claudine compose file.md --help
+claudine compose file.md --gemini name=Ken --help
+claudine compose -h
+```
+
+**After normalization**
+
+```sh
+claudine --help compose file.md
+claudine --help compose file.md --provider gemini -- name=Ken
+claudine -h compose
+```
+
+Rule 4 fires **before** Rule 3, so `--help` is removed from the trailing
+setter region before the `--` separator is inserted. It is gated to
+composition subcommands only — wrapper subcommands
+(`claudine claude --help`) intentionally forward `--help` to the child
+CLI, and non-composition subcommands already have working `--help`
+support.
+
+Rule 4 does not fire when:
+
+- `--help` / `-h` appears at or after the first literal `--` (it's a
+  trailing raw value and belongs to someone else);
+- the subcommand is a wrapper or other non-composition subcommand;
+- the argv already has `--help` / `-h` at position 1 (idempotent).
+
 ## Pass-through guarantees
 
 The normalizer never mutates argv when any of the following hold:
@@ -180,9 +247,12 @@ The normalizer never mutates argv when any of the following hold:
    values that are not valid UTF-8 are left in place.
 4. **Argv with fewer than two elements.** Nothing downstream needs
    parsing.
-5. **Unknown subcommands.** Rule 1 and Rule 2 are subcommand-agnostic;
-   Rule 3 is gated to the composition trio. Unknown-subcommand handling
-   stays with clap.
+5. **Non-composition subcommands.** Rule 1, Rule 3, and Rule 4 are gated
+   to the composition trio (`compose`, `inline-compose`, `sequence`);
+   wrapper subcommands (`claude`, `codex`, …) and every other subcommand
+   pass through unchanged. Rule 2 remains flag-driven so `--provider`
+   resolution works regardless of subcommand. Unknown-subcommand
+   handling stays with clap.
 
 Every new rule added to the normalizer MUST land with a matching
 pass-through unit test so the normalizer cannot silently start
