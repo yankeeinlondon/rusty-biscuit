@@ -19,6 +19,7 @@ use clap_complete::{ArgValueCompleter, CompletionCandidate};
 
 use crate::argv;
 use crate::completion::file_reference;
+use crate::completion::validate;
 
 /// Discriminates per-command behavior for the completer attached to the
 /// shared `args` positional. Phase 1 uses this only for a stable marker;
@@ -81,23 +82,29 @@ fn attach_mode_completer(cmd: &mut clap::Command, mode: ComposeMode) {
     let _ = std::mem::replace(sub, rebuilt);
 }
 
-/// Dispatch a completion request into the Phase 2 discovery layer.
+/// Dispatch a completion request into the Phase 2 discovery layer and apply
+/// the Phase 3 per-mode validator.
 ///
 /// Phase 2 owns token classification, scope discovery, and bounded directory
-/// walking; the resulting [`file_reference::FileCompletionEntry`] list is
-/// converted to [`CompletionCandidate`]s here.
+/// walking; Phase 3 narrows the walked set down to the files that actually
+/// satisfy each composition mode's runtime contract:
 ///
-/// `_mode` is currently unused because Phase 2 emits every walked entry.
-/// Phase 3 will route per-mode validators through this seam, at which point
-/// the mode tag will determine the `.md` extension gate vs. frontmatter
-/// parsing.
-fn dispatch_complete(_mode: ComposeMode, current: &OsStr) -> Vec<CompletionCandidate> {
+/// - `compose` keeps every `.md` / `.markdown` file (no frontmatter parse).
+/// - `inline-compose` keeps files with a non-empty string `prompt:` field.
+/// - `sequence` keeps files whose frontmatter resolves to a real sequence
+///   plan (inline list or external YAML reference).
+///
+/// Directories are always emitted as-is so a single `<TAB>` keeps descending
+/// into a subtree. File validation is fail-closed — every I/O or parse error
+/// silently drops the candidate rather than surfacing shell-visible noise.
+fn dispatch_complete(mode: ComposeMode, current: &OsStr) -> Vec<CompletionCandidate> {
     let Some(partial) = current.to_str() else {
         return Vec::new();
     };
     let ctx = file_reference::CompletionRepoContext::discover();
     file_reference::discover_candidates(partial, &ctx)
         .into_iter()
+        .filter(|entry| entry.is_dir || validate::is_valid_for_mode(&entry.resolved_path, mode))
         .map(|entry| CompletionCandidate::new(entry.value))
         .collect()
 }

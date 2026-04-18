@@ -33,10 +33,9 @@ pub(crate) const MAX_RECURSION_DEPTH: usize = 4;
 pub(crate) const MAX_CANDIDATES: usize = 500;
 
 /// Maximum file size, in bytes, for any file the validator layer is willing
-/// to open. Larger files are skipped without reading their bodies. Used by
-/// `super::validate` in Phase 3; declared here so all walker-related limits
-/// live in one place.
-#[allow(dead_code)]
+/// to open. Larger files are skipped without reading their bodies. Declared
+/// here so all walker-related limits live in one place; consumed by
+/// [`super::validate`].
 pub(crate) const MAX_FRONTMATTER_BYTES: u64 = 1024 * 1024;
 
 /// Directory names the walker must never descend into. Treated as a curated
@@ -86,12 +85,10 @@ pub(crate) struct FileCompletionEntry {
     /// Directories carry a trailing `/`.
     pub value: String,
     /// Absolute filesystem path for the validator layer to inspect.
-    /// Consumed by `super::validate` in Phase 3.
-    #[allow(dead_code)]
     pub resolved_path: PathBuf,
-    /// True when the resolved path is a directory. Used by Phase 3 validators
-    /// to short-circuit directory entries (which always pass through).
-    #[allow(dead_code)]
+    /// True when the resolved path is a directory. Used by the Phase 3
+    /// validator dispatch to short-circuit directory entries (which always
+    /// pass through — one `<TAB>` should keep descending).
     pub is_dir: bool,
     /// Source rank for deduplication; lower wins on equal `value`.
     /// 0 = cwd-local bare, 1 = package-area, 2 = repo-wide magic,
