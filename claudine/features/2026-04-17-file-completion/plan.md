@@ -42,6 +42,12 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4:
   - claudine/docs/shell-completions.md
 skills_files_updated_during_phase4: []
+source_files_during_phase_5:
+  - claudine/cli/tests/completion_cli.rs
+docs_updated_during_phase_5:
+  - claudine/docs/shell-completions.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase5: []
 packages:
   - claudine-cli
 ---
