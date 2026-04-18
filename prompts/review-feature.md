@@ -19,7 +19,7 @@ We have just completed a feature defined in "{{dir}}":
 - technical design: "{{dir}}/{{design}}"
 ::end-block
 
-::block when="spec && design"
+::block when="And(spec, design)"
 Read both the specification and design documents and then perform a review on the implementation:
 ::end-block
 ::block when="spec"

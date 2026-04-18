@@ -178,7 +178,7 @@ review feat="":
 
     claudine compose "@prompts/review-feature.md" -y dir="${dir}" spec="$(basename ${spec})" design="$(basename ${design})"
     echo
-    echo "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
+    echo -e "🎉 review for {{bold}}{{yellow}}${feature}{{reset}} has completed"
     echo
 
 
