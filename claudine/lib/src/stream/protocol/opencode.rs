@@ -549,8 +549,9 @@ mod tests {
 
     #[test]
     fn opencode_task_completed_deserializes() {
-        let event =
-            parse(r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#);
+        let event = parse(
+            r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#,
+        );
         let OpenCodeEvent::TaskCompleted(task) = event else {
             panic!("expected TaskCompleted");
         };

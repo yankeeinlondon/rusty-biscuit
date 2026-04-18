@@ -237,7 +237,8 @@ impl StreamTextRenderer {
                 term,
                 self.terminal_options.as_ref(),
             );
-            let _ = out.write_all(rendered.as_bytes());
+            let normalized = normalize_stream_rendered_newlines(text, &rendered);
+            let _ = out.write_all(normalized.as_bytes());
         } else {
             let _ = out.write_all(text.as_bytes());
         }
@@ -274,6 +275,37 @@ fn is_stream_safe_list_item(line: &str) -> bool {
         let digits = line.bytes().take_while(|b| b.is_ascii_digit()).count();
         digits > 0 && line[digits..].starts_with(". ")
     }
+}
+
+/// Darkmatter renders each streamed fragment as a standalone Markdown
+/// document. For short fragments such as a single heading or list item,
+/// that can add synthetic trailing blank lines that were not present in
+/// the provider stream, which then shows up as loose-list spacing in the
+/// terminal. Preserve the provider-authored trailing newline count instead.
+fn normalize_stream_rendered_newlines(source: &str, rendered: &str) -> String {
+    let desired_trailing_newlines = source.bytes().rev().take_while(|b| *b == b'\n').count();
+    let mut kept_lines: Vec<&str> = rendered.split_inclusive('\n').collect();
+    while let Some(last) = kept_lines.last() {
+        let stripped = biscuit_terminal::prelude::strip_escape_codes(*last);
+        let visual = stripped.trim_end_matches('\n').trim();
+        if visual.is_empty() {
+            kept_lines.pop();
+        } else {
+            break;
+        }
+    }
+
+    let joined = kept_lines.concat();
+    let trimmed = joined.trim_end_matches('\n');
+    if desired_trailing_newlines == 0 && trimmed.len() == joined.len() {
+        return joined;
+    }
+
+    let mut normalized = trimmed.to_string();
+    for _ in 0..desired_trailing_newlines {
+        normalized.push('\n');
+    }
+    normalized
 }
 
 /// Spawn the provider child process and return its exit code.
@@ -615,9 +647,10 @@ fn wait_with_signal_handling(
 /// Behaves like [`wait_with_signal_handling`] while also polling the
 /// stderr-bridge channel. When a signal arrives, the child's process group
 /// is sent `SIGTERM` and escalated to `SIGKILL` after a 5-second grace
-/// period. The return value preserves existing SIGINT semantics and reports
-/// `Interrupted` when either a user Ctrl-C or a bridge-signaled early
-/// termination reaped the child.
+/// period. User Ctrl-C still reports `Interrupted`; wrapper-driven early
+/// termination (rate-limit recovery, silent-stall recovery) preserves a
+/// normal `Completed` termination so downstream failure handling can inspect
+/// synthesized summary fields instead of treating the run like a user cancel.
 ///
 /// Isolated to the bridge path so non-OpenCode runs keep the existing
 /// `child.wait()`-based helper.
@@ -626,6 +659,9 @@ fn wait_with_signal_and_early_termination(
     child: &mut Child,
     child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
+    live_metrics: Option<LiveMetrics>,
+    stop_threshold: Duration,
+    silent_stall_threshold: Duration,
 ) -> Result<(
     i32,
     claudine::harness::ProcessTermination,
@@ -676,8 +712,10 @@ fn wait_with_signal_and_early_termination(
             child_exited.store(true, Ordering::SeqCst);
             let code = exit_code_from_status(status);
             let was_interrupted = interrupt_count.load(Ordering::SeqCst) > 0;
-            let termination = if was_interrupted || early_termination.is_some() {
+            let termination = if was_interrupted {
                 claudine::harness::ProcessTermination::Interrupted
+            } else if early_termination.is_some() {
+                early_termination_process_outcome(early_termination.as_ref())
             } else {
                 claudine::harness::ProcessTermination::Completed
             };
@@ -709,6 +747,32 @@ fn wait_with_signal_and_early_termination(
             }
         }
 
+        if early_termination.is_none()
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) = detect_opencode_hang_termination(
+                metrics,
+                Instant::now(),
+                stop_threshold,
+                silent_stall_threshold,
+            )
+        {
+            tracing::warn!(
+                child_pid,
+                early_termination = ?signal,
+                "OpenCode silent-stall recovery triggered; sending SIGTERM to child process group",
+            );
+            let kill_pid = if child_in_own_pgroup {
+                -(child_pid as i32)
+            } else {
+                child_pid as i32
+            };
+            unsafe {
+                libc::kill(kill_pid, libc::SIGTERM);
+            }
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
         if let Some(deadline) = grace_deadline
             && Instant::now() >= deadline
         {
@@ -736,6 +800,9 @@ fn wait_with_signal_and_early_termination(
     child: &mut Child,
     _child_in_own_pgroup: bool,
     early_rx: Receiver<EarlyTermination>,
+    live_metrics: Option<LiveMetrics>,
+    stop_threshold: Duration,
+    silent_stall_threshold: Duration,
 ) -> Result<(
     i32,
     claudine::harness::ProcessTermination,
@@ -750,7 +817,7 @@ fn wait_with_signal_and_early_termination(
         if let Some(status) = child.try_wait()? {
             let code = exit_code_from_status(status);
             let termination = if early_termination.is_some() {
-                claudine::harness::ProcessTermination::Interrupted
+                early_termination_process_outcome(early_termination.as_ref())
             } else {
                 claudine::harness::ProcessTermination::Completed
             };
@@ -769,6 +836,20 @@ fn wait_with_signal_and_early_termination(
             }
         }
 
+        if early_termination.is_none()
+            && let Some(metrics) = live_metrics.as_ref()
+            && let Some(signal) = detect_opencode_hang_termination(
+                metrics,
+                Instant::now(),
+                stop_threshold,
+                silent_stall_threshold,
+            )
+        {
+            let _ = child.kill();
+            early_termination = Some(signal);
+            grace_deadline = Some(Instant::now() + grace_period);
+        }
+
         if let Some(deadline) = grace_deadline
             && Instant::now() >= deadline
         {
@@ -780,11 +861,8 @@ fn wait_with_signal_and_early_termination(
     }
 }
 
-/// Overwrite the synthesized failure fields when the stderr bridge signals
-/// a terminal early-exit condition. Today only
-/// [`EarlyTermination::RateLimit`] applies, which produces a
-/// `usage_limit_reached` error so the summary, JSONL log, and Quota badge
-/// all describe the failure even though the child was killed by a signal.
+/// Overwrite the synthesized summary fields when the stderr bridge or the
+/// OpenCode wait loop signals an early-exit condition.
 ///
 /// Preserves any parser-provided `rate_limit` fields field-by-field:
 /// `is_throttled` is forced to `Some(true)`, `message` is only set when
@@ -811,6 +889,18 @@ fn apply_early_termination_to_summary(
                 rate_limit.reset_at = Some(*reset);
             }
             summary.rate_limit = Some(rate_limit);
+        }
+        EarlyTermination::CompletedButHung { .. } => {
+            summary.exit_code = 0;
+            summary.is_error = false;
+            summary.error_kind = None;
+            summary.error_message = None;
+        }
+        EarlyTermination::SilentStall { message } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("provider_stalled".into());
+            summary.error_message = Some(message.clone());
         }
     }
 }
@@ -1192,6 +1282,23 @@ fn stall_threshold_from_env(policy: HeartbeatPolicy) -> Duration {
     }
 }
 
+/// Resolve the OpenCode silent-stall recovery threshold.
+///
+/// This is separate from the user-facing stall warning: the warning fires
+/// first, then OpenCode gets additional time to recover before Claudine
+/// kills the hung process group. Invalid or non-positive values fall back to
+/// 5 minutes.
+fn opencode_hang_threshold_from_env() -> Duration {
+    match std::env::var("CLAUDINE_OPENCODE_HANG_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+    {
+        Some(secs) => Duration::from_secs(secs),
+        None => Duration::from_secs(300),
+    }
+}
+
 /// Check the live metrics for a stalled stream and emit one warning per
 /// stall episode. Returns `true` when a warning was emitted on this call.
 ///
@@ -1232,6 +1339,54 @@ fn format_stall_duration(secs: u64) -> String {
         format!("{}m", secs / 60)
     } else {
         format!("{}h{}m", secs / 3_600, (secs % 3_600) / 60)
+    }
+}
+
+fn detect_opencode_hang_termination(
+    metrics: &LiveMetrics,
+    now: Instant,
+    stop_threshold: Duration,
+    silent_stall_threshold: Duration,
+) -> Option<EarlyTermination> {
+    let state = metrics.lock().ok()?;
+    let last_event_at = state.last_event_at?;
+    let silence = now.saturating_duration_since(last_event_at);
+
+    if !state.in_flight.is_empty() || !state.in_flight_subagents.is_empty() {
+        return None;
+    }
+
+    let silence_text = format_stall_duration(silence.as_secs());
+    if silence >= stop_threshold && state.provider_status.as_deref() == Some("stop") {
+        return Some(EarlyTermination::CompletedButHung {
+            message: format!(
+                "OpenCode reported stop but stayed alive for {silence_text}; terminating hung process"
+            ),
+        });
+    }
+
+    if silence >= silent_stall_threshold {
+        return Some(EarlyTermination::SilentStall {
+            message: format!(
+                "OpenCode produced no activity for {silence_text}; terminating hung process"
+            ),
+        });
+    }
+
+    None
+}
+
+fn early_termination_process_outcome(
+    early_termination: Option<&EarlyTermination>,
+) -> claudine::harness::ProcessTermination {
+    match early_termination {
+        Some(EarlyTermination::CompletedButHung { .. }) => {
+            claudine::harness::ProcessTermination::Completed
+        }
+        Some(EarlyTermination::RateLimit { .. } | EarlyTermination::SilentStall { .. }) => {
+            claudine::harness::ProcessTermination::Completed
+        }
+        None => claudine::harness::ProcessTermination::Completed,
     }
 }
 
@@ -1363,6 +1518,7 @@ pub(crate) fn run_child_stream_semantic(
 
     let heartbeat_output = stream_output.clone();
     let stdout_output = stream_output.clone();
+    let wait_loop_metrics = live_metrics.clone();
     let heartbeat = spawn_progress_heartbeat(
         show_progress_heartbeat,
         started_at,
@@ -1503,15 +1659,34 @@ pub(crate) fn run_child_stream_semantic(
         stdin_pipe.write_all(seed.as_bytes())?;
     }
 
+    let stall_threshold = stall_threshold_from_env(heartbeat_policy);
+    let opencode_hang_threshold = opencode_hang_threshold_from_env();
     let (exit_code, termination, early_termination) = if let Some(seconds) = timeout {
         let (code, term) = wait_with_timeout(&mut child, seconds)?;
         (code, term, None)
     } else if let Some(rx) = early_terminate_rx {
-        wait_with_signal_and_early_termination(&mut child, true, rx)?
+        wait_with_signal_and_early_termination(
+            &mut child,
+            true,
+            rx,
+            Some(wait_loop_metrics),
+            stall_threshold,
+            opencode_hang_threshold,
+        )?
     } else {
         let (code, term) = wait_with_signal_handling(&mut child, true)?;
         (code, term, None)
     };
+
+    if let Some(
+        EarlyTermination::CompletedButHung { message } | EarlyTermination::SilentStall { message },
+    ) = early_termination.as_ref()
+    {
+        let rendered = Status::new(message)
+            .state(StatusState::Warning)
+            .render(&crate::log::terminal());
+        stream_output.emit_stderr_line(&rendered);
+    }
 
     kill_process_group(&mut child);
     stop_progress_heartbeat(heartbeat);
@@ -1583,6 +1758,7 @@ fn exit_code_from_status(status: ExitStatus) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use darkmatter::markdown::output::terminal::{TerminalImageMode, TerminalOptions};
 
     fn test_renderer() -> StreamTextRenderer {
         StreamTextRenderer {
@@ -1593,6 +1769,21 @@ mod tests {
             last_block_growth_at: None,
             term: None,
             terminal_options: None,
+        }
+    }
+
+    fn markdown_renderer() -> StreamTextRenderer {
+        let term = Terminal::new_optimistic(80);
+        let mut opts = TerminalOptions::default();
+        opts.image_mode = TerminalImageMode::Never;
+        StreamTextRenderer {
+            block_buffer: String::new(),
+            line_buffer: String::new(),
+            in_code_fence: false,
+            partial_line_committed: false,
+            last_block_growth_at: None,
+            term: Some(term),
+            terminal_options: Some(opts),
         }
     }
 
@@ -1679,6 +1870,37 @@ mod tests {
         assert_eq!(flushed, "1. first item\n2. second item\n");
         assert!(renderer.block_buffer.is_empty());
         assert!(renderer.line_buffer.is_empty());
+    }
+
+    #[test]
+    fn markdown_streamed_list_items_do_not_gain_blank_lines() {
+        let mut renderer = markdown_renderer();
+        let mut out = Vec::new();
+
+        renderer.push(
+            &mut out,
+            "- Hash: `f525870d`\n- Package: `claudine`\n- Operation: `feat`\n",
+        );
+        let flushed =
+            biscuit_terminal::prelude::strip_escape_codes(&String::from_utf8(out).expect("utf8"));
+
+        assert!(
+            !flushed.contains("\n\n"),
+            "streamed list items should stay contiguous; got: {flushed:?}"
+        );
+    }
+
+    #[test]
+    fn normalize_stream_rendered_newlines_matches_source_trailing_newlines() {
+        assert_eq!(
+            normalize_stream_rendered_newlines("- item\n", "- item\n\n"),
+            "- item\n"
+        );
+        assert_eq!(
+            normalize_stream_rendered_newlines("paragraph\n\n", "paragraph\n\n\n"),
+            "paragraph\n\n"
+        );
+        assert_eq!(normalize_stream_rendered_newlines("done", "done\n"), "done");
     }
 
     #[test]
@@ -2037,5 +2259,96 @@ mod tests {
         assert_eq!(rl.reset_at, Some(existing_reset));
         // retry_after_ms is untouched.
         assert_eq!(rl.retry_after_ms, Some(5000));
+    }
+
+    #[test]
+    fn apply_early_termination_completed_but_hung_restores_success() {
+        let mut summary = StreamExecutionSummary {
+            exit_code: 143,
+            is_error: true,
+            error_kind: Some("agent_native".into()),
+            error_message: Some("killed".into()),
+            ..Default::default()
+        };
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::CompletedButHung {
+                message: "OpenCode reported stop but stayed alive".into(),
+            },
+        );
+
+        assert_eq!(summary.exit_code, 0);
+        assert!(!summary.is_error);
+        assert!(summary.error_kind.is_none());
+        assert!(summary.error_message.is_none());
+    }
+
+    #[test]
+    fn apply_early_termination_silent_stall_sets_provider_stalled_error() {
+        let mut summary = StreamExecutionSummary::default();
+
+        apply_early_termination_to_summary(
+            &mut summary,
+            &EarlyTermination::SilentStall {
+                message: "OpenCode produced no activity for 5m".into(),
+            },
+        );
+
+        assert_eq!(summary.exit_code, 1);
+        assert!(summary.is_error);
+        assert_eq!(summary.error_kind.as_deref(), Some("provider_stalled"));
+        assert!(
+            summary
+                .error_message
+                .as_deref()
+                .unwrap_or("")
+                .contains("no activity"),
+        );
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_recovers_after_stop_reason() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(180));
+            state.provider_status = Some("stop".into());
+        }
+
+        let detected = detect_opencode_hang_termination(
+            &metrics,
+            now,
+            Duration::from_secs(120),
+            Duration::from_secs(300),
+        );
+
+        assert!(matches!(
+            detected,
+            Some(EarlyTermination::CompletedButHung { .. })
+        ));
+    }
+
+    #[test]
+    fn detect_opencode_hang_termination_reports_generic_silent_stall() {
+        let metrics = claudine::stream::progress::new_live_metrics();
+        let now = Instant::now();
+        {
+            let mut state = metrics.lock().unwrap();
+            state.last_event_at = Some(now - Duration::from_secs(360));
+        }
+
+        let detected = detect_opencode_hang_termination(
+            &metrics,
+            now,
+            Duration::from_secs(120),
+            Duration::from_secs(300),
+        );
+
+        assert!(matches!(
+            detected,
+            Some(EarlyTermination::SilentStall { .. })
+        ));
     }
 }

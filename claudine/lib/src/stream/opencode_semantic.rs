@@ -30,8 +30,8 @@ use serde_json::{Map, Value};
 use super::parser::{SemanticStreamParser, StreamParseError};
 use super::protocol::opencode::{
     OpenCodeError, OpenCodeEvent, OpenCodeInit, OpenCodeReasoning, OpenCodeStepComplete,
-    OpenCodeStepFinish, OpenCodeStepStart, OpenCodeTaskEvent, OpenCodeTaskProgress,
-    OpenCodeText, OpenCodeTool,
+    OpenCodeStepFinish, OpenCodeStepStart, OpenCodeTaskEvent, OpenCodeTaskProgress, OpenCodeText,
+    OpenCodeTool,
 };
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::StreamExecutionSummary;

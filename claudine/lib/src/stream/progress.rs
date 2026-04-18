@@ -91,6 +91,13 @@ pub struct LiveMetricsState {
     pub token_usage: Option<NormalizedTokenUsage>,
     /// Latest known cost-in-USD for the session.
     pub cost_usd: Option<f64>,
+    /// Latest provider-reported completion / stop status.
+    ///
+    /// OpenCode often stops at `step_finish.part.reason = "stop"` without a
+    /// dedicated terminal event. The wrapper's hang-recovery path inspects
+    /// this field to distinguish "answer finished but process never exited"
+    /// from a generic silent stall.
+    pub provider_status: Option<String>,
     /// Wall-clock time of the most recent observed event of any kind (tool
     /// start, tool end, or assistant text delta). The heartbeat suppresses
     /// ticks when this is recent so busy streams stay quiet; a stale value
@@ -241,15 +248,28 @@ impl LiveMetricsState {
                 self.subagent_done_count += 1;
             }
             SemanticEvent::TurnComplete {
+                provider_status,
                 token_usage,
                 cost_usd,
                 ..
             } => {
+                if let Some(status) = provider_status {
+                    self.provider_status = Some(status.clone());
+                }
                 if let Some(usage) = token_usage {
                     self.token_usage = Some(usage.clone());
                 }
                 if let Some(cost) = cost_usd {
                     self.cost_usd = Some(*cost);
+                }
+            }
+            SemanticEvent::Info { extra, .. } => {
+                let step_phase = extra.get("step_phase").and_then(serde_json::Value::as_str);
+                let reason = extra.get("reason").and_then(serde_json::Value::as_str);
+                if step_phase == Some("finish")
+                    && let Some(reason) = reason.filter(|reason| !reason.is_empty())
+                {
+                    self.provider_status = Some(reason.to_string());
                 }
             }
             _ => {}
@@ -765,7 +785,7 @@ mod tests {
             let now = Instant::now();
             state.observe_event(
                 &SemanticEvent::TurnComplete {
-                    provider_status: None,
+                    provider_status: Some("stop".into()),
                     token_usage: Some(NormalizedTokenUsage {
                         input: Some(100),
                         output: Some(50),
@@ -779,8 +799,26 @@ mod tests {
                 now,
             );
             assert_eq!(state.cost_usd, Some(0.01));
+            assert_eq!(state.provider_status.as_deref(), Some("stop"));
             let tu = state.token_usage.unwrap();
             assert_eq!(tu.input, Some(100));
+        }
+
+        #[test]
+        fn step_finish_info_updates_provider_status() {
+            let mut state = LiveMetricsState::default();
+            let now = Instant::now();
+            state.observe_event(
+                &SemanticEvent::Info {
+                    message: "step_finish".into(),
+                    extra: serde_json::json!({
+                        "step_phase": "finish",
+                        "reason": "tool-calls"
+                    }),
+                },
+                now,
+            );
+            assert_eq!(state.provider_status.as_deref(), Some("tool-calls"));
         }
 
         #[test]

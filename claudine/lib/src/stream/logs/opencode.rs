@@ -482,8 +482,8 @@ pub enum StderrIngestOutcome {
 /// Reason the bridge wants `run_child_stream_semantic(...)` to terminate
 /// the child process early.
 ///
-/// Today this only fires for pre-stream usage-cap failures, where the
-/// provider would otherwise retry until the reset time.
+/// Today this fires for pre-stream usage-cap failures plus wrapper-driven
+/// silent-stall recovery in OpenCode's structured non-interactive path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EarlyTermination {
     /// The provider reported a rate-limit failure before any stdout
@@ -492,6 +492,15 @@ pub enum EarlyTermination {
         message: String,
         reset_at: Option<DateTime<Utc>>,
     },
+    /// OpenCode reported a terminal stop condition (`reason = "stop"`) but
+    /// the process never exited. The wrapper terminates the hung process and
+    /// treats the run as successful because the semantic stream had already
+    /// finished.
+    CompletedButHung { message: String },
+    /// OpenCode went completely silent for too long with no visible in-flight
+    /// work left. The wrapper terminates the hung process and reports a
+    /// synthetic `provider_stalled` failure.
+    SilentStall { message: String },
 }
 
 /// Shared stderr-side state accumulated by the bridge as it parses lines.

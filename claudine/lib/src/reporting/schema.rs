@@ -277,10 +277,7 @@ fn validate_identifier(ident: &str, kind: &str) -> Result<()> {
             "SQL {kind} identifier must not be empty"
         )));
     }
-    if !ident
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if !ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(crate::error::ClaudineError::ConfigValidation(format!(
             "SQL {kind} identifier `{ident}` contains invalid characters (only [a-zA-Z0-9_] allowed)"
         )));

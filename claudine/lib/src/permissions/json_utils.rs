@@ -43,10 +43,7 @@ mod tests {
         let mut root = json!({"a": {"existing": true}});
         let result = ensure_json_value(&mut root, &["a", "new_key"]);
         *result = json!("hello");
-        assert_eq!(
-            root,
-            json!({"a": {"existing": true, "new_key": "hello"}})
-        );
+        assert_eq!(root, json!({"a": {"existing": true, "new_key": "hello"}}));
     }
 
     #[test]
