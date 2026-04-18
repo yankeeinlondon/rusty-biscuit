@@ -144,20 +144,21 @@ fn agents_and_commands_route_to_empty_state_messages() {
 }
 
 #[test]
-fn completions_write_to_stdout_for_supported_shells() {
-    for (shell, marker, edit_marker) in [
-        ("bash", "_claudine()", "--edit"),
-        ("zsh", "#compdef claudine", "--edit[Open the prompt"),
+fn completions_emit_dynamic_bootstrap_snippets() {
+    // `claudine completions <shell>` no longer ships a static clap_complete
+    // script; it now emits a one-line bootstrap that activates dynamic
+    // completion via the `COMPLETE=<shell>` runtime hook. Each expected
+    // snippet is exact except that the marker assertions skip trailing
+    // whitespace so future formatting tweaks don't break the contract.
+    for (shell, expected) in [
+        ("bash", "source <(COMPLETE=bash claudine)\n"),
+        ("zsh", "source <(COMPLETE=zsh claudine)\n"),
+        ("fish", "COMPLETE=fish claudine | source\n"),
         (
-            "fish",
-            "complete -c claudine",
-            "-l edit -d 'Open the prompt in an external editor before launching the provider'",
+            "powershell",
+            "& { $env:COMPLETE=\"powershell\"; claudine } | Out-String | Invoke-Expression\n",
         ),
-        (
-            "elvish",
-            "edit:completion:arg-completer[claudine]",
-            "cand --edit 'Open the prompt in an external editor before launching the provider'",
-        ),
+        ("elvish", "eval (E:COMPLETE=elvish claudine | slurp)\n"),
     ] {
         let output = cargo_bin_cmd!("claudine")
             .env("NO_COLOR", "1")
@@ -169,17 +170,17 @@ fn completions_write_to_stdout_for_supported_shells() {
 
         let stdout = String::from_utf8(output.stdout).unwrap();
         let stderr = String::from_utf8(output.stderr).unwrap();
-        assert!(
-            stdout.contains(marker),
-            "expected {shell} completion output to contain {marker:?}"
+        assert_eq!(
+            stdout, expected,
+            "expected {shell} bootstrap snippet to match exactly",
         );
         assert!(
             stderr.trim().is_empty(),
             "expected no stderr, got: {stderr}"
         );
         assert!(
-            stdout.contains(edit_marker),
-            "expected {shell} completion output to advertise wrapper --edit support"
+            !stdout.contains("_clap_complete"),
+            "{shell} bootstrap leaked the retired static clap_complete script",
         );
     }
 }

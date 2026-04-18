@@ -39,6 +39,37 @@ parsing fails, so `count=3`, `enabled=true`, `tags=["a","b"]`, and
 Inline setters override matching keys from `--set`. For `sequence`, reserved
 per-step overlay keys still win over both `--set` and shorthand setters.
 
+### Shell Completion
+
+The file-reference positional on all three composition commands is wired
+to Claudine's dynamic completer. Type part of a file reference and press
+`<TAB>`; the shell calls back into Claudine itself to produce candidates
+that match the command's validity rules:
+
+| Command            | Completion filter                                                      |
+| ------------------ | ---------------------------------------------------------------------- |
+| `compose`          | any `.md` / `.markdown` file (extension-only)                          |
+| `inline-compose`   | markdown files with a non-empty string `prompt:` frontmatter value     |
+| `sequence`         | markdown files whose frontmatter resolves to a valid sequence plan     |
+
+Sigils pick the scope:
+
+- `@<TAB>` walks the current repo root plus `~/.claudine/{prompts,sequences}`.
+- `!<TAB>` walks only the current monorepo package area.
+- `./<TAB>` / `../<TAB>` list immediate children of cwd / parent.
+- A bare partial (`<TAB>` with no sigil) shows a curated landing menu
+  union.
+
+`key=<TAB>` setters and explicitly unsupported prefixes (`vault:`, `/abs`,
+`%`, `{{…}}`) return zero candidates so the shell falls back to its
+default behavior.
+
+The completer binary updates automatically — Claudine owns the runtime
+completion output, so you never need to regenerate a static script.
+Install the one-time bootstrap snippet with
+`claudine completions <shell>`; see [shell-completions.md](../shell-completions.md)
+for the full install matrix and the unsupported-prefix rationale.
+
 ## Direct Composition
 
 Direct composition takes a Markdown file, composes it through Darkmatter, and sends the composed content as a prompt to an agentic CLI. No files are mutated.
