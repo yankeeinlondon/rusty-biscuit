@@ -157,8 +157,12 @@ async fn async_main(argv: Vec<OsString>) -> Result<()> {
     };
 
     // Commands that must work without config (handle is a hook callback,
-    // completions is shell setup). Everything else requires config.
-    let needs_config = !matches!(command, Commands::Handle(_) | Commands::Completions(_));
+    // completions is shell setup, __complete runs under a shell completion
+    // pipeline). Everything else requires config.
+    let needs_config = !matches!(
+        command,
+        Commands::Handle(_) | Commands::Completions(_) | Commands::Complete(_)
+    );
     if needs_config {
         ensure_config_exists().await?;
     }
@@ -166,6 +170,7 @@ async fn async_main(argv: Vec<OsString>) -> Result<()> {
     match command {
         Commands::Handle(args) => commands::handle::run(args).await,
         Commands::Completions(args) => commands::completions::run(args),
+        Commands::Complete(args) => commands::completions::run_complete(args),
         Commands::Config(args) => commands::config_tui::run(args).await,
         Commands::Sync(args) => commands::sync::run(args).await,
         Commands::Hooks(args) => commands::hooks::run(args, cli.verbose > 0),

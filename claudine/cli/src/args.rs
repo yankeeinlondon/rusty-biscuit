@@ -59,6 +59,9 @@ pub(crate) enum Commands {
     Handle(commands::handle::HandleArgs),
     /// Generate shell completions.
     Completions(commands::completions::CompletionsArgs),
+    /// Hidden completion engine invoked by generated bash/zsh/fish scripts.
+    #[command(name = "__complete", hide = true)]
+    Complete(commands::completions::CompleteArgs),
     /// Manage Claudine configuration with a TUI.
     Config(commands::config_tui::ConfigArgs),
     /// Re-sync hook registrations with detected agents.

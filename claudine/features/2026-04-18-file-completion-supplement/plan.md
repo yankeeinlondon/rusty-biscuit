@@ -28,15 +28,14 @@ source_files_during_phase_4:
   - claudine/cli/src/args.rs
   - claudine/cli/src/main.rs
   - claudine/cli/src/argv.rs
-  - claudine/cli/src/commands/mod.rs
   - claudine/cli/src/commands/completions.rs
   - claudine/cli/src/completion/mod.rs
-  - claudine/cli/src/completion/bootstrap.rs
-  - claudine/cli/src/completion/file_reference.rs
-  - claudine/cli/src/completion/validate.rs
+  - claudine/cli/src/completion/supplement.rs
+  - claudine/cli/src/telemetry.rs
 docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase4: []
+packages_during_phase_4: [claudine-cli]
 source_files_during_phase_5:
   - claudine/cli/src/commands/completions.rs
   - claudine/cli/src/completion/bootstrap.rs

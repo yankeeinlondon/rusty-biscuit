@@ -118,6 +118,15 @@ fn normalize_inner(raw: Vec<OsString>, completion_active: bool) -> Vec<OsString>
         return raw;
     }
 
+    // The hidden `__complete` subcommand receives the user's original argv
+    // as its trailing value. Rewriting any of those tokens (Rule 2's
+    // `--provider` canonicalization in particular) would corrupt the
+    // payload the supplement engine classifies against, so normalize is a
+    // full no-op for `__complete` subcommand invocations.
+    if find_subcommand(&raw, &["__complete"]).is_some() {
+        return raw;
+    }
+
     // Rule 1 is gated on composition subcommands so wrapper passthrough
     // never sees its own flags silently rewritten into `--provider <slug>`.
     let is_composition = find_subcommand(&raw, COMPOSITION_SUBCOMMANDS).is_some();
