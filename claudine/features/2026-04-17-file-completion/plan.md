@@ -1,7 +1,7 @@
 ---
 phases: 6
 created: 2026-04-17
-start_phase: 2
+start_phase: 3
 source_files_during_phase_0: []
 docs_updated_during_phase_0: []
 docs_created_during_phase_0:
@@ -19,6 +19,12 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase1: []
+source_files_during_phase_2:
+  - claudine/cli/src/completion/file_reference.rs
+  - claudine/cli/src/completion/command_factory.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
 packages:
   - claudine-cli
 ---
