@@ -7,6 +7,13 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: [claudine/features/2026-04-18-opencode-reporting-improvements/plan.md]
 docs_created_during_phase_1: []
 skills_files_updated_during_phase1: []
+source_files_during_phase_2:
+  - claudine/lib/src/stream/opencode_semantic.rs
+  - claudine/lib/src/stream/tool_display.rs
+  - claudine/lib/tests/semantic_fidelity.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase2: []
 ---
 
 ## Phase 1 Baseline — Audit Findings
