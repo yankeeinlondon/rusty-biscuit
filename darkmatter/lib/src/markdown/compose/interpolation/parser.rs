@@ -1025,4 +1025,143 @@ mod tests {
             assert_eq!(expr.to_string(), "length(items)");
         }
     }
+
+    mod condition_mode_logic {
+        use super::*;
+
+        fn extract_call(expr: &Expr) -> (&str, &[Expr]) {
+            match expr {
+                Expr::FunctionCall { name, args } => (name.as_str(), args.as_slice()),
+                other => panic!("expected FunctionCall, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn condition_parses_infix_and() {
+            let expr = parse_condition("a && b").unwrap();
+            let (name, args) = extract_call(&expr);
+            assert_eq!(name, "And");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "b"));
+        }
+
+        #[test]
+        fn condition_parses_infix_or() {
+            let expr = parse_condition("a || b").unwrap();
+            let (name, args) = extract_call(&expr);
+            assert_eq!(name, "Or");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "b"));
+        }
+
+        #[test]
+        fn condition_and_binds_tighter_than_or_left() {
+            // a && b || c parses as (a && b) || c
+            let expr = parse_condition("a && b || c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "Or");
+            assert_eq!(args.len(), 2);
+            let (inner, inner_args) = extract_call(&args[0]);
+            assert_eq!(inner, "And");
+            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn condition_and_binds_tighter_than_or_right() {
+            // a || b && c parses as a || (b && c)
+            let expr = parse_condition("a || b && c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "Or");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
+            let (inner, inner_args) = extract_call(&args[1]);
+            assert_eq!(inner, "And");
+            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "b"));
+            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn condition_parenthesized_or_then_and() {
+            // (a || b) && c parses as And(Or(a, b), c)
+            let expr = parse_condition("(a || b) && c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "And");
+            assert_eq!(args.len(), 2);
+            let (inner, inner_args) = extract_call(&args[0]);
+            assert_eq!(inner, "Or");
+            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn condition_fallback_inside_or() {
+            // a || (b | c) — fallback parses tighter than ||, and parens
+            // preserve the fallback as the rhs of the Or.
+            let expr = parse_condition("a || (b | c)").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "Or");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&args[1], Expr::Fallback { .. }));
+        }
+
+        #[test]
+        fn condition_fallback_binds_tighter_than_and() {
+            // a | b && c parses as And(Fallback(a, b), c)
+            let expr = parse_condition("a | b && c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "And");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(&args[0], Expr::Fallback { .. }));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn interpolation_double_pipe_still_fallback() {
+            let expr = parse(r#"plan || "plan.md""#).unwrap();
+            match expr {
+                Expr::Fallback { primary, fallback } => {
+                    assert!(matches!(*primary, Expr::Variable(ref n) if n == "plan"));
+                    assert!(matches!(*fallback, Expr::StringLiteral(ref s) if s == "plan.md"));
+                }
+                _ => panic!("Expected Fallback"),
+            }
+        }
+
+        #[test]
+        fn interpolation_rejects_infix_and() {
+            let result = parse("a && b");
+            assert!(result.is_err(), "&& must be rejected in interpolation mode");
+        }
+
+        #[test]
+        fn condition_chained_and_left_associative() {
+            // a && b && c parses as And(And(a, b), c)
+            let expr = parse_condition("a && b && c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "And");
+            assert_eq!(args.len(), 2);
+            let (inner, inner_args) = extract_call(&args[0]);
+            assert_eq!(inner, "And");
+            assert!(matches!(&inner_args[0], Expr::Variable(n) if n == "a"));
+            assert!(matches!(&inner_args[1], Expr::Variable(n) if n == "b"));
+            assert!(matches!(&args[1], Expr::Variable(n) if n == "c"));
+        }
+
+        #[test]
+        fn condition_chained_or_left_associative() {
+            // a || b || c parses as Or(Or(a, b), c)
+            let expr = parse_condition("a || b || c").unwrap();
+            let (outer, args) = extract_call(&expr);
+            assert_eq!(outer, "Or");
+            assert_eq!(args.len(), 2);
+            let (inner, _) = extract_call(&args[0]);
+            assert_eq!(inner, "Or");
+        }
+    }
 }

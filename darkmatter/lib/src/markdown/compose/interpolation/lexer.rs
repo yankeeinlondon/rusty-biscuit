@@ -1328,4 +1328,61 @@ After code {{ end }}."#;
             assert_eq!(err.to_string(), "Test error at position 5");
         }
     }
+
+    mod condition_mode_tokens {
+        use super::*;
+
+        #[test]
+        fn condition_mode_double_pipe_is_or_or() {
+            let mut lexer = Lexer::with_mode("a || b", ParseMode::Condition);
+            let tokens = lexer.tokenize_all().unwrap();
+            assert!(matches!(&tokens[1], Token::OrOr));
+        }
+
+        #[test]
+        fn condition_mode_double_amp_is_and_and() {
+            let mut lexer = Lexer::with_mode("a && b", ParseMode::Condition);
+            let tokens = lexer.tokenize_all().unwrap();
+            assert!(matches!(&tokens[1], Token::AndAnd));
+        }
+
+        #[test]
+        fn condition_mode_single_pipe_stays_fallback() {
+            let mut lexer = Lexer::with_mode("a | b", ParseMode::Condition);
+            let tokens = lexer.tokenize_all().unwrap();
+            assert!(matches!(&tokens[1], Token::Pipe));
+        }
+
+        #[test]
+        fn condition_mode_single_amp_still_errors() {
+            let mut lexer = Lexer::with_mode("a & b", ParseMode::Condition);
+            let result = lexer.tokenize_all();
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn interpolation_mode_double_pipe_collapses_to_fallback() {
+            let mut lexer = Lexer::with_mode("a || b", ParseMode::Interpolation);
+            let tokens = lexer.tokenize_all().unwrap();
+            assert!(matches!(&tokens[1], Token::Pipe));
+        }
+
+        #[test]
+        fn interpolation_mode_double_amp_errors() {
+            let mut lexer = Lexer::with_mode("a && b", ParseMode::Interpolation);
+            let result = lexer.tokenize_all();
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn condition_mode_mixed_operators_tokens() {
+            let mut lexer = Lexer::with_mode("a && b || c", ParseMode::Condition);
+            let tokens = lexer.tokenize_all().unwrap();
+            assert!(matches!(&tokens[0], Token::Variable(v) if v == "a"));
+            assert!(matches!(&tokens[1], Token::AndAnd));
+            assert!(matches!(&tokens[2], Token::Variable(v) if v == "b"));
+            assert!(matches!(&tokens[3], Token::OrOr));
+            assert!(matches!(&tokens[4], Token::Variable(v) if v == "c"));
+        }
+    }
 }

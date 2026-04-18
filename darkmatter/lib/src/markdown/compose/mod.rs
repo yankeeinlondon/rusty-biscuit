@@ -3967,4 +3967,122 @@ Rounded: {{ round(pi) }}"#;
             );
         }
     }
+
+    mod infix_logic_conditions {
+        use super::*;
+
+        fn compose_with_page_blocks(content: &str) -> (String, ComposeReport) {
+            let md: Markdown = content.into();
+            let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
+            let (composed, report) = md.compose_with(options).unwrap();
+            (composed.content().to_string(), report)
+        }
+
+        #[test]
+        fn page_block_with_infix_and_true() {
+            let content = "---\na: true\nb: true\n---\n::block when=\"a && b\"\ninside\n::end-block\n";
+            let (output, report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+            assert_eq!(report.page_blocks_rendered, 1);
+            assert_eq!(report.page_blocks_skipped, 0);
+        }
+
+        #[test]
+        fn page_block_with_infix_and_false() {
+            let content =
+                "---\na: true\nb: false\n---\n::block when=\"a && b\"\ninside\n::end-block\n";
+            let (output, report) = compose_with_page_blocks(content);
+            assert!(!output.contains("inside"));
+            assert_eq!(report.page_blocks_rendered, 0);
+            assert_eq!(report.page_blocks_skipped, 1);
+        }
+
+        #[test]
+        fn page_block_with_infix_or_one_true() {
+            let content =
+                "---\na: false\nb: true\n---\n::block when=\"a || b\"\ninside\n::end-block\n";
+            let (output, report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+            assert_eq!(report.page_blocks_rendered, 1);
+        }
+
+        #[test]
+        fn page_block_with_infix_or_both_false() {
+            let content =
+                "---\na: false\nb: false\n---\n::block when=\"a || b\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content);
+            assert!(!output.contains("inside"));
+        }
+
+        #[test]
+        fn page_block_with_grouped_precedence() {
+            // (a || b) && c — grouping overrides default precedence
+            let content = "---\na: false\nb: true\nc: true\n---\n::block when=\"(a || b) && c\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+
+            let content_false = "---\na: false\nb: true\nc: false\n---\n::block when=\"(a || b) && c\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content_false);
+            assert!(!output.contains("inside"));
+        }
+
+        #[test]
+        fn page_block_fallback_mixed_with_infix() {
+            // Fallback `|` binds tighter than `||`. When `missing_var` is unset,
+            // the fallback yields "go" which matches the literal, and `|| b`
+            // short-circuits to true.
+            let content = "---\nb: false\n---\n::block when=\"(missing_var | \\\"go\\\") == \\\"go\\\" || b\"\ninside\n::end-block\n";
+            let (output, _report) = compose_with_page_blocks(content);
+            assert!(output.contains("inside"));
+        }
+
+        #[test]
+        fn transclusion_directive_with_mixed_infix_logic() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            // Child loaded only if (enabled || fallback) && !skip
+            std::fs::write(&child, "child body").unwrap();
+            std::fs::write(
+                &root,
+                "---\nenabled: true\nskip: false\n---\nbefore\n\n::file child.md when=\"enabled && !skip\"\n\nafter\n",
+            )
+            .unwrap();
+
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .only(&[ComposeOperation::BlockTransclusion]);
+
+            let (composed, _) = Markdown::try_from(root.as_path())
+                .unwrap()
+                .compose_with(options)
+                .unwrap();
+            assert!(composed.content().contains("child body"));
+        }
+
+        #[test]
+        fn transclusion_skipped_when_infix_condition_false() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.md");
+            let child = dir.path().join("child.md");
+
+            std::fs::write(&child, "child body").unwrap();
+            std::fs::write(
+                &root,
+                "---\nenabled: true\nskip: true\n---\nbefore\n\n::file child.md when=\"enabled && !skip\"\n\nafter\n",
+            )
+            .unwrap();
+
+            let options = ComposeOptions::new()
+                .with_source_file(&root)
+                .only(&[ComposeOperation::BlockTransclusion]);
+
+            let (composed, _) = Markdown::try_from(root.as_path())
+                .unwrap()
+                .compose_with(options)
+                .unwrap();
+            assert!(!composed.content().contains("child body"));
+        }
+    }
 }
