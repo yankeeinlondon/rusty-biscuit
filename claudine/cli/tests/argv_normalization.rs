@@ -29,18 +29,29 @@ fn write_fixture(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
 // Headline integration cases (spec: "Testing → Integration tests")
 // ──────────────────────────────────────────────────────────────────────
 
-/// Rule 3 insertion: `compose <file> --<provider-bool> key=val --help`.
+/// Rule 4 + Rule 3 headline: `compose <file> --<provider-bool> key=val --help`
+/// must render the compose-tier help screen, not a clap error.
 ///
 /// Before this feature, clap emitted the misleading
 /// `tip: to pass '--help' as a value, use '-- --help'` diagnostic because
-/// the greedy positional collector swallowed `--help`. After normalization,
-/// Rule 1 canonicalises `--gemini` to `--provider gemini` and Rule 3
-/// inserts a `--` before `name=Ken`, so clap never hits the misleading
-/// "unexpected argument" arm. The specific exit behavior of compose is
-/// out of scope; the assertion we care about is that the pre-existing
-/// clap tip is gone from stderr.
+/// the greedy positional collector swallowed `--help`. The first fix
+/// landed only Rule 1 and Rule 3 — that suppressed the clap tip but
+/// surfaced a new "expected at most one file reference" Claudine error
+/// because `--` buried `--help` in the trailing raw-value bucket, which
+/// the downstream positional parser then misclassified as a second file
+/// reference. Rule 4 closes the loop by hoisting `--help` to position 1,
+/// so the root `cli.help` handler fires and the grouped help screen
+/// renders.
+///
+/// The assertion suite covers three user-visible guarantees:
+///
+/// 1. the process exits successfully;
+/// 2. Claudine's own help content appears (the command group heading
+///    and the `compose` entry are both visible);
+/// 3. neither the original clap tip nor the secondary Claudine error
+///    leak into the output.
 #[test]
-fn headline_compose_with_interleaved_flag_no_longer_trips_clap_help_tip() {
+fn headline_compose_with_interleaved_flag_renders_help() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "greet.md");
 
@@ -53,7 +64,8 @@ fn headline_compose_with_interleaved_flag_no_longer_trips_clap_help_tip() {
             "name=Ken",
             "--help",
         ])
-        .assert();
+        .assert()
+        .success();
 
     let output = assert.get_output().clone();
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -62,13 +74,56 @@ fn headline_compose_with_interleaved_flag_no_longer_trips_clap_help_tip() {
     let plain = strip_ansi(&combined);
 
     assert!(
+        plain.contains("Compose a Markdown document"),
+        "expected Claudine's help output to include the `compose` \
+         command description; got: {plain}"
+    );
+    assert!(
+        plain.contains("Composition"),
+        "expected Claudine's help output to include the `Composition` \
+         command group heading; got: {plain}"
+    );
+    assert!(
         !plain.contains("tip: to pass '--help' as a value"),
-        "normalizer must suppress the misleading clap help tip; got: {plain}"
+        "normalizer must suppress the misleading clap help tip; \
+         got: {plain}"
     );
     assert!(
         !plain.contains("unexpected argument '--help'"),
         "normalizer must keep `--help` from tripping clap's greedy \
          positional collection; got: {plain}"
+    );
+    assert!(
+        !plain.contains("expected at most one file reference"),
+        "Rule 4 must hoist `--help` off the trailing raw-value bucket \
+         so the downstream positional parser never misclassifies it \
+         as a second file reference; got: {plain}"
+    );
+}
+
+/// Rule 4 simpler form: `compose <file> --help` (no interleaved
+/// setters) must also render the help screen.
+#[test]
+fn headline_compose_with_trailing_help_renders_help() {
+    let workspace = tempdir().unwrap();
+    let fixture = write_fixture(workspace.path(), "simple.md");
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", fixture.to_str().unwrap(), "--help"])
+        .assert()
+        .success();
+
+    let output = assert.get_output().clone();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stderr}{stdout}");
+    let plain = strip_ansi(&combined);
+
+    assert!(
+        plain.contains("Compose a Markdown document"),
+        "trailing `--help` on compose must render Claudine help; \
+         got: {plain}"
     );
 }
 
@@ -221,3 +276,40 @@ fn passthrough_hooks_describe_still_runs() {
 // trigger `clap_complete::CompleteEnv::complete()` and short-circuit the
 // whole CLI before our normalizer runs, which defeats the purpose of
 // the regression.
+
+/// `spec.md`: `--claud` (near-miss of `--claude`) is intentionally NOT
+/// rewritten by Rule 1. Clap must surface the standard unknown-argument
+/// error so the user sees a diagnostic that points at the token they
+/// actually typed instead of a silent rewrite. This closes the
+/// acceptance-criterion loop end-to-end.
+#[test]
+fn passthrough_near_miss_provider_flag_surfaces_clap_unknown_error() {
+    let workspace = tempdir().unwrap();
+    let fixture = write_fixture(workspace.path(), "near-miss.md");
+
+    let assert = cargo_bin_cmd!("claudine")
+        .env("NO_COLOR", "1")
+        .args(["compose", fixture.to_str().unwrap(), "--claud"])
+        .assert()
+        .failure();
+
+    let output = assert.get_output().clone();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let combined = format!("{stderr}{stdout}");
+
+    assert!(
+        combined.contains("--claud"),
+        "clap must surface an error mentioning the user-typed `--claud` \
+         token; got: {combined}"
+    );
+    // Clap's phrasing in 4.x is "unexpected argument" — match on that
+    // shape without over-specifying the exact wording.
+    assert!(
+        combined.contains("unexpected argument")
+            || combined.contains("unrecognized argument")
+            || combined.contains("invalid value"),
+        "clap must reject `--claud` with its native unknown-argument \
+         diagnostic; got: {combined}"
+    );
+}

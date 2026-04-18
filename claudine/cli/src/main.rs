@@ -54,14 +54,28 @@ async fn ensure_config_exists() -> Result<()> {
     }
 }
 
-/// Two-pass CLI parsing for wrapper subcommands over an already-normalized argv.
+/// CLI parsing over an already-normalized argv.
 ///
-/// Pass 1: build the `Command` with `ignore_errors(true)` on the wrapper
-/// subcommands so that unknown flags (belonging to the underlying agent)
-/// are collected into the `passthrough` bucket instead of causing a clap
-/// error. Extract global flags and the subcommand name.
+/// Non-wrapper subcommands go through a single strict `Cli::parse_from`
+/// call — that's the common path and the one that produces rich clap
+/// errors on unknown args or invalid values.
 ///
-/// Pass 2: re-build with strict parsing for non-wrapper subcommands.
+/// Wrapper subcommands (`claude`, `codex`, …) need a lenient pass so that
+/// unknown flags destined for the wrapped agent CLI flow into the
+/// `passthrough` bucket instead of aborting with a clap error. That lenient
+/// pass is constructed by cloning the clap `Command` and marking each
+/// wrapper subcommand with `ignore_errors(true)`, then calling
+/// `try_get_matches_from` + `Cli::from_arg_matches`.
+///
+/// Both `unwrap_or_else` / `Err(_) =>` branches fall back to
+/// `Cli::parse_from(...)` on the same normalized argv. Those fallbacks are
+/// defensive: in practice the lenient pass cannot fail for
+/// wrapper-targeted argv, because `ignore_errors(true)` absorbs every
+/// unknown token. The fallbacks exist so a future clap upgrade that tightens
+/// `from_arg_matches` cannot silently drop into an `unwrap()` panic — the
+/// strict pass then produces the user-facing clap error message. This does
+/// mean the lenient diagnostic is swallowed on the rare failure path; if
+/// that becomes a problem, emit a `tracing::debug!` before falling through.
 fn parse_cli_from(argv: &[OsString]) -> Cli {
     use clap::{CommandFactory, FromArgMatches, Parser};
 

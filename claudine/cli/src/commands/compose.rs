@@ -21,6 +21,19 @@ use crate::log;
 use crate::provider_values::provider_value_parser;
 
 /// Shared flags for composition commands.
+///
+/// ## Notes
+///
+/// The eight provider boolean fields (`claude`, `codex`, `gemini`, `goose`,
+/// `kimicode`, `opencode`, `qwen`, `roo`) are handled entirely by the
+/// pre-clap argv normalizer in [`crate::argv`]: Rule 1 rewrites each
+/// `--<provider>` token to the canonical `--provider <slug>` pair before
+/// clap ever sees it. The struct fields and clap `#[arg(...)]` declarations
+/// are retained as user-facing help entries only — their parsed boolean
+/// values are never read at runtime (see [`Self::explicit_provider`]).
+///
+/// Retiring these fields is tracked in the
+/// `2026-04-17-cli-pre-processing` spec follow-ups.
 #[derive(Debug, Clone, Args)]
 pub struct SharedComposeArgs {
     /// Use a specific provider.

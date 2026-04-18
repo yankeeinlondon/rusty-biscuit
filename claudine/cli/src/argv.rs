@@ -7,16 +7,19 @@
 //!
 //! The rewrite rules (feature `2026-04-17-cli-pre-processing`) are:
 //!
-//! - **Rule 1** — provider boolean flags (`--claude`, `--codex`, …) rewrite
-//!   to `--provider <slug>`.
+//! - **Rule 1** — on composition subcommands only, provider boolean flags
+//!   (`--claude`, `--codex`, …) rewrite to `--provider <slug>`. Gating on
+//!   composition subcommands preserves wrapper passthrough: a user typing
+//!   `claudine claude --gemini file.md` would otherwise see `--gemini`
+//!   silently rewritten into the child CLI's argv.
 //! - **Rule 2** — fuzzy `--provider <value>` values are canonicalized to a
 //!   known slug via `Provider::fuzzy_match_cli_name`.
 //! - **Rule 3** — on composition subcommands (`compose`, `inline-compose`,
 //!   `sequence`), insert a single `--` separator before the first positional
 //!   setter that follows an interleaved flag.
-//!
-//! Phase 1 landed the module plumbing and the shared ingress seam.
-//! Phase 2 added Rules 1 and 2. Phase 3 adds Rule 3.
+//! - **Rule 4** — on composition subcommands, hoist a trailing `--help` or
+//!   `-h` token to position 1 so the root help flag fires instead of being
+//!   trapped inside clap's greedy positional collector.
 //!
 //! ## Pass-through guarantees
 //!
@@ -33,7 +36,7 @@
 
 use std::ffi::OsString;
 
-use claudine::events::Provider;
+use claudine::events::{PROVIDERS_DISPLAY_ORDER, Provider};
 
 /// Wrapper subcommands that hand off to an external agent CLI.
 pub(crate) const WRAPPER_SUBCOMMANDS: &[&str] = &[
@@ -78,40 +81,44 @@ const COMPOSITION_FLAGS_WITH_VALUE: &[&str] = &[
     "--fail-fast",
 ];
 
-/// Mapping of user-facing provider boolean flags to the canonical
-/// [`Provider`] they select. Rule 1 rewrites the flag to
-/// `--provider <Provider::as_slug()>`.
-const PROVIDER_BOOLEAN_FLAGS: &[(&str, Provider)] = &[
-    ("--claude", Provider::Claude),
-    ("--codex", Provider::Codex),
-    ("--gemini", Provider::Gemini),
-    ("--goose", Provider::Goose),
-    ("--kimi", Provider::KimiCode),
-    ("--opencode", Provider::OpenCode),
-    ("--qwen", Provider::QwenCode),
-    ("--roo", Provider::RooCode),
-];
+// Provider boolean flag mapping (Rule 1 surface) is derived from
+// [`Provider::cli_aliases`] — see [`provider_for_boolean_flag`].
 
 /// Normalize raw argv before clap parses it.
 ///
 /// Applies Rules 1 and 2 left-to-right, stopping at the first literal `--`,
-/// then Rule 3 on the rewritten argv. See [the module docs](self) for
-/// pass-through guarantees.
+/// then Rule 3 and Rule 4 on the rewritten argv. See [the module docs](self)
+/// for pass-through guarantees.
 pub(crate) fn normalize(raw: Vec<OsString>) -> Vec<OsString> {
-    normalize_with_completion(raw, completion_mode_active())
+    normalize_inner(raw, completion_mode_active())
 }
 
 /// Dependency-injected variant of [`normalize`] that avoids reading the
 /// process environment. Tests use this so they can assert the COMPLETE
 /// pass-through guarantee without racing against other tests on a
 /// shared env var.
+///
+/// Only compiled under `#[cfg(test)]` because it is exclusively a test-only
+/// entry point; production code uses [`normalize`].
+#[cfg(test)]
 fn normalize_with_completion(raw: Vec<OsString>, completion_active: bool) -> Vec<OsString> {
+    normalize_inner(raw, completion_active)
+}
+
+/// Shared core of [`normalize`] and the test-only
+/// [`normalize_with_completion`]. Kept private so production callers cannot
+/// accidentally bypass the env-var read.
+fn normalize_inner(raw: Vec<OsString>, completion_active: bool) -> Vec<OsString> {
     if completion_active {
         return raw;
     }
     if raw.len() < 2 {
         return raw;
     }
+
+    // Rule 1 is gated on composition subcommands so wrapper passthrough
+    // never sees its own flags silently rewritten into `--provider <slug>`.
+    let is_composition = find_subcommand(&raw, COMPOSITION_SUBCOMMANDS).is_some();
 
     let stop = first_dash_dash_index(&raw).unwrap_or(raw.len());
     let mut out: Vec<OsString> = Vec::with_capacity(raw.len());
@@ -120,7 +127,9 @@ fn normalize_with_completion(raw: Vec<OsString>, completion_active: bool) -> Vec
         let token = &raw[index];
         match as_utf8(token) {
             Some(text) => {
-                if let Some(provider) = provider_for_boolean_flag(text) {
+                if is_composition
+                    && let Some(provider) = provider_for_boolean_flag(text)
+                {
                     // Rule 1: `--claude` → `--provider claude`
                     out.push(OsString::from("--provider"));
                     out.push(OsString::from(provider.as_slug()));
@@ -181,7 +190,13 @@ fn normalize_with_completion(raw: Vec<OsString>, completion_active: bool) -> Vec
         index += 1;
     }
 
-    apply_composition_separator(out)
+    // Rule 4 must precede Rule 3 so `--help` is hoisted off the trailing
+    // setter region before the `--` separator is inserted. Otherwise Rule 3
+    // would bury `--help` inside clap's trailing raw-value bucket and the
+    // downstream positional parser would misclassify it as a second file
+    // reference.
+    let with_help_hoisted = hoist_composition_help(out);
+    apply_composition_separator(with_help_hoisted)
 }
 
 /// Apply Rule 3: insert a single `--` before the first setter-shaped token on
@@ -258,12 +273,82 @@ fn apply_composition_separator(argv: Vec<OsString>) -> Vec<OsString> {
     result
 }
 
-/// Returns the [`Provider`] that a boolean flag token selects, if any.
-fn provider_for_boolean_flag(token: &str) -> Option<Provider> {
-    PROVIDER_BOOLEAN_FLAGS
+/// Apply Rule 4: hoist `-h`/`--help` on composition subcommands to argv
+/// position 1 so the root [`Cli::help`] handler fires.
+///
+/// `args.rs` sets `disable_help_flag = true` on the root `Cli` and declares
+/// a non-global `help: bool`, which means composition subcommands never
+/// inherit a working `--help` handler. Without this rule, a user typing
+/// `claudine compose file.md --gemini name=Ken --help` lands in clap's
+/// greedy positional collector and sees either the misleading "unexpected
+/// argument" tip or a downstream "expected at most one file reference"
+/// error.
+///
+/// Hoisting `--help` / `-h` to position 1 converts the same argv into a
+/// root-help invocation, which `main.rs` catches and forwards to
+/// [`crate::commands::help::run`]. The rest of the argv still parses
+/// cleanly under clap (compose accepts the remaining positionals), but
+/// `cli.help == true` short-circuits into the grouped help screen before
+/// any subcommand runs.
+///
+/// No-ops when:
+///
+/// - The argv does not target a composition subcommand.
+/// - No `-h`/`--help` token is present between the subcommand and the
+///   first literal `--`.
+/// - An earlier pass already hoisted a help token to position 1.
+fn hoist_composition_help(argv: Vec<OsString>) -> Vec<OsString> {
+    let Some((sub_idx, _)) = find_subcommand(&argv, COMPOSITION_SUBCOMMANDS) else {
+        return argv;
+    };
+
+    if argv.get(1).and_then(|t| t.to_str()) == Some("--help")
+        || argv.get(1).and_then(|t| t.to_str()) == Some("-h")
+    {
+        // Already hoisted; nothing to do.
+        return argv;
+    }
+
+    let stop = first_dash_dash_index(&argv).unwrap_or(argv.len());
+    let help_index = argv
         .iter()
-        .find(|(flag, _)| *flag == token)
-        .map(|(_, provider)| *provider)
+        .enumerate()
+        .skip(sub_idx + 1)
+        .take_while(|(idx, _)| *idx < stop)
+        .find_map(|(idx, token)| {
+            let text = token.to_str()?;
+            (text == "--help" || text == "-h").then_some(idx)
+        });
+
+    let Some(idx) = help_index else {
+        return argv;
+    };
+
+    let mut result = Vec::with_capacity(argv.len());
+    result.push(argv[0].clone());
+    result.push(argv[idx].clone());
+    result.extend(argv[1..idx].iter().cloned());
+    result.extend(argv[idx + 1..].iter().cloned());
+    result
+}
+
+/// Returns the [`Provider`] that a boolean flag token selects, if any.
+///
+/// The boolean flag surface is derived from [`Provider::cli_aliases`]: the
+/// first alias of each provider (`claude`, `codex`, `gemini`, `goose`,
+/// `kimi`, `opencode`, `qwen`, `roo`) is the user-facing flag name, and
+/// the normalizer rewrites `--<first-alias>` to `--provider <as_slug()>`.
+/// Keeping the mapping derived means a new provider added with a matching
+/// clap boolean flag declaration in `SharedComposeArgs` automatically
+/// inherits Rule 1 coverage.
+fn provider_for_boolean_flag(token: &str) -> Option<Provider> {
+    let name = token.strip_prefix("--")?;
+    if name.is_empty() || name.starts_with('-') {
+        return None;
+    }
+    PROVIDERS_DISPLAY_ORDER
+        .into_iter()
+        .find(|provider| provider.cli_aliases().first().copied() == Some(name))
 }
 
 /// True when a `--provider` value token is a candidate for fuzzy rewrite.
@@ -326,6 +411,11 @@ fn first_dash_dash_index(raw: &[OsString]) -> Option<usize> {
 }
 
 /// UTF-8 accessor that returns `None` for tokens that are not valid UTF-8.
+///
+/// All rewrite rules are pattern-based on `&str`, so non-UTF-8 tokens are
+/// deliberately skipped and passed through unchanged. Centralizing the
+/// conversion here keeps the "we deliberately leave opaque tokens alone"
+/// contract in one place.
 fn as_utf8(token: &OsString) -> Option<&str> {
     token.to_str()
 }
@@ -589,19 +679,22 @@ mod tests {
         // Lock in that `normalize_with_completion(_, false)` produces the
         // exact argv `normalize` would emit for the same input when the
         // environment is clean — otherwise the test-only entry point
-        // could silently drift from the production path.
+        // could silently drift from the production path. This also
+        // exercises the full Rule 1 → Rule 4 → Rule 3 chain: `--gemini`
+        // is rewritten to `--provider gemini`, `--help` is hoisted to
+        // position 1, and `--` is inserted before the trailing setter.
         let input = argv(&[
             "claudine", "compose", "file.md", "--gemini", "name=Ken", "--help",
         ]);
         let expected = argv(&[
             "claudine",
+            "--help",
             "compose",
             "file.md",
             "--provider",
             "gemini",
             "--",
             "name=Ken",
-            "--help",
         ]);
         assert_eq!(normalize_with_completion(input, false), expected);
     }
@@ -835,10 +928,16 @@ mod tests {
 
     #[test]
     fn provider_for_boolean_flag_matches_every_entry() {
-        for (flag, expected_provider) in PROVIDER_BOOLEAN_FLAGS {
+        for provider in PROVIDERS_DISPLAY_ORDER {
+            let first_alias = provider
+                .cli_aliases()
+                .first()
+                .copied()
+                .expect("every Provider exposes at least one cli alias");
+            let flag = format!("--{first_alias}");
             assert_eq!(
-                provider_for_boolean_flag(flag),
-                Some(*expected_provider),
+                provider_for_boolean_flag(&flag),
+                Some(provider),
                 "flag {flag}"
             );
         }
@@ -869,18 +968,20 @@ mod tests {
 
     #[test]
     fn rule_3_inserts_separator_before_help_after_flag() {
+        // Headline case: Rule 4 hoists `--help` to position 1 so the root
+        // help handler fires, then Rule 3 inserts `--` before the setter.
         let input = argv(&[
             "claudine", "compose", "file.md", "--gemini", "name=Ken", "--help",
         ]);
         let expected = argv(&[
             "claudine",
+            "--help",
             "compose",
             "file.md",
             "--provider",
             "gemini",
             "--",
             "name=Ken",
-            "--help",
         ]);
         assert_eq!(normalize(input), expected);
     }
@@ -897,13 +998,13 @@ mod tests {
         ]);
         let expected = argv(&[
             "claudine",
+            "--help",
             "inline-compose",
             "file.md",
             "--provider",
             "gemini",
             "--",
             "k=v",
-            "--help",
         ]);
         assert_eq!(normalize(input), expected);
     }
@@ -915,13 +1016,13 @@ mod tests {
         ]);
         let expected = argv(&[
             "claudine",
+            "--help",
             "sequence",
             "file.md",
             "--provider",
             "gemini",
             "--",
             "k=v",
-            "--help",
         ]);
         assert_eq!(normalize(input), expected);
     }
@@ -996,35 +1097,33 @@ mod tests {
 
     #[test]
     fn rule_3_does_not_fire_on_non_composition_subcommand() {
+        // Since Rule 1, Rule 3, and Rule 4 are all gated to composition
+        // subcommands, a `hooks` argv with a provider boolean and trailing
+        // `--help` must pass through unchanged.
         let input = argv(&["claudine", "hooks", "file.md", "--gemini", "k=v", "--help"]);
-        // Rule 1 still rewrites `--gemini`, but Rule 3 is gated to composition.
-        let expected = argv(&[
-            "claudine",
-            "hooks",
-            "file.md",
-            "--provider",
-            "gemini",
-            "k=v",
-            "--help",
-        ]);
-        assert_eq!(normalize(input), expected);
+        assert_eq!(normalize(input.clone()), input);
     }
 
     #[test]
     fn rule_3_does_not_fire_without_positional() {
+        // No positional means Rule 3 doesn't fire, but Rule 4 still hoists
+        // `--help` to position 1 so the root help handler renders.
         let input = argv(&["claudine", "compose", "--help"]);
-        assert_eq!(normalize(input.clone()), input);
+        let expected = argv(&["claudine", "--help", "compose"]);
+        assert_eq!(normalize(input), expected);
     }
 
     #[test]
     fn rule_3_handles_root_globals_before_subcommand() {
         // Real-tree regression case from the phase plan: root `--plain` must
-        // not stop Rule 3 from firing on `compose`.
+        // not stop Rule 3 from firing on `compose`. `--help` is hoisted to
+        // position 1 by Rule 4 (ahead of any user-supplied root globals).
         let input = argv(&[
             "claudine", "--plain", "compose", "file.md", "--gemini", "name=Ken", "--help",
         ]);
         let expected = argv(&[
             "claudine",
+            "--help",
             "--plain",
             "compose",
             "file.md",
@@ -1032,7 +1131,6 @@ mod tests {
             "gemini",
             "--",
             "name=Ken",
-            "--help",
         ]);
         assert_eq!(normalize(input), expected);
     }
@@ -1048,12 +1146,12 @@ mod tests {
     #[test]
     fn rule_3_fires_after_short_flag_with_value() {
         // `-m gpt-4` consumes its value; the setter afterward still warrants
-        // the separator.
+        // the separator. `--help` is hoisted by Rule 4.
         let input = argv(&[
             "claudine", "compose", "file.md", "-m", "gpt-4", "k=v", "--help",
         ]);
         let expected = argv(&[
-            "claudine", "compose", "file.md", "-m", "gpt-4", "--", "k=v", "--help",
+            "claudine", "--help", "compose", "file.md", "-m", "gpt-4", "--", "k=v",
         ]);
         assert_eq!(normalize(input), expected);
     }
@@ -1061,7 +1159,7 @@ mod tests {
     #[test]
     fn rule_3_fires_after_equals_form_flag() {
         // `--provider=gemini` is a single token; Rule 3 must still treat it
-        // as an interleaved flag.
+        // as an interleaved flag. `--help` is hoisted by Rule 4.
         let input = argv(&[
             "claudine",
             "compose",
@@ -1072,12 +1170,12 @@ mod tests {
         ]);
         let expected = argv(&[
             "claudine",
+            "--help",
             "compose",
             "file.md",
             "--provider=gemini",
             "--",
             "k=v",
-            "--help",
         ]);
         assert_eq!(normalize(input), expected);
     }
@@ -1085,11 +1183,13 @@ mod tests {
     #[test]
     fn rule_3_inserts_at_first_qualifying_setter_only() {
         // Two setters after the flag; `--` must land only before the first.
+        // `--help` is hoisted by Rule 4.
         let input = argv(&[
             "claudine", "compose", "file.md", "--gemini", "a=1", "b=2", "--help",
         ]);
         let expected = argv(&[
             "claudine",
+            "--help",
             "compose",
             "file.md",
             "--provider",
@@ -1097,7 +1197,6 @@ mod tests {
             "--",
             "a=1",
             "b=2",
-            "--help",
         ]);
         assert_eq!(normalize(input), expected);
     }
@@ -1106,7 +1205,7 @@ mod tests {
     fn rule_3_ignores_setter_before_positional() {
         // Leading setter does not count as a positional; the later setter
         // after the flag fires Rule 3 because a real positional was seen in
-        // between.
+        // between. `--help` is hoisted by Rule 4.
         let input = argv(&[
             "claudine",
             "compose",
@@ -1118,6 +1217,7 @@ mod tests {
         ]);
         let expected = argv(&[
             "claudine",
+            "--help",
             "compose",
             "k=early",
             "file.md",
@@ -1125,7 +1225,6 @@ mod tests {
             "gemini",
             "--",
             "k=late",
-            "--help",
         ]);
         assert_eq!(normalize(input), expected);
     }
@@ -1195,5 +1294,230 @@ mod tests {
         assert!(!is_composition_flag_with_value("--yolo"));
         assert!(!is_composition_flag_with_value("--plain"));
         assert!(!is_composition_flag_with_value("file.md"));
+    }
+
+    // ── Rule 4: `--help` / `-h` hoisting for composition subcommands ─
+
+    #[test]
+    fn rule_4_hoists_help_to_position_one_on_composition() {
+        let input = argv(&["claudine", "compose", "file.md", "--help"]);
+        let expected = argv(&["claudine", "--help", "compose", "file.md"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_4_hoists_short_help_flag() {
+        let input = argv(&["claudine", "compose", "file.md", "-h"]);
+        let expected = argv(&["claudine", "-h", "compose", "file.md"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    #[test]
+    fn rule_4_is_idempotent_when_help_is_already_at_position_one() {
+        let input = argv(&["claudine", "--help", "compose", "file.md"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_4_does_not_fire_on_wrapper_subcommand() {
+        // Wrappers forward `--help` to the child CLI; the normalizer must
+        // not hoist it or clap would short-circuit before the child runs.
+        let input = argv(&["claudine", "claude", "--help"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_4_does_not_fire_on_non_composition_subcommand() {
+        let input = argv(&["claudine", "hooks", "--describe", "--help"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_4_does_not_touch_help_after_user_dash_dash() {
+        // A user-provided `--` ends the rule window; `--help` beyond it is
+        // a trailing raw value and must stay put.
+        let input = argv(&[
+            "claudine", "compose", "file.md", "--", "--help",
+        ]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_4_hoists_only_the_first_help_token() {
+        // A duplicate `--help` later in argv is left alone — clap already
+        // tolerates a boolean flag appearing twice.
+        let input = argv(&["claudine", "compose", "--help", "file.md", "--help"]);
+        let expected = argv(&["claudine", "--help", "compose", "file.md", "--help"]);
+        assert_eq!(normalize(input), expected);
+    }
+
+    // ── Gap 3: wrapper safety — Rule 1 is gated on composition ───────
+
+    #[test]
+    fn rule_1_does_not_rewrite_provider_boolean_on_wrapper_subcommand() {
+        // A user typing `claudine claude --gemini file.md` is sending
+        // `--gemini` to the child CLI (the wrapper forwards unknown args).
+        // Rule 1 must leave the token alone, otherwise the child sees
+        // `--provider gemini` instead of `--gemini`.
+        let input = argv(&["claudine", "claude", "--gemini", "file.md"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_1_does_not_rewrite_on_unknown_subcommand() {
+        let input = argv(&["claudine", "unknown-subcommand", "--gemini", "file.md"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    #[test]
+    fn rule_1_does_not_rewrite_on_hooks_subcommand() {
+        let input = argv(&["claudine", "hooks", "--gemini"]);
+        assert_eq!(normalize(input.clone()), input);
+    }
+
+    // ── Gap 5: parametric coverage for Rule 3 value-bearing flags ────
+
+    #[test]
+    fn rule_3_skips_value_for_every_composition_flag_with_value() {
+        // For each value-bearing composition flag, construct
+        // `claudine compose file.md <flag> VAL k=v` and assert Rule 3 does
+        // not fire (the flag consumes `VAL`, so no positional-after-flag
+        // sequence appears before the setter in a way that should trip the
+        // rule). This locks the `COMPOSITION_FLAGS_WITH_VALUE` contract so
+        // adding a new value-bearing flag without also adding it to the
+        // constant becomes a test failure instead of a latent bug.
+        let cases: &[(&str, &str)] = &[
+            ("--provider", "claude"),
+            ("--exclude", "claude"),
+            ("--include", "FOO"),
+            ("--model", "gpt-4"),
+            ("-m", "gpt-4"),
+            ("--output", "json"),
+            ("-o", "json"),
+            ("--append-system-prompt", "prompt.md"),
+            ("--asp", "prompt.md"),
+            ("--replace-system-prompt", "prompt.md"),
+            ("--rsp", "prompt.md"),
+            ("--timeout", "30"),
+            ("-t", "30"),
+            ("--operation", "ship"),
+            ("--op", "ship"),
+            ("--set", "{\"k\":\"v\"}"),
+            ("--use", "id1,id2"),
+            ("--fail-fast", "true"),
+        ];
+        for (flag, value) in cases {
+            let input = argv(&[
+                "claudine",
+                "compose",
+                "file.md",
+                flag,
+                value,
+                "k=v",
+            ]);
+            // No `--help`, so Rule 4 is a no-op. Rule 3 should fire here
+            // (positional `file.md`, interleaved flag+value, setter
+            // `k=v`) and insert a `--` before the setter — except when
+            // `flag` is `--provider`, in which case Rule 2 also rewrites
+            // nothing because `claude` is already canonical.
+            let result = normalize(input);
+            assert!(
+                result.contains(&OsString::from("--")),
+                "flag {flag} with value {value}: Rule 3 must insert `--`, \
+                 got result = {result:?}"
+            );
+            assert!(
+                result.contains(&OsString::from(*flag)) || *flag == "--provider",
+                "flag {flag}: token must survive normalization verbatim"
+            );
+        }
+    }
+
+    // ── Gap 7: `find_subcommand` handles --debug=LEVEL after subcommand ──
+
+    #[test]
+    fn find_subcommand_handles_equals_form_after_composition_subcommand() {
+        // `--debug` is a global flag that can appear after the subcommand
+        // as well. The equals form (`--debug=trace`) is a single token, so
+        // `find_subcommand` already handles it, but lock that in so a
+        // future regression is caught by the test suite.
+        let input = argv(&["claudine", "compose", "--debug=trace", "file.md"]);
+        assert_eq!(
+            find_subcommand(&input, COMPOSITION_SUBCOMMANDS),
+            Some((1, "compose"))
+        );
+    }
+
+    // ── Gap 6: drift detection between clap surface and the value-table ──
+
+    #[test]
+    fn composition_flags_with_value_matches_clap_surface() {
+        use crate::commands::compose::ComposeArgs;
+        use crate::commands::sequence::SequenceArgs;
+
+        fn build_cmd<A: clap::Args>() -> clap::Command {
+            A::augment_args(clap::Command::new("test"))
+        }
+
+        fn collect_value_flags(cmd: &clap::Command) -> Vec<String> {
+            use clap::ArgAction;
+            let mut out = Vec::new();
+            for arg in cmd.get_arguments() {
+                // Skip boolean-style args: they do not consume the next
+                // argv token, so Rule 3 must NOT skip past them.
+                if matches!(
+                    arg.get_action(),
+                    ArgAction::SetTrue | ArgAction::SetFalse | ArgAction::Count | ArgAction::Help
+                    | ArgAction::HelpShort | ArgAction::HelpLong | ArgAction::Version
+                ) {
+                    continue;
+                }
+                // Only flag-shaped args contribute to the value-flag surface;
+                // positional args like compose's `args: Vec<String>` have no
+                // long/short name.
+                let has_flag_name = arg.get_long().is_some() || arg.get_short().is_some();
+                if !has_flag_name {
+                    continue;
+                }
+                if let Some(long) = arg.get_long() {
+                    out.push(format!("--{long}"));
+                }
+                if let Some(aliases) = arg.get_visible_aliases() {
+                    for alias in aliases {
+                        out.push(format!("--{alias}"));
+                    }
+                }
+                if let Some(short) = arg.get_short() {
+                    out.push(format!("-{short}"));
+                }
+            }
+            out
+        }
+
+        let mut clap_flags: Vec<String> = Vec::new();
+        clap_flags.extend(collect_value_flags(&build_cmd::<ComposeArgs>()));
+        clap_flags.extend(collect_value_flags(&build_cmd::<SequenceArgs>()));
+        clap_flags.sort();
+        clap_flags.dedup();
+
+        assert!(
+            !clap_flags.is_empty(),
+            "expected the clap surface to expose at least one value-bearing \
+             flag; the test-wiring must be broken"
+        );
+
+        for flag in &clap_flags {
+            // `--help` / `-h` are not value-bearing on clap's side; skip
+            // any stray entries just in case.
+            if flag == "--help" || flag == "-h" {
+                continue;
+            }
+            assert!(
+                COMPOSITION_FLAGS_WITH_VALUE.contains(&flag.as_str()),
+                "clap surface exposes value-bearing flag `{flag}` that is \
+                 missing from `COMPOSITION_FLAGS_WITH_VALUE`; add it there \
+                 so Rule 3 keeps skipping its value correctly"
+            );
+        }
     }
 }
