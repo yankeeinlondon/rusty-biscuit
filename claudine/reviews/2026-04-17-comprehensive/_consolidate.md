@@ -43,6 +43,6 @@ You task is to **consolidate** the recommendations across all of the reviews int
 
 ::block when="state == 'plan'"
 
-::file prompts/plan.md 
+::file prompts/plan.md set.spec={{dir}}/consolidated-review.md
 
 ::end-block
