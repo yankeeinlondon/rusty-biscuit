@@ -41,34 +41,42 @@ per-step overlay keys still win over both `--set` and shorthand setters.
 
 ### Shell Completion
 
-The file-reference positional on all three composition commands is wired
-to Claudine's dynamic completer. Type part of a file reference and press
-`<TAB>`; the shell calls back into Claudine itself to produce candidates
-that match the command's validity rules:
+Dynamic completion fires at markdown-expecting argument positions on all
+three composition commands and on the `--append-system-prompt` /
+`--replace-system-prompt` flag values — both on compose/inline-compose/
+sequence themselves and on every wrapped provider subcommand (`claude`,
+`codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`). All three
+composition commands share one markdown-only contract; there is no
+per-command frontmatter validation at completion time.
 
-| Command            | Completion filter                                                      |
-| ------------------ | ---------------------------------------------------------------------- |
-| `compose`          | any `.md` / `.markdown` file (extension-only)                          |
-| `inline-compose`   | markdown files with a non-empty string `prompt:` frontmatter value     |
-| `sequence`         | markdown files whose frontmatter resolves to a valid sequence plan     |
+The generated bash/zsh/fish scripts shell out to `claudine __complete` on
+every `<TAB>`. The supplement engine applies these rules in order:
 
-Sigils pick the scope:
+- **Candidates are markdown files only** (`*.md`). Directories,
+  non-markdown files, `./`/`../` traversal tokens, `!` package sigils,
+  `vault:`, `/abs`, `%`, and `{{…}}` prefixes all return zero candidates.
+- **Two supported entry forms**: `@`-prefixed magic paths (enumerated
+  against repo root + user home) and implicit-relative paths like
+  `prompts/…` (enumerated against the repo root only).
+- **Typed-length scope**: 0–2 "meaningful characters" (leading `@` and
+  segments before a `/` don't count) use the curated scope only —
+  `prompts/` and `sequences/` under `<repo>/`, `<package-root>/`,
+  `<package-area-root>/`, `~/`, and `~/.claudine/`. 3+ characters extend
+  to a `.gitignore`-aware walk of the enclosing git repo.
+- **Case-insensitive substring matching** on the filename with `.md`
+  stripped for matching only. `@omp<TAB>` matches `prompt.md`.
+- **`KEY=<TAB>` setters** return zero candidates so shell default
+  behavior kicks in.
 
-- `@<TAB>` walks the current repo root plus `~/.claudine/{prompts,sequences}`.
-- `!<TAB>` walks only the current monorepo package area.
-- `./<TAB>` / `../<TAB>` list immediate children of cwd / parent.
-- A bare partial (`<TAB>` with no sigil) shows a curated landing menu
-  union.
-
-`key=<TAB>` setters and explicitly unsupported prefixes (`vault:`, `/abs`,
-`%`, `{{…}}`) return zero candidates so the shell falls back to its
-default behavior.
-
-The completer binary updates automatically — Claudine owns the runtime
-completion output, so you never need to regenerate a static script.
-Install the one-time bootstrap snippet with
-`claudine completions <shell>`; see [shell-completions.md](../shell-completions.md)
-for the full install matrix and the unsupported-prefix rationale.
+Install with `claudine completions <shell>` — regenerate and reinstall
+after a Claudine upgrade that changes the callback wiring. The hidden
+`claudine __complete` subprocess always tracks the running binary, so
+the completion candidates themselves never go stale. PowerShell and
+Elvish retain the legacy one-line `COMPLETE=<shell>` bootstrap; users
+who installed an older `COMPLETE=<shell>` snippet continue to reach the
+legacy completion path on every shell until they regenerate. See
+[shell-completions.md](../shell-completions.md) for the full install
+matrix, supported token shapes, and the open-questions list.
 
 ## Direct Composition
 
