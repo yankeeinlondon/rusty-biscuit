@@ -168,4 +168,4 @@ Use these severity levels consistently:
 - Do not flood the review with style-only comments.
 - Optimize for signal density.
 
-Now perform the review and save the results to claudine/reviews/2026-04-17-comprehensive/review-glm.md 
+Now perform the review and save the results to claudine/reviews/2026-04-17-comprehensive/review-pass-2.md 
