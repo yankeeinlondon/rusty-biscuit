@@ -32,6 +32,17 @@ use crate::events::Provider;
 /// cosmetic ordering").
 const MAX_PRE_INIT_HOOK_EVENTS: usize = 32;
 
+/// Maximum number of bytes we will accumulate in a single pending
+/// `tool_use.input_json` buffer before giving up.
+///
+/// Claude streams tool inputs as a series of `input_json_delta` events
+/// that the parser concatenates until the accumulated string parses as
+/// JSON. A malformed or truncated stream that never closes the JSON
+/// would otherwise grow the buffer without bound and OOM a long-lived
+/// wrapper process. At 1 MiB we're well past any legitimate tool-input
+/// payload but still small enough to recover from a transient outage.
+const MAX_PENDING_TOOL_USE_INPUT_BYTES: usize = 1 << 20;
+
 /// Known raw event `type` strings that are NOT modeled by [`ClaudeEvent`] but
 /// should still map to specific semantic events rather than
 /// [`SemanticEvent::ProviderExtension`]. Kept alongside the parser so the
@@ -745,6 +756,49 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         let Some(pending) = self.pending_tool_use.as_mut() else {
             return false;
         };
+        // Cap the accumulated buffer so a malformed / unterminated stream
+        // cannot drive the wrapper to OOM. If we exceed the cap, drop the
+        // pending entry and emit a terminal semantic error so operators
+        // see why the tool call never landed.
+        if pending.input_json.len().saturating_add(partial_json.len())
+            > MAX_PENDING_TOOL_USE_INPUT_BYTES
+        {
+            let dropped = self
+                .pending_tool_use
+                .take()
+                .expect("pending tool use present");
+            let tool_name = dropped.name.as_deref().unwrap_or("<unknown>").to_string();
+            let message = format!(
+                "Dropping pending tool_use `{tool_name}`: input_json exceeded {} bytes without \
+                 closing JSON",
+                MAX_PENDING_TOOL_USE_INPUT_BYTES
+            );
+            self.is_error = true;
+            if self.error_message.is_none() {
+                self.error_message = Some(message.clone());
+            }
+            if !self.terminal_error_emitted {
+                let mut extra = self.base_extra();
+                extra.insert("raw_kind".into(), Value::from("input_json_overflow"));
+                if let Some(id) = dropped.id.as_deref() {
+                    extra.insert("tool_id".into(), Value::from(id));
+                }
+                if let Some(name) = dropped.name.as_deref() {
+                    extra.insert("tool_name".into(), Value::from(name));
+                }
+                extra.insert(
+                    "input_bytes_seen".into(),
+                    Value::from(dropped.input_json.len()),
+                );
+                self.sink.on_semantic_event(SemanticEvent::Error {
+                    message,
+                    terminal: false,
+                    kind: SemanticErrorKind::AgentNative,
+                    extra: Value::Object(extra),
+                });
+            }
+            return true;
+        }
         pending.input_json.push_str(partial_json);
         let Ok(input) = serde_json::from_str::<Value>(&pending.input_json) else {
             return true;
@@ -1697,6 +1751,45 @@ mod tests {
             "captured Claude fixture must produce zero non-hook ProviderExtension events; found {}: {:#?}",
             ext.len(),
             ext.iter().take(3).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn unterminated_input_json_delta_is_bounded() {
+        let (sink, mut parser) = new_parser();
+        // Open a pending tool_use but never close the JSON.
+        parser
+            .feed_line(
+                r#"{"type":"content_block_start","content_block":{"type":"tool_use","id":"t1","name":"bash"}}"#,
+            )
+            .unwrap();
+
+        // Craft a chunk larger than the cap to trigger the overflow path
+        // in a single delta.
+        let junk = "x".repeat(MAX_PENDING_TOOL_USE_INPUT_BYTES + 10);
+        let line = serde_json::json!({
+            "type": "content_block_delta",
+            "delta": {"type": "input_json_delta", "partial_json": junk},
+        })
+        .to_string();
+        parser.feed_line(&line).unwrap();
+
+        let events = sink.snapshot();
+        let overflow: Vec<&SemanticEvent> = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    SemanticEvent::Error { extra, .. }
+                        if extra.get("raw_kind").and_then(Value::as_str)
+                            == Some("input_json_overflow")
+                )
+            })
+            .collect();
+        assert_eq!(
+            overflow.len(),
+            1,
+            "expected exactly one overflow Error event; got {events:#?}"
         );
     }
 
