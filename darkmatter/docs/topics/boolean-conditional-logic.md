@@ -4,8 +4,9 @@ Darkmatter uses a shared condition evaluator for `when="..."` expressions. That 
 
 - page blocks via `::block when="..."`
 - block transclusion via `::file`, `::code`, and `::url` directives with `when="..."`
+- reference-graph conditional extraction
 
-This means page blocks and transclusion directives all support the same condition syntax, the same functions, and the same truthiness rules.
+This means page blocks, transclusion directives, and reference-graph traversal all support the same condition syntax, the same functions, and the same truthiness rules.
 
 ## Where Conditions Read Values From
 
@@ -75,11 +76,31 @@ From highest precedence to lowest:
 2. unary `!`
 3. comparisons: `==`, `!=`, `>`, `>=`, `<`
 4. fallback: `|`
-5. ternary: `? :`
+5. logical AND: `&&`
+6. logical OR: `||`
+7. ternary: `? :`
 
-There are no infix `&&` or `||` operators. Use `And(...)` and `Or(...)` instead.
+Fallback binds tighter than `&&`, and `&&` binds tighter than `||`. Use parentheses whenever the desired grouping is not obvious.
 
-There is also no `<=` operator today. Express that as `!(x > y)` or by flipping the comparison.
+There is no `<=` operator today. Express that as `!(x > y)` or by flipping the comparison.
+
+## Interpolation vs. Condition Mode
+
+Darkmatter parses `{{ ... }}` interpolation expressions and `when="..."` condition expressions with the same parser but in two different modes. The operator set differs between modes:
+
+| Context | `\|` | `\|\|` | `&&` |
+|---------|------|--------|------|
+| Interpolation `{{ ... }}` | fallback | fallback (alias of `\|`) | syntax error |
+| Condition `when="..."` | fallback | logical OR | logical AND |
+
+That means:
+
+- `when="a || b"` is logical OR and evaluates to a boolean
+- `{{ a || "default" }}` remains fallback sugar and expands to the first truthy value
+- `{{ a && b }}` is still rejected at parse time
+- `when="a && b"` is logical AND
+
+The function-call forms `And(...)` and `Or(...)` are supported in both modes and remain valid aliases for the infix operators in condition mode.
 
 ## Comparison Operators
 
@@ -157,25 +178,76 @@ Prefix `!` negates truthiness:
 
 This is a common pattern for "render a default when no environment variable is set".
 
+## Infix Boolean Operators
+
+Condition expressions support infix `&&` and `||`. Both operators are short-circuited:
+
+- `a && b` evaluates `b` only when `a` is truthy; otherwise it returns `false`
+- `a || b` evaluates `b` only when `a` is falsy; otherwise it returns `true`
+
+Short-circuit evaluation makes it safe to guard a function call with a cheap predicate:
+
+```md
+::file ./contributors.md when="HasKey(release, 'contributors') && Length(release.contributors) > 0"
+
+::block when="env.CI || env.FORCE"
+Only renders in CI or when explicitly forced.
+::end-block
+```
+
+### Mixed Precedence
+
+`&&` binds tighter than `||`, so:
+
+```md
+::file ./alert.md when="priority == 'high' && env.PROD || env.FORCE"
+```
+
+is parsed as:
+
+```md
+(priority == 'high' && env.PROD) || env.FORCE
+```
+
+Use parentheses whenever the desired grouping would otherwise be ambiguous:
+
+```md
+::file ./alert.md when="priority == 'high' && (env.PROD || env.FORCE)"
+```
+
+### Fallback Mixed with Boolean Logic
+
+Fallback `|` still binds tighter than `&&`. You can pick a default for an operand without changing the surrounding boolean expression:
+
+```md
+::file ./notes.md when="(env.AGENT | env.DEFAULT_AGENT) == 'claude' && !draft"
+```
+
+Here `env.AGENT | env.DEFAULT_AGENT` resolves first, then the comparison runs, and finally the AND combines with `!draft`.
+
 ## Functions
 
 Function names are case-insensitive. `HasKey`, `has_key`, and `haskey` all resolve to the same function.
 
 ### `And(a, b, c, ...)`
 
-Returns true only if every argument is truthy.
+Returns true only if every argument is truthy. Arguments are evaluated left-to-right with short-circuit behavior matching the infix `&&` operator, so arguments after the first falsy one are not evaluated.
 
 ```md
 ::file ./private.md when="And(user.is_admin, env.INTERNAL_DOCS)"
 ```
 
+`And(a, b)` is equivalent to `a && b`.
+
 ### `Or(a, b, c, ...)`
 
-Returns true if any argument is truthy.
+Returns true if any argument is truthy. Arguments are evaluated left-to-right with short-circuit behavior matching the infix `||` operator, so arguments after the first truthy one are not evaluated.
 
 ```md
 ::file ./llm-notes.md when="Or(env.OPENAI_API_KEY, env.ANTHROPIC_API_KEY)"
 ```
+
+`Or(a, b)` is equivalent to `a || b`.
 
 ### `HasKey(object, key)`
 
@@ -262,6 +334,8 @@ Some agent value is available.
 ::end-block
 ```
 
+In condition mode, `|` is still fallback — only `||` is logical OR.
+
 ### Ternary with `? :`
 
 `condition ? then_value : else_value` returns one branch, and the final branch value is then tested for truthiness.
@@ -292,8 +366,28 @@ Admin-only details
 
 ### Require Multiple Conditions
 
+Either infix or function-call form works. Pick whichever reads best for the use case.
+
 ```md
+::file ./release.md when="release.enabled && env.CI"
+
 ::file ./release.md when="And(release.enabled, env.CI)"
+```
+
+### Match Any of Several Conditions
+
+```md
+::file ./llm-notes.md when="env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY"
+```
+
+### Grouped Boolean Expressions
+
+Use parentheses whenever `&&` and `||` appear in the same expression and the precedence is not obvious.
+
+```md
+::block when="(draft || preview) && user.is_admin"
+Early access content for admins.
+::end-block
 ```
 
 ### Prefer Explicit Comparison for String Flags
@@ -310,15 +404,15 @@ Invalid expressions fail composition with a parse or evaluation error that inclu
 
 Unsupported or easy-to-misread forms include:
 
-- `a && b`
-- `a || b`
 - `a <= b`
+- `a && b` inside `{{ ... }}` interpolation (still an error; only `when="..."` accepts it)
+- a single `&` (always a lexer error)
 
 Use these instead:
 
-- `And(a, b)`
-- `Or(a, b)`
 - `!(a > b)` or `b >= a`
+- keep `&&` / `||` in `when="..."` conditions
+- write `&&` for logical AND in conditions
 
 ## See Also
 
